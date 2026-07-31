@@ -5,6 +5,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Snapshot.Abstractions;
 using CrestCreates.Accountability.Abstractions.Context;
+using System.Text.Json.Serialization;
 
 namespace CrestCreates.Workflow.Abstractions;
 
@@ -24,12 +25,16 @@ public sealed class WorkflowInstance : ISnapshotable<WorkflowInstance>
     public List<WorkflowStepResult> StepResults { get; init; } = new();
     public string? ErrorMessage { get; set; }
     public string? LastLifecycleAuditId { get; set; }
-    public long Revision { get; internal set; }
+    public long Revision { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
 
+    [JsonIgnore]
     public string InstanceId => Key.InstanceId;
+    [JsonIgnore]
     public string? TenantId => Key.TenantId;
+    [JsonIgnore]
     public string? WaitingHumanTaskId => WaitingHumanTaskKey?.InstanceId;
+    [JsonIgnore]
     public VersionedDescriptorRef<WorkflowDescriptor> Workflow => new(
         WorkflowPin.Ref.Id,
         WorkflowPin.Ref.Version ?? 0,

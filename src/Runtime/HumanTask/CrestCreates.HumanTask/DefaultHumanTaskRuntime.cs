@@ -3,6 +3,7 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
+using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
@@ -16,15 +17,19 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
     private readonly ILocalEventBus _eventBus;
     private readonly IHumanTaskAssigneeResolver _resolver;
     private readonly IHumanTaskCompletionFailurePolicy _completionFailurePolicy;
-    private readonly IDescriptorStableHashBuilder? _hashBuilder;
+    private readonly IRuntimeDescriptorPinResolver<HumanTaskDescriptor> _pinResolver;
+    private readonly IRuntimeStateContractRegistry _stateRegistry;
+    private readonly IDescriptorSnapshotStore? _snapshots;
 
     public DefaultHumanTaskRuntime(
         IHumanTaskRegistry registry,
         IHumanTaskInstanceStore store,
         ILocalEventBus eventBus,
         IHumanTaskAssigneeResolver resolver,
+        IRuntimeDescriptorPinResolver<HumanTaskDescriptor> pinResolver,
+        IRuntimeStateContractRegistry stateRegistry,
         IHumanTaskCompletionFailurePolicy? completionFailurePolicy = null,
-        IDescriptorStableHashBuilder? hashBuilder = null)
+        IDescriptorSnapshotStore? snapshots = null)
     {
         _registry = registry;
         _store = store;
@@ -32,23 +37,31 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         _resolver = resolver;
         _completionFailurePolicy = completionFailurePolicy
             ?? RejectingHumanTaskCompletionFailurePolicy.Instance;
-        _hashBuilder = hashBuilder;
+        _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
+        _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
+        _snapshots = snapshots;
     }
 
-    public async Task<HumanTaskInstance> CreateAsync(
+    public async Task<HumanTaskInstance> PrepareAsync(
         HumanTaskCreationRequest request, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
         HumanTaskDescriptor? descriptor = request.Version.HasValue
             ? _registry.GetByVersion(request.HumanTaskId, request.Version.Value)
             : _registry.GetById(request.HumanTaskId);
         if (descriptor == null)
             throw new InvalidOperationException($"HumanTask descriptor '{request.HumanTaskId}' not found.");
 
+        if (request.Input is not null)
+            _stateRegistry.Validate(request.Input);
+        var resolved = _pinResolver.Capture(descriptor);
         var resolution = await _resolver.ResolveAsync(descriptor, request, ct).ConfigureAwait(false);
         var instance = new HumanTaskInstance
         {
-            Key = new RuntimeInstanceKey(request.TenantId, Guid.NewGuid().ToString("N")),
-            HumanTaskPin = CreatePin(descriptor),
+            Key = new RuntimeInstanceKey(
+                request.TenantId,
+                request.InstanceId ?? Guid.NewGuid().ToString("N")),
+            HumanTaskPin = resolved.Pin,
             Status = (!string.IsNullOrWhiteSpace(resolution.AssigneeUserId)
                 || !string.IsNullOrWhiteSpace(resolution.AssigneeRoleId))
                 ? HumanTaskInstanceStatus.Assigned
@@ -66,6 +79,13 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             CreatedAt = DateTimeOffset.UtcNow
         };
 
+        return instance;
+    }
+
+    public async Task<HumanTaskInstance> CreateAsync(
+        HumanTaskCreationRequest request, CancellationToken ct = default)
+    {
+        var instance = await PrepareAsync(request, ct).ConfigureAwait(false);
         await _store.AddAsync(instance, ct).ConfigureAwait(false);
         instance.Revision = 1;
         return instance;
@@ -83,8 +103,10 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             && loaded.Status != HumanTaskInstanceStatus.Assigned)
             throw new InvalidOperationException($"HumanTask instance '{loaded.Id}' is in status '{loaded.Status}' and cannot be completed.");
 
-        var descriptor = _registry.GetByVersion(loaded.HumanTaskId, loaded.HumanTaskVersion)
-            ?? throw new InvalidOperationException($"HumanTask descriptor '{loaded.HumanTaskId}' v{loaded.HumanTaskVersion} not found.");
+        await RuntimeDescriptorPinEvidence.ValidateAsync(loaded.HumanTaskPin, _snapshots, ct).ConfigureAwait(false);
+        var descriptor = _pinResolver.Resolve(loaded.HumanTaskPin).Descriptor;
+        if (request.Result is not null)
+            _stateRegistry.Validate(request.Result);
         CompletionOutcomeMatcher.Resolve(descriptor, request.Outcome);
 
         if (isRecovery)
@@ -181,40 +203,6 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             Outcome = outcome,
             Result = result
         };
-
-    private RuntimeDescriptorPin CreatePin(HumanTaskDescriptor descriptor)
-    {
-        if (_hashBuilder is null)
-            return CreatePlaceholderPin(descriptor);
-        var hashes = _hashBuilder.Build(descriptor);
-        return new RuntimeDescriptorPin
-        {
-            Ref = new DescriptorRef(descriptor.Namespace, descriptor.Id, descriptor.Version),
-            ContractHash = hashes.ContractHash,
-            DefinitionHash = hashes.DefinitionHash
-        };
-    }
-
-    private static RuntimeDescriptorPin CreatePlaceholderPin(HumanTaskDescriptor descriptor)
-        => new()
-        {
-            Ref = new DescriptorRef(descriptor.Namespace, descriptor.Id, descriptor.Version),
-            ContractHash = PlaceholderHash("Contract"),
-            DefinitionHash = PlaceholderHash("Definition")
-        };
-
-    private static CanonicalHash PlaceholderHash(string purpose) => new()
-    {
-        Value = "unresolved",
-        Algorithm = "unresolved",
-        AlgorithmVersion = "unresolved",
-        ArtifactKind = "Descriptor",
-        DescriptorKind = "HumanTask",
-        Scope = "InternalFull",
-        Purpose = purpose,
-        ContractVersion = "unresolved",
-        CanonicalShapeVersion = "unresolved"
-    };
 
     private sealed class RejectingHumanTaskCompletionFailurePolicy : IHumanTaskCompletionFailurePolicy
     {

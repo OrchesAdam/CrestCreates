@@ -1,7 +1,10 @@
+using System.Text.Json.Serialization;
+
 namespace CrestCreates.Runtime.Persistence.Abstractions.Keys;
 
 public readonly record struct RuntimeTenantScope
 {
+    [JsonConstructor]
     public RuntimeTenantScope(string? tenantId)
     {
         if (tenantId is not null && string.IsNullOrWhiteSpace(tenantId))

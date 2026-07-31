@@ -4,6 +4,7 @@ using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Snapshot.Abstractions;
+using System.Text.Json.Serialization;
 
 namespace CrestCreates.HumanTask.Abstractions;
 
@@ -42,13 +43,18 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
     public string? PositionId { get; set; }
     public string? AssigneeResolutionReason { get; set; }
 
-    public long Revision { get; internal set; }
+    public long Revision { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
 
+    [JsonIgnore]
     public string Id => Key.InstanceId;
+    [JsonIgnore]
     public string? TenantId => Key.TenantId;
+    [JsonIgnore]
     public string HumanTaskId => HumanTaskPin.Ref.Id;
+    [JsonIgnore]
     public int HumanTaskVersion => HumanTaskPin.Ref.Version ?? 0;
+    [JsonIgnore]
     public string? WorkflowInstanceId => WorkflowKey?.InstanceId;
 
     public HumanTaskInstance Snapshot()
@@ -85,7 +91,7 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
 
     private static RuntimeDescriptorPin CreateUnresolvedPin() => new()
     {
-        Ref = new DescriptorRef("human-task", "unresolved", 1),
+        Ref = new DescriptorRef("humantask", "unresolved", 1),
         ContractHash = PlaceholderHash("Contract"),
         DefinitionHash = PlaceholderHash("Definition")
     };

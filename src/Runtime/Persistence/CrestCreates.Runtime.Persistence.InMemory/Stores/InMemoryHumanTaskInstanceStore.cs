@@ -22,7 +22,7 @@ internal sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
     private void AddCore(HumanTaskInstance instance) { Validate(instance); if (instance.Revision != 0) throw Contract("New HumanTaskInstance must have Revision 0."); if (!_coordinator.CurrentState.HumanTasks.TryAdd(instance.Key, WithRevision(instance, 1))) throw new RuntimeDuplicateEntityException(RuntimeDuplicateEntityCode.DuplicateInstance, "Human task instance already exists."); }
     private void UpdateCore(HumanTaskInstance instance, long expectedRevision) { Validate(instance); if (instance.Revision != expectedRevision || !_coordinator.CurrentState.HumanTasks.TryGetValue(instance.Key, out var current) || current.Revision != expectedRevision) throw new RuntimeConcurrencyException("Human task revision is stale."); _coordinator.CurrentState.HumanTasks[instance.Key] = WithRevision(instance, expectedRevision + 1); }
     private HumanTaskInstance? GetCore(RuntimeInstanceKey key) => _coordinator.CurrentState.HumanTasks.TryGetValue(key, out var value) ? value.Snapshot() : null;
-    private static void Validate(HumanTaskInstance i) { ArgumentNullException.ThrowIfNull(i); i.Key.EnsureValid(); }
+    private static void Validate(HumanTaskInstance i) { ArgumentNullException.ThrowIfNull(i); i.Key.EnsureValid(); i.HumanTaskPin.EnsureValid(); }
     private static HumanTaskInstance WithRevision(HumanTaskInstance value, long revision) { var copy = value.Snapshot(); copy.Revision = revision; copy.UpdatedAt = DateTimeOffset.UtcNow; return copy; }
     private static RuntimePersistenceContractException Contract(string message) => new(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, message);
 }

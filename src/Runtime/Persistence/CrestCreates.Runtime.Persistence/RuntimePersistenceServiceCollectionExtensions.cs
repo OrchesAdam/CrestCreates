@@ -1,6 +1,7 @@
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.Json;
 using CrestCreates.Runtime.Persistence.State;
+using CrestCreates.Schema.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Runtime.Persistence;
@@ -16,7 +17,8 @@ public static class RuntimePersistenceServiceCollectionExtensions
             foreach (var contributor in provider.GetServices<IRuntimeStateContractContributor>())
                 contributor.Contribute(builder);
 
-            return builder.Build();
+            var schemas = provider.GetService<ISchemaRegistry>();
+            return builder.Build(schemas is null ? null : new RuntimeStateContractStartupValidator(schemas));
         });
         services.AddSingleton<IRuntimeStateContractRegistry>(provider =>
             provider.GetRequiredService<RuntimeStateContractRegistry>());

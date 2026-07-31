@@ -1,6 +1,8 @@
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Persistence;
+using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Workflow.Abstractions;
@@ -11,36 +13,40 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
 {
     private readonly IWorkflowInstanceStore _store;
     private readonly IWorkflowStateMachine _stateMachine;
-    private readonly IWorkflowRegistry _registry;
     private readonly IWorkflowExecutionRunner _executionRunner;
     private readonly IWorkflowLifecycleEventPublisher _eventPublisher;
     private readonly IAuditOperationContextAccessor _contexts;
     private readonly WorkflowLifecycleEventFactory _events;
-    private readonly IRuntimeStateContractRegistry? _stateRegistry;
+    private readonly IRuntimeStateContractRegistry _stateRegistry;
+    private readonly IRuntimeDescriptorPinResolver<WorkflowDescriptor> _pinResolver;
+    private readonly IDescriptorSnapshotStore? _snapshots;
 
     public WorkflowContinuationService(
         IWorkflowInstanceStore store,
         IWorkflowStateMachine stateMachine,
-        IWorkflowRegistry registry,
         IWorkflowExecutionRunner executionRunner,
         IWorkflowLifecycleEventPublisher eventPublisher,
         IAuditOperationContextAccessor contexts,
         WorkflowLifecycleEventFactory events,
-        IRuntimeStateContractRegistry? stateRegistry = null)
+        IRuntimeStateContractRegistry stateRegistry,
+        IRuntimeDescriptorPinResolver<WorkflowDescriptor> pinResolver,
+        IDescriptorSnapshotStore? snapshots)
     {
         _store = store;
         _stateMachine = stateMachine;
-        _registry = registry;
         _executionRunner = executionRunner;
         _eventPublisher = eventPublisher;
         _contexts = contexts;
         _events = events;
-        _stateRegistry = stateRegistry;
+        _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
+        _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
+        _snapshots = snapshots;
     }
 
     public async Task ContinueAsync(
         WorkflowContinuationRequest request, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
         var instance = await _store.GetByWaitingHumanTaskAsync(request.HumanTaskKey, ct)
             .ConfigureAwait(false);
         if (instance == null)
@@ -53,10 +59,14 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         _stateMachine.ValidateTransition(
             WorkflowInstanceStatus.Suspended, WorkflowInstanceStatus.Running);
 
-        var descriptor = _registry.GetByVersion(instance.Workflow.Id, instance.Workflow.Version);
-        if (descriptor == null)
-            throw new InvalidOperationException(
-                $"Workflow '{instance.Workflow.Id}' version {instance.Workflow.Version} not found.");
+        await RuntimeDescriptorPinEvidence.ValidateAsync(instance.WorkflowPin, _snapshots, ct).ConfigureAwait(false);
+        var descriptor = _pinResolver.Resolve(instance.WorkflowPin).Descriptor;
+        if (request.WorkflowKey != instance.Key)
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                "Workflow continuation key does not match the waiting Workflow instance.");
+        if (request.Result is not null)
+            _stateRegistry.Validate(request.Result);
 
         var runOperationId = _events.CreateRunOperationId();
         var parent = _contexts.Current;
@@ -77,9 +87,10 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             InvocationSource = "workflow"
         });
 
-        var currentStep = descriptor.Steps[instance.StepIndex];
-        var resumedFromStatus = instance.Status;
-        instance.StepResults.Add(new WorkflowStepResult
+        var candidate = instance.Snapshot();
+        var currentStep = descriptor.Steps[candidate.StepIndex];
+        var resumedFromStatus = candidate.Status;
+        candidate.StepResults.Add(new WorkflowStepResult
         {
             StepId = currentStep.Id,
             StepName = currentStep.Name,
@@ -88,22 +99,21 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             ExecutedAt = DateTimeOffset.UtcNow
         });
 
-        instance.Variables["lastStepOutcome"] = _stateRegistry?.Capture(request.Outcome)
-            ?? throw new RuntimeStateContractException("Runtime state registry is required for continuation state capture.");
+        candidate.Variables["lastStepOutcome"] = _stateRegistry.Capture(request.Outcome);
         if (request.Result is not null)
-            instance.Variables["lastStepResult"] = request.Result;
-        instance.StepIndex++;
-        instance.WaitingHumanTaskKey = null;
-        instance.Status = WorkflowInstanceStatus.Running;
-        var resumedPreviousId = instance.LastLifecycleAuditId;
+            candidate.Variables["lastStepResult"] = request.Result;
+        candidate.StepIndex++;
+        candidate.WaitingHumanTaskKey = null;
+        candidate.Status = WorkflowInstanceStatus.Running;
+        var resumedPreviousId = candidate.LastLifecycleAuditId;
         var resumedIdentity = _events.AllocateLifecycleIdentity();
-        instance.LastLifecycleAuditId = resumedIdentity.AuditId;
+        candidate.LastLifecycleAuditId = resumedIdentity.AuditId;
 
         try
         {
             var expectedRevision = instance.Revision;
-            await _store.UpdateAsync(instance, expectedRevision, ct).ConfigureAwait(false);
-            instance.Revision = expectedRevision + 1;
+            await _store.UpdateAsync(candidate, expectedRevision, ct).ConfigureAwait(false);
+            candidate.Revision = expectedRevision + 1;
         }
         catch (RuntimeConcurrencyException)
         {
@@ -120,7 +130,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
 
         await _eventPublisher.PublishAsync(_events.Create(
             "workflow.resumed",
-            instance,
+            candidate,
             descriptor,
             resumedIdentity,
             runOperationId,
@@ -131,6 +141,6 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             humanTaskInstanceId: request.HumanTaskKey.InstanceId,
             humanTaskCompletionEventId: request.CompletionEventId), CancellationToken.None).ConfigureAwait(false);
 
-        await _executionRunner.RunAsync(instance, runOperationId, parent?.EnclosingAuditId, ct).ConfigureAwait(false);
+        await _executionRunner.RunAsync(candidate, runOperationId, parent?.EnclosingAuditId, ct).ConfigureAwait(false);
     }
 }

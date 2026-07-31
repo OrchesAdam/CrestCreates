@@ -41,7 +41,7 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
     }
     private WorkflowInstance? GetCore(RuntimeInstanceKey key)
         => _coordinator.CurrentState.Workflows.TryGetValue(key, out var value) ? value.Snapshot() : null;
-    private static void Validate(WorkflowInstance i) { ArgumentNullException.ThrowIfNull(i); i.Key.EnsureValid(); }
+    private static void Validate(WorkflowInstance i) { ArgumentNullException.ThrowIfNull(i); i.Key.EnsureValid(); i.WorkflowPin.EnsureValid(); }
     private static WorkflowInstance WithRevision(WorkflowInstance value, long revision) { var copy = value.Snapshot(); copy.Revision = revision; copy.UpdatedAt = DateTimeOffset.UtcNow; return copy; }
     private static RuntimePersistenceContractException Contract(string message) => new(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, message);
 }

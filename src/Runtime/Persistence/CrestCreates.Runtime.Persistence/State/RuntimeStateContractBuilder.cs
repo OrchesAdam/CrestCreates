@@ -44,6 +44,13 @@ public sealed class RuntimeStateContractBuilder : IRuntimeStateContractBuilder
             throw new RuntimeStateContractException(
                 $"CLR type '{duplicateClr.Key.FullName}' has multiple Runtime state registrations.");
 
+        var requiresSchemaValidation = ordered.Any(x => x.SchemaRef is not null);
+        if (requiresSchemaValidation && schemaRefValidator is null)
+        {
+            throw new RuntimeStateContractException(
+                "Runtime state SchemaRef registrations require an ISchemaRegistry at startup.");
+        }
+
         foreach (var registration in ordered)
             schemaRefValidator?.Validate(registration.SchemaRef);
 

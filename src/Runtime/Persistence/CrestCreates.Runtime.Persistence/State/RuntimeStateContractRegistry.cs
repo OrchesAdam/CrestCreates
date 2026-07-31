@@ -44,18 +44,14 @@ public sealed class RuntimeStateContractRegistry : IRuntimeStateContractRegistry
 
     public object? Restore(RuntimeStateValue value)
     {
-        ArgumentNullException.ThrowIfNull(value);
-        if (!_byTypeId.TryGetValue(value.TypeId, out var registration))
-        {
-            throw new RuntimeStateContractException(
-                $"Runtime state TypeId '{value.TypeId}' is not registered.");
-        }
-
-        if (registration.SchemaRef != value.SchemaRef)
-            throw new RuntimeStateContractException(
-                $"Runtime state SchemaRef does not match registration for TypeId '{value.TypeId}'.");
-
+        var registration = GetRegistration(value);
         return registration.RestoreObject(ValidatePayload(value.JsonPayload));
+    }
+
+    public void Validate(RuntimeStateValue value)
+    {
+        var registration = GetRegistration(value);
+        _ = registration.RestoreObject(ValidatePayload(value.JsonPayload));
     }
 
     public T Restore<T>(RuntimeStateValue value)
@@ -76,6 +72,23 @@ public sealed class RuntimeStateContractRegistry : IRuntimeStateContractRegistry
         if (value.JsonPayload.Length > RuntimeStateLimits.MaxJsonPayloadCharacters)
             throw new RuntimeStateContractException("Runtime state JSON payload exceeds the configured limit.");
         return value;
+    }
+
+    private RuntimeStateRegistration GetRegistration(RuntimeStateValue value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (string.IsNullOrWhiteSpace(value.TypeId))
+            throw new RuntimeStateContractException("Runtime state TypeId is required.");
+        if (!_byTypeId.TryGetValue(value.TypeId, out var registration))
+        {
+            throw new RuntimeStateContractException(
+                $"Runtime state TypeId '{value.TypeId}' is not registered.");
+        }
+
+        if (registration.SchemaRef != value.SchemaRef)
+            throw new RuntimeStateContractException(
+                $"Runtime state SchemaRef does not match registration for TypeId '{value.TypeId}'.");
+        return registration;
     }
 
     private static string ValidatePayload(string payload)

@@ -109,7 +109,9 @@ jobs:
           dotnet test tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests --no-build
 
       - name: Test — Persistence / PostgreSQL direct Npgsql provider
-        run: dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build
+        run: |
+          dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build
+          dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests --no-build
 
       - name: Test — Runtime / Agent
         run: |

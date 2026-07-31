@@ -332,6 +332,9 @@
   </Folder>
   <Folder Name="/tests/Persistence/">
     <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/CrestCreates.Runtime.Persistence.PostgreSql.Tests.csproj" />
+    <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.csproj" />
+    <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj" />
+    <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests.csproj" />
     <Project Path="tests/Persistence/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj" />
     <Project Path="tests/Persistence/CrestCreates.MongoDB.Tests/CrestCreates.MongoDB.Tests.csproj" />
     <Project Path="tests/Persistence/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj" />

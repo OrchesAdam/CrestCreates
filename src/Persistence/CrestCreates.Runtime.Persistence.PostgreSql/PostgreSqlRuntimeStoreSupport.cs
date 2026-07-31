@@ -1,0 +1,63 @@
+using System.Text.Json;
+using CrestCreates.Runtime.Persistence.Abstractions.Errors;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using Npgsql;
+using NpgsqlTypes;
+
+namespace CrestCreates.Runtime.Persistence.PostgreSql;
+
+internal static class PostgreSqlRuntimeStoreSupport
+{
+    public static string Table(PostgreSqlRuntimePersistenceOptions options, string table)
+        => $"\"{options.Schema}\".\"{table}\"";
+
+    public static string ScopeKind(string? tenantId) => tenantId is null ? "host" : "tenant";
+
+    public static string TenantValue(string? tenantId) => tenantId ?? string.Empty;
+
+    public static void AddKey(NpgsqlCommand command, RuntimeInstanceKey key, string prefix = "")
+    {
+        key.EnsureValid();
+        command.Parameters.AddWithValue($"{prefix}scope", ScopeKind(key.TenantId));
+        command.Parameters.AddWithValue($"{prefix}tenant", TenantValue(key.TenantId));
+        command.Parameters.AddWithValue($"{prefix}id", key.InstanceId);
+    }
+
+    public static void AddScope(NpgsqlCommand command, RuntimeTenantScope scope, string prefix = "")
+    {
+        scope.EnsureValid();
+        command.Parameters.AddWithValue($"{prefix}scope", ScopeKind(scope.TenantId));
+        command.Parameters.AddWithValue($"{prefix}tenant", TenantValue(scope.TenantId));
+    }
+
+    public static void AddJson(NpgsqlCommand command, string name, string value)
+        => command.Parameters.Add(name, NpgsqlDbType.Jsonb).Value = value;
+
+    public static NpgsqlCommand CreateCommand(
+        PostgreSqlRuntimeSession session,
+        PostgreSqlRuntimePersistenceOptions options,
+        string sql)
+    {
+        var command = new NpgsqlCommand(sql, session.Connection, session.Transaction)
+        {
+            CommandTimeout = options.CommandTimeoutSeconds
+        };
+        return command;
+    }
+
+    public static string Serialize<T>(T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
+        => JsonSerializer.Serialize(value, typeInfo);
+
+    public static T Deserialize<T>(string payload, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
+        => JsonSerializer.Deserialize(payload, typeInfo)
+           ?? throw new RuntimePersistenceContractException(
+               RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+               "PostgreSQL Runtime persistence returned an invalid JSON payload.");
+
+    public static RuntimePersistenceContractException Correlation(string message)
+        => new(RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict, message);
+
+    public static bool IsUniqueViolation(PostgresException exception, string constraint)
+        => exception.SqlState == PostgresErrorCodes.UniqueViolation
+            && string.Equals(exception.ConstraintName, constraint, StringComparison.Ordinal);
+}

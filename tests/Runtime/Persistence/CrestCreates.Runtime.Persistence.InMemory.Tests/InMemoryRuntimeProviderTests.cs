@@ -6,6 +6,8 @@ using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Runtime.Persistence.InMemory;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Persistence;
+using CrestCreates.Metadata.Abstractions.Runtime;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,8 +35,8 @@ public sealed class InMemoryRuntimeProviderTests
         var tx = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
         var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
         var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
-        var workflow = new WorkflowInstance { Key = new RuntimeInstanceKey("tenant-a", "wf-1") };
-        var task = new HumanTaskInstance { Key = new RuntimeInstanceKey("tenant-a", "task-1"), WorkflowKey = workflow.Key };
+        var workflow = NewWorkflow("tenant-a", "wf-1");
+        var task = NewTask("tenant-a", "task-1", workflow.Key);
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await tx.ExecuteAsync(async _ =>
@@ -57,7 +59,7 @@ public sealed class InMemoryRuntimeProviderTests
         var services = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence();
         using var provider = services.BuildServiceProvider();
         var store = provider.GetRequiredService<IWorkflowInstanceStore>();
-        var item = new WorkflowInstance { Key = new RuntimeInstanceKey("tenant-a", "wf-1") };
+        var item = NewWorkflow("tenant-a", "wf-1");
         await store.AddAsync(item);
         var stale = (await store.GetAsync(item.Key))!;
         await store.UpdateAsync(stale, 1);
@@ -76,4 +78,37 @@ public sealed class InMemoryRuntimeProviderTests
         (await snapshots.WriteAsync(snapshot)).Status.Should().Be(DescriptorSnapshotWriteStatus.Duplicate);
         snapshot.Descriptors[0].DefinitionHash.Should().Be("d");
     }
+
+    private static WorkflowInstance NewWorkflow(string? tenantId, string id) => new()
+    {
+        Key = new RuntimeInstanceKey(tenantId, id),
+        WorkflowPin = Pin("workflow", "workflow", "Workflow")
+    };
+
+    private static HumanTaskInstance NewTask(string? tenantId, string id, RuntimeInstanceKey workflowKey) => new()
+    {
+        Key = new RuntimeInstanceKey(tenantId, id),
+        WorkflowKey = workflowKey,
+        HumanTaskPin = Pin("humantask", "task", "HumanTask")
+    };
+
+    private static RuntimeDescriptorPin Pin(string @namespace, string id, string kind) => new()
+    {
+        Ref = new DescriptorRef(@namespace, id, 1),
+        ContractHash = Hash("contract", "Contract", kind),
+        DefinitionHash = Hash("definition", "Definition", kind)
+    };
+
+    private static CanonicalHash Hash(string value, string purpose, string kind) => new()
+    {
+        Value = value,
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "Descriptor",
+        DescriptorKind = kind,
+        Scope = "InternalFull",
+        Purpose = purpose,
+        ContractVersion = "canonical-hash-v1",
+        CanonicalShapeVersion = "runtime-test-v1"
+    };
 }

@@ -7,64 +7,185 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
 internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
 {
+    private const string PrimaryKey = "runtime_human_task_instances_pkey";
+    private const string ActiveStepKey = "ux_runtime_human_task_active_step";
+    private readonly PostgreSqlRuntimePersistenceOptions _options;
     private readonly PostgreSqlRuntimeTransactionCoordinator _coordinator;
     private readonly string _table;
-    public PostgreSqlHumanTaskInstanceStore(PostgreSqlRuntimePersistenceOptions options, PostgreSqlRuntimeTransactionCoordinator coordinator)
-    { _coordinator = coordinator; _table = $"\"{options.Schema.Replace("\"", "\"\"")}\".runtime_human_task_instances"; }
-    public Task AddAsync(HumanTaskInstance instance, CancellationToken cancellationToken = default) => _coordinator.ExecuteAsync(async ct =>
+
+    public PostgreSqlHumanTaskInstanceStore(
+        PostgreSqlRuntimePersistenceOptions options,
+        PostgreSqlRuntimeTransactionCoordinator coordinator)
     {
-        if (instance.Revision != 0) throw new RuntimePersistenceContractException(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, "Revision must be zero on Add.");
-        var s = _coordinator.RequireSession();
-        await using var c = new NpgsqlCommand($"insert into {_table} (tenant_scope_kind, tenant_id, instance_id, revision, status, human_task_namespace, human_task_id, human_task_version, contract_hash, definition_hash, workflow_scope_kind, workflow_tenant_id, workflow_instance_id, outcome) values (@scope,@tenant,@id,1,@status,@ns,@ht,@ver,@contract,@definition,@wscope,@wtenant,@wid,@outcome)", s.Connection, s.Transaction);
-        c.Parameters.AddWithValue("scope", Scope(instance.TenantId)); c.Parameters.AddWithValue("tenant", StoredTenant(instance.TenantId)); c.Parameters.AddWithValue("id", instance.Id); c.Parameters.AddWithValue("status", (int)instance.Status); c.Parameters.AddWithValue("ns", instance.HumanTaskPin.Ref.Namespace); c.Parameters.AddWithValue("ht", instance.HumanTaskPin.Ref.Id); c.Parameters.AddWithValue("ver", instance.HumanTaskPin.Ref.Version ?? 0); c.Parameters.AddWithValue("contract", instance.HumanTaskPin.ContractHash.Value); c.Parameters.AddWithValue("definition", instance.HumanTaskPin.DefinitionHash.Value); c.Parameters.AddWithValue("wscope", (object?)instance.WorkflowKey is null ? DBNull.Value : Scope(instance.WorkflowKey.Value.TenantId)); c.Parameters.AddWithValue("wtenant", (object?)instance.WorkflowKey is null ? DBNull.Value : StoredTenant(instance.WorkflowKey.Value.TenantId)); c.Parameters.AddWithValue("wid", (object?)instance.WorkflowKey?.InstanceId ?? DBNull.Value); c.Parameters.AddWithValue("outcome", (object?)instance.Outcome ?? DBNull.Value);
-        try { await c.ExecuteNonQueryAsync(ct).ConfigureAwait(false); } catch (PostgresException ex) when (ex.SqlState == "23505") { throw new RuntimeDuplicateEntityException(RuntimeDuplicateEntityCode.DuplicateInstance, "Human task instance already exists."); }
-    }, cancellationToken).AsTask();
-    public Task UpdateAsync(HumanTaskInstance instance, long expectedRevision, CancellationToken cancellationToken = default) => _coordinator.ExecuteAsync(async ct => { var s = _coordinator.RequireSession(); await using var c = new NpgsqlCommand($"update {_table} set revision=@next,status=@status,outcome=@outcome where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id and revision=@expected", s.Connection, s.Transaction); c.Parameters.AddWithValue("next", expectedRevision + 1); c.Parameters.AddWithValue("expected", expectedRevision); c.Parameters.AddWithValue("scope", Scope(instance.TenantId)); c.Parameters.AddWithValue("tenant", StoredTenant(instance.TenantId)); c.Parameters.AddWithValue("id", instance.Id); c.Parameters.AddWithValue("status", (int)instance.Status); c.Parameters.AddWithValue("outcome", (object?)instance.Outcome ?? DBNull.Value); if (await c.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1) throw new RuntimeConcurrencyException("Human task revision is stale or missing."); }, cancellationToken).AsTask();
-    public Task<HumanTaskInstance?> GetAsync(RuntimeInstanceKey key, CancellationToken cancellationToken = default) => _coordinator.ExecuteAsync(ct => new ValueTask<HumanTaskInstance?>(ReadAsync("where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id", [new("scope", Scope(key.TenantId)), new("tenant", StoredTenant(key.TenantId)), new("id", key.InstanceId)], ct)), cancellationToken).AsTask();
-    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByWorkflowAsync(RuntimeInstanceKey workflowKey, CancellationToken cancellationToken = default) => QueryAsync("where workflow_scope_kind=@scope and workflow_tenant_id=@tenant and workflow_instance_id=@id and status in (0,1)", workflowKey, cancellationToken);
-    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByAssigneeAsync(RuntimeTenantScope scope, string assigneeUserId, CancellationToken cancellationToken = default) => QueryAsync("where tenant_scope_kind=@scope and tenant_id=@tenant and assignee_user_id=@id and status in (0,1)", new RuntimeInstanceKey(scope.TenantId, assigneeUserId), cancellationToken);
-    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateUserAsync(RuntimeTenantScope scope, string userId, CancellationToken cancellationToken = default) => QueryAsync("where false", new RuntimeInstanceKey(scope.TenantId, userId), cancellationToken);
-    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateRoleAsync(RuntimeTenantScope scope, string roleId, CancellationToken cancellationToken = default) => QueryAsync("where false", new RuntimeInstanceKey(scope.TenantId, roleId), cancellationToken);
-    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByOrganizationAsync(RuntimeTenantScope scope, string organizationUnitId, CancellationToken cancellationToken = default) => QueryAsync("where false", new RuntimeInstanceKey(scope.TenantId, organizationUnitId), cancellationToken);
-    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByPositionAsync(RuntimeTenantScope scope, string positionId, CancellationToken cancellationToken = default) => QueryAsync("where false", new RuntimeInstanceKey(scope.TenantId, positionId), cancellationToken);
-    private async Task<IReadOnlyList<HumanTaskInstance>> QueryAsync(string predicate, RuntimeInstanceKey key, CancellationToken ct)
-    {
-        var s = _coordinator.RequireSession();
-        await using var c = new NpgsqlCommand($"select tenant_scope_kind,tenant_id,instance_id,revision,status,human_task_namespace,human_task_id,human_task_version,contract_hash,definition_hash,workflow_scope_kind,workflow_tenant_id,workflow_instance_id,outcome from {_table} {predicate}", s.Connection, s.Transaction);
-        c.Parameters.AddWithValue("scope", Scope(key.TenantId));
-        c.Parameters.AddWithValue("tenant", StoredTenant(key.TenantId));
-        c.Parameters.AddWithValue("id", key.InstanceId);
-        await using var r = await c.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        var result = new List<HumanTaskInstance>();
-        while (await r.ReadAsync(ct).ConfigureAwait(false))
-            result.Add(Map(r));
-        return result;
+        _options = options;
+        _coordinator = coordinator;
+        _table = PostgreSqlRuntimeStoreSupport.Table(options, "runtime_human_task_instances");
     }
 
-    private async Task<HumanTaskInstance?> ReadAsync(string predicate, NpgsqlParameter[] parameters, CancellationToken ct)
-    {
-        var s = _coordinator.RequireSession();
-        await using var c = new NpgsqlCommand($"select tenant_scope_kind,tenant_id,instance_id,revision,status,human_task_namespace,human_task_id,human_task_version,contract_hash,definition_hash,workflow_scope_kind,workflow_tenant_id,workflow_instance_id,outcome from {_table} {predicate}", s.Connection, s.Transaction);
-        c.Parameters.AddRange(parameters);
-        await using var r = await c.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        return await r.ReadAsync(ct).ConfigureAwait(false) ? Map(r) : null;
-    }
+    public Task AddAsync(HumanTaskInstance instance, CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => new ValueTask(AddCoreAsync(instance, ct)), cancellationToken).AsTask();
 
-    private static HumanTaskInstance Map(NpgsqlDataReader r) => new()
+    public Task UpdateAsync(HumanTaskInstance instance, long expectedRevision, CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => new ValueTask(UpdateCoreAsync(instance, expectedRevision, ct)), cancellationToken).AsTask();
+
+    public Task<HumanTaskInstance?> GetAsync(RuntimeInstanceKey key, CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => new ValueTask<HumanTaskInstance?>(ReadOneAsync(
+            "where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id", command => PostgreSqlRuntimeStoreSupport.AddKey(command, key), ct)), cancellationToken).AsTask();
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByWorkflowAsync(RuntimeInstanceKey workflowKey, CancellationToken cancellationToken = default)
+        => QueryPendingAsync("where tenant_scope_kind=@scope and tenant_id=@tenant and workflow_instance_id=@id", workflowKey, cancellationToken);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByAssigneeAsync(RuntimeTenantScope scope, string assigneeUserId, CancellationToken cancellationToken = default)
+        => QueryPendingAsync("where tenant_scope_kind=@scope and tenant_id=@tenant and assignee_user_id=@id", new RuntimeInstanceKey(scope.TenantId, assigneeUserId), cancellationToken);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateUserAsync(RuntimeTenantScope scope, string userId, CancellationToken cancellationToken = default)
+        => QueryPendingAndFilterAsync(scope, item => item.CandidateUserIds.Contains(userId, StringComparer.Ordinal), cancellationToken);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateRoleAsync(RuntimeTenantScope scope, string roleId, CancellationToken cancellationToken = default)
+        => QueryPendingAndFilterAsync(scope, item => item.CandidateRoleIds.Contains(roleId, StringComparer.Ordinal), cancellationToken);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByOrganizationAsync(RuntimeTenantScope scope, string organizationUnitId, CancellationToken cancellationToken = default)
+        => QueryPendingAndFilterAsync(scope, item => string.Equals(item.OrganizationUnitId, organizationUnitId, StringComparison.Ordinal), cancellationToken);
+
+    public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByPositionAsync(RuntimeTenantScope scope, string positionId, CancellationToken cancellationToken = default)
+        => QueryPendingAndFilterAsync(scope, item => string.Equals(item.PositionId, positionId, StringComparison.Ordinal), cancellationToken);
+
+    private async Task AddCoreAsync(HumanTaskInstance instance, CancellationToken cancellationToken)
     {
-        Key = new RuntimeInstanceKey(r.GetString(0) == "host" ? null : r.GetString(1), r.GetString(2)),
-        Revision = r.GetInt64(3),
-        Status = (HumanTaskInstanceStatus)r.GetInt32(4),
-        HumanTaskPin = new Metadata.Abstractions.Runtime.RuntimeDescriptorPin
+        Validate(instance, 0);
+        var session = _coordinator.RequireSession();
+        using var commandLease = session.EnterCommand();
+        await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
+            $"insert into {_table} (tenant_scope_kind, tenant_id, instance_id, revision, status, human_task_pin_json, workflow_instance_id, workflow_step_id, suspension_operation_id, assignee_user_id, state_json, created_at, updated_at) values (@scope, @tenant, @id, 1, @status, @pin, @workflow, @step, @operation, @assignee, @state, @created, @updated);");
+        AddWriteParameters(command, Persisted(instance, 1), null);
+        try
         {
-            Ref = new Metadata.Abstractions.DescriptorRef(r.GetString(5), r.GetString(6), r.GetInt32(7)),
-            ContractHash = Placeholder(r.GetString(8), "Contract", "HumanTask"),
-            DefinitionHash = Placeholder(r.GetString(9), "Definition", "HumanTask")
-        },
-        WorkflowKey = r.IsDBNull(12) ? null : new RuntimeInstanceKey(r.GetString(10) == "host" ? null : r.GetString(11), r.GetString(12)),
-        Outcome = r.IsDBNull(13) ? null : r.GetString(13)
-    };
-    private static Metadata.Abstractions.CanonicalHashing.CanonicalHash Placeholder(string value, string purpose, string kind) => new() { Value = value, Algorithm = "persisted", AlgorithmVersion = "1", ArtifactKind = "Descriptor", DescriptorKind = kind, Scope = "InternalFull", Purpose = purpose, ContractVersion = "1", CanonicalShapeVersion = "1" };
-    private static string Scope(string? tenantId) => tenantId is null ? "host" : "tenant";
-    private static string StoredTenant(string? tenantId) => tenantId ?? string.Empty;
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (PostgresException exception) when (PostgreSqlRuntimeStoreSupport.IsUniqueViolation(exception, PrimaryKey))
+        {
+            throw new RuntimeDuplicateEntityException(RuntimeDuplicateEntityCode.DuplicateInstance, "HumanTask instance already exists.");
+        }
+        catch (PostgresException exception) when (PostgreSqlRuntimeStoreSupport.IsUniqueViolation(exception, ActiveStepKey))
+        {
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.ActiveStepCorrelationConflict,
+                "A HumanTask already exists for the Workflow step correlation.");
+        }
+    }
+
+    private async Task UpdateCoreAsync(HumanTaskInstance instance, long expectedRevision, CancellationToken cancellationToken)
+    {
+        Validate(instance, expectedRevision);
+        var session = _coordinator.RequireSession();
+        using var commandLease = session.EnterCommand();
+        await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
+            $"update {_table} set revision=@next, status=@status, human_task_pin_json=@pin, workflow_instance_id=@workflow, workflow_step_id=@step, suspension_operation_id=@operation, assignee_user_id=@assignee, state_json=@state, updated_at=@updated where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id and revision=@expected;");
+        AddWriteParameters(command, Persisted(instance, expectedRevision + 1), null);
+        command.Parameters.AddWithValue("next", expectedRevision + 1);
+        command.Parameters.AddWithValue("expected", expectedRevision);
+        try
+        {
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+                throw new RuntimeConcurrencyException("HumanTask revision is stale or the instance is missing.");
+        }
+        catch (PostgresException exception) when (PostgreSqlRuntimeStoreSupport.IsUniqueViolation(exception, ActiveStepKey))
+        {
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.ActiveStepCorrelationConflict,
+                "A HumanTask already exists for the Workflow step correlation.");
+        }
+    }
+
+    private Task<IReadOnlyList<HumanTaskInstance>> QueryPendingAsync(string predicate, RuntimeInstanceKey key, CancellationToken cancellationToken)
+        => _coordinator.ExecuteAsync(ct => new ValueTask<IReadOnlyList<HumanTaskInstance>>(ReadManyAsync(
+            $"{predicate} and status in (@created, @assigned) order by created_at, instance_id collate \"C\"", command =>
+            {
+                PostgreSqlRuntimeStoreSupport.AddKey(command, key);
+                command.Parameters.AddWithValue("created", (int)HumanTaskInstanceStatus.Created);
+                command.Parameters.AddWithValue("assigned", (int)HumanTaskInstanceStatus.Assigned);
+            }, ct)), cancellationToken).AsTask();
+
+    private Task<IReadOnlyList<HumanTaskInstance>> QueryPendingAndFilterAsync(
+        RuntimeTenantScope scope,
+        Func<HumanTaskInstance, bool> predicate,
+        CancellationToken cancellationToken)
+        => _coordinator.ExecuteAsync(async ct =>
+        {
+            scope.EnsureValid();
+            var items = await ReadManyAsync(
+                "where tenant_scope_kind=@scope and tenant_id=@tenant and status in (@created, @assigned) order by created_at, instance_id collate \"C\"",
+                command =>
+                {
+                    PostgreSqlRuntimeStoreSupport.AddScope(command, scope);
+                    command.Parameters.AddWithValue("created", (int)HumanTaskInstanceStatus.Created);
+                    command.Parameters.AddWithValue("assigned", (int)HumanTaskInstanceStatus.Assigned);
+                }, ct).ConfigureAwait(false);
+            return (IReadOnlyList<HumanTaskInstance>)items.Where(predicate).ToArray();
+        }, cancellationToken).AsTask();
+
+    private async Task<HumanTaskInstance?> ReadOneAsync(string predicate, Action<NpgsqlCommand> addParameters, CancellationToken cancellationToken)
+    {
+        var values = await ReadManyAsync(predicate, addParameters, cancellationToken).ConfigureAwait(false);
+        return values.SingleOrDefault();
+    }
+
+    private async Task<IReadOnlyList<HumanTaskInstance>> ReadManyAsync(string predicate, Action<NpgsqlCommand> addParameters, CancellationToken cancellationToken)
+    {
+        var session = _coordinator.RequireSession();
+        using var commandLease = session.EnterCommand();
+        await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
+            $"select revision, state_json::text from {_table} {predicate};");
+        addParameters(command);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var values = new List<HumanTaskInstance>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var revision = reader.GetInt64(0);
+            var value = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(1), PostgreSqlRuntimeJsonSerializerContext.Default.HumanTaskInstance);
+            value.Key.EnsureValid();
+            value.HumanTaskPin.EnsureValid();
+            if (value.Revision != revision)
+            {
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                    "HumanTask state JSON revision does not match the durable revision column.");
+            }
+            values.Add(value.Snapshot());
+        }
+        return values;
+    }
+
+    private static void Validate(HumanTaskInstance instance, long expectedRevision)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        instance.Key.EnsureValid();
+        instance.HumanTaskPin.EnsureValid();
+        if (instance.Revision != expectedRevision)
+            throw new RuntimeConcurrencyException("HumanTask candidate revision does not match the expected revision.");
+        if (instance.WorkflowKey is { } workflow && workflow.TenantId != instance.TenantId)
+            throw PostgreSqlRuntimeStoreSupport.Correlation("HumanTask Workflow correlation must be tenant-local.");
+    }
+
+    private static void AddWriteParameters(NpgsqlCommand command, HumanTaskInstance instance, string? operationId)
+    {
+        PostgreSqlRuntimeStoreSupport.AddKey(command, instance.Key);
+        command.Parameters.AddWithValue("status", (int)instance.Status);
+        PostgreSqlRuntimeStoreSupport.AddJson(command, "pin", PostgreSqlRuntimeStoreSupport.Serialize(instance.HumanTaskPin, PostgreSqlRuntimeJsonSerializerContext.Default.RuntimeDescriptorPin));
+        command.Parameters.AddWithValue("workflow", (object?)instance.WorkflowKey?.InstanceId ?? DBNull.Value);
+        command.Parameters.AddWithValue("step", (object?)instance.WorkflowStepId ?? DBNull.Value);
+        command.Parameters.AddWithValue("operation", (object?)operationId ?? DBNull.Value);
+        command.Parameters.AddWithValue("assignee", (object?)instance.AssigneeUserId ?? DBNull.Value);
+        PostgreSqlRuntimeStoreSupport.AddJson(command, "state", PostgreSqlRuntimeStoreSupport.Serialize(instance, PostgreSqlRuntimeJsonSerializerContext.Default.HumanTaskInstance));
+        command.Parameters.AddWithValue("created", instance.CreatedAt);
+        command.Parameters.AddWithValue("updated", instance.UpdatedAt ?? DateTimeOffset.UtcNow);
+    }
+
+    private static HumanTaskInstance Persisted(HumanTaskInstance instance, long revision)
+    {
+        var copy = instance.Snapshot();
+        copy.Revision = revision;
+        copy.UpdatedAt ??= DateTimeOffset.UtcNow;
+        return copy;
+    }
 }

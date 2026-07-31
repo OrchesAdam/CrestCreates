@@ -25,16 +25,33 @@ public sealed record RuntimeDescriptorPin
         if (Ref.Version is not > 0)
             throw new ArgumentException("Descriptor pin requires an exact positive version.", nameof(Ref));
 
-        if (string.IsNullOrWhiteSpace(ContractHash.Value))
-            throw new ArgumentException("Contract hash digest is required.", nameof(ContractHash));
-        if (string.IsNullOrWhiteSpace(DefinitionHash.Value))
-            throw new ArgumentException("Definition hash digest is required.", nameof(DefinitionHash));
-        if (!string.Equals(ContractHash.Purpose, "Contract", StringComparison.Ordinal))
-            throw new ArgumentException("Contract hash purpose must be Contract.", nameof(ContractHash));
-        if (!string.Equals(DefinitionHash.Purpose, "Definition", StringComparison.Ordinal))
-            throw new ArgumentException("Definition hash purpose must be Definition.", nameof(DefinitionHash));
-        if (!string.Equals(ContractHash.Scope, "InternalFull", StringComparison.Ordinal)
-            || !string.Equals(DefinitionHash.Scope, "InternalFull", StringComparison.Ordinal))
-            throw new ArgumentException("Executable descriptor pins require InternalFull hash scope.", nameof(ContractHash));
+        EnsureHash(ContractHash, "Contract", nameof(ContractHash));
+        EnsureHash(DefinitionHash, "Definition", nameof(DefinitionHash));
+    }
+
+    private static void EnsureHash(CanonicalHash hash, string purpose, string parameterName)
+    {
+        ArgumentNullException.ThrowIfNull(hash);
+        if (string.IsNullOrWhiteSpace(hash.Value)
+            || string.IsNullOrWhiteSpace(hash.Algorithm)
+            || string.IsNullOrWhiteSpace(hash.AlgorithmVersion)
+            || string.IsNullOrWhiteSpace(hash.ArtifactKind)
+            || string.IsNullOrWhiteSpace(hash.ContractVersion)
+            || string.IsNullOrWhiteSpace(hash.CanonicalShapeVersion))
+        {
+            throw new ArgumentException("Descriptor hash profile is incomplete.", parameterName);
+        }
+        if (string.Equals(hash.Value, "unresolved", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(hash.Algorithm, "unresolved", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(hash.AlgorithmVersion, "unresolved", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(hash.ContractVersion, "unresolved", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(hash.CanonicalShapeVersion, "unresolved", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Placeholder descriptor hashes cannot be persisted or executed.", parameterName);
+        }
+        if (!string.Equals(hash.Purpose, purpose, StringComparison.Ordinal))
+            throw new ArgumentException($"Descriptor hash purpose must be {purpose}.", parameterName);
+        if (!string.Equals(hash.Scope, "InternalFull", StringComparison.Ordinal))
+            throw new ArgumentException("Executable descriptor pins require InternalFull hash scope.", parameterName);
     }
 }

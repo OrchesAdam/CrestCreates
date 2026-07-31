@@ -127,7 +127,7 @@ public sealed class RuntimeDescriptorPinResolver<TDescriptor> : IRuntimeDescript
             "event" => DescriptorKind.Event,
             "workflow" => DescriptorKind.Workflow,
             "form" => DescriptorKind.Form,
-            "human-task" => DescriptorKind.HumanTask,
+            "human-task" or "humantask" => DescriptorKind.HumanTask,
             "dynamic-api-endpoint" => DescriptorKind.DynamicApiEndpoint,
             "mcp-tool" => DescriptorKind.McpTool,
             "agent-tool" => DescriptorKind.AgentTool,

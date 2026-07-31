@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-31 (Phase 9b durable persistence design and implementation plan approved)
+Last Updated: 2026-07-31 (Phase 9b durable persistence CI and NativeAOT evidence verified)
 
 ## Purpose
 
@@ -730,10 +730,10 @@ Expected final standard:
 
 ### Issue #24 — Phase 9b Durable Persistence Foundation
 
-Status: Implementation in progress on `feature/phase-9b-durable-persistence-foundation-24`.
-Slices 1–5 foundation work is present and covered by CI; crash-worker and
-NativeAOT database evidence remain future gates before declaring PostgreSQL
-`FullDurable`.
+Status: Implemented on `feature/phase-9b-durable-persistence-foundation-24`.
+GitHub Actions has verified the PostgreSQL Testcontainers integration,
+independent crash-worker reconciliation, and Linux NativeAOT publish-link-run
+fixture; PostgreSQL is now declared `FullDurable`.
 
 Approved mainline:
 
@@ -800,12 +800,24 @@ Implementation evidence to date:
   `RuntimeInstanceKey` tenant boundaries;
 - added generated Runtime State contracts and deep state snapshots, exact Pin
   resolution, and an atomic Full Semantic InMemory provider;
-- added direct-Npgsql PostgreSQL transaction kernel, migration bootstrap,
-  provider-neutral durable Audit sink, and CI contract tests;
+- added direct-Npgsql PostgreSQL transaction kernel, checksummed migration
+  bootstrap/validation-only startup gate, full detached Workflow/HumanTask
+  JSON persistence, Snapshot/Receipt stores, and provider-neutral durable
+  Audit sink;
+- made exact Pins mandatory for durable records, validates optional Snapshot
+  evidence without treating it as an executable definition source, and gives
+  retryable suspension operations stable HumanTask identities plus Receipt
+  reconciliation;
+- added PostgreSQL Testcontainers cases for migrations, state round-trip,
+  tenant-scoped constraints, atomic rollback, receipt/audit duplicate-conflict
+  semantics, restart reads, and a separately-killed worker proving committed
+  state survives response loss; added a linux-x64 NativeAOT host which links
+  and performs real PostgreSQL operations;
 - migrated Procurement and DescriptorControlPlane samples to the new contracts;
-- solution, provider, runtime, boundary, Procurement, and sample tests pass in
-  the local verification gates. PostgreSQL crash/AOT evidence is intentionally
-  not yet advertised as `FullDurable`.
+- the full solution, provider, runtime, and boundary gates are locally green.
+  GitHub Actions run `30622708655` is the authoritative Docker/Linux-x64
+  evidence gate and passed PostgreSQL integration, crash reconciliation, and
+  NativeAOT publish-link-run; PostgreSQL is now `FullDurable`.
 
 ### Phase 8a — Capability Endpoint Projection
 

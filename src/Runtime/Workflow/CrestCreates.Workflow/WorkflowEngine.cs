@@ -1,7 +1,6 @@
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Metadata.Abstractions;
-using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
@@ -17,7 +16,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
     private readonly IWorkflowLifecycleEventPublisher _eventPublisher;
     private readonly IAuditOperationContextAccessor _contexts;
     private readonly WorkflowLifecycleEventFactory _events;
-    private readonly IDescriptorStableHashBuilder? _hashBuilder;
+    private readonly IRuntimeDescriptorPinResolver<WorkflowDescriptor> _pinResolver;
+    private readonly IRuntimeStateContractRegistry _stateRegistry;
 
     internal WorkflowEngine(
         IWorkflowRegistry registry,
@@ -26,7 +26,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
         IWorkflowLifecycleEventPublisher eventPublisher,
         IAuditOperationContextAccessor contexts,
         WorkflowLifecycleEventFactory events,
-        IDescriptorStableHashBuilder? hashBuilder = null)
+        IRuntimeDescriptorPinResolver<WorkflowDescriptor> pinResolver,
+        IRuntimeStateContractRegistry stateRegistry)
     {
         _registry = registry;
         _store = store;
@@ -34,14 +35,15 @@ public sealed class WorkflowEngine : IWorkflowEngine
         _eventPublisher = eventPublisher;
         _contexts = contexts;
         _events = events;
-        _hashBuilder = hashBuilder;
+        _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
+        _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
     }
 
     public async Task<WorkflowInstance> ExecuteAsync(
         string workflowId,
         IReadOnlyDictionary<string, RuntimeStateValue>? inputVariables = null,
         CancellationToken ct = default)
-        => await ExecuteCoreAsync(workflowId, null, inputVariables, null, ct).ConfigureAwait(false);
+        => await ExecuteCoreAsync(workflowId, null, inputVariables, null, null, ct).ConfigureAwait(false);
 
     public async Task<WorkflowInstance> ExecuteAsync(
         WorkflowExecutionRequest request,
@@ -53,6 +55,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
             request.TenantId,
             request.InputVariables,
             request.Origin,
+            request.OperationId,
             ct).ConfigureAwait(false);
     }
 
@@ -61,6 +64,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
         string? tenantId,
         IReadOnlyDictionary<string, RuntimeStateValue>? inputVariables,
         AuditOrigin? explicitOrigin,
+        string? requestedOperationId,
         CancellationToken ct)
     {
         var descriptor = _registry.GetById(workflowId);
@@ -68,7 +72,9 @@ public sealed class WorkflowEngine : IWorkflowEngine
             throw new InvalidOperationException($"Workflow '{workflowId}' not found.");
 
         var ambient = _contexts.Current;
-        var workflowRunOperationId = _events.CreateRunOperationId();
+        if (requestedOperationId is not null && string.IsNullOrWhiteSpace(requestedOperationId))
+            throw new ArgumentException("Workflow operation identity cannot be blank when supplied.", nameof(requestedOperationId));
+        var workflowRunOperationId = requestedOperationId ?? _events.CreateRunOperationId();
         var origin = explicitOrigin ?? (ambient is null ? new AuditOrigin
         {
             CorrelationId = _events.CreateRunOperationId(),
@@ -85,15 +91,19 @@ public sealed class WorkflowEngine : IWorkflowEngine
         var instance = new WorkflowInstance
         {
             Key = new RuntimeInstanceKey(tenantId ?? ambient?.TenantId, Guid.NewGuid().ToString("N")),
-            WorkflowPin = CreatePin(descriptor),
+            WorkflowPin = _pinResolver.Capture(descriptor).Pin,
             AuditOrigin = origin
         };
 
         if (inputVariables != null)
         {
             foreach (var kv in inputVariables)
-                instance.Variables[kv.Key] = kv.Value
-                    ?? throw new InvalidOperationException($"Workflow input variable '{kv.Key}' is null.");
+            {
+                if (kv.Value is null)
+                    throw new InvalidOperationException($"Workflow input variable '{kv.Key}' is null.");
+                _stateRegistry.Validate(kv.Value);
+                instance.Variables[kv.Key] = kv.Value;
+            }
         }
 
         var enclosingAuditId = ambient?.EnclosingAuditId;
@@ -130,34 +140,4 @@ public sealed class WorkflowEngine : IWorkflowEngine
         return await _executionRunner.RunAsync(instance, workflowRunOperationId, enclosingAuditId, ct).ConfigureAwait(false);
     }
 
-    private RuntimeDescriptorPin CreatePin(WorkflowDescriptor descriptor)
-    {
-        if (_hashBuilder is null)
-            return new RuntimeDescriptorPin
-            {
-                Ref = new DescriptorRef(descriptor.Namespace, descriptor.Id, descriptor.Version),
-                ContractHash = PlaceholderHash("Contract", "Workflow"),
-                DefinitionHash = PlaceholderHash("Definition", "Workflow")
-            };
-        var hashes = _hashBuilder.Build(descriptor);
-        return new RuntimeDescriptorPin
-        {
-            Ref = new DescriptorRef(descriptor.Namespace, descriptor.Id, descriptor.Version),
-            ContractHash = hashes.ContractHash,
-            DefinitionHash = hashes.DefinitionHash
-        };
-    }
-
-    private static CanonicalHash PlaceholderHash(string purpose, string descriptorKind) => new()
-    {
-        Value = "unresolved",
-        Algorithm = "unresolved",
-        AlgorithmVersion = "unresolved",
-        ArtifactKind = "Descriptor",
-        DescriptorKind = descriptorKind,
-        Scope = "InternalFull",
-        Purpose = purpose,
-        ContractVersion = "unresolved",
-        CanonicalShapeVersion = "unresolved"
-    };
 }

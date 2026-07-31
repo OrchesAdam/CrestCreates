@@ -5,6 +5,12 @@ namespace CrestCreates.HumanTask.Abstractions;
 
 public sealed class HumanTaskCreationRequest
 {
+    /// <summary>
+    /// Stable caller-supplied identity for a retryable Runtime operation.
+    /// When omitted, an interactive/non-durable caller receives a new identity.
+    /// </summary>
+    public string? InstanceId { get; init; }
+
     public string HumanTaskId { get; init; } = default!;
     public int? Version { get; init; }
 

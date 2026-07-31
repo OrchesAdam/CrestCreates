@@ -3,7 +3,11 @@ using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Metadata.Abstractions.Persistence;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Npgsql;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
@@ -13,13 +17,19 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         this IServiceCollection services, PostgreSqlRuntimePersistenceOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        PostgreSqlRuntimePersistenceOptionsValidator.Validate(options);
         services.AddSingleton(options);
+        services.AddSingleton<NpgsqlDataSource>(_ => new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build());
+        services.AddSingleton<PostgreSqlRuntimeMigrationRunner>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PostgreSqlRuntimeSchemaCompatibilityHostedService>());
         services.AddSingleton<PostgreSqlRuntimeTransactionAccessor>();
         services.AddSingleton<PostgreSqlRuntimeTransactionCoordinator>();
         services.AddSingleton<IRuntimeTransactionCoordinator>(sp => sp.GetRequiredService<PostgreSqlRuntimeTransactionCoordinator>());
         services.AddSingleton<IRuntimePersistenceProviderCapabilities, PostgreSqlRuntimeProviderCapabilities>();
         services.AddSingleton<IWorkflowInstanceStore, PostgreSqlWorkflowInstanceStore>();
         services.AddSingleton<IHumanTaskInstanceStore, PostgreSqlHumanTaskInstanceStore>();
+        services.AddSingleton<IWorkflowSuspensionReceiptStore, PostgreSqlWorkflowSuspensionReceiptStore>();
+        services.AddSingleton<IDescriptorSnapshotStore, PostgreSqlDescriptorSnapshotStore>();
         services.AddSingleton<IAuditSink, PostgreSqlAuditSink>();
         return services;
     }

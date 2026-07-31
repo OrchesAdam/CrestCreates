@@ -23,6 +23,7 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Registry;
+using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.Mcp;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.MultiTenancy;
@@ -64,6 +65,7 @@ var formRegistry = new FormRegistry(new RegistryValidationEngine<FormDescriptor>
 formRegistry.Build([new ProcurementDescriptorProvider<FormDescriptor>([ProcurementDescriptorCatalog.ApprovalForm])]);
 
 builder.Services.AddCapabilityRuntime();
+builder.Services.AddDescriptorStableHash();
 builder.Services.AddMultiTenancy();
 builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
 builder.Services.AddRuntimePersistence();

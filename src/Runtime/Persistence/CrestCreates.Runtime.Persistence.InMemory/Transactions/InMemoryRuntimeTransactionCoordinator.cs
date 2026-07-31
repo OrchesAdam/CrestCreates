@@ -40,8 +40,12 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
             var result = await work(cancellationToken).ConfigureAwait(false);
             _committed.Workflows.Clear();
             _committed.HumanTasks.Clear();
+            _committed.Snapshots.Clear();
+            _committed.Receipts.Clear();
             foreach (var (key, value) in context.StagedState.Workflows) _committed.Workflows[key] = value.Snapshot();
             foreach (var (key, value) in context.StagedState.HumanTasks) _committed.HumanTasks[key] = value.Snapshot();
+            foreach (var (key, value) in context.StagedState.Snapshots) _committed.Snapshots[key] = (value.Snapshot.Snapshot(), value.Fingerprint);
+            foreach (var (key, value) in context.StagedState.Receipts) _committed.Receipts[key] = value;
             return result;
         }
         finally

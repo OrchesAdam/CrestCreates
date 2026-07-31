@@ -2,6 +2,9 @@ using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.InMemory;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -59,6 +62,27 @@ public sealed class Phase9bHumanTaskPersistenceContractTests
     private static HumanTaskInstance New(string? tenantId, string id) => new()
     {
         Key = new RuntimeInstanceKey(tenantId, id),
+        HumanTaskPin = Pin(),
         Status = HumanTaskInstanceStatus.Created,
+    };
+
+    private static RuntimeDescriptorPin Pin() => new()
+    {
+        Ref = new DescriptorRef("humantask", "review", 1),
+        ContractHash = Hash("contract", "Contract"),
+        DefinitionHash = Hash("definition", "Definition")
+    };
+
+    private static CanonicalHash Hash(string value, string purpose) => new()
+    {
+        Value = value,
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = "Descriptor",
+        DescriptorKind = "HumanTask",
+        Scope = "InternalFull",
+        Purpose = purpose,
+        ContractVersion = "canonical-hash-v1",
+        CanonicalShapeVersion = "human-task-v1"
     };
 }

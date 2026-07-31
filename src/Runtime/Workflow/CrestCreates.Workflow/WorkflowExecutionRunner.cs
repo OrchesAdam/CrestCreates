@@ -1,4 +1,6 @@
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Persistence;
+using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
@@ -15,8 +17,10 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
     private readonly IWorkflowStateMachine _stateMachine;
     private readonly IWorkflowLifecycleEventPublisher _eventPublisher;
     private readonly WorkflowLifecycleEventFactory _events;
-    private readonly IRuntimeStateContractRegistry? _stateRegistry;
-    private readonly IRuntimeTransactionCoordinator? _transactionCoordinator;
+    private readonly IRuntimeStateContractRegistry _stateRegistry;
+    private readonly IRuntimeDescriptorPinResolver<WorkflowDescriptor> _pinResolver;
+    private readonly WorkflowSuspensionCommitter _suspensionCommitter;
+    private readonly IDescriptorSnapshotStore? _snapshots;
 
     public WorkflowExecutionRunner(
         IWorkflowRegistry registry,
@@ -25,8 +29,10 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         IWorkflowStateMachine stateMachine,
         IWorkflowLifecycleEventPublisher eventPublisher,
         WorkflowLifecycleEventFactory events,
-        IRuntimeStateContractRegistry? stateRegistry = null,
-        IRuntimeTransactionCoordinator? transactionCoordinator = null)
+        IRuntimeStateContractRegistry stateRegistry,
+        IRuntimeDescriptorPinResolver<WorkflowDescriptor> pinResolver,
+        WorkflowSuspensionCommitter suspensionCommitter,
+        IDescriptorSnapshotStore? snapshots)
     {
         _registry = registry;
         _executorRegistry = executorRegistry;
@@ -34,8 +40,10 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         _stateMachine = stateMachine;
         _eventPublisher = eventPublisher;
         _events = events;
-        _stateRegistry = stateRegistry;
-        _transactionCoordinator = transactionCoordinator;
+        _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
+        _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
+        _suspensionCommitter = suspensionCommitter ?? throw new ArgumentNullException(nameof(suspensionCommitter));
+        _snapshots = snapshots;
     }
 
     public async Task<WorkflowInstance> RunAsync(
@@ -45,17 +53,9 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         CancellationToken ct)
     {
         instance = instance.Snapshot();
-        var descriptor = _registry.GetByVersion(instance.Workflow.Id, instance.Workflow.Version);
-        if (descriptor == null)
-            throw new InvalidOperationException(
-                $"Workflow '{instance.Workflow.Id}' version {instance.Workflow.Version} not found.");
-
-        if (_transactionCoordinator is null)
-            return await ExecuteStepsAsync(instance, descriptor, workflowRunOperationId, enclosingAuditId, ct).ConfigureAwait(false);
-
-        return await _transactionCoordinator.ExecuteAsync(
-            token => new ValueTask<WorkflowInstance>(ExecuteStepsAsync(instance, descriptor, workflowRunOperationId, enclosingAuditId, token)),
-            ct).ConfigureAwait(false);
+        await RuntimeDescriptorPinEvidence.ValidateAsync(instance.WorkflowPin, _snapshots, ct).ConfigureAwait(false);
+        var descriptor = _pinResolver.Resolve(instance.WorkflowPin).Descriptor;
+        return await ExecuteStepsAsync(instance, descriptor, workflowRunOperationId, enclosingAuditId, ct).ConfigureAwait(false);
     }
 
     private async Task<WorkflowInstance> ExecuteStepsAsync(
@@ -76,7 +76,7 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
             var startedAt = DateTimeOffset.UtcNow;
 
             var executor = _executorRegistry.Resolve(step.Target);
-            var context = new WorkflowExecutionContext(descriptor, instance, step);
+            var context = new WorkflowExecutionContext(descriptor, instance, step, runOperationId);
 
             StepExecutionResult stepResult;
             try
@@ -125,9 +125,12 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                     continue;
 
                 case StepExecutionStatus.Suspended:
-                    if (string.IsNullOrWhiteSpace(stepResult.WaitingHumanTaskId))
+                    if (string.IsNullOrWhiteSpace(stepResult.WaitingHumanTaskId)
+                        || stepResult.PreparedHumanTask is null
+                        || !string.Equals(stepResult.WaitingHumanTaskId, stepResult.PreparedHumanTask.Id, StringComparison.Ordinal))
                         throw new InvalidOperationException(
-                            "Suspended HumanTask step must provide WaitingHumanTaskId.");
+                            "Suspended HumanTask step must provide one matching detached HumanTask candidate.");
+                    var suspensionBefore = instance.Snapshot();
                     var suspendedFromStatus = instance.Status;
                     instance.WaitingHumanTaskKey = new RuntimeInstanceKey(
                         instance.TenantId,
@@ -139,7 +142,13 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                     var suspendedPreviousId = instance.LastLifecycleAuditId;
                     var suspendedIdentity = _events.AllocateLifecycleIdentity();
                     instance.LastLifecycleAuditId = suspendedIdentity.AuditId;
-                    await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
+                    await _suspensionCommitter.CommitAsync(
+                        suspensionBefore,
+                        instance,
+                        stepResult.PreparedHumanTask,
+                        $"{runOperationId}:suspend:{step.Id}",
+                        ct).ConfigureAwait(false);
+                    instance.Revision = suspensionBefore.Revision + 1;
                     await PublishEvent("workflow.suspended", instance, descriptor, runOperationId, parentAuditId, suspendedFromStatus, suspendedPreviousId, suspendedIdentity, null, step.Id, CancellationToken.None).ConfigureAwait(false);
                     return instance;
 
@@ -212,7 +221,10 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         if (value is null)
             return null;
         if (value is RuntimeStateValue envelope)
+        {
+            _stateRegistry.Validate(envelope);
             return envelope;
+        }
         if (value is IReadOnlyDictionary<string, object?> dictionary)
         {
             var bag = new RuntimeStateBag(dictionary.Select(pair =>
@@ -222,10 +234,8 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                         $"Workflow state dictionary entry '{pair.Key}' cannot be an untyped null.");
                 return new KeyValuePair<string, RuntimeStateValue>(pair.Key, captured);
             }));
-            return _stateRegistry?.Capture(bag)
-                ?? throw new RuntimeStateContractException("Runtime state registry is required for durable state capture.");
+            return _stateRegistry.Capture(bag);
         }
-        return _stateRegistry?.Capture(value)
-            ?? throw new RuntimeStateContractException("Runtime state registry is required for durable state capture.");
+        return _stateRegistry.Capture(value);
     }
 }
