@@ -331,10 +331,87 @@ public sealed class PostgreSqlRuntimeMigrationRunner
     }
 
     private static string NormalizeSql(string value)
-        => string.Concat(value
+    {
+        var representation = value
             .Replace("::text", string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Where(character => !char.IsWhiteSpace(character) && character != '"'))
+            .Replace("\"", string.Empty, StringComparison.Ordinal)
             .ToLowerInvariant();
+        var canonical = CanonicalizeParentheses(representation);
+        return string.Concat(canonical.Where(character => !char.IsWhiteSpace(character)));
+    }
+
+    private static string CanonicalizeParentheses(string value)
+    {
+        var result = new StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] != '(')
+            {
+                result.Append(value[index]);
+                continue;
+            }
+
+            var closingIndex = FindMatchingParenthesis(value, index);
+            var inner = CanonicalizeParentheses(value[(index + 1)..closingIndex]);
+            if (ContainsTopLevelBooleanOperator(inner))
+                result.Append('(').Append(inner).Append(')');
+            else
+                result.Append(inner);
+            index = closingIndex;
+        }
+
+        const string checkPrefix = "check";
+        var canonical = result.ToString();
+        if (!canonical.StartsWith(checkPrefix, StringComparison.Ordinal))
+        {
+            while (IsEntireParenthesizedExpression(canonical.Trim()))
+                canonical = canonical.Trim()[1..^1].Trim();
+            return canonical;
+        }
+
+        var expression = canonical[checkPrefix.Length..].Trim();
+        while (IsEntireParenthesizedExpression(expression))
+            expression = expression[1..^1].Trim();
+        return checkPrefix + expression;
+    }
+
+    private static int FindMatchingParenthesis(string value, int openingIndex)
+    {
+        var depth = 0;
+        for (var index = openingIndex; index < value.Length; index++)
+        {
+            if (value[index] == '(') depth++;
+            if (value[index] != ')') continue;
+            if (--depth == 0) return index;
+        }
+        throw new InvalidOperationException("PostgreSQL schema manifest contains an unbalanced expression.");
+    }
+
+    private static bool ContainsTopLevelBooleanOperator(string value)
+    {
+        var depth = 0;
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] == '(') { depth++; continue; }
+            if (value[index] == ')') { depth--; continue; }
+            if (depth == 0
+                && ((index == 0 || IsBooleanBoundary(value[index - 1]))
+                    && (value.AsSpan(index).StartsWith("and", StringComparison.Ordinal)
+                        || value.AsSpan(index).StartsWith("or", StringComparison.Ordinal))
+                    && (index + (value.AsSpan(index).StartsWith("and", StringComparison.Ordinal) ? 3 : 2) == value.Length
+                        || IsBooleanBoundary(value[index + (value.AsSpan(index).StartsWith("and", StringComparison.Ordinal) ? 3 : 2)]))))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsBooleanBoundary(char character)
+        => char.IsWhiteSpace(character) || character is '(' or ')';
+
+    private static bool IsEntireParenthesizedExpression(string value)
+        => value.Length > 1 && value[0] == '(' && FindMatchingParenthesis(value, 0) == value.Length - 1;
 
     private string QuotedSchema() => $"\"{_options.Schema}\"";
     private string Qualified(string table) => $"{QuotedSchema()}.\"{table}\"";
