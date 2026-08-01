@@ -130,19 +130,52 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
     public async Task ValidationOnly_WithMissingTenantScopeCheck_ShouldFailClosed()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteSchemaDdlAsync(lease.Options, "alter table runtime_workflow_instances drop constraint ck_runtime_workflow_tenant_scope;");
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ValidationOnly_WithLifecycleCheckReplacedByStatusOnlyCheck_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
         await ExecuteSchemaDdlAsync(lease.Options, """
-            do $$
-            declare constraint_name text;
-            begin
-                select constraint_info.conname into constraint_name
-                from pg_constraint constraint_info
-                join pg_class relation on relation.oid = constraint_info.conrelid
-                where relation.relname = 'runtime_workflow_instances'
-                  and constraint_info.contype = 'c'
-                  and pg_get_constraintdef(constraint_info.oid) like '%tenant_scope_kind%';
-                execute format('alter table runtime_workflow_instances drop constraint %I', constraint_name);
-            end $$;
+            alter table runtime_human_task_instances drop constraint ck_runtime_human_task_lifecycle;
+            alter table runtime_human_task_instances add constraint ck_runtime_human_task_lifecycle check (status >= 0);
             """);
+
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ValidationOnly_WithTenantCheckSameTokensButChangedBooleanLogic_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteSchemaDdlAsync(lease.Options, """
+            alter table runtime_workflow_instances drop constraint ck_runtime_workflow_tenant_scope;
+            alter table runtime_workflow_instances add constraint ck_runtime_workflow_tenant_scope
+                check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id = ''));
+            """);
+
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ValidationOnly_WithExtraColumnInRequiredIndex_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteSchemaDdlAsync(lease.Options, """
+            drop index ux_runtime_human_task_active_step;
+            create unique index ux_runtime_human_task_active_step
+                on runtime_human_task_instances (tenant_scope_kind, tenant_id, workflow_instance_id, workflow_step_id, instance_id)
+                where workflow_instance_id is not null
+                  and workflow_step_id is not null
+                  and completed_at is null
+                  and cancelled_at is null;
+            """);
+
         var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
