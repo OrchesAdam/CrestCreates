@@ -333,7 +333,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
     private static string NormalizeSql(string value)
         => string.Concat(value
             .Replace("::text", string.Empty, StringComparison.OrdinalIgnoreCase)
-            .Where(character => !char.IsWhiteSpace(character) && character != '"' && character != '(' && character != ')'))
+            .Where(character => !char.IsWhiteSpace(character) && character != '"'))
             .ToLowerInvariant();
 
     private string QuotedSchema() => $"\"{_options.Schema}\"";

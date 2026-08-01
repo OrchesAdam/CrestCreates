@@ -155,7 +155,14 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         await ExecuteSchemaDdlAsync(lease.Options, """
             alter table runtime_workflow_instances drop constraint ck_runtime_workflow_tenant_scope;
             alter table runtime_workflow_instances add constraint ck_runtime_workflow_tenant_scope
-                check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id = ''));
+                check (
+                    tenant_scope_kind = 'host'
+                    and (
+                        tenant_id = ''
+                        or tenant_scope_kind = 'tenant'
+                    )
+                    and tenant_id <> ''
+                );
             """);
 
         var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
