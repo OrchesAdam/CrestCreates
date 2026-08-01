@@ -266,14 +266,46 @@ public sealed class PostgreSqlRuntimeMigrationRunner
 
     private async Task ValidateForeignKeyAsync(NpgsqlConnection connection, string table, RuntimeSchemaForeignKey expected, CancellationToken cancellationToken)
     {
-        var definitions = await ReadConstraintDefinitionsAsync(connection, table, "f", cancellationToken).ConfigureAwait(false);
-        var mode = expected.Deferrable ? " DEFERRABLE INITIALLY DEFERRED" : string.Empty;
-        var expectedDefinition = $"FOREIGN KEY ({expected.Columns}) REFERENCES {Qualified(expected.ReferencedTable)} ({expected.ReferencedColumns}) ON DELETE RESTRICT{mode}";
-        if (!definitions.Any(value => value.Deferrable == expected.Deferrable && value.InitiallyDeferred == expected.InitiallyDeferred
-            && NormalizeSql(value.Definition).Contains(NormalizeSql(expectedDefinition), StringComparison.Ordinal)))
+        await using var command = new NpgsqlCommand("""
+            select constraint_info.condeferrable,
+                   constraint_info.condeferred,
+                   referenced_schema.nspname,
+                   referenced_relation.relname,
+                   array(
+                       select source_attribute.attname
+                       from unnest(constraint_info.conkey) with ordinality source_key(attnum, ordinal)
+                       join pg_attribute source_attribute on source_attribute.attrelid = relation.oid and source_attribute.attnum = source_key.attnum
+                       order by source_key.ordinal),
+                   array(
+                       select referenced_attribute.attname
+                       from unnest(constraint_info.confkey) with ordinality referenced_key(attnum, ordinal)
+                       join pg_attribute referenced_attribute on referenced_attribute.attrelid = referenced_relation.oid and referenced_attribute.attnum = referenced_key.attnum
+                       order by referenced_key.ordinal)
+            from pg_constraint constraint_info
+            join pg_class relation on relation.oid = constraint_info.conrelid
+            join pg_namespace schema_info on schema_info.oid = relation.relnamespace
+            join pg_class referenced_relation on referenced_relation.oid = constraint_info.confrelid
+            join pg_namespace referenced_schema on referenced_schema.oid = referenced_relation.relnamespace
+            where schema_info.nspname=@schema and relation.relname=@table and constraint_info.contype='f';
+            """, connection);
+        command.Parameters.AddWithValue("schema", _options.Schema);
+        command.Parameters.AddWithValue("table", table);
+        var expectedColumns = expected.Columns.Split(", ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var expectedReferencedColumns = expected.ReferencedColumns.Split(", ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            throw new InvalidOperationException($"PostgreSQL runtime table '{table}' has an incompatible required foreign key.");
+            if (reader.GetBoolean(0) == expected.Deferrable
+                && reader.GetBoolean(1) == expected.InitiallyDeferred
+                && string.Equals(reader.GetString(2), _options.Schema, StringComparison.Ordinal)
+                && string.Equals(reader.GetString(3), expected.ReferencedTable, StringComparison.Ordinal)
+                && reader.GetFieldValue<string[]>(4).SequenceEqual(expectedColumns, StringComparer.Ordinal)
+                && reader.GetFieldValue<string[]>(5).SequenceEqual(expectedReferencedColumns, StringComparer.Ordinal))
+            {
+                return;
+            }
         }
+        throw new InvalidOperationException($"PostgreSQL runtime table '{table}' has an incompatible required foreign key.");
     }
 
     private async Task<IReadOnlyList<ConstraintDefinition>> ReadConstraintDefinitionsAsync(
