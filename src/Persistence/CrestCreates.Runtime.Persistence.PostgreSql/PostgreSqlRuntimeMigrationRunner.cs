@@ -568,8 +568,6 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                   and cancelled_at is null;
             """),
         new RuntimeMigration("V005", "reciprocal_correlation_and_task_lifecycle_invariants", """
-            alter table {schema}.runtime_human_task_instances
-                drop constraint fk_human_task_workflow;
             alter table {schema}.runtime_workflow_instances
                 drop constraint fk_workflow_waiting_task;
             alter table {schema}.runtime_operation_receipts
