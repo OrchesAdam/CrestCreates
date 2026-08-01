@@ -94,7 +94,9 @@ public static class ProcurementGoldenScenario
 
             var workflowInstanceId = store.GetById("golden-tenant", submitResult.RequestId)!.WorkflowInstanceId!;
             var pending = await provider.GetRequiredService<IHumanTaskInstanceStore>()
-                .GetPendingByWorkflowAsync(workflowInstanceId);
+                .GetPendingByWorkflowAsync(new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeInstanceKey(
+                    "golden-tenant",
+                    workflowInstanceId));
             if (pending.Count != 1)
                 return 4;
 

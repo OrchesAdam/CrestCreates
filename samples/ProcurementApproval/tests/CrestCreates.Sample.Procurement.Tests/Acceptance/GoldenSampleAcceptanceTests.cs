@@ -12,6 +12,7 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Mcp;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Sample.Procurement.Application;
 using CrestCreates.Sample.Procurement.Contracts;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
@@ -542,10 +543,10 @@ public sealed class WorkflowTenantAndSchemaAcceptanceTests
         aggregate.WorkflowInstanceId.Should().NotBeNullOrWhiteSpace();
 
         var workflow = await services.GetRequiredService<IWorkflowInstanceStore>()
-            .GetAsync(aggregate.WorkflowInstanceId!);
+            .GetAsync(new RuntimeInstanceKey("tenant-a", aggregate.WorkflowInstanceId!));
         workflow!.Status.Should().Be(WorkflowInstanceStatus.Suspended);
         var tasks = await services.GetRequiredService<IHumanTaskInstanceStore>()
-            .GetPendingByWorkflowAsync(workflow.InstanceId);
+            .GetPendingByWorkflowAsync(new RuntimeInstanceKey("tenant-a", workflow.InstanceId));
         tasks.Should().ContainSingle();
 
         identity.Set("tenant-a", "manager-a", "procurement-manager");
@@ -555,7 +556,7 @@ public sealed class WorkflowTenantAndSchemaAcceptanceTests
         aggregate.Status.ToString().Should().Be("Approved");
         aggregate.ApproverId.Should().Be("manager-a");
         var completed = await services.GetRequiredService<IWorkflowInstanceStore>()
-            .GetAsync(workflow.InstanceId);
+            .GetAsync(new RuntimeInstanceKey("tenant-a", workflow.InstanceId));
         completed!.Status.Should().Be(WorkflowInstanceStatus.Completed);
         factory.Services.GetRequiredService<InMemoryAuditSink>()
             .GetRecords().Where(record => record.Runtime is { InvocationSource: AuditInvocationSources.HumanTask }

@@ -4,6 +4,7 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Samples.DescriptorControlPlane;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -76,7 +77,7 @@ public sealed class CompanyCertificationGoldenScenarioTests : IAsyncLifetime
         using var scope = _host.CreateScope();
         var sp = scope.ServiceProvider;
         var wfStore = sp.GetRequiredService<IWorkflowInstanceStore>();
-        var wf = await wfStore.GetAsync(report.WorkflowInstanceId!);
+        var wf = await wfStore.GetAsync(new RuntimeInstanceKey(null, report.WorkflowInstanceId!));
         wf.Should().NotBeNull();
         wf!.Status.Should().Be(WorkflowInstanceStatus.Completed);
     }

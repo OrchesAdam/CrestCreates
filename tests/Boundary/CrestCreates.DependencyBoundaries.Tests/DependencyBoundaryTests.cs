@@ -57,12 +57,12 @@ public class DependencyBoundaryTests
     {
         AssertNoDirectProjectReferences(
             "src/Persistence",
-            "Persistence projects must not own runtime store contracts.",
+            "Persistence projects may reference Runtime abstractions but not concrete Runtime implementations.",
             new[]
             {
-                "src/Runtime/Workflow/CrestCreates.Workflow",
-                "src/Runtime/Agent/CrestCreates.Agent.Runtime",
-                "src/Runtime/HumanTask/CrestCreates.HumanTask"
+                "src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj",
+                "src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj",
+                "src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj"
             });
     }
 

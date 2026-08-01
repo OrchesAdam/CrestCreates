@@ -1,6 +1,8 @@
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
@@ -17,42 +19,46 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
     private readonly IActivationReviewOrchestrator _orchestrator;
     private readonly IHumanTaskInstanceStore _humanTaskInstanceStore;
     private readonly ILogger<DescriptorActivationReviewHumanTaskEventHandler> _logger;
+    private readonly IRuntimeStateContractRegistry _stateRegistry;
 
     public DescriptorActivationReviewHumanTaskEventHandler(
         IActivationReviewOrchestrator orchestrator,
         IHumanTaskInstanceStore humanTaskInstanceStore,
-        ILogger<DescriptorActivationReviewHumanTaskEventHandler> logger)
+        ILogger<DescriptorActivationReviewHumanTaskEventHandler> logger,
+        IRuntimeStateContractRegistry stateRegistry)
     {
         _orchestrator = orchestrator;
         _humanTaskInstanceStore = humanTaskInstanceStore;
         _logger = logger;
+        _stateRegistry = stateRegistry;
     }
 
     public async Task HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)
     {
         // Only process activation review HumanTasks
-        if (@event.HumanTaskId != DescriptorActivationHumanTaskIds.ActivationReview)
+        if (@event.HumanTaskPin.Ref.Id != DescriptorActivationHumanTaskIds.ActivationReview)
         {
             return;
         }
 
         _logger.LogInformation(
             "Processing activation review completion for HumanTask {TaskInstanceId}, outcome: {Outcome}",
-            @event.HumanTaskInstanceId, @event.Outcome);
+            @event.HumanTaskKey.InstanceId, @event.Outcome);
 
         // Parse the review decision from the event result
+        var result = @event.Result is null ? null : _stateRegistry.Restore(@event.Result);
         if (!DescriptorActivationReviewDecisionParser.TryParseReviewDecision(
-            @event.Result, out var parsedDecision, out var error))
+            result, out var parsedDecision, out var error))
         {
             _logger.LogError(
                 "Failed to parse activation review decision from HumanTask {TaskInstanceId}: {Error}",
-                @event.HumanTaskInstanceId, error);
+                @event.HumanTaskKey.InstanceId, error);
             return;
         }
 
         // Enrich the decision with TenantId/CorrelationId from the HumanTask instance
         var enrichedDecision = await EnrichDecisionAsync(
-            parsedDecision!, @event.HumanTaskInstanceId, cancellationToken);
+            parsedDecision!, @event.HumanTaskKey, cancellationToken);
 
         if (enrichedDecision is null)
         {
@@ -65,7 +71,7 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
 
     private async Task<DescriptorActivationReviewDecision?> EnrichDecisionAsync(
         DescriptorActivationReviewDecision parsedDecision,
-        string humanTaskInstanceId,
+        RuntimeInstanceKey humanTaskKey,
         CancellationToken cancellationToken)
     {
         // If TenantId/CorrelationId are already non-empty, use them as-is
@@ -76,12 +82,12 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         }
 
         // Look up the HumanTask instance to obtain TenantId and the task input (CorrelationId)
-        var instance = await _humanTaskInstanceStore.GetByIdAsync(humanTaskInstanceId, cancellationToken);
+        var instance = await _humanTaskInstanceStore.GetAsync(humanTaskKey, cancellationToken);
         if (instance is null)
         {
             _logger.LogError(
                 "HumanTask instance '{InstanceId}' not found — cannot enrich activation review decision.",
-                humanTaskInstanceId);
+                humanTaskKey.InstanceId);
             return null;
         }
 
@@ -91,7 +97,9 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
 
         var correlationId = !string.IsNullOrEmpty(parsedDecision.CorrelationId)
             ? parsedDecision.CorrelationId
-            : (instance.Input as DescriptorActivationReviewTaskInput)?.CorrelationId ?? string.Empty;
+            : instance.Input is null
+                ? string.Empty
+                : (_stateRegistry.Restore<DescriptorActivationReviewTaskInput>(instance.Input)).CorrelationId ?? string.Empty;
 
         return parsedDecision with
         {

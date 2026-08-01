@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-31 (Issue #39 Phase 9a PR #67 fourth-round global exception boundary remediated)
+Last Updated: 2026-07-31 (Phase 9b durable persistence CI and NativeAOT evidence verified)
 
 ## Purpose
 
@@ -727,6 +727,97 @@ Expected final standard:
 ---
 
 ## Not Yet Started or Not Yet Closed as Formal Platform Work
+
+### Issue #24 — Phase 9b Durable Persistence Foundation
+
+Status: Implemented on `feature/phase-9b-durable-persistence-foundation-24`.
+GitHub Actions has verified the PostgreSQL Testcontainers integration,
+independent crash-worker reconciliation, and Linux NativeAOT publish-link-run
+fixture; PostgreSQL is now declared `FullDurable`.
+
+Approved mainline:
+
+```text
+explicit AOT-safe Runtime State contracts
+    + tenant-scoped RuntimeInstanceKey
+    + structured exact Workflow/HumanTask Descriptor Pins
+    + runner-owned atomic suspension commit
+    -> direct-Npgsql PostgreSQL durable authority
+```
+
+Key boundary corrections:
+
+- `DescriptorSnapshot` is immutable evidence/index data and contains no
+  executable Descriptor payload. Restart resolves exact descriptors from the
+  current activated Registries and fails closed on ref/hash/profile mismatch.
+- Workflow suspension atomically commits the HumanTask insert, Workflow
+  Suspended CAS transition, Pins, and immutable suspension receipt.
+- Durable state uses stable TypeId + optional SchemaRef + generated
+  `JsonTypeInfo` + JSON payload; unregistered types fail before transaction and
+  reads restore deep snapshots.
+- Every Store lookup, CAS, correlation, foreign key, and unique constraint
+  includes exact tenant scope. PostgreSQL host scope uses explicit non-null
+  scope columns rather than nullable unique-key semantics.
+- The provider is direct Npgsql, not EF Core, because the production mainline
+  requires executable NativeAOT evidence.
+- InMemory is a Full Semantic Runtime Provider: it must preserve the same
+  Add/CAS, atomic suspension, and rollback semantics, while making no process
+  durability, restart, migration, or database NativeAOT claim.
+- Descriptor Pin validation is lazy when an instance is loaded for execution or
+  transition. Phase 9b does not scan dormant Pins at Host startup or implement
+  deployment/activation blocking; compatible deployments must retain exact
+  Descriptor versions required by live instances.
+- Durable `IAuditSink` preserves Accepted/Duplicate/Conflict across restart,
+  but reliable state-to-Accountability/event delivery remains owned by #25.
+- Agent Memory durability and Agent Tool pre-dispatch reconciliation remain
+  separate follow-ups.
+
+Spec:
+`docs/superpowers/specs/2026-07-31-phase-9b-durable-persistence-foundation-design.md`
+
+Implementation Plan:
+`docs/superpowers/plans/2026-07-31-phase-9b-durable-persistence-foundation.md`
+
+Plan review status: approved after three detailed closure rounds. The Plan
+records P-01 through P-08, R2-01 through R2-04, R3-01 through R3-03, and both
+non-blocking review sets in §16.
+
+Implementation evidence to date:
+
+- created the provider-neutral Runtime Persistence Abstractions, concrete
+  Runtime kernel shell, runner-free shared contract test kit, and contract
+  test project;
+- fixed dependency direction with architecture tests, including explicit
+  Workflow/HumanTask prohibition on concrete Runtime Persistence references;
+- established tenant-scoped key/scope, Runtime State envelope/bag, Required
+  transaction coordinator, provider capability tiers, provider-neutral
+  failures, and immutable Descriptor Snapshot evidence contracts;
+- moved the old Metadata-owned Runtime Store exceptions to
+  `99_RecycleBin/Phase9bDurablePersistence/MetadataRuntimeStoreExceptions/`;
+  Workflow/HumanTask now consume the Runtime Persistence exception authority,
+  while Company Certification uses its own domain exception;
+- cut Workflow/HumanTask stores and events to Add/CAS plus
+  `RuntimeInstanceKey` tenant boundaries;
+- added generated Runtime State contracts and deep state snapshots, exact Pin
+  resolution, and an atomic Full Semantic InMemory provider;
+- added direct-Npgsql PostgreSQL transaction kernel, checksummed migration
+  bootstrap/validation-only startup gate, full detached Workflow/HumanTask
+  JSON persistence, Snapshot/Receipt stores, and provider-neutral durable
+  Audit sink;
+- made exact Pins mandatory for durable records, validates optional Snapshot
+  evidence without treating it as an executable definition source, and gives
+  retryable suspension operations stable HumanTask identities plus Receipt
+  reconciliation;
+- added PostgreSQL Testcontainers cases for migrations, state round-trip,
+  tenant-scoped constraints, atomic rollback, receipt/audit duplicate-conflict
+  semantics, restart reads, and a separately-killed worker proving committed
+  state survives response loss; added a linux-x64 NativeAOT host which links
+  and performs real PostgreSQL operations;
+- migrated Procurement and DescriptorControlPlane samples to the new contracts;
+- the full solution, provider, runtime, and boundary gates are locally green.
+  GitHub Actions run `30622708655` is the authoritative Docker/Linux-x64
+  evidence gate and passed PostgreSQL integration, crash reconciliation, and
+  NativeAOT publish-link-run; PostgreSQL is now `FullDurable`.
 
 ### Phase 8a — Capability Endpoint Projection
 

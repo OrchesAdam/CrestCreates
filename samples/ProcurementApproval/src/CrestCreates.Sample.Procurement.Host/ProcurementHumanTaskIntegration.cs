@@ -12,6 +12,8 @@ using CrestCreates.Sample.Procurement.Contracts.Json;
 using CrestCreates.Sample.Procurement.Domain;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,9 +49,9 @@ public sealed class ProcurementDecisionReconciliationStore
             ? decision.ErrorCode
             : "PROCUREMENT_DECISION_CONTINUATION_FAILED";
         _records.AddOrUpdate(
-            completed.HumanTaskInstanceId,
+            completed.HumanTaskKey.InstanceId,
             _ => new ProcurementDecisionReconciliation(
-                completed.HumanTaskInstanceId,
+                completed.HumanTaskKey.InstanceId,
                 workflowInstanceId,
                 requestId,
                 completed.Outcome,
@@ -96,7 +98,8 @@ public sealed class ProcurementDecisionDispatchException(
 
 public sealed class ProcurementLocalEventBus(
     IServiceProvider services,
-    ProcurementDecisionReconciliationStore reconciliation) : ILocalEventBus
+    ProcurementDecisionReconciliationStore reconciliation,
+    IRuntimeStateContractRegistry stateRegistry) : ILocalEventBus
 {
     public Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
         => @event is HumanTaskCompletedEvent completed
@@ -114,24 +117,25 @@ public sealed class ProcurementLocalEventBus(
         try
         {
             var handlers = services.GetServices<ILocalEventHandler<HumanTaskCompletedEvent>>().ToArray();
-            var nextHandlerIndex = reconciliation.GetNextHandlerIndex(completed.HumanTaskInstanceId);
+            var taskKey = completed.HumanTaskKey;
+            var nextHandlerIndex = reconciliation.GetNextHandlerIndex(taskKey.InstanceId);
             for (var index = nextHandlerIndex; index < handlers.Length; index++)
             {
                 await handlers[index].HandleAsync(completed, cancellationToken).ConfigureAwait(false);
-                reconciliation.MarkHandlerCompleted(completed.HumanTaskInstanceId, index + 1);
+                reconciliation.MarkHandlerCompleted(taskKey.InstanceId, index + 1);
             }
             await RequireCompletedWorkflowAsync(completed, cancellationToken).ConfigureAwait(false);
-            reconciliation.MarkResolved(completed.HumanTaskInstanceId);
+            reconciliation.MarkResolved(taskKey.InstanceId);
         }
         catch (Exception exception)
         {
             var task = await services.GetRequiredService<IHumanTaskInstanceStore>()
-                .GetByIdAsync(completed.HumanTaskInstanceId, CancellationToken.None)
+                .GetAsync(completed.HumanTaskKey, CancellationToken.None)
                 .ConfigureAwait(false);
             var workflow = string.IsNullOrWhiteSpace(task?.WorkflowInstanceId)
                 ? null
                 : await services.GetRequiredService<IWorkflowInstanceStore>()
-                    .GetAsync(task.WorkflowInstanceId, CancellationToken.None)
+                    .GetAsync(task.WorkflowKey!.Value, CancellationToken.None)
                     .ConfigureAwait(false);
             reconciliation.RecordFailure(
                 completed,
@@ -149,12 +153,12 @@ public sealed class ProcurementLocalEventBus(
         CancellationToken cancellationToken)
     {
         var task = await services.GetRequiredService<IHumanTaskInstanceStore>()
-            .GetByIdAsync(completed.HumanTaskInstanceId, cancellationToken)
+            .GetAsync(completed.HumanTaskKey, cancellationToken)
             .ConfigureAwait(false);
         var workflow = string.IsNullOrWhiteSpace(task?.WorkflowInstanceId)
             ? null
             : await services.GetRequiredService<IWorkflowInstanceStore>()
-                .GetAsync(task.WorkflowInstanceId, cancellationToken)
+                .GetAsync(task.WorkflowKey!.Value, cancellationToken)
                 .ConfigureAwait(false);
         if (workflow?.Status != WorkflowInstanceStatus.Completed)
         {
@@ -164,11 +168,12 @@ public sealed class ProcurementLocalEventBus(
         }
     }
 
-    private static Guid? RequestId(HumanTaskInstance? task)
+    private Guid? RequestId(HumanTaskInstance? task)
     {
-        if (task?.Input is not Dictionary<string, object?> variables
-            || !variables.TryGetValue("requestId", out var value)
-            || value is null)
+        if (task?.Input is null || stateRegistry.Restore(task.Input) is not RuntimeStateBag bag
+            || bag.Values.Count == 0
+            || !bag.Values.TryGetValue("requestId", out var requestValue)
+            || stateRegistry.Restore(requestValue) is not object value)
             return null;
         return value is Guid requestId || Guid.TryParse(value.ToString(), out requestId)
             ? requestId
@@ -190,18 +195,18 @@ public sealed class ProcurementHumanTaskDecisionHandler(
     IHumanTaskInstanceStore tasks,
     ICapabilityDispatcher dispatcher,
     ITenantContext tenant,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IRuntimeStateContractRegistry stateRegistry)
     : ILocalEventHandler<HumanTaskCompletedEvent>
 {
     public async Task HandleAsync(
         HumanTaskCompletedEvent @event,
         CancellationToken cancellationToken = default)
     {
-        var task = await tasks.GetByIdAsync(@event.HumanTaskInstanceId, cancellationToken)
+        var task = await tasks.GetAsync(@event.HumanTaskKey, cancellationToken)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
-        var variables = task.Input as Dictionary<string, object?>
-            ?? throw new InvalidOperationException("Procurement workflow variables are unavailable.");
+        var variables = RestoreVariables(task.Input, stateRegistry);
         if (string.IsNullOrWhiteSpace(task.TenantId)
             || !string.Equals(task.TenantId, tenant.CurrentTenantId, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("The HumanTask belongs to another tenant.");
@@ -217,7 +222,7 @@ public sealed class ProcurementHumanTaskDecisionHandler(
             var input = new ApproveProcurementRequestInput
             {
                 RequestId = requestId,
-                Comment = @event.Result as string ?? "Approved through HumanTask"
+                Comment = @event.Result is null ? "Approved through HumanTask" : stateRegistry.Restore(@event.Result) as string ?? "Approved through HumanTask"
             };
             result = await dispatcher.DispatchAsync(
                 ProcurementContractIds.ApplyApprovalDecisionCapability,
@@ -233,7 +238,7 @@ public sealed class ProcurementHumanTaskDecisionHandler(
             var input = new RejectProcurementRequestInput
             {
                 RequestId = requestId,
-                Reason = @event.Result as string ?? "Rejected through HumanTask"
+                Reason = @event.Result is null ? "Rejected through HumanTask" : stateRegistry.Restore(@event.Result) as string ?? "Rejected through HumanTask"
             };
             result = await dispatcher.DispatchAsync(
                 ProcurementContractIds.ApplyRejectionDecisionCapability,
@@ -255,6 +260,13 @@ public sealed class ProcurementHumanTaskDecisionHandler(
                 $"HumanTask decision dispatch failed with '{result.ErrorCode}'.");
     }
 
+    private static Dictionary<string, object?> RestoreVariables(RuntimeStateValue? input, IRuntimeStateContractRegistry registry)
+    {
+        if (input is null || registry.Restore(input) is not RuntimeStateBag bag)
+            throw new InvalidOperationException("Procurement workflow variables are unavailable.");
+        return bag.Values.ToDictionary(pair => pair.Key, pair => registry.Restore(pair.Value));
+    }
+
     private static string RequiredString(Dictionary<string, object?> variables, string key)
         => variables.TryGetValue(key, out var value) && value is not null
             ? value.ToString()!
@@ -264,13 +276,12 @@ public sealed class ProcurementHumanTaskDecisionHandler(
 public sealed class ProcurementApprovalTaskService(
     IWorkflowEngine workflowEngine,
     IWorkflowInstanceStore workflows,
-    InMemoryWorkflowInstanceStore inMemoryWorkflows,
     IHumanTaskRuntime runtime,
     IHumanTaskInstanceStore tasks,
-    InMemoryHumanTaskInstanceStore inMemoryTasks,
     InMemoryProcurementRequestStore requests,
     ITenantContext tenant,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IRuntimeStateContractRegistry stateRegistry)
     : IProcurementApprovalOrchestrator
 {
     public async Task<ProcurementApprovalWorkflowLease> StartAsync(
@@ -287,15 +298,15 @@ public sealed class ProcurementApprovalTaskService(
                 {
                     WorkflowId = ProcurementContractIds.ApprovalWorkflow,
                     TenantId = tenantId,
-                    InputVariables = new Dictionary<string, object?>
+                    InputVariables = new Dictionary<string, RuntimeStateValue>
                     {
-                        ["requestId"] = requestId,
-                        ["requesterId"] = requesterId
+                        ["requestId"] = stateRegistry.Capture(requestId),
+                        ["requesterId"] = stateRegistry.Capture(requesterId)
                     }
                 },
                 cancellationToken).ConfigureAwait(false);
             var pending = await tasks.GetPendingByWorkflowAsync(
-                workflow.InstanceId,
+                workflow.Key,
                 cancellationToken).ConfigureAwait(false);
             if (workflow.Status != WorkflowInstanceStatus.Suspended
                 || !string.Equals(workflow.TenantId, tenantId, StringComparison.Ordinal)
@@ -312,7 +323,6 @@ public sealed class ProcurementApprovalTaskService(
         }
         catch (Exception exception)
         {
-            RollbackCreatedRuntime(tenantId, requestId, workflow?.InstanceId);
             if (exception is OperationCanceledException)
                 throw;
             throw new CapabilityFailureException(
@@ -325,8 +335,6 @@ public sealed class ProcurementApprovalTaskService(
         ProcurementApprovalWorkflowLease lease,
         CancellationToken cancellationToken = default)
     {
-        inMemoryTasks.TryRemove(lease.HumanTaskInstanceId);
-        inMemoryWorkflows.TryRemove(lease.WorkflowInstanceId);
         return Task.CompletedTask;
     }
 
@@ -365,7 +373,7 @@ public sealed class ProcurementApprovalTaskService(
                 $"Procurement request '{requestId}' has no pending approval decision.");
         }
 
-        var workflow = await workflows.GetAsync(request.WorkflowInstanceId, cancellationToken)
+        var workflow = await workflows.GetAsync(new RuntimeInstanceKey(tenantId, request.WorkflowInstanceId), cancellationToken)
             .ConfigureAwait(false);
         if (workflow?.Status != WorkflowInstanceStatus.Suspended
             || string.IsNullOrWhiteSpace(workflow.WaitingHumanTaskId))
@@ -375,7 +383,7 @@ public sealed class ProcurementApprovalTaskService(
                 "The approval workflow is not suspended on a HumanTask.");
         }
 
-        var task = await tasks.GetByIdAsync(workflow.WaitingHumanTaskId, cancellationToken)
+        var task = await tasks.GetAsync(workflow.WaitingHumanTaskKey!.Value, cancellationToken)
             .ConfigureAwait(false);
         if (task is null
             || !string.Equals(task.WorkflowInstanceId, workflow.InstanceId, StringComparison.Ordinal)
@@ -396,7 +404,7 @@ public sealed class ProcurementApprovalTaskService(
                 "The requested decision conflicts with the failed HumanTask completion outcome.");
         if (task.Status != HumanTaskInstanceStatus.CompletionDispatchFailed)
         {
-            var pending = await tasks.GetPendingByWorkflowAsync(workflow.InstanceId, cancellationToken)
+            var pending = await tasks.GetPendingByWorkflowAsync(workflow.Key, cancellationToken)
                 .ConfigureAwait(false);
             if (pending.Count != 1 || pending[0].Id != task.Id)
                 throw DecisionStateInvalid("Exactly one correlated pending HumanTask is required.");
@@ -412,10 +420,9 @@ public sealed class ProcurementApprovalTaskService(
         string comment,
         CancellationToken cancellationToken = default)
     {
-        var task = await tasks.GetByIdAsync(humanTaskId, cancellationToken).ConfigureAwait(false)
+        var task = await tasks.GetAsync(new RuntimeInstanceKey(tenant.CurrentTenantId, humanTaskId), cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("HumanTask is unavailable.");
-        var variables = task.Input as Dictionary<string, object?>
-            ?? throw new InvalidOperationException("Procurement workflow variables are unavailable.");
+        var variables = RestoreVariables(task.Input, stateRegistry);
         var requesterId = variables["requesterId"]?.ToString();
         if (string.IsNullOrWhiteSpace(task.TenantId)
             || !string.Equals(task.TenantId, tenant.CurrentTenantId, StringComparison.Ordinal))
@@ -427,39 +434,18 @@ public sealed class ProcurementApprovalTaskService(
 
         await runtime.CompleteAsync(new HumanTaskCompletionRequest
         {
-            HumanTaskInstanceId = humanTaskId,
+            HumanTaskKey = task.Key,
             Outcome = outcome,
-            Result = comment
+            Result = stateRegistry.Capture(comment)
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private void RollbackCreatedRuntime(
-        string tenantId,
-        Guid requestId,
-        string? workflowInstanceId)
+    private static Dictionary<string, object?> RestoreVariables(RuntimeStateValue? input, IRuntimeStateContractRegistry registry)
     {
-        var workflowIds = inMemoryWorkflows.GetAll()
-            .Where(instance =>
-                (string.Equals(instance.TenantId, tenantId, StringComparison.Ordinal)
-                 && string.Equals(instance.InstanceId, workflowInstanceId, StringComparison.Ordinal))
-                || MatchesRequest(instance, tenantId, requestId))
-            .Select(instance => instance.InstanceId)
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (var task in inMemoryTasks.GetAll()
-                     .Where(task => task.WorkflowInstanceId is not null
-                         && workflowIds.Contains(task.WorkflowInstanceId)))
-            inMemoryTasks.TryRemove(task.Id);
-        foreach (var instanceId in workflowIds)
-            inMemoryWorkflows.TryRemove(instanceId);
+        if (input is null || registry.Restore(input) is not RuntimeStateBag bag)
+            throw new InvalidOperationException("Procurement workflow variables are unavailable.");
+        return bag.Values.ToDictionary(pair => pair.Key, pair => registry.Restore(pair.Value));
     }
-
-    private static bool MatchesRequest(
-        WorkflowInstance instance,
-        string tenantId,
-        Guid requestId)
-        => string.Equals(instance.TenantId, tenantId, StringComparison.Ordinal)
-            && instance.Variables.TryGetValue("requestId", out var value)
-            && (value is Guid id ? id == requestId : Guid.TryParse(value?.ToString(), out id) && id == requestId);
 
     private static CapabilityFailureException DecisionStateInvalid(string message)
         => new("CAPABILITY_DECISION_STATE_INVALID", message);

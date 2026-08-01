@@ -17,6 +17,9 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.ContextPack;
+using CrestCreates.Runtime.Persistence;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Persistence.InMemory;
 using CrestCreates.Samples.DescriptorControlPlane.Authoring;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
@@ -75,8 +78,8 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         services.AddLogging();
 
         // ── Persistence ────────────────────────────────────────────────
-        // Register BEFORE AddWorkflowEngine/AddHumanTaskRuntime so SQLite stores
-        // take precedence over TryAddSingleton defaults in those methods.
+        // SQLite owns only sample business data. Runtime state is explicitly
+        // registered through the Full Semantic InMemory adapter in this sample.
         ICompanyCertificationStore companyStore;
         if (persistenceOptions.Mode == CompanyCertificationPersistenceMode.Sqlite)
         {
@@ -86,10 +89,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
 
             companyStore = new SqliteCompanyCertificationStore(connectionFactory);
             services.AddSingleton<ICompanyCertificationStore>(companyStore);
-            services.AddSingleton<IWorkflowInstanceStore>(sp => new SqliteWorkflowInstanceStore(connectionFactory));
-            services.AddSingleton<IHumanTaskInstanceStore>(sp => new SqliteHumanTaskInstanceStore(connectionFactory));
             services.AddSingleton(connectionFactory);
-            services.AddSingleton(new SqliteRuntimeStoreDiagnostics(connectionFactory));
         }
         else
         {
@@ -103,6 +103,9 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
             ?? CompanyCertificationDescriptorCloner.CopyAllDescriptors();
 
         RegisterRuntimeRegistries(services, inventory);
+        services.AddRuntimePersistence();
+        services.AddSingleton<IRuntimeStateContractContributor, CompanyCertificationRuntimeStateContributor>();
+        services.AddCrestCreatesInMemoryRuntimePersistence();
         RegisterRuntimeServices(services);
         RegisterControlPlaneServices(services);
 
@@ -185,11 +188,9 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         services.AddAccountability();
 
         // ── HumanTask Runtime ──────────────────────────────────────────
-        // TryAddSingleton defaults — will NOT override SQLite stores registered earlier
         services.AddHumanTaskRuntime();
 
         // ── Workflow Engine ────────────────────────────────────────────
-        // TryAddSingleton defaults — will NOT override SQLite stores registered earlier
         services.AddWorkflowEngine();
     }
 

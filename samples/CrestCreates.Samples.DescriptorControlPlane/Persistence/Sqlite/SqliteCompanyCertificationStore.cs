@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using CrestCreates.Metadata.Abstractions;
 
 namespace CrestCreates.Samples.DescriptorControlPlane;
 
@@ -117,8 +116,7 @@ public sealed class SqliteCompanyCertificationStore : ICompanyCertificationStore
 
         var affected = await cmd.ExecuteNonQueryAsync(cancellationToken);
         if (affected == 0)
-            throw new RuntimeEntityNotFoundException(
-                $"CompanyCertification with id '{id}' not found.");
+            throw new CompanyCertificationNotFoundException(id);
     }
 
     public async Task RejectAsync(
@@ -145,8 +143,7 @@ public sealed class SqliteCompanyCertificationStore : ICompanyCertificationStore
 
         var affected = await cmd.ExecuteNonQueryAsync(cancellationToken);
         if (affected == 0)
-            throw new RuntimeEntityNotFoundException(
-                $"CompanyCertification with id '{id}' not found.");
+            throw new CompanyCertificationNotFoundException(id);
     }
 
     public async Task<int> CountAsync(

@@ -1,8 +1,11 @@
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
+
 namespace CrestCreates.HumanTask.Abstractions;
 
 public sealed class HumanTaskCompletionRequest
 {
-    public string HumanTaskInstanceId { get; init; } = default!;
+    public RuntimeInstanceKey HumanTaskKey { get; init; }
     public string Outcome { get; init; } = default!;
-    public object? Result { get; init; }
+    public RuntimeStateValue? Result { get; init; }
 }

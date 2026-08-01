@@ -125,6 +125,11 @@
     <Project Path="src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
     <Project Path="src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
   </Folder>
+  <Folder Name="/src/Runtime/Persistence/">
+    <Project Path="src/Runtime/Persistence/CrestCreates.Runtime.Persistence.Abstractions/CrestCreates.Runtime.Persistence.Abstractions.csproj" />
+    <Project Path="src/Runtime/Persistence/CrestCreates.Runtime.Persistence/CrestCreates.Runtime.Persistence.csproj" />
+    <Project Path="src/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory/CrestCreates.Runtime.Persistence.InMemory.csproj" />
+  </Folder>
   <Folder Name="/src/Runtime/" />
   <Folder Name="/src/Runtime/Agent/">
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
@@ -172,6 +177,7 @@
     <Project Path="src/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP/CrestCreates.DistributedTransaction.CAP.csproj" />
   </Folder>
   <Folder Name="/src/Persistence/">
+    <Project Path="src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj" />
     <Project Path="src/Persistence/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
     <Project Path="src/Persistence/CrestCreates.Data.Core/CrestCreates.Data.Core.csproj" />
     <Project Path="src/Persistence/CrestCreates.Data.EFCore/CrestCreates.Data.EFCore.csproj" />
@@ -213,6 +219,7 @@
   </Folder>
   <Folder Name="/tests/Shared/">
     <Project Path="tests/Shared/CrestCreates.Accountability.Testing/CrestCreates.Accountability.Testing.csproj" />
+    <Project Path="tests/Shared/CrestCreates.Runtime.Persistence.Testing/CrestCreates.Runtime.Persistence.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/Core/">
     <Project Path="tests/Core/CrestCreates.Core.Abstractions.Tests/CrestCreates.Core.Abstractions.Tests.csproj" />
@@ -316,10 +323,18 @@
     <Project Path="tests/Runtime/Audit/CrestCreates.Accountability.Tests/CrestCreates.Accountability.Tests.csproj" />
     <Project Path="tests/Runtime/Audit/CrestCreates.AuditLogging.Tests/CrestCreates.AuditLogging.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Runtime/Persistence/">
+    <Project Path="tests/Runtime/Persistence/CrestCreates.Runtime.Persistence.Tests/CrestCreates.Runtime.Persistence.Tests.csproj" />
+    <Project Path="tests/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory.Tests/CrestCreates.Runtime.Persistence.InMemory.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/Runtime/DistributedTransaction/">
     <Project Path="tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Persistence/">
+    <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/CrestCreates.Runtime.Persistence.PostgreSql.Tests.csproj" />
+    <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.csproj" />
+    <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj" />
+    <Project Path="tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests.csproj" />
     <Project Path="tests/Persistence/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj" />
     <Project Path="tests/Persistence/CrestCreates.MongoDB.Tests/CrestCreates.MongoDB.Tests.csproj" />
     <Project Path="tests/Persistence/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj" />

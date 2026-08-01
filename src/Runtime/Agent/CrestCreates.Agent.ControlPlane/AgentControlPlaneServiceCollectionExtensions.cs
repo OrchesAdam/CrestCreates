@@ -3,6 +3,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -33,6 +34,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
         services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRuntimeStateContractContributor, DescriptorActivationRuntimeStateContractContributor>());
         services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
@@ -61,6 +63,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
         services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRuntimeStateContractContributor, DescriptorActivationRuntimeStateContractContributor>());
         services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));

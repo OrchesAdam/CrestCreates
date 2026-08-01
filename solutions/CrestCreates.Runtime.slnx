@@ -73,8 +73,17 @@
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj" />
     <Project Path="../src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
     <Project Path="../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
+    <Project Path="../src/Runtime/Persistence/CrestCreates.Runtime.Persistence.Abstractions/CrestCreates.Runtime.Persistence.Abstractions.csproj" />
+    <Project Path="../src/Runtime/Persistence/CrestCreates.Runtime.Persistence/CrestCreates.Runtime.Persistence.csproj" />
+    <Project Path="../src/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory/CrestCreates.Runtime.Persistence.InMemory.csproj" />
     <Project Path="../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
     <Project Path="../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />
+  </Folder>
+  <Folder Name="/src/Persistence/">
+    <Project Path="../src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj" />
+  </Folder>
+  <Folder Name="/tests/Persistence/">
+    <Project Path="../tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/CrestCreates.Runtime.Persistence.PostgreSql.Tests.csproj" />
   </Folder>
   <Folder Name="/src/Tooling/">
     <Project Path="../src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />
@@ -82,7 +91,12 @@
   <Folder Name="/tests/Boundary/">
     <Project Path="../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Shared/">
+    <Project Path="../tests/Shared/CrestCreates.Runtime.Persistence.Testing/CrestCreates.Runtime.Persistence.Testing.csproj" />
+  </Folder>
   <Folder Name="/tests/Runtime/">
+    <Project Path="../tests/Runtime/Persistence/CrestCreates.Runtime.Persistence.Tests/CrestCreates.Runtime.Persistence.Tests.csproj" />
+    <Project Path="../tests/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory.Tests/CrestCreates.Runtime.Persistence.InMemory.Tests.csproj" />
     <Project Path="../tests/Runtime/Audit/CrestCreates.AuditLogging.Tests/CrestCreates.AuditLogging.Tests.csproj" />
     <Project Path="../tests/Runtime/Capability/CrestCreates.Capability.Tests/CrestCreates.Capability.Tests.csproj" />
     <Project Path="../tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests/CrestCreates.DescriptorDraft.Tests.csproj" />
