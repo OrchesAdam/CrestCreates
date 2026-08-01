@@ -91,6 +91,63 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
     }
 
     [Fact]
+    public async Task ValidationOnly_WithMissingReciprocalForeignKey_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteSchemaDdlAsync(lease.Options, "alter table runtime_workflow_instances drop constraint fk_workflow_waiting_task_reciprocal;");
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ValidationOnly_WithChangedColumnType_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteSchemaDdlAsync(lease.Options, "alter table runtime_workflow_instances alter column status type bigint;");
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ValidationOnly_WithMissingActiveStepIndex_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteSchemaDdlAsync(lease.Options, "drop index ux_runtime_human_task_active_step;");
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ValidationOnly_WithChangedIndexPredicate_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteSchemaDdlAsync(lease.Options, "drop index ux_runtime_human_task_active_step; create unique index ux_runtime_human_task_active_step on runtime_human_task_instances (tenant_scope_kind, tenant_id, workflow_instance_id, workflow_step_id) where workflow_instance_id is not null;");
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ValidationOnly_WithMissingTenantScopeCheck_ShouldFailClosed()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteSchemaDdlAsync(lease.Options, """
+            do $$
+            declare constraint_name text;
+            begin
+                select constraint_info.conname into constraint_name
+                from pg_constraint constraint_info
+                join pg_class relation on relation.oid = constraint_info.conrelid
+                where relation.relname = 'runtime_workflow_instances'
+                  and constraint_info.contype = 'c'
+                  and pg_get_constraintdef(constraint_info.oid) like '%tenant_scope_kind%';
+                execute format('alter table runtime_workflow_instances drop constraint %I', constraint_name);
+            end $$;
+            """);
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task SuspensionCommit_ShouldAtomicallyPersistWorkflowHumanTaskAndReceiptAcrossFreshProvider()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
@@ -258,21 +315,134 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         var coordinator = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
         var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
         var workflow = NewWorkflow("tenant-a", "workflow-1");
-        var task1 = NewTask("tenant-a", "task-1", workflow.Key);
-        var task2 = NewTask("tenant-a", "task-2", workflow.Key);
+        var task1 = NewTask("tenant-a", "task-1", workflow.Key, "review-1");
+        var task2 = NewTask("tenant-a", "task-2", workflow.Key, "review-2");
         await provider.GetRequiredService<IWorkflowInstanceStore>().AddAsync(workflow);
 
         var act = async () =>
         {
             await coordinator.ExecuteAsync(async ct =>
             {
-                await Task.WhenAll(
-                    tasks.AddAsync(task1, ct),
-                    tasks.AddAsync(task2, ct));
+                using var firstLeaseEntered = new ManualResetEventSlim();
+                using var releaseFirstLease = new ManualResetEventSlim();
+                using var probe = PostgreSqlRuntimeTestHooks.BlockFirstCommand(() =>
+                {
+                    firstLeaseEntered.Set();
+                    releaseFirstLease.Wait();
+                });
+                var first = Task.Run(() => tasks.AddAsync(task1, ct), ct);
+                firstLeaseEntered.Wait(ct);
+                try
+                {
+                    await tasks.AddAsync(task2, ct);
+                }
+                catch
+                {
+                    releaseFirstLease.Set();
+                    await first;
+                    throw;
+                }
+                finally
+                {
+                    releaseFirstLease.Set();
+                }
+                await first;
             });
         };
 
-        await act.Should().ThrowAsync<Exception>();
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.ConcurrentAmbientUse);
+        (await tasks.GetAsync(task1.Key)).Should().BeNull();
+        (await tasks.GetAsync(task2.Key)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DirectStoreWrite_WithNonReciprocalTask_ShouldFail()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var coordinator = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var workflowA = NewWorkflow("tenant-a", "workflow-a");
+        var workflowB = NewWorkflow("tenant-a", "workflow-b");
+        await workflows.AddAsync(workflowA);
+        await workflows.AddAsync(workflowB);
+        var task = NewTask("tenant-a", "task-a", workflowB.Key);
+        await tasks.AddAsync(task);
+        var waiting = (await workflows.GetAsync(workflowA.Key))!;
+        waiting.Status = WorkflowInstanceStatus.Suspended;
+        waiting.WaitingHumanTaskKey = task.Key;
+
+        var act = () => coordinator.ExecuteAsync(ct => new ValueTask(workflows.UpdateAsync(waiting, waiting.Revision, ct))).AsTask();
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict);
+    }
+
+    [Fact]
+    public async Task Receipt_WithTaskBelongingToAnotherWorkflow_ShouldFail()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var receipts = provider.GetRequiredService<IWorkflowSuspensionReceiptStore>();
+        var workflowA = NewWorkflow("tenant-a", "workflow-a");
+        var workflowB = NewWorkflow("tenant-a", "workflow-b");
+        await workflows.AddAsync(workflowA);
+        await workflows.AddAsync(workflowB);
+        var task = NewTask("tenant-a", "task-a", workflowB.Key);
+        await tasks.AddAsync(task);
+        var act = () => receipts.AddAsync(NewReceipt(workflowA, workflowA, task, "wrong-workflow"));
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict);
+    }
+
+    [Fact]
+    public Task AssignedTask_WithCompletedAt_ShouldFail()
+        => AssertInvalidHumanTaskLifecycleAsync(HumanTaskInstanceStatus.Assigned, completedAt: true, cancelledAt: false);
+
+    [Fact]
+    public Task CompletedTask_WithoutCompletedAt_ShouldFail()
+        => AssertInvalidHumanTaskLifecycleAsync(HumanTaskInstanceStatus.Completed, completedAt: false, cancelledAt: false);
+
+    [Fact]
+    public Task CancelledTask_WithoutCancelledAt_ShouldFail()
+        => AssertInvalidHumanTaskLifecycleAsync(HumanTaskInstanceStatus.Cancelled, completedAt: false, cancelledAt: false);
+
+    [Fact]
+    public async Task DatabaseLifecycleCheck_ShouldRejectBypassedStoreWrite()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var workflow = NewWorkflow("tenant-a", "workflow-1");
+        var task = NewTask("tenant-a", "task-1", workflow.Key);
+        await provider.GetRequiredService<IWorkflowInstanceStore>().AddAsync(workflow);
+        await provider.GetRequiredService<IHumanTaskInstanceStore>().AddAsync(task);
+
+        await using var connection = new NpgsqlConnection(lease.Options.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand($"update \"{lease.Options.Schema}\".runtime_human_task_instances set completed_at=clock_timestamp() where tenant_scope_kind='tenant' and tenant_id='tenant-a' and instance_id='task-1';", connection);
+        var act = () => command.ExecuteNonQueryAsync();
+        await act.Should().ThrowAsync<PostgresException>()
+            .Where(ex => ex.SqlState == PostgresErrorCodes.CheckViolation);
+    }
+
+    private async Task AssertInvalidHumanTaskLifecycleAsync(
+        HumanTaskInstanceStatus status, bool completedAt, bool cancelledAt)
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var workflow = NewWorkflow("tenant-a", "workflow-1");
+        await provider.GetRequiredService<IWorkflowInstanceStore>().AddAsync(workflow);
+        var task = NewTask("tenant-a", $"task-{status}", workflow.Key);
+        task.Status = status;
+        task.CompletedAt = completedAt ? DateTimeOffset.UtcNow : null;
+        task.CancelledAt = cancelledAt ? DateTimeOffset.UtcNow : null;
+
+        var act = () => provider.GetRequiredService<IHumanTaskInstanceStore>().AddAsync(task);
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
     }
 
     [Fact]
@@ -342,12 +512,22 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         var receipt = NewReceipt(workflow, workflow, task, "op-1");
 
         var act = async () => await tx.ExecuteAsync(async ct => await receipts.AddAsync(receipt, ct));
-        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
-            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+        var failure = await act.Should().ThrowAsync<RuntimePersistenceContractException>();
+        failure.Which.Code.Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+        failure.Which.Message.Should().Be("The persisted Runtime correlation violates a required invariant.");
+        failure.Which.InnerException.Should().BeNull();
     }
 
     private static ServiceProvider BuildProvider(PostgreSqlRuntimePersistenceOptions options)
         => new ServiceCollection().AddCrestCreatesPostgreSqlRuntimePersistence(options).BuildServiceProvider();
+
+    private static async Task ExecuteSchemaDdlAsync(PostgreSqlRuntimePersistenceOptions options, string sql)
+    {
+        await using var connection = new NpgsqlConnection(options.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand($"set search_path to \"{options.Schema}\"; {sql}", connection);
+        await command.ExecuteNonQueryAsync();
+    }
 
     private static WorkflowInstance NewWorkflow(string? tenantId, string id) => new()
     {

@@ -81,9 +81,7 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
         }
         catch (PostgresException ex) when (ex.SqlState == "23503")
         {
-            throw new RuntimePersistenceContractException(
-                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
-                "A referential integrity constraint was violated: " + ex.MessageText);
+            throw PostgreSqlRuntimeStoreSupport.TranslateForeignKeyViolation(ex);
         }
         catch (NpgsqlException)
         {

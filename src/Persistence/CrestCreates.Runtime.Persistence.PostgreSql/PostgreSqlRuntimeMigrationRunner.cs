@@ -183,7 +183,121 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             cancellationToken).ConfigureAwait(false);
         if (count != expected.Length)
             throw new InvalidOperationException("PostgreSQL runtime schema has an unexpected or incomplete table shape.");
+
+        foreach (var table in RuntimeSchemaManifest.Tables)
+        {
+            await ValidateTableColumnsAsync(connection, table, cancellationToken).ConfigureAwait(false);
+            await ValidatePrimaryKeyAsync(connection, table, cancellationToken).ConfigureAwait(false);
+            foreach (var check in table.RequiredChecks)
+                await ValidateCheckAsync(connection, table.Name, check, cancellationToken).ConfigureAwait(false);
+            foreach (var index in table.RequiredIndexes)
+                await ValidateIndexAsync(connection, table.Name, index, cancellationToken).ConfigureAwait(false);
+            foreach (var foreignKey in table.RequiredForeignKeys)
+                await ValidateForeignKeyAsync(connection, table.Name, foreignKey, cancellationToken).ConfigureAwait(false);
+        }
     }
+
+    private async Task ValidateTableColumnsAsync(NpgsqlConnection connection, RuntimeSchemaTable table, CancellationToken cancellationToken)
+    {
+        var actual = new Dictionary<string, (string Type, string Nullable)>(StringComparer.Ordinal);
+        await using var command = new NpgsqlCommand(
+            "select column_name, data_type, is_nullable from information_schema.columns where table_schema=@schema and table_name=@table;",
+            connection);
+        command.Parameters.AddWithValue("schema", _options.Schema);
+        command.Parameters.AddWithValue("table", table.Name);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            actual.Add(reader.GetString(0), (reader.GetString(1), reader.GetString(2)));
+
+        if (actual.Count != table.Columns.Count || table.Columns.Any(pair => !actual.TryGetValue(pair.Key, out var value) || value != pair.Value))
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table.Name}' has an incompatible column shape.");
+    }
+
+    private async Task ValidatePrimaryKeyAsync(NpgsqlConnection connection, RuntimeSchemaTable table, CancellationToken cancellationToken)
+    {
+        var actual = new List<string>();
+        await using var command = new NpgsqlCommand("""
+            select attribute.attname
+            from pg_constraint constraint_info
+            join pg_class relation on relation.oid = constraint_info.conrelid
+            join pg_namespace schema_info on schema_info.oid = relation.relnamespace
+            join unnest(constraint_info.conkey) with ordinality key_column(attnum, ordinal) on true
+            join pg_attribute attribute on attribute.attrelid = relation.oid and attribute.attnum = key_column.attnum
+            where schema_info.nspname=@schema and relation.relname=@table and constraint_info.contype='p'
+            order by key_column.ordinal;
+            """, connection);
+        command.Parameters.AddWithValue("schema", _options.Schema);
+        command.Parameters.AddWithValue("table", table.Name);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) actual.Add(reader.GetString(0));
+        if (!actual.SequenceEqual(table.PrimaryKey, StringComparer.Ordinal))
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table.Name}' has an incompatible primary key.");
+    }
+
+    private async Task ValidateCheckAsync(NpgsqlConnection connection, string table, string requiredFragment, CancellationToken cancellationToken)
+    {
+        var definitions = await ReadConstraintDefinitionsAsync(connection, table, "c", cancellationToken).ConfigureAwait(false);
+        if (!definitions.Any(value => NormalizeSql(value.Definition).Contains(NormalizeSql(requiredFragment), StringComparison.Ordinal)))
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table}' is missing a required check constraint.");
+    }
+
+    private async Task ValidateIndexAsync(NpgsqlConnection connection, string table, RuntimeSchemaIndex expected, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("""
+            select index_info.indexname, pg_get_indexdef(index_relation.oid), coalesce(pg_get_expr(index_data.indpred, index_data.indrelid), ''), index_data.indisunique
+            from pg_indexes index_info
+            join pg_class index_relation on index_relation.relname = index_info.indexname
+            join pg_namespace index_schema on index_schema.oid = index_relation.relnamespace and index_schema.nspname = index_info.schemaname
+            join pg_index index_data on index_data.indexrelid = index_relation.oid
+            where index_info.schemaname=@schema and index_info.tablename=@table and index_info.indexname=@name;
+            """, connection);
+        command.Parameters.AddWithValue("schema", _options.Schema);
+        command.Parameters.AddWithValue("table", table);
+        command.Parameters.AddWithValue("name", expected.Name);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            || !NormalizeSql(reader.GetString(1)).Contains(NormalizeSql(expected.ColumnSql), StringComparison.Ordinal)
+            || !string.Equals(NormalizeSql(reader.GetString(2)), NormalizeSql(expected.Predicate), StringComparison.Ordinal)
+            || reader.GetBoolean(3) != expected.Unique)
+        {
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table}' has an incompatible required index.");
+        }
+    }
+
+    private async Task ValidateForeignKeyAsync(NpgsqlConnection connection, string table, RuntimeSchemaForeignKey expected, CancellationToken cancellationToken)
+    {
+        var definitions = await ReadConstraintDefinitionsAsync(connection, table, "f", cancellationToken).ConfigureAwait(false);
+        var mode = expected.Deferrable ? " DEFERRABLE INITIALLY DEFERRED" : string.Empty;
+        var expectedDefinition = $"FOREIGN KEY ({expected.Columns}) REFERENCES {Qualified(expected.ReferencedTable)} ({expected.ReferencedColumns}) ON DELETE RESTRICT{mode}";
+        if (!definitions.Any(value => value.Deferrable == expected.Deferrable && value.InitiallyDeferred == expected.InitiallyDeferred
+            && NormalizeSql(value.Definition).Contains(NormalizeSql(expectedDefinition), StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table}' has an incompatible required foreign key.");
+        }
+    }
+
+    private async Task<IReadOnlyList<ConstraintDefinition>> ReadConstraintDefinitionsAsync(
+        NpgsqlConnection connection, string table, string type, CancellationToken cancellationToken)
+    {
+        var result = new List<ConstraintDefinition>();
+        await using var command = new NpgsqlCommand("""
+            select pg_get_constraintdef(constraint_info.oid), constraint_info.condeferrable, constraint_info.condeferred
+            from pg_constraint constraint_info
+            join pg_class relation on relation.oid = constraint_info.conrelid
+            join pg_namespace schema_info on schema_info.oid = relation.relnamespace
+            where schema_info.nspname=@schema and relation.relname=@table and constraint_info.contype=@type;
+            """, connection);
+        command.Parameters.AddWithValue("schema", _options.Schema);
+        command.Parameters.AddWithValue("table", table);
+        command.Parameters.AddWithValue("type", type[0]);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            result.Add(new ConstraintDefinition(reader.GetString(0), reader.GetBoolean(1), reader.GetBoolean(2)));
+        return result;
+    }
+
+    private static string NormalizeSql(string value)
+        => string.Concat(value.Where(character => !char.IsWhiteSpace(character) && character != '"' && character != '(' && character != ')')).ToLowerInvariant();
 
     private string QuotedSchema() => $"\"{_options.Schema}\"";
     private string Qualified(string table) => $"{QuotedSchema()}.\"{table}\"";
@@ -218,6 +332,84 @@ public sealed class PostgreSqlRuntimeMigrationRunner
     }
 
     private sealed record AppliedMigration(string Version, string Name, string Checksum);
+    private sealed record ConstraintDefinition(string Definition, bool Deferrable, bool InitiallyDeferred);
+    private sealed record RuntimeSchemaIndex(string Name, string ColumnSql, string Predicate, bool Unique = true);
+    private sealed record RuntimeSchemaForeignKey(
+        string Columns,
+        string ReferencedTable,
+        string ReferencedColumns,
+        bool Deferrable = true,
+        bool InitiallyDeferred = true);
+    private sealed record RuntimeSchemaTable(
+        string Name,
+        IReadOnlyDictionary<string, (string Type, string Nullable)> Columns,
+        IReadOnlyList<string> PrimaryKey,
+        IReadOnlyList<string> RequiredChecks,
+        IReadOnlyList<RuntimeSchemaIndex> RequiredIndexes,
+        IReadOnlyList<RuntimeSchemaForeignKey> RequiredForeignKeys);
+
+    private static class RuntimeSchemaManifest
+    {
+        private static readonly (string Type, string Nullable) Text = ("text", "NO");
+        private static readonly (string Type, string Nullable) NullableText = ("text", "YES");
+        private static readonly (string Type, string Nullable) BigInt = ("bigint", "NO");
+        private static readonly (string Type, string Nullable) Integer = ("integer", "NO");
+        private static readonly (string Type, string Nullable) Json = ("jsonb", "NO");
+        private static readonly (string Type, string Nullable) Timestamp = ("timestamp with time zone", "NO");
+        private static readonly (string Type, string Nullable) NullableTimestamp = ("timestamp with time zone", "YES");
+
+        public static readonly IReadOnlyList<RuntimeSchemaTable> Tables =
+        [
+            new("runtime_workflow_instances", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = Text, ["tenant_id"] = Text, ["instance_id"] = Text,
+                ["revision"] = BigInt, ["status"] = Integer, ["workflow_pin_json"] = Json,
+                ["waiting_instance_id"] = NullableText, ["suspension_operation_id"] = NullableText,
+                ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "instance_id"],
+            ["revision > 0", "tenant_scope_kind = 'host'", "tenant_scope_kind = 'tenant'"],
+            [new("ux_runtime_workflow_waiting", "tenant_scope_kind, tenant_id, waiting_instance_id", "waiting_instance_id is not null")],
+            [new("tenant_scope_kind, tenant_id, instance_id, waiting_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id")]),
+            new("runtime_human_task_instances", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = Text, ["tenant_id"] = Text, ["instance_id"] = Text,
+                ["revision"] = BigInt, ["status"] = Integer, ["human_task_pin_json"] = Json,
+                ["workflow_instance_id"] = NullableText, ["workflow_step_id"] = NullableText,
+                ["suspension_operation_id"] = NullableText, ["assignee_user_id"] = NullableText,
+                ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp,
+                ["completed_at"] = NullableTimestamp, ["cancelled_at"] = NullableTimestamp
+            }, ["tenant_scope_kind", "tenant_id", "instance_id"],
+            ["revision > 0", "tenant_scope_kind = 'host'", "tenant_scope_kind = 'tenant'", "workflow_instance_id is null", "status"],
+            [new("ux_runtime_human_task_active_step", "tenant_scope_kind, tenant_id, workflow_instance_id, workflow_step_id", "workflow_instance_id is not null and workflow_step_id is not null and completed_at is null and cancelled_at is null"),
+             new("uq_runtime_human_task_workflow_instance", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", "")],
+            [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id")]),
+            new("runtime_operation_receipts", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = Text, ["tenant_id"] = Text, ["operation_id"] = Text,
+                ["workflow_instance_id"] = Text, ["human_task_instance_id"] = Text,
+                ["workflow_from_revision"] = BigInt, ["workflow_to_revision"] = BigInt,
+                ["integrity_json"] = Json, ["receipt_json"] = Json, ["committed_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "operation_id"],
+            ["workflow_to_revision = workflow_from_revision + 1", "tenant_scope_kind = 'host'", "tenant_scope_kind = 'tenant'"], [],
+            [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id"),
+             new("tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id")]),
+            new("descriptor_snapshots", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["snapshot_id"] = Text, ["content_hash"] = Text, ["snapshot_json"] = Json, ["created_at"] = Timestamp
+            }, ["snapshot_id"], [], [], []),
+            new("descriptor_snapshot_entries", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["snapshot_id"] = Text, ["descriptor_namespace"] = Text, ["descriptor_id"] = Text,
+                ["descriptor_version"] = Integer, ["contract_hash"] = Text, ["definition_hash"] = Text
+            }, ["snapshot_id", "descriptor_namespace", "descriptor_id", "descriptor_version"], [], [],
+            [new("snapshot_id", "descriptor_snapshots", "snapshot_id", Deferrable: false, InitiallyDeferred: false)]),
+            new("runtime_audit_envelopes", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["sink_id"] = Text, ["audit_id"] = Text, ["integrity_json"] = Json,
+                ["envelope_json"] = Json, ["accepted_at"] = Timestamp
+            }, ["sink_id", "audit_id"], [], [], [])
+        ];
+    }
 
     private static readonly IReadOnlyList<RuntimeMigration> Catalog =
     [
@@ -342,6 +534,40 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                   and workflow_step_id is not null
                   and completed_at is null
                   and cancelled_at is null;
+            """),
+        new RuntimeMigration("V005", "reciprocal_correlation_and_task_lifecycle_invariants", """
+            alter table {schema}.runtime_human_task_instances
+                drop constraint fk_human_task_workflow;
+            alter table {schema}.runtime_workflow_instances
+                drop constraint fk_workflow_waiting_task;
+            alter table {schema}.runtime_operation_receipts
+                drop constraint fk_receipt_human_task;
+
+            alter table {schema}.runtime_human_task_instances
+                add constraint uq_runtime_human_task_workflow_instance
+                unique (tenant_scope_kind, tenant_id, workflow_instance_id, instance_id);
+
+            alter table {schema}.runtime_workflow_instances
+                add constraint fk_workflow_waiting_task_reciprocal
+                foreign key (tenant_scope_kind, tenant_id, instance_id, waiting_instance_id)
+                references {schema}.runtime_human_task_instances (tenant_scope_kind, tenant_id, workflow_instance_id, instance_id)
+                on delete restrict
+                deferrable initially deferred;
+
+            alter table {schema}.runtime_operation_receipts
+                add constraint fk_receipt_human_task_reciprocal
+                foreign key (tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id)
+                references {schema}.runtime_human_task_instances (tenant_scope_kind, tenant_id, workflow_instance_id, instance_id)
+                on delete restrict
+                deferrable initially deferred;
+
+            alter table {schema}.runtime_human_task_instances
+                add constraint ck_runtime_human_task_lifecycle
+                check (
+                    (status in (0, 1) and completed_at is null and cancelled_at is null)
+                    or (status in (2, 4) and completed_at is not null and cancelled_at is null)
+                    or (status = 3 and completed_at is null and cancelled_at is not null)
+                );
             """)
     ];
 }

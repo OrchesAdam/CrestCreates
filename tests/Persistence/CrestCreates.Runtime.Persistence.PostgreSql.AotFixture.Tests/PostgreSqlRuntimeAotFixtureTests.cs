@@ -46,8 +46,9 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
                 TimeSpan.FromMinutes(2));
             execution.ExitCode.Should().Be(0, execution.Output);
             execution.Output.Should().Contain("PHASE9B_POSTGRES_SUSPENSION_OK");
-            execution.Output.Should().Contain("PHASE9B_POSTGRES_RECEIPT_DEDUP_OK");
-            execution.Output.Should().Contain("PHASE9B_POSTGRES_RECOVERY_OK");
+            execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
+            execution.Output.Should().Contain("PHASE9B_POSTGRES_PIN_RECOVERY_OK");
+            execution.Output.Should().Contain("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
         }
         finally
         {

@@ -60,4 +60,18 @@ internal static class PostgreSqlRuntimeStoreSupport
     public static bool IsUniqueViolation(PostgresException exception, string constraint)
         => exception.SqlState == PostgresErrorCodes.UniqueViolation
             && string.Equals(exception.ConstraintName, constraint, StringComparison.Ordinal);
+
+    public static RuntimePersistenceContractException TranslateForeignKeyViolation(PostgresException exception)
+    {
+        var code = exception.ConstraintName switch
+        {
+            "fk_workflow_waiting_task_reciprocal" => RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+            "fk_receipt_human_task_reciprocal" => RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+            _ => RuntimePersistenceContractErrorCode.PersistedInvariantViolation
+        };
+
+        return new RuntimePersistenceContractException(
+            code,
+            "The persisted Runtime correlation violates a required invariant.");
+    }
 }

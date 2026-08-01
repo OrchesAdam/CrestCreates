@@ -1,6 +1,7 @@
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Runtime.Persistence.InMemory.Kernel;
+using CrestCreates.HumanTask.Abstractions;
 
 namespace CrestCreates.Runtime.Persistence.InMemory.Transactions;
 
@@ -45,6 +46,7 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
         try
         {
             var result = await work(cancellationToken).ConfigureAwait(false);
+            ValidateCommittedInvariants(context.StagedState);
             _committed.Workflows.Clear();
             _committed.HumanTasks.Clear();
             _committed.Snapshots.Clear();
@@ -59,6 +61,51 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
         {
             _accessor.Set(null);
             _gate.Release();
+        }
+    }
+
+    private static void ValidateCommittedInvariants(InMemoryRuntimePersistenceState state)
+    {
+        foreach (var workflow in state.Workflows.Values)
+        {
+            if (workflow.WaitingHumanTaskKey is { } waiting
+                && (!state.HumanTasks.TryGetValue(waiting, out var task) || task.WorkflowKey != workflow.Key))
+            {
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                    "Workflow waiting HumanTask correlation must be reciprocal and tenant-local.");
+            }
+        }
+
+        foreach (var receipt in state.Receipts.Values)
+        {
+            if (!state.HumanTasks.TryGetValue(receipt.HumanTaskKey, out var task)
+                || task.WorkflowKey != receipt.WorkflowKey)
+            {
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                    "Receipt HumanTask correlation must be reciprocal and tenant-local.");
+            }
+        }
+
+        foreach (var task in state.HumanTasks.Values)
+        {
+            var lifecycleIsValid = task.Status switch
+            {
+                HumanTaskInstanceStatus.Created or HumanTaskInstanceStatus.Assigned
+                    => task.CompletedAt is null && task.CancelledAt is null,
+                HumanTaskInstanceStatus.Completed or HumanTaskInstanceStatus.CompletionDispatchFailed
+                    => task.CompletedAt is not null && task.CancelledAt is null,
+                HumanTaskInstanceStatus.Cancelled
+                    => task.CompletedAt is null && task.CancelledAt is not null,
+                _ => false
+            };
+            if (!lifecycleIsValid)
+            {
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                    "HumanTask status and terminal timestamps must describe one valid lifecycle state.");
+            }
         }
     }
 }

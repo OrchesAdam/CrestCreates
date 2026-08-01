@@ -19,6 +19,7 @@ internal sealed class PostgreSqlRuntimeSession
                 RuntimePersistenceContractErrorCode.ConcurrentAmbientUse,
                 "Concurrent commands on one Runtime transaction session are not supported.");
         }
+        PostgreSqlRuntimeTestHooks.NotifyCommandLeaseAcquired();
         return new Releaser(this);
     }
 

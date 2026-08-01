@@ -221,6 +221,100 @@ public sealed class InMemoryRuntimeProviderTests
             .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
     }
 
+    [Fact]
+    public async Task DirectStoreWrite_WithNonReciprocalTask_ShouldFail()
+    {
+        using var provider = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence().BuildServiceProvider();
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var workflowA = NewWorkflow("tenant-a", "workflow-a");
+        var workflowB = NewWorkflow("tenant-a", "workflow-b");
+        await workflows.AddAsync(workflowA);
+        await workflows.AddAsync(workflowB);
+        var task = NewTask("tenant-a", "task-a", workflowB.Key);
+        await tasks.AddAsync(task);
+        var waiting = (await workflows.GetAsync(workflowA.Key))!;
+        waiting.Status = WorkflowInstanceStatus.Suspended;
+        waiting.WaitingHumanTaskKey = task.Key;
+
+        var act = () => workflows.UpdateAsync(waiting, waiting.Revision);
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict);
+    }
+
+    [Fact]
+    public async Task Receipt_WithTaskBelongingToAnotherWorkflow_ShouldFail()
+    {
+        using var provider = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence().BuildServiceProvider();
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var receipts = provider.GetRequiredService<IWorkflowSuspensionReceiptStore>();
+        var workflowA = NewWorkflow("tenant-a", "workflow-a");
+        var workflowB = NewWorkflow("tenant-a", "workflow-b");
+        await workflows.AddAsync(workflowA);
+        await workflows.AddAsync(workflowB);
+        var task = NewTask("tenant-a", "task-a", workflowB.Key);
+        await tasks.AddAsync(task);
+        var receipt = new WorkflowSuspensionReceipt
+        {
+            Scope = new RuntimeTenantScope("tenant-a"),
+            SuspensionOperationId = "wrong-workflow",
+            Integrity = Hash("integrity", "Integrity", "Suspension"),
+            WorkflowKey = workflowA.Key,
+            HumanTaskKey = task.Key,
+            WorkflowFromRevision = 1,
+            WorkflowToRevision = 2,
+            WorkflowPin = workflowA.WorkflowPin,
+            HumanTaskPin = task.HumanTaskPin
+        };
+
+        var act = () => receipts.AddAsync(receipt);
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict);
+    }
+
+    [Fact]
+    public async Task AssignedTask_WithCompletedAt_ShouldFail()
+    {
+        using var provider = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence().BuildServiceProvider();
+        var workflow = NewWorkflow("tenant-a", "workflow-1");
+        await provider.GetRequiredService<IWorkflowInstanceStore>().AddAsync(workflow);
+        var task = NewTask("tenant-a", "task-1", workflow.Key);
+        task.CompletedAt = DateTimeOffset.UtcNow;
+
+        var act = () => provider.GetRequiredService<IHumanTaskInstanceStore>().AddAsync(task);
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+    [Fact]
+    public async Task CompletedTask_WithoutCompletedAt_ShouldFail()
+    {
+        using var provider = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence().BuildServiceProvider();
+        var workflow = NewWorkflow("tenant-a", "workflow-1");
+        await provider.GetRequiredService<IWorkflowInstanceStore>().AddAsync(workflow);
+        var task = NewTask("tenant-a", "task-1", workflow.Key);
+        task.Status = HumanTaskInstanceStatus.Completed;
+
+        var act = () => provider.GetRequiredService<IHumanTaskInstanceStore>().AddAsync(task);
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+    [Fact]
+    public async Task CancelledTask_WithoutCancelledAt_ShouldFail()
+    {
+        using var provider = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence().BuildServiceProvider();
+        var workflow = NewWorkflow("tenant-a", "workflow-1");
+        await provider.GetRequiredService<IWorkflowInstanceStore>().AddAsync(workflow);
+        var task = NewTask("tenant-a", "task-1", workflow.Key);
+        task.Status = HumanTaskInstanceStatus.Cancelled;
+
+        var act = () => provider.GetRequiredService<IHumanTaskInstanceStore>().AddAsync(task);
+        await act.Should().ThrowAsync<RuntimePersistenceContractException>()
+            .Where(ex => ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
     private static WorkflowInstance NewWorkflow(string? tenantId, string id) => new()
     {
         Key = new RuntimeInstanceKey(tenantId, id),

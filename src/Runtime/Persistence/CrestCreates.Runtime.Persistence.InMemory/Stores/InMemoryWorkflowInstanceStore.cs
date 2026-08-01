@@ -37,10 +37,23 @@ public sealed class InMemoryWorkflowInstanceStore : IWorkflowInstanceStore
         Validate(instance);
         if (instance.Revision != expectedRevision || !_coordinator.CurrentState.Workflows.TryGetValue(instance.Key, out var current)
             || current.Revision != expectedRevision) throw new RuntimeConcurrencyException("Workflow revision is stale.");
+        EnsureWaitingTaskIsReciprocal(instance);
         _coordinator.CurrentState.Workflows[instance.Key] = WithRevision(instance, expectedRevision + 1);
     }
     private WorkflowInstance? GetCore(RuntimeInstanceKey key)
         => _coordinator.CurrentState.Workflows.TryGetValue(key, out var value) ? value.Snapshot() : null;
+    private void EnsureWaitingTaskIsReciprocal(WorkflowInstance instance)
+    {
+        if (instance.WaitingHumanTaskKey is not { } waiting)
+            return;
+        if (!_coordinator.CurrentState.HumanTasks.TryGetValue(waiting, out var task)
+            || task.WorkflowKey != instance.Key)
+        {
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                "Workflow waiting HumanTask correlation must be reciprocal and tenant-local.");
+        }
+    }
     private static void Validate(WorkflowInstance i) { ArgumentNullException.ThrowIfNull(i); i.Key.EnsureValid(); i.WorkflowPin.EnsureValid(); }
     private static WorkflowInstance WithRevision(WorkflowInstance value, long revision) { var copy = value.Snapshot(); copy.Revision = revision; copy.UpdatedAt = DateTimeOffset.UtcNow; return copy; }
     private static RuntimePersistenceContractException Contract(string message) => new(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, message);

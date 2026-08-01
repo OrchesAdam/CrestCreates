@@ -165,6 +165,22 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
             throw new RuntimeConcurrencyException("HumanTask candidate revision does not match the expected revision.");
         if (instance.WorkflowKey is { } workflow && workflow.TenantId != instance.TenantId)
             throw PostgreSqlRuntimeStoreSupport.Correlation("HumanTask Workflow correlation must be tenant-local.");
+        var lifecycleIsValid = instance.Status switch
+        {
+            HumanTaskInstanceStatus.Created or HumanTaskInstanceStatus.Assigned
+                => instance.CompletedAt is null && instance.CancelledAt is null,
+            HumanTaskInstanceStatus.Completed or HumanTaskInstanceStatus.CompletionDispatchFailed
+                => instance.CompletedAt is not null && instance.CancelledAt is null,
+            HumanTaskInstanceStatus.Cancelled
+                => instance.CompletedAt is null && instance.CancelledAt is not null,
+            _ => false
+        };
+        if (!lifecycleIsValid)
+        {
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "HumanTask status and terminal timestamps must describe one valid lifecycle state.");
+        }
     }
 
     private static void AddWriteParameters(NpgsqlCommand command, HumanTaskInstance instance, string? operationId)

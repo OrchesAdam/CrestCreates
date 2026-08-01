@@ -29,7 +29,6 @@ internal sealed class InMemoryWorkflowSuspensionReceiptStore : IWorkflowSuspensi
             throw new RuntimePersistenceContractException(
                 RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
                 "Receipt references a non-existent Workflow instance.");
-
         var key = (receipt.Scope, receipt.SuspensionOperationId);
         if (_coordinator.CurrentState.Receipts.TryGetValue(key, out var existing))
         {

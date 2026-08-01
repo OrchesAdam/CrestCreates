@@ -40,7 +40,9 @@ public sealed class Phase9bHumanTaskPersistenceContractTests
         var first = (await store.GetAsync(instance.Key))!;
         var second = first.Snapshot();
         first.Status = HumanTaskInstanceStatus.Completed;
+        first.CompletedAt = DateTimeOffset.UtcNow;
         second.Status = HumanTaskInstanceStatus.Cancelled;
+        second.CancelledAt = DateTimeOffset.UtcNow;
 
         await store.UpdateAsync(first, 1);
         var act = () => store.UpdateAsync(second, 1);

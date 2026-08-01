@@ -62,7 +62,24 @@ internal sealed class InMemoryHumanTaskInstanceStore : IHumanTaskInstanceStore
                 "HumanTask references a non-existent Workflow instance.");
     }
     private HumanTaskInstance? GetCore(RuntimeInstanceKey key) => _coordinator.CurrentState.HumanTasks.TryGetValue(key, out var value) ? value.Snapshot() : null;
-    private static void Validate(HumanTaskInstance i) { ArgumentNullException.ThrowIfNull(i); i.Key.EnsureValid(); i.HumanTaskPin.EnsureValid(); }
+    private static void Validate(HumanTaskInstance i)
+    {
+        ArgumentNullException.ThrowIfNull(i);
+        i.Key.EnsureValid();
+        i.HumanTaskPin.EnsureValid();
+        var lifecycleIsValid = i.Status switch
+        {
+            HumanTaskInstanceStatus.Created or HumanTaskInstanceStatus.Assigned
+                => i.CompletedAt is null && i.CancelledAt is null,
+            HumanTaskInstanceStatus.Completed or HumanTaskInstanceStatus.CompletionDispatchFailed
+                => i.CompletedAt is not null && i.CancelledAt is null,
+            HumanTaskInstanceStatus.Cancelled
+                => i.CompletedAt is null && i.CancelledAt is not null,
+            _ => false
+        };
+        if (!lifecycleIsValid)
+            throw Contract("HumanTask status and terminal timestamps must describe one valid lifecycle state.");
+    }
     private static HumanTaskInstance WithRevision(HumanTaskInstance value, long revision) { var copy = value.Snapshot(); copy.Revision = revision; copy.UpdatedAt = DateTimeOffset.UtcNow; return copy; }
     private static RuntimePersistenceContractException Contract(string message) => new(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, message);
 }
