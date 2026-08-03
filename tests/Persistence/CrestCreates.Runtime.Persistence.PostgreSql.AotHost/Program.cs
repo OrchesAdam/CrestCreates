@@ -150,7 +150,6 @@ return 0;
 static async Task RunPreDispatchScenarioAsync(PostgreSqlRuntimePersistenceOptions options)
 {
     var key = new AgentToolLogicalInvocationKey("tenant", "user", "agent", "exec", "predispatch");
-    var identity = new AgentToolPreDispatchIdentity(key, "attempt-aot");
     var fp = "fp-aot";
 
     var governance = new AgentToolEffectiveGovernance(
@@ -161,51 +160,19 @@ static async Task RunPreDispatchScenarioAsync(PostgreSqlRuntimePersistenceOption
         new AgentToolBudgetRequirement { Category = "default", CostUnits = 1, MaxCallsPerExecution = 10 },
         AgentToolAuditMode.Required);
 
-    var context = new AgentToolGovernanceAuditContext
+    var executionContext = new AgentExecutionContext
     {
-        LogicalInvocationKey = key,
-        AttemptId = "attempt-aot",
-        InvocationFingerprint = fp,
-        ArgumentsHash = "args-aot",
-        ArgumentsEvaluated = true,
-        CallOrigin = AgentToolCallOrigin.ExplicitRequest,
-        AgentRolesHash = "roles-aot",
-        ToolContract = new AgentToolContractIdentity("tool-aot", 1, "tool-hash"),
-        CapabilityContract = new AgentToolContractIdentity("cap-aot", 1, "cap-hash"),
-        Governance = governance
+        ExecutionId = "exec-aot",
+        InvocationId = "inv-aot",
+        AgentId = "agent-aot",
+        AgentRoles = new HashSet<string> { "role-1" },
+        CallOrigin = AgentToolCallOrigin.ExplicitRequest
     };
 
-    var budgetContext = new AgentToolGovernanceContext
-    {
-        LogicalInvocationKey = key,
-        AttemptId = "attempt-aot",
-        InvocationFingerprint = fp,
-        ArgumentsHash = "args-aot",
-        ArgumentsEvaluated = true,
-        ExecutionContext = new AgentExecutionContext { ExecutionId = "exec", InvocationId = "inv", AgentId = "agent", AgentRoles = new HashSet<string> { "role-1" }, CallOrigin = AgentToolCallOrigin.ExplicitRequest },
-        ToolContract = new AgentToolContractIdentity("tool-aot", 1, "tool-hash"),
-        CapabilityContract = new AgentToolContractIdentity("cap-aot", 1, "cap-hash"),
-        Governance = governance
-    };
-
-    var lease = new AgentToolInvocationLease
-    {
-        AttemptId = "attempt-aot",
-        LeaseId = "lease-aot",
-        FencingToken = DateTimeOffset.UtcNow.Ticks,
-        AcquiredAt = DateTimeOffset.UtcNow,
-        ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5)
-    };
-
-    var approval = new AgentToolApprovalResult
-    {
-        Decision = AgentToolApprovalDecision.NotRequired,
-        ClaimState = AgentToolApprovalEvidenceClaimState.NotApplicable,
-        EvidenceId = null,
-        ApproverReference = "approver-aot",
-        ReasonCode = "reason-aot"
-    };
-
+    AgentToolGovernanceAuditContext context = null!;
+    AgentToolGovernanceContext budgetContext = null!;
+    AgentToolInvocationLease lease = null!;
+    AgentToolPreDispatchIdentity identity = new(key, "placeholder");
     string? reservationId = null;
     AgentToolGovernancePreDispatchReceipt? receipt = null;
 
@@ -222,11 +189,50 @@ static async Task RunPreDispatchScenarioAsync(PostgreSqlRuntimePersistenceOption
         if (acquired.Status != AgentToolInvocationAcquireStatus.Acquired)
             throw new InvalidOperationException($"Acquire failed: {acquired.Status}");
 
-        await gate.PreparePreDispatchIntentAsync(acquired.Lease!, new AgentToolInvocationPreparePreDispatchIntentRequest
+        lease = acquired.Lease!;
+        identity = new AgentToolPreDispatchIdentity(key, lease.AttemptId);
+
+        context = new AgentToolGovernanceAuditContext
+        {
+            LogicalInvocationKey = key,
+            AttemptId = lease.AttemptId,
+            InvocationFingerprint = fp,
+            ArgumentsHash = "args-aot",
+            ArgumentsEvaluated = true,
+            CallOrigin = AgentToolCallOrigin.ExplicitRequest,
+            AgentRolesHash = "roles-aot",
+            ToolContract = new AgentToolContractIdentity("tool-aot", 1, "tool-hash"),
+            CapabilityContract = new AgentToolContractIdentity("cap-aot", 1, "cap-hash"),
+            Governance = governance
+        };
+
+        budgetContext = new AgentToolGovernanceContext
+        {
+            LogicalInvocationKey = key,
+            AttemptId = lease.AttemptId,
+            InvocationFingerprint = fp,
+            ArgumentsHash = "args-aot",
+            ArgumentsEvaluated = true,
+            ExecutionContext = executionContext,
+            ToolContract = new AgentToolContractIdentity("tool-aot", 1, "tool-hash"),
+            CapabilityContract = new AgentToolContractIdentity("cap-aot", 1, "cap-hash"),
+            Governance = governance
+        };
+
+        var approval = new AgentToolApprovalResult
+        {
+            Decision = AgentToolApprovalDecision.NotRequired,
+            ClaimState = AgentToolApprovalEvidenceClaimState.NotApplicable,
+            EvidenceId = null,
+            ApproverReference = "approver-aot",
+            ReasonCode = "reason-aot"
+        };
+
+        await gate.PreparePreDispatchIntentAsync(lease, new AgentToolInvocationPreparePreDispatchIntentRequest
         {
             Intent = new AgentToolInvocationPreDispatchIntentSnapshot
             {
-                FrozenLease = acquired.Lease!,
+                FrozenLease = lease,
                 InvocationFingerprint = fp,
                 Context = context,
                 Approval = approval
