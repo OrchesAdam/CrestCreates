@@ -115,3 +115,17 @@ public interface IAgentToolPreDispatchPersistenceCapabilities
 {
     AgentToolPreDispatchPersistenceCapability Capability { get; }
 }
+
+/// <summary>
+/// Best-effort accountability fact publisher. Dormant until Slice 6 wiring.
+/// The reconciler calls this after terminal state transitions; failures are
+/// swallowed and must not affect reconciliation correctness.
+/// </summary>
+public interface IAgentToolPreDispatchReconciliationAccountabilityProducer
+{
+    ValueTask PublishAsync(
+        AgentToolPreDispatchIdentity identity,
+        AgentToolPreDispatchReconciliationStatus status,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
+}

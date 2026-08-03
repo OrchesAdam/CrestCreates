@@ -708,6 +708,88 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             alter table {schema}.runtime_operation_receipts
                 add constraint ck_runtime_receipt_transition_revision check (workflow_to_revision = workflow_from_revision + 1),
                 add constraint ck_runtime_receipt_tenant_scope check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''));
+            """),
+        new RuntimeMigration("V007", "agent_tool_pre_dispatch_reconciliation", """
+            create table {schema}.agent_tool_pre_dispatch_checkpoints (
+                tenant_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                invocation_fingerprint text not null,
+                arguments_hash text not null,
+                arguments_evaluated boolean not null,
+                call_origin integer not null,
+                agent_roles_hash text not null,
+                tool_contract_json jsonb not null,
+                capability_contract_json jsonb not null,
+                input_schema_contract_json jsonb null,
+                output_schema_contract_json jsonb null,
+                governance_json jsonb not null,
+                lease_json jsonb not null,
+                approval_json jsonb not null,
+                budget_reservation_json jsonb not null,
+                accepted_at timestamptz not null,
+                created_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, logical_invocation_key, attempt_id)
+            );
+
+            create table {schema}.agent_tool_budget_reservations (
+                tenant_id text not null,
+                reservation_id text not null,
+                attempt_id text not null,
+                invocation_fingerprint text not null,
+                category text not null,
+                cost_units bigint not null,
+                max_calls_per_execution integer null,
+                state integer not null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, reservation_id)
+            );
+            create unique index ux_agent_tool_budget_attempt on {schema}.agent_tool_budget_reservations (tenant_id, attempt_id);
+
+            create table {schema}.agent_tool_invocation_pre_dispatch (
+                tenant_id text not null,
+                lease_id text not null,
+                attempt_id text not null,
+                fencing_token text not null,
+                acquired_at timestamptz not null,
+                expires_at timestamptz not null,
+                pre_dispatch_state integer not null default 0,
+                intent_json jsonb null,
+                bound_reservation_id text null,
+                accepted_receipt_json jsonb null,
+                abandoned_receipt_json jsonb null,
+                dispatch_started_at timestamptz null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, lease_id)
+            );
+            create index ix_agent_tool_invocation_pre_dispatch_attempt on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, attempt_id);
+
+            create table {schema}.agent_tool_reconciliation_observations (
+                tenant_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                revision bigint not null check (revision > 0),
+                status integer not null,
+                reason_code text not null,
+                observed_at timestamptz not null default clock_timestamp(),
+                observation_json jsonb not null,
+                primary key (tenant_id, logical_invocation_key, attempt_id)
+            );
+
+            create table {schema}.agent_tool_reconciliation_receipts (
+                tenant_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                status integer not null,
+                reason_code text not null,
+                terminal_at timestamptz not null,
+                integrity_value text not null,
+                receipt_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, logical_invocation_key, attempt_id)
+            );
             """)
     ];
 }

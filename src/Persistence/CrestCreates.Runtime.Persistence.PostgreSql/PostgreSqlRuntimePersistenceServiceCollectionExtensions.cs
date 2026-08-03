@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Tools;
 using CrestCreates.Runtime.Persistence.Abstractions.Providers;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Accountability.Abstractions.Sinks;
@@ -31,6 +32,10 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         services.AddSingleton<IWorkflowSuspensionReceiptStore, PostgreSqlWorkflowSuspensionReceiptStore>();
         services.AddSingleton<IDescriptorSnapshotStore, PostgreSqlDescriptorSnapshotStore>();
         services.AddSingleton<IAuditSink, PostgreSqlAuditSink>();
+        services.AddSingleton<IAgentToolGovernanceAuditor, PostgreSqlAgentToolGovernanceAuditor>();
+        services.AddSingleton<IAgentToolBudgetGate, PostgreSqlAgentToolBudgetGate>();
+        services.AddSingleton<IAgentToolInvocationGate, PostgreSqlAgentToolInvocationGate>();
+        services.AddSingleton<IAgentToolPreDispatchReconciliationStore, PostgreSqlAgentToolPreDispatchReconciliationStore>();
         return services;
     }
 }
