@@ -383,8 +383,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             var (entry, _) = GetCurrent(lease);
             if (entry.PreDispatchState is not (
                 AgentToolInvocationPreDispatchState.Unknown
-                or AgentToolInvocationPreDispatchState.Pending
-                or AgentToolInvocationPreDispatchState.Ready))
+                or AgentToolInvocationPreDispatchState.Pending))
             {
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
@@ -480,7 +479,8 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
-            if (!_entries.TryGetValue(identity.LogicalInvocationKey, out var entry))
+            if (!_entries.TryGetValue(identity.LogicalInvocationKey, out var entry)
+                || entry.ActiveLease?.AttemptId != identity.AttemptId)
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
                     State = AgentToolInvocationPreDispatchState.Unknown

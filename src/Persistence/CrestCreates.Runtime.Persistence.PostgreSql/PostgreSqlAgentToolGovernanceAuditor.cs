@@ -34,19 +34,36 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
     public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(string auditId, CancellationToken cancellationToken = default)
         => _coordinator.ExecuteAsync(ct => GetFinalizationStateCoreAsync(auditId, ct), cancellationToken);
 
+    private NpgsqlConnection Conn() => _coordinator.RequireSession().Connection;
+
     private async ValueTask RecordDecisionCoreAsync(AgentToolGovernanceDecisionRecord record, CancellationToken cancellationToken)
     {
-        await Task.CompletedTask;
+        var auditId = Guid.NewGuid().ToString("N");
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            insert into {_options.Schema}.agent_tool_governance_decisions
+                (tenant_id, audit_id, logical_invocation_key, attempt_id, decision_state, decision_json)
+            values (@tenantId, @auditId, @lik, @attemptId, @decisionState, @decisionJson)
+            on conflict (tenant_id, audit_id) do nothing
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("tenantId", record.Context.LogicalInvocationKey.TenantId ?? string.Empty));
+        cmd.Parameters.Add(new NpgsqlParameter("auditId", auditId));
+        cmd.Parameters.Add(new NpgsqlParameter("lik", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.Context.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("attemptId", record.Context.AttemptId));
+        cmd.Parameters.Add(new NpgsqlParameter("decisionState", (int)record.Decision));
+        cmd.Parameters.Add(new NpgsqlParameter("decisionJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernanceDecisionRecord) });
+        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchCoreAsync(AgentToolGovernancePreDispatchRecord record, CancellationToken cancellationToken)
     {
         var connection = _coordinator.RequireSession().Connection;
+        var acceptedAt = DateTimeOffset.UtcNow;
         var receipt = new AgentToolGovernancePreDispatchReceipt
         {
             AuditId = Guid.NewGuid().ToString("N"),
             Identity = new AgentToolPreDispatchIdentity(record.Context.LogicalInvocationKey, record.Context.AttemptId),
-            AcceptedAt = DateTimeOffset.UtcNow
+            AcceptedAt = acceptedAt
         };
 
         await using var cmd = connection.CreateCommand();
@@ -64,7 +81,7 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("auditId", NpgsqlDbType.Text) { Value = receipt.AuditId });
-        AddCheckpointParameters(cmd, record);
+        AddCheckpointParameters(cmd, record, acceptedAt);
 
         var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         if (result is null)
@@ -122,17 +139,45 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
 
     private async ValueTask<AgentToolGovernanceFinalizationResult> FinalizeCoreAsync(AgentToolGovernanceFinalizationRecord record, CancellationToken cancellationToken)
     {
-        await Task.CompletedTask;
-        return new AgentToolGovernanceFinalizationResult { Status = AgentToolGovernanceFinalizationStatus.Finalized };
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            insert into {_options.Schema}.agent_tool_governance_finalizations
+                (tenant_id, audit_id, logical_invocation_key, attempt_id, attempt_state, finalization_json)
+            values (@tenantId, @auditId, @lik, @attemptId, @attemptState, @finalizationJson)
+            on conflict (tenant_id, audit_id) do update set
+                attempt_state = excluded.attempt_state,
+                finalization_json = excluded.finalization_json
+            returning 1
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("tenantId", record.Context.LogicalInvocationKey.TenantId ?? string.Empty));
+        cmd.Parameters.Add(new NpgsqlParameter("auditId", record.AuditId));
+        cmd.Parameters.Add(new NpgsqlParameter("lik", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.Context.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("attemptId", record.Context.AttemptId));
+        cmd.Parameters.Add(new NpgsqlParameter("attemptState", (int)record.AttemptState));
+        cmd.Parameters.Add(new NpgsqlParameter("finalizationJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernanceFinalizationRecord) });
+        var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return new AgentToolGovernanceFinalizationResult
+        {
+            Status = result is not null ? AgentToolGovernanceFinalizationStatus.Finalized : AgentToolGovernanceFinalizationStatus.NotFinalized
+        };
     }
 
     private async ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateCoreAsync(string auditId, CancellationToken cancellationToken)
     {
-        await Task.CompletedTask;
-        return new AgentToolGovernanceFinalizationResult { Status = AgentToolGovernanceFinalizationStatus.NotFinalized };
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            select 1 from {_options.Schema}.agent_tool_governance_finalizations
+            where audit_id = @auditId
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("auditId", auditId));
+        var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return new AgentToolGovernanceFinalizationResult
+        {
+            Status = result is not null ? AgentToolGovernanceFinalizationStatus.Finalized : AgentToolGovernanceFinalizationStatus.NotFinalized
+        };
     }
 
-    private static void AddCheckpointParameters(NpgsqlCommand cmd, AgentToolGovernancePreDispatchRecord record)
+    private static void AddCheckpointParameters(NpgsqlCommand cmd, AgentToolGovernancePreDispatchRecord record, DateTimeOffset acceptedAt)
     {
         var ctx = record.Context;
         var tenantId = ctx.LogicalInvocationKey.TenantId ?? string.Empty;
@@ -140,10 +185,10 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(ctx.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", ctx.AttemptId));
         cmd.Parameters.Add(new NpgsqlParameter("fp", ctx.InvocationFingerprint ?? string.Empty));
-        cmd.Parameters.Add(new NpgsqlParameter("argsHash", ctx.ArgumentsHash ?? string.Empty));
+        cmd.Parameters.Add(new NpgsqlParameter("argsHash", (object?)ctx.ArgumentsHash ?? DBNull.Value));
         cmd.Parameters.Add(new NpgsqlParameter("argsEval", ctx.ArgumentsEvaluated));
         cmd.Parameters.Add(new NpgsqlParameter("callOrigin", (int)ctx.CallOrigin));
-        cmd.Parameters.Add(new NpgsqlParameter("rolesHash", ctx.AgentRolesHash ?? string.Empty));
+        cmd.Parameters.Add(new NpgsqlParameter("rolesHash", (object?)ctx.AgentRolesHash ?? DBNull.Value));
         cmd.Parameters.Add(new NpgsqlParameter("toolJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(ctx.ToolContract, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolContractIdentity) });
         cmd.Parameters.Add(new NpgsqlParameter("capJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(ctx.CapabilityContract, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolContractIdentity) });
         cmd.Parameters.Add(new NpgsqlParameter("inputJson", NpgsqlDbType.Jsonb) { Value = ctx.InputSchemaContract is not null ? PostgreSqlRuntimeStoreSupport.Serialize(ctx.InputSchemaContract, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolSchemaContractIdentity) : DBNull.Value });
@@ -152,7 +197,7 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         cmd.Parameters.Add(new NpgsqlParameter("leaseJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.Lease, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationLease) });
         cmd.Parameters.Add(new NpgsqlParameter("approvalJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.Approval, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolApprovalResult) });
         cmd.Parameters.Add(new NpgsqlParameter("budgetJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.BudgetReservation, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolBudgetReservation) });
-        cmd.Parameters.Add(new NpgsqlParameter("acceptedAt", DateTimeOffset.UtcNow));
+        cmd.Parameters.Add(new NpgsqlParameter("acceptedAt", acceptedAt));
     }
 
     private static AgentToolGovernancePreDispatchRecord ReadCheckpoint(NpgsqlDataReader reader)
@@ -162,10 +207,10 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
             LogicalInvocationKey = DeserializeJson(reader, "logical_invocation_key", PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey),
             AttemptId = reader.GetString(reader.GetOrdinal("attempt_id")),
             InvocationFingerprint = reader.GetString(reader.GetOrdinal("invocation_fingerprint")),
-            ArgumentsHash = reader.GetString(reader.GetOrdinal("arguments_hash")),
+            ArgumentsHash = reader.IsDBNull(reader.GetOrdinal("arguments_hash")) ? null : reader.GetString(reader.GetOrdinal("arguments_hash")),
             ArgumentsEvaluated = reader.GetBoolean(reader.GetOrdinal("arguments_evaluated")),
             CallOrigin = (AgentToolCallOrigin)reader.GetInt32(reader.GetOrdinal("call_origin")),
-            AgentRolesHash = reader.GetString(reader.GetOrdinal("agent_roles_hash")),
+            AgentRolesHash = reader.IsDBNull(reader.GetOrdinal("agent_roles_hash")) ? null : reader.GetString(reader.GetOrdinal("agent_roles_hash")),
             ToolContract = DeserializeJson(reader, "tool_contract_json", PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolContractIdentity)!,
             CapabilityContract = DeserializeJson(reader, "capability_contract_json", PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolContractIdentity)!,
             InputSchemaContract = DeserializeJson(reader, "input_schema_contract_json", PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolSchemaContractIdentity),

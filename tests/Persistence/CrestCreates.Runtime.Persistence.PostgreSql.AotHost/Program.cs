@@ -291,10 +291,30 @@ static async Task RunPreDispatchScenarioAsync(PostgreSqlRuntimePersistenceOption
         if (result1.Status != AgentToolPreDispatchReconciliationStatus.Released)
             throw new InvalidOperationException($"First reconcile failed: {result1.Status}");
 
-        // Repeat reconciliation — should return AlreadyReleased
+        // Verify budget is actually Released after reconciliation
+        var postReconcileBudget = await budget.GetReservationStateAsync(identity);
+        if (postReconcileBudget.Status != AgentToolBudgetReadStatus.Released
+            && postReconcileBudget.Status != AgentToolBudgetReadStatus.Missing)
+            throw new InvalidOperationException(
+                $"Budget not released after reconcile: {postReconcileBudget.Status}");
+
+        // Verify gate state reflects reconciliation (Accepted or Released — both safe)
+        var postReconcileGate = await gate.GetPreDispatchStateAsync(identity);
+        if (postReconcileGate.State == AgentToolInvocationPreDispatchState.Pending
+            || postReconcileGate.State == AgentToolInvocationPreDispatchState.Ready)
+            throw new InvalidOperationException(
+                $"Gate in unsafe state after reconcile: {postReconcileGate.State}");
+
+        // Repeat reconciliation — should return AlreadyReleased, not re-release budget
         var result2 = await reconciler.ReconcileAsync(identity);
         if (result2.Status != AgentToolPreDispatchReconciliationStatus.AlreadyReleased)
             throw new InvalidOperationException($"Second reconcile failed: {result2.Status}");
+
+        // Verify budget was not double-released (still Released, not re-finalized)
+        var postReReconcileBudget = await budget.GetReservationStateAsync(identity);
+        if (postReReconcileBudget.Status != postReconcileBudget.Status)
+            throw new InvalidOperationException(
+                $"Budget state changed on second reconcile: {postReReconcileBudget.Status} vs {postReconcileBudget.Status}");
     }
 
     Console.WriteLine("CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK");
@@ -304,7 +324,7 @@ static ServiceProvider BuildPreDispatchProvider(PostgreSqlRuntimePersistenceOpti
 {
     var services = new ServiceCollection();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
-    services.AddSingleton<IAgentToolPreDispatchAccountabilityProducer, AgentToolPreDispatchReconciliationAccountabilityProducer>();
+    services.AddSingleton<IAgentToolPreDispatchReconciliationAccountabilityProducer, AgentToolPreDispatchReconciliationAccountabilityProducer>();
     services.AddSingleton<IAgentToolPreDispatchReconciler, DefaultAgentToolPreDispatchReconciler>();
     var provider = services.BuildServiceProvider();
     return provider;

@@ -35,6 +35,15 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 [JsonSerializable(typeof(AgentToolGovernancePreDispatchRecord))]
 [JsonSerializable(typeof(AgentToolBudgetRequirement))]
 [JsonSerializable(typeof(AgentExecutionContext))]
+[JsonSerializable(typeof(AgentToolInvocationAbandonedReceipt))]
+[JsonSerializable(typeof(AgentToolInvocationPrepareCompletionRequest))]
+[JsonSerializable(typeof(AgentToolInvocationPrepareReleaseRequest))]
+[JsonSerializable(typeof(AgentToolInvocationOutcome))]
+[JsonSerializable(typeof(AgentToolGovernanceFinalizationRecord))]
+[JsonSerializable(typeof(AgentToolGovernanceDecisionRecord))]
+[JsonSerializable(typeof(AgentToolBudgetReserveRequest))]
+[JsonSerializable(typeof(AgentToolBudgetFinalizeRequest))]
+[JsonSerializable(typeof(AgentToolInvocationAcquireRequest))]
 internal sealed partial class PostgreSqlRuntimeJsonSerializerContext : JsonSerializerContext
 {
 }

@@ -32,6 +32,13 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         services.AddSingleton<IWorkflowSuspensionReceiptStore, PostgreSqlWorkflowSuspensionReceiptStore>();
         services.AddSingleton<IDescriptorSnapshotStore, PostgreSqlDescriptorSnapshotStore>();
         services.AddSingleton<IAuditSink, PostgreSqlAuditSink>();
+
+        // Replace development participants with durable PostgreSQL participants
+        services.RemoveAll<IAgentToolGovernanceAuditor>();
+        services.RemoveAll<IAgentToolBudgetGate>();
+        services.RemoveAll<IAgentToolInvocationGate>();
+        services.RemoveAll<IAgentToolPreDispatchReconciliationStore>();
+        services.RemoveAll<IAgentToolPreDispatchReconciler>();
         services.AddSingleton<IAgentToolGovernanceAuditor, PostgreSqlAgentToolGovernanceAuditor>();
         services.AddSingleton<IAgentToolBudgetGate, PostgreSqlAgentToolBudgetGate>();
         services.AddSingleton<IAgentToolInvocationGate, PostgreSqlAgentToolInvocationGate>();

@@ -308,7 +308,18 @@ public class AgentToolPreDispatchReconcilerTests
         public ValueTask<AgentToolBudgetReserveResult> ReserveAsync(AgentToolBudgetReserveRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
         public ValueTask<AgentToolBudgetReservation> FinalizeAsync(AgentToolBudgetFinalizeRequest request, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
+        {
+            return ValueTask.FromResult(new AgentToolBudgetReservation
+            {
+                ReservationId = request.ReservationId,
+                AttemptId = request.AttemptId,
+                InvocationFingerprint = request.InvocationFingerprint,
+                Category = "default",
+                CostUnits = 1,
+                MaxCallsPerExecution = 1,
+                State = request.RequestedState
+            });
+        }
         public ValueTask<AgentToolBudgetReservationReadResult> GetReservationStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
         {
             return ValueTask.FromResult(new AgentToolBudgetReservationReadResult
@@ -350,9 +361,16 @@ public class AgentToolPreDispatchReconcilerTests
         public ValueTask RecordDecisionAsync(AgentToolGovernanceDecisionRecord decision, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
         public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(AgentToolGovernanceFinalizationRecord record, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
+            => ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
+            {
+                Status = AgentToolGovernanceFinalizationStatus.Finalized,
+                Record = record
+            });
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(string auditId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
+            => ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
+            {
+                Status = AgentToolGovernanceFinalizationStatus.NotFinalized
+            });
     }
 
     private sealed class InMemoryReconciliationStore : IAgentToolPreDispatchReconciliationStore

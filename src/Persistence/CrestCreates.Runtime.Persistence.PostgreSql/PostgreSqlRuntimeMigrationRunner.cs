@@ -175,7 +175,14 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             "runtime_operation_receipts",
             "descriptor_snapshots",
             "descriptor_snapshot_entries",
-            "runtime_audit_envelopes"
+            "runtime_audit_envelopes",
+            "agent_tool_pre_dispatch_checkpoints",
+            "agent_tool_budget_reservations",
+            "agent_tool_invocation_pre_dispatch",
+            "agent_tool_governance_decisions",
+            "agent_tool_governance_finalizations",
+            "agent_tool_reconciliation_observations",
+            "agent_tool_reconciliation_receipts"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -737,6 +744,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 tenant_id text not null,
                 reservation_id text not null,
                 attempt_id text not null,
+                logical_invocation_key jsonb not null,
                 invocation_fingerprint text not null,
                 category text not null,
                 cost_units bigint not null,
@@ -752,20 +760,48 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 tenant_id text not null,
                 lease_id text not null,
                 attempt_id text not null,
-                fencing_token text not null,
+                logical_invocation_key jsonb not null,
+                invocation_fingerprint text not null,
+                fencing_token bigint not null,
                 acquired_at timestamptz not null,
                 expires_at timestamptz not null,
                 pre_dispatch_state integer not null default 0,
+                revision bigint not null default 1,
                 intent_json jsonb null,
                 bound_reservation_id text null,
                 accepted_receipt_json jsonb null,
                 abandoned_receipt_json jsonb null,
                 dispatch_started_at timestamptz null,
+                completion_outcome_json jsonb null,
+                release_outcome_json jsonb null,
                 created_at timestamptz not null default clock_timestamp(),
                 updated_at timestamptz not null default clock_timestamp(),
                 primary key (tenant_id, lease_id)
             );
-            create index ix_agent_tool_invocation_pre_dispatch_attempt on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, attempt_id);
+            create unique index ux_agent_tool_invocation_pre_dispatch_attempt on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, attempt_id);
+            create index ix_agent_tool_invocation_pre_dispatch_logical on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key);
+
+            create table {schema}.agent_tool_governance_decisions (
+                tenant_id text not null,
+                audit_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                decision_state integer not null,
+                decision_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, audit_id)
+            );
+
+            create table {schema}.agent_tool_governance_finalizations (
+                tenant_id text not null,
+                audit_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                attempt_state integer not null,
+                finalization_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, audit_id)
+            );
 
             create table {schema}.agent_tool_reconciliation_observations (
                 tenant_id text not null,
@@ -775,7 +811,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 status integer not null,
                 reason_code text not null,
                 observed_at timestamptz not null default clock_timestamp(),
-                observation_json jsonb not null,
+                observation_json jsonb null,
                 primary key (tenant_id, logical_invocation_key, attempt_id)
             );
 
