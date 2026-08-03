@@ -1,8 +1,8 @@
 # Accountability Runtime Foundation — Architecture Design
 
 > **Status:** Implemented and merged
-> **Phase:** 9a, Issue #39, PR #67
-> **Last updated:** 2026-07-31
+> **Phase:** 9a, Issue #39, plus 9b Durable Persistence Foundation, Issue #24 / PR #71
+> **Last updated:** 2026-08-03
 
 ---
 
@@ -26,8 +26,9 @@ already happened; it must not drive, approve, reject, or roll back business
 execution.
 
 Phase 9a establishes the framework contract and first-party HTTP, method,
-Capability, and Workflow producers. Durable providers, query APIs, retention,
-Outbox delivery, signatures, and tamper-evident storage belong to later phases.
+Capability, and Workflow producers. Phase 9b adds a durable `IAuditSink` backed
+by the Runtime Persistence provider. Query APIs, retention, Outbox delivery,
+signatures, and tamper-evident storage remain outside this feature boundary.
 
 ---
 
@@ -385,7 +386,7 @@ Startup also rejects:
 
 ---
 
-## 9. Phase 9b Provider Boundary
+## 9. Phase 9b Durable Provider Boundary
 
 A durable Phase 9b provider implements `IAuditSink` and must independently
 provide:
@@ -395,6 +396,12 @@ provide:
 - exact Accepted/Duplicate/Conflict semantics;
 - provider-local first-acceptance metadata;
 - immutable safe snapshots.
+
+The production provider is direct Npgsql PostgreSQL and is
+`NativeAOT-verified` through publish/link/run evidence. The InMemory provider is
+`FullSemantic`: it preserves transaction, rollback, and Accepted/Duplicate/
+Conflict semantics for tests and local hosts, but makes no process durability,
+restart, migration, or database NativeAOT claim.
 
 Provider tests reuse the runner-free
 `tests/Shared/CrestCreates.Accountability.Testing` contract cases. A provider
@@ -409,7 +416,7 @@ and not part of the v1 integrity projection.
 
 ## 10. Non-goals and Security Claims
 
-Phase 9a does not provide:
+The Accountability runtime and Phase 9b provider do not provide:
 
 - reliable delivery, Outbox, cross-sink atomicity, or distributed exactly-once;
 - global ordering or a distributed clock;

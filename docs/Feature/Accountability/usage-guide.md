@@ -1,7 +1,7 @@
 # Accountability Runtime Foundation — Usage Guide
 
 > For host authors, producer developers, sanitizer owners, and durable sink providers.
-> **Status:** Phase 9a implemented; durable providers are Phase 9b.
+> **Status:** Phase 9a and Phase 9b implemented; PostgreSQL is NativeAOT-verified.
 
 ---
 
@@ -26,6 +26,30 @@ builder.Services.AddAuditSink<InMemoryAuditSink>();
 
 `InMemoryAuditSink` is single-process and volatile. It is suitable for tests,
 development, and acceptance fixtures, not production durability.
+
+For a durable PostgreSQL sink and Runtime stores, register the direct-Npgsql
+provider explicitly:
+
+```csharp
+using CrestCreates.Runtime.Persistence.PostgreSql;
+
+builder.Services.AddCrestCreatesPostgreSqlRuntimePersistence(
+    new PostgreSqlRuntimePersistenceOptions
+    {
+        ConnectionString = builder.Configuration.GetConnectionString("Runtime")!,
+        Schema = "crest_runtime",
+        ApplyMigrations = false
+    });
+```
+
+`ApplyMigrations = false` is validation-only: the configured schema, migration
+history, tables, columns, keys, indexes, foreign keys, and checks must already
+exist, otherwise startup fails closed. Set it to `true` only when this provider
+is explicitly authorized to apply its checksummed PostgreSQL migrations.
+The provider registers the durable `IAuditSink`, Workflow/HumanTask stores,
+Descriptor Snapshot store, suspension receipt store, and one transaction
+coordinator. It uses Npgsql directly; EF Core is not part of this NativeAOT
+production path.
 
 The library default for `RequireAtLeastOneSink` is `false`; first-party
 production hosts should set it to `true`. Configuration uses standard Options
