@@ -62,13 +62,6 @@ public sealed record AgentToolGovernancePreDispatchRecord
     public required AgentToolBudgetReservation BudgetReservation { get; init; }
 }
 
-public sealed record AgentToolGovernanceAuditHandle
-{
-    public required string AuditId { get; init; }
-
-    public required DateTimeOffset AcceptedAt { get; init; }
-}
-
 /// <summary>
 /// Records a governance decision that prevented dispatch before a pre-dispatch
 /// checkpoint could be created. It intentionally contains no fabricated lease,
@@ -140,8 +133,12 @@ public interface IAgentToolGovernanceAuditor
         AgentToolGovernanceDecisionRecord record,
         CancellationToken cancellationToken = default);
 
-    ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+    ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
         AgentToolGovernancePreDispatchRecord record,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
         CancellationToken cancellationToken = default);
 
     ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(

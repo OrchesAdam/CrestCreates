@@ -247,6 +247,56 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 : GovernanceDenied("AGENT_TOOL_APPROVAL_DENIED");
         }
 
+        var auditContext = CreateAuditContext(governance);
+        var identity = new AgentToolPreDispatchIdentity(
+            auditContext.LogicalInvocationKey,
+            lease.AttemptId);
+
+        AgentToolInvocationPreDispatchResult? preDispatchState;
+
+        try
+        {
+            preDispatchState = await _invocations.PreparePreDispatchIntentAsync(
+                lease,
+                new AgentToolInvocationPreparePreDispatchIntentRequest
+                {
+                    Intent = new AgentToolInvocationPreDispatchIntentSnapshot
+                    {
+                        FrozenLease = lease,
+                        InvocationFingerprint = auditContext.InvocationFingerprint,
+                        Context = auditContext,
+                        Approval = approval
+                    }
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            preDispatchState = await RecoverPreDispatchStateAsync(identity, lease, cancellationToken)
+                .ConfigureAwait(false);
+            if (preDispatchState is null)
+            {
+                await MarkIndeterminateIgnoringFailureAsync(lease, "pre_dispatch_intent_uncertain")
+                    .ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch
+        {
+            preDispatchState = await RecoverPreDispatchStateAsync(identity, lease, cancellationToken)
+                .ConfigureAwait(false);
+            if (preDispatchState is null)
+                return await FinishFenceIndeterminateAsync(
+                    null, auditContext, lease, null, "pre_dispatch_intent_uncertain")
+                    .ConfigureAwait(false);
+        }
+
+        if (preDispatchState.State == AgentToolInvocationPreDispatchState.Abandoned
+            && preDispatchState.AbandonedReceipt is not null)
+        {
+            return GovernanceDenied(preDispatchState.AbandonedReceipt.ReasonCode);
+        }
+
         AgentToolBudgetReserveResult reserved;
         try
         {
@@ -258,20 +308,20 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         {
             var decisionOutcome = Indeterminate("AGENT_TOOL_BUDGET_RESERVATION_UNCERTAIN");
             var recorded = await RecordDecisionBestEffortAsync(
-                CreateAuditContext(governance),
+                auditContext,
                 AgentToolGovernanceDecisionState.Indeterminate,
                 decisionOutcome,
                 "budget_reservation_uncertain").ConfigureAwait(false);
             if (!recorded && entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required)
                 decisionOutcome = Indeterminate("decision_audit_failure");
             await MarkIndeterminateIgnoringFailureAsync(lease, "budget_reservation_uncertain").ConfigureAwait(false);
-            return decisionOutcome;
+            throw;
         }
         catch
         {
             var decisionOutcome = Indeterminate("AGENT_TOOL_BUDGET_FAILURE");
             var recorded = await RecordDecisionBestEffortAsync(
-                CreateAuditContext(governance),
+                auditContext,
                 AgentToolGovernanceDecisionState.Indeterminate,
                 decisionOutcome,
                 "budget_reservation_uncertain").ConfigureAwait(false);
@@ -289,10 +339,11 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             var reason = "budget_denied";
             var decisionOutcome = GovernanceDenied("AGENT_TOOL_BUDGET_DENIED");
             var recorded = await RecordDecisionBestEffortAsync(
-                CreateAuditContext(governance),
+                auditContext,
                 AgentToolGovernanceDecisionState.Denied,
                 decisionOutcome,
                 reason).ConfigureAwait(false);
+            await PublishBudgetDenialBestEffortAsync(lease, reserved, reason).ConfigureAwait(false);
             await AbandonUnrecordedLeaseBestEffortAsync(lease, "budget_denied").ConfigureAwait(false);
             return !recorded && entry.Governance.EffectiveAuditMode == AgentToolAuditMode.Required
                 ? GovernanceDenied("AGENT_TOOL_AUDIT_FAILURE")
@@ -306,7 +357,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             const string reason = "budget_reservation_invalid";
             var decisionOutcome = Indeterminate("AGENT_TOOL_BUDGET_FAILURE");
             var recorded = await RecordDecisionBestEffortAsync(
-                CreateAuditContext(governance),
+                auditContext,
                 AgentToolGovernanceDecisionState.Indeterminate,
                 decisionOutcome,
                 reason,
@@ -317,7 +368,38 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             return decisionOutcome;
         }
 
-        var auditContext = CreateAuditContext(governance);
+        try
+        {
+            preDispatchState = await _invocations.BindPreDispatchReservationAsync(
+                lease,
+                new AgentToolInvocationBindReservationRequest
+                {
+                    ReservationId = reservation.ReservationId,
+                    Reservation = reservation
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            preDispatchState = await RecoverPreDispatchStateAsync(identity, lease, cancellationToken)
+                .ConfigureAwait(false);
+            if (preDispatchState is null)
+            {
+                await MarkIndeterminateIgnoringFailureAsync(lease, "bind_reservation_uncertain")
+                    .ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch
+        {
+            preDispatchState = await RecoverPreDispatchStateAsync(identity, lease, cancellationToken)
+                .ConfigureAwait(false);
+            if (preDispatchState is null)
+                return await FinishFenceIndeterminateAsync(
+                    null, auditContext, lease, reservation, "bind_reservation_uncertain")
+                    .ConfigureAwait(false);
+        }
+
         var preDispatch = new AgentToolGovernancePreDispatchRecord
         {
             Context = auditContext,
@@ -325,15 +407,19 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             Approval = approval,
             BudgetReservation = reservation
         };
-        AgentToolGovernanceAuditHandle? auditHandle = null;
+        AgentToolGovernancePreDispatchReceipt? auditHandle = null;
         try
         {
-            auditHandle = await _audit.RecordPreDispatchAsync(preDispatch, cancellationToken)
+            var writeResult = await _audit.RecordPreDispatchAsync(preDispatch, cancellationToken)
                 .ConfigureAwait(false);
+            if (writeResult.Status is AgentToolGovernancePreDispatchWriteStatus.Accepted
+                or AgentToolGovernancePreDispatchWriteStatus.Duplicate)
+                auditHandle = writeResult.Receipt;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            auditHandle = await TryRecoverPreDispatchAsync(preDispatch).ConfigureAwait(false);
+            auditHandle = await RecoverAuditReceiptAsync(preDispatch, cancellationToken)
+                .ConfigureAwait(false);
             if (auditHandle is not null)
             {
                 _ = await ReleaseAuditedBeforeDispatchAsync(
@@ -357,14 +443,43 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
         catch
         {
-            auditHandle = await TryRecoverPreDispatchAsync(preDispatch).ConfigureAwait(false);
+            auditHandle = await RecoverAuditReceiptAsync(preDispatch, cancellationToken)
+                .ConfigureAwait(false);
             if (auditHandle is null)
                 return await FinishFenceIndeterminateAsync(
-                    null,
-                    auditContext,
-                    lease,
-                    reservation,
-                    "pre_dispatch_audit_uncertain").ConfigureAwait(false);
+                    null, auditContext, lease, reservation, "pre_dispatch_audit_uncertain")
+                    .ConfigureAwait(false);
+        }
+
+        try
+        {
+            preDispatchState = await _invocations.BindAcceptedPreDispatchAsync(
+                lease,
+                new AgentToolInvocationBindPreDispatchRequest
+                {
+                    Receipt = auditHandle!
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            preDispatchState = await RecoverPreDispatchStateAsync(identity, lease, cancellationToken)
+                .ConfigureAwait(false);
+            if (preDispatchState is null)
+            {
+                await MarkIndeterminateIgnoringFailureAsync(lease, "bind_accepted_uncertain")
+                    .ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch
+        {
+            preDispatchState = await RecoverPreDispatchStateAsync(identity, lease, cancellationToken)
+                .ConfigureAwait(false);
+            if (preDispatchState is null)
+                return await FinishFenceIndeterminateAsync(
+                    auditHandle, auditContext, lease, reservation, "bind_accepted_uncertain")
+                    .ConfigureAwait(false);
         }
 
         if (renewal.HasFailed)
@@ -381,7 +496,11 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         bool dispatchStarted;
         try
         {
-            dispatchStarted = await _invocations.TryMarkDispatchStartedAsync(lease, cancellationToken)
+            dispatchStarted = await _invocations.TryMarkDispatchStartedAsync(
+                    lease,
+                    auditHandle!,
+                    reservation.ReservationId,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         catch
@@ -580,7 +699,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
     private async ValueTask<AgentToolInvocationOutcome> FinishCompletedAsync(
         AgentToolRuntimeEntry entry,
-        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernancePreDispatchReceipt? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
@@ -861,7 +980,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                         StringComparison.Ordinal)));
 
     private async ValueTask<AgentToolInvocationOutcome> FinishIndeterminateWithSettledBudgetAsync(
-        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernancePreDispatchReceipt? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation settled,
@@ -875,7 +994,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             reasonCode).ConfigureAwait(false);
 
     private async ValueTask<AgentToolInvocationOutcome> FinalizeIndeterminateAfterGateAsync(
-        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernancePreDispatchReceipt? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
@@ -907,7 +1026,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     }
 
     private async ValueTask<AgentToolInvocationOutcome> FinishIndeterminateAsync(
-        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernancePreDispatchReceipt? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
@@ -935,7 +1054,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     }
 
     private async ValueTask<AgentToolInvocationOutcome> FinishIndeterminateWithoutBudgetAsync(
-        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernancePreDispatchReceipt? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
@@ -957,7 +1076,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
 
     private async ValueTask<AgentToolInvocationOutcome> ReleaseAuditedBeforeDispatchAsync(
         AgentToolRuntimeEntry entry,
-        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernancePreDispatchReceipt? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
@@ -1115,7 +1234,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             && string.Equals(result.ReasonCode, reasonCode, StringComparison.Ordinal);
 
     private async ValueTask<AgentToolInvocationOutcome> FinishFenceIndeterminateAsync(
-        AgentToolGovernanceAuditHandle? auditHandle,
+        AgentToolGovernancePreDispatchReceipt? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,
@@ -1342,17 +1461,59 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         }
     }
 
-    private async ValueTask<AgentToolGovernanceAuditHandle?> TryRecoverPreDispatchAsync(
-        AgentToolGovernancePreDispatchRecord record)
+    private async ValueTask<AgentToolGovernancePreDispatchReceipt?> RecoverAuditReceiptAsync(
+        AgentToolGovernancePreDispatchRecord record,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return await _audit.RecordPreDispatchAsync(record, CancellationToken.None)
+            var writeResult = await _audit.RecordPreDispatchAsync(record, cancellationToken)
+                .ConfigureAwait(false);
+            return writeResult.Status is AgentToolGovernancePreDispatchWriteStatus.Accepted
+                or AgentToolGovernancePreDispatchWriteStatus.Duplicate
+                ? writeResult.Receipt
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async ValueTask<AgentToolInvocationPreDispatchResult?> RecoverPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        AgentToolInvocationLease lease,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _invocations.GetPreDispatchStateAsync(identity, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch
         {
             return null;
+        }
+    }
+
+    private async ValueTask PublishBudgetDenialBestEffortAsync(
+        AgentToolInvocationLease lease,
+        AgentToolBudgetReserveResult reserved,
+        string reasonCode)
+    {
+        try
+        {
+            await _invocations.PublishBudgetDenialAsync(
+                lease,
+                new AgentToolInvocationPublishDenialRequest
+                {
+                    Outcome = GovernanceDenied("AGENT_TOOL_BUDGET_DENIED"),
+                    ReasonCode = reasonCode
+                },
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
         }
     }
 
@@ -1374,7 +1535,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         };
 
     private static AgentToolGovernanceFinalizationRecord Finalization(
-        AgentToolGovernanceAuditHandle handle,
+        AgentToolGovernancePreDispatchReceipt handle,
         AgentToolGovernanceAuditContext context,
         AgentToolInvocationLease lease,
         AgentToolBudgetReservation reservation,

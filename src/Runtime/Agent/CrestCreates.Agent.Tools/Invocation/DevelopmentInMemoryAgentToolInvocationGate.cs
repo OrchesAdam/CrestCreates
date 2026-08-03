@@ -46,7 +46,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         {
             if (!_entries.TryGetValue(request.Key, out var entry))
             {
-                entry = new Entry(request.InvocationFingerprint);
+                entry = new Entry(request.InvocationFingerprint) { FingerprintKey = request.Key };
                 _entries.Add(request.Key, entry);
             }
             else if (!string.Equals(entry.Fingerprint, request.InvocationFingerprint, StringComparison.Ordinal))
@@ -125,8 +125,12 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
 
     public ValueTask<bool> TryMarkDispatchStartedAsync(
         AgentToolInvocationLease lease,
+        AgentToolGovernancePreDispatchReceipt receipt,
+        string reservationId,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(receipt);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reservationId);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
@@ -135,7 +139,14 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 return ValueTask.FromResult(false);
             if (entry.DispatchStarted)
                 return ValueTask.FromResult(true);
+            if (entry.PreDispatchState != AgentToolInvocationPreDispatchState.Accepted
+                || entry.AcceptedReceipt is null
+                || !string.Equals(entry.AcceptedReceipt.AuditId, receipt.AuditId, StringComparison.Ordinal))
+                return ValueTask.FromResult(false);
+            if (!string.Equals(entry.BoundReservationId, reservationId, StringComparison.Ordinal))
+                return ValueTask.FromResult(false);
             entry.DispatchStarted = true;
+            entry.PreDispatchState = AgentToolInvocationPreDispatchState.DispatchStarted;
             return ValueTask.FromResult(true);
         }
     }
@@ -359,6 +370,193 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         }
     }
 
+    public ValueTask<AgentToolInvocationPreDispatchResult> PreparePreDispatchIntentAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPreparePreDispatchIntentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Intent);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var (entry, _) = GetCurrent(lease);
+            if (entry.PreDispatchState is not (
+                AgentToolInvocationPreDispatchState.Unknown
+                or AgentToolInvocationPreDispatchState.Pending
+                or AgentToolInvocationPreDispatchState.Ready))
+            {
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = entry.PreDispatchState,
+                    ReasonCode = "pre_dispatch_intent_already_prepared"
+                });
+            }
+
+            entry.Intent = request.Intent;
+            entry.PreDispatchState = AgentToolInvocationPreDispatchState.Pending;
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+            {
+                State = AgentToolInvocationPreDispatchState.Pending,
+                Intent = entry.Intent
+            });
+        }
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindPreDispatchReservationAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindReservationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Reservation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ReservationId);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var (entry, _) = GetCurrent(lease);
+            if (entry.PreDispatchState != AgentToolInvocationPreDispatchState.Pending)
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = entry.PreDispatchState,
+                    ReasonCode = "pre_dispatch_not_pending"
+                });
+
+            if (entry.BoundReservationId is not null
+                && !string.Equals(entry.BoundReservationId, request.ReservationId, StringComparison.Ordinal))
+            {
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = entry.PreDispatchState,
+                    ReasonCode = "pre_dispatch_reservation_conflict"
+                });
+            }
+
+            entry.BoundReservationId = request.ReservationId;
+            entry.PreDispatchState = AgentToolInvocationPreDispatchState.Ready;
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+            {
+                State = AgentToolInvocationPreDispatchState.Ready,
+                Intent = entry.Intent,
+                BoundReservationId = entry.BoundReservationId
+            });
+        }
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindPreDispatchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Receipt);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var (entry, _) = GetCurrent(lease);
+            if (entry.PreDispatchState != AgentToolInvocationPreDispatchState.Ready)
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = entry.PreDispatchState,
+                    ReasonCode = "pre_dispatch_not_ready"
+                });
+
+            entry.AcceptedReceipt = request.Receipt;
+            entry.PreDispatchState = AgentToolInvocationPreDispatchState.Accepted;
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+            {
+                State = AgentToolInvocationPreDispatchState.Accepted,
+                Intent = entry.Intent,
+                BoundReservationId = entry.BoundReservationId,
+                AcceptedReceipt = entry.AcceptedReceipt
+            });
+        }
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (!_entries.TryGetValue(identity.LogicalInvocationKey, out var entry))
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = AgentToolInvocationPreDispatchState.Unknown
+                });
+
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+            {
+                State = entry.PreDispatchState,
+                Intent = entry.Intent,
+                BoundReservationId = entry.BoundReservationId,
+                AcceptedReceipt = entry.AcceptedReceipt,
+                AbandonedReceipt = entry.AbandonedReceipt,
+                ReasonCode = entry.LastReasonCode
+            });
+        }
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPublishDenialRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Outcome);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ReasonCode);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var (entry, _) = GetCurrent(lease);
+            if (entry.PreDispatchState is not (
+                AgentToolInvocationPreDispatchState.Pending
+                or AgentToolInvocationPreDispatchState.Abandoned))
+            {
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = entry.PreDispatchState,
+                    ReasonCode = "pre_dispatch_not_pending"
+                });
+            }
+
+            if (entry.AbandonedReceipt is not null)
+            {
+                if (!string.Equals(entry.AbandonedReceipt.ReasonCode, request.ReasonCode, StringComparison.Ordinal))
+                    return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                    {
+                        State = entry.PreDispatchState,
+                        ReasonCode = "pre_dispatch_denial_conflict"
+                    });
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = AgentToolInvocationPreDispatchState.Abandoned,
+                    AbandonedReceipt = entry.AbandonedReceipt
+                });
+            }
+
+            var identity = new AgentToolPreDispatchIdentity(
+                entry.FingerprintKey,
+                lease.AttemptId);
+            var abandoned = new AgentToolInvocationAbandonedReceipt
+            {
+                Identity = identity,
+                Outcome = request.Outcome,
+                ReasonCode = request.ReasonCode,
+                AbandonedAt = _timeProvider.GetUtcNow()
+            };
+            entry.AbandonedReceipt = abandoned;
+            entry.PreDispatchState = AgentToolInvocationPreDispatchState.Abandoned;
+            entry.LastReasonCode = request.ReasonCode;
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+            {
+                State = AgentToolInvocationPreDispatchState.Abandoned,
+                AbandonedReceipt = abandoned
+            });
+        }
+    }
+
     public ValueTask AbandonUnrecordedLeaseAsync(
         AgentToolInvocationLease lease,
         string reasonCode,
@@ -575,10 +773,17 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
     private sealed class Entry(string fingerprint)
     {
         public string Fingerprint { get; } = fingerprint;
+        public AgentToolLogicalInvocationKey FingerprintKey { get; set; }
         public long FencingToken { get; set; }
         public AgentToolInvocationLease? ActiveLease { get; set; }
         public bool DispatchStarted { get; set; }
         public bool Indeterminate { get; set; }
+        public AgentToolInvocationPreDispatchState PreDispatchState { get; set; }
+            = AgentToolInvocationPreDispatchState.Unknown;
+        public AgentToolInvocationPreDispatchIntentSnapshot? Intent { get; set; }
+        public string? BoundReservationId { get; set; }
+        public AgentToolGovernancePreDispatchReceipt? AcceptedReceipt { get; set; }
+        public AgentToolInvocationAbandonedReceipt? AbandonedReceipt { get; set; }
         public AgentToolInvocationOutcome? CompletedOutcome { get; set; }
         public AgentToolInvocationOutcome? CompletionPendingOutcome { get; set; }
         public DateTimeOffset? CompletionPendingPreparedAt { get; set; }

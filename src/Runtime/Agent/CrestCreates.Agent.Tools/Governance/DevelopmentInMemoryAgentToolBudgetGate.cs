@@ -172,6 +172,40 @@ public sealed class DevelopmentInMemoryAgentToolBudgetGate : IAgentToolBudgetGat
         }
     }
 
+    public ValueTask<AgentToolBudgetReservationReadResult> GetReservationStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var attemptKey = new AttemptKey(
+                identity.LogicalInvocationKey,
+                identity.AttemptId);
+            if (!_byAttempt.TryGetValue(attemptKey, out var entry))
+            {
+                return ValueTask.FromResult(new AgentToolBudgetReservationReadResult
+                {
+                    Status = AgentToolBudgetReadStatus.Missing
+                });
+            }
+
+            var status = entry.Reservation.State switch
+            {
+                AgentToolBudgetReservationState.Reserved => AgentToolBudgetReadStatus.Reserved,
+                AgentToolBudgetReservationState.Released => AgentToolBudgetReadStatus.Released,
+                AgentToolBudgetReservationState.Committed => AgentToolBudgetReadStatus.Committed,
+                AgentToolBudgetReservationState.Indeterminate => AgentToolBudgetReadStatus.Indeterminate,
+                _ => AgentToolBudgetReadStatus.Unknown
+            };
+            return ValueTask.FromResult(new AgentToolBudgetReservationReadResult
+            {
+                Status = status,
+                Reservation = entry.Reservation
+            });
+        }
+    }
+
     private static bool Matches(
         BudgetEntry entry,
         AgentToolGovernanceContext context,

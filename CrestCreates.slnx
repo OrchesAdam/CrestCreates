@@ -308,6 +308,7 @@
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture/CrestCreates.Agent.Tools.AotFixture.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Tools.E2E.Tests/CrestCreates.Agent.Tools.E2E.Tests.csproj" />
     <Project Path="tests/Runtime/Agent/CrestCreates.Agent.Tools.Tests/CrestCreates.Agent.Tools.Tests.csproj" />
+    <Project Path="tests/Shared/CrestCreates.Agent.Tools.Persistence.Testing/CrestCreates.Agent.Tools.Persistence.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Eventing/">
     <Project Path="tests/Runtime/Eventing/CrestCreates.Event.Tests/CrestCreates.Event.Tests.csproj" />

@@ -27,13 +27,13 @@ public sealed class AgentToolGovernanceAuditorTests
         var firstTask = RecordAfterBarrierAsync();
         var secondTask = RecordAfterBarrierAsync();
         barrier.SignalAndWait();
-        var handles = await Task.WhenAll(firstTask, secondTask);
+        var results = await Task.WhenAll(firstTask, secondTask);
 
-        handles.Select(handle => handle.AuditId)
+        results.Select(result => result.Receipt!.AuditId)
             .Distinct(StringComparer.Ordinal).Should().ContainSingle();
-        handles.Should().OnlyContain(handle => handle.AcceptedAt == Now);
+        results.Should().OnlyContain(result => result.Receipt!.AcceptedAt == Now);
 
-        async Task<AgentToolGovernanceAuditHandle> RecordAfterBarrierAsync()
+        async Task<AgentToolGovernancePreDispatchWriteResult> RecordAfterBarrierAsync()
         {
             return await Task.Run(async () =>
             {
@@ -62,9 +62,9 @@ public sealed class AgentToolGovernanceAuditorTests
             }
         };
 
-        var act = async () => await auditor.RecordPreDispatchAsync(changed);
+        var result = await auditor.RecordPreDispatchAsync(changed);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        result.Status.Should().Be(AgentToolGovernancePreDispatchWriteStatus.Conflict);
     }
 
     [Fact]
@@ -87,9 +87,9 @@ public sealed class AgentToolGovernanceAuditorTests
             BudgetReservation = record.BudgetReservation with { CostUnits = 99 }
         };
 
-        var act = async () => await auditor.RecordPreDispatchAsync(changed);
+        var result = await auditor.RecordPreDispatchAsync(changed);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        result.Status.Should().Be(AgentToolGovernancePreDispatchWriteStatus.Conflict);
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var preDispatch = GovernanceTestData.PreDispatch(context);
         var handle = await auditor.RecordPreDispatchAsync(preDispatch);
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
@@ -125,7 +125,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var preDispatch = GovernanceTestData.PreDispatch(context);
         var handle = await auditor.RecordPreDispatchAsync(preDispatch);
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
@@ -147,7 +147,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var preDispatch = GovernanceTestData.PreDispatch(context);
         var handle = await auditor.RecordPreDispatchAsync(preDispatch);
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
@@ -179,14 +179,14 @@ public sealed class AgentToolGovernanceAuditorTests
             GovernanceTestData.PreDispatch(context));
         using var document = JsonDocument.Parse("{\"value\":1}");
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
             AgentToolInvocationTerminalState.Completed) with
         {
             Outcome = Finalization(
-                handle.AuditId,
+                handle.Receipt!.AuditId,
                 context,
                 AgentToolBudgetReservationState.Committed,
                 AgentToolGovernanceAttemptFinalState.Completed,
@@ -231,15 +231,15 @@ public sealed class AgentToolGovernanceAuditorTests
         var handle = await auditor.RecordPreDispatchAsync(
             GovernanceTestData.PreDispatch(context));
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
             AgentToolInvocationTerminalState.Completed);
 
-        var before = await auditor.GetFinalizationStateAsync(handle.AuditId);
+        var before = await auditor.GetFinalizationStateAsync(handle.Receipt!.AuditId);
         var persisted = await auditor.FinalizeAsync(finalization);
-        var after = await auditor.GetFinalizationStateAsync(handle.AuditId);
+        var after = await auditor.GetFinalizationStateAsync(handle.Receipt!.AuditId);
 
         before.Status.Should().Be(AgentToolGovernanceFinalizationStatus.NotFinalized);
         before.Record.Should().BeNull();
@@ -256,7 +256,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var handle = await auditor.RecordPreDispatchAsync(
             GovernanceTestData.PreDispatch(context));
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Indeterminate,
@@ -275,7 +275,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var handle = await auditor.RecordPreDispatchAsync(
             GovernanceTestData.PreDispatch(context));
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Unknown,
             AgentToolGovernanceAttemptFinalState.Indeterminate,
@@ -365,7 +365,7 @@ public sealed class AgentToolGovernanceAuditorTests
             attemptId: context.AttemptId,
             fingerprint: "different-fingerprint");
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             mismatchedContext,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
@@ -384,7 +384,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var handle = await auditor.RecordPreDispatchAsync(
             GovernanceTestData.PreDispatch(context));
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Released,
             AgentToolGovernanceAttemptFinalState.Released,
@@ -406,7 +406,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var handle = await auditor.RecordPreDispatchAsync(
             GovernanceTestData.PreDispatch(context));
         var malformed = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
@@ -426,7 +426,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var handle = await auditor.RecordPreDispatchAsync(
             GovernanceTestData.PreDispatch(context));
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,
@@ -449,7 +449,7 @@ public sealed class AgentToolGovernanceAuditorTests
         var handle = await auditor.RecordPreDispatchAsync(
             GovernanceTestData.PreDispatch(context));
         var finalization = Finalization(
-            handle.AuditId,
+            handle.Receipt!.AuditId,
             context,
             AgentToolBudgetReservationState.Committed,
             AgentToolGovernanceAttemptFinalState.Completed,

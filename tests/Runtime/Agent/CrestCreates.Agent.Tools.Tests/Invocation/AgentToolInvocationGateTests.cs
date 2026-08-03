@@ -16,7 +16,8 @@ public sealed class AgentToolInvocationGateTests
 
         acquired.Status.Should().Be(AgentToolInvocationAcquireStatus.Acquired);
         concurrent.Status.Should().Be(AgentToolInvocationAcquireStatus.InProgress);
-        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+        await PreparePreDispatchAsync(gate, acquired.Lease!);
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!, TestReceipt(acquired.Lease!), "reservation")).Should().BeTrue();
         var outcome = Success();
         await gate.PrepareCompletionAsync(acquired.Lease!, PrepareRequest(outcome));
         (await gate.PublishCompletionAsync(acquired.Lease!)).State
@@ -34,7 +35,8 @@ public sealed class AgentToolInvocationGateTests
     {
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();
         var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
-        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+        await PreparePreDispatchAsync(gate, acquired.Lease!);
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!, TestReceipt(acquired.Lease!), "reservation")).Should().BeTrue();
 
         await gate.PrepareCompletionAsync(acquired.Lease!, PrepareRequest(Success()));
         var pending = await gate.AcquireAsync(Request("fingerprint-a"));
@@ -56,7 +58,8 @@ public sealed class AgentToolInvocationGateTests
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();
         var request = Request("fingerprint-a");
         var acquired = await gate.AcquireAsync(request);
-        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+        await PreparePreDispatchAsync(gate, acquired.Lease!);
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!, TestReceipt(acquired.Lease!), "reservation")).Should().BeTrue();
         var outcome = Success();
         await gate.PrepareCompletionAsync(acquired.Lease!, PrepareRequest(outcome));
         await gate.PublishCompletionAsync(acquired.Lease!);
@@ -76,7 +79,8 @@ public sealed class AgentToolInvocationGateTests
     {
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();
         var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
-        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+        await PreparePreDispatchAsync(gate, acquired.Lease!);
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!, TestReceipt(acquired.Lease!), "reservation")).Should().BeTrue();
         var outcome = Success();
         await gate.PrepareCompletionAsync(
             acquired.Lease!,
@@ -101,7 +105,8 @@ public sealed class AgentToolInvocationGateTests
     {
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();
         var acquired = await gate.AcquireAsync(Request("fingerprint-a"));
-        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!)).Should().BeTrue();
+        await PreparePreDispatchAsync(gate, acquired.Lease!);
+        (await gate.TryMarkDispatchStartedAsync(acquired.Lease!, TestReceipt(acquired.Lease!), "reservation")).Should().BeTrue();
 
         var act = () => gate.PrepareCompletionAsync(
             acquired.Lease!,
@@ -266,7 +271,7 @@ public sealed class AgentToolInvocationGateTests
 
         second.Status.Should().Be(AgentToolInvocationAcquireStatus.Acquired);
         second.Lease!.FencingToken.Should().BeGreaterThan(first.Lease!.FencingToken);
-        (await gate.TryMarkDispatchStartedAsync(first.Lease!)).Should().BeFalse();
+        (await gate.TryMarkDispatchStartedAsync(first.Lease!, TestReceipt(first.Lease!), "reservation")).Should().BeFalse();
         var staleCompletion = () => gate.PrepareCompletionAsync(first.Lease!, PrepareRequest(Success())).AsTask();
         await staleCompletion.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -277,7 +282,8 @@ public sealed class AgentToolInvocationGateTests
         var time = new ManualTimeProvider();
         var gate = new DevelopmentInMemoryAgentToolInvocationGate(time, TimeSpan.FromSeconds(10));
         var first = await gate.AcquireAsync(Request("fingerprint-a"));
-        (await gate.TryMarkDispatchStartedAsync(first.Lease!)).Should().BeTrue();
+        await PreparePreDispatchAsync(gate, first.Lease!);
+        (await gate.TryMarkDispatchStartedAsync(first.Lease!, TestReceipt(first.Lease!), "reservation")).Should().BeTrue();
         time.Advance(TimeSpan.FromSeconds(11));
 
         var retry = await gate.AcquireAsync(Request("fingerprint-a"));
@@ -287,6 +293,54 @@ public sealed class AgentToolInvocationGateTests
         state.State.Should().Be(AgentToolInvocationCompletionState.Indeterminate);
         state.ReasonCode.Should().Be("post_dispatch_lease_expired");
     }
+
+
+    private static async Task PreparePreDispatchAsync(
+        DevelopmentInMemoryAgentToolInvocationGate gate,
+        AgentToolInvocationLease lease,
+        string reservationId = "reservation")
+    {
+        var receipt = TestReceipt(lease);
+        var reservation = new AgentToolBudgetReservation
+        {
+            ReservationId = reservationId,
+            AttemptId = lease.AttemptId,
+            InvocationFingerprint = "fingerprint-a",
+            Category = "default",
+            CostUnits = 1,
+            MaxCallsPerExecution = 1,
+            State = AgentToolBudgetReservationState.Reserved
+        };
+        await gate.PreparePreDispatchIntentAsync(lease, new AgentToolInvocationPreparePreDispatchIntentRequest
+        {
+            Intent = new AgentToolInvocationPreDispatchIntentSnapshot
+            {
+                FrozenLease = lease,
+                InvocationFingerprint = "fingerprint-a",
+                Context = null!,
+                Approval = null!
+            }
+        });
+        await gate.BindPreDispatchReservationAsync(lease, new AgentToolInvocationBindReservationRequest
+        {
+            ReservationId = reservationId,
+            Reservation = reservation
+        });
+        await gate.BindAcceptedPreDispatchAsync(lease, new AgentToolInvocationBindPreDispatchRequest
+        {
+            Receipt = receipt
+        });
+    }
+
+    private static AgentToolGovernancePreDispatchReceipt TestReceipt(AgentToolInvocationLease lease)
+        => new()
+        {
+            Identity = new AgentToolPreDispatchIdentity(
+                new AgentToolLogicalInvocationKey("tenant", "user", "agent", "execution", "invocation"),
+                lease.AttemptId),
+            AuditId = "audit-test",
+            AcceptedAt = DateTimeOffset.UtcNow
+        };
 
     private static AgentToolInvocationAcquireRequest Request(string fingerprint)
         => new(

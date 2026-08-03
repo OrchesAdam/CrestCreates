@@ -12,6 +12,122 @@ using FluentAssertions;
 using Xunit;
 
 namespace CrestCreates.Agent.Tools.Tests.Invocation;
+/// <summary>
+/// Shared pre-dispatch state tracker for test gate mocks.
+/// </summary>
+internal sealed class TestPreDispatchStateTracker
+{
+    private AgentToolInvocationPreDispatchState _state = AgentToolInvocationPreDispatchState.Unknown;
+    private AgentToolInvocationPreDispatchIntentSnapshot? _intent;
+    private string? _boundReservationId;
+    private AgentToolGovernancePreDispatchReceipt? _acceptedReceipt;
+    private AgentToolPreDispatchIdentity _identity;
+    private readonly Func<bool> _dispatchSucceeds;
+
+    public TestPreDispatchStateTracker(Func<bool>? dispatchSucceeds = null)
+    {
+        _dispatchSucceeds = dispatchSucceeds ?? (() => true);
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PreparePreDispatchIntentAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPreparePreDispatchIntentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        _state = AgentToolInvocationPreDispatchState.Pending;
+        _intent = request.Intent;
+        _identity = new AgentToolPreDispatchIdentity(
+            new AgentToolLogicalInvocationKey(null, "test", "test", "test", lease.AttemptId),
+            lease.AttemptId);
+        return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+        {
+            State = _state,
+            Intent = _intent
+        });
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindPreDispatchReservationAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindReservationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_state != AgentToolInvocationPreDispatchState.Pending)
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult { State = _state });
+        _state = AgentToolInvocationPreDispatchState.Ready;
+        _boundReservationId = request.ReservationId;
+        return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+        {
+            State = _state,
+            Intent = _intent,
+            BoundReservationId = _boundReservationId
+        });
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindPreDispatchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_state != AgentToolInvocationPreDispatchState.Ready)
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult { State = _state });
+        _state = AgentToolInvocationPreDispatchState.Accepted;
+        _acceptedReceipt = request.Receipt;
+        return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+        {
+            State = _state,
+            Intent = _intent,
+            BoundReservationId = _boundReservationId,
+            AcceptedReceipt = _acceptedReceipt
+        });
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+        {
+            State = _state,
+            Intent = _intent,
+            BoundReservationId = _boundReservationId,
+            AcceptedReceipt = _acceptedReceipt
+        });
+    }
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPublishDenialRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        _state = AgentToolInvocationPreDispatchState.Abandoned;
+        return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+        {
+            State = _state,
+            AbandonedReceipt = new AgentToolInvocationAbandonedReceipt
+            {
+                Identity = _identity,
+                Outcome = request.Outcome,
+                ReasonCode = request.ReasonCode,
+                AbandonedAt = DateTimeOffset.UtcNow
+            }
+        });
+    }
+
+    public ValueTask<bool> TryMarkDispatchStartedAsync(
+        AgentToolInvocationLease lease,
+        AgentToolGovernancePreDispatchReceipt receipt,
+        string reservationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_state != AgentToolInvocationPreDispatchState.Accepted)
+            return ValueTask.FromResult(false);
+        if (!_dispatchSucceeds())
+            return ValueTask.FromResult(false);
+        _state = AgentToolInvocationPreDispatchState.DispatchStarted;
+        return ValueTask.FromResult(true);
+    }
+}
+
 
 public sealed class AgentToolInvokerTests
 {
@@ -757,6 +873,9 @@ public sealed class AgentToolInvokerTests
             _reservation = _reservation! with { State = request.RequestedState };
             return ValueTask.FromResult(_reservation);
         }
+    public ValueTask<AgentToolBudgetReservationReadResult> GetReservationStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(new AgentToolBudgetReservationReadResult { Status = AgentToolBudgetReadStatus.Reserved });
+
     }
 
     private sealed class ThrowingAuditor(bool throwDecision = false) : IAgentToolGovernanceAuditor
@@ -768,10 +887,10 @@ public sealed class AgentToolInvokerTests
                 ? ValueTask.FromException(new InvalidOperationException("decision audit unavailable"))
                 : ValueTask.CompletedTask;
 
-        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+        public ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
             CancellationToken cancellationToken = default)
-            => ValueTask.FromException<AgentToolGovernanceAuditHandle>(new InvalidOperationException("audit unavailable"));
+            => ValueTask.FromException<AgentToolGovernancePreDispatchWriteResult>(new InvalidOperationException("audit unavailable"));
 
         public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
             AgentToolGovernanceFinalizationRecord record,
@@ -785,6 +904,9 @@ public sealed class AgentToolInvokerTests
             {
                 Status = AgentToolGovernanceFinalizationStatus.Unknown
             });
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult { Status = AgentToolGovernancePreDispatchReadStatus.Accepted });
+
     }
 
     private sealed class ThrowingDispatchFenceGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
@@ -803,10 +925,8 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RenewAsync(lease, cancellationToken);
 
-        public ValueTask<bool> TryMarkDispatchStartedAsync(
-            AgentToolInvocationLease lease,
-            CancellationToken cancellationToken = default)
-            => ValueTask.FromException<bool>(new InvalidOperationException("fence result unavailable"));
+        public ValueTask<bool> TryMarkDispatchStartedAsync(AgentToolInvocationLease lease, AgentToolGovernancePreDispatchReceipt receipt, string reservationId, CancellationToken cancellationToken = default)
+            => _preDispatchTracker.TryMarkDispatchStartedAsync(lease, receipt, reservationId, cancellationToken);
 
         public ValueTask PrepareCompletionAsync(
             AgentToolInvocationLease lease,
@@ -854,6 +974,38 @@ public sealed class AgentToolInvokerTests
             string reasonCode,
             CancellationToken cancellationToken = default)
             => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
+    private readonly TestPreDispatchStateTracker _preDispatchTracker = new TestPreDispatchStateTracker(() => throw new InvalidOperationException("fence result unavailable"));
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PreparePreDispatchIntentAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPreparePreDispatchIntentRequest request,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.PreparePreDispatchIntentAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindPreDispatchReservationAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindReservationRequest request,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.BindPreDispatchReservationAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindPreDispatchRequest request,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.BindAcceptedPreDispatchAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.GetPreDispatchStateAsync(identity, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPublishDenialRequest request,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.PublishBudgetDenialAsync(lease, request, cancellationToken);
+
+
     }
 
     private sealed class RejectingDispatchFenceGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
@@ -870,10 +1022,8 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RenewAsync(lease, cancellationToken);
 
-        public ValueTask<bool> TryMarkDispatchStartedAsync(
-            AgentToolInvocationLease lease,
-            CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(false);
+        public ValueTask<bool> TryMarkDispatchStartedAsync(AgentToolInvocationLease lease, AgentToolGovernancePreDispatchReceipt receipt, string reservationId, CancellationToken cancellationToken = default)
+            => _preDispatchTracker.TryMarkDispatchStartedAsync(lease, receipt, reservationId, cancellationToken);
 
         public ValueTask PrepareCompletionAsync(
             AgentToolInvocationLease lease,
@@ -918,6 +1068,38 @@ public sealed class AgentToolInvokerTests
             string reasonCode,
             CancellationToken cancellationToken = default)
             => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
+    private readonly TestPreDispatchStateTracker _preDispatchTracker = new TestPreDispatchStateTracker(() => false);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PreparePreDispatchIntentAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPreparePreDispatchIntentRequest request,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.PreparePreDispatchIntentAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindPreDispatchReservationAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindReservationRequest request,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.BindPreDispatchReservationAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindPreDispatchRequest request,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.BindAcceptedPreDispatchAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.GetPreDispatchStateAsync(identity, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPublishDenialRequest request,
+        CancellationToken cancellationToken = default)
+        => _preDispatchTracker.PublishBudgetDenialAsync(lease, request, cancellationToken);
+
+
     }
 
     private sealed class FinalizationThrowingAuditor : IAgentToolGovernanceAuditor
@@ -927,14 +1109,24 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => ValueTask.CompletedTask;
 
-        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+        public ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
             CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(new AgentToolGovernanceAuditHandle
+            => ValueTask.FromResult(new AgentToolGovernancePreDispatchWriteResult
             {
-                AuditId = "audit-test",
-                AcceptedAt = DateTimeOffset.UtcNow
+                Status = AgentToolGovernancePreDispatchWriteStatus.Accepted,
+                Receipt = new AgentToolGovernancePreDispatchReceipt
+                {
+                    Identity = new AgentToolPreDispatchIdentity(
+                        record.Context.LogicalInvocationKey,
+                        record.Lease.AttemptId),
+                    AuditId = "audit-test",
+                    AcceptedAt = DateTimeOffset.UtcNow
+                }
             });
+
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult { Status = AgentToolGovernancePreDispatchReadStatus.Accepted });
 
         public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
             AgentToolGovernanceFinalizationRecord record,
@@ -960,7 +1152,7 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RecordDecisionAsync(record, cancellationToken);
 
-        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+        public ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
             CancellationToken cancellationToken = default)
             => _inner.RecordPreDispatchAsync(record, cancellationToken);
@@ -993,6 +1185,9 @@ public sealed class AgentToolInvokerTests
                     }
                 };
         }
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
+
     }
 
     private sealed class PreDispatchResponseLossAuditor : IAgentToolGovernanceAuditor
@@ -1006,7 +1201,7 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => Inner.RecordDecisionAsync(record, cancellationToken);
 
-        public async ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+        public async ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
             CancellationToken cancellationToken = default)
         {
@@ -1026,6 +1221,9 @@ public sealed class AgentToolInvokerTests
             string auditId,
             CancellationToken cancellationToken = default)
             => Inner.GetFinalizationStateAsync(auditId, cancellationToken);
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult { Status = AgentToolGovernancePreDispatchReadStatus.Accepted });
+
     }
 
     private sealed class MismatchedFinalizationAuditor : IAgentToolGovernanceAuditor
@@ -1037,7 +1235,7 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RecordDecisionAsync(record, cancellationToken);
 
-        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+        public ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
             CancellationToken cancellationToken = default)
             => _inner.RecordPreDispatchAsync(record, cancellationToken);
@@ -1062,6 +1260,9 @@ public sealed class AgentToolInvokerTests
             string auditId,
             CancellationToken cancellationToken = default)
             => _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
+
     }
 
     private sealed class IndeterminateFinalizationAuditor : IAgentToolGovernanceAuditor
@@ -1073,7 +1274,7 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RecordDecisionAsync(record, cancellationToken);
 
-        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+        public ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
             CancellationToken cancellationToken = default)
             => _inner.RecordPreDispatchAsync(record, cancellationToken);
@@ -1111,6 +1312,9 @@ public sealed class AgentToolInvokerTests
             string auditId,
             CancellationToken cancellationToken = default)
             => _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
+
     }
 
     private sealed class ConflictingFinalizationAuditor : IAgentToolGovernanceAuditor
@@ -1122,7 +1326,7 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RecordDecisionAsync(record, cancellationToken);
 
-        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+        public ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
             CancellationToken cancellationToken = default)
             => _inner.RecordPreDispatchAsync(record, cancellationToken);
@@ -1146,6 +1350,9 @@ public sealed class AgentToolInvokerTests
             string auditId,
             CancellationToken cancellationToken = default)
             => _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
+
     }
 
     private sealed class BlockingFinalizationAuditor : IAgentToolGovernanceAuditor
@@ -1161,14 +1368,24 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => ValueTask.CompletedTask;
 
-        public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+        public ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
             AgentToolGovernancePreDispatchRecord record,
             CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(new AgentToolGovernanceAuditHandle
+            => ValueTask.FromResult(new AgentToolGovernancePreDispatchWriteResult
             {
-                AuditId = "audit-blocking",
-                AcceptedAt = DateTimeOffset.UtcNow
+                Status = AgentToolGovernancePreDispatchWriteStatus.Accepted,
+                Receipt = new AgentToolGovernancePreDispatchReceipt
+                {
+                    Identity = new AgentToolPreDispatchIdentity(
+                        record.Context.LogicalInvocationKey,
+                        record.Lease.AttemptId),
+                    AuditId = "audit-blocking",
+                    AcceptedAt = DateTimeOffset.UtcNow
+                }
             });
+
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult { Status = AgentToolGovernancePreDispatchReadStatus.Accepted });
 
         public async ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
             AgentToolGovernanceFinalizationRecord record,
@@ -1202,10 +1419,8 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RenewAsync(lease, cancellationToken);
 
-        public ValueTask<bool> TryMarkDispatchStartedAsync(
-            AgentToolInvocationLease lease,
-            CancellationToken cancellationToken = default)
-            => _inner.TryMarkDispatchStartedAsync(lease, cancellationToken);
+        public ValueTask<bool> TryMarkDispatchStartedAsync(AgentToolInvocationLease lease, AgentToolGovernancePreDispatchReceipt receipt, string reservationId, CancellationToken cancellationToken = default)
+            => _inner.TryMarkDispatchStartedAsync(lease, receipt, reservationId, cancellationToken);
 
         public ValueTask PrepareCompletionAsync(
             AgentToolInvocationLease lease,
@@ -1259,6 +1474,36 @@ public sealed class AgentToolInvokerTests
             string reasonCode,
             CancellationToken cancellationToken = default)
             => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
+    public ValueTask<AgentToolInvocationPreDispatchResult> PreparePreDispatchIntentAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPreparePreDispatchIntentRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.PreparePreDispatchIntentAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindPreDispatchReservationAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindReservationRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.BindPreDispatchReservationAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindPreDispatchRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.BindAcceptedPreDispatchAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+        => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPublishDenialRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.PublishBudgetDenialAsync(lease, request, cancellationToken);
+
+
     }
 
     private sealed class PublishResponseLossGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
@@ -1275,10 +1520,8 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RenewAsync(lease, cancellationToken);
 
-        public ValueTask<bool> TryMarkDispatchStartedAsync(
-            AgentToolInvocationLease lease,
-            CancellationToken cancellationToken = default)
-            => _inner.TryMarkDispatchStartedAsync(lease, cancellationToken);
+        public ValueTask<bool> TryMarkDispatchStartedAsync(AgentToolInvocationLease lease, AgentToolGovernancePreDispatchReceipt receipt, string reservationId, CancellationToken cancellationToken = default)
+            => _inner.TryMarkDispatchStartedAsync(lease, receipt, reservationId, cancellationToken);
 
         public ValueTask PrepareCompletionAsync(
             AgentToolInvocationLease lease,
@@ -1326,6 +1569,36 @@ public sealed class AgentToolInvokerTests
             string reasonCode,
             CancellationToken cancellationToken = default)
             => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
+    public ValueTask<AgentToolInvocationPreDispatchResult> PreparePreDispatchIntentAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPreparePreDispatchIntentRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.PreparePreDispatchIntentAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindPreDispatchReservationAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindReservationRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.BindPreDispatchReservationAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindPreDispatchRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.BindAcceptedPreDispatchAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+        => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPublishDenialRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.PublishBudgetDenialAsync(lease, request, cancellationToken);
+
+
     }
 
     private sealed class MismatchedPublishResultGate : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
@@ -1343,10 +1616,8 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.RenewAsync(lease, cancellationToken);
 
-        public ValueTask<bool> TryMarkDispatchStartedAsync(
-            AgentToolInvocationLease lease,
-            CancellationToken cancellationToken = default)
-            => _inner.TryMarkDispatchStartedAsync(lease, cancellationToken);
+        public ValueTask<bool> TryMarkDispatchStartedAsync(AgentToolInvocationLease lease, AgentToolGovernancePreDispatchReceipt receipt, string reservationId, CancellationToken cancellationToken = default)
+            => _inner.TryMarkDispatchStartedAsync(lease, receipt, reservationId, cancellationToken);
 
         public ValueTask PrepareCompletionAsync(
             AgentToolInvocationLease lease,
@@ -1401,6 +1672,36 @@ public sealed class AgentToolInvokerTests
             string reasonCode,
             CancellationToken cancellationToken = default)
             => _inner.AbandonUnrecordedLeaseAsync(lease, reasonCode, cancellationToken);
+    public ValueTask<AgentToolInvocationPreDispatchResult> PreparePreDispatchIntentAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPreparePreDispatchIntentRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.PreparePreDispatchIntentAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindPreDispatchReservationAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindReservationRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.BindPreDispatchReservationAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindPreDispatchRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.BindAcceptedPreDispatchAsync(lease, request, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+        => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPublishDenialRequest request,
+        CancellationToken cancellationToken = default)
+        => _inner.PublishBudgetDenialAsync(lease, request, cancellationToken);
+
+
     }
 
     private sealed class EmptyServiceProvider : IServiceProvider

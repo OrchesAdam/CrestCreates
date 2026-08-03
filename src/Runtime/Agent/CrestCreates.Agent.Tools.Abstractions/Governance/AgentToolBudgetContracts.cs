@@ -69,4 +69,8 @@ public interface IAgentToolBudgetGate
     ValueTask<AgentToolBudgetReservation> FinalizeAsync(
         AgentToolBudgetFinalizeRequest request,
         CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolBudgetReservationReadResult> GetReservationStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default);
 }

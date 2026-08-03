@@ -97,4 +97,25 @@ public sealed class SampleAgentToolBudgetGate : IAgentToolBudgetGate
         _reservations[existing.ReservationId] = finalized;
         return ValueTask.FromResult(finalized);
     }
+
+    public ValueTask<AgentToolBudgetReservationReadResult> GetReservationStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var match = _reservations.Values.FirstOrDefault(r => r.AttemptId == identity.AttemptId);
+        if (match is null)
+        {
+            return ValueTask.FromResult(new AgentToolBudgetReservationReadResult
+            {
+                Status = AgentToolBudgetReadStatus.Missing
+            });
+        }
+
+        return ValueTask.FromResult(new AgentToolBudgetReservationReadResult
+        {
+            Status = AgentToolBudgetReadStatus.Reserved,
+            Reservation = match
+        });
+    }
 }
