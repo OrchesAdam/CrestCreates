@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using CrestCreates.Agent.Tools;
 using Npgsql;
@@ -5,6 +6,8 @@ using NpgsqlTypes;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
+[UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Tier 3 persistence provider — JSON serialization of Agent Tool governance records uses known record types that are preserved by the persistence project's runtime contract.")]
+[UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Tier 3 persistence provider — JSON serialization of Agent Tool governance records uses known record types that are preserved by the persistence project's runtime contract.")]
 internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanceAuditor
 {
     private readonly PostgreSqlRuntimePersistenceOptions _options;

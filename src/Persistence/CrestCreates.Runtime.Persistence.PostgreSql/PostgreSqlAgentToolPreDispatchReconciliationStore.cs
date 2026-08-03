@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using CrestCreates.Agent.Tools;
 using Npgsql;
@@ -5,6 +6,8 @@ using NpgsqlTypes;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
+[UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Tier 3 persistence provider — JSON serialization of reconciliation observation/receipt records uses known record types.")]
+[UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Tier 3 persistence provider — JSON serialization of reconciliation observation/receipt records uses known record types.")]
 internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgentToolPreDispatchReconciliationStore
 {
     private readonly PostgreSqlRuntimePersistenceOptions _options;
