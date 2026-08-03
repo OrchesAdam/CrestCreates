@@ -712,6 +712,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         new RuntimeMigration("V007", "agent_tool_pre_dispatch_reconciliation", """
             create table {schema}.agent_tool_pre_dispatch_checkpoints (
                 tenant_id text not null,
+                audit_id text not null,
                 logical_invocation_key jsonb not null,
                 attempt_id text not null,
                 invocation_fingerprint text not null,
