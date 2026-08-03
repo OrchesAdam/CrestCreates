@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using CrestCreates.Agent.Tools;
 using Npgsql;
@@ -6,8 +5,6 @@ using NpgsqlTypes;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
-[UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Tier 3 persistence provider — JSON serialization of reconciliation observation/receipt records uses known record types.")]
-[UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Tier 3 persistence provider — JSON serialization of reconciliation observation/receipt records uses known record types.")]
 internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgentToolPreDispatchReconciliationStore
 {
     private readonly PostgreSqlRuntimePersistenceOptions _options;
@@ -56,7 +53,7 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
               and attempt_id = @attemptId
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", identity.LogicalInvocationKey.TenantId ?? string.Empty));
-        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(identity.LogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", identity.AttemptId));
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -94,7 +91,7 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", observation.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
-        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(observation.Identity.LogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(observation.Identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", observation.Identity.AttemptId));
         cmd.Parameters.Add(new NpgsqlParameter("revision", observation.Revision));
         cmd.Parameters.Add(new NpgsqlParameter("status", (int)observation.Status));
@@ -120,7 +117,7 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
               and attempt_id = @attemptId
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", identity.LogicalInvocationKey.TenantId ?? string.Empty));
-        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(identity.LogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", identity.AttemptId));
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -151,13 +148,13 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", receipt.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
-        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(receipt.Identity.LogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(receipt.Identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", receipt.Identity.AttemptId));
         cmd.Parameters.Add(new NpgsqlParameter("status", (int)receipt.Status));
         cmd.Parameters.Add(new NpgsqlParameter("reasonCode", receipt.ReasonCode));
         cmd.Parameters.Add(new NpgsqlParameter("terminalAt", receipt.TerminalAt));
         cmd.Parameters.Add(new NpgsqlParameter("integrityValue", receipt.IntegrityValue));
-        cmd.Parameters.Add(new NpgsqlParameter("receiptJson", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(receipt) });
+        cmd.Parameters.Add(new NpgsqlParameter("receiptJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(receipt, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolPreDispatchReconciliationReceipt) });
 
         var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return result is not null;

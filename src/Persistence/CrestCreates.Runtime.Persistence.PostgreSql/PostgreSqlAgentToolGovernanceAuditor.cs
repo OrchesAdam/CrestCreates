@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using CrestCreates.Agent.Tools;
 using Npgsql;
@@ -6,8 +5,6 @@ using NpgsqlTypes;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
-[UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Tier 3 persistence provider — JSON serialization of Agent Tool governance records uses known record types that are preserved by the persistence project's runtime contract.")]
-[UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Tier 3 persistence provider — JSON serialization of Agent Tool governance records uses known record types that are preserved by the persistence project's runtime contract.")]
 internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanceAuditor
 {
     private readonly PostgreSqlRuntimePersistenceOptions _options;
@@ -97,7 +94,7 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
               and attempt_id = @attemptId
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", identity.LogicalInvocationKey.TenantId ?? string.Empty));
-        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(identity.LogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", identity.AttemptId));
 
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -124,21 +121,21 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         var ctx = record.Context;
         var tenantId = ctx.LogicalInvocationKey.TenantId ?? string.Empty;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId));
-        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(ctx.LogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(ctx.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", ctx.AttemptId));
         cmd.Parameters.Add(new NpgsqlParameter("fp", ctx.InvocationFingerprint ?? string.Empty));
         cmd.Parameters.Add(new NpgsqlParameter("argsHash", ctx.ArgumentsHash ?? string.Empty));
         cmd.Parameters.Add(new NpgsqlParameter("argsEval", ctx.ArgumentsEvaluated));
         cmd.Parameters.Add(new NpgsqlParameter("callOrigin", (int)ctx.CallOrigin));
         cmd.Parameters.Add(new NpgsqlParameter("rolesHash", ctx.AgentRolesHash ?? string.Empty));
-        cmd.Parameters.Add(new NpgsqlParameter("toolJson", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(ctx.ToolContract) });
-        cmd.Parameters.Add(new NpgsqlParameter("capJson", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(ctx.CapabilityContract) });
-        cmd.Parameters.Add(new NpgsqlParameter("inputJson", NpgsqlDbType.Jsonb) { Value = ctx.InputSchemaContract is not null ? JsonSerializer.Serialize(ctx.InputSchemaContract) : DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("outputJson", NpgsqlDbType.Jsonb) { Value = ctx.OutputSchemaContract is not null ? JsonSerializer.Serialize(ctx.OutputSchemaContract) : DBNull.Value });
-        cmd.Parameters.Add(new NpgsqlParameter("govJson", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(ctx.Governance) });
-        cmd.Parameters.Add(new NpgsqlParameter("leaseJson", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(record.Lease) });
-        cmd.Parameters.Add(new NpgsqlParameter("approvalJson", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(record.Approval) });
-        cmd.Parameters.Add(new NpgsqlParameter("budgetJson", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(record.BudgetReservation) });
+        cmd.Parameters.Add(new NpgsqlParameter("toolJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(ctx.ToolContract, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolContractIdentity) });
+        cmd.Parameters.Add(new NpgsqlParameter("capJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(ctx.CapabilityContract, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolContractIdentity) });
+        cmd.Parameters.Add(new NpgsqlParameter("inputJson", NpgsqlDbType.Jsonb) { Value = ctx.InputSchemaContract is not null ? PostgreSqlRuntimeStoreSupport.Serialize(ctx.InputSchemaContract, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolSchemaContractIdentity) : DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("outputJson", NpgsqlDbType.Jsonb) { Value = ctx.OutputSchemaContract is not null ? PostgreSqlRuntimeStoreSupport.Serialize(ctx.OutputSchemaContract, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolSchemaContractIdentity) : DBNull.Value });
+        cmd.Parameters.Add(new NpgsqlParameter("govJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(ctx.Governance, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolEffectiveGovernance) });
+        cmd.Parameters.Add(new NpgsqlParameter("leaseJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.Lease, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationLease) });
+        cmd.Parameters.Add(new NpgsqlParameter("approvalJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.Approval, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolApprovalResult) });
+        cmd.Parameters.Add(new NpgsqlParameter("budgetJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.BudgetReservation, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolBudgetReservation) });
         cmd.Parameters.Add(new NpgsqlParameter("acceptedAt", DateTimeOffset.UtcNow));
     }
 }

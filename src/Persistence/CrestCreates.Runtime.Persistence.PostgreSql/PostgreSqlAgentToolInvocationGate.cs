@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using CrestCreates.Agent.Tools;
 using Npgsql;
@@ -6,8 +5,6 @@ using NpgsqlTypes;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
-[UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Tier 3 persistence provider — JSON serialization of Agent Tool invocation pre-dispatch records uses known record types.")]
-[UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Tier 3 persistence provider — JSON serialization of Agent Tool invocation pre-dispatch records uses known record types.")]
 internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGate
 {
     private readonly PostgreSqlRuntimePersistenceOptions _options;
@@ -129,7 +126,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
         cmd.Parameters.Add(new NpgsqlParameter("st", NpgsqlDbType.Integer) { Value = (int)AgentToolInvocationPreDispatchState.Pending });
-        cmd.Parameters.Add(new NpgsqlParameter("ij", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(req.Intent) });
+        cmd.Parameters.Add(new NpgsqlParameter("ij", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(req.Intent, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPreDispatchIntentSnapshot) });
         var r = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return new AgentToolInvocationPreDispatchResult
         {
@@ -168,7 +165,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
         cmd.Parameters.Add(new NpgsqlParameter("st", (int)AgentToolInvocationPreDispatchState.Accepted));
-        cmd.Parameters.Add(new NpgsqlParameter("rj", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(req.Receipt) });
+        cmd.Parameters.Add(new NpgsqlParameter("rj", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(req.Receipt, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernancePreDispatchReceipt) });
         cmd.Parameters.Add(new NpgsqlParameter("ps", (int)AgentToolInvocationPreDispatchState.Ready));
         var r = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return new AgentToolInvocationPreDispatchResult
