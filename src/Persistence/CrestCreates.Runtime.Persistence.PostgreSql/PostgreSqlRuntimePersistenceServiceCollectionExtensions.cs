@@ -36,6 +36,7 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         services.AddSingleton<IAgentToolBudgetGate, PostgreSqlAgentToolBudgetGate>();
         services.AddSingleton<IAgentToolInvocationGate, PostgreSqlAgentToolInvocationGate>();
         services.AddSingleton<IAgentToolPreDispatchReconciliationStore, PostgreSqlAgentToolPreDispatchReconciliationStore>();
+        services.AddSingleton<PostgreSqlAgentToolPreDispatchCleanup>();
         return services;
     }
 }

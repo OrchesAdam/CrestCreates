@@ -49,6 +49,7 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_PIN_RECOVERY_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK");
         }
         finally
         {

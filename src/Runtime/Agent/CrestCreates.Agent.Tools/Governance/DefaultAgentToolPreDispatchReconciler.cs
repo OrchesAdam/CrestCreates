@@ -1,3 +1,6 @@
+using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Recording;
+using CrestCreates.Accountability.Abstractions.Semantics;
 using CrestCreates.Agent.Abstractions;
 
 namespace CrestCreates.Agent.Tools;
@@ -281,17 +284,71 @@ public sealed class NullAgentToolPreDispatchAccountabilityProducer : IAgentToolP
 /// <summary>
 /// Real Accountability producer (activated in Slice 6). Uses IAuditRecorder,
 /// never IAuditSink. Emits only safe IDs/descriptors/reason families.
+/// Accountability failure is observed/logged and cannot alter the reconciliation result.
 /// </summary>
 public sealed class AgentToolPreDispatchReconciliationAccountabilityProducer : IAgentToolPreDispatchAccountabilityProducer
 {
-    public ValueTask PublishAsync(
+    private readonly IAuditRecorder _auditRecorder;
+    private readonly TimeProvider _timeProvider;
+
+    public AgentToolPreDispatchReconciliationAccountabilityProducer(
+        IAuditRecorder auditRecorder,
+        TimeProvider? timeProvider = null)
+    {
+        _auditRecorder = auditRecorder ?? throw new ArgumentNullException(nameof(auditRecorder));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    public async ValueTask PublishAsync(
         AgentToolPreDispatchIdentity identity,
         AgentToolPreDispatchReconciliationStatus status,
         string reasonCode,
         CancellationToken cancellationToken = default)
     {
-        // Slice 6 will wire IAuditRecorder and emit the safe AuditEnvelope.
-        // Until then, this is a no-op that satisfies the interface contract.
-        return ValueTask.CompletedTask;
+        try
+        {
+            var now = _timeProvider.GetUtcNow();
+            var auditId = $"acr-{identity.LogicalInvocationKey.InvocationId}-{identity.AttemptId}-{now:yyyyMMddHHmmssfff}";
+
+            var envelope = new AuditEnvelope
+            {
+                AuditId = auditId,
+                OccurredAt = now,
+                TenantId = identity.LogicalInvocationKey.TenantId,
+                CorrelationId = identity.LogicalInvocationKey.ExecutionId,
+                CausationId = identity.LogicalInvocationKey.InvocationId,
+                Actor = new AuditActor
+                {
+                    Kind = AuditActorKinds.System,
+                    Id = "agent-tool-reconciler",
+                    DisplayName = "Agent Tool Pre-Dispatch Reconciler"
+                },
+                Action = new AuditAction
+                {
+                    Kind = "control.transition",
+                    Name = "AgentToolPreDispatchReconciliation"
+                },
+                Target = new AuditTarget
+                {
+                    Kind = "agent-tool-invocation",
+                    Id = $"{identity.LogicalInvocationKey.InvocationId}:{identity.AttemptId}"
+                },
+                Outcome = new AuditOutcome
+                {
+                    Status = status == AgentToolPreDispatchReconciliationStatus.Released
+                        ? AuditOutcomeStatuses.Succeeded
+                        : AuditOutcomeStatuses.Succeeded,
+                    Code = reasonCode
+                },
+                Tags = AuditTagMap.Empty.Add("reconciliation.status", status.ToString())
+            };
+
+            await _auditRecorder.RecordAsync(envelope, cancellationToken);
+        }
+        catch
+        {
+            // Accountability failure is observed/logged and cannot alter the reconciliation result.
+            // The control terminal/receipt is already persisted; projection may retry independently.
+        }
     }
 }

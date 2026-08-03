@@ -12,5 +12,6 @@
     <ProjectReference Include="../../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
+    <ProjectReference Include="../../Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
   </ItemGroup>
 </Project>

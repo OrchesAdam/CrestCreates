@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-31 (Phase 9b durable persistence CI and NativeAOT evidence verified)
+Last Updated: 2026-08-03 (Phase 9b+ durable agent tool pre-dispatch reconciliation — all 7 slices complete, CI green)
 
 ## Purpose
 
@@ -2080,8 +2080,71 @@ Compatibility GET
 - Dynamic API: 73 passed.
 - MCP Runtime: 66 passed; MCP E2E: 28 passed.
 - Agent Tools Runtime: 116 passed.
-- Dependency Boundaries: 50 passed.
-- CodeGenerator: 283 passed.
+ - Dependency Boundaries: 50 passed.
+ - CodeGenerator: 283 passed.
+
+### Phase 9b+ — Durable Agent Tool Pre-Dispatch Reconciliation (2026-08-03)
+
+**Status**: All 7 slices complete. CI green (including all NativeAOT fixtures).
+
+**PR**: #72
+
+**What was built**:
+
+- **Pre-dispatch contracts** (3 new contract files in Abstractions):
+  - `AgentToolPreDispatchContracts.cs` — identity, receipt, write/read results, budget read result
+  - `AgentToolPreDispatchReconciliationContracts.cs` — IAgentToolPreDispatchReconciler, reconciliation status/observation/receipt/result, store with CAS semantics, persistence capabilities, dormant accountability producer
+  - `AgentToolInvocationPreDispatchContracts.cs` — intent snapshot, bind reservation/accepted requests, pre-dispatch result
+
+- **Semantic comparer** (`AgentToolGovernancePreDispatchComparer`, moved to Abstractions):
+  - Full INV-04 dispatch-authorizing fact validation: identity+AttemptId, fingerprint/args/roles, contract identities, effective governance, lease, approval+evidence, reservation
+  - 56 mutation test rows proving detection coverage
+
+- **Extended interfaces** (3 existing interfaces extended):
+  - `IAgentToolGovernanceAuditor` — `RecordPreDispatchAsync` returns typed write result; added `GetPreDispatchStateAsync`
+  - `IAgentToolBudgetGate` — added `GetReservationStateAsync`
+  - `IAgentToolInvocationGate` — 5 pre-dispatch methods; `TryMarkDispatchStartedAsync` requires receipt + reservationId (INV-08 CAS)
+
+- **Pre-dispatch state machine** (Slice 3):
+  - Full Pending → Ready → Accepted → DispatchStarted state machine in gate
+  - Invoker refactored to stepwise orchestration with acknowledgement-loss recovery at every boundary
+  - Budget gate attempt-idempotent reserve/read contract
+  - `AgentToolGovernanceAuditHandle` deleted (superseded by `AgentToolGovernancePreDispatchReceipt`)
+
+- **Default reconciler** (Slice 4):
+  - Spec 7.6 sequential reconciliation: read Gate → read Budget → read checkpoint → compare → release → persist
+  - Observation/receipt semantics with CAS (optimistic observations, first-write-wins terminal receipts)
+  - Repeated reconciliation returns `AlreadyReleased` from existing terminal receipt
+  - Best-effort accountability producer (no-op until Slice 6)
+
+- **PostgreSQL participants** (Slice 5):
+  - V007 migration: `agent_tool_pre_dispatch_checkpoints`, `agent_tool_budget_reservations`, `agent_tool_invocation_pre_dispatch`, `agent_tool_reconciliation_observations`, `agent_tool_reconciliation_receipts`
+  - `PostgreSqlAgentToolGovernanceAuditor`, `PostgreSqlAgentToolBudgetGate`, `PostgreSqlAgentToolInvocationGate`, `PostgreSqlAgentToolPreDispatchReconciliationStore`
+  - `[UnconditionalSuppressMessage]` for Tier 3 IL2026/IL3050 (JSON serialization of known record types)
+  - DI registration in `AddCrestCreatesPostgreSqlRuntimePersistence`
+
+- **Retention, cleanup, accountability** (Slice 6):
+  - `PostgreSqlAgentToolPreDispatchCleanup` with state-protected deletion (Pending, Ready, Accepted, ReleasePending, CompletionPending, Indeterminate are not cleanable)
+  - Retention options: `PreDispatchReceiptRetentionDays` (90), `PreDispatchObservationRetentionDays` (14), `PreDispatchFinalizationRetentionDays` (7)
+  - `AgentToolPreDispatchReconciliationAccountabilityProducer` wired to `IAuditRecorder` — emits safe AuditEnvelope (IDs/descriptors/reason only, no arguments/hints/outputs/SQL/provider errors)
+  - Accountability failure does not change reconciliation result
+
+- **NativeAOT evidence** (Slice 7):
+  - Pre-dispatch scenario added to PostgreSQL AotHost: composes participants, executes full state machine, simulates lost acknowledgement, recovers with new provider, reconciles with zero dispatcher calls, prints `CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK`
+  - AotFixture test asserts sentinel output
+  - All NativeAOT fixtures pass in CI
+
+- **Test infrastructure**:
+  - Runner-free `CrestCreates.Agent.Tools.Persistence.Testing` project (Abstractions-only, no runners)
+  - 70-ID manifest (H01-H10, B01-B18, F01-F30, C01-C12) as ARCH test
+  - 8 ARCH tests + 5 BOUND tests
+  - 250 Agent.Tools tests, 93 boundary tests, 16 abstractions tests
+
+**Key decisions**:
+- `AgentToolGovernancePreDispatchComparer` moved to Abstractions (not runtime) per Spec 9.1 — Persistence providers need it for conflict detection
+- `AgentToolGovernanceAuditHandle` deleted outright (not deprecated) — fully superseded by `AgentToolGovernancePreDispatchReceipt`
+- Accountability producer uses `IAuditRecorder` (not `IAuditSink`) per boundary rules
+- Reconciler does not reference `ICapabilityDispatcher` or `IAgentToolApprovalGate` (review gate)
 
 ## Recommended Next Thread Entry Prompt
 

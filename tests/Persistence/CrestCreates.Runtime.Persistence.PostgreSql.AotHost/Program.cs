@@ -1,13 +1,17 @@
 using System.Text.Json.Serialization;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Agent.Abstractions;
+using CrestCreates.Agent.Tools;
 using CrestCreates.Core.Abstractions.Serialization;
 using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Metadata.Bootstrap;
+using CrestCreates.Metadata.AgentTool;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
@@ -138,7 +142,167 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
     Console.WriteLine("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
 }
 
+// Phase 9b+ Durable Agent Tool Pre-Dispatch Reconciliation scenario
+await RunPreDispatchScenarioAsync(options);
+
 return 0;
+
+static async Task RunPreDispatchScenarioAsync(PostgreSqlRuntimePersistenceOptions options)
+{
+    var key = new AgentToolLogicalInvocationKey("tenant", "user", "agent", "exec", "predispatch");
+    var identity = new AgentToolPreDispatchIdentity(key, "attempt-aot");
+    var fp = "fp-aot";
+
+    var governance = new AgentToolEffectiveGovernance(
+        AgentToolSelectionPolicy.ExplicitOnly,
+        AgentToolSideEffectKind.ReadOnly,
+        CapabilityRiskLevel.Low,
+        AgentToolApprovalMode.None,
+        new AgentToolBudgetRequirement { Category = "default", CostUnits = 1, MaxCallsPerExecution = 10 },
+        AgentToolAuditMode.Required);
+
+    var context = new AgentToolGovernanceAuditContext
+    {
+        LogicalInvocationKey = key,
+        AttemptId = "attempt-aot",
+        InvocationFingerprint = fp,
+        ArgumentsHash = "args-aot",
+        ArgumentsEvaluated = true,
+        CallOrigin = AgentToolCallOrigin.ExplicitRequest,
+        AgentRolesHash = "roles-aot",
+        ToolContract = new AgentToolContractIdentity("tool-aot", 1, "tool-hash"),
+        CapabilityContract = new AgentToolContractIdentity("cap-aot", 1, "cap-hash"),
+        Governance = governance
+    };
+
+    var budgetContext = new AgentToolGovernanceContext
+    {
+        LogicalInvocationKey = key,
+        AttemptId = "attempt-aot",
+        InvocationFingerprint = fp,
+        ArgumentsHash = "args-aot",
+        ArgumentsEvaluated = true,
+        ExecutionContext = new AgentExecutionContext { ExecutionId = "exec", InvocationId = "inv", AgentId = "agent", AgentRoles = new HashSet<string> { "role-1" }, CallOrigin = AgentToolCallOrigin.ExplicitRequest },
+        ToolContract = new AgentToolContractIdentity("tool-aot", 1, "tool-hash"),
+        CapabilityContract = new AgentToolContractIdentity("cap-aot", 1, "cap-hash"),
+        Governance = governance
+    };
+
+    var lease = new AgentToolInvocationLease
+    {
+        AttemptId = "attempt-aot",
+        LeaseId = "lease-aot",
+        FencingToken = DateTimeOffset.UtcNow.Ticks,
+        AcquiredAt = DateTimeOffset.UtcNow,
+        ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5)
+    };
+
+    var approval = new AgentToolApprovalResult
+    {
+        Decision = AgentToolApprovalDecision.NotRequired,
+        ClaimState = AgentToolApprovalEvidenceClaimState.NotApplicable,
+        EvidenceId = null,
+        ApproverReference = "approver-aot",
+        ReasonCode = "reason-aot"
+    };
+
+    string? reservationId = null;
+    AgentToolGovernancePreDispatchReceipt? receipt = null;
+
+    // Phase 1: Acquire, prepare intent, reserve budget, bind reservation, record checkpoint, bind accepted
+    await using (var first = BuildPreDispatchProvider(options))
+    {
+        using var scope = first.CreateScope();
+        var services = scope.ServiceProvider;
+        var gate = services.GetRequiredService<IAgentToolInvocationGate>();
+        var budget = services.GetRequiredService<IAgentToolBudgetGate>();
+        var auditor = services.GetRequiredService<IAgentToolGovernanceAuditor>();
+
+        var acquired = await gate.AcquireAsync(new AgentToolInvocationAcquireRequest(key, fp));
+        if (acquired.Status != AgentToolInvocationAcquireStatus.Acquired)
+            throw new InvalidOperationException($"Acquire failed: {acquired.Status}");
+
+        await gate.PreparePreDispatchIntentAsync(acquired.Lease!, new AgentToolInvocationPreparePreDispatchIntentRequest
+        {
+            Intent = new AgentToolInvocationPreDispatchIntentSnapshot
+            {
+                FrozenLease = acquired.Lease!,
+                InvocationFingerprint = fp,
+                Context = context,
+                Approval = approval
+            }
+        });
+
+        var reserveResult = await budget.ReserveAsync(new AgentToolBudgetReserveRequest { Context = budgetContext });
+        if (reserveResult.Status != AgentToolBudgetReserveStatus.Reserved || reserveResult.Reservation is null)
+            throw new InvalidOperationException($"Budget reserve failed: {reserveResult.Status}");
+        reservationId = reserveResult.Reservation.ReservationId;
+
+        await gate.BindPreDispatchReservationAsync(acquired.Lease!, new AgentToolInvocationBindReservationRequest
+        {
+            ReservationId = reservationId,
+            Reservation = reserveResult.Reservation
+        });
+
+        var record = new AgentToolGovernancePreDispatchRecord
+        {
+            Context = context,
+            Lease = lease,
+            Approval = approval,
+            BudgetReservation = reserveResult.Reservation
+        };
+        var writeResult = await auditor.RecordPreDispatchAsync(record);
+        if (writeResult.Status != AgentToolGovernancePreDispatchWriteStatus.Accepted || writeResult.Receipt is null)
+            throw new InvalidOperationException($"RecordPreDispatch failed: {writeResult.Status}");
+        receipt = writeResult.Receipt;
+
+        await gate.BindAcceptedPreDispatchAsync(acquired.Lease!, new AgentToolInvocationBindPreDispatchRequest
+        {
+            Receipt = receipt
+        });
+    }
+    // First provider disposed — simulates lost acknowledgement after BindAccepted
+
+    // Phase 2: Fresh provider — recover by identity, reconcile with zero dispatcher calls
+    await using (var fresh = BuildPreDispatchProvider(options))
+    {
+        using var scope = fresh.CreateScope();
+        var services = scope.ServiceProvider;
+        var gate = services.GetRequiredService<IAgentToolInvocationGate>();
+        var budget = services.GetRequiredService<IAgentToolBudgetGate>();
+        var auditor = services.GetRequiredService<IAgentToolGovernanceAuditor>();
+        var reconciler = services.GetRequiredService<IAgentToolPreDispatchReconciler>();
+
+        // Recover audit receipt by identity
+        var readResult = await auditor.GetPreDispatchStateAsync(identity);
+        if (readResult.Status != AgentToolGovernancePreDispatchReadStatus.Accepted || readResult.Receipt is null)
+            throw new InvalidOperationException($"Recovery failed: {readResult.Status}");
+        if (readResult.Receipt.AuditId != receipt!.AuditId)
+            throw new InvalidOperationException("Recovered AuditId mismatch");
+
+        // Reconcile — should release the budget reservation with zero dispatcher calls
+        var result1 = await reconciler.ReconcileAsync(identity);
+        if (result1.Status != AgentToolPreDispatchReconciliationStatus.Released)
+            throw new InvalidOperationException($"First reconcile failed: {result1.Status}");
+
+        // Repeat reconciliation — should return AlreadyReleased
+        var result2 = await reconciler.ReconcileAsync(identity);
+        if (result2.Status != AgentToolPreDispatchReconciliationStatus.AlreadyReleased)
+            throw new InvalidOperationException($"Second reconcile failed: {result2.Status}");
+    }
+
+    Console.WriteLine("CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK");
+}
+
+static ServiceProvider BuildPreDispatchProvider(PostgreSqlRuntimePersistenceOptions options)
+{
+    var services = new ServiceCollection();
+    services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
+    services.AddSingleton<IAgentToolPreDispatchAccountabilityProducer, AgentToolPreDispatchReconciliationAccountabilityProducer>();
+    services.AddSingleton<IAgentToolPreDispatchReconciler, DefaultAgentToolPreDispatchReconciler>();
+    var provider = services.BuildServiceProvider();
+    return provider;
+}
 
 static ServiceProvider BuildProvider(
     PostgreSqlRuntimePersistenceOptions options,
