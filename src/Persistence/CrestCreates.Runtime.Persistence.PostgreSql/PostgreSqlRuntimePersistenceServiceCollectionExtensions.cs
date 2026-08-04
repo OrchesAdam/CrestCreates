@@ -38,11 +38,16 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         services.RemoveAll<IAgentToolBudgetGate>();
         services.RemoveAll<IAgentToolInvocationGate>();
         services.RemoveAll<IAgentToolPreDispatchReconciliationStore>();
-        services.RemoveAll<IAgentToolPreDispatchReconciler>();
+        services.RemoveAll<IAgentToolInvocationLeaseAbandoner>();
+        services.RemoveAll<IAgentToolPreDispatchPersistenceCapabilities>();
         services.AddSingleton<IAgentToolGovernanceAuditor, PostgreSqlAgentToolGovernanceAuditor>();
         services.AddSingleton<IAgentToolBudgetGate, PostgreSqlAgentToolBudgetGate>();
         services.AddSingleton<IAgentToolInvocationGate, PostgreSqlAgentToolInvocationGate>();
+        services.AddSingleton<IAgentToolInvocationLeaseAbandoner>(sp => sp.GetRequiredService<IAgentToolInvocationGate>() as IAgentToolInvocationLeaseAbandoner ?? throw new InvalidOperationException("PostgreSQL gate does not implement IAgentToolInvocationLeaseAbandoner"));
+        services.AddSingleton<IAgentToolPreDispatchPersistenceCapabilities>(sp => sp.GetRequiredService<IAgentToolInvocationGate>() as IAgentToolPreDispatchPersistenceCapabilities ?? throw new InvalidOperationException("PostgreSQL gate does not implement IAgentToolPreDispatchPersistenceCapabilities"));
         services.AddSingleton<IAgentToolPreDispatchReconciliationStore, PostgreSqlAgentToolPreDispatchReconciliationStore>();
+        // Reconciler and accountability producer are registered by the application/runtime layer.
+        // Do not remove them here — only replace the durable participants.
         services.AddSingleton<PostgreSqlAgentToolPreDispatchCleanup>();
         return services;
     }

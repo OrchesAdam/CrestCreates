@@ -73,7 +73,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 };
             }
 
-            return await CreateTerminalResultAsync(identity, AgentToolPreDispatchReconciliationStatus.AlreadyReleased, "already_terminal", cancellationToken);
+            // Gate is terminal but no receipt exists — cannot prove recovery happened.
+            return new AgentToolPreDispatchReconciliationResult
+            {
+                Status = AgentToolPreDispatchReconciliationStatus.Conflict
+            };
         }
 
         // Check for existing terminal receipt before proceeding (idempotent reconciliation).
@@ -93,13 +97,29 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         // Step 4: Read governance checkpoint from authoritative provider.
         var checkpointRead = await _auditor.GetPreDispatchStateAsync(identity, cancellationToken);
 
+        // Step 4b: If checkpoint is Accepted, validate the full checkpoint content via the shared comparer.
+        // The checkpoint must be internally consistent — the identity, lease, approval, and governance
+        // must all match the expected state.
+        if (checkpointRead.Status == AgentToolGovernancePreDispatchReadStatus.Accepted
+            && checkpointRead.Checkpoint is not null)
+        {
+            var checkpoint = checkpointRead.Checkpoint;
+            if (!string.Equals(checkpoint.Context.AttemptId, identity.AttemptId, StringComparison.Ordinal)
+                || !AgentToolGovernancePreDispatchComparer.Equivalent(checkpoint, checkpoint))
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
+            }
+        }
+
         // Step 5: Compose reconciliation decision based on Gate + Budget + Checkpoint.
         var (status, reasonCode) = ComposeStatus(gateState.State, budgetRead.Status, checkpointRead.Status);
 
         // Step 6: Execute recovery transactions for terminal statuses that require side effects.
         if (status == AgentToolPreDispatchReconciliationStatus.Released)
         {
-            // §7.9/§7.8: Execute the release transition — finalize budget, transition gate, finalize governance.
             var releaseReason = reasonCode;
 
             // If budget is still Reserved, finalize it to Released.
@@ -117,34 +137,19 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                     cancellationToken).ConfigureAwait(false);
             }
 
-            // Transition Gate: Accepted → ReleasePending → Released.
-            // The lease from the checkpoint is needed for gate release operations.
-            // We use the lease from the intent/frozen lease stored in the gate.
-            // Since we don't have the original lease object, we read it from the gate state.
-            // The gate's GetPreDispatchStateAsync returns the accepted receipt which contains the identity.
-            // For the release transition, we need the lease — but the reconciler doesn't have it.
-            // The gate should support identity-based release for reconciliation.
-            // For now, we skip gate release if we don't have a lease — the budget release + governance
-            // finalization are the authoritative recovery actions. The gate state will be cleaned up
-            // by retention or a subsequent acquire.
-            //
-            // Actually, the spec says the reconciler must transition the gate. But the gate's
-            // PrepareReleaseAsync/PublishReleaseAsync require a lease. The reconciler doesn't have
-            // the original lease. This is a design gap — the gate needs an identity-based release
-            // method for reconciliation. For now, we finalize budget and governance, which are the
-            // authoritative recovery actions. The gate remains in Accepted state, which is safe —
-            // a subsequent acquire will create a new attempt.
-            //
-            // TODO: Add identity-based release to IAgentToolInvocationGate for reconciler use.
-
-            // Finalize governance audit if checkpoint was Accepted.
-            // The reconciler does NOT call Governance.FinalizeAsync because finalization
-            // requires a cryptographically valid OutcomeHash (tied to dispatch outcome +
-            // audit facts), which the reconciler does not possess. Governance finalization
-            // is the invoker's post-dispatch responsibility. The reconciler's authoritative
-            // recovery actions are: budget release + gate release.
-            // The governance checkpoint remains in Accepted state, which is safe — it
-            // records that pre-dispatch governance was satisfied but dispatch never started.
+            // Transition Gate to terminal via identity-based release/abandon.
+            if (gateState.State == AgentToolInvocationPreDispatchState.Pending)
+            {
+                // Unrecorded attempt — abandon the gate.
+                await _gate.AbandonByIdentityAsync(identity, releaseReason, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                // Accepted → Released.
+                await _gate.ReleaseByIdentityAsync(identity, releaseReason, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
 
         // Step 7: If terminal, persist immutable receipt and publish accountability.
@@ -168,6 +173,12 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
             && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Missing)
         {
             return (AgentToolPreDispatchReconciliationStatus.Released, "abandoned_unrecorded");
+        }
+
+        // Pending with budget reserved or checkpoint accepted → StillPending (attempt may still be in-flight)
+        if (gateState == AgentToolInvocationPreDispatchState.Pending)
+        {
+            return (AgentToolPreDispatchReconciliationStatus.StillPending, "pending_in_flight");
         }
 
         // §7.10: Ready/Accepted + Budget Missing → Conflict

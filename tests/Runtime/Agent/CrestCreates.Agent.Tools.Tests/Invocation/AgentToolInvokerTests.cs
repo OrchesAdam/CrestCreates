@@ -969,6 +969,15 @@ public sealed class AgentToolInvokerTests
             await _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
         }
 
+        public ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.ReleaseByIdentityAsync(identity, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
+
+
         public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
             string reasonCode,
@@ -1062,6 +1071,15 @@ public sealed class AgentToolInvokerTests
             string reasonCode,
             CancellationToken cancellationToken = default)
             => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.ReleaseByIdentityAsync(identity, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
+
 
         public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
@@ -1469,6 +1487,15 @@ public sealed class AgentToolInvokerTests
             CancellationToken cancellationToken = default)
             => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
 
+        public ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.ReleaseByIdentityAsync(identity, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
+
+
         public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
             string reasonCode,
@@ -1563,6 +1590,15 @@ public sealed class AgentToolInvokerTests
             string reasonCode,
             CancellationToken cancellationToken = default)
             => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.ReleaseByIdentityAsync(identity, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
+
 
         public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
@@ -1666,6 +1702,15 @@ public sealed class AgentToolInvokerTests
             string reasonCode,
             CancellationToken cancellationToken = default)
             => _inner.MarkIndeterminateAsync(lease, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.ReleaseByIdentityAsync(identity, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+            => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
+
 
         public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,

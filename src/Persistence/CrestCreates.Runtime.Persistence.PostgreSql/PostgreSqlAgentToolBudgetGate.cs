@@ -74,29 +74,56 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
 
         // Attempt-idempotent: same AttemptId already has a reservation — recover it
         var existing = await ReadReservationByIdentityAsync(tenantId, reservation.AttemptId, ct);
-        if (existing is not null && existing.State == AgentToolBudgetReservationState.Reserved)
-            return new AgentToolBudgetReserveResult { Status = AgentToolBudgetReserveStatus.Reserved, Reservation = existing };
+        if (existing is not null)
+        {
+            // Verify the existing reservation matches the full identity and budget parameters.
+            if (existing.InvocationFingerprint != reservation.InvocationFingerprint
+                || existing.Category != reservation.Category
+                || existing.CostUnits != reservation.CostUnits
+                || existing.MaxCallsPerExecution != reservation.MaxCallsPerExecution)
+                return new AgentToolBudgetReserveResult { Status = AgentToolBudgetReserveStatus.Denied, Reservation = existing };
 
-        // The existing reservation is in a terminal state (Released/Committed/Indeterminate) — cannot re-reserve
-        return new AgentToolBudgetReserveResult { Status = AgentToolBudgetReserveStatus.Denied, Reservation = existing };
+            if (existing.State == AgentToolBudgetReservationState.Reserved)
+                return new AgentToolBudgetReserveResult { Status = AgentToolBudgetReserveStatus.Reserved, Reservation = existing };
+
+            // The existing reservation is in a terminal state — cannot re-reserve
+            return new AgentToolBudgetReserveResult { Status = AgentToolBudgetReserveStatus.Denied, Reservation = existing };
+        }
+
+        return new AgentToolBudgetReserveResult { Status = AgentToolBudgetReserveStatus.Denied };
     }
 
     private async ValueTask<AgentToolBudgetReservation> FinalizeCoreAsync(AgentToolBudgetFinalizeRequest request, CancellationToken ct)
     {
         var targetState = request.RequestedState;
         await using var cmd = Conn().CreateCommand();
+        // Terminal monotonicity: only allow finalizing from Reserved (non-terminal → terminal).
+        // Once terminal, the reservation is immutable.
         cmd.CommandText = $"""
             update {_options.Schema}.agent_tool_budget_reservations
             set state = @state, updated_at = clock_timestamp()
             where reservation_id = @reservationId
+              and attempt_id = @attemptId
+              and invocation_fingerprint = @fp
+              and state = {(int)AgentToolBudgetReservationState.Reserved}
             returning reservation_id, attempt_id, invocation_fingerprint, category, cost_units, max_calls_per_execution, state
             """;
         cmd.Parameters.Add(new NpgsqlParameter("reservationId", request.ReservationId));
+        cmd.Parameters.Add(new NpgsqlParameter("attemptId", request.AttemptId ?? string.Empty));
+        cmd.Parameters.Add(new NpgsqlParameter("fp", request.InvocationFingerprint ?? string.Empty));
         cmd.Parameters.Add(IntParam("state", (int)targetState));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))
-            throw new InvalidOperationException($"Budget reservation {request.ReservationId} not found.");
+        {
+            // Either not found, identity mismatch, or already terminal.
+            // Read current state to distinguish.
+            var existing = await ReadReservationByIdReservationIdAsync(request.ReservationId, ct);
+            if (existing is null)
+                throw new InvalidOperationException($"Budget reservation {request.ReservationId} not found.");
+            // Already terminal — return the existing reservation (idempotent).
+            return existing;
+        }
 
         return ReadReservation(reader);
     }
@@ -117,6 +144,21 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
         };
 
         return new AgentToolBudgetReservationReadResult { Status = status, Reservation = reservation };
+    }
+
+    private async ValueTask<AgentToolBudgetReservation?> ReadReservationByIdReservationIdAsync(string reservationId, CancellationToken ct)
+    {
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            select reservation_id, attempt_id, invocation_fingerprint, category, cost_units, max_calls_per_execution, state
+            from {_options.Schema}.agent_tool_budget_reservations
+            where reservation_id = @rid
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("rid", reservationId));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            return null;
+        return ReadReservation(reader);
     }
 
     private async ValueTask<AgentToolBudgetReservation?> ReadReservationByIdentityAsync(string tenantId, string attemptId, CancellationToken ct)

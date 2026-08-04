@@ -291,19 +291,17 @@ static async Task RunPreDispatchScenarioAsync(PostgreSqlRuntimePersistenceOption
         if (result1.Status != AgentToolPreDispatchReconciliationStatus.Released)
             throw new InvalidOperationException($"First reconcile failed: {result1.Status}");
 
-        // Verify budget is actually Released after reconciliation
+        // Verify budget is actually Released after reconciliation (not Missing)
         var postReconcileBudget = await budget.GetReservationStateAsync(identity);
-        if (postReconcileBudget.Status != AgentToolBudgetReadStatus.Released
-            && postReconcileBudget.Status != AgentToolBudgetReadStatus.Missing)
+        if (postReconcileBudget.Status != AgentToolBudgetReadStatus.Released)
             throw new InvalidOperationException(
                 $"Budget not released after reconcile: {postReconcileBudget.Status}");
 
-        // Verify gate state reflects reconciliation (Accepted or Released — both safe)
+        // Verify gate state is Released after reconciliation (not Accepted)
         var postReconcileGate = await gate.GetPreDispatchStateAsync(identity);
-        if (postReconcileGate.State == AgentToolInvocationPreDispatchState.Pending
-            || postReconcileGate.State == AgentToolInvocationPreDispatchState.Ready)
+        if (postReconcileGate.State != AgentToolInvocationPreDispatchState.Released)
             throw new InvalidOperationException(
-                $"Gate in unsafe state after reconcile: {postReconcileGate.State}");
+                $"Gate not Released after reconcile: {postReconcileGate.State}");
 
         // Repeat reconciliation — should return AlreadyReleased, not re-release budget
         var result2 = await reconciler.ReconcileAsync(identity);

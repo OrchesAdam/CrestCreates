@@ -144,9 +144,7 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
             insert into {_options.Schema}.agent_tool_governance_finalizations
                 (tenant_id, audit_id, logical_invocation_key, attempt_id, attempt_state, finalization_json)
             values (@tenantId, @auditId, @lik, @attemptId, @attemptState, @finalizationJson)
-            on conflict (tenant_id, audit_id) do update set
-                attempt_state = excluded.attempt_state,
-                finalization_json = excluded.finalization_json
+            on conflict (tenant_id, audit_id) do nothing
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", record.Context.LogicalInvocationKey.TenantId ?? string.Empty));

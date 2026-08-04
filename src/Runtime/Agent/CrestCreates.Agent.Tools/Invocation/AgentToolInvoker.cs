@@ -293,6 +293,13 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                     .ConfigureAwait(false);
         }
 
+        // If the attempt was already abandoned (e.g. budget denial replay), return the abandoned receipt.
+        if (preDispatchState.State == AgentToolInvocationPreDispatchState.Abandoned
+            && preDispatchState.AbandonedReceipt is not null)
+        {
+            return GovernanceDenied(preDispatchState.AbandonedReceipt.ReasonCode);
+        }
+
         // Validate Prepare returned the expected Pending state.
         if (preDispatchState.State != AgentToolInvocationPreDispatchState.Pending)
         {
@@ -300,12 +307,6 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 null, auditContext, lease, null,
                 $"pre_dispatch_intent_unexpected_state:{preDispatchState.State}")
                 .ConfigureAwait(false);
-        }
-
-        if (preDispatchState.State == AgentToolInvocationPreDispatchState.Abandoned
-            && preDispatchState.AbandonedReceipt is not null)
-        {
-            return GovernanceDenied(preDispatchState.AbandonedReceipt.ReasonCode);
         }
 
         AgentToolBudgetReserveResult reserved;
@@ -542,8 +543,11 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                     .ConfigureAwait(false);
         }
 
-        // Validate BindAccepted returned the expected Accepted state.
-        if (preDispatchState.State != AgentToolInvocationPreDispatchState.Accepted)
+        // Validate BindAccepted returned the expected Accepted state with the exact receipt.
+        if (preDispatchState.State != AgentToolInvocationPreDispatchState.Accepted
+            || preDispatchState.AcceptedReceipt is null
+            || !string.Equals(preDispatchState.AcceptedReceipt.AuditId, auditHandle!.AuditId, StringComparison.Ordinal)
+            || !string.Equals(preDispatchState.AcceptedReceipt.Identity.AttemptId, auditHandle.Identity.AttemptId, StringComparison.Ordinal))
         {
             return await FinishFenceIndeterminateAsync(
                 auditHandle, auditContext, lease, reservation,
@@ -1556,8 +1560,15 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             var readResult = await _audit.GetPreDispatchStateAsync(identity, cancellationToken)
                 .ConfigureAwait(false);
             if (readResult.Status == AgentToolGovernancePreDispatchReadStatus.Accepted
-                && readResult.Receipt is not null)
+                && readResult.Receipt is not null
+                && readResult.Checkpoint is not null)
             {
+                // Validate the full checkpoint against the expected record using the shared comparer.
+                if (!AgentToolGovernancePreDispatchComparer.Equivalent(readResult.Checkpoint, record))
+                    return null; // Checkpoint mismatch — cannot safely proceed.
+                // Validate receipt identity matches.
+                if (!string.Equals(readResult.Receipt.Identity.AttemptId, record.Context.AttemptId, StringComparison.Ordinal))
+                    return null;
                 return readResult.Receipt;
             }
         }

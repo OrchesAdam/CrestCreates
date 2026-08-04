@@ -53,34 +53,9 @@ internal sealed class PostgreSqlAgentToolPreDispatchCleanup
             (int)AgentToolInvocationPreDispatchState.CompletionPending,
             (int)AgentToolInvocationPreDispatchState.Indeterminate);
 
-        // 1. Clean up terminal invocation pre-dispatch entries (Abandoned, Released, Completed)
-        //    but protect non-terminal states
-        totalDeleted += await ExecuteNonQueryAsync(session,
-            $"""
-            DELETE FROM {_options.Schema}.agent_tool_invocation_pre_dispatch
-            WHERE created_at < @cutoff_receipt
-              AND pre_dispatch_state NOT IN ({protectedStates})
-            """,
-            ("cutoff_receipt", cutoffReceipt));
-
-        // 2. Clean up terminal budget reservations (Released, Committed, Indeterminate)
-        //    but protect Reserved (active) reservations
-        var terminalBudgetStates = string.Join(", ",
-            (int)AgentToolBudgetReservationState.Released,
-            (int)AgentToolBudgetReservationState.Committed,
-            (int)AgentToolBudgetReservationState.Indeterminate);
-        totalDeleted += await ExecuteNonQueryAsync(session,
-            $"""
-            DELETE FROM {_options.Schema}.agent_tool_budget_reservations
-            WHERE created_at < @cutoff_budget
-              AND state IN ({terminalBudgetStates})
-            """,
-            ("cutoff_budget", cutoffBudget));
-
-        // 3. Clean up terminal governance checkpoints — only for attempts that have
-        //    reached a terminal state in the invocation gate (Released, Completed,
-        //    Abandoned, Indeterminate). This prevents deleting checkpoints for
-        //    attempts that are still in-flight.
+        // 1. Clean up terminal governance checkpoints — only for attempts that have
+        //    reached a terminal state in the invocation gate. Must run BEFORE deleting
+        //    gate rows so the terminal-state check can see them.
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
             DELETE FROM {_options.Schema}.agent_tool_pre_dispatch_checkpoints
@@ -99,7 +74,7 @@ internal sealed class PostgreSqlAgentToolPreDispatchCleanup
             """,
             ("cutoff_checkpoint", cutoffCheckpoint));
 
-        // 4. Clean up terminal governance finalizations and decisions
+        // 2. Clean up terminal governance finalizations and decisions
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
             DELETE FROM {_options.Schema}.agent_tool_governance_finalizations
@@ -112,6 +87,31 @@ internal sealed class PostgreSqlAgentToolPreDispatchCleanup
             WHERE created_at < @cutoff_finalization
             """,
             ("cutoff_finalization", cutoffFinalization));
+
+        // 3. Clean up terminal budget reservations (Released, Committed, Indeterminate)
+        //    but protect Reserved (active) reservations
+        var terminalBudgetStates = string.Join(", ",
+            (int)AgentToolBudgetReservationState.Released,
+            (int)AgentToolBudgetReservationState.Committed,
+            (int)AgentToolBudgetReservationState.Indeterminate);
+        totalDeleted += await ExecuteNonQueryAsync(session,
+            $"""
+            DELETE FROM {_options.Schema}.agent_tool_budget_reservations
+            WHERE created_at < @cutoff_budget
+              AND state IN ({terminalBudgetStates})
+            """,
+            ("cutoff_budget", cutoffBudget));
+
+        // 4. Clean up terminal invocation pre-dispatch entries (Abandoned, Released, Completed)
+        //    but protect non-terminal states. Runs AFTER checkpoint cleanup so the
+        //    terminal-state check in step 1 can still see the gate rows.
+        totalDeleted += await ExecuteNonQueryAsync(session,
+            $"""
+            DELETE FROM {_options.Schema}.agent_tool_invocation_pre_dispatch
+            WHERE created_at < @cutoff_receipt
+              AND pre_dispatch_state NOT IN ({protectedStates})
+            """,
+            ("cutoff_receipt", cutoffReceipt));
 
         // 5. Clean up mutable reconciliation observations
         //    StillPending observations are protected (non-terminal)

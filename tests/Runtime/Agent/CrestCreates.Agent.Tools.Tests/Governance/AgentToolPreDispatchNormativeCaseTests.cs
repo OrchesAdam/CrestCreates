@@ -38,14 +38,24 @@ public class AgentToolPreDispatchNormativeCaseTests
         BindReservation(gate2, lease2, reservation);
         var bindResult2 = BindAccepted(gate2, lease2);
 
-        var wrongReceipt = new AgentToolGovernancePreDispatchReceipt
+        var wrongAuditId = new AgentToolGovernancePreDispatchReceipt
         {
             AuditId = "wrong-audit-id",
             Identity = bindResult2.AcceptedReceipt!.Identity,
             AcceptedAt = bindResult2.AcceptedReceipt.AcceptedAt
         };
-        var rejected = gate2.TryMarkDispatchStartedAsync(lease2, wrongReceipt, reservation).Result;
-        rejected.Should().BeFalse("dispatch CAS must reject a mismatched receipt AuditId");
+        var rejectedAudit = gate2.TryMarkDispatchStartedAsync(lease2, wrongAuditId, reservation).Result;
+        rejectedAudit.Should().BeFalse("dispatch CAS must reject a mismatched receipt AuditId");
+
+        // Wrong AcceptedAt → dispatch CAS must fail
+        var wrongAcceptedAt = new AgentToolGovernancePreDispatchReceipt
+        {
+            AuditId = bindResult2.AcceptedReceipt.AuditId,
+            Identity = bindResult2.AcceptedReceipt.Identity,
+            AcceptedAt = bindResult2.AcceptedReceipt.AcceptedAt.AddSeconds(1)
+        };
+        var rejectedTime = gate2.TryMarkDispatchStartedAsync(lease2, wrongAcceptedAt, reservation).Result;
+        rejectedTime.Should().BeFalse("dispatch CAS must reject a mismatched receipt AcceptedAt");
 
         // Wrong reservationId → dispatch CAS must fail
         var rejectedReservation = gate2.TryMarkDispatchStartedAsync(lease2, bindResult2.AcceptedReceipt!, "wrong-res").Result;
@@ -137,6 +147,24 @@ public class AgentToolPreDispatchNormativeCaseTests
         gateState.State.Should().Be(AgentToolInvocationPreDispatchState.Accepted);
         gateState.AcceptedReceipt!.AuditId.Should().Be(receipt.AuditId);
         gateState.BoundReservationId.Should().Be("res-1");
+
+        // Mutation case: checkpoint with mismatched AttemptId must produce Conflict from reconciler
+        var mismatchedRecord = new AgentToolGovernancePreDispatchRecord
+        {
+            Context = SampleAuditContext("different-attempt"),
+            Lease = lease,
+            Approval = checkpointRecord.Approval,
+            BudgetReservation = checkpointRecord.BudgetReservation
+        };
+        var mismatchIdentity = new AgentToolPreDispatchIdentity(
+            new AgentToolLogicalInvocationKey("tenant-1", "user-1", "agent-1", "exec-1", "inv-1"),
+            "different-attempt");
+        var store = new InMemoryReconciliationStore();
+        var reconciler = new DefaultAgentToolPreDispatchReconciler(gate, new DevelopmentInMemoryAgentToolBudgetGate(), auditor, store);
+        // The mismatched identity won't find any gate state (different attempt) → StillPending
+        var mismatchResult = reconciler.ReconcileAsync(mismatchIdentity).Result;
+        mismatchResult.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending,
+            "mismatched attempt identity should not match any gate state");
     }
 
     [Fact]
@@ -188,6 +216,11 @@ public class AgentToolPreDispatchNormativeCaseTests
         var budgetState = budgetGate.GetReservationStateAsync(identity).Result;
         budgetState.Status.Should().Be(AgentToolBudgetReadStatus.Released);
 
+        // Verify Gate is now Released (not still Accepted)
+        var gateState = gate.GetPreDispatchStateAsync(identity).Result;
+        gateState.State.Should().Be(AgentToolInvocationPreDispatchState.Released,
+            "reconciler must transition Gate to Released");
+
         // Second reconcile — must return AlreadyReleased, not re-release
         var second = reconciler.ReconcileAsync(identity).Result;
         second.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.AlreadyReleased,
@@ -196,6 +229,10 @@ public class AgentToolPreDispatchNormativeCaseTests
         // Budget state must still be Released (not double-released)
         var budgetStateAfter = budgetGate.GetReservationStateAsync(identity).Result;
         budgetStateAfter.Status.Should().Be(AgentToolBudgetReadStatus.Released);
+
+        // Gate state must still be Released (not double-released)
+        var gateStateAfter = gate.GetPreDispatchStateAsync(identity).Result;
+        gateStateAfter.State.Should().Be(AgentToolInvocationPreDispatchState.Released);
     }
 
     // --- Helpers ---

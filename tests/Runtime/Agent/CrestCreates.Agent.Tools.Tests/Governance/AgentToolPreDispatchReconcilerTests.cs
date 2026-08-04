@@ -261,7 +261,7 @@ public class AgentToolPreDispatchReconcilerTests
 
     private sealed class StubInvocationGate : IAgentToolInvocationGate
     {
-        private readonly AgentToolInvocationPreDispatchState _state;
+        private AgentToolInvocationPreDispatchState _state;
 
         public StubInvocationGate(AgentToolInvocationPreDispatchState state) => _state = state;
 
@@ -297,6 +297,19 @@ public class AgentToolPreDispatchReconcilerTests
             => throw new NotImplementedException();
         public ValueTask MarkIndeterminateAsync(AgentToolInvocationLease lease, string reasonCode, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
+        public ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+        {
+            _state = AgentToolInvocationPreDispatchState.Released;
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult { State = _state, ReasonCode = reasonCode });
+        }
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
+            AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
+        {
+            _state = AgentToolInvocationPreDispatchState.Abandoned;
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult { State = _state, ReasonCode = reasonCode });
+        }
     }
 
     private sealed class StubBudgetGate : IAgentToolBudgetGate

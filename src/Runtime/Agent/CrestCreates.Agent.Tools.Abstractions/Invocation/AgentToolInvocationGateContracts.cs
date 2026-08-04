@@ -192,4 +192,14 @@ public interface IAgentToolInvocationGate
         string reasonCode,
         CancellationToken cancellationToken = default);
 
+    ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
+        AgentToolPreDispatchIdentity identity,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
+        AgentToolPreDispatchIdentity identity,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
+
 }

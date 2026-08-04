@@ -476,6 +476,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         private static readonly (string Type, string Nullable) BigInt = ("bigint", "NO");
         private static readonly (string Type, string Nullable) Integer = ("integer", "NO");
         private static readonly (string Type, string Nullable) Json = ("jsonb", "NO");
+        private static readonly (string Type, string Nullable) NullableJson = ("jsonb", "YES");
         private static readonly (string Type, string Nullable) Timestamp = ("timestamp with time zone", "NO");
         private static readonly (string Type, string Nullable) NullableTimestamp = ("timestamp with time zone", "YES");
 
@@ -533,7 +534,51 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             {
                 ["sink_id"] = Text, ["audit_id"] = Text, ["integrity_json"] = Json,
                 ["envelope_json"] = Json, ["accepted_at"] = Timestamp
-            }, ["sink_id", "audit_id"], [], [], [])
+            }, ["sink_id", "audit_id"], [], [], []),
+            new("agent_tool_pre_dispatch_checkpoints", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["audit_id"] = Text, ["attempt_id"] = Text,
+                ["logical_invocation_key"] = NullableText, ["invocation_fingerprint"] = NullableText,
+                ["lease_id"] = Text, ["fencing_token"] = BigInt,
+                ["arguments_hash"] = NullableText, ["agent_roles_hash"] = NullableText,
+                ["checkpoint_json"] = Json, ["accepted_at"] = Timestamp
+            }, ["tenant_id", "audit_id"], [], [], []),
+            new("agent_tool_budget_reservations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["reservation_id"] = Text, ["attempt_id"] = Text,
+                ["logical_invocation_key"] = NullableText, ["invocation_fingerprint"] = NullableText,
+                ["reservation_json"] = Json, ["state"] = Integer, ["created_at"] = Timestamp
+            }, ["tenant_id", "reservation_id"], [], [], []),
+            new("agent_tool_invocation_pre_dispatch", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["attempt_id"] = Text, ["lease_id"] = Text,
+                ["logical_invocation_key"] = NullableText, ["invocation_fingerprint"] = NullableText,
+                ["fencing_token"] = BigInt, ["pre_dispatch_state"] = Integer,
+                ["bound_reservation_id"] = NullableText,
+                ["accepted_receipt_json"] = NullableJson, ["abandoned_receipt_json"] = NullableJson,
+                ["intent_json"] = NullableJson, ["created_at"] = Timestamp
+            }, ["tenant_id", "attempt_id"], [], [], []),
+            new("agent_tool_governance_decisions", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["audit_id"] = Text, ["decision_json"] = Json,
+                ["created_at"] = Timestamp
+            }, ["tenant_id", "audit_id"], [], [], []),
+            new("agent_tool_governance_finalizations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["audit_id"] = Text, ["attempt_state"] = Integer,
+                ["finalization_json"] = NullableJson, ["created_at"] = Timestamp
+            }, ["tenant_id", "audit_id"], [], [], []),
+            new("agent_tool_reconciliation_observations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["audit_id"] = Text, ["revision"] = BigInt,
+                ["status"] = Integer, ["observation_json"] = NullableJson,
+                ["observed_at"] = Timestamp
+            }, ["tenant_id", "audit_id", "revision"], [], [], []),
+            new("agent_tool_reconciliation_receipts", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["audit_id"] = Text, ["receipt_json"] = Json,
+                ["terminal_at"] = Timestamp
+            }, ["tenant_id", "audit_id"], [], [], [])
         ];
     }
 
@@ -723,10 +768,10 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 logical_invocation_key jsonb not null,
                 attempt_id text not null,
                 invocation_fingerprint text not null,
-                arguments_hash text not null,
+                arguments_hash text null,
                 arguments_evaluated boolean not null,
                 call_origin integer not null,
-                agent_roles_hash text not null,
+                agent_roles_hash text null,
                 tool_contract_json jsonb not null,
                 capability_contract_json jsonb not null,
                 input_schema_contract_json jsonb null,

@@ -339,7 +339,7 @@ public sealed class AgentToolInvocationGateTests
                 new AgentToolLogicalInvocationKey("tenant", "user", "agent", "execution", "invocation"),
                 lease.AttemptId),
             AuditId = "audit-test",
-            AcceptedAt = DateTimeOffset.UtcNow
+            AcceptedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
         };
 
     private static AgentToolInvocationAcquireRequest Request(string fingerprint)
