@@ -145,7 +145,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         // Check for an existing active attempt for the same logical invocation.
         await using var checkCmd = Conn().CreateCommand();
         checkCmd.CommandText = $"""
-            select pre_dispatch_state, attempt_id, lease_id
+            select pre_dispatch_state
             from {_options.Schema}.agent_tool_invocation_pre_dispatch
             where logical_invocation_key = @lik
               and pre_dispatch_state not in (
@@ -160,15 +160,27 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         await using var reader = await checkCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            return new AgentToolInvocationAcquireResult { Status = AgentToolInvocationAcquireStatus.Conflict };
+            var existingState = (AgentToolInvocationPreDispatchState)reader.GetInt32(0);
+            var conflictStatus = existingState >= AgentToolInvocationPreDispatchState.DispatchStarted
+                ? AgentToolInvocationAcquireStatus.Completed
+                : AgentToolInvocationAcquireStatus.InProgress;
+            return new AgentToolInvocationAcquireResult { Status = conflictStatus };
         }
         await reader.CloseAsync().ConfigureAwait(false);
+
+        // Acquire a monotonic fencing token from the database sequence.
+        long fencingToken;
+        await using (var seqCmd = Conn().CreateCommand())
+        {
+            seqCmd.CommandText = $"select nextval('{_options.Schema}.agent_tool_fencing_token_seq')";
+            fencingToken = (long)(await seqCmd.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? 0L);
+        }
 
         var lease = new AgentToolInvocationLease
         {
             LeaseId = Guid.NewGuid().ToString("N"),
             AttemptId = Guid.NewGuid().ToString("N"),
-            FencingToken = now.Ticks,
+            FencingToken = fencingToken,
             AcquiredAt = now,
             ExpiresAt = now.AddSeconds(30)
         };
@@ -325,7 +337,9 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
     {
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
-            select pre_dispatch_state, bound_reservation_id, accepted_receipt_json, abandoned_receipt_json
+            select pre_dispatch_state, bound_reservation_id, accepted_receipt_json,
+                   abandoned_receipt_json, intent_json, lease_id, attempt_id,
+                   fencing_token, acquired_at, expires_at
             from {_options.Schema}.agent_tool_invocation_pre_dispatch
             where tenant_id = @tid
               and attempt_id = @aid
@@ -341,27 +355,50 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         var boundReservationId = reader.IsDBNull(1) ? null : reader.GetString(1);
         AgentToolGovernancePreDispatchReceipt? acceptedReceipt = null;
         AgentToolInvocationAbandonedReceipt? abandonedReceipt = null;
+        AgentToolInvocationPreDispatchIntentSnapshot? intent = null;
         if (!reader.IsDBNull(2))
             acceptedReceipt = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(2), PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernancePreDispatchReceipt);
         if (!reader.IsDBNull(3))
             abandonedReceipt = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(3), PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationAbandonedReceipt);
+        if (!reader.IsDBNull(4))
+            intent = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(4), PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPreDispatchIntentSnapshot);
         return new AgentToolInvocationPreDispatchResult
         {
             State = state,
             BoundReservationId = boundReservationId,
             AcceptedReceipt = acceptedReceipt,
-            AbandonedReceipt = abandonedReceipt
+            AbandonedReceipt = abandonedReceipt,
+            Intent = intent
         };
     }
 
     private async ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialCoreAsync(
         AgentToolInvocationLease lease, AgentToolInvocationPublishDenialRequest req, CancellationToken ct)
     {
+        // Read the logical key from the persisted row to build an accurate Abandoned receipt.
+        AgentToolLogicalInvocationKey logicalKey;
+        await using (var keyCmd = Conn().CreateCommand())
+        {
+            keyCmd.CommandText = $"""
+                select logical_invocation_key from {_options.Schema}.agent_tool_invocation_pre_dispatch
+                where lease_id = @lid
+                """;
+            keyCmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
+            var keyJson = (string?)await keyCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (keyJson is not null)
+            {
+                logicalKey = PostgreSqlRuntimeStoreSupport.Deserialize(
+                    keyJson, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey);
+            }
+            else
+            {
+                logicalKey = new AgentToolLogicalInvocationKey(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);
+            }
+        }
+
         var abandonedReceipt = new AgentToolInvocationAbandonedReceipt
         {
-            Identity = new AgentToolPreDispatchIdentity(
-                new AgentToolLogicalInvocationKey(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty),
-                lease.AttemptId),
+            Identity = new AgentToolPreDispatchIdentity(logicalKey, lease.AttemptId),
             Outcome = req.Outcome,
             ReasonCode = req.ReasonCode,
             AbandonedAt = DateTimeOffset.UtcNow

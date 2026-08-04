@@ -801,6 +801,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             );
             create unique index ux_agent_tool_budget_attempt on {schema}.agent_tool_budget_reservations (tenant_id, attempt_id);
 
+            create sequence {schema}.agent_tool_fencing_token_seq as bigint;
+
             create table {schema}.agent_tool_invocation_pre_dispatch (
                 tenant_id text not null,
                 lease_id text not null,

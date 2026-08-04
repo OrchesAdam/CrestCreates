@@ -97,15 +97,44 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         // Step 4: Read governance checkpoint from authoritative provider.
         var checkpointRead = await _auditor.GetPreDispatchStateAsync(identity, cancellationToken);
 
-        // Step 4b: If checkpoint is Accepted, validate the full checkpoint content via the shared comparer.
-        // The checkpoint must be internally consistent — the identity, lease, approval, and governance
-        // must all match the expected state.
+        // Step 4b: If checkpoint is Accepted, validate the full checkpoint content.
+        // The checkpoint must be internally consistent and match the recovery identity.
+        // Cross-verify that the checkpoint's lease, approval, and reservation all
+        // belong to the same attempt — not just the same tenant/attempt string.
         if (checkpointRead.Status == AgentToolGovernancePreDispatchReadStatus.Accepted
             && checkpointRead.Checkpoint is not null)
         {
             var checkpoint = checkpointRead.Checkpoint;
-            if (!string.Equals(checkpoint.Context.AttemptId, identity.AttemptId, StringComparison.Ordinal)
-                || !AgentToolGovernancePreDispatchComparer.Equivalent(checkpoint, checkpoint))
+
+            // Validate identity: checkpoint's AttemptId and LogicalInvocationKey
+            // must match the recovery identity.
+            if (!AgentToolGovernancePreDispatchComparer.ValidateIdentity(checkpoint, identity))
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
+            }
+
+            // Cross-verify: if Budget was read, the checkpoint's reservation
+            // AttemptId must match the budget reservation's AttemptId.
+            if (budgetRead.Reservation is not null
+                && !string.Equals(
+                    checkpoint.BudgetReservation?.AttemptId,
+                    budgetRead.Reservation.AttemptId,
+                    StringComparison.Ordinal))
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
+            }
+
+            // Cross-verify: checkpoint's lease AttemptId must match identity.
+            if (!string.Equals(
+                    checkpoint.Lease?.AttemptId,
+                    identity.AttemptId,
+                    StringComparison.Ordinal))
             {
                 return new AgentToolPreDispatchReconciliationResult
                 {

@@ -321,9 +321,8 @@ static async Task RunPreDispatchScenarioAsync(PostgreSqlRuntimePersistenceOption
 static ServiceProvider BuildPreDispatchProvider(PostgreSqlRuntimePersistenceOptions options)
 {
     var services = new ServiceCollection();
+    services.AddCrestAgentTools();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
-    services.AddSingleton<IAgentToolPreDispatchReconciliationAccountabilityProducer, AgentToolPreDispatchReconciliationAccountabilityProducer>();
-    services.AddSingleton<IAgentToolPreDispatchReconciler, DefaultAgentToolPreDispatchReconciler>();
     var provider = services.BuildServiceProvider();
     return provider;
 }

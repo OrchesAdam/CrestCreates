@@ -9,8 +9,10 @@ namespace CrestCreates.Agent.Tools;
 /// exactly-once guarantee.
 /// </summary>
 public sealed class DevelopmentInMemoryAgentToolInvocationGate
-    : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner
+    : IAgentToolInvocationGate, IAgentToolInvocationLeaseAbandoner, IAgentToolPreDispatchPersistenceCapabilities
 {
+    public AgentToolPreDispatchPersistenceCapability Capability => AgentToolPreDispatchPersistenceCapability.FullSemantic;
+
     private readonly object _sync = new();
     private readonly Dictionary<AgentToolLogicalInvocationKey, Entry> _entries = [];
     private readonly Dictionary<string, AgentToolLogicalInvocationKey> _leaseKeys
