@@ -70,7 +70,9 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
             Identity = identity,
             Status = AgentToolPreDispatchReconciliationStatus.Released,
             ReasonCode = "released",
-            TerminalAt = DateTimeOffset.UtcNow,
+            // PostgreSQL timestamptz stores microsecond precision; truncate so the
+            // persisted receipt round-trips losslessly.
+            TerminalAt = TruncateToMicroseconds(DateTimeOffset.UtcNow),
             IntegrityValue = "integrity-1"
         };
 
@@ -457,6 +459,7 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
         var finalizeRequest = new AgentToolBudgetFinalizeRequest
         {
             ReservationId = reserve.Reservation!.ReservationId,
+            TenantId = LogicalKey.TenantId,
             AttemptId = "attempt-fin",
             InvocationFingerprint = "fp-1",
             RequestedState = AgentToolBudgetReservationState.Released,
@@ -539,6 +542,7 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
         var finalize = await _budgetGate.FinalizeAsync(new AgentToolBudgetFinalizeRequest
         {
             ReservationId = first.Reservation!.ReservationId,
+            TenantId = LogicalKey.TenantId,
             AttemptId = "attempt-committed-1",
             InvocationFingerprint = "fp-1",
             RequestedState = AgentToolBudgetReservationState.Committed,
@@ -657,7 +661,7 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
     [Fact]
     public async Task Release_ResponseLoss_Should_Replay_Full_Terminal_Receipt()
     {
-        var (lease, _) = await DispatchStartedAsync();
+        var (lease, _) = await AcceptedAsync();
 
         var prepared = new AgentToolInvocationPrepareReleaseRequest
         {
@@ -692,7 +696,7 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
     [Fact]
     public async Task Release_Prepare_ChangedRequest_Should_Conflict()
     {
-        var (lease, _) = await DispatchStartedAsync();
+        var (lease, _) = await AcceptedAsync();
 
         var prepared = new AgentToolInvocationPrepareReleaseRequest
         {
@@ -733,6 +737,25 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
 
         var dispatch = await _gate.TryMarkDispatchStartedAsync(lease, receipt, "res-1");
         dispatch.Should().BeTrue();
+        return (lease, receipt);
+    }
+
+    private async Task<(AgentToolInvocationLease Lease, AgentToolGovernancePreDispatchReceipt Receipt)> AcceptedAsync()
+    {
+        var acquire = await _gate.AcquireAsync(new AgentToolInvocationAcquireRequest(LogicalKey, "fp-1"));
+        var lease = acquire.Lease!;
+        await PrepareAndBindAsync(lease);
+
+        var receipt = new AgentToolGovernancePreDispatchReceipt
+        {
+            Identity = new AgentToolPreDispatchIdentity(LogicalKey, lease.AttemptId),
+            AuditId = "audit-accepted",
+            AcceptedAt = DateTimeOffset.UtcNow
+        };
+        await _gate.BindAcceptedPreDispatchAsync(lease, new AgentToolInvocationBindPreDispatchRequest
+        {
+            Receipt = receipt
+        });
         return (lease, receipt);
     }
 
@@ -1032,6 +1055,13 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
             ClaimState = AgentToolApprovalEvidenceClaimState.Claimed,
             EvidenceId = "evidence-1"
         };
+    }
+
+    private static DateTimeOffset TruncateToMicroseconds(DateTimeOffset value)
+    {
+        var ticks = value.UtcTicks;
+        ticks -= ticks % (TimeSpan.TicksPerMillisecond / 1000);
+        return new DateTimeOffset(ticks, TimeSpan.Zero);
     }
 }
 

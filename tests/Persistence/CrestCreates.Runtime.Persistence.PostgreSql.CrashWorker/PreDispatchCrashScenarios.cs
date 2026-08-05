@@ -34,9 +34,9 @@ internal static class PreDispatchCrashScenarios
 
         var executionContext = new AgentExecutionContext
         {
-            ExecutionId = "exec-crash",
-            InvocationId = "inv-crash",
-            AgentId = "agent-crash",
+            ExecutionId = key.ExecutionId,
+            InvocationId = key.InvocationId,
+            AgentId = key.AgentId,
             AgentRoles = new HashSet<string> { "role-1" },
             CallOrigin = AgentToolCallOrigin.ExplicitRequest
         };

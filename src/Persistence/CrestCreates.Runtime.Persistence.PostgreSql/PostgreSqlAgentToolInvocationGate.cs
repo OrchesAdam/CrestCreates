@@ -806,7 +806,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         if (row.State is AgentToolInvocationPreDispatchState.Completed
             or AgentToolInvocationPreDispatchState.CompletionPending)
         {
-            if (string.Equals(row.CompletionOutcomeJson, requestJson, StringComparison.Ordinal))
+            if (PostgreSqlRuntimeStoreSupport.JsonEquals(row.CompletionOutcomeJson, requestJson))
                 return;
             throw new InvalidOperationException(
                 row.State == AgentToolInvocationPreDispatchState.Completed
@@ -945,7 +945,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         if (row.State is AgentToolInvocationPreDispatchState.Released
             or AgentToolInvocationPreDispatchState.ReleasePending)
         {
-            if (string.Equals(row.ReleaseOutcomeJson, requestJson, StringComparison.Ordinal))
+            if (PostgreSqlRuntimeStoreSupport.JsonEquals(row.ReleaseOutcomeJson, requestJson))
                 return;
             throw new InvalidOperationException(
                 row.State == AgentToolInvocationPreDispatchState.Released

@@ -97,7 +97,7 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
             var logicalReservations = await ReadReservationsByLogicalKeyAsync(tenantId, logicalKeyJson, ct)
                 .ConfigureAwait(false);
             if (logicalReservations.Any(entry =>
-                    !string.Equals(entry.ToolContractJson, toolContractJson, StringComparison.Ordinal)
+                    !PostgreSqlRuntimeStoreSupport.JsonEquals(entry.ToolContractJson, toolContractJson)
                     || !string.Equals(
                         entry.Reservation.InvocationFingerprint,
                         context.InvocationFingerprint,
@@ -363,7 +363,7 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
             && string.Equals(existing.Reservation.Category, requirement.Category, StringComparison.Ordinal)
             && existing.Reservation.CostUnits == requirement.CostUnits
             && existing.Reservation.MaxCallsPerExecution == requirement.MaxCallsPerExecution
-            && string.Equals(existing.ToolContractJson, toolContractJson, StringComparison.Ordinal);
+            && PostgreSqlRuntimeStoreSupport.JsonEquals(existing.ToolContractJson, toolContractJson);
 
     private static string BuildCapacityKey(AgentToolGovernanceContext context)
     {

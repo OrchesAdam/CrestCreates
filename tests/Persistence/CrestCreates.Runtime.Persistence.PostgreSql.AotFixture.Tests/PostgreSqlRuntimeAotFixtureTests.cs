@@ -17,15 +17,24 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
         var root = FindRepositoryRoot();
         var output = Path.Combine(Path.GetTempPath(), "crest-runtime-postgresql-aot-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(output);
-        await using var postgres = new PostgreSqlBuilder("postgres:16-alpine")
-            .WithDatabase("crest_runtime_aot")
-            .WithUsername("crest")
-            .WithPassword("crest")
-            .Build();
+        var connectionString = Environment.GetEnvironmentVariable("CREST_RUNTIME_PG_CONNECTION");
+        PostgreSqlContainer? postgres = null;
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            postgres = new PostgreSqlBuilder("postgres:16-alpine")
+                .WithDatabase("crest_runtime_aot")
+                .WithUsername("crest")
+                .WithPassword("crest")
+                .Build();
+        }
 
         try
         {
-            await postgres.StartAsync();
+            if (postgres is not null)
+            {
+                await postgres.StartAsync();
+                connectionString = postgres.GetConnectionString();
+            }
             var project = Path.Combine(root,
                 "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj");
             var publish = await RunAsync(
@@ -42,7 +51,7 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             var schema = "itest_" + Guid.NewGuid().ToString("N");
             var execution = await RunAsync(
                 executable,
-                $"\"{postgres.GetConnectionString()}\" {schema}",
+                $"\"{connectionString}\" {schema}",
                 TimeSpan.FromMinutes(5));
             execution.ExitCode.Should().Be(0, execution.Output);
             execution.Output.Should().Contain("PHASE9B_POSTGRES_SUSPENSION_OK");

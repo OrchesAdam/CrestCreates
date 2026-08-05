@@ -2090,6 +2090,27 @@ NativeAOT evidence restored as required CI gates (Docker-backed job re-enabled i
 `.github/workflows/ci.yml`); "CI green" is only claimed once that job passes on the
 PR. The PR must not be closed against #70 before that evidence is green.
 
+First real execution (previously the job was excluded) surfaced contract failures
+that were fixed and re-verified locally against PostgreSQL 16:
+
+- JSONB normalization broke raw-string comparison of `tool_contract_json` and
+  completion/release payloads — comparisons now use semantic JSON equality
+  (`PostgreSqlRuntimeStoreSupport.JsonEquals`), restoring attempt idempotency,
+  capacity enforcement, logical-conflict rejection and prepare-replay.
+- CrashWorker/AotHost built `AgentExecutionContext` values that contradicted their
+  `LogicalInvocationKey`, so `AgentToolGovernanceGuard.IsValid` denied every reserve —
+  contexts now derive from the key.
+- Budget finalization lookups are tenant-scoped (INV-15); tests pass `TenantId`.
+- Release prepare requires a non-dispatched (Accepted) attempt, matching the
+  InMemory contract; release tests use that flow.
+- Reconciliation receipt tests truncate timestamps to PostgreSQL microsecond precision.
+- AotHost per-window markers derived from the sentinel (`CW04`…`CW09`), not the
+  last two scenario characters.
+
+Verified locally (PostgreSQL 16 on 127.0.0.1): 64/64 PostgreSQL contract/crash
+tests pass, AotFixture native publish-link-run + subprocess crash recovery passes,
+270 Agent.Tools + 93 boundary + 16 abstractions tests pass.
+
 **PR**: #72
 
 **What was built**:

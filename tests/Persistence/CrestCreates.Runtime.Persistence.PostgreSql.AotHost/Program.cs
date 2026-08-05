@@ -247,7 +247,8 @@ static async Task RunPreDispatchCrashScenariosAsync(PostgreSqlRuntimePersistence
                     $"[{scenario.Scenario}] Second reconcile failed: {result2.Status}");
         }
 
-        Console.WriteLine($"CRESTCREATES_AGENTTOOL_PREDISPATCH_{scenario.Scenario[^2..].ToUpperInvariant()}_OK");
+        var crashWindow = scenario.Sentinel["PREDISPATCH_".Length..].Split('_')[0];
+        Console.WriteLine($"CRESTCREATES_AGENTTOOL_PREDISPATCH_{crashWindow}_OK");
     }
 
     Console.WriteLine("CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK");
@@ -275,9 +276,9 @@ static async Task<int> RunPreDispatchCrashChildAsync(
 
     var executionContext = new AgentExecutionContext
     {
-        ExecutionId = "exec-aot",
-        InvocationId = "inv-aot",
-        AgentId = "agent-aot",
+        ExecutionId = key.ExecutionId,
+        InvocationId = key.InvocationId,
+        AgentId = key.AgentId,
         AgentRoles = new HashSet<string> { "role-1" },
         CallOrigin = AgentToolCallOrigin.ExplicitRequest
     };
