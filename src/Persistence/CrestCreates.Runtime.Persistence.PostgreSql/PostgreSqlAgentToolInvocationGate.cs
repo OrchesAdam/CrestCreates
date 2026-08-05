@@ -543,7 +543,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
                    release_outcome_json, release_prepared_at,
                    frozen_lease_json, reconciliation_claim_token,
                    reconciliation_claimed_at, reconciliation_claimed_state,
-                   reconciliation_ownership_evidence
+                   reconciliation_ownership_evidence, revision
             from {_options.Schema}.agent_tool_invocation_pre_dispatch
             where lease_id = @lid
               and attempt_id = @aid
@@ -552,6 +552,36 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
         cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
         cmd.Parameters.Add(new NpgsqlParameter("ft", lease.FencingToken));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            return new GateRow(AgentToolInvocationPreDispatchState.Unknown);
+        return ReadGateRow(reader);
+    }
+
+    /// <summary>
+    /// Reads the current gate row by lease + attempt identity without the
+    /// fencing-token predicate. Used only for post-CAS classification, where a
+    /// competing fence or claim may have bumped the fencing token.
+    /// </summary>
+    private async ValueTask<GateRow> ReadGateRowByLeaseAsync(
+        AgentToolInvocationLease lease, CancellationToken ct)
+    {
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            select pre_dispatch_state, bound_reservation_id, accepted_receipt_json,
+                   abandoned_receipt_json, intent_json, last_reason_code,
+                   indeterminate_at, indeterminate_reason,
+                   completion_outcome_json, completion_prepared_at,
+                   release_outcome_json, release_prepared_at,
+                   frozen_lease_json, reconciliation_claim_token,
+                   reconciliation_claimed_at, reconciliation_claimed_state,
+                   reconciliation_ownership_evidence, revision
+            from {_options.Schema}.agent_tool_invocation_pre_dispatch
+            where lease_id = @lid
+              and attempt_id = @aid
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
+        cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))
             return new GateRow(AgentToolInvocationPreDispatchState.Unknown);
@@ -588,7 +618,8 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             reader.IsDBNull(13) ? null : reader.GetString(13),
             reader.IsDBNull(14) ? null : reader.GetFieldValue<DateTimeOffset>(14),
             reader.IsDBNull(15) ? null : (AgentToolInvocationPreDispatchState)reader.GetInt32(15),
-            reader.IsDBNull(16) ? null : reader.GetString(16));
+            reader.IsDBNull(16) ? null : reader.GetString(16),
+            reader.GetInt64(17));
     }
 
     private async ValueTask<AgentToolInvocationPreDispatchResult> ReadCurrentStateAsync(
@@ -840,6 +871,8 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
         if (row.State == AgentToolInvocationPreDispatchState.Unknown)
             throw new InvalidOperationException("The invocation lease is stale or unknown.");
+        if (row.IsIndeterminate)
+            throw new InvalidOperationException("The invocation is fenced as indeterminate.");
 
         // Same complete request → idempotent; changed request → conflict.
         if (row.State is AgentToolInvocationPreDispatchState.Completed
@@ -893,10 +926,10 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
         if (row.State == AgentToolInvocationPreDispatchState.Unknown)
             return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
-        if (row.IsIndeterminate)
-            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Indeterminate);
         if (row.State == AgentToolInvocationPreDispatchState.Completed)
             return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Completed);
+        if (row.IsIndeterminate)
+            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Indeterminate);
         if (row.State != AgentToolInvocationPreDispatchState.CompletionPending)
             return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
 
@@ -925,6 +958,8 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
             if (row.State == AgentToolInvocationPreDispatchState.Completed)
                 return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Completed);
+            if (row.IsIndeterminate)
+                return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Indeterminate);
             return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
         }
 
@@ -939,10 +974,10 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
         if (row.State == AgentToolInvocationPreDispatchState.Completed)
             return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Completed);
-        if (row.State == AgentToolInvocationPreDispatchState.CompletionPending)
-            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.CompletionPending);
         if (row.IsIndeterminate)
             return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Indeterminate);
+        if (row.State == AgentToolInvocationPreDispatchState.CompletionPending)
+            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.CompletionPending);
         return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
     }
 
@@ -981,6 +1016,8 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
         if (row.State == AgentToolInvocationPreDispatchState.Unknown)
             throw new InvalidOperationException("The invocation lease is stale or unknown.");
+        if (row.IsIndeterminate)
+            throw new InvalidOperationException("The invocation is fenced as indeterminate.");
 
         // Same complete request → idempotent; changed request → conflict.
         if (row.State is AgentToolInvocationPreDispatchState.Released
@@ -1034,10 +1071,10 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
         if (row.State == AgentToolInvocationPreDispatchState.Unknown)
             return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
-        if (row.IsIndeterminate)
-            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Indeterminate);
         if (row.State == AgentToolInvocationPreDispatchState.Released)
             return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Released);
+        if (row.IsIndeterminate)
+            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Indeterminate);
         if (row.State != AgentToolInvocationPreDispatchState.ReleasePending)
             return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
 
@@ -1066,6 +1103,8 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
             if (row.State == AgentToolInvocationPreDispatchState.Released)
                 return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Released);
+            if (row.IsIndeterminate)
+                return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Indeterminate);
             return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
         }
 
@@ -1080,10 +1119,10 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
         if (row.State == AgentToolInvocationPreDispatchState.Released)
             return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Released);
-        if (row.State == AgentToolInvocationPreDispatchState.ReleasePending)
-            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.ReleasePending);
         if (row.IsIndeterminate)
             return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Indeterminate);
+        if (row.State == AgentToolInvocationPreDispatchState.ReleasePending)
+            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.ReleasePending);
         return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
     }
 
@@ -1112,23 +1151,37 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
 
-        var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
-        if (row.State == AgentToolInvocationPreDispatchState.Unknown)
+        // Pre-read the expected revision/state so the CAS below can be
+        // linearized. The read is identity-based (lease_id + attempt_id) and
+        // deliberately NOT fencing-token-scoped: a fence established by an
+        // earlier MarkIndeterminate bumps the token, and re-marking an already
+        // indeterminate invocation must be idempotent success (matching the
+        // InMemory provider). The single UPDATE below is the linearization
+        // point: it requires revision + state + indeterminate-null, so a
+        // concurrently published terminal receipt
+        // (PublishCompletion/PublishRelease) or a competing ownership
+        // transition can never be overwritten by a late fence.
+        var before = await ReadGateRowByLeaseAsync(lease, ct).ConfigureAwait(false);
+        if (before.State == AgentToolInvocationPreDispatchState.Unknown)
             throw new InvalidOperationException("The invocation lease is stale or unknown.");
-        if (row.State == AgentToolInvocationPreDispatchState.Completed
-            || row.State == AgentToolInvocationPreDispatchState.Released)
+        if (before.State == AgentToolInvocationPreDispatchState.Completed
+            || before.State == AgentToolInvocationPreDispatchState.Released)
         {
             throw new InvalidOperationException("A published terminal receipt cannot be changed.");
         }
-        if (row.IsIndeterminate)
+        if (before.IsIndeterminate)
             return;
 
         // Indeterminate is a logical/operational marker; the underlying
-        // Pending/Ready/Accepted recovery substate is preserved. The current
-        // lease is frozen as recovery evidence and active ownership is
-        // invalidated by bumping the fencing token, so no live-worker forward
-        // transition (which CAS on lease_id + attempt_id + fencing_token) can
-        // proceed after the marker is established.
+        // Pending/Ready/Accepted recovery substate is preserved. Active
+        // ownership is fenced by the marker itself: every live-worker forward
+        // transition CAS requires indeterminate_at is null. The fencing token
+        // is deliberately NOT bumped here — InMemory keeps the token on
+        // MarkIndeterminate, and keeping it lets GetCompletionStateAsync /
+        // GetReleaseStateAsync (keyed by the original lease) observe the
+        // Indeterminate marker, preserving provider-equivalent semantics. The
+        // reconciliation claim (which bumps the token) is the ownership
+        // hand-over path.
         var frozenLeaseJson = PostgreSqlRuntimeStoreSupport.Serialize(
             lease, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationLease);
         await using var cmd = Conn().CreateCommand();
@@ -1138,12 +1191,14 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
                 indeterminate_reason = @irc,
                 last_reason_code = @rc,
                 frozen_lease_json = coalesce(frozen_lease_json, @flj),
-                fencing_token = (select nextval('{_options.Schema}.agent_tool_fencing_token_seq')),
                 revision = revision + 1,
                 updated_at = clock_timestamp()
             where lease_id = @lid
               and attempt_id = @aid
               and fencing_token = @ft
+              and revision = @rev
+              and pre_dispatch_state = @ps
+              and indeterminate_at is null
             returning revision
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -1153,7 +1208,27 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.Parameters.Add(new NpgsqlParameter("irc", reasonCode));
         cmd.Parameters.Add(new NpgsqlParameter("rc", reasonCode));
         cmd.Parameters.Add(JsonParam("flj", frozenLeaseJson));
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        cmd.Parameters.Add(new NpgsqlParameter("rev", before.Revision));
+        cmd.Parameters.Add(IntParam("ps", (int)before.State));
+        if (await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) is not null)
+            return;
+
+        // CAS lost — re-read (without the fencing-token predicate; a competing
+        // fence or claim may have bumped it) and classify the outcome. A
+        // zero-row UPDATE must never be reported as success.
+        var current = await ReadGateRowByLeaseAsync(lease, ct).ConfigureAwait(false);
+        if (current.State == AgentToolInvocationPreDispatchState.Unknown)
+            throw new InvalidOperationException("The invocation lease is stale or unknown.");
+        if (current.IsIndeterminate)
+            return;
+        if (current.State == AgentToolInvocationPreDispatchState.Completed
+            || current.State == AgentToolInvocationPreDispatchState.Released)
+        {
+            throw new InvalidOperationException("A published terminal receipt cannot be changed.");
+        }
+        if (current.Revision != before.Revision || current.State != before.State)
+            throw new InvalidOperationException("The invocation ownership changed before the fence was established.");
+        throw new InvalidOperationException("The invocation lease is stale or unknown.");
     }
 
     private async ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationCoreAsync(
@@ -1634,7 +1709,8 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         string? ClaimToken = null,
         DateTimeOffset? ClaimedAt = null,
         AgentToolInvocationPreDispatchState? ClaimedState = null,
-        string? OwnershipEvidence = null)
+        string? OwnershipEvidence = null,
+        long Revision = 0)
     {
         public bool IsIndeterminate => IndeterminateAt is not null;
 

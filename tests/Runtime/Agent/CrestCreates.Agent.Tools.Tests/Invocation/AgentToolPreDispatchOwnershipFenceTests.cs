@@ -136,4 +136,49 @@ public sealed class AgentToolPreDispatchOwnershipFenceTests : IAsyncLifetime
     public Task LiveAccepted_DispatchAndReconcileRace_Should_HaveSingleWinner()
         => AgentToolPreDispatchOwnershipFenceContractCases
             .LiveAccepted_DispatchAndReconcileRace_Should_HaveSingleWinner(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task PublishedCompletion_Should_Never_Accept_LateIndeterminateMutation()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .PublishedCompletion_Should_Never_Accept_LateIndeterminateMutation(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task PublishedRelease_Should_Never_Accept_LateIndeterminateMutation()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .PublishedRelease_Should_Never_Accept_LateIndeterminateMutation(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task CompletionPending_WithIndeterminateMarker_Should_ReadAsIndeterminate()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .CompletionPending_WithIndeterminateMarker_Should_ReadAsIndeterminate(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task ReleasePending_WithIndeterminateMarker_Should_ReadAsIndeterminate()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .ReleasePending_WithIndeterminateMarker_Should_ReadAsIndeterminate(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_Is_Idempotent_On_ExistingMarker()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_Is_Idempotent_On_ExistingMarker(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_ZeroAffectedRows_Should_Not_ReportSuccess()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_ZeroAffectedRows_Should_Not_ReportSuccess(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_vs_DispatchStarted_Should_HaveLinearizableOrder()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_vs_DispatchStarted_Should_HaveLinearizableOrder(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_vs_PublishCompletion_Should_HaveSingleWinner()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_vs_PublishCompletion_Should_HaveSingleWinner(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_vs_PublishRelease_Should_HaveSingleWinner()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_vs_PublishRelease_Should_HaveSingleWinner(_ctx, CancellationToken.None);
 }

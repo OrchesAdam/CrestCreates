@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation — slices implemented; PostgreSQL contract/crash/NativeAOT evidence restored as required CI gates, pending green)
+Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation — all slices implemented; PostgreSQL contract/crash/NativeAOT evidence green in CI run 30994557565; review rounds 1–3 remediated, round-3 MarkIndeterminate CAS linearization closed)
 
 ## Purpose
 
@@ -2083,17 +2083,17 @@ Compatibility GET
 - Dependency Boundaries: 50 passed.
 - CodeGenerator: 283 passed.
 
-### Phase 9b+ — Durable Agent Tool Pre-Dispatch Reconciliation (2026-08-03, remediated 2026-08-06, ownership-fence 2026-08-06)
+### Phase 9b+ — Durable Agent Tool Pre-Dispatch Reconciliation (2026-08-03, remediated 2026-08-06, ownership-fence 2026-08-06, MarkIndeterminate CAS 2026-08-06)
 
 **Status**: All 7 slices implemented. PostgreSQL contract, crash-window, retention and
 NativeAOT evidence restored as required CI gates (Docker-backed job re-enabled in
 `.github/workflows/ci.yml`). The evidence gate is **green in CI**
-(run 30992601362: PostgreSQL contract/crash 64/64, PostgreSQL AOT fixture 1/1,
+(run 30994557565: PostgreSQL contract/crash 64/64, PostgreSQL AOT fixture 1/1,
 all other jobs green); PR #72 re-added `Closes #70`.
 
 Second review round (ownership fence) closed with a new P0 fix:
 - `Indeterminate` is now a real fence: `MarkIndeterminateAsync` freezes the current
-  lease into `frozen_lease_json` and bumps the fencing token (V009); all 12 live-worker
+  lease into `frozen_lease_json` (V009); all 12 live-worker
   forward transitions CAS on lease + attempt + fencing token and additionally require
   `indeterminate_at is null`. InMemory clears the active lease on Indeterminate, so both
   providers converge on the same observable semantics.
@@ -2107,6 +2107,37 @@ Second review round (ownership fence) closed with a new P0 fix:
   LivePending/LiveReady safety, ExpiredLease/MarkedIndeterminate convergence,
   ClaimWins × 3, DispatchWins × 2, live race single-winner) run against **both** the
   InMemory and PostgreSQL providers from the shared Testing project.
+
+Third review round (MarkIndeterminate linearization) closed with one more P0 fix:
+- `PostgreSqlAgentToolInvocationGate.MarkIndeterminateCoreAsync` is now a single
+  atomic CAS: it pre-reads `revision + state` by lease identity, then
+  `UPDATE ... WHERE lease_id AND attempt_id AND fencing_token AND revision = @rev
+  AND pre_dispatch_state = @ps AND indeterminate_at is null RETURNING revision`.
+  The UPDATE is the linearization point, so a concurrently published terminal
+  receipt (`PublishCompletion`/`PublishRelease`) or a competing ownership transition
+  can never be overwritten by a late fence.
+- A zero-row CAS is **never reported as success**: the method re-reads without the
+  fencing-token predicate (`ReadGateRowByLeaseAsync`) and classifies the outcome —
+  same existing Indeterminate → idempotent success; Completed/Released → terminal
+  conflict throw; different revision/state → ownership-changed throw; missing row →
+  stale throw.
+- The fencing-token bump was **removed** from `MarkIndeterminate` (V009 keeps the
+  frozen lease). InMemory keeps the token on MarkIndeterminate, and keeping it lets
+  `GetCompletionStateAsync`/`GetReleaseStateAsync` (keyed by the original lease)
+  observe the Indeterminate marker, preserving provider-equivalent semantics. Fencing
+  comes from the `indeterminate_at is null` CAS guards; the reconciliation claim
+  (which does bump the token) remains the ownership hand-over path.
+- Read-order fixes in `PublishCompletionCoreAsync`, `GetCompletionStateCoreAsync`,
+  `PublishReleaseCoreAsync`, `GetReleaseStateCoreAsync`: terminal state →
+  `IsIndeterminate` → Pending → Unknown, so a Pending row with an indeterminate
+  marker reads as Indeterminate (matching InMemory). `PrepareCompletionCoreAsync` /
+  `PrepareReleaseCoreAsync` reject an already-fenced row up front.
+- 10 new shared contract cases added (PublishedCompletion/Release never accept a late
+  indeterminate mutation, CompletionPending/ReleasePending with marker read as
+  Indeterminate, MarkIndeterminate idempotent on existing marker, zero-affected-rows
+  not reported as success, MarkIndeterminate vs DispatchStarted/Completion/Release
+  linearizable single-winner with a second independent provider/connection), all
+  green on both InMemory and PostgreSQL runners. No schema change — no V010 required.
 
 First real execution (previously the job was excluded) surfaced contract failures
 that were fixed and re-verified locally against PostgreSQL 16:
@@ -2125,9 +2156,9 @@ that were fixed and re-verified locally against PostgreSQL 16:
 - AotHost per-window markers derived from the sentinel (`CW04`…`CW09`), not the
   last two scenario characters.
 
-Verified locally (PostgreSQL 16 on 127.0.0.1): 77/77 PostgreSQL contract/crash tests
-pass (64 contract/crash + 13 ownership-fence), AotFixture native publish-link-run +
-subprocess crash recovery passes, 283 Agent.Tools (270 + 13 ownership-fence) +
+Verified locally (PostgreSQL 16 on 127.0.0.1): 86/86 PostgreSQL contract/crash tests
+pass (64 contract/crash + 13 ownership-fence + 9 MarkIndeterminate-CAS), AotFixture native publish-link-run +
+subprocess crash recovery passes, 292 Agent.Tools (270 + 13 ownership-fence + 9 MarkIndeterminate-CAS) +
 93 boundary + 16 abstractions tests pass.
 
 **PR**: #72

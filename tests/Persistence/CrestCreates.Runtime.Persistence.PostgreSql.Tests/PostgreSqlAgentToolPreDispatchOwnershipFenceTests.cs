@@ -19,6 +19,7 @@ public sealed class PostgreSqlAgentToolPreDispatchOwnershipFenceTests : IAsyncLi
     private readonly PostgreSqlRuntimeCollectionFixture _fixture;
     private PostgreSqlRuntimeSchemaLease _lease = null!;
     private ServiceProvider _provider = null!;
+    private ServiceProvider _secondProvider = null!;
     private AgentToolPreDispatchOwnershipFenceContext _ctx = null!;
 
     public PostgreSqlAgentToolPreDispatchOwnershipFenceTests(PostgreSqlRuntimeCollectionFixture fixture)
@@ -33,6 +34,14 @@ public sealed class PostgreSqlAgentToolPreDispatchOwnershipFenceTests : IAsyncLi
             .AddCrestCreatesPostgreSqlRuntimePersistence(_lease.Options)
             .BuildServiceProvider();
 
+        // A second, fully independent ServiceProvider over the same durable
+        // schema: the true-race cases run their two participants through two
+        // separate connection pools, so the observed winner is arbitrated by
+        // the database, not by a single in-memory stub.
+        _secondProvider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(_lease.Options)
+            .BuildServiceProvider();
+
         var gate = _provider.GetRequiredService<IAgentToolInvocationGate>();
         var budgetGate = _provider.GetRequiredService<IAgentToolBudgetGate>();
         var auditor = _provider.GetRequiredService<IAgentToolGovernanceAuditor>();
@@ -41,6 +50,7 @@ public sealed class PostgreSqlAgentToolPreDispatchOwnershipFenceTests : IAsyncLi
         _ctx = new AgentToolPreDispatchOwnershipFenceContext
         {
             Gate = gate,
+            SecondGate = _secondProvider.GetRequiredService<IAgentToolInvocationGate>(),
             BudgetGate = budgetGate,
             Auditor = auditor,
             Reconciler = new DefaultAgentToolPreDispatchReconciler(gate, budgetGate, auditor, store),
@@ -51,6 +61,7 @@ public sealed class PostgreSqlAgentToolPreDispatchOwnershipFenceTests : IAsyncLi
 
     public async Task DisposeAsync()
     {
+        await _secondProvider.DisposeAsync();
         await _provider.DisposeAsync();
         await _lease.DisposeAsync();
     }
@@ -137,4 +148,49 @@ public sealed class PostgreSqlAgentToolPreDispatchOwnershipFenceTests : IAsyncLi
     public Task LiveAccepted_DispatchAndReconcileRace_Should_HaveSingleWinner()
         => AgentToolPreDispatchOwnershipFenceContractCases
             .LiveAccepted_DispatchAndReconcileRace_Should_HaveSingleWinner(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task PublishedCompletion_Should_Never_Accept_LateIndeterminateMutation()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .PublishedCompletion_Should_Never_Accept_LateIndeterminateMutation(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task PublishedRelease_Should_Never_Accept_LateIndeterminateMutation()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .PublishedRelease_Should_Never_Accept_LateIndeterminateMutation(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task CompletionPending_WithIndeterminateMarker_Should_ReadAsIndeterminate()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .CompletionPending_WithIndeterminateMarker_Should_ReadAsIndeterminate(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task ReleasePending_WithIndeterminateMarker_Should_ReadAsIndeterminate()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .ReleasePending_WithIndeterminateMarker_Should_ReadAsIndeterminate(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_Is_Idempotent_On_ExistingMarker()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_Is_Idempotent_On_ExistingMarker(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_ZeroAffectedRows_Should_Not_ReportSuccess()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_ZeroAffectedRows_Should_Not_ReportSuccess(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_vs_DispatchStarted_Should_HaveLinearizableOrder()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_vs_DispatchStarted_Should_HaveLinearizableOrder(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_vs_PublishCompletion_Should_HaveSingleWinner()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_vs_PublishCompletion_Should_HaveSingleWinner(_ctx, CancellationToken.None);
+
+    [Fact]
+    public Task MarkIndeterminate_vs_PublishRelease_Should_HaveSingleWinner()
+        => AgentToolPreDispatchOwnershipFenceContractCases
+            .MarkIndeterminate_vs_PublishRelease_Should_HaveSingleWinner(_ctx, CancellationToken.None);
 }

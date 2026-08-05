@@ -16,6 +16,14 @@ public sealed class AgentToolPreDispatchOwnershipFenceContext
 {
     public required IAgentToolInvocationGate Gate { get; init; }
 
+    /// <summary>
+    /// Optional second participant used by the true-race cases (for example a
+    /// second ServiceProvider over the same durable schema, or the same gate
+    /// when the provider linearizes internally). When omitted, races run both
+    /// participants against <see cref="Gate"/>.
+    /// </summary>
+    public IAgentToolInvocationGate? SecondGate { get; init; }
+
     public required IAgentToolBudgetGate BudgetGate { get; init; }
 
     public required IAgentToolGovernanceAuditor Auditor { get; init; }
@@ -416,6 +424,386 @@ public static class AgentToolPreDispatchOwnershipFenceContractCases
         }
     }
 
+    // ── MarkIndeterminate atomic CAS (review P0, round 3) ────────────────────
+
+    /// <summary>
+    /// A published Completion is a terminal receipt: a later
+    /// MarkIndeterminate must be rejected as a single linearized CAS, never
+    /// silently succeeding or stamping a marker onto the completed row
+    /// (INV-14).
+    /// </summary>
+    public static async Task PublishedCompletion_Should_Never_Accept_LateIndeterminateMutation(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var (setup, reservation, receipt) = await SetupAcceptedAsync(ctx, cancellationToken);
+        await PublishCompletedAsync(ctx, setup, reservation, receipt, cancellationToken);
+
+        await AssertThrowsInvalidOperationAsync(
+            () => ctx.Gate.MarkIndeterminateAsync(setup.Lease, "late-fence", cancellationToken),
+            "MarkIndeterminate must reject a published Completion (INV-14).");
+
+        var completion = await ctx.Gate.GetCompletionStateAsync(setup.Lease, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationCompletionState.Completed,
+            completion.State,
+            "A published completion must remain the terminal receipt after a late fence attempt.");
+
+        var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+        AgentToolPreDispatchContractAssertions.True(
+            !state.Indeterminate,
+            "A late fence must not stamp an indeterminate marker onto a published completion.");
+    }
+
+    /// <summary>
+    /// A published Release is a terminal receipt: a later MarkIndeterminate
+    /// must be rejected as a single linearized CAS (INV-14).
+    /// </summary>
+    public static async Task PublishedRelease_Should_Never_Accept_LateIndeterminateMutation(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var (setup, reservation, _) = await SetupAcceptedAsync(ctx, cancellationToken);
+        await PublishReleasedAsync(ctx, setup, reservation, cancellationToken);
+
+        await AssertThrowsInvalidOperationAsync(
+            () => ctx.Gate.MarkIndeterminateAsync(setup.Lease, "late-fence", cancellationToken),
+            "MarkIndeterminate must reject a published Release (INV-14).");
+
+        var release = await ctx.Gate.GetReleaseStateAsync(setup.Lease, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationReleaseState.Released,
+            release.State,
+            "A published release must remain the terminal receipt after a late fence attempt.");
+
+        var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+        AgentToolPreDispatchContractAssertions.True(
+            !state.Indeterminate,
+            "A late fence must not stamp an indeterminate marker onto a published release.");
+    }
+
+    /// <summary>
+    /// A CompletionPending row marked indeterminate must read as Indeterminate
+    /// (not CompletionPending), while the fence itself reports success.
+    /// </summary>
+    public static async Task CompletionPending_WithIndeterminateMarker_Should_ReadAsIndeterminate(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var (setup, reservation, receipt) = await SetupAcceptedAsync(ctx, cancellationToken);
+        var dispatched = await ctx.Gate.TryMarkDispatchStartedAsync(
+            setup.Lease, receipt, reservation.ReservationId, cancellationToken);
+        AgentToolPreDispatchContractAssertions.True(
+            dispatched,
+            "Dispatch must start before completion can be prepared.");
+        await ctx.Gate.PrepareCompletionAsync(setup.Lease,
+            CompletionRequest(reservation, "audit-mark-completion-pending"), cancellationToken);
+
+        var pending = await ctx.Gate.GetCompletionStateAsync(setup.Lease, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationCompletionState.CompletionPending,
+            pending.State,
+            "Precondition: completion must be pending before the fence.");
+
+        await ctx.Gate.MarkIndeterminateAsync(setup.Lease, "fenced", cancellationToken);
+
+        var after = await ctx.Gate.GetCompletionStateAsync(setup.Lease, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationCompletionState.Indeterminate,
+            after.State,
+            "A marked CompletionPending row must read as Indeterminate, not CompletionPending.");
+
+        var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+        AgentToolPreDispatchContractAssertions.True(
+            state.Indeterminate,
+            "The indeterminate marker must be visible on the preserved sub-state.");
+    }
+
+    /// <summary>
+    /// A ReleasePending row marked indeterminate must read as Indeterminate
+    /// (not ReleasePending), while the fence itself reports success.
+    /// </summary>
+    public static async Task ReleasePending_WithIndeterminateMarker_Should_ReadAsIndeterminate(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var (setup, reservation, _) = await SetupAcceptedAsync(ctx, cancellationToken);
+        await ctx.Gate.PrepareReleaseAsync(setup.Lease,
+            ReleaseRequest(reservation, "audit-mark-release-pending"), cancellationToken);
+
+        var pending = await ctx.Gate.GetReleaseStateAsync(setup.Lease, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationReleaseState.ReleasePending,
+            pending.State,
+            "Precondition: release must be pending before the fence.");
+
+        await ctx.Gate.MarkIndeterminateAsync(setup.Lease, "fenced", cancellationToken);
+
+        var after = await ctx.Gate.GetReleaseStateAsync(setup.Lease, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationReleaseState.Indeterminate,
+            after.State,
+            "A marked ReleasePending row must read as Indeterminate, not ReleasePending.");
+
+        var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+        AgentToolPreDispatchContractAssertions.True(
+            state.Indeterminate,
+            "The indeterminate marker must be visible on the preserved sub-state.");
+    }
+
+    /// <summary>
+    /// Re-marking an already indeterminate invocation is idempotent success on
+    /// every provider (the InMemory provider returns under the same lock; the
+    /// PostgreSQL provider classifies its zero-row CAS as an existing fence).
+    /// </summary>
+    public static async Task MarkIndeterminate_Is_Idempotent_On_ExistingMarker(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var (setup, _, _) = await SetupAcceptedAsync(ctx, cancellationToken);
+
+        await ctx.Gate.MarkIndeterminateAsync(setup.Lease, "fenced-first", cancellationToken);
+        await ctx.Gate.MarkIndeterminateAsync(setup.Lease, "fenced-second", cancellationToken);
+
+        var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+        AgentToolPreDispatchContractAssertions.True(
+            state.Indeterminate,
+            "The marker must be established by the first fence.");
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationPreDispatchState.Accepted,
+            state.State,
+            "The Accepted recovery sub-state must be preserved by an idempotent re-fence.");
+    }
+
+    /// <summary>
+    /// When MarkIndeterminate's CAS affects zero rows because a competing
+    /// ownership transition won (here: a reconciliation claim that bumps the
+    /// fencing token and revision), the call must fail loudly — a zero-row
+    /// UPDATE must never be reported as success.
+    /// </summary>
+    public static async Task MarkIndeterminate_ZeroAffectedRows_Should_Not_ReportSuccess(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var (setup, _, _) = await SetupAcceptedAsync(ctx, cancellationToken);
+        var current = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+
+        var claim = await ctx.Gate.TryBeginPreDispatchReconciliationAsync(
+            new AgentToolPreDispatchReconciliationClaimRequest
+            {
+                Identity = setup.Identity,
+                ExpectedRevision = current.Revision,
+                OwnershipLost = true,
+                OwnershipEvidence = "zero-row-fence-test"
+            }, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolPreDispatchReconciliationClaimStatus.Claimed,
+            claim.Status,
+            "The reconciliation claim must win the fence before the stale MarkIndeterminate.");
+
+        await AssertThrowsInvalidOperationAsync(
+            () => ctx.Gate.MarkIndeterminateAsync(setup.Lease, "late-fence", cancellationToken),
+            "A MarkIndeterminate whose CAS affects zero rows must not report success.");
+
+        var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+        AgentToolPreDispatchContractAssertions.True(
+            !state.Indeterminate,
+            "A lost MarkIndeterminate CAS must not stamp the marker.");
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationPreDispatchState.ReconciliationPending,
+            state.State,
+            "The claim owner's transition must remain authoritative.");
+    }
+
+    /// <summary>
+    /// MarkIndeterminate racing DispatchStarted has a linearizable order: a
+    /// winning dispatch is observable as DispatchStarted; a winning fence
+    /// blocks dispatch and preserves the Accepted recovery sub-state.
+    /// </summary>
+    public static async Task MarkIndeterminate_vs_DispatchStarted_Should_HaveLinearizableOrder(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var gateA = ctx.Gate;
+        var gateB = ctx.SecondGate ?? ctx.Gate;
+
+        for (var round = 0; round < 3; round++)
+        {
+            var (setup, reservation, receipt) = await SetupAcceptedAsync(ctx, cancellationToken);
+
+            var markTask = CaptureAsync(
+                () => gateA.MarkIndeterminateAsync(setup.Lease, "fenced", cancellationToken));
+            var dispatchTask = CaptureResultAsync(() => gateB.TryMarkDispatchStartedAsync(
+                setup.Lease, receipt, reservation.ReservationId, cancellationToken));
+            await Task.WhenAll(markTask, dispatchTask).ConfigureAwait(false);
+
+            var markError = markTask.Result;
+            var dispatched = dispatchTask.Result.Result == true;
+            var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+
+            if (dispatched)
+            {
+                AgentToolPreDispatchContractAssertions.Equal(
+                    AgentToolInvocationPreDispatchState.DispatchStarted,
+                    state.State,
+                    "A winning dispatch must be observable as DispatchStarted.");
+                if (markError is null)
+                {
+                    AgentToolPreDispatchContractAssertions.True(
+                        state.Indeterminate,
+                        "A fence that landed after dispatch must be observable on the DispatchStarted row.");
+                }
+            }
+            else
+            {
+                AgentToolPreDispatchContractAssertions.True(
+                    markError is null,
+                    "A fenced dispatch implies the fence itself succeeded (INV-09).");
+                AgentToolPreDispatchContractAssertions.True(
+                    state.Indeterminate,
+                    "A fenced dispatch must carry the indeterminate marker.");
+                AgentToolPreDispatchContractAssertions.Equal(
+                    AgentToolInvocationPreDispatchState.Accepted,
+                    state.State,
+                    "Indeterminate must preserve the Accepted recovery sub-state.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// MarkIndeterminate racing PublishCompletion has exactly one winner: the
+    /// published Completion rejects a late fence, and a winning fence makes
+    /// PublishCompletion observe Indeterminate — never both terminal
+    /// receipts.
+    /// </summary>
+    public static async Task MarkIndeterminate_vs_PublishCompletion_Should_HaveSingleWinner(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var gateA = ctx.Gate;
+        var gateB = ctx.SecondGate ?? ctx.Gate;
+
+        for (var round = 0; round < 3; round++)
+        {
+            var (setup, reservation, receipt) = await SetupAcceptedAsync(ctx, cancellationToken);
+            var dispatched = await ctx.Gate.TryMarkDispatchStartedAsync(
+                setup.Lease, receipt, reservation.ReservationId, cancellationToken);
+            AgentToolPreDispatchContractAssertions.True(
+                dispatched,
+                "Dispatch must start before completion publication can race.");
+            await ctx.Gate.PrepareCompletionAsync(setup.Lease,
+                CompletionRequest(reservation, "audit-mark-completion-race"), cancellationToken);
+
+            var markTask = CaptureAsync(
+                () => gateA.MarkIndeterminateAsync(setup.Lease, "fenced", cancellationToken));
+            var publishTask = CaptureResultAsync(
+                () => gateB.PublishCompletionAsync(setup.Lease, cancellationToken));
+            await Task.WhenAll(markTask, publishTask).ConfigureAwait(false);
+
+            var markError = markTask.Result;
+            var (published, publishError) = publishTask.Result;
+
+            var completion = await ctx.Gate.GetCompletionStateAsync(setup.Lease, cancellationToken);
+            var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+
+            if (published is { State: AgentToolInvocationCompletionState.Completed })
+            {
+                AgentToolPreDispatchContractAssertions.True(
+                    markError is not null,
+                    "MarkIndeterminate must not silently succeed over a published Completion.");
+                AgentToolPreDispatchContractAssertions.Equal(
+                    AgentToolInvocationCompletionState.Completed,
+                    completion.State,
+                    "The published completion must remain the terminal receipt.");
+                AgentToolPreDispatchContractAssertions.True(
+                    !state.Indeterminate,
+                    "A winning publication must not carry a late indeterminate marker.");
+            }
+            else
+            {
+                // The fence won first: it reports success, and the losing
+                // publish must not reach the terminal state.
+                AgentToolPreDispatchContractAssertions.True(
+                    markError is null,
+                    "The winning fence must report success.");
+                AgentToolPreDispatchContractAssertions.True(
+                    publishError is null || published is null,
+                    "The losing publish must fail or observe the fence, not the terminal state.");
+                AgentToolPreDispatchContractAssertions.Equal(
+                    AgentToolInvocationCompletionState.Indeterminate,
+                    completion.State,
+                    "A marked CompletionPending row must read as Indeterminate.");
+                AgentToolPreDispatchContractAssertions.True(
+                    state.Indeterminate,
+                    "The winning fence marker must be visible.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// MarkIndeterminate racing PublishRelease has exactly one winner: the
+    /// published Release rejects a late fence, and a winning fence makes
+    /// PublishRelease observe Indeterminate — never both terminal receipts.
+    /// </summary>
+    public static async Task MarkIndeterminate_vs_PublishRelease_Should_HaveSingleWinner(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        CancellationToken cancellationToken)
+    {
+        var gateA = ctx.Gate;
+        var gateB = ctx.SecondGate ?? ctx.Gate;
+
+        for (var round = 0; round < 3; round++)
+        {
+            var (setup, reservation, _) = await SetupAcceptedAsync(ctx, cancellationToken);
+            await ctx.Gate.PrepareReleaseAsync(setup.Lease,
+                ReleaseRequest(reservation, "audit-mark-release-race"), cancellationToken);
+
+            var markTask = CaptureAsync(
+                () => gateA.MarkIndeterminateAsync(setup.Lease, "fenced", cancellationToken));
+            var publishTask = CaptureResultAsync(
+                () => gateB.PublishReleaseAsync(setup.Lease, cancellationToken));
+            await Task.WhenAll(markTask, publishTask).ConfigureAwait(false);
+
+            var markError = markTask.Result;
+            var (published, publishError) = publishTask.Result;
+
+            var release = await ctx.Gate.GetReleaseStateAsync(setup.Lease, cancellationToken);
+            var state = await ctx.Gate.GetPreDispatchStateAsync(setup.Identity, cancellationToken);
+
+            if (published is { State: AgentToolInvocationReleaseState.Released })
+            {
+                AgentToolPreDispatchContractAssertions.True(
+                    markError is not null,
+                    "MarkIndeterminate must not silently succeed over a published Release.");
+                AgentToolPreDispatchContractAssertions.Equal(
+                    AgentToolInvocationReleaseState.Released,
+                    release.State,
+                    "The published release must remain the terminal receipt.");
+                AgentToolPreDispatchContractAssertions.True(
+                    !state.Indeterminate,
+                    "A winning release must not carry a late indeterminate marker.");
+            }
+            else
+            {
+                // The fence won first: it reports success, and the losing
+                // publish must not reach the terminal state.
+                AgentToolPreDispatchContractAssertions.True(
+                    markError is null,
+                    "The winning fence must report success.");
+                AgentToolPreDispatchContractAssertions.True(
+                    publishError is null || published is null,
+                    "The losing publish must fail or observe the fence, not the terminal state.");
+                AgentToolPreDispatchContractAssertions.Equal(
+                    AgentToolInvocationReleaseState.Indeterminate,
+                    release.State,
+                    "A marked ReleasePending row must read as Indeterminate.");
+                AgentToolPreDispatchContractAssertions.True(
+                    state.Indeterminate,
+                    "The winning fence marker must be visible.");
+            }
+        }
+    }
+
     // ── Setup helpers ────────────────────────────────────────────────────────
 
     private static AgentToolLogicalInvocationKey NewKey(string seed)
@@ -691,5 +1079,119 @@ public static class AgentToolPreDispatchOwnershipFenceContractCases
             AgentToolBudgetReadStatus.Released,
             budget.Status,
             "Budget must be released.");
+    }
+
+    private static async Task PublishCompletedAsync(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        Setup setup,
+        AgentToolBudgetReservation reservation,
+        AgentToolGovernancePreDispatchReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        var dispatched = await ctx.Gate.TryMarkDispatchStartedAsync(
+            setup.Lease, receipt, reservation.ReservationId, cancellationToken);
+        AgentToolPreDispatchContractAssertions.True(
+            dispatched,
+            "Dispatch must start before completion publication.");
+        await ctx.Gate.PrepareCompletionAsync(setup.Lease,
+            CompletionRequest(reservation, "audit-mark-completion-late"), cancellationToken);
+        var published = await ctx.Gate.PublishCompletionAsync(setup.Lease, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationCompletionState.Completed,
+            published.State,
+            "Completion publication must reach the terminal state.");
+    }
+
+    private static async Task PublishReleasedAsync(
+        AgentToolPreDispatchOwnershipFenceContext ctx,
+        Setup setup,
+        AgentToolBudgetReservation reservation,
+        CancellationToken cancellationToken)
+    {
+        await ctx.Gate.PrepareReleaseAsync(setup.Lease,
+            ReleaseRequest(reservation, "audit-mark-release-late"), cancellationToken);
+        var published = await ctx.Gate.PublishReleaseAsync(setup.Lease, cancellationToken);
+        AgentToolPreDispatchContractAssertions.Equal(
+            AgentToolInvocationReleaseState.Released,
+            published.State,
+            "Release publication must reach the terminal state.");
+    }
+
+    private static AgentToolInvocationPrepareCompletionRequest CompletionRequest(
+        AgentToolBudgetReservation reservation,
+        string auditId)
+        => new()
+        {
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.Succeeded,
+                Code = "tool-ok",
+                Message = "tool completed"
+            },
+            AuditId = auditId,
+            BudgetReservationId = reservation.ReservationId,
+            ReasonCode = "tool-ok"
+        };
+
+    private static AgentToolInvocationPrepareReleaseRequest ReleaseRequest(
+        AgentToolBudgetReservation reservation,
+        string auditId)
+        => new()
+        {
+            AuditId = auditId,
+            BudgetReservationId = reservation.ReservationId,
+            ReasonCode = "no-dispatch"
+        };
+
+    private static async Task AssertThrowsInvalidOperationAsync(
+        Func<ValueTask> action,
+        string message)
+    {
+        Exception? captured = null;
+        try
+        {
+            await action().ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            captured = ex;
+        }
+
+        AgentToolPreDispatchContractAssertions.True(
+            captured is not null,
+            message);
+    }
+
+    /// <summary>
+    /// Starts an operation and captures any exception (synchronous or
+    /// asynchronous) so the true-race cases can run both participants
+    /// concurrently without a faulted task escaping. The in-memory provider
+    /// executes its ValueTask bodies synchronously, so the invocation itself
+    /// may throw and must be wrapped.
+    /// </summary>
+    private static async Task<Exception?> CaptureAsync(Func<ValueTask> action)
+    {
+        try
+        {
+            await action().ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex;
+        }
+    }
+
+    private static async Task<(TResult? Result, Exception? Error)> CaptureResultAsync<TResult>(
+        Func<ValueTask<TResult>> action)
+    {
+        try
+        {
+            return (await action().ConfigureAwait(false), null);
+        }
+        catch (Exception ex)
+        {
+            return (default, ex);
+        }
     }
 }
