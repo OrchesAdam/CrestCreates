@@ -116,6 +116,8 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))
         {
+            // Close the reader before running a follow-up query on the same connection.
+            await reader.DisposeAsync().ConfigureAwait(false);
             // Either not found, identity mismatch, or already terminal.
             // Read current state to distinguish.
             var existing = await ReadReservationByIdReservationIdAsync(request.ReservationId, ct);
