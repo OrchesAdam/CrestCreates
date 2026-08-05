@@ -1015,6 +1015,18 @@ public sealed class AgentToolInvokerTests
             AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
             => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
 
+        public ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaimRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.TryBeginPreDispatchReconciliationAsync(request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaim claim,
+            AgentToolPreDispatchReconciliationCompletionKind kind,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.CompletePreDispatchReconciliationAsync(claim, kind, reasonCode, cancellationToken);
+
 
         public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
@@ -1117,6 +1129,18 @@ public sealed class AgentToolInvokerTests
         public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
             AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
             => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaimRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.TryBeginPreDispatchReconciliationAsync(request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaim claim,
+            AgentToolPreDispatchReconciliationCompletionKind kind,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.CompletePreDispatchReconciliationAsync(claim, kind, reasonCode, cancellationToken);
 
 
         public ValueTask AbandonUnrecordedLeaseAsync(
@@ -1622,6 +1646,18 @@ public sealed class AgentToolInvokerTests
             AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
             => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
 
+        public ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaimRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.TryBeginPreDispatchReconciliationAsync(request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaim claim,
+            AgentToolPreDispatchReconciliationCompletionKind kind,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.CompletePreDispatchReconciliationAsync(claim, kind, reasonCode, cancellationToken);
+
 
         public ValueTask AbandonUnrecordedLeaseAsync(
             AgentToolInvocationLease lease,
@@ -1725,6 +1761,18 @@ public sealed class AgentToolInvokerTests
         public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
             AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
             => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaimRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.TryBeginPreDispatchReconciliationAsync(request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaim claim,
+            AgentToolPreDispatchReconciliationCompletionKind kind,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.CompletePreDispatchReconciliationAsync(claim, kind, reasonCode, cancellationToken);
 
 
         public ValueTask AbandonUnrecordedLeaseAsync(
@@ -1837,6 +1885,18 @@ public sealed class AgentToolInvokerTests
         public ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
             AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
             => _inner.AbandonByIdentityAsync(identity, reasonCode, cancellationToken);
+
+        public ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaimRequest request,
+            CancellationToken cancellationToken = default)
+            => _inner.TryBeginPreDispatchReconciliationAsync(request, cancellationToken);
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaim claim,
+            AgentToolPreDispatchReconciliationCompletionKind kind,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+            => _inner.CompletePreDispatchReconciliationAsync(claim, kind, reasonCode, cancellationToken);
 
 
         public ValueTask AbandonUnrecordedLeaseAsync(

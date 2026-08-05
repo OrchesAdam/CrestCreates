@@ -41,7 +41,16 @@ public sealed class PostgreSqlAgentToolPreDispatchCrashTests(PostgreSqlRuntimeCo
         var reconciler = new DefaultAgentToolPreDispatchReconciler(gate, budget, auditor, store);
 
         // Fresh provider converges the crash window with zero dispatcher calls.
-        var result = await reconciler.ReconcileAsync(identity);
+        // The worker process tree was killed, so the reconciler asserts durable
+        // ownership loss to claim the still-valid lease before settling anything.
+        var result = await reconciler.ReconcileAsync(
+            identity,
+            cancellationToken: default,
+            context: new AgentToolPreDispatchReconciliationContext
+            {
+                OwnershipLost = true,
+                OwnershipEvidence = "process-tree-killed"
+            });
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Released);
         result.Receipt.Should().NotBeNull();
         result.Receipt!.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Released);
@@ -74,7 +83,14 @@ public sealed class PostgreSqlAgentToolPreDispatchCrashTests(PostgreSqlRuntimeCo
         var store = fresh.GetRequiredService<IAgentToolPreDispatchReconciliationStore>();
         var reconciler = new DefaultAgentToolPreDispatchReconciler(gate, budget, auditor, store);
 
-        var result = await reconciler.ReconcileAsync(identity);
+        var result = await reconciler.ReconcileAsync(
+            identity,
+            cancellationToken: default,
+            context: new AgentToolPreDispatchReconciliationContext
+            {
+                OwnershipLost = true,
+                OwnershipEvidence = "process-tree-killed"
+            });
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Released);
         result.Receipt.Should().NotBeNull();
 

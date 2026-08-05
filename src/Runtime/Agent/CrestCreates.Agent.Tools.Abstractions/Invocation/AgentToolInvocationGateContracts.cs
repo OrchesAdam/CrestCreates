@@ -202,4 +202,13 @@ public interface IAgentToolInvocationGate
         string reasonCode,
         CancellationToken cancellationToken = default);
 
+    ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+        AgentToolPreDispatchReconciliationClaimRequest request,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+        AgentToolPreDispatchReconciliationClaim claim,
+        AgentToolPreDispatchReconciliationCompletionKind kind,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
 }

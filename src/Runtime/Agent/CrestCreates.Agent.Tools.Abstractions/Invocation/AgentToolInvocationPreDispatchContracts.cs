@@ -15,7 +15,8 @@ public enum AgentToolInvocationPreDispatchState
     Released,
     CompletionPending,
     Completed,
-    Indeterminate
+    Indeterminate,
+    ReconciliationPending
 }
 
 /// <summary>
@@ -111,6 +112,32 @@ public sealed record AgentToolInvocationPreDispatchResult
     public AgentToolGovernancePreDispatchReceipt? AcceptedReceipt { get; init; }
 
     public AgentToolInvocationAbandonedReceipt? AbandonedReceipt { get; init; }
+
+    /// <summary>
+    /// Current revision of the Attempt row. Observed by the reconciler and
+    /// replayed as <c>ExpectedRevision</c> when claiming reconciliation
+    /// ownership; a mismatch means another participant transitioned the Attempt.
+    /// </summary>
+    public long Revision { get; init; }
+
+    /// <summary>
+    /// Claim token of a granted reconciliation claim. Set when
+    /// <see cref="State"/> is <see cref="AgentToolInvocationPreDispatchState.ReconciliationPending"/>.
+    /// Lets a reconciler that lost its claim response recover the exact claim
+    /// token and complete the reconciliation without a second claim.
+    /// </summary>
+    public string? ReconciliationClaimToken { get; init; }
+
+    /// <summary>
+    /// The pre-claim substate preserved by a granted reconciliation claim.
+    /// </summary>
+    public AgentToolInvocationPreDispatchState? ReconciliationClaimedState { get; init; }
+
+    /// <summary>
+    /// When the reconciliation claim was granted. Recovery evidence for a
+    /// reconciler reconstructing a claim after its own crash.
+    /// </summary>
+    public DateTimeOffset? ReconciliationClaimedAt { get; init; }
 
     public string? ReasonCode { get; init; }
 }

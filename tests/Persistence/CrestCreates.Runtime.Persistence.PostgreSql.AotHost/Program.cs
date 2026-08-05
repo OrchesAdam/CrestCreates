@@ -226,7 +226,14 @@ static async Task RunPreDispatchCrashScenariosAsync(PostgreSqlRuntimePersistence
             var budget = services.GetRequiredService<IAgentToolBudgetGate>();
             var reconciler = services.GetRequiredService<IAgentToolPreDispatchReconciler>();
 
-            var result1 = await reconciler.ReconcileAsync(identity);
+            var result1 = await reconciler.ReconcileAsync(
+                identity,
+                cancellationToken: default,
+                context: new AgentToolPreDispatchReconciliationContext
+                {
+                    OwnershipLost = true,
+                    OwnershipEvidence = "process-tree-killed"
+                });
             if (result1.Status != AgentToolPreDispatchReconciliationStatus.Released)
                 throw new InvalidOperationException(
                     $"[{scenario.Scenario}] First reconcile failed: {result1.Status}");
@@ -241,7 +248,14 @@ static async Task RunPreDispatchCrashScenariosAsync(PostgreSqlRuntimePersistence
                 throw new InvalidOperationException(
                     $"[{scenario.Scenario}] Gate not {scenario.GateState} after reconcile: {postReconcileGate.State}");
 
-            var result2 = await reconciler.ReconcileAsync(identity);
+            var result2 = await reconciler.ReconcileAsync(
+                identity,
+                cancellationToken: default,
+                context: new AgentToolPreDispatchReconciliationContext
+                {
+                    OwnershipLost = true,
+                    OwnershipEvidence = "process-tree-killed"
+                });
             if (result2.Status != AgentToolPreDispatchReconciliationStatus.AlreadyReleased)
                 throw new InvalidOperationException(
                     $"[{scenario.Scenario}] Second reconcile failed: {result2.Status}");

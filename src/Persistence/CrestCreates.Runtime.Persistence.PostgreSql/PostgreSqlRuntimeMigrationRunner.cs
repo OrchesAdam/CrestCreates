@@ -577,18 +577,23 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["completion_outcome_json"] = NullableJson, ["release_outcome_json"] = NullableJson,
                 ["indeterminate_at"] = NullableTimestamp, ["indeterminate_reason"] = NullableText,
                 ["completion_prepared_at"] = NullableTimestamp, ["release_prepared_at"] = NullableTimestamp,
+                ["frozen_lease_json"] = NullableJson, ["reconciliation_claim_token"] = NullableText,
+                ["reconciliation_claimed_at"] = NullableTimestamp,
+                ["reconciliation_claimed_state"] = IntegerNullable,
+                ["reconciliation_ownership_evidence"] = NullableText,
                 ["created_at"] = Timestamp, ["updated_at"] = Timestamp
             }, ["tenant_id", "lease_id"],
-            [new("ck_agent_tool_pre_dispatch_state_range", "check ((pre_dispatch_state >= 0) and (pre_dispatch_state <= 10))"),
+            [new("ck_agent_tool_pre_dispatch_state_range", "check ((pre_dispatch_state >= 0) and (pre_dispatch_state <= 11))"),
              new("ck_agent_tool_pre_dispatch_revision", "check (revision > 0)"),
              new("ck_agent_tool_pre_dispatch_fencing", "check (fencing_token > 0)"),
              new("ck_agent_tool_pre_dispatch_ready_shape", "check ((pre_dispatch_state <> 2) or (bound_reservation_id is not null))"),
              new("ck_agent_tool_pre_dispatch_accepted_shape", "check ((pre_dispatch_state <> 3) or (accepted_receipt_json is not null))"),
              new("ck_agent_tool_pre_dispatch_abandoned_shape", "check ((pre_dispatch_state <> 5) or (abandoned_receipt_json is not null))"),
              new("ck_agent_tool_pre_dispatch_release_pending_shape", "check ((pre_dispatch_state <> 6) or (release_outcome_json is not null))"),
-             new("ck_agent_tool_pre_dispatch_completion_pending_shape", "check ((pre_dispatch_state <> 8) or (completion_outcome_json is not null))")],
+             new("ck_agent_tool_pre_dispatch_completion_pending_shape", "check ((pre_dispatch_state <> 8) or (completion_outcome_json is not null))"),
+             new("ck_agent_tool_pre_dispatch_reconciliation_shape", "check ((pre_dispatch_state <> 11) or (reconciliation_claim_token is not null))")],
             [new("ux_agent_tool_invocation_pre_dispatch_attempt", ["tenant_id", "attempt_id"], ""),
-             new("ux_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "pre_dispatch_state = any (array[0, 1, 2, 3, 4, 6, 8, 10])"),
+             new("ux_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "pre_dispatch_state = any (array[0, 1, 2, 3, 4, 6, 8, 10, 11])"),
              new("ix_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "", Unique: false)],
             []),
             new("agent_tool_governance_decisions", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
@@ -964,6 +969,31 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             -- Stable decision identity: one decision per (tenant, logical invocation, attempt).
             create unique index ux_agent_tool_decision_identity
                 on {schema}.agent_tool_governance_decisions (tenant_id, logical_invocation_key, attempt_id);
+            """)
+        , new RuntimeMigration("V009", "agent_tool_pre_dispatch_reconciliation_ownership", """
+            -- Gate-owned reconciliation claim (P0: ownership fence). A claimed
+            -- Attempt moves to state 11 (ReconciliationPending) with an immutable
+            -- claim token; the live lease/fencing evidence is frozen in
+            -- frozen_lease_json so governance finalization can still reference it.
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                add column frozen_lease_json jsonb null,
+                add column reconciliation_claim_token text null,
+                add column reconciliation_claimed_at timestamptz null,
+                add column reconciliation_claimed_state integer null,
+                add column reconciliation_ownership_evidence text null;
+
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                drop constraint ck_agent_tool_pre_dispatch_state_range;
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                add constraint ck_agent_tool_pre_dispatch_state_range check (pre_dispatch_state >= 0 and pre_dispatch_state <= 11),
+                add constraint ck_agent_tool_pre_dispatch_reconciliation_shape check (pre_dispatch_state <> 11 or reconciliation_claim_token is not null);
+
+            -- A claimed Attempt is still a logical-invocation fence: extend the
+            -- partial unique index so Acquire cannot create a parallel Attempt.
+            drop index {schema}.ux_agent_tool_invocation_pre_dispatch_logical;
+            create unique index ux_agent_tool_invocation_pre_dispatch_logical
+                on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key)
+                where pre_dispatch_state in (0, 1, 2, 3, 4, 6, 8, 10, 11);
             """)
     ];
 }

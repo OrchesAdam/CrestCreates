@@ -139,7 +139,12 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
     private async ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchCoreAsync(AgentToolGovernancePreDispatchRecord record, CancellationToken cancellationToken)
     {
         var connection = _coordinator.RequireSession().Connection;
-        var acceptedAt = DateTimeOffset.UtcNow;
+        // PostgreSQL timestamptz stores microsecond precision. Truncate here so
+        // the returned receipt matches exactly what the accepted_at column will
+        // persist — otherwise the Gate's accepted_receipt_json (full precision)
+        // and the checkpoint read-back never satisfy the comparer's exact
+        // AcceptedAt equality.
+        var acceptedAt = TruncateToMicroseconds(DateTimeOffset.UtcNow);
         var receipt = new AgentToolGovernancePreDispatchReceipt
         {
             AuditId = Guid.NewGuid().ToString("N"),
@@ -280,8 +285,7 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         };
     }
 
-    private static void AddCheckpointParameters(NpgsqlCommand cmd, AgentToolGovernancePreDispatchRecord record, DateTimeOffset acceptedAt)
-    {
+    private static void AddCheckpointParameters(NpgsqlCommand cmd, AgentToolGovernancePreDispatchRecord record, DateTimeOffset acceptedAt)    {
         var ctx = record.Context;
         var tenantId = ctx.LogicalInvocationKey.TenantId ?? string.Empty;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId));
@@ -351,5 +355,16 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         var ordinal = reader.GetOrdinal(columnName);
         if (reader.IsDBNull(ordinal)) return default;
         return PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(ordinal), typeInfo);
+    }
+
+    /// <summary>
+    /// PostgreSQL timestamptz has microsecond precision. Truncate so the
+    /// returned receipt's AcceptedAt exactly equals the value read back from
+    /// the accepted_at column.
+    /// </summary>
+    private static DateTimeOffset TruncateToMicroseconds(DateTimeOffset value)
+    {
+        var truncatedTicks = value.Ticks - (value.Ticks % TimeSpan.TicksPerMicrosecond);
+        return new DateTimeOffset(truncatedTicks, value.Offset);
     }
 }

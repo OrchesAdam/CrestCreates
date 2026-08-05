@@ -215,10 +215,17 @@ public class AgentToolPreDispatchNormativeCaseTests
         var bindResult = BindAccepted(gate, lease, checkpointWrite.Receipt);
         bindResult.State.Should().Be(AgentToolInvocationPreDispatchState.Accepted);
 
-        // First reconcile
+        // First reconcile — the invoker is gone (crash-recovery scenario), so the
+        // reconciler asserts durable ownership loss to claim the Gate before
+        // releasing the budget.
         var identity = new AgentToolPreDispatchIdentity(budgetContext.LogicalInvocationKey, lease.AttemptId);
         var reconciler = new DefaultAgentToolPreDispatchReconciler(gate, budgetGate, auditor, store);
-        var first = reconciler.ReconcileAsync(identity).Result;
+        var reconciliationContext = new AgentToolPreDispatchReconciliationContext
+        {
+            OwnershipLost = true,
+            OwnershipEvidence = "test-invoker-gone"
+        };
+        var first = reconciler.ReconcileAsync(identity, cancellationToken: default, context: reconciliationContext).Result;
         first.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Released,
             "first reconcile should release the budget");
 
@@ -232,7 +239,7 @@ public class AgentToolPreDispatchNormativeCaseTests
             "reconciler must transition Gate to Released");
 
         // Second reconcile — must return AlreadyReleased, not re-release
-        var second = reconciler.ReconcileAsync(identity).Result;
+        var second = reconciler.ReconcileAsync(identity, cancellationToken: default, context: reconciliationContext).Result;
         second.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.AlreadyReleased,
             "second reconcile must not re-release budget");
 

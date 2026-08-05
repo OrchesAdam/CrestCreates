@@ -2083,13 +2083,30 @@ Compatibility GET
 - Dependency Boundaries: 50 passed.
 - CodeGenerator: 283 passed.
 
-### Phase 9b+ — Durable Agent Tool Pre-Dispatch Reconciliation (2026-08-03, remediated 2026-08-06)
+### Phase 9b+ — Durable Agent Tool Pre-Dispatch Reconciliation (2026-08-03, remediated 2026-08-06, ownership-fence 2026-08-06)
 
 **Status**: All 7 slices implemented. PostgreSQL contract, crash-window, retention and
 NativeAOT evidence restored as required CI gates (Docker-backed job re-enabled in
-`.github/workflows/ci.yml`). The evidence gate is now **green in CI**
+`.github/workflows/ci.yml`). The evidence gate is **green in CI**
 (run 30992601362: PostgreSQL contract/crash 64/64, PostgreSQL AOT fixture 1/1,
 all other jobs green); PR #72 re-added `Closes #70`.
+
+Second review round (ownership fence) closed with a new P0 fix:
+- `Indeterminate` is now a real fence: `MarkIndeterminateAsync` freezes the current
+  lease into `frozen_lease_json` and bumps the fencing token (V009); all 12 live-worker
+  forward transitions CAS on lease + attempt + fencing token and additionally require
+  `indeterminate_at is null`. InMemory clears the active lease on Indeterminate, so both
+  providers converge on the same observable semantics.
+- Reconciliation is now claim-first: the reconciler calls
+  `TryBeginPreDispatchReconciliationAsync` (single CAS: state ∈ Pending/Ready/Accepted,
+  `DispatchStarted == false`, indeterminate OR expired lease OR `OwnershipLost` proof,
+  expected revision) to obtain a durable `ReconciliationPending` claim that invalidates
+  the worker's fencing token — only then does it settle budget, finalize governance, and
+  publish the terminal outcome via `CompletePreDispatchReconciliationAsync`.
+- 13 shared ownership-fence contract cases (IndeterminatePending/Ready/Accepted fence,
+  LivePending/LiveReady safety, ExpiredLease/MarkedIndeterminate convergence,
+  ClaimWins × 3, DispatchWins × 2, live race single-winner) run against **both** the
+  InMemory and PostgreSQL providers from the shared Testing project.
 
 First real execution (previously the job was excluded) surfaced contract failures
 that were fixed and re-verified locally against PostgreSQL 16:
@@ -2108,9 +2125,10 @@ that were fixed and re-verified locally against PostgreSQL 16:
 - AotHost per-window markers derived from the sentinel (`CW04`…`CW09`), not the
   last two scenario characters.
 
-Verified locally (PostgreSQL 16 on 127.0.0.1): 64/64 PostgreSQL contract/crash
-tests pass, AotFixture native publish-link-run + subprocess crash recovery passes,
-270 Agent.Tools + 93 boundary + 16 abstractions tests pass.
+Verified locally (PostgreSQL 16 on 127.0.0.1): 77/77 PostgreSQL contract/crash tests
+pass (64 contract/crash + 13 ownership-fence), AotFixture native publish-link-run +
+subprocess crash recovery passes, 283 Agent.Tools (270 + 13 ownership-fence) +
+93 boundary + 16 abstractions tests pass.
 
 **PR**: #72
 
@@ -2172,13 +2190,32 @@ tests pass, AotFixture native publish-link-run + subprocess crash recovery passe
   - Runner-free `CrestCreates.Agent.Tools.Persistence.Testing` project (Abstractions-only, no runners)
   - 70-ID manifest (H01-H10, B01-B18, F01-F30, C01-C12) as ARCH test
   - 8 ARCH tests + 5 BOUND tests
-  - 270 Agent.Tools tests, 93 boundary tests, 16 abstractions tests
+  - 283 Agent.Tools tests, 93 boundary tests, 16 abstractions tests
+  - 13 shared ownership-fence contract cases executed by both InMemory
+    (`AgentToolPreDispatchOwnershipFenceTests`) and PostgreSQL
+    (`PostgreSqlAgentToolPreDispatchOwnershipFenceTests`) runners
+
+**Ownership-fence remediation** (second review round P0):
+- `AgentToolPreDispatchReconciliationClaimContracts.cs` — claim request/result/claim,
+  completion kind; two new `IAgentToolInvocationGate` methods
+  (`TryBeginPreDispatchReconciliationAsync`, `CompletePreDispatchReconciliationAsync`)
+- `ReconciliationPending = 11` gate state; `Revision`, `ReconciliationClaimToken`,
+  `ReconciliationClaimedState`, `ReconciliationClaimedAt` on the pre-dispatch result
+- V009 migration: `frozen_lease_json`, `reconciliation_claim_*`, `indeterminate_*`
+  columns; `indeterminate_at is null` guards on 12 CAS transitions
+- Reconciler reorder: claim Gate ownership FIRST → settle budget → finalize governance
+  → `CompletePreDispatchReconciliationAsync`; DispatchStarted early-out is
+  `PostDispatchUnknown`; claim refusal with a live lease returns `StillPending`
+- PG auditor `accepted_at` normalized to PostgreSQL microsecond precision so the
+  returned receipt exactly matches the persisted value (comparer `AcceptedAt ==`
+  holds across providers)
 
 **Key decisions**:
 - `AgentToolGovernancePreDispatchComparer` moved to Abstractions (not runtime) per Spec 9.1 — Persistence providers need it for conflict detection
 - `AgentToolGovernanceAuditHandle` deleted outright (not deprecated) — fully superseded by `AgentToolGovernancePreDispatchReceipt`
 - Accountability producer uses `IAuditRecorder` (not `IAuditSink`) per boundary rules
 - Reconciler does not reference `ICapabilityDispatcher` or `IAgentToolApprovalGate` (review gate)
+- Ownership fence: the Gate decides who owns the Attempt BEFORE any budget/governance mutation — the reconciliation claim invalidates the worker's fencing token, so budget release and governance finalization can only follow a granted claim (never precede it)
 
 ## Recommended Next Thread Entry Prompt
 

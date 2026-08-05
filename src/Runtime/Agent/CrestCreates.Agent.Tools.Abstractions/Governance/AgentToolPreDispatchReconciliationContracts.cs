@@ -65,6 +65,21 @@ public sealed record AgentToolPreDispatchReconciliationResult
 }
 
 /// <summary>
+/// Optional reconciliation context. Carries the control-plane ownership-loss
+/// assertion used to claim Gate ownership of an Attempt whose worker is known
+/// to be gone (process-tree kill, orchestrator worker-death event, heartbeat
+/// timeout). When omitted, the Gate grants a claim only for an Attempt that is
+/// already marked indeterminate or whose lease has expired — a live worker's
+/// Attempt is never claimed.
+/// </summary>
+public sealed record AgentToolPreDispatchReconciliationContext
+{
+    public bool OwnershipLost { get; init; }
+
+    public string? OwnershipEvidence { get; init; }
+}
+
+/// <summary>
 /// Runtime-owned orchestrator that reads Gate, Budget, and checkpoint in the
 /// Spec order. Never dispatches, never evaluates approval, and never creates
 /// budget reservations.
@@ -73,7 +88,8 @@ public interface IAgentToolPreDispatchReconciler
 {
     ValueTask<AgentToolPreDispatchReconciliationResult> ReconcileAsync(
         AgentToolPreDispatchIdentity identity,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        AgentToolPreDispatchReconciliationContext? context = null);
 }
 
 /// <summary>

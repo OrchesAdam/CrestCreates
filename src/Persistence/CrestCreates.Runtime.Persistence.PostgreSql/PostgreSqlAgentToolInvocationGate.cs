@@ -76,6 +76,17 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
         => _coordinator.ExecuteAsync(ct => AbandonByIdentityCoreAsync(identity, reasonCode, ct), cancellationToken);
 
+    public ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+        AgentToolPreDispatchReconciliationClaimRequest request, CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => TryBeginPreDispatchReconciliationCoreAsync(request, ct), cancellationToken);
+
+    public ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+        AgentToolPreDispatchReconciliationClaim claim,
+        AgentToolPreDispatchReconciliationCompletionKind kind,
+        string reasonCode,
+        CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => CompletePreDispatchReconciliationCoreAsync(claim, kind, reasonCode, ct), cancellationToken);
+
     private NpgsqlConnection Conn() => _coordinator.RequireSession().Connection;
 
     private static NpgsqlParameter IntParam(string name, int value)
@@ -160,6 +171,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and pre_dispatch_state in (
                   {(int)AgentToolInvocationPreDispatchState.Unknown},
                   {(int)AgentToolInvocationPreDispatchState.Pending})
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -184,7 +196,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         string? expiredUnpreparedLeaseId = null;
         await using var checkCmd = Conn().CreateCommand();
         checkCmd.CommandText = $"""
-            select lease_id, pre_dispatch_state, invocation_fingerprint, expires_at
+            select lease_id, pre_dispatch_state, invocation_fingerprint, expires_at, indeterminate_at
             from {_options.Schema}.agent_tool_invocation_pre_dispatch
             where tenant_id = @tid
               and logical_invocation_key = @lik
@@ -200,18 +212,21 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             var existingState = (AgentToolInvocationPreDispatchState)reader.GetInt32(1);
             var existingFingerprint = reader.GetString(2);
             var existingExpiry = reader.GetFieldValue<DateTimeOffset>(3);
+            var indeterminate = !reader.IsDBNull(4);
 
             if (!string.Equals(existingFingerprint, req.InvocationFingerprint, StringComparison.Ordinal))
                 return new AgentToolInvocationAcquireResult { Status = AgentToolInvocationAcquireStatus.Conflict };
 
             if (existingState == AgentToolInvocationPreDispatchState.Completed)
                 return new AgentToolInvocationAcquireResult { Status = AgentToolInvocationAcquireStatus.Completed };
-            if (existingState == AgentToolInvocationPreDispatchState.Indeterminate)
+            if (existingState == AgentToolInvocationPreDispatchState.Indeterminate
+                || indeterminate)
                 return new AgentToolInvocationAcquireResult { Status = AgentToolInvocationAcquireStatus.Indeterminate };
             if (existingState is AgentToolInvocationPreDispatchState.Pending
                 or AgentToolInvocationPreDispatchState.Ready
                 or AgentToolInvocationPreDispatchState.Accepted
                 or AgentToolInvocationPreDispatchState.ReleasePending
+                or AgentToolInvocationPreDispatchState.ReconciliationPending
                 or AgentToolInvocationPreDispatchState.CompletionPending)
                 return new AgentToolInvocationAcquireResult { Status = AgentToolInvocationAcquireStatus.InProgress };
             if (existingState == AgentToolInvocationPreDispatchState.DispatchStarted)
@@ -275,7 +290,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
                 (tenant_id, lease_id, attempt_id, logical_invocation_key, invocation_fingerprint,
                  fencing_token, acquired_at, expires_at, pre_dispatch_state, revision)
             values (@tid, @lid, @aid, @lik, @fp, @ft, @aa, @ea, @st, 1)
-            on conflict (tenant_id, logical_invocation_key) where pre_dispatch_state in (0, 1, 2, 3, 4, 6, 8, 10) do nothing
+            on conflict (tenant_id, logical_invocation_key) where pre_dispatch_state in (0, 1, 2, 3, 4, 6, 8, 10, 11) do nothing
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tid", req.Key.TenantId ?? string.Empty));
@@ -306,6 +321,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and fencing_token = @ft
               and expires_at = @expectedExpiry
               and expires_at > @now
+              and indeterminate_at is null
               and pre_dispatch_state not in (
                 {(int)AgentToolInvocationPreDispatchState.Released},
                 {(int)AgentToolInvocationPreDispatchState.Completed},
@@ -358,6 +374,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and invocation_fingerprint = @fp
               and expires_at > @now
               and pre_dispatch_state = {(int)AgentToolInvocationPreDispatchState.Unknown}
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -420,6 +437,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and fencing_token = @ft
               and expires_at > @now
               and pre_dispatch_state = {(int)AgentToolInvocationPreDispatchState.Pending}
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -485,6 +503,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and fencing_token = @ft
               and expires_at > @now
               and pre_dispatch_state = {(int)AgentToolInvocationPreDispatchState.Ready}
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -521,7 +540,10 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
                    abandoned_receipt_json, intent_json, last_reason_code,
                    indeterminate_at, indeterminate_reason,
                    completion_outcome_json, completion_prepared_at,
-                   release_outcome_json, release_prepared_at
+                   release_outcome_json, release_prepared_at,
+                   frozen_lease_json, reconciliation_claim_token,
+                   reconciliation_claimed_at, reconciliation_claimed_state,
+                   reconciliation_ownership_evidence
             from {_options.Schema}.agent_tool_invocation_pre_dispatch
             where lease_id = @lid
               and attempt_id = @aid
@@ -561,7 +583,12 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             reader.IsDBNull(8) ? null : reader.GetString(8),
             reader.IsDBNull(9) ? null : reader.GetFieldValue<DateTimeOffset>(9),
             reader.IsDBNull(10) ? null : reader.GetString(10),
-            reader.IsDBNull(11) ? null : reader.GetFieldValue<DateTimeOffset>(11));
+            reader.IsDBNull(11) ? null : reader.GetFieldValue<DateTimeOffset>(11),
+            reader.IsDBNull(12) ? null : reader.GetString(12),
+            reader.IsDBNull(13) ? null : reader.GetString(13),
+            reader.IsDBNull(14) ? null : reader.GetFieldValue<DateTimeOffset>(14),
+            reader.IsDBNull(15) ? null : (AgentToolInvocationPreDispatchState)reader.GetInt32(15),
+            reader.IsDBNull(16) ? null : reader.GetString(16));
     }
 
     private async ValueTask<AgentToolInvocationPreDispatchResult> ReadCurrentStateAsync(
@@ -634,7 +661,9 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.CommandText = $"""
             select pre_dispatch_state, bound_reservation_id, accepted_receipt_json,
                    abandoned_receipt_json, intent_json, lease_id, attempt_id,
-                   fencing_token, acquired_at, expires_at, last_reason_code, indeterminate_at
+                   fencing_token, acquired_at, expires_at, last_reason_code,
+                   indeterminate_at, revision, reconciliation_claim_token,
+                   reconciliation_claimed_state, reconciliation_claimed_at
             from {_options.Schema}.agent_tool_invocation_pre_dispatch
             where tenant_id = @tid
               and attempt_id = @aid
@@ -665,7 +694,15 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             AbandonedReceipt = abandonedReceipt,
             Intent = intent,
             ReasonCode = reader.IsDBNull(10) ? null : reader.GetString(10),
-            Indeterminate = !reader.IsDBNull(11)
+            Indeterminate = !reader.IsDBNull(11),
+            Revision = reader.GetInt64(12),
+            ReconciliationClaimToken = reader.IsDBNull(13) ? null : reader.GetString(13),
+            ReconciliationClaimedState = reader.IsDBNull(14)
+                ? null
+                : (AgentToolInvocationPreDispatchState)reader.GetInt32(14),
+            ReconciliationClaimedAt = reader.IsDBNull(15)
+                ? null
+                : reader.GetFieldValue<DateTimeOffset>(15)
         };
     }
 
@@ -721,6 +758,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and fencing_token = @ft
               and expires_at > @now
               and pre_dispatch_state = {(int)AgentToolInvocationPreDispatchState.Pending}
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -768,6 +806,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and pre_dispatch_state = @ps
               and bound_reservation_id = @rid
               and accepted_receipt_json = @receiptJson
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -831,6 +870,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and fencing_token = @ft
               and expires_at > @now
               and pre_dispatch_state = @ps
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -870,6 +910,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and attempt_id = @aid
               and fencing_token = @ft
               and pre_dispatch_state = @ps
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -970,6 +1011,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and fencing_token = @ft
               and expires_at > @now
               and pre_dispatch_state = @ps
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -1009,6 +1051,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and attempt_id = @aid
               and fencing_token = @ft
               and pre_dispatch_state = @ps
+              and indeterminate_at is null
             returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
@@ -1081,18 +1124,27 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             return;
 
         // Indeterminate is a logical/operational marker; the underlying
-        // Pending/Ready/Accepted recovery substate is preserved.
+        // Pending/Ready/Accepted recovery substate is preserved. The current
+        // lease is frozen as recovery evidence and active ownership is
+        // invalidated by bumping the fencing token, so no live-worker forward
+        // transition (which CAS on lease_id + attempt_id + fencing_token) can
+        // proceed after the marker is established.
+        var frozenLeaseJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            lease, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationLease);
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             update {_options.Schema}.agent_tool_invocation_pre_dispatch
             set indeterminate_at = @iat,
                 indeterminate_reason = @irc,
                 last_reason_code = @rc,
+                frozen_lease_json = coalesce(frozen_lease_json, @flj),
+                fencing_token = (select nextval('{_options.Schema}.agent_tool_fencing_token_seq')),
                 revision = revision + 1,
                 updated_at = clock_timestamp()
             where lease_id = @lid
               and attempt_id = @aid
               and fencing_token = @ft
+            returning revision
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
         cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
@@ -1100,7 +1152,332 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.Parameters.Add(new NpgsqlParameter("iat", DateTimeOffset.UtcNow));
         cmd.Parameters.Add(new NpgsqlParameter("irc", reasonCode));
         cmd.Parameters.Add(new NpgsqlParameter("rc", reasonCode));
+        cmd.Parameters.Add(JsonParam("flj", frozenLeaseJson));
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationCoreAsync(
+        AgentToolPreDispatchReconciliationClaimRequest req, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(req);
+        ArgumentNullException.ThrowIfNull(req.Identity);
+
+        var now = DateTimeOffset.UtcNow;
+        var logicalKeyJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            req.Identity.LogicalInvocationKey,
+            PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey);
+
+        // Preflight read: the CAS below still arbitrates; this read only builds
+        // the frozen-lease recovery evidence and the claim payload from the
+        // pre-claim row. If another participant bumps the revision between this
+        // read and the CAS, the CAS affects zero rows and the claim is refused.
+        AgentToolInvocationLease? frozenLease = null;
+        string? boundReservationId = null;
+        AgentToolGovernancePreDispatchReceipt? acceptedReceipt = null;
+        AgentToolInvocationPreDispatchIntentSnapshot? intent = null;
+        string? lastReasonCode = null;
+        bool wasIndeterminate;
+        AgentToolInvocationPreDispatchState currentState;
+        await using (var preflight = Conn().CreateCommand())
+        {
+            preflight.CommandText = $"""
+                select pre_dispatch_state, lease_id, attempt_id, fencing_token,
+                       acquired_at, expires_at, bound_reservation_id,
+                       accepted_receipt_json, intent_json, last_reason_code,
+                       indeterminate_at, revision
+                from {_options.Schema}.agent_tool_invocation_pre_dispatch
+                where tenant_id = @tid
+                  and attempt_id = @aid
+                  and logical_invocation_key = @lik
+                """;
+            preflight.Parameters.Add(new NpgsqlParameter("tid", req.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
+            preflight.Parameters.Add(new NpgsqlParameter("aid", req.Identity.AttemptId));
+            preflight.Parameters.Add(JsonParam("lik", logicalKeyJson));
+            await using var reader = await preflight.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return new AgentToolPreDispatchReconciliationClaimResult
+                {
+                    Status = AgentToolPreDispatchReconciliationClaimStatus.NotClaimable,
+                    ReasonCode = "identity_not_found"
+                };
+            }
+
+            currentState = (AgentToolInvocationPreDispatchState)reader.GetInt32(0);
+            if (currentState is not (AgentToolInvocationPreDispatchState.Pending
+                or AgentToolInvocationPreDispatchState.Ready
+                or AgentToolInvocationPreDispatchState.Accepted))
+            {
+                return new AgentToolPreDispatchReconciliationClaimResult
+                {
+                    Status = AgentToolPreDispatchReconciliationClaimStatus.NotClaimable,
+                    ReasonCode = currentState == AgentToolInvocationPreDispatchState.ReconciliationPending
+                        ? "already_claimed"
+                        : "state_not_claimable"
+                };
+            }
+
+            if (!reader.IsDBNull(6))
+                boundReservationId = reader.GetString(6);
+            if (!reader.IsDBNull(7))
+                acceptedReceipt = PostgreSqlRuntimeStoreSupport.Deserialize(
+                    reader.GetString(7),
+                    PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernancePreDispatchReceipt);
+            if (!reader.IsDBNull(8))
+                intent = PostgreSqlRuntimeStoreSupport.Deserialize(
+                    reader.GetString(8),
+                    PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPreDispatchIntentSnapshot);
+            if (!reader.IsDBNull(9))
+                lastReasonCode = reader.GetString(9);
+            wasIndeterminate = !reader.IsDBNull(10);
+            if (reader.GetInt64(11) != req.ExpectedRevision)
+            {
+                return new AgentToolPreDispatchReconciliationClaimResult
+                {
+                    Status = AgentToolPreDispatchReconciliationClaimStatus.RevisionConflict,
+                    ReasonCode = "revision_conflict"
+                };
+            }
+
+            frozenLease = new AgentToolInvocationLease
+            {
+                AttemptId = reader.GetString(2),
+                LeaseId = reader.GetString(1),
+                FencingToken = reader.GetInt64(3),
+                AcquiredAt = reader.GetFieldValue<DateTimeOffset>(4),
+                ExpiresAt = reader.GetFieldValue<DateTimeOffset>(5)
+            };
+        }
+
+        // Ownership-loss condition: the Attempt must already be fenced
+        // (indeterminate marker), or the lease must be expired, or the caller
+        // must assert durable ownership loss (e.g. observed process-tree kill).
+        if (!wasIndeterminate
+            && frozenLease.ExpiresAt > now
+            && !req.OwnershipLost)
+        {
+            return new AgentToolPreDispatchReconciliationClaimResult
+            {
+                Status = AgentToolPreDispatchReconciliationClaimStatus.NotClaimable,
+                ReasonCode = "ownership_not_lost"
+            };
+        }
+
+        var claimToken = $"rc-{Guid.NewGuid():N}";
+        var frozenLeaseJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            frozenLease, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationLease);
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            update {_options.Schema}.agent_tool_invocation_pre_dispatch
+            set pre_dispatch_state = @st,
+                reconciliation_claim_token = @ct,
+                reconciliation_claimed_at = @ca,
+                reconciliation_claimed_state = pre_dispatch_state,
+                reconciliation_ownership_evidence = @ev,
+                frozen_lease_json = coalesce(frozen_lease_json, @flj),
+                fencing_token = (select nextval('{_options.Schema}.agent_tool_fencing_token_seq')),
+                last_reason_code = @rc,
+                revision = revision + 1,
+                updated_at = clock_timestamp()
+            where tenant_id = @tid
+              and logical_invocation_key = @lik
+              and attempt_id = @aid
+              and pre_dispatch_state in (@ps_pending, @ps_ready, @ps_accepted)
+              and revision = @expectedRevision
+              and (indeterminate_at is not null or expires_at <= @now or @ownershipLost)
+            returning pre_dispatch_state, revision, reconciliation_claim_token,
+                     reconciliation_claimed_at, reconciliation_claimed_state
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("tid", req.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
+        cmd.Parameters.Add(JsonParam("lik", logicalKeyJson));
+        cmd.Parameters.Add(new NpgsqlParameter("aid", req.Identity.AttemptId));
+        cmd.Parameters.Add(IntParam("st", (int)AgentToolInvocationPreDispatchState.ReconciliationPending));
+        cmd.Parameters.Add(new NpgsqlParameter("ct", claimToken));
+        cmd.Parameters.Add(new NpgsqlParameter("ca", now));
+        cmd.Parameters.Add(new NpgsqlParameter("ev", NpgsqlDbType.Text) { Value = (object?)req.OwnershipEvidence ?? DBNull.Value });
+        cmd.Parameters.Add(JsonParam("flj", frozenLeaseJson));
+        cmd.Parameters.Add(new NpgsqlParameter("rc", "reconciliation_claimed"));
+        cmd.Parameters.Add(IntParam("ps_pending", (int)AgentToolInvocationPreDispatchState.Pending));
+        cmd.Parameters.Add(IntParam("ps_ready", (int)AgentToolInvocationPreDispatchState.Ready));
+        cmd.Parameters.Add(IntParam("ps_accepted", (int)AgentToolInvocationPreDispatchState.Accepted));
+        cmd.Parameters.Add(new NpgsqlParameter("expectedRevision", req.ExpectedRevision));
+        cmd.Parameters.Add(new NpgsqlParameter("now", now));
+        cmd.Parameters.Add(new NpgsqlParameter("ownershipLost", req.OwnershipLost));
+
+        await using var result = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await result.ReadAsync(ct).ConfigureAwait(false))
+        {
+            // CAS lost — someone else transitioned the Attempt after our read.
+            // Re-read to distinguish revision conflict from state conflict.
+            var current = await GetPreDispatchStateCoreAsync(req.Identity, ct).ConfigureAwait(false);
+            if (current.Revision != req.ExpectedRevision
+                || current.State == AgentToolInvocationPreDispatchState.ReconciliationPending)
+            {
+                return new AgentToolPreDispatchReconciliationClaimResult
+                {
+                    Status = AgentToolPreDispatchReconciliationClaimStatus.RevisionConflict,
+                    ReasonCode = "revision_conflict"
+                };
+            }
+
+            return new AgentToolPreDispatchReconciliationClaimResult
+            {
+                Status = AgentToolPreDispatchReconciliationClaimStatus.NotClaimable,
+                ReasonCode = "state_not_claimable"
+            };
+        }
+
+        var newRevision = result.GetInt64(1);
+        var claimedAt = result.GetFieldValue<DateTimeOffset>(3);
+        var claimedState = (AgentToolInvocationPreDispatchState)result.GetInt32(4);
+
+        return new AgentToolPreDispatchReconciliationClaimResult
+        {
+            Status = AgentToolPreDispatchReconciliationClaimStatus.Claimed,
+            Claim = new AgentToolPreDispatchReconciliationClaim
+            {
+                Identity = req.Identity,
+                Revision = newRevision,
+                ClaimToken = claimToken,
+                ClaimedAt = claimedAt,
+                ClaimedState = claimedState,
+                Indeterminate = wasIndeterminate,
+                FrozenLease = frozenLease,
+                BoundReservationId = boundReservationId,
+                AcceptedReceipt = acceptedReceipt,
+                Intent = intent,
+                LastReasonCode = lastReasonCode,
+                OwnershipEvidence = req.OwnershipEvidence
+            }
+        };
+    }
+
+    private async ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationCoreAsync(
+        AgentToolPreDispatchReconciliationClaim claim,
+        AgentToolPreDispatchReconciliationCompletionKind kind,
+        string reasonCode,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(claim);
+        ArgumentNullException.ThrowIfNull(claim.Identity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(claim.ClaimToken);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+        if (kind is not (AgentToolPreDispatchReconciliationCompletionKind.Released
+            or AgentToolPreDispatchReconciliationCompletionKind.Abandoned))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var logicalKeyJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            claim.Identity.LogicalInvocationKey,
+            PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey);
+
+        string? releaseOutcomeJson = null;
+        string? abandonedReceiptJson = null;
+        AgentToolInvocationAbandonedReceipt? abandonedReceipt = null;
+        if (kind == AgentToolPreDispatchReconciliationCompletionKind.Released)
+        {
+            if (string.IsNullOrWhiteSpace(claim.BoundReservationId))
+            {
+                return new AgentToolInvocationPreDispatchResult
+                {
+                    State = AgentToolInvocationPreDispatchState.Unknown,
+                    ReasonCode = "release_requires_reservation"
+                };
+            }
+
+            var releaseRequest = new AgentToolInvocationPrepareReleaseRequest
+            {
+                AuditId = claim.AcceptedReceipt?.AuditId,
+                BudgetReservationId = claim.BoundReservationId,
+                ReasonCode = reasonCode
+            };
+            releaseOutcomeJson = PostgreSqlRuntimeStoreSupport.Serialize(
+                releaseRequest,
+                PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPrepareReleaseRequest);
+        }
+        else
+        {
+            abandonedReceipt = new AgentToolInvocationAbandonedReceipt
+            {
+                Identity = claim.Identity,
+                Outcome = new AgentToolInvocationOutcome
+                {
+                    Kind = AgentToolInvocationOutcomeKind.GovernanceDenied,
+                    Code = reasonCode,
+                    Message = reasonCode
+                },
+                ReasonCode = reasonCode,
+                AbandonedAt = now
+            };
+            abandonedReceiptJson = PostgreSqlRuntimeStoreSupport.Serialize(
+                abandonedReceipt,
+                PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationAbandonedReceipt);
+        }
+
+        var terminalState = kind == AgentToolPreDispatchReconciliationCompletionKind.Released
+            ? AgentToolInvocationPreDispatchState.Released
+            : AgentToolInvocationPreDispatchState.Abandoned;
+
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            update {_options.Schema}.agent_tool_invocation_pre_dispatch
+            set pre_dispatch_state = @st,
+                release_outcome_json = @roj,
+                release_prepared_at = @rpa,
+                abandoned_receipt_json = @arj,
+                last_reason_code = @rc,
+                revision = revision + 1,
+                updated_at = clock_timestamp()
+            where tenant_id = @tid
+              and logical_invocation_key = @lik
+              and attempt_id = @aid
+              and pre_dispatch_state = {(int)AgentToolInvocationPreDispatchState.ReconciliationPending}
+              and reconciliation_claim_token = @ct
+            returning pre_dispatch_state
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("tid", claim.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
+        cmd.Parameters.Add(JsonParam("lik", logicalKeyJson));
+        cmd.Parameters.Add(new NpgsqlParameter("aid", claim.Identity.AttemptId));
+        cmd.Parameters.Add(IntParam("st", (int)terminalState));
+        cmd.Parameters.Add(releaseOutcomeJson is null
+            ? new NpgsqlParameter("roj", NpgsqlDbType.Jsonb) { Value = DBNull.Value }
+            : JsonParam("roj", releaseOutcomeJson));
+        cmd.Parameters.Add(new NpgsqlParameter("rpa", NpgsqlDbType.TimestampTz)
+        {
+            Value = kind == AgentToolPreDispatchReconciliationCompletionKind.Released
+                ? now
+                : (object)DBNull.Value
+        });
+        cmd.Parameters.Add(abandonedReceiptJson is null
+            ? new NpgsqlParameter("arj", NpgsqlDbType.Jsonb) { Value = DBNull.Value }
+            : JsonParam("arj", abandonedReceiptJson));
+        cmd.Parameters.Add(new NpgsqlParameter("rc", reasonCode));
+        cmd.Parameters.Add(new NpgsqlParameter("ct", claim.ClaimToken));
+
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (result is null)
+        {
+            // Lost CAS or already terminal — replay the authoritative row.
+            var current = await GetPreDispatchStateCoreAsync(claim.Identity, ct).ConfigureAwait(false);
+            if (current.State is AgentToolInvocationPreDispatchState.Released
+                or AgentToolInvocationPreDispatchState.Abandoned)
+                return current;
+
+            return new AgentToolInvocationPreDispatchResult
+            {
+                State = AgentToolInvocationPreDispatchState.Unknown,
+                ReasonCode = "reconciliation_completion_conflict"
+            };
+        }
+
+        return new AgentToolInvocationPreDispatchResult
+        {
+            State = terminalState,
+            ReasonCode = reasonCode,
+            AbandonedReceipt = abandonedReceipt
+        };
     }
 
     private async ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityCoreAsync(
@@ -1120,6 +1497,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and logical_invocation_key = @lk
               and attempt_id = @aid
               and pre_dispatch_state in (@ps_accepted, @ps_ready, @ps_pending)
+              and indeterminate_at is null
             returning pre_dispatch_state
             """;
         cmd.Parameters.Add(JsonParam("lk", logicalKeyJson));
@@ -1185,6 +1563,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and logical_invocation_key = @lk
               and attempt_id = @aid
               and pre_dispatch_state in (@ps_accepted, @ps_ready, @ps_pending)
+              and indeterminate_at is null
             returning pre_dispatch_state
             """;
         cmd.Parameters.Add(JsonParam("lk", logicalKeyJson));
@@ -1250,8 +1629,19 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         string? CompletionOutcomeJson = null,
         DateTimeOffset? CompletionPreparedAt = null,
         string? ReleaseOutcomeJson = null,
-        DateTimeOffset? ReleasePreparedAt = null)
+        DateTimeOffset? ReleasePreparedAt = null,
+        string? FrozenLeaseJson = null,
+        string? ClaimToken = null,
+        DateTimeOffset? ClaimedAt = null,
+        AgentToolInvocationPreDispatchState? ClaimedState = null,
+        string? OwnershipEvidence = null)
     {
         public bool IsIndeterminate => IndeterminateAt is not null;
+
+        public AgentToolInvocationLease? FrozenLease => FrozenLeaseJson is null
+            ? null
+            : PostgreSqlRuntimeStoreSupport.Deserialize(
+                FrozenLeaseJson,
+                PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationLease);
     }
 }

@@ -38,7 +38,8 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
 
     public async ValueTask<AgentToolPreDispatchReconciliationResult> ReconcileAsync(
         AgentToolPreDispatchIdentity identity,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AgentToolPreDispatchReconciliationContext? context = null)
     {
         // Step 1: Read Gate Attempt by exact identity.
         var gateState = await _gate.GetPreDispatchStateAsync(identity, cancellationToken);
@@ -96,6 +97,15 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 Receipt = priorReceipt
             };
         }
+
+        // A ReconciliationPending attempt was claimed by a prior reconciler that
+        // crashed before completing the reconciliation. The preserved claimed substate
+        // (Pending/Ready/Accepted) drives checkpoint validation and status composition,
+        // so the next reconciler converges the same decision instead of treating the
+        // claim state as an unresolved live worker.
+        var effectiveGateState = gateState.State == AgentToolInvocationPreDispatchState.ReconciliationPending
+            ? gateState.ReconciliationClaimedState ?? gateState.State
+            : gateState.State;
 
         // Step 3: Read budget reservation by Attempt identity.
         var budgetRead = await _budgetGate.GetReservationStateAsync(identity, cancellationToken);
@@ -164,7 +174,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 };
             }
 
-            if (gateState.State is AgentToolInvocationPreDispatchState.Ready
+            if (effectiveGateState is AgentToolInvocationPreDispatchState.Ready
                     or AgentToolInvocationPreDispatchState.Accepted
                 && !string.Equals(
                     gateState.BoundReservationId,
@@ -177,7 +187,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 };
             }
 
-            if (gateState.State == AgentToolInvocationPreDispatchState.Accepted
+            if (effectiveGateState == AgentToolInvocationPreDispatchState.Accepted
                 && (gateState.AcceptedReceipt is null
                     || !AgentToolGovernancePreDispatchComparer.Equivalent(
                         gateState.AcceptedReceipt,
@@ -203,15 +213,93 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         }
 
         // Step 5: Compose reconciliation decision based on Gate + Budget + Checkpoint.
-        var (status, reasonCode, abandonGate) = ComposeStatus(gateState.State, budgetRead.Status, checkpointRead.Status);
+        // When a claim is being recovered, the preserved substate drives composition.
+        var (status, reasonCode, abandonGate) = ComposeStatus(effectiveGateState, budgetRead.Status, checkpointRead.Status);
 
         // Step 6: Execute recovery transactions for terminal statuses that require side effects.
+        // The Gate decides who owns the Attempt BEFORE any budget or governance mutation.
+        // A granted reconciliation claim is the durable ownership fence: it invalidates
+        // the live worker's lease/fencing token and moves the Attempt to
+        // ReconciliationPending, so a still-alive Invoker can never win
+        // TryMarkDispatchStarted after the claim. Only then does the reconciler settle
+        // the budget, finalize governance, and publish the terminal Gate outcome
+        // through the claim.
         if (status == AgentToolPreDispatchReconciliationStatus.Released)
         {
             var releaseReason = reasonCode;
             var terminalReservation = budgetRead.Reservation;
 
-            // If budget is still Reserved, finalize it to Released.
+            // A. Claim Gate ownership — or recover a claim granted by a prior
+            // reconciler that crashed before completing the reconciliation.
+            AgentToolPreDispatchReconciliationClaim? claim;
+            if (gateState.State == AgentToolInvocationPreDispatchState.ReconciliationPending)
+            {
+                claim = BuildRecoveredClaim(identity, gateState);
+            }
+            else
+            {
+                var claimResult = await _gate.TryBeginPreDispatchReconciliationAsync(
+                    new AgentToolPreDispatchReconciliationClaimRequest
+                    {
+                        Identity = identity,
+                        ExpectedRevision = gateState.Revision,
+                        OwnershipLost = context?.OwnershipLost ?? false,
+                        OwnershipEvidence = context?.OwnershipEvidence
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                if (claimResult.Status != AgentToolPreDispatchReconciliationClaimStatus.Claimed)
+                {
+                    // No claim was granted. Re-read the Attempt to distinguish
+                    // "live worker still owns it" from "a competing transition won".
+                    // Budget and governance are NOT touched in either case.
+                    var current = await _gate.GetPreDispatchStateAsync(identity, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (current.State == AgentToolInvocationPreDispatchState.DispatchStarted)
+                    {
+                        return await CreateTerminalResultAsync(
+                            identity,
+                            AgentToolPreDispatchReconciliationStatus.PostDispatchUnknown,
+                            "dispatch_started",
+                            cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (current.State is AgentToolInvocationPreDispatchState.Released
+                        or AgentToolInvocationPreDispatchState.Abandoned)
+                    {
+                        return await CreateTerminalResultAsync(
+                            identity,
+                            AgentToolPreDispatchReconciliationStatus.Released,
+                            current.ReasonCode ?? "terminal_recovered",
+                            cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (current.State == AgentToolInvocationPreDispatchState.ReconciliationPending)
+                    {
+                        // A prior reconciler claimed but crashed before completing.
+                        claim = BuildRecoveredClaim(identity, current);
+                    }
+                    else
+                    {
+                        // The Attempt is still Pending/Ready/Accepted with a live
+                        // lease and no ownership-loss proof — the worker may still
+                        // be running. Do NOT abandon it and do NOT release its budget.
+                        return await CreateObservationResultAsync(
+                            identity,
+                            AgentToolPreDispatchReconciliationStatus.StillPending,
+                            claimResult.ReasonCode ?? "ownership_not_lost",
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    claim = claimResult.Claim;
+                }
+            }
+
+            // B. If budget is still Reserved, finalize it to Released. The claim is
+            // held, so the live worker can no longer transition the Attempt or commit
+            // the reservation.
             if (budgetRead.Status == AgentToolBudgetReadStatus.Reserved && budgetRead.Reservation is not null)
             {
                 var finalizeResult = await _budgetGate.FinalizeAsync(
@@ -238,7 +326,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 terminalReservation = finalizeResult;
             }
 
-            // A checkpoint is not terminal until the exact Released governance
+            // C. A checkpoint is not terminal until the exact Released governance
             // fact is durable. This precedes Gate publication so response loss can
             // safely converge using the same finalization record.
             if (checkpointRead.Status == AgentToolGovernancePreDispatchReadStatus.Accepted)
@@ -307,36 +395,35 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 }
             }
 
-            // Transition Gate to terminal via identity-based release/abandon.
-            // Abandon when the checkpoint was never recorded (attempt did not exist
-            // durably); release otherwise. The decision is part of the composed status
-            // so Ready + Reserved + Missing converges to Abandon and Ready + Reserved +
-            // Accepted converges to Released.
-            if (abandonGate)
+            // D. Publish the terminal Gate outcome through the claim. Abandon when the
+            // checkpoint was never recorded (attempt did not exist durably); release
+            // otherwise. Only the claim token (not the lease/fencing token, which the
+            // claim invalidated) authorizes this transition.
+            var completionKind = abandonGate
+                ? AgentToolPreDispatchReconciliationCompletionKind.Abandoned
+                : AgentToolPreDispatchReconciliationCompletionKind.Released;
+            var terminalState = abandonGate
+                ? AgentToolInvocationPreDispatchState.Abandoned
+                : AgentToolInvocationPreDispatchState.Released;
+            if (claim is null)
             {
-                // Unrecorded attempt — abandon the gate.
-                var abandonResult = await _gate.AbandonByIdentityAsync(identity, releaseReason, cancellationToken)
-                    .ConfigureAwait(false);
-                if (abandonResult.State != AgentToolInvocationPreDispatchState.Abandoned)
+                // A claim could not be granted or recovered — no terminal transition.
+                return new AgentToolPreDispatchReconciliationResult
                 {
-                    return new AgentToolPreDispatchReconciliationResult
-                    {
-                        Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                    };
-                }
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
             }
-            else
+            var completeResult = await _gate.CompletePreDispatchReconciliationAsync(
+                claim,
+                completionKind,
+                releaseReason,
+                cancellationToken).ConfigureAwait(false);
+            if (completeResult.State != terminalState)
             {
-                // Ready/Accepted → Released.
-                var releaseResult = await _gate.ReleaseByIdentityAsync(identity, releaseReason, cancellationToken)
-                    .ConfigureAwait(false);
-                if (releaseResult.State != AgentToolInvocationPreDispatchState.Released)
+                return new AgentToolPreDispatchReconciliationResult
                 {
-                    return new AgentToolPreDispatchReconciliationResult
-                    {
-                        Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                    };
-                }
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
             }
         }
 
@@ -485,6 +572,33 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
 
         return (AgentToolPreDispatchReconciliationStatus.StillPending, "unresolved", AbandonGate: false);
     }
+
+    /// <summary>
+    /// Reconstructs an immutable reconciliation claim from a Gate read that already
+    /// shows <see cref="AgentToolInvocationPreDispatchState.ReconciliationPending"/>.
+    /// Used when a prior reconciler claimed the Attempt but crashed before completing
+    /// the reconciliation: the durable claim token and preserved substate let the
+    /// next reconciler finish without a second (conflicting) claim.
+    /// </summary>
+    private static AgentToolPreDispatchReconciliationClaim BuildRecoveredClaim(
+        AgentToolPreDispatchIdentity identity,
+        AgentToolInvocationPreDispatchResult gateState)
+        => new()
+        {
+            Identity = identity,
+            Revision = gateState.Revision,
+            ClaimToken = gateState.ReconciliationClaimToken
+                ?? throw new InvalidOperationException(
+                    "A ReconciliationPending attempt must carry a reconciliation claim token."),
+            ClaimedAt = gateState.ReconciliationClaimedAt ?? DateTimeOffset.MinValue,
+            ClaimedState = gateState.ReconciliationClaimedState
+                ?? AgentToolInvocationPreDispatchState.Pending,
+            Indeterminate = gateState.Indeterminate,
+            BoundReservationId = gateState.BoundReservationId,
+            AcceptedReceipt = gateState.AcceptedReceipt,
+            Intent = gateState.Intent,
+            LastReasonCode = gateState.ReasonCode
+        };
 
     private static bool IsTerminal(AgentToolPreDispatchReconciliationStatus status)
         => status is AgentToolPreDispatchReconciliationStatus.Released

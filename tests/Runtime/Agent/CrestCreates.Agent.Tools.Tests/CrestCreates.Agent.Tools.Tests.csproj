@@ -20,5 +20,6 @@
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj" />
+    <ProjectReference Include="../../../Shared/CrestCreates.Agent.Tools.Persistence.Testing/CrestCreates.Agent.Tools.Persistence.Testing.csproj" />
   </ItemGroup>
 </Project>

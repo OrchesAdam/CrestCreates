@@ -406,6 +406,9 @@ public class AgentToolPreDispatchReconcilerTests
     private sealed class StubInvocationGate : IAgentToolInvocationGate
     {
         private AgentToolInvocationPreDispatchState _state;
+        private long _revision = 1;
+        private string? _claimToken;
+        private AgentToolInvocationPreDispatchState? _claimedState;
         public int ReleaseCallCount { get; private set; }
 
         public StubInvocationGate(AgentToolInvocationPreDispatchState state) => _state = state;
@@ -438,6 +441,9 @@ public class AgentToolPreDispatchReconcilerTests
                 AcceptedReceipt = _state == AgentToolInvocationPreDispatchState.Accepted
                     ? StubReceipt
                     : null,
+                Revision = _revision,
+                ReconciliationClaimToken = _claimToken,
+                ReconciliationClaimedState = _claimedState,
                 ReasonCode = "stub"
             });
         public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(AgentToolInvocationLease lease, AgentToolInvocationPublishDenialRequest request, CancellationToken cancellationToken = default)
@@ -471,6 +477,80 @@ public class AgentToolPreDispatchReconcilerTests
         {
             _state = AgentToolInvocationPreDispatchState.Abandoned;
             return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult { State = _state, ReasonCode = reasonCode });
+        }
+
+        public ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaimRequest request, CancellationToken cancellationToken = default)
+        {
+            // The stub models an ownership-lost environment: any Pending/Ready/Accepted
+            // Attempt with a matching revision is claimable.
+            if (_state is not (AgentToolInvocationPreDispatchState.Pending
+                or AgentToolInvocationPreDispatchState.Ready
+                or AgentToolInvocationPreDispatchState.Accepted))
+                return ValueTask.FromResult(new AgentToolPreDispatchReconciliationClaimResult
+                {
+                    Status = AgentToolPreDispatchReconciliationClaimStatus.NotClaimable,
+                    ReasonCode = "state_not_claimable"
+                });
+            if (_revision != request.ExpectedRevision)
+                return ValueTask.FromResult(new AgentToolPreDispatchReconciliationClaimResult
+                {
+                    Status = AgentToolPreDispatchReconciliationClaimStatus.RevisionConflict,
+                    ReasonCode = "revision_conflict"
+                });
+
+            var claimToken = $"rc-stub-{Guid.NewGuid():N}";
+            _claimToken = claimToken;
+            _claimedState = _state;
+            _revision++;
+            _state = AgentToolInvocationPreDispatchState.ReconciliationPending;
+            return ValueTask.FromResult(new AgentToolPreDispatchReconciliationClaimResult
+            {
+                Status = AgentToolPreDispatchReconciliationClaimStatus.Claimed,
+                Claim = new AgentToolPreDispatchReconciliationClaim
+                {
+                    Identity = request.Identity,
+                    Revision = _revision,
+                    ClaimToken = claimToken,
+                    ClaimedAt = DateTimeOffset.UtcNow,
+                    ClaimedState = _claimedState.Value,
+                    Indeterminate = false,
+                    BoundReservationId = _claimedState is AgentToolInvocationPreDispatchState.Ready
+                        or AgentToolInvocationPreDispatchState.Accepted
+                        ? "stub-reservation"
+                        : null,
+                    AcceptedReceipt = _claimedState == AgentToolInvocationPreDispatchState.Accepted
+                        ? StubReceipt
+                        : null
+                }
+            });
+        }
+
+        public ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+            AgentToolPreDispatchReconciliationClaim claim,
+            AgentToolPreDispatchReconciliationCompletionKind kind,
+            string reasonCode,
+            CancellationToken cancellationToken = default)
+        {
+            if (_state != AgentToolInvocationPreDispatchState.ReconciliationPending
+                || !string.Equals(_claimToken, claim.ClaimToken, StringComparison.Ordinal))
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = AgentToolInvocationPreDispatchState.Unknown,
+                    ReasonCode = "reconciliation_completion_conflict"
+                });
+
+            _state = kind == AgentToolPreDispatchReconciliationCompletionKind.Abandoned
+                ? AgentToolInvocationPreDispatchState.Abandoned
+                : AgentToolInvocationPreDispatchState.Released;
+            if (kind == AgentToolPreDispatchReconciliationCompletionKind.Released)
+                ReleaseCallCount++;
+            _revision++;
+            return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+            {
+                State = _state,
+                ReasonCode = reasonCode
+            });
         }
     }
 

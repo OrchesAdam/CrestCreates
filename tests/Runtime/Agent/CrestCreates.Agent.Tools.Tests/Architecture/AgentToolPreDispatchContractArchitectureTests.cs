@@ -98,9 +98,10 @@ public class AgentToolPreDispatchContractArchitectureTests
         reconcileMethod.Should().NotBeNull();
 
         var parameters = reconcileMethod!.GetParameters();
-        parameters.Should().HaveCount(2);
+        parameters.Should().HaveCount(3);
         parameters[0].ParameterType.Should().Be(typeof(AgentToolPreDispatchIdentity));
         parameters[1].ParameterType.Should().Be(typeof(CancellationToken));
+        parameters[2].ParameterType.Should().Be(typeof(AgentToolPreDispatchReconciliationContext));
     }
 
     [Fact]
