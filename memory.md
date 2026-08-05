@@ -2087,8 +2087,9 @@ Compatibility GET
 
 **Status**: All 7 slices implemented. PostgreSQL contract, crash-window, retention and
 NativeAOT evidence restored as required CI gates (Docker-backed job re-enabled in
-`.github/workflows/ci.yml`); "CI green" is only claimed once that job passes on the
-PR. The PR must not be closed against #70 before that evidence is green.
+`.github/workflows/ci.yml`). The evidence gate is now **green in CI**
+(run 30992601362: PostgreSQL contract/crash 64/64, PostgreSQL AOT fixture 1/1,
+all other jobs green); PR #72 re-added `Closes #70`.
 
 First real execution (previously the job was excluded) surfaced contract failures
 that were fixed and re-verified locally against PostgreSQL 16:
