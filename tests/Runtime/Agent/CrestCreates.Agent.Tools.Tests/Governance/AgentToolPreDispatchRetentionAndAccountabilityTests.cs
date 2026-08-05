@@ -60,12 +60,14 @@ public sealed class AgentToolPreDispatchRetentionAndAccountabilityTests
             Status = AgentToolPreDispatchReconciliationStatus.Released,
             ReasonCode = "test"
         };
-        await store.TryUpsertObservationAsync(observation, 0);
+        var observedAfterTerminal = await store.TryUpsertObservationAsync(observation, 0);
+        observedAfterTerminal.Should().BeFalse();
 
         // Read receipt back — should still exist
         var readReceipt = await store.ReadReceiptAsync(identity);
         readReceipt.Should().NotBeNull();
         readReceipt!.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Released);
+        (await store.ReadObservationAsync(identity)).Should().BeNull();
     }
 
     // B16: cleanup observes PreDispatchReady — cleanup skips/loses CAS; Ready evidence remains
@@ -86,7 +88,10 @@ public sealed class AgentToolPreDispatchRetentionAndAccountabilityTests
         var bindResult = await gate.BindPreDispatchReservationAsync(lease, new AgentToolInvocationBindReservationRequest
         {
             ReservationId = "res-b16",
-            Reservation = SampleReservation("attempt-b16", "fp-b16")
+            Reservation = SampleReservation(lease.AttemptId, "fp-b16") with
+            {
+                ReservationId = "res-b16"
+            }
         });
         bindResult.State.Should().Be(AgentToolInvocationPreDispatchState.Ready);
 
@@ -323,6 +328,9 @@ internal sealed class InMemoryReconciliationStore : IAgentToolPreDispatchReconci
     {
         lock (_lock)
         {
+            if (_receipts.ContainsKey(observation.Identity.AttemptId))
+                return ValueTask.FromResult(false);
+
             if (_observations.TryGetValue(observation.Identity.AttemptId, out var existing))
             {
                 if (existing.Revision != expectedRevision)
@@ -347,8 +355,12 @@ internal sealed class InMemoryReconciliationStore : IAgentToolPreDispatchReconci
         lock (_lock)
         {
             if (_receipts.ContainsKey(receipt.Identity.AttemptId))
+            {
+                _observations.Remove(receipt.Identity.AttemptId);
                 return ValueTask.FromResult(false);
+            }
             _receipts[receipt.Identity.AttemptId] = receipt;
+            _observations.Remove(receipt.Identity.AttemptId);
             return ValueTask.FromResult(true);
         }
     }

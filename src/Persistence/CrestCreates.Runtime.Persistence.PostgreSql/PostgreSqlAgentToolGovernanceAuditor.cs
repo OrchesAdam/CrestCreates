@@ -155,13 +155,20 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         cmd.Parameters.Add(new NpgsqlParameter("finalizationJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernanceFinalizationRecord) });
         var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         if (result is not null)
-            return new AgentToolGovernanceFinalizationResult { Status = AgentToolGovernanceFinalizationStatus.Finalized };
+            return new AgentToolGovernanceFinalizationResult
+            {
+                Status = AgentToolGovernanceFinalizationStatus.Finalized,
+                Record = record
+            };
 
         // Duplicate: read the existing finalization record to confirm it exists.
         var existing = await ReadFinalizationAsync(record.Context.LogicalInvocationKey.TenantId ?? string.Empty, record.AuditId, cancellationToken);
         return new AgentToolGovernanceFinalizationResult
         {
-            Status = existing is not null ? AgentToolGovernanceFinalizationStatus.Finalized : AgentToolGovernanceFinalizationStatus.NotFinalized
+            Status = existing is not null
+                ? AgentToolGovernanceFinalizationStatus.Finalized
+                : AgentToolGovernanceFinalizationStatus.NotFinalized,
+            Record = existing
         };
     }
 
@@ -169,14 +176,23 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
     {
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
-            select 1 from {_options.Schema}.agent_tool_governance_finalizations
+            select finalization_json
+            from {_options.Schema}.agent_tool_governance_finalizations
             where audit_id = @auditId
             """;
         cmd.Parameters.Add(new NpgsqlParameter("auditId", auditId));
-        var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        var result = (string?)await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        var record = result is null
+            ? null
+            : PostgreSqlRuntimeStoreSupport.Deserialize(
+                result,
+                PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernanceFinalizationRecord);
         return new AgentToolGovernanceFinalizationResult
         {
-            Status = result is not null ? AgentToolGovernanceFinalizationStatus.Finalized : AgentToolGovernanceFinalizationStatus.NotFinalized
+            Status = record is not null
+                ? AgentToolGovernanceFinalizationStatus.Finalized
+                : AgentToolGovernanceFinalizationStatus.NotFinalized,
+            Record = record
         };
     }
 

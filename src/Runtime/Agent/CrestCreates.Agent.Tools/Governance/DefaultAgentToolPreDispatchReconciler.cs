@@ -68,16 +68,22 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
             {
                 return new AgentToolPreDispatchReconciliationResult
                 {
-                    Status = AgentToolPreDispatchReconciliationStatus.AlreadyReleased,
+                    Status = ReplayStatus(existingReceipt),
                     Receipt = existingReceipt
                 };
             }
 
-            // Gate is terminal but no receipt exists — cannot prove recovery happened.
-            return new AgentToolPreDispatchReconciliationResult
-            {
-                Status = AgentToolPreDispatchReconciliationStatus.Conflict
-            };
+            // The Gate terminal CAS is authoritative control evidence. A crash
+            // may occur after that commit but before receipt insertion, so create
+            // the first immutable receipt instead of freezing a safely closed
+            // Attempt as Conflict.
+            return await CreateTerminalResultAsync(
+                identity,
+                AgentToolPreDispatchReconciliationStatus.Released,
+                gateState.ReasonCode ?? (gateState.State == AgentToolInvocationPreDispatchState.Abandoned
+                    ? "abandoned_terminal_recovered"
+                    : "released_terminal_recovered"),
+                cancellationToken).ConfigureAwait(false);
         }
 
         // Check for existing terminal receipt before proceeding (idempotent reconciliation).
@@ -86,7 +92,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         {
             return new AgentToolPreDispatchReconciliationResult
             {
-                Status = AgentToolPreDispatchReconciliationStatus.AlreadyReleased,
+                Status = ReplayStatus(priorReceipt),
                 Receipt = priorReceipt
             };
         }
@@ -101,10 +107,27 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         // The checkpoint must be internally consistent and match the recovery identity.
         // Cross-verify that the checkpoint's lease, approval, and reservation all
         // belong to the same attempt — not just the same tenant/attempt string.
-        if (checkpointRead.Status == AgentToolGovernancePreDispatchReadStatus.Accepted
-            && checkpointRead.Checkpoint is not null)
+        if (checkpointRead.Status == AgentToolGovernancePreDispatchReadStatus.Accepted)
         {
+            if (checkpointRead.Checkpoint is null || checkpointRead.Receipt is null)
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
+            }
+
             var checkpoint = checkpointRead.Checkpoint;
+            if (checkpoint.Context is null
+                || checkpoint.Lease is null
+                || checkpoint.Approval is null
+                || checkpoint.BudgetReservation is null)
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
+            }
 
             // Validate identity: checkpoint's AttemptId and LogicalInvocationKey
             // must match the recovery identity.
@@ -116,13 +139,49 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 };
             }
 
+            if (checkpointRead.Receipt.Identity != identity
+                || gateState.Intent is null
+                || !AgentToolGovernancePreDispatchComparer.MatchesFrozenIntent(
+                    gateState.Intent,
+                    checkpoint))
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
+            }
+
             // Cross-verify: if Budget was read, the checkpoint's reservation
             // AttemptId must match the budget reservation's AttemptId.
             if (budgetRead.Reservation is not null
+                && !AgentToolGovernancePreDispatchComparer.ReservationIdentityAndTermsEqual(
+                    checkpoint.BudgetReservation,
+                    budgetRead.Reservation))
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
+            }
+
+            if (gateState.State is AgentToolInvocationPreDispatchState.Ready
+                    or AgentToolInvocationPreDispatchState.Accepted
                 && !string.Equals(
-                    checkpoint.BudgetReservation?.AttemptId,
-                    budgetRead.Reservation.AttemptId,
+                    gateState.BoundReservationId,
+                    checkpoint.BudgetReservation.ReservationId,
                     StringComparison.Ordinal))
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
+                };
+            }
+
+            if (gateState.State == AgentToolInvocationPreDispatchState.Accepted
+                && (gateState.AcceptedReceipt is null
+                    || !AgentToolGovernancePreDispatchComparer.Equivalent(
+                        gateState.AcceptedReceipt,
+                        checkpointRead.Receipt)))
             {
                 return new AgentToolPreDispatchReconciliationResult
                 {
@@ -150,6 +209,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         if (status == AgentToolPreDispatchReconciliationStatus.Released)
         {
             var releaseReason = reasonCode;
+            var terminalReservation = budgetRead.Reservation;
 
             // If budget is still Reserved, finalize it to Released.
             if (budgetRead.Status == AgentToolBudgetReadStatus.Reserved && budgetRead.Reservation is not null)
@@ -172,6 +232,77 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                     {
                         Status = AgentToolPreDispatchReconciliationStatus.Conflict
                     };
+                }
+
+                terminalReservation = finalizeResult;
+            }
+
+            // A checkpoint is not terminal until the exact Released governance
+            // fact is durable. This precedes Gate publication so response loss can
+            // safely converge using the same finalization record.
+            if (checkpointRead.Status == AgentToolGovernancePreDispatchReadStatus.Accepted)
+            {
+                if (checkpointRead.Checkpoint is null
+                    || checkpointRead.Receipt is null
+                    || terminalReservation is null
+                    || terminalReservation.State != AgentToolBudgetReservationState.Released)
+                {
+                    return await CreateTerminalResultAsync(
+                        identity,
+                        AgentToolPreDispatchReconciliationStatus.Conflict,
+                        "governance_finalization_evidence_missing",
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                var outcome = new AgentToolInvocationOutcome
+                {
+                    Kind = AgentToolInvocationOutcomeKind.InProgress,
+                    Code = "AGENT_TOOL_INVOCATION_NOT_ACQUIRED",
+                    Message = "The tool invocation could not acquire execution ownership."
+                };
+                var finalization = new AgentToolGovernanceFinalizationRecord
+                {
+                    AuditId = checkpointRead.Receipt.AuditId,
+                    Context = checkpointRead.Checkpoint.Context,
+                    Lease = checkpointRead.Checkpoint.Lease,
+                    DispatchStarted = false,
+                    BudgetReservation = terminalReservation,
+                    AttemptState = AgentToolGovernanceAttemptFinalState.Released,
+                    InvocationState = null,
+                    Outcome = outcome,
+                    OutcomeHash = AgentToolGovernanceOutcomeHasher.Compute(
+                        outcome,
+                        Array.Empty<AgentToolAuditFact>()),
+                    AuditFacts = Array.Empty<AgentToolAuditFact>(),
+                    ReasonCode = releaseReason
+                };
+
+                AgentToolGovernanceFinalizationResult auditFinalization;
+                try
+                {
+                    auditFinalization = await _auditor.FinalizeAsync(finalization, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    return await CreateObservationResultAsync(
+                        identity,
+                        AgentToolPreDispatchReconciliationStatus.StillPending,
+                        "governance_finalization_unavailable",
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                if (auditFinalization.Status != AgentToolGovernanceFinalizationStatus.Finalized
+                    || auditFinalization.Record is null
+                    || !AgentToolGovernancePreDispatchComparer.Equivalent(
+                        auditFinalization.Record,
+                        finalization))
+                {
+                    return await CreateTerminalResultAsync(
+                        identity,
+                        AgentToolPreDispatchReconciliationStatus.Conflict,
+                        "governance_finalization_conflict",
+                        cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -268,7 +399,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
             && budgetStatus == AgentToolBudgetReadStatus.Released
             && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Accepted)
         {
-            return (AgentToolPreDispatchReconciliationStatus.Released, "released_converge");
+            return (AgentToolPreDispatchReconciliationStatus.Released, "released_no_dispatch");
         }
 
         // §7.10: Committed budget → Conflict (budget committed without dispatch)
@@ -298,6 +429,12 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
             or AgentToolPreDispatchReconciliationStatus.Conflict
             or AgentToolPreDispatchReconciliationStatus.PostDispatchUnknown;
 
+    private static AgentToolPreDispatchReconciliationStatus ReplayStatus(
+        AgentToolPreDispatchReconciliationReceipt receipt)
+        => receipt.Status == AgentToolPreDispatchReconciliationStatus.Released
+            ? AgentToolPreDispatchReconciliationStatus.AlreadyReleased
+            : receipt.Status;
+
     private async ValueTask<AgentToolPreDispatchReconciliationResult> CreateTerminalResultAsync(
         AgentToolPreDispatchIdentity identity,
         AgentToolPreDispatchReconciliationStatus status,
@@ -324,7 +461,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 // Return the already-persisted receipt, not a new one.
                 return new AgentToolPreDispatchReconciliationResult
                 {
-                    Status = AgentToolPreDispatchReconciliationStatus.AlreadyReleased,
+                    Status = ReplayStatus(existingReceipt),
                     Receipt = existingReceipt
                 };
             }

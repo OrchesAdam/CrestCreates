@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.AgentTool;
 using FluentAssertions;
 using Xunit;
@@ -66,6 +67,39 @@ public class AgentToolPreDispatchReconcilerTests
     }
 
     [Fact]
+    public async Task Reconcile_TerminalGate_AfterReceiptWriteLoss_Should_CreateReceipt()
+    {
+        var identity = SampleIdentity("attempt-1");
+        var (reconciler, harness) = CreateReconciler(
+            AgentToolInvocationPreDispatchState.Released,
+            AgentToolBudgetReadStatus.Released,
+            AgentToolGovernancePreDispatchReadStatus.Accepted);
+
+        var result = await reconciler.ReconcileAsync(identity);
+
+        result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Released);
+        result.Receipt.Should().NotBeNull();
+        (await harness.Store.ReadReceiptAsync(identity)).Should().BeEquivalentTo(result.Receipt);
+        harness.BudgetGate.FinalizeCallCount.Should().Be(0);
+        harness.Gate.ReleaseCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Reconcile_RepeatedPostDispatchUnknown_Should_Not_Project_AlreadyReleased()
+    {
+        var identity = SampleIdentity("attempt-1");
+        var (reconciler, _) = CreateReconciler(
+            AgentToolInvocationPreDispatchState.DispatchStarted,
+            AgentToolBudgetReadStatus.Committed,
+            AgentToolGovernancePreDispatchReadStatus.Accepted);
+
+        (await reconciler.ReconcileAsync(identity)).Status
+            .Should().Be(AgentToolPreDispatchReconciliationStatus.PostDispatchUnknown);
+        (await reconciler.ReconcileAsync(identity)).Status
+            .Should().Be(AgentToolPreDispatchReconciliationStatus.PostDispatchUnknown);
+    }
+
+    [Fact]
     public async Task Reconcile_StillPending_Persists_Mutable_Observation()
     {
         var identity = SampleIdentity("attempt-1");
@@ -111,9 +145,9 @@ public class AgentToolPreDispatchReconcilerTests
         result2.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Released);
         result2.Receipt.Should().NotBeNull();
 
-        // Observation should still exist but receipt is now terminal.
+        // Terminal receipt atomically supersedes retryable observation.
         var observation = await harness1.Store.ReadObservationAsync(identity);
-        observation.Should().NotBeNull();
+        observation.Should().BeNull();
         var receipt = await harness1.Store.ReadReceiptAsync(identity);
         receipt.Should().NotBeNull();
     }
@@ -161,6 +195,12 @@ public class AgentToolPreDispatchReconcilerTests
         var result2 = await reconciler.ReconcileAsync(identity);
         result2.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.AlreadyReleased);
         result2.Receipt.Should().NotBeNull();
+        harness.Auditor.FinalizeCallCount.Should().Be(1);
+        harness.Auditor.LastFinalization!.AttemptState
+            .Should().Be(AgentToolGovernanceAttemptFinalState.Released);
+        harness.Auditor.LastFinalization.DispatchStarted.Should().BeFalse();
+        harness.Auditor.LastFinalization.BudgetReservation.State
+            .Should().Be(AgentToolBudgetReservationState.Released);
     }
 
     [Fact]
@@ -179,6 +219,25 @@ public class AgentToolPreDispatchReconcilerTests
         // Second reconcile should not create a new receipt.
         var result2 = await reconciler.ReconcileAsync(identity);
         result2.Receipt!.IntegrityValue.Should().Be(firstIntegrity);
+    }
+
+    [Fact]
+    public async Task Reconcile_ChangedFrozenApproval_Should_Conflict_BeforeBudgetOrGateTransition()
+    {
+        var (reconciler, harness) = CreateReconciler(
+            AgentToolInvocationPreDispatchState.Accepted,
+            AgentToolBudgetReadStatus.Reserved,
+            AgentToolGovernancePreDispatchReadStatus.Accepted);
+        harness.Auditor.CheckpointOverride = StubCheckpoint with
+        {
+            Approval = StubApproval with { ReasonCode = "changed" }
+        };
+
+        var result = await reconciler.ReconcileAsync(SampleIdentity("attempt-1"));
+
+        result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Conflict);
+        harness.Gate.ReleaseCallCount.Should().Be(0);
+        harness.BudgetGate.FinalizeCallCount.Should().Be(0);
     }
 
     public static IEnumerable<object[]> ReconciliationMatrix => new[]
@@ -219,6 +278,82 @@ public class AgentToolPreDispatchReconcilerTests
 
     private static AgentToolLogicalInvocationKey SampleKey()
         => new("tenant", "user", "agent", "execution", "invocation");
+
+    private static AgentToolInvocationLease StubLease => new()
+    {
+        LeaseId = "lease-1",
+        AttemptId = "attempt-1",
+        FencingToken = 1,
+        AcquiredAt = DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+        ExpiresAt = DateTimeOffset.Parse("2026-08-01T00:05:00Z")
+    };
+
+    private static AgentToolGovernanceAuditContext StubContext => new()
+    {
+        LogicalInvocationKey = SampleKey(),
+        AttemptId = "attempt-1",
+        InvocationFingerprint = "fp-stub",
+        ArgumentsHash = "args-hash",
+        ArgumentsEvaluated = true,
+        CallOrigin = AgentToolCallOrigin.ExplicitRequest,
+        AgentRolesHash = "roles-hash",
+        ToolContract = new AgentToolContractIdentity("tool", 1, "tool-hash"),
+        CapabilityContract = new AgentToolContractIdentity("capability", 1, "capability-hash"),
+        Governance = new AgentToolEffectiveGovernance(
+            AgentToolSelectionPolicy.ExplicitOnly,
+            AgentToolSideEffectKind.ReadOnly,
+            CapabilityRiskLevel.Low,
+            AgentToolApprovalMode.None,
+            new AgentToolBudgetRequirement
+            {
+                Category = "default",
+                CostUnits = 1,
+                MaxCallsPerExecution = 1
+            },
+            AgentToolAuditMode.Required)
+    };
+
+    private static AgentToolApprovalResult StubApproval => new()
+    {
+        Decision = AgentToolApprovalDecision.NotRequired,
+        ClaimState = AgentToolApprovalEvidenceClaimState.NotApplicable
+    };
+
+    private static AgentToolBudgetReservation StubReservation(
+        AgentToolBudgetReservationState state = AgentToolBudgetReservationState.Reserved)
+        => new()
+        {
+            ReservationId = "stub-reservation",
+            AttemptId = "attempt-1",
+            InvocationFingerprint = "fp-stub",
+            Category = "default",
+            CostUnits = 1,
+            MaxCallsPerExecution = 1,
+            State = state
+        };
+
+    private static AgentToolGovernancePreDispatchReceipt StubReceipt => new()
+    {
+        Identity = SampleIdentity("attempt-1"),
+        AuditId = "audit-1",
+        AcceptedAt = DateTimeOffset.Parse("2026-08-01T00:01:00Z")
+    };
+
+    private static AgentToolInvocationPreDispatchIntentSnapshot StubIntent => new()
+    {
+        FrozenLease = StubLease,
+        InvocationFingerprint = "fp-stub",
+        Context = StubContext,
+        Approval = StubApproval
+    };
+
+    private static AgentToolGovernancePreDispatchRecord StubCheckpoint => new()
+    {
+        Context = StubContext,
+        Lease = StubLease,
+        Approval = StubApproval,
+        BudgetReservation = StubReservation()
+    };
 
     private static (DefaultAgentToolPreDispatchReconciler reconciler, ReconcilerTestHarness harness) CreateReconciler(
         AgentToolInvocationPreDispatchState gateState,
@@ -262,6 +397,7 @@ public class AgentToolPreDispatchReconcilerTests
     private sealed class StubInvocationGate : IAgentToolInvocationGate
     {
         private AgentToolInvocationPreDispatchState _state;
+        public int ReleaseCallCount { get; private set; }
 
         public StubInvocationGate(AgentToolInvocationPreDispatchState state) => _state = state;
 
@@ -278,7 +414,23 @@ public class AgentToolPreDispatchReconcilerTests
         public ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(AgentToolInvocationLease lease, AgentToolInvocationBindPreDispatchRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
         public ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(new AgentToolInvocationPreDispatchResult { State = _state, ReasonCode = "stub" });
+            => ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+            {
+                State = _state,
+                Intent = _state is AgentToolInvocationPreDispatchState.Pending
+                    or AgentToolInvocationPreDispatchState.Ready
+                    or AgentToolInvocationPreDispatchState.Accepted
+                    ? StubIntent
+                    : null,
+                BoundReservationId = _state is AgentToolInvocationPreDispatchState.Ready
+                    or AgentToolInvocationPreDispatchState.Accepted
+                    ? "stub-reservation"
+                    : null,
+                AcceptedReceipt = _state == AgentToolInvocationPreDispatchState.Accepted
+                    ? StubReceipt
+                    : null,
+                ReasonCode = "stub"
+            });
         public ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(AgentToolInvocationLease lease, AgentToolInvocationPublishDenialRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
         public ValueTask<bool> TryMarkDispatchStartedAsync(AgentToolInvocationLease lease, AgentToolGovernancePreDispatchReceipt receipt, string reservationId, CancellationToken cancellationToken = default)
@@ -300,6 +452,7 @@ public class AgentToolPreDispatchReconcilerTests
         public ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
             AgentToolPreDispatchIdentity identity, string reasonCode, CancellationToken cancellationToken = default)
         {
+            ReleaseCallCount++;
             _state = AgentToolInvocationPreDispatchState.Released;
             return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult { State = _state, ReasonCode = reasonCode });
         }
@@ -315,6 +468,7 @@ public class AgentToolPreDispatchReconcilerTests
     private sealed class StubBudgetGate : IAgentToolBudgetGate
     {
         private readonly AgentToolBudgetReadStatus _status;
+        public int FinalizeCallCount { get; private set; }
 
         public StubBudgetGate(AgentToolBudgetReadStatus status) => _status = status;
 
@@ -322,6 +476,7 @@ public class AgentToolPreDispatchReconcilerTests
             => throw new NotImplementedException();
         public ValueTask<AgentToolBudgetReservation> FinalizeAsync(AgentToolBudgetFinalizeRequest request, CancellationToken cancellationToken = default)
         {
+            FinalizeCallCount++;
             return ValueTask.FromResult(new AgentToolBudgetReservation
             {
                 ReservationId = request.ReservationId,
@@ -335,21 +490,18 @@ public class AgentToolPreDispatchReconcilerTests
         }
         public ValueTask<AgentToolBudgetReservationReadResult> GetReservationStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
         {
+            var state = _status switch
+            {
+                AgentToolBudgetReadStatus.Reserved => AgentToolBudgetReservationState.Reserved,
+                AgentToolBudgetReadStatus.Released => AgentToolBudgetReservationState.Released,
+                AgentToolBudgetReadStatus.Committed => AgentToolBudgetReservationState.Committed,
+                AgentToolBudgetReadStatus.Indeterminate => AgentToolBudgetReservationState.Indeterminate,
+                _ => (AgentToolBudgetReservationState?)null
+            };
             return ValueTask.FromResult(new AgentToolBudgetReservationReadResult
             {
                 Status = _status,
-                Reservation = _status == AgentToolBudgetReadStatus.Reserved
-                    ? new AgentToolBudgetReservation
-                    {
-                        ReservationId = "stub-reservation",
-                        AttemptId = "attempt-1",
-                        InvocationFingerprint = "fp-stub",
-                        Category = "default",
-                        CostUnits = 1,
-                        MaxCallsPerExecution = 1,
-                        State = AgentToolBudgetReservationState.Reserved
-                    }
-                    : null
+                Reservation = state.HasValue ? StubReservation(state.Value) : null
             });
         }
     }
@@ -357,6 +509,9 @@ public class AgentToolPreDispatchReconcilerTests
     private sealed class StubAuditor : IAgentToolGovernanceAuditor
     {
         private readonly AgentToolGovernancePreDispatchReadStatus _status;
+        public AgentToolGovernancePreDispatchRecord? CheckpointOverride { get; set; }
+        public int FinalizeCallCount { get; private set; }
+        public AgentToolGovernanceFinalizationRecord? LastFinalization { get; private set; }
 
         public StubAuditor(AgentToolGovernancePreDispatchReadStatus status) => _status = status;
 
@@ -367,18 +522,26 @@ public class AgentToolPreDispatchReconcilerTests
             return ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult
             {
                 Status = _status,
-                Receipt = null,
-                Checkpoint = null
+                Receipt = _status == AgentToolGovernancePreDispatchReadStatus.Accepted
+                    ? StubReceipt
+                    : null,
+                Checkpoint = _status == AgentToolGovernancePreDispatchReadStatus.Accepted
+                    ? CheckpointOverride ?? StubCheckpoint
+                    : null
             });
         }
         public ValueTask RecordDecisionAsync(AgentToolGovernanceDecisionRecord decision, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
         public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(AgentToolGovernanceFinalizationRecord record, CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
+        {
+            FinalizeCallCount++;
+            LastFinalization = record;
+            return ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
             {
                 Status = AgentToolGovernanceFinalizationStatus.Finalized,
                 Record = record
             });
+        }
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(string auditId, CancellationToken cancellationToken = default)
             => ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
             {
@@ -405,6 +568,9 @@ public class AgentToolPreDispatchReconcilerTests
         {
             lock (_lock)
             {
+                if (_receipts.ContainsKey(observation.Identity.AttemptId))
+                    return ValueTask.FromResult(false);
+
                 if (_observations.TryGetValue(observation.Identity.AttemptId, out var existing))
                 {
                     if (existing.Revision != expectedRevision)
@@ -429,8 +595,12 @@ public class AgentToolPreDispatchReconcilerTests
             lock (_lock)
             {
                 if (_receipts.ContainsKey(receipt.Identity.AttemptId))
+                {
+                    _observations.Remove(receipt.Identity.AttemptId);
                     return ValueTask.FromResult(false);
+                }
                 _receipts[receipt.Identity.AttemptId] = receipt;
+                _observations.Remove(receipt.Identity.AttemptId);
                 return ValueTask.FromResult(true);
             }
         }

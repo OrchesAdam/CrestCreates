@@ -1,4 +1,5 @@
 using CrestCreates.Metadata.AgentTool;
+using System.Text.Json;
 
 namespace CrestCreates.Agent.Tools;
 
@@ -20,6 +21,83 @@ namespace CrestCreates.Agent.Tools;
 public static class AgentToolGovernancePreDispatchComparer
 {
     /// <summary>
+    /// Compares two frozen Gate intents using the same dispatch-authorizing
+    /// semantics as complete checkpoint comparison.
+    /// </summary>
+    public static bool Equivalent(
+        AgentToolInvocationPreDispatchIntentSnapshot left,
+        AgentToolInvocationPreDispatchIntentSnapshot right)
+        => left.Context is not null
+            && right.Context is not null
+            && left.FrozenLease is not null
+            && right.FrozenLease is not null
+            && left.Approval is not null
+            && right.Approval is not null
+            && string.Equals(
+                left.InvocationFingerprint,
+                right.InvocationFingerprint,
+                StringComparison.Ordinal)
+            && ContextsEqual(left.Context, right.Context)
+            && LeasesEqual(left.FrozenLease, right.FrozenLease)
+            && ApprovalsEqual(left.Approval, right.Approval);
+
+    /// <summary>
+    /// Verifies that a durable checkpoint is derived from the exact frozen
+    /// Gate intent rather than merely sharing its Attempt identity.
+    /// </summary>
+    public static bool MatchesFrozenIntent(
+        AgentToolInvocationPreDispatchIntentSnapshot intent,
+        AgentToolGovernancePreDispatchRecord checkpoint)
+        => intent.Context is not null
+            && intent.FrozenLease is not null
+            && intent.Approval is not null
+            && checkpoint.Context is not null
+            && checkpoint.Lease is not null
+            && checkpoint.Approval is not null
+            && string.Equals(
+                intent.InvocationFingerprint,
+                checkpoint.Context.InvocationFingerprint,
+                StringComparison.Ordinal)
+            && ContextsEqual(intent.Context, checkpoint.Context)
+            && LeasesEqual(intent.FrozenLease, checkpoint.Lease)
+            && ApprovalsEqual(intent.Approval, checkpoint.Approval);
+
+    /// <summary>
+    /// Compares provider-issued receipts including the complete Attempt
+    /// identity and the frozen acceptance timestamp.
+    /// </summary>
+    public static bool Equivalent(
+        AgentToolGovernancePreDispatchReceipt left,
+        AgentToolGovernancePreDispatchReceipt right)
+        => string.Equals(left.AuditId, right.AuditId, StringComparison.Ordinal)
+            && left.AcceptedAt == right.AcceptedAt
+            && LogicalKeysEqual(
+                left.Identity.LogicalInvocationKey,
+                right.Identity.LogicalInvocationKey)
+            && string.Equals(
+                left.Identity.AttemptId,
+                right.Identity.AttemptId,
+                StringComparison.Ordinal);
+
+    /// <summary>
+    /// Compares immutable reservation identity and budget terms while allowing
+    /// the authoritative current state to advance from Reserved to a terminal
+    /// state after the checkpoint was recorded.
+    /// </summary>
+    public static bool ReservationIdentityAndTermsEqual(
+        AgentToolBudgetReservation left,
+        AgentToolBudgetReservation right)
+        => string.Equals(left.ReservationId, right.ReservationId, StringComparison.Ordinal)
+            && string.Equals(left.AttemptId, right.AttemptId, StringComparison.Ordinal)
+            && string.Equals(
+                left.InvocationFingerprint,
+                right.InvocationFingerprint,
+                StringComparison.Ordinal)
+            && string.Equals(left.Category, right.Category, StringComparison.Ordinal)
+            && left.CostUnits == right.CostUnits
+            && left.MaxCallsPerExecution == right.MaxCallsPerExecution;
+
+    /// <summary>
     /// Compares two complete pre-dispatch checkpoints for semantic equality.
     /// Returns true only when every dispatch-authorizing fact matches.
     /// </summary>
@@ -32,6 +110,25 @@ public static class AgentToolGovernancePreDispatchComparer
             && ApprovalsEqual(left.Approval, right.Approval)
             && BudgetReservationsEqual(left.BudgetReservation, right.BudgetReservation);
     }
+
+    /// <summary>
+    /// Compares the complete terminal governance fact. Recovery must confirm
+    /// the provider persisted this exact record before publishing Gate release.
+    /// </summary>
+    public static bool Equivalent(
+        AgentToolGovernanceFinalizationRecord left,
+        AgentToolGovernanceFinalizationRecord right)
+        => string.Equals(left.AuditId, right.AuditId, StringComparison.Ordinal)
+            && ContextsEqual(left.Context, right.Context)
+            && LeasesEqual(left.Lease, right.Lease)
+            && left.DispatchStarted == right.DispatchStarted
+            && BudgetReservationsEqual(left.BudgetReservation, right.BudgetReservation)
+            && left.AttemptState == right.AttemptState
+            && left.InvocationState == right.InvocationState
+            && OutcomesEqual(left.Outcome, right.Outcome)
+            && string.Equals(left.OutcomeHash, right.OutcomeHash, StringComparison.Ordinal)
+            && left.AuditFacts.SequenceEqual(right.AuditFacts)
+            && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
 
     /// <summary>
     /// Validates that the record's identity fields match the expected
@@ -160,30 +257,25 @@ public static class AgentToolGovernancePreDispatchComparer
     private static bool BudgetReservationsEqual(
         AgentToolBudgetReservation left,
         AgentToolBudgetReservation right)
-    {
-        if (!string.Equals(left.ReservationId, right.ReservationId, StringComparison.Ordinal))
-            return false;
+        => ReservationIdentityAndTermsEqual(left, right)
+            && left.State == right.State;
 
-        if (!string.Equals(left.AttemptId, right.AttemptId, StringComparison.Ordinal))
-            return false;
+    private static bool OutcomesEqual(
+        AgentToolInvocationOutcome left,
+        AgentToolInvocationOutcome right)
+        => left.Kind == right.Kind
+            && string.Equals(left.Code, right.Code, StringComparison.Ordinal)
+            && string.Equals(left.Message, right.Message, StringComparison.Ordinal)
+            && JsonEquals(left.StructuredOutput, right.StructuredOutput)
+            && left.Issues.SequenceEqual(right.Issues);
 
-        if (!string.Equals(left.InvocationFingerprint, right.InvocationFingerprint, StringComparison.Ordinal))
-            return false;
-
-        if (!string.Equals(left.Category, right.Category, StringComparison.Ordinal))
-            return false;
-
-        if (left.CostUnits != right.CostUnits)
-            return false;
-
-        if (left.MaxCallsPerExecution != right.MaxCallsPerExecution)
-            return false;
-
-        if (left.State != right.State)
-            return false;
-
-        return true;
-    }
+    private static bool JsonEquals(JsonElement? left, JsonElement? right)
+        => left.HasValue == right.HasValue
+            && (!left.HasValue
+                || string.Equals(
+                    left.Value.GetRawText(),
+                    right!.Value.GetRawText(),
+                    StringComparison.Ordinal));
 
     private static bool LogicalKeysEqual(
         AgentToolLogicalInvocationKey left,

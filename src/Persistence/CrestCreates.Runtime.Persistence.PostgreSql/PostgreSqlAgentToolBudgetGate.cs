@@ -38,6 +38,9 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
     {
         var budget = request.Context.Governance.Budget;
         var tenantId = request.Context.LogicalInvocationKey.TenantId ?? string.Empty;
+        var logicalKeyJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            request.Context.LogicalInvocationKey,
+            PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey);
         var reservation = new AgentToolBudgetReservation
         {
             ReservationId = Guid.NewGuid().ToString("N"),
@@ -61,7 +64,7 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId));
         cmd.Parameters.Add(new NpgsqlParameter("reservationId", reservation.ReservationId));
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", reservation.AttemptId));
-        cmd.Parameters.Add(JsonParam("lik", PostgreSqlRuntimeStoreSupport.Serialize(request.Context.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey)));
+        cmd.Parameters.Add(JsonParam("lik", logicalKeyJson));
         cmd.Parameters.Add(new NpgsqlParameter("fp", reservation.InvocationFingerprint));
         cmd.Parameters.Add(new NpgsqlParameter("category", reservation.Category));
         cmd.Parameters.Add(new NpgsqlParameter("costUnits", reservation.CostUnits));
@@ -73,7 +76,11 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
             return new AgentToolBudgetReserveResult { Status = AgentToolBudgetReserveStatus.Reserved, Reservation = reservation };
 
         // Attempt-idempotent: same AttemptId already has a reservation — recover it
-        var existing = await ReadReservationByIdentityAsync(tenantId, reservation.AttemptId, ct);
+        var existing = await ReadReservationByIdentityAsync(
+            tenantId,
+            logicalKeyJson,
+            reservation.AttemptId,
+            ct);
         if (existing is not null)
         {
             // Verify the existing reservation matches the full identity and budget parameters.
@@ -95,6 +102,18 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
 
     private async ValueTask<AgentToolBudgetReservation> FinalizeCoreAsync(AgentToolBudgetFinalizeRequest request, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(request.ReservationId)
+            || string.IsNullOrWhiteSpace(request.AttemptId)
+            || string.IsNullOrWhiteSpace(request.InvocationFingerprint)
+            || string.IsNullOrWhiteSpace(request.ReasonCode)
+            || request.RequestedState is not (
+                AgentToolBudgetReservationState.Released
+                or AgentToolBudgetReservationState.Committed
+                or AgentToolBudgetReservationState.Indeterminate))
+        {
+            throw new ArgumentException("Budget finalization has an invalid contract.", nameof(request));
+        }
+
         var targetState = request.RequestedState;
         await using var cmd = Conn().CreateCommand();
         // Terminal monotonicity: only allow finalizing from Reserved (non-terminal → terminal).
@@ -123,6 +142,14 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
             var existing = await ReadReservationByIdReservationIdAsync(request.ReservationId, ct);
             if (existing is null)
                 throw new InvalidOperationException($"Budget reservation {request.ReservationId} not found.");
+            if (!string.Equals(existing.AttemptId, request.AttemptId, StringComparison.Ordinal)
+                || !string.Equals(
+                    existing.InvocationFingerprint,
+                    request.InvocationFingerprint,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The budget reservation identity does not match.");
+            }
             // Already terminal — only idempotent if the existing state matches the requested state.
             if (existing.State == targetState)
                 return existing;
@@ -136,8 +163,14 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
 
     private async ValueTask<AgentToolBudgetReservationReadResult> GetReservationStateCoreAsync(AgentToolPreDispatchIdentity identity, CancellationToken ct)
     {
+        var logicalKeyJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            identity.LogicalInvocationKey,
+            PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey);
         var reservation = await ReadReservationByIdentityAsync(
-            identity.LogicalInvocationKey.TenantId ?? string.Empty, identity.AttemptId, ct);
+            identity.LogicalInvocationKey.TenantId ?? string.Empty,
+            logicalKeyJson,
+            identity.AttemptId,
+            ct);
         if (reservation is null)
             return new AgentToolBudgetReservationReadResult { Status = AgentToolBudgetReadStatus.Missing };
 
@@ -167,17 +200,24 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
         return ReadReservation(reader);
     }
 
-    private async ValueTask<AgentToolBudgetReservation?> ReadReservationByIdentityAsync(string tenantId, string attemptId, CancellationToken ct)
+    private async ValueTask<AgentToolBudgetReservation?> ReadReservationByIdentityAsync(
+        string tenantId,
+        string logicalKeyJson,
+        string attemptId,
+        CancellationToken ct)
     {
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             select reservation_id, attempt_id, invocation_fingerprint, category, cost_units, max_calls_per_execution, state
             from {_options.Schema}.agent_tool_budget_reservations
-            where tenant_id = @tenantId and attempt_id = @attemptId
+            where tenant_id = @tenantId
+              and logical_invocation_key = @logicalKey
+              and attempt_id = @attemptId
             order by created_at desc
             limit 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId));
+        cmd.Parameters.Add(JsonParam("logicalKey", logicalKeyJson));
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", attemptId));
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))

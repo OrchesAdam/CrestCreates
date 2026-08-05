@@ -563,6 +563,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["fencing_token"] = BigInt, ["acquired_at"] = Timestamp, ["expires_at"] = Timestamp,
                 ["pre_dispatch_state"] = Integer, ["revision"] = BigInt,
                 ["intent_json"] = NullableJson, ["bound_reservation_id"] = NullableText,
+                ["bound_reservation_json"] = NullableJson,
                 ["accepted_receipt_json"] = NullableJson, ["abandoned_receipt_json"] = NullableJson,
                 ["last_reason_code"] = NullableText,
                 ["dispatch_started_at"] = NullableTimestamp,
@@ -833,6 +834,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 revision bigint not null default 1,
                 intent_json jsonb null,
                 bound_reservation_id text null,
+                bound_reservation_json jsonb null,
                 accepted_receipt_json jsonb null,
                 abandoned_receipt_json jsonb null,
                 last_reason_code text null,
@@ -844,7 +846,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 primary key (tenant_id, lease_id)
             );
             create unique index ux_agent_tool_invocation_pre_dispatch_attempt on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, attempt_id);
-            create unique index ux_agent_tool_invocation_pre_dispatch_logical on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key) where pre_dispatch_state in (0, 1, 2, 3, 4);
+            create unique index ux_agent_tool_invocation_pre_dispatch_logical on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key) where pre_dispatch_state in (0, 1, 2, 3, 4, 6, 8, 10);
             create index ix_agent_tool_invocation_pre_dispatch_logical on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key);
 
             create table {schema}.agent_tool_governance_decisions (

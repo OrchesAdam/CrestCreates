@@ -21,6 +21,9 @@ internal sealed class DevelopmentInMemoryAgentToolPreDispatchReconciliationStore
     {
         lock (_lock)
         {
+            if (_receipts.ContainsKey(observation.Identity))
+                return new(false);
+
             if (!_observations.TryGetValue(observation.Identity, out var existing))
             {
                 if (expectedRevision != 0)
@@ -47,6 +50,19 @@ internal sealed class DevelopmentInMemoryAgentToolPreDispatchReconciliationStore
     public ValueTask<bool> TryInsertReceiptAsync(
         AgentToolPreDispatchReconciliationReceipt receipt, CancellationToken cancellationToken = default)
     {
-        return new(_receipts.TryAdd(receipt.Identity, receipt));
+        lock (_lock)
+        {
+            if (!_receipts.TryAdd(receipt.Identity, receipt))
+            {
+                _observations.TryRemove(receipt.Identity, out _);
+                return new(false);
+            }
+
+            // A terminal receipt supersedes the mutable retry observation. Keeping
+            // both makes cleanup and later readers disagree about whether this
+            // identity is still retryable.
+            _observations.TryRemove(receipt.Identity, out _);
+            return new(true);
+        }
     }
 }

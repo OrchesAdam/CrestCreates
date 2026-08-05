@@ -164,6 +164,100 @@ public sealed class AgentToolPreDispatchStateMachineTests
     }
 
     [Fact]
+    public async Task PreparePreDispatchIntent_ChangedRetry_Should_Conflict_WithoutReplacingFrozenIntent()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fp-a"));
+        var identity = SampleIdentity(acquired.Lease!.AttemptId);
+        var original = SampleIntent(acquired.Lease, "fp-a");
+
+        await gate.PreparePreDispatchIntentAsync(
+            acquired.Lease,
+            new AgentToolInvocationPreparePreDispatchIntentRequest { Intent = original });
+
+        var changed = original with
+        {
+            Approval = original.Approval with { ReasonCode = "changed" }
+        };
+        var conflict = await gate.PreparePreDispatchIntentAsync(
+            acquired.Lease,
+            new AgentToolInvocationPreparePreDispatchIntentRequest { Intent = changed });
+
+        conflict.State.Should().Be(AgentToolInvocationPreDispatchState.Unknown);
+        var recovered = await gate.GetPreDispatchStateAsync(identity);
+        AgentToolGovernancePreDispatchComparer.Equivalent(recovered.Intent!, original)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task BindReservation_ChangedRetry_Should_Conflict_WithoutReplacingBinding()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fp-a"));
+        await gate.PreparePreDispatchIntentAsync(
+            acquired.Lease!,
+            new AgentToolInvocationPreparePreDispatchIntentRequest
+            {
+                Intent = SampleIntent(acquired.Lease!, "fp-a")
+            });
+
+        var original = SampleReservation(acquired.Lease!, "fp-a");
+        await gate.BindPreDispatchReservationAsync(
+            acquired.Lease!,
+            new AgentToolInvocationBindReservationRequest
+            {
+                ReservationId = original.ReservationId,
+                Reservation = original
+            });
+
+        var conflict = await gate.BindPreDispatchReservationAsync(
+            acquired.Lease!,
+            new AgentToolInvocationBindReservationRequest
+            {
+                ReservationId = original.ReservationId,
+                Reservation = original with { CostUnits = original.CostUnits + 1 }
+            });
+
+        conflict.State.Should().Be(AgentToolInvocationPreDispatchState.Unknown);
+        var retry = await gate.BindPreDispatchReservationAsync(
+            acquired.Lease!,
+            new AgentToolInvocationBindReservationRequest
+            {
+                ReservationId = original.ReservationId,
+                Reservation = original
+            });
+        retry.State.Should().Be(AgentToolInvocationPreDispatchState.Ready);
+    }
+
+    [Fact]
+    public async Task BindAccepted_ChangedRetry_Should_Conflict_WithoutReplacingReceipt()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var acquired = await gate.AcquireAsync(Request("fp-a"));
+        await PrepareThroughReadyAsync(gate, acquired.Lease!, "fp-a", "res-1");
+        var original = TestReceipt(acquired.Lease!);
+
+        await gate.BindAcceptedPreDispatchAsync(
+            acquired.Lease!,
+            new AgentToolInvocationBindPreDispatchRequest { Receipt = original });
+
+        var conflict = await gate.BindAcceptedPreDispatchAsync(
+            acquired.Lease!,
+            new AgentToolInvocationBindPreDispatchRequest
+            {
+                Receipt = original with { AuditId = "changed-audit" }
+            });
+
+        conflict.State.Should().Be(AgentToolInvocationPreDispatchState.Unknown);
+        var recovered = await gate.GetPreDispatchStateAsync(
+            SampleIdentity(acquired.Lease!.AttemptId));
+        AgentToolGovernancePreDispatchComparer.Equivalent(
+                recovered.AcceptedReceipt!,
+                original)
+            .Should().BeTrue();
+    }
+
+    [Fact]
     public async Task F26_GetPreDispatchState_ReturnsCurrentStateAfterRecovery()
     {
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();
@@ -178,7 +272,7 @@ public sealed class AgentToolPreDispatchStateMachineTests
     }
 
     [Fact]
-    public async Task F29_PublishBudgetDenial_AbandonsPreDispatch()
+    public async Task Known_BudgetDenial_Should_Abandon_Attempt_WithStableReceipt()
     {
         var gate = new DevelopmentInMemoryAgentToolInvocationGate();
         var acquired = await gate.AcquireAsync(Request("fp-a"));
@@ -231,6 +325,92 @@ public sealed class AgentToolPreDispatchStateMachineTests
             acquired.Lease!, TestReceipt(acquired.Lease!), "res-1");
 
         started.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Pending_Checkpoint_Should_Block_LeaseExpiryReplacement()
+    {
+        var time = new ManualTimeProvider();
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate(time, TimeSpan.FromSeconds(10));
+        var first = await gate.AcquireAsync(Request("fp-a"));
+        await gate.PreparePreDispatchIntentAsync(first.Lease!, new AgentToolInvocationPreparePreDispatchIntentRequest
+        {
+            Intent = SampleIntent(first.Lease!, "fp-a")
+        });
+
+        time.Advance(TimeSpan.FromSeconds(11));
+        var retry = await gate.AcquireAsync(Request("fp-a"));
+
+        retry.Status.Should().Be(AgentToolInvocationAcquireStatus.Indeterminate);
+        retry.Lease.Should().BeNull();
+        (await gate.GetPreDispatchStateAsync(SampleIdentity(first.Lease!.AttemptId)))
+            .State.Should().Be(AgentToolInvocationPreDispatchState.Pending);
+    }
+
+    [Fact]
+    public async Task Ready_Checkpoint_Should_Block_LeaseExpiryReplacement()
+    {
+        var time = new ManualTimeProvider();
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate(time, TimeSpan.FromSeconds(10));
+        var first = await gate.AcquireAsync(Request("fp-a"));
+        await PrepareThroughReadyAsync(gate, first.Lease!, "fp-a", "res-1");
+
+        time.Advance(TimeSpan.FromSeconds(11));
+        var retry = await gate.AcquireAsync(Request("fp-a"));
+
+        retry.Status.Should().Be(AgentToolInvocationAcquireStatus.Indeterminate);
+        retry.Lease.Should().BeNull();
+        (await gate.GetPreDispatchStateAsync(SampleIdentity(first.Lease!.AttemptId)))
+            .State.Should().Be(AgentToolInvocationPreDispatchState.Ready);
+    }
+
+    [Fact]
+    public async Task Accepted_Checkpoint_Should_Block_LeaseExpiryReplacement()
+    {
+        var time = new ManualTimeProvider();
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate(time, TimeSpan.FromSeconds(10));
+        var first = await gate.AcquireAsync(Request("fp-a"));
+        await PrepareFullPreDispatchAsync(gate, first.Lease!, "fp-a", "res-1");
+
+        time.Advance(TimeSpan.FromSeconds(11));
+        var retry = await gate.AcquireAsync(Request("fp-a"));
+
+        retry.Status.Should().Be(AgentToolInvocationAcquireStatus.Indeterminate);
+        retry.Lease.Should().BeNull();
+        (await gate.GetPreDispatchStateAsync(SampleIdentity(first.Lease!.AttemptId)))
+            .State.Should().Be(AgentToolInvocationPreDispatchState.Accepted);
+    }
+
+    [Fact]
+    public async Task Acquire_AfterBudgetDenial_Should_Create_NewAttempt()
+    {
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+        var first = await gate.AcquireAsync(Request("fp-a"));
+        await gate.PreparePreDispatchIntentAsync(first.Lease!, new AgentToolInvocationPreparePreDispatchIntentRequest
+        {
+            Intent = SampleIntent(first.Lease!, "fp-a")
+        });
+        var denial = new AgentToolInvocationPublishDenialRequest
+        {
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.GovernanceDenied,
+                Code = "budget_denied",
+                Message = "budget_denied"
+            },
+            ReasonCode = "budget_denied"
+        };
+        var abandoned = await gate.PublishBudgetDenialAsync(first.Lease!, denial);
+
+        var second = await gate.AcquireAsync(Request("fp-a"));
+
+        second.Status.Should().Be(AgentToolInvocationAcquireStatus.Acquired);
+        second.Lease!.AttemptId.Should().NotBe(first.Lease!.AttemptId);
+        var oldAttempt = await gate.GetPreDispatchStateAsync(SampleIdentity(first.Lease.AttemptId));
+        oldAttempt.State.Should().Be(AgentToolInvocationPreDispatchState.Abandoned);
+        oldAttempt.AbandonedReceipt.Should().BeEquivalentTo(abandoned.AbandonedReceipt);
+        (await gate.GetPreDispatchStateAsync(SampleIdentity(second.Lease.AttemptId)))
+            .State.Should().Be(AgentToolInvocationPreDispatchState.Unknown);
     }
 
     [Fact]
@@ -363,8 +543,30 @@ public sealed class AgentToolPreDispatchStateMachineTests
         {
             FrozenLease = lease,
             InvocationFingerprint = fingerprint,
-            Context = null!,
-            Approval = null!
+            Context = new AgentToolGovernanceAuditContext
+            {
+                LogicalInvocationKey = SampleIdentity(lease.AttemptId).LogicalInvocationKey,
+                AttemptId = lease.AttemptId,
+                InvocationFingerprint = fingerprint,
+                ArgumentsHash = "args-hash",
+                ArgumentsEvaluated = true,
+                CallOrigin = AgentToolCallOrigin.ExplicitRequest,
+                AgentRolesHash = "roles-hash",
+                ToolContract = new AgentToolContractIdentity("tool", 1, "tool-hash"),
+                CapabilityContract = new AgentToolContractIdentity("capability", 1, "capability-hash"),
+                Governance = new AgentToolEffectiveGovernance(
+                    AgentToolSelectionPolicy.ExplicitOnly,
+                    AgentToolSideEffectKind.ReadOnly,
+                    CapabilityRiskLevel.Low,
+                    AgentToolApprovalMode.None,
+                    SampleBudgetRequirement(),
+                    AgentToolAuditMode.Required)
+            },
+            Approval = new AgentToolApprovalResult
+            {
+                Decision = AgentToolApprovalDecision.NotRequired,
+                ClaimState = AgentToolApprovalEvidenceClaimState.NotApplicable
+            }
         };
 
     private static AgentToolBudgetReservation SampleReservation(

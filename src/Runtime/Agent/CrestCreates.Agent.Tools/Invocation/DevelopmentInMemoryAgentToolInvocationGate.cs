@@ -21,6 +21,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         = new(StringComparer.Ordinal);
     private readonly Dictionary<string, AbandonedReceipt> _abandonedReasons
         = new(StringComparer.Ordinal);
+    private readonly Dictionary<AgentToolPreDispatchIdentity, AgentToolInvocationPreDispatchResult> _preDispatchHistory = [];
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _leaseDuration;
 
@@ -68,28 +69,46 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             var now = _timeProvider.GetUtcNow();
             if (entry.ActiveLease is { } active)
             {
-                if (active.ExpiresAt > now)
+                if (entry.PreDispatchState == AgentToolInvocationPreDispatchState.Abandoned)
+                {
+                    ArchivePreDispatch(entry, active);
+                    _leaseKeys.Remove(active.LeaseId);
+                    entry.ActiveLease = null;
+                    entry.LastTerminalLease = active;
+                    entry.LastAttemptState = AttemptTerminalState.Abandoned;
+                }
+                else if (active.ExpiresAt > now)
                     return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.InProgress));
-                if (entry.DispatchStarted)
+                else if (entry.PreDispatchState is (
+                    AgentToolInvocationPreDispatchState.Pending
+                    or AgentToolInvocationPreDispatchState.Ready
+                    or AgentToolInvocationPreDispatchState.Accepted))
+                {
+                    entry.Indeterminate = true;
+                    entry.LastReasonCode = "pre_dispatch_lease_expired";
+                    ClearLease(entry, active, AttemptTerminalState.Indeterminate);
+                    return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.Indeterminate));
+                }
+                else if (entry.DispatchStarted)
                 {
                     entry.Indeterminate = true;
                     entry.LastReasonCode = "post_dispatch_lease_expired";
                     ClearLease(entry, active, AttemptTerminalState.Indeterminate);
                     return ValueTask.FromResult(Result(AgentToolInvocationAcquireStatus.Indeterminate));
                 }
-                _leaseKeys.Remove(active.LeaseId);
-                entry.ActiveLease = null;
+                else
+                {
+                    _leaseKeys.Remove(active.LeaseId);
+                    entry.ActiveLease = null;
+                }
             }
 
             if (entry.LastTerminalLease is { } terminalLease)
             {
+                if (entry.LastAttemptState is AttemptTerminalState.Abandoned or AttemptTerminalState.Released)
+                    ArchivePreDispatch(entry, terminalLease);
                 _leaseKeys.Remove(terminalLease.LeaseId);
-                entry.LastTerminalLease = null;
-                entry.LastAttemptState = AttemptTerminalState.None;
-                entry.ReleasePendingPreparedAt = null;
-                entry.ReleasePendingAuditId = null;
-                entry.ReleasePendingBudgetReservationId = null;
-                entry.ReleasePendingReasonCode = null;
+                ResetForNewAttempt(entry);
             }
 
             entry.FencingToken++;
@@ -390,8 +409,9 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                     ReasonCode = "identity_not_found"
                 });
 
-            if (entry.ActiveLease is not null
-                && entry.ActiveLease.AttemptId != identity.AttemptId)
+            var attemptLease = entry.ActiveLease ?? entry.LastTerminalLease;
+            if (attemptLease is null
+                || attemptLease.AttemptId != identity.AttemptId)
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
                     State = AgentToolInvocationPreDispatchState.Unknown,
@@ -401,21 +421,26 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             if (entry.LastAttemptState is AttemptTerminalState.Released)
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
-                    State = AgentToolInvocationPreDispatchState.Released,
-                    ReasonCode = "already_released"
+                    State = string.Equals(entry.LastReasonCode, reasonCode, StringComparison.Ordinal)
+                        ? AgentToolInvocationPreDispatchState.Released
+                        : AgentToolInvocationPreDispatchState.Unknown,
+                    ReasonCode = string.Equals(entry.LastReasonCode, reasonCode, StringComparison.Ordinal)
+                        ? entry.LastReasonCode
+                        : "release_conflict"
                 });
 
             if (entry.LastAttemptState is AttemptTerminalState.Completed)
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
-                    State = AgentToolInvocationPreDispatchState.Released,
+                    State = AgentToolInvocationPreDispatchState.Completed,
                     ReasonCode = "already_completed"
                 });
 
             entry.PreDispatchState = AgentToolInvocationPreDispatchState.Released;
             entry.LastReasonCode = reasonCode;
             entry.LastAttemptState = AttemptTerminalState.Released;
-            ClearLease(entry, entry.ActiveLease, AttemptTerminalState.Released);
+            ClearLease(entry, attemptLease, AttemptTerminalState.Released);
+            ArchivePreDispatch(entry, attemptLease);
             return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
             {
                 State = AgentToolInvocationPreDispatchState.Released,
@@ -440,8 +465,9 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                     ReasonCode = "identity_not_found"
                 });
 
-            if (entry.ActiveLease is not null
-                && entry.ActiveLease.AttemptId != identity.AttemptId)
+            var attemptLease = entry.ActiveLease ?? entry.LastTerminalLease;
+            if (attemptLease is null
+                || attemptLease.AttemptId != identity.AttemptId)
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
                     State = AgentToolInvocationPreDispatchState.Unknown,
@@ -454,14 +480,26 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                 {
                     State = entry.LastAttemptState == AttemptTerminalState.Released
                         ? AgentToolInvocationPreDispatchState.Released
-                        : AgentToolInvocationPreDispatchState.Released,
+                        : AgentToolInvocationPreDispatchState.Completed,
                     ReasonCode = "already_terminal"
+                });
+
+            if (entry.LastAttemptState is AttemptTerminalState.Abandoned)
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = string.Equals(entry.LastReasonCode, reasonCode, StringComparison.Ordinal)
+                        ? AgentToolInvocationPreDispatchState.Abandoned
+                        : AgentToolInvocationPreDispatchState.Unknown,
+                    ReasonCode = string.Equals(entry.LastReasonCode, reasonCode, StringComparison.Ordinal)
+                        ? entry.LastReasonCode
+                        : "abandon_conflict"
                 });
 
             entry.PreDispatchState = AgentToolInvocationPreDispatchState.Abandoned;
             entry.LastReasonCode = reasonCode;
-            entry.LastAttemptState = AttemptTerminalState.Indeterminate;
-            ClearLease(entry, entry.ActiveLease, AttemptTerminalState.Indeterminate);
+            entry.LastAttemptState = AttemptTerminalState.Abandoned;
+            ClearLease(entry, attemptLease, AttemptTerminalState.Abandoned);
+            ArchivePreDispatch(entry, attemptLease);
             return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
             {
                 State = AgentToolInvocationPreDispatchState.Abandoned,
@@ -481,9 +519,26 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         lock (_sync)
         {
             var (entry, _) = GetCurrent(lease);
-            if (entry.PreDispatchState is not (
-                AgentToolInvocationPreDispatchState.Unknown
-                or AgentToolInvocationPreDispatchState.Pending))
+            if (entry.PreDispatchState == AgentToolInvocationPreDispatchState.Pending)
+            {
+                return ValueTask.FromResult(
+                    entry.Intent is not null
+                    && AgentToolGovernancePreDispatchComparer.Equivalent(
+                        entry.Intent,
+                        request.Intent)
+                        ? new AgentToolInvocationPreDispatchResult
+                        {
+                            State = AgentToolInvocationPreDispatchState.Pending,
+                            Intent = entry.Intent
+                        }
+                        : new AgentToolInvocationPreDispatchResult
+                        {
+                            State = AgentToolInvocationPreDispatchState.Unknown,
+                            ReasonCode = "pre_dispatch_intent_conflict"
+                        });
+            }
+
+            if (entry.PreDispatchState != AgentToolInvocationPreDispatchState.Unknown)
             {
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
@@ -514,6 +569,31 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         lock (_sync)
         {
             var (entry, _) = GetCurrent(lease);
+            if (entry.PreDispatchState == AgentToolInvocationPreDispatchState.Ready)
+            {
+                return ValueTask.FromResult(
+                    entry.BoundReservation is not null
+                    && string.Equals(
+                        entry.BoundReservationId,
+                        request.ReservationId,
+                        StringComparison.Ordinal)
+                    && AgentToolGovernancePreDispatchComparer.ReservationIdentityAndTermsEqual(
+                        entry.BoundReservation,
+                        request.Reservation)
+                    && entry.BoundReservation.State == request.Reservation.State
+                        ? new AgentToolInvocationPreDispatchResult
+                        {
+                            State = AgentToolInvocationPreDispatchState.Ready,
+                            Intent = entry.Intent,
+                            BoundReservationId = entry.BoundReservationId
+                        }
+                        : new AgentToolInvocationPreDispatchResult
+                        {
+                            State = AgentToolInvocationPreDispatchState.Unknown,
+                            ReasonCode = "pre_dispatch_reservation_conflict"
+                        });
+            }
+
             if (entry.PreDispatchState != AgentToolInvocationPreDispatchState.Pending)
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
@@ -521,17 +601,29 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
                     ReasonCode = "pre_dispatch_not_pending"
                 });
 
-            if (entry.BoundReservationId is not null
-                && !string.Equals(entry.BoundReservationId, request.ReservationId, StringComparison.Ordinal))
+            if (!string.Equals(
+                    request.ReservationId,
+                    request.Reservation.ReservationId,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    request.Reservation.AttemptId,
+                    lease.AttemptId,
+                    StringComparison.Ordinal)
+                || entry.Intent is null
+                || !string.Equals(
+                    request.Reservation.InvocationFingerprint,
+                    entry.Intent.InvocationFingerprint,
+                    StringComparison.Ordinal))
             {
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
-                    State = entry.PreDispatchState,
+                    State = AgentToolInvocationPreDispatchState.Unknown,
                     ReasonCode = "pre_dispatch_reservation_conflict"
                 });
             }
 
             entry.BoundReservationId = request.ReservationId;
+            entry.BoundReservation = request.Reservation;
             entry.PreDispatchState = AgentToolInvocationPreDispatchState.Ready;
             return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
             {
@@ -553,12 +645,45 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         lock (_sync)
         {
             var (entry, _) = GetCurrent(lease);
+            if (entry.PreDispatchState == AgentToolInvocationPreDispatchState.Accepted)
+            {
+                return ValueTask.FromResult(
+                    entry.AcceptedReceipt is not null
+                    && AgentToolGovernancePreDispatchComparer.Equivalent(
+                        entry.AcceptedReceipt,
+                        request.Receipt)
+                        ? new AgentToolInvocationPreDispatchResult
+                        {
+                            State = AgentToolInvocationPreDispatchState.Accepted,
+                            Intent = entry.Intent,
+                            BoundReservationId = entry.BoundReservationId,
+                            AcceptedReceipt = entry.AcceptedReceipt
+                        }
+                        : new AgentToolInvocationPreDispatchResult
+                        {
+                            State = AgentToolInvocationPreDispatchState.Unknown,
+                            ReasonCode = "pre_dispatch_receipt_conflict"
+                        });
+            }
+
             if (entry.PreDispatchState != AgentToolInvocationPreDispatchState.Ready)
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
                     State = entry.PreDispatchState,
                     ReasonCode = "pre_dispatch_not_ready"
                 });
+
+            var expectedIdentity = new AgentToolPreDispatchIdentity(
+                entry.FingerprintKey,
+                lease.AttemptId);
+            if (request.Receipt.Identity != expectedIdentity)
+            {
+                return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
+                {
+                    State = AgentToolInvocationPreDispatchState.Unknown,
+                    ReasonCode = "pre_dispatch_receipt_conflict"
+                });
+            }
 
             entry.AcceptedReceipt = request.Receipt;
             entry.PreDispatchState = AgentToolInvocationPreDispatchState.Accepted;
@@ -579,22 +704,22 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            if (_preDispatchHistory.TryGetValue(identity, out var historical))
+                return ValueTask.FromResult(historical);
+
             if (!_entries.TryGetValue(identity.LogicalInvocationKey, out var entry))
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
                     State = AgentToolInvocationPreDispatchState.Unknown
                 });
 
-            // If the lease is still active, verify the AttemptId matches.
-            if (entry.ActiveLease is not null
-                && entry.ActiveLease.AttemptId != identity.AttemptId)
+            var attemptLease = entry.ActiveLease ?? entry.LastTerminalLease;
+            if (attemptLease is null
+                || attemptLease.AttemptId != identity.AttemptId)
                 return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                 {
                     State = AgentToolInvocationPreDispatchState.Unknown
                 });
-
-            // If the lease was cleared (terminal state), still return the pre-dispatch state
-            // so that reconcilers and recovery paths can observe the terminal transition.
 
             return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
             {
@@ -619,6 +744,30 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            AgentToolInvocationPreDispatchResult? historical = null;
+            foreach (var pair in _preDispatchHistory)
+            {
+                if (string.Equals(pair.Key.AttemptId, lease.AttemptId, StringComparison.Ordinal))
+                {
+                    historical = pair.Value;
+                    break;
+                }
+            }
+
+            if (historical is not null)
+            {
+                return ValueTask.FromResult(
+                    historical.AbandonedReceipt is not null
+                    && string.Equals(historical.AbandonedReceipt.ReasonCode, request.ReasonCode, StringComparison.Ordinal)
+                    && Equivalent(historical.AbandonedReceipt.Outcome, request.Outcome)
+                        ? historical
+                        : new AgentToolInvocationPreDispatchResult
+                        {
+                            State = AgentToolInvocationPreDispatchState.Unknown,
+                            ReasonCode = "pre_dispatch_denial_conflict"
+                        });
+            }
+
             var (entry, _) = GetCurrent(lease);
             if (entry.PreDispatchState is not (
                 AgentToolInvocationPreDispatchState.Pending
@@ -633,7 +782,11 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
 
             if (entry.AbandonedReceipt is not null)
             {
-                if (!string.Equals(entry.AbandonedReceipt.ReasonCode, request.ReasonCode, StringComparison.Ordinal))
+                if (!string.Equals(
+                        entry.AbandonedReceipt.ReasonCode,
+                        request.ReasonCode,
+                        StringComparison.Ordinal)
+                    || !Equivalent(entry.AbandonedReceipt.Outcome, request.Outcome))
                     return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
                     {
                         State = entry.PreDispatchState,
@@ -659,6 +812,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             entry.AbandonedReceipt = abandoned;
             entry.PreDispatchState = AgentToolInvocationPreDispatchState.Abandoned;
             entry.LastReasonCode = request.ReasonCode;
+            ArchivePreDispatch(entry, lease);
             return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
             {
                 State = AgentToolInvocationPreDispatchState.Abandoned,
@@ -762,6 +916,40 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         entry.ActiveLease = null;
         entry.LastTerminalLease = lease;
         entry.LastAttemptState = state;
+    }
+
+    private void ArchivePreDispatch(Entry entry, AgentToolInvocationLease lease)
+    {
+        var identity = new AgentToolPreDispatchIdentity(entry.FingerprintKey, lease.AttemptId);
+        _preDispatchHistory[identity] = new AgentToolInvocationPreDispatchResult
+        {
+            State = entry.PreDispatchState,
+            Intent = entry.Intent,
+            BoundReservationId = entry.BoundReservationId,
+            AcceptedReceipt = entry.AcceptedReceipt,
+            AbandonedReceipt = entry.AbandonedReceipt,
+            ReasonCode = entry.LastReasonCode
+        };
+    }
+
+    private static void ResetForNewAttempt(Entry entry)
+    {
+        entry.ActiveLease = null;
+        entry.LastTerminalLease = null;
+        entry.LastAttemptState = AttemptTerminalState.None;
+        entry.PreDispatchState = AgentToolInvocationPreDispatchState.Unknown;
+        entry.Intent = null;
+        entry.BoundReservationId = null;
+        entry.BoundReservation = null;
+        entry.AcceptedReceipt = null;
+        entry.AbandonedReceipt = null;
+        entry.DispatchStarted = false;
+        entry.Indeterminate = false;
+        entry.LastReasonCode = null;
+        entry.ReleasePendingPreparedAt = null;
+        entry.ReleasePendingAuditId = null;
+        entry.ReleasePendingBudgetReservationId = null;
+        entry.ReleasePendingReasonCode = null;
     }
 
     private static AgentToolInvocationAcquireResult Result(
@@ -892,6 +1080,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             = AgentToolInvocationPreDispatchState.Unknown;
         public AgentToolInvocationPreDispatchIntentSnapshot? Intent { get; set; }
         public string? BoundReservationId { get; set; }
+        public AgentToolBudgetReservation? BoundReservation { get; set; }
         public AgentToolGovernancePreDispatchReceipt? AcceptedReceipt { get; set; }
         public AgentToolInvocationAbandonedReceipt? AbandonedReceipt { get; set; }
         public AgentToolInvocationOutcome? CompletedOutcome { get; set; }

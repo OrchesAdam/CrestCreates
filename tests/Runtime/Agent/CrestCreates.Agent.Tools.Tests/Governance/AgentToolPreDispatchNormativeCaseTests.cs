@@ -198,7 +198,6 @@ public class AgentToolPreDispatchNormativeCaseTests
         var reservationId = reserveResult.Reservation!.ReservationId;
 
         BindReservation(gate, lease, reservationId);
-        var bindResult = BindAccepted(gate, lease);
 
         // Record the governance checkpoint (as the invoker would)
         var checkpointRecord = new AgentToolGovernancePreDispatchRecord
@@ -212,7 +211,9 @@ public class AgentToolPreDispatchNormativeCaseTests
             },
             BudgetReservation = reserveResult.Reservation!
         };
-        auditor.RecordPreDispatchAsync(checkpointRecord).AsTask().Wait();
+        var checkpointWrite = auditor.RecordPreDispatchAsync(checkpointRecord).AsTask().Result;
+        var bindResult = BindAccepted(gate, lease, checkpointWrite.Receipt);
+        bindResult.State.Should().Be(AgentToolInvocationPreDispatchState.Accepted);
 
         // First reconcile
         var identity = new AgentToolPreDispatchIdentity(budgetContext.LogicalInvocationKey, lease.AttemptId);

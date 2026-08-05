@@ -80,7 +80,13 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
         cmd.CommandText = $"""
             insert into {_options.Schema}.agent_tool_reconciliation_observations
                 (tenant_id, logical_invocation_key, attempt_id, revision, status, reason_code, observed_at)
-            values (@tenantId, @logicalKey::jsonb, @attemptId, @revision, @status, @reasonCode, @observedAt)
+            select @tenantId, @logicalKey::jsonb, @attemptId, @revision, @status, @reasonCode, @observedAt
+            where not exists (
+                select 1
+                from {_options.Schema}.agent_tool_reconciliation_receipts r
+                where r.tenant_id = @tenantId
+                  and r.logical_invocation_key = @logicalKey::jsonb
+                  and r.attempt_id = @attemptId)
             on conflict (tenant_id, logical_invocation_key, attempt_id)
             do update set
                 revision = excluded.revision,
@@ -141,11 +147,26 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
         var connection = _coordinator.RequireSession().Connection;
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = $"""
-            insert into {_options.Schema}.agent_tool_reconciliation_receipts
-                (tenant_id, logical_invocation_key, attempt_id, status, reason_code, terminal_at, integrity_value, receipt_json)
-            values (@tenantId, @logicalKey::jsonb, @attemptId, @status, @reasonCode, @terminalAt, @integrityValue, @receiptJson::jsonb)
-            on conflict (tenant_id, logical_invocation_key, attempt_id) do nothing
-            returning 1
+            with inserted as (
+                insert into {_options.Schema}.agent_tool_reconciliation_receipts
+                    (tenant_id, logical_invocation_key, attempt_id, status, reason_code, terminal_at, integrity_value, receipt_json)
+                values (@tenantId, @logicalKey::jsonb, @attemptId, @status, @reasonCode, @terminalAt, @integrityValue, @receiptJson::jsonb)
+                on conflict (tenant_id, logical_invocation_key, attempt_id) do nothing
+                returning 1
+            ), cleared_observation as (
+                delete from {_options.Schema}.agent_tool_reconciliation_observations o
+                where o.tenant_id = @tenantId
+                  and o.logical_invocation_key = @logicalKey::jsonb
+                  and o.attempt_id = @attemptId
+                  and exists (
+                      select 1
+                      from {_options.Schema}.agent_tool_reconciliation_receipts r
+                      where r.tenant_id = o.tenant_id
+                        and r.logical_invocation_key = o.logical_invocation_key
+                        and r.attempt_id = o.attempt_id)
+                returning 1
+            )
+            select exists(select 1 from inserted)
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", receipt.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
         cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(receipt.Identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
@@ -157,6 +178,6 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
         cmd.Parameters.Add(new NpgsqlParameter("receiptJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(receipt, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolPreDispatchReconciliationReceipt) });
 
         var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return result is not null;
+        return result is true;
     }
 }

@@ -37,107 +37,186 @@ internal sealed class PostgreSqlAgentToolPreDispatchCleanup
         var session = _coordinator.RequireSession();
         var totalDeleted = 0;
 
-        var cutoffCheckpoint = now - _options.GovernanceCheckpointRetention;
-        var cutoffBudget = now - _options.BudgetReservationRetention;
-        var cutoffReceipt = now - _options.InvocationAttemptReceiptRetention;
+        var accountabilityFloor = _options.AccountabilityProjectionRetryWindow;
+        var cutoffCheckpoint = now - Max(_options.GovernanceCheckpointRetention, accountabilityFloor);
+        var cutoffBudget = now - Max(_options.BudgetReservationRetention, accountabilityFloor);
+        var cutoffReceipt = now - Max(_options.InvocationAttemptReceiptRetention, accountabilityFloor);
         var cutoffObservation = now - _options.ReconciliationObservationRetention;
         var cutoffReconciliationReceipt = now - _options.ReconciliationReceiptRetention;
-        var cutoffFinalization = now - _options.GovernanceFinalizationRetention;
+        var cutoffFinalization = now - Max(_options.GovernanceFinalizationRetention, accountabilityFloor);
+        var cutoffReconciliationWindow = now - _options.MaximumInvocationReconciliationWindow;
 
-        // Protected pre-dispatch states that must never be cleaned up
-        var protectedStates = string.Join(", ",
-            (int)AgentToolInvocationPreDispatchState.Pending,
-            (int)AgentToolInvocationPreDispatchState.Ready,
-            (int)AgentToolInvocationPreDispatchState.Accepted,
-            (int)AgentToolInvocationPreDispatchState.ReleasePending,
-            (int)AgentToolInvocationPreDispatchState.CompletionPending,
-            (int)AgentToolInvocationPreDispatchState.Indeterminate);
-
-        // 1. Clean up terminal governance checkpoints — only for attempts that have
-        //    reached a true terminal state (Released, Completed, Abandoned) in the
-        //    invocation gate. Indeterminate is PROTECTED and must NOT be cleaned up.
-        //    Must run BEFORE deleting gate rows so the terminal-state check can see them.
-        totalDeleted += await ExecuteNonQueryAsync(session,
-            $"""
-            DELETE FROM {_options.Schema}.agent_tool_pre_dispatch_checkpoints
-            WHERE accepted_at < @cutoff_checkpoint
-              AND tenant_id IN (
-                  SELECT i.tenant_id
-                  FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
-                  WHERE i.tenant_id = agent_tool_pre_dispatch_checkpoints.tenant_id
-                    AND i.attempt_id = agent_tool_pre_dispatch_checkpoints.attempt_id
-                    AND i.logical_invocation_key = agent_tool_pre_dispatch_checkpoints.logical_invocation_key
-                    AND i.pre_dispatch_state IN (
-                        {(int)AgentToolInvocationPreDispatchState.Released},
-                        {(int)AgentToolInvocationPreDispatchState.Completed},
-                        {(int)AgentToolInvocationPreDispatchState.Abandoned}
-                    )
-              )
-            """,
-            ("cutoff_checkpoint", cutoffCheckpoint));
-
-        // 2. Clean up terminal governance finalizations and decisions — only for
-        //    attempts whose invocation gate has reached a true terminal state.
-        totalDeleted += await ExecuteNonQueryAsync(session,
-            $"""
-            DELETE FROM {_options.Schema}.agent_tool_governance_finalizations
-            WHERE created_at < @cutoff_finalization
-              AND attempt_id IN (
-                  SELECT i.attempt_id
-                  FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
-                  WHERE i.attempt_id = agent_tool_governance_finalizations.attempt_id
-                    AND i.pre_dispatch_state IN (
-                        {(int)AgentToolInvocationPreDispatchState.Released},
-                        {(int)AgentToolInvocationPreDispatchState.Completed},
-                        {(int)AgentToolInvocationPreDispatchState.Abandoned}
-                    )
-              )
-            """,
-            ("cutoff_finalization", cutoffFinalization));
-        totalDeleted += await ExecuteNonQueryAsync(session,
-            $"""
-            DELETE FROM {_options.Schema}.agent_tool_governance_decisions
-            WHERE created_at < @cutoff_finalization
-              AND attempt_id IN (
-                  SELECT i.attempt_id
-                  FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
-                  WHERE i.attempt_id = agent_tool_governance_decisions.attempt_id
-                    AND i.pre_dispatch_state IN (
-                        {(int)AgentToolInvocationPreDispatchState.Released},
-                        {(int)AgentToolInvocationPreDispatchState.Completed},
-                        {(int)AgentToolInvocationPreDispatchState.Abandoned}
-                    )
-              )
-            """,
-            ("cutoff_finalization", cutoffFinalization));
-
-        // 3. Clean up terminal budget reservations (Released, Committed, Indeterminate)
-        //    but protect Reserved (active) reservations
+        var terminalAttemptStates = string.Join(", ",
+            (int)AgentToolInvocationPreDispatchState.Abandoned,
+            (int)AgentToolInvocationPreDispatchState.Released,
+            (int)AgentToolInvocationPreDispatchState.Completed);
         var terminalBudgetStates = string.Join(", ",
             (int)AgentToolBudgetReservationState.Released,
             (int)AgentToolBudgetReservationState.Committed,
             (int)AgentToolBudgetReservationState.Indeterminate);
+
+        // A checkpoint is removable only when every linked authority proves that
+        // the exact tenant/logical-key/Attempt aggregate is terminal.
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
-            DELETE FROM {_options.Schema}.agent_tool_budget_reservations
-            WHERE created_at < @cutoff_budget
-              AND state IN ({terminalBudgetStates})
+            DELETE FROM {_options.Schema}.agent_tool_pre_dispatch_checkpoints c
+            WHERE c.accepted_at < @cutoff_checkpoint
+              AND EXISTS (
+                  SELECT 1
+                  FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
+                  WHERE i.tenant_id = c.tenant_id
+                    AND i.logical_invocation_key = c.logical_invocation_key
+                    AND i.attempt_id = c.attempt_id
+                    AND i.pre_dispatch_state IN ({terminalAttemptStates}))
+              AND EXISTS (
+                  SELECT 1
+                  FROM {_options.Schema}.agent_tool_governance_finalizations f
+                  WHERE f.tenant_id = c.tenant_id
+                    AND f.logical_invocation_key = c.logical_invocation_key
+                    AND f.attempt_id = c.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM {_options.Schema}.agent_tool_budget_reservations b
+                  WHERE b.tenant_id = c.tenant_id
+                    AND b.logical_invocation_key = c.logical_invocation_key
+                    AND b.attempt_id = c.attempt_id
+                    AND b.state NOT IN ({terminalBudgetStates}))
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM {_options.Schema}.agent_tool_reconciliation_observations o
+                  WHERE o.tenant_id = c.tenant_id
+                    AND o.logical_invocation_key = c.logical_invocation_key
+                    AND o.attempt_id = c.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM {_options.Schema}.agent_tool_reconciliation_receipts r
+                  WHERE r.tenant_id = c.tenant_id
+                    AND r.logical_invocation_key = c.logical_invocation_key
+                    AND r.attempt_id = c.attempt_id
+                    AND r.terminal_at >= @cutoff_reconciliation_window)
             """,
-            ("cutoff_budget", cutoffBudget));
+            ("cutoff_checkpoint", cutoffCheckpoint),
+            ("cutoff_reconciliation_window", cutoffReconciliationWindow));
 
-        // 4. Clean up terminal invocation pre-dispatch entries (Abandoned, Released, Completed)
-        //    but protect non-terminal states. Runs AFTER checkpoint cleanup so the
-        //    terminal-state check in step 1 can still see the gate rows.
+        // Finalization and decision rows use the complete identity. AttemptId
+        // alone is intentionally insufficient because it is provider-owned text.
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
-            DELETE FROM {_options.Schema}.agent_tool_invocation_pre_dispatch
-            WHERE created_at < @cutoff_receipt
-              AND pre_dispatch_state NOT IN ({protectedStates})
+            DELETE FROM {_options.Schema}.agent_tool_governance_finalizations f
+            WHERE f.created_at < @cutoff_finalization
+              AND EXISTS (
+                  SELECT 1
+                  FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
+                  WHERE i.tenant_id = f.tenant_id
+                    AND i.logical_invocation_key = f.logical_invocation_key
+                    AND i.attempt_id = f.attempt_id
+                    AND i.pre_dispatch_state IN ({terminalAttemptStates}))
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_pre_dispatch_checkpoints c
+                  WHERE c.tenant_id = f.tenant_id
+                    AND c.logical_invocation_key = f.logical_invocation_key
+                    AND c.attempt_id = f.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_observations o
+                  WHERE o.tenant_id = f.tenant_id
+                    AND o.logical_invocation_key = f.logical_invocation_key
+                    AND o.attempt_id = f.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_receipts r
+                  WHERE r.tenant_id = f.tenant_id
+                    AND r.logical_invocation_key = f.logical_invocation_key
+                    AND r.attempt_id = f.attempt_id
+                    AND r.terminal_at >= @cutoff_reconciliation_window)
             """,
-            ("cutoff_receipt", cutoffReceipt));
+            ("cutoff_finalization", cutoffFinalization),
+            ("cutoff_reconciliation_window", cutoffReconciliationWindow));
+        totalDeleted += await ExecuteNonQueryAsync(session,
+            $"""
+            DELETE FROM {_options.Schema}.agent_tool_governance_decisions d
+            WHERE d.created_at < @cutoff_finalization
+              AND EXISTS (
+                  SELECT 1
+                  FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
+                  WHERE i.tenant_id = d.tenant_id
+                    AND i.logical_invocation_key = d.logical_invocation_key
+                    AND i.attempt_id = d.attempt_id
+                    AND i.pre_dispatch_state IN ({terminalAttemptStates}))
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_observations o
+                  WHERE o.tenant_id = d.tenant_id
+                    AND o.logical_invocation_key = d.logical_invocation_key
+                    AND o.attempt_id = d.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_receipts r
+                  WHERE r.tenant_id = d.tenant_id
+                    AND r.logical_invocation_key = d.logical_invocation_key
+                    AND r.attempt_id = d.attempt_id
+                    AND r.terminal_at >= @cutoff_reconciliation_window)
+            """,
+            ("cutoff_finalization", cutoffFinalization),
+            ("cutoff_reconciliation_window", cutoffReconciliationWindow));
 
-        // 5. Clean up mutable reconciliation observations
-        //    StillPending observations are protected (non-terminal)
+        // A terminal budget cannot age out while its Gate is live or reconciliation
+        // still has a mutable observation/new terminal receipt.
+        totalDeleted += await ExecuteNonQueryAsync(session,
+            $"""
+            DELETE FROM {_options.Schema}.agent_tool_budget_reservations b
+            WHERE b.created_at < @cutoff_budget
+              AND b.state IN ({terminalBudgetStates})
+              AND EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
+                  WHERE i.tenant_id = b.tenant_id
+                    AND i.logical_invocation_key = b.logical_invocation_key
+                    AND i.attempt_id = b.attempt_id
+                    AND i.pre_dispatch_state IN ({terminalAttemptStates}))
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_observations o
+                  WHERE o.tenant_id = b.tenant_id
+                    AND o.logical_invocation_key = b.logical_invocation_key
+                    AND o.attempt_id = b.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_receipts r
+                  WHERE r.tenant_id = b.tenant_id
+                    AND r.logical_invocation_key = b.logical_invocation_key
+                    AND r.attempt_id = b.attempt_id
+                    AND r.terminal_at >= @cutoff_reconciliation_window)
+            """,
+            ("cutoff_budget", cutoffBudget),
+            ("cutoff_reconciliation_window", cutoffReconciliationWindow));
+
+        // Delete only named terminal states, after all aggregate-owned evidence is
+        // gone. Unknown and DispatchStarted are not terminal cleanup candidates.
+        totalDeleted += await ExecuteNonQueryAsync(session,
+            $"""
+            DELETE FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
+            WHERE i.created_at < @cutoff_receipt
+              AND i.pre_dispatch_state IN ({terminalAttemptStates})
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_pre_dispatch_checkpoints c
+                  WHERE c.tenant_id = i.tenant_id AND c.logical_invocation_key = i.logical_invocation_key AND c.attempt_id = i.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_budget_reservations b
+                  WHERE b.tenant_id = i.tenant_id AND b.logical_invocation_key = i.logical_invocation_key AND b.attempt_id = i.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_governance_finalizations f
+                  WHERE f.tenant_id = i.tenant_id AND f.logical_invocation_key = i.logical_invocation_key AND f.attempt_id = i.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_governance_decisions d
+                  WHERE d.tenant_id = i.tenant_id AND d.logical_invocation_key = i.logical_invocation_key AND d.attempt_id = i.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_observations o
+                  WHERE o.tenant_id = i.tenant_id AND o.logical_invocation_key = i.logical_invocation_key AND o.attempt_id = i.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_receipts r
+                  WHERE r.tenant_id = i.tenant_id
+                    AND r.logical_invocation_key = i.logical_invocation_key
+                    AND r.attempt_id = i.attempt_id
+                    AND r.terminal_at >= @cutoff_reconciliation_window)
+            """,
+            ("cutoff_receipt", cutoffReceipt),
+            ("cutoff_reconciliation_window", cutoffReconciliationWindow));
+
+        // StillPending is mutable retry state and therefore never age-deleted.
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
             DELETE FROM {_options.Schema}.agent_tool_reconciliation_observations
@@ -146,17 +225,26 @@ internal sealed class PostgreSqlAgentToolPreDispatchCleanup
             """,
             ("cutoff_observation", cutoffObservation));
 
-        // 6. Clean up terminal reconciliation receipt tombstones
-        //    These are retained independently after aggregate cleanup
+        // A terminal tombstone outlives the aggregate and disappears only after
+        // its own retention once neither Gate nor mutable observation remains.
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
-            DELETE FROM {_options.Schema}.agent_tool_reconciliation_receipts
-            WHERE terminal_at < @cutoff_reconciliation_receipt
+            DELETE FROM {_options.Schema}.agent_tool_reconciliation_receipts r
+            WHERE r.terminal_at < @cutoff_reconciliation_receipt
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
+                  WHERE i.tenant_id = r.tenant_id AND i.logical_invocation_key = r.logical_invocation_key AND i.attempt_id = r.attempt_id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM {_options.Schema}.agent_tool_reconciliation_observations o
+                  WHERE o.tenant_id = r.tenant_id AND o.logical_invocation_key = r.logical_invocation_key AND o.attempt_id = r.attempt_id)
             """,
             ("cutoff_reconciliation_receipt", cutoffReconciliationReceipt));
 
         return totalDeleted;
     }
+
+    private static TimeSpan Max(TimeSpan left, TimeSpan right)
+        => left >= right ? left : right;
 
     private static async Task<int> ExecuteNonQueryAsync(PostgreSqlRuntimeSession session, string sql, params (string Name, object Value)[] parameters)
     {
