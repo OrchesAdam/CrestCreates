@@ -579,20 +579,23 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             new("agent_tool_governance_finalizations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["audit_id"] = Text,
-                ["attempt_state"] = Integer, ["finalization_json"] = NullableJson,
+                ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
+                ["attempt_state"] = Integer, ["finalization_json"] = Json,
                 ["created_at"] = Timestamp
             }, ["tenant_id", "audit_id"], [], [], []),
             new("agent_tool_reconciliation_observations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
-                ["tenant_id"] = Text, ["audit_id"] = Text, ["revision"] = BigInt,
-                ["status"] = Integer, ["observation_json"] = NullableJson,
-                ["observed_at"] = Timestamp
-            }, ["tenant_id", "audit_id", "revision"], [], [], []),
+                ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
+                ["revision"] = BigInt, ["status"] = Integer, ["reason_code"] = Text,
+                ["observed_at"] = Timestamp, ["observation_json"] = NullableJson
+            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], []),
             new("agent_tool_reconciliation_receipts", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
-                ["tenant_id"] = Text, ["audit_id"] = Text, ["receipt_json"] = Json,
-                ["terminal_at"] = Timestamp
-            }, ["tenant_id", "audit_id"], [], [], [])
+                ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
+                ["status"] = Integer, ["reason_code"] = Text,
+                ["terminal_at"] = Timestamp, ["integrity_value"] = Text,
+                ["receipt_json"] = Json, ["created_at"] = Timestamp
+            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], [])
         ];
     }
 
