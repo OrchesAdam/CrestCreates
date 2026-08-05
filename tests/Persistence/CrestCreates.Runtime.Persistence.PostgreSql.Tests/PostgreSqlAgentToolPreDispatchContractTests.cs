@@ -472,6 +472,344 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PostgreSql_Budget_Should_Enforce_MaxCallsPerExecution()
+    {
+        // Capacity is shared per capacity key (tenant|user|agent|execution|tool|category).
+        // Three attempts against a capacity of 2 must leave exactly 2 occupied.
+        var first = await _budgetGate.ReserveAsync(new AgentToolBudgetReserveRequest
+        {
+            Context = SampleBudgetContext("attempt-cap-1", maxCallsPerExecution: 2)
+        });
+        var second = await _budgetGate.ReserveAsync(new AgentToolBudgetReserveRequest
+        {
+            Context = SampleBudgetContext("attempt-cap-2", maxCallsPerExecution: 2)
+        });
+
+        first.Status.Should().Be(AgentToolBudgetReserveStatus.Reserved);
+        second.Status.Should().Be(AgentToolBudgetReserveStatus.Reserved);
+
+        var third = await _budgetGate.ReserveAsync(new AgentToolBudgetReserveRequest
+        {
+            Context = SampleBudgetContext("attempt-cap-3", maxCallsPerExecution: 2)
+        });
+
+        third.Status.Should().Be(AgentToolBudgetReserveStatus.Denied);
+        third.ReasonCode.Should().Be("budget_capacity_exceeded");
+
+        // The same attempt retry is still idempotent even at capacity.
+        var retry = await _budgetGate.ReserveAsync(new AgentToolBudgetReserveRequest
+        {
+            Context = SampleBudgetContext("attempt-cap-1", maxCallsPerExecution: 2)
+        });
+        retry.Status.Should().Be(AgentToolBudgetReserveStatus.Reserved);
+        retry.Reservation!.ReservationId.Should().Be(first.Reservation!.ReservationId);
+    }
+
+    [Fact]
+    public async Task PostgreSql_Budget_Should_Reject_LogicalInvocationConflict()
+    {
+        var first = await _budgetGate.ReserveAsync(new AgentToolBudgetReserveRequest
+        {
+            Context = SampleBudgetContext("attempt-conflict-1")
+        });
+        first.Status.Should().Be(AgentToolBudgetReserveStatus.Reserved);
+
+        // Same LogicalInvocationKey but a different tool contract — must be rejected
+        // before any capacity accounting happens.
+        var second = await _budgetGate.ReserveAsync(new AgentToolBudgetReserveRequest
+        {
+            Context = SampleBudgetContext(
+                "attempt-conflict-2",
+                toolContract: new AgentToolContractIdentity("tool-2", 1, "hash-2"))
+        });
+
+        second.Status.Should().Be(AgentToolBudgetReserveStatus.Denied);
+        second.ReasonCode.Should().Be("budget_logical_invocation_conflict");
+    }
+
+    [Fact]
+    public async Task PostgreSql_Budget_Should_Reject_AfterCommittedReservation()
+    {
+        var first = await _budgetGate.ReserveAsync(new AgentToolBudgetReserveRequest
+        {
+            Context = SampleBudgetContext("attempt-committed-1")
+        });
+        first.Status.Should().Be(AgentToolBudgetReserveStatus.Reserved);
+
+        var finalize = await _budgetGate.FinalizeAsync(new AgentToolBudgetFinalizeRequest
+        {
+            ReservationId = first.Reservation!.ReservationId,
+            AttemptId = "attempt-committed-1",
+            InvocationFingerprint = "fp-1",
+            RequestedState = AgentToolBudgetReservationState.Committed,
+            ReasonCode = "dispatched"
+        });
+        finalize.State.Should().Be(AgentToolBudgetReservationState.Committed);
+
+        // A logical invocation that already reached Committed must not accept new
+        // reservations for other attempts.
+        var second = await _budgetGate.ReserveAsync(new AgentToolBudgetReserveRequest
+        {
+            Context = SampleBudgetContext("attempt-committed-2")
+        });
+        second.Status.Should().Be(AgentToolBudgetReserveStatus.Denied);
+        second.ReasonCode.Should().Be("budget_logical_invocation_committed");
+    }
+
+    [Fact]
+    public async Task Concurrent_BudgetReserve_Should_Not_ExceedCapacity()
+    {
+        // 12 concurrent reservations against a capacity of 10 — exactly 10 may
+        // occupy the capacity key, the remaining 2 must be denied. The advisory
+        // xact locks serialize the read-then-insert / count sequence.
+        const int maxCalls = 10;
+        const int attempts = 12;
+
+        var tasks = Enumerable.Range(0, attempts).Select(i => _budgetGate.ReserveAsync(
+            new AgentToolBudgetReserveRequest
+            {
+                Context = SampleBudgetContext($"attempt-par-{i}", maxCallsPerExecution: maxCalls)
+            }).AsTask());
+
+        var results = await Task.WhenAll(tasks);
+
+        results.Count(r => r.Status == AgentToolBudgetReserveStatus.Reserved).Should().Be(maxCalls);
+        results.Count(r => r.Status == AgentToolBudgetReserveStatus.Denied).Should().Be(attempts - maxCalls);
+        results.Where(r => r.Status == AgentToolBudgetReserveStatus.Denied)
+            .Should().OnlyContain(r => r.ReasonCode == "budget_capacity_exceeded");
+    }
+
+    [Fact]
+    public async Task Completion_ResponseLoss_Should_Replay_Full_Terminal_Receipt()
+    {
+        var (lease, _) = await DispatchStartedAsync();
+
+        var prepared = new AgentToolInvocationPrepareCompletionRequest
+        {
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.Succeeded,
+                Code = "completed",
+                Message = "tool finished"
+            },
+            AuditId = "audit-completion-1",
+            BudgetReservationId = "res-1",
+            ReasonCode = "completed_normally"
+        };
+        await _gate.PrepareCompletionAsync(lease, prepared);
+
+        var first = await _gate.PublishCompletionAsync(lease);
+        first.State.Should().Be(AgentToolInvocationCompletionState.Completed);
+        first.Outcome.Should().BeEquivalentTo(prepared.Outcome);
+        first.PreparedAt.Should().NotBeNull();
+        first.AuditId.Should().Be("audit-completion-1");
+        first.BudgetReservationId.Should().Be("res-1");
+        first.ReasonCode.Should().Be("completed_normally");
+
+        // Response loss: second publish replays the original terminal receipt.
+        var second = await _gate.PublishCompletionAsync(lease);
+        second.State.Should().Be(AgentToolInvocationCompletionState.Completed);
+        second.Outcome.Should().BeEquivalentTo(prepared.Outcome);
+        second.AuditId.Should().Be("audit-completion-1");
+        second.BudgetReservationId.Should().Be("res-1");
+        second.ReasonCode.Should().Be("completed_normally");
+
+        // Get returns the complete original receipt.
+        var get = await _gate.GetCompletionStateAsync(lease);
+        get.State.Should().Be(AgentToolInvocationCompletionState.Completed);
+        get.Outcome.Should().BeEquivalentTo(prepared.Outcome);
+        get.AuditId.Should().Be("audit-completion-1");
+        get.BudgetReservationId.Should().Be("res-1");
+        get.ReasonCode.Should().Be("completed_normally");
+    }
+
+    [Fact]
+    public async Task Completion_Prepare_ChangedRequest_Should_Conflict()
+    {
+        var (lease, _) = await DispatchStartedAsync();
+
+        var prepared = new AgentToolInvocationPrepareCompletionRequest
+        {
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.Succeeded,
+                Code = "completed",
+                Message = "tool finished"
+            },
+            AuditId = "audit-completion-2",
+            BudgetReservationId = "res-1",
+            ReasonCode = "completed_normally"
+        };
+        await _gate.PrepareCompletionAsync(lease, prepared);
+
+        // Same complete request → idempotent.
+        await _gate.PrepareCompletionAsync(lease, prepared);
+
+        // Changed request → conflict.
+        var changed = prepared with
+        {
+            ReasonCode = "changed"
+        };
+        var conflict = async () => await _gate.PrepareCompletionAsync(lease, changed);
+        await conflict.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Release_ResponseLoss_Should_Replay_Full_Terminal_Receipt()
+    {
+        var (lease, _) = await DispatchStartedAsync();
+
+        var prepared = new AgentToolInvocationPrepareReleaseRequest
+        {
+            AuditId = "audit-release-1",
+            BudgetReservationId = "res-1",
+            ReasonCode = "reconciled_no_dispatch"
+        };
+        await _gate.PrepareReleaseAsync(lease, prepared);
+
+        var first = await _gate.PublishReleaseAsync(lease);
+        first.State.Should().Be(AgentToolInvocationReleaseState.Released);
+        first.PreparedAt.Should().NotBeNull();
+        first.AuditId.Should().Be("audit-release-1");
+        first.BudgetReservationId.Should().Be("res-1");
+        first.ReasonCode.Should().Be("reconciled_no_dispatch");
+
+        // Response loss: second publish replays the original terminal receipt.
+        var second = await _gate.PublishReleaseAsync(lease);
+        second.State.Should().Be(AgentToolInvocationReleaseState.Released);
+        second.AuditId.Should().Be("audit-release-1");
+        second.BudgetReservationId.Should().Be("res-1");
+        second.ReasonCode.Should().Be("reconciled_no_dispatch");
+
+        // Get returns the complete original receipt.
+        var get = await _gate.GetReleaseStateAsync(lease);
+        get.State.Should().Be(AgentToolInvocationReleaseState.Released);
+        get.AuditId.Should().Be("audit-release-1");
+        get.BudgetReservationId.Should().Be("res-1");
+        get.ReasonCode.Should().Be("reconciled_no_dispatch");
+    }
+
+    [Fact]
+    public async Task Release_Prepare_ChangedRequest_Should_Conflict()
+    {
+        var (lease, _) = await DispatchStartedAsync();
+
+        var prepared = new AgentToolInvocationPrepareReleaseRequest
+        {
+            AuditId = "audit-release-2",
+            BudgetReservationId = "res-1",
+            ReasonCode = "reconciled_no_dispatch"
+        };
+        await _gate.PrepareReleaseAsync(lease, prepared);
+
+        // Same complete request → idempotent.
+        await _gate.PrepareReleaseAsync(lease, prepared);
+
+        // Changed request → conflict.
+        var changed = prepared with
+        {
+            ReasonCode = "changed"
+        };
+        var conflict = async () => await _gate.PrepareReleaseAsync(lease, changed);
+        await conflict.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    private async Task<(AgentToolInvocationLease Lease, AgentToolGovernancePreDispatchReceipt Receipt)> DispatchStartedAsync()
+    {
+        var acquire = await _gate.AcquireAsync(new AgentToolInvocationAcquireRequest(LogicalKey, "fp-1"));
+        var lease = acquire.Lease!;
+        await PrepareAndBindAsync(lease);
+
+        var receipt = new AgentToolGovernancePreDispatchReceipt
+        {
+            Identity = new AgentToolPreDispatchIdentity(LogicalKey, lease.AttemptId),
+            AuditId = "audit-dispatch-start",
+            AcceptedAt = DateTimeOffset.UtcNow
+        };
+        await _gate.BindAcceptedPreDispatchAsync(lease, new AgentToolInvocationBindPreDispatchRequest
+        {
+            Receipt = receipt
+        });
+
+        var dispatch = await _gate.TryMarkDispatchStartedAsync(lease, receipt, "res-1");
+        dispatch.Should().BeTrue();
+        return (lease, receipt);
+    }
+
+    // B09 (real owner): retention at exactly the minimum window — the record
+    // remains queryable through the window boundary; strictly older terminal
+    // observations are cleaned.
+    [Fact]
+    public async Task PostgreSql_B09_Retention_AtMinimumWindow_Should_RemainQueryable()
+    {
+        var now = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        var clock = new FixedTimeProvider(now);
+        var coordinator = _provider.GetRequiredService<PostgreSqlRuntimeTransactionCoordinator>();
+        var cleanup = new PostgreSqlAgentToolPreDispatchCleanup(
+            coordinator, _lease.Options, clock);
+
+        var identity = new AgentToolPreDispatchIdentity(LogicalKey, "attempt-b09");
+        var boundary = now - _lease.Options.ReconciliationObservationRetention;
+
+        // Exactly at the minimum window boundary — must survive cleanup.
+        (await _reconciliationStore.TryUpsertObservationAsync(
+            new AgentToolPreDispatchReconciliationObservation
+            {
+                Identity = identity,
+                Status = AgentToolPreDispatchReconciliationStatus.Released,
+                ReasonCode = "released",
+                ObservedAt = boundary,
+                Revision = 1
+            }, 0)).Should().BeTrue();
+
+        // Strictly beyond the window — must be cleaned.
+        var beyondIdentity = new AgentToolPreDispatchIdentity(LogicalKey, "attempt-b09-beyond");
+        (await _reconciliationStore.TryUpsertObservationAsync(
+            new AgentToolPreDispatchReconciliationObservation
+            {
+                Identity = beyondIdentity,
+                Status = AgentToolPreDispatchReconciliationStatus.Released,
+                ReasonCode = "released",
+                ObservedAt = boundary.AddSeconds(-1),
+                Revision = 1
+            }, 0)).Should().BeTrue();
+
+        await cleanup.CleanupAsync();
+
+        (await _reconciliationStore.ReadObservationAsync(identity)).Should().NotBeNull();
+        (await _reconciliationStore.ReadObservationAsync(beyondIdentity)).Should().BeNull();
+    }
+
+    // F18 (real owner): cleanup races live reconciliation — StillPending is
+    // mutable retry state and must never be age-deleted, even far beyond the window.
+    [Fact]
+    public async Task PostgreSql_F18_Cleanup_Should_Not_Remove_LiveReconciliationState()
+    {
+        var now = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        var clock = new FixedTimeProvider(now);
+        var coordinator = _provider.GetRequiredService<PostgreSqlRuntimeTransactionCoordinator>();
+        var cleanup = new PostgreSqlAgentToolPreDispatchCleanup(
+            coordinator, _lease.Options, clock);
+
+        var identity = new AgentToolPreDispatchIdentity(LogicalKey, "attempt-f18");
+        (await _reconciliationStore.TryUpsertObservationAsync(
+            new AgentToolPreDispatchReconciliationObservation
+            {
+                Identity = identity,
+                Status = AgentToolPreDispatchReconciliationStatus.StillPending,
+                ReasonCode = "authority_unavailable",
+                ObservedAt = now - TimeSpan.FromDays(400),
+                Revision = 1
+            }, 0)).Should().BeTrue();
+
+        await cleanup.CleanupAsync();
+
+        var read = await _reconciliationStore.ReadObservationAsync(identity);
+        read.Should().NotBeNull("StillPending is mutable retry state and must survive cleanup");
+        read!.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending);
+    }
+
+    [Fact]
     public async Task Governance_Finalization_Is_Immutable()
     {
         var context = SampleAuditContext("attempt-gov-fin");
@@ -536,9 +874,53 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
         conflictResult.Record.Should().BeEquivalentTo(finalization);
 
         // Verify the finalization state is readable.
-        var state = await _auditor.GetFinalizationStateAsync(receipt.Receipt!.AuditId);
+        var state = await _auditor.GetFinalizationStateAsync(receipt.Receipt!.AuditId, receipt.Receipt!.Identity.LogicalInvocationKey.TenantId);
         state.Status.Should().Be(AgentToolGovernanceFinalizationStatus.Finalized);
         state.Record.Should().BeEquivalentTo(finalization);
+    }
+
+    [Fact]
+    public async Task Decision_Retry_Is_Idempotent_With_Stable_Identity()
+    {
+        var decision = new AgentToolGovernanceDecisionRecord
+        {
+            Context = SampleAuditContext("attempt-decision-1"),
+            Decision = AgentToolGovernanceDecisionState.Denied,
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.CapabilityFailure,
+                Code = "denied",
+                Message = "rejected"
+            },
+            ReasonCode = "policy_denied"
+        };
+
+        // First record.
+        await _auditor.RecordDecisionAsync(decision);
+
+        // Response-loss retry with identical content must be idempotent (no throw, no duplicate).
+        await _auditor.RecordDecisionAsync(decision);
+
+        // A different decision for the same attempt identity must conflict.
+        var conflicting = decision with { ReasonCode = "changed" };
+        var conflict = async () => await _auditor.RecordDecisionAsync(conflicting);
+        await conflict.Should().ThrowAsync<InvalidOperationException>();
+
+        // Exactly one row exists for the stable decision identity.
+        await using var connection = new NpgsqlConnection(_lease.Options.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            select count(*)
+            from {_lease.Options.Schema}.agent_tool_governance_decisions
+            where tenant_id = @tenantId
+              and attempt_id = @attemptId
+              and decision_state = @decisionState
+            """;
+        command.Parameters.AddWithValue("tenantId", LogicalKey.TenantId!);
+        command.Parameters.AddWithValue("attemptId", "attempt-decision-1");
+        command.Parameters.AddWithValue("decisionState", (int)AgentToolGovernanceDecisionState.Denied);
+        (await command.ExecuteScalarAsync()).Should().Be(1L);
     }
 
     private async Task PrepareAndBindAsync(AgentToolInvocationLease lease)
@@ -610,13 +992,17 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
         };
     }
 
-    private static AgentToolGovernanceContext SampleBudgetContext(string attemptId)
+    private static AgentToolGovernanceContext SampleBudgetContext(
+        string attemptId,
+        int? maxCallsPerExecution = 10,
+        AgentToolContractIdentity? toolContract = null,
+        string? fingerprint = null)
     {
         return new AgentToolGovernanceContext
         {
             LogicalInvocationKey = LogicalKey,
             AttemptId = attemptId,
-            InvocationFingerprint = "fp-1",
+            InvocationFingerprint = fingerprint ?? "fp-1",
             ExecutionContext = new AgentExecutionContext
             {
                 ExecutionId = "exec-1",
@@ -625,14 +1011,14 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
                 AgentRoles = new HashSet<string> { "role-1" },
                 CallOrigin = AgentToolCallOrigin.ExplicitRequest
             },
-            ToolContract = new AgentToolContractIdentity("tool-1", 1, "hash-1"),
+            ToolContract = toolContract ?? new AgentToolContractIdentity("tool-1", 1, "hash-1"),
             CapabilityContract = new AgentToolContractIdentity("cap-1", 1, "hash-1"),
             Governance = new AgentToolEffectiveGovernance(
                 AgentToolSelectionPolicy.ExplicitOnly,
                 AgentToolSideEffectKind.ReadOnly,
                 CapabilityRiskLevel.Low,
                 AgentToolApprovalMode.None,
-                new AgentToolBudgetRequirement { Category = "default", CostUnits = 1, MaxCallsPerExecution = 10 },
+                new AgentToolBudgetRequirement { Category = "default", CostUnits = 1, MaxCallsPerExecution = maxCallsPerExecution },
                 AgentToolAuditMode.Required),
             ArgumentsHash = "args-hash-1"
         };
@@ -647,4 +1033,9 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
             EvidenceId = "evidence-1"
         };
     }
+}
+
+internal sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => utcNow;
 }

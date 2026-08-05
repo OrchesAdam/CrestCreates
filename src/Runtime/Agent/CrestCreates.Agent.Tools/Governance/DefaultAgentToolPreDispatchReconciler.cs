@@ -203,7 +203,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         }
 
         // Step 5: Compose reconciliation decision based on Gate + Budget + Checkpoint.
-        var (status, reasonCode) = ComposeStatus(gateState.State, budgetRead.Status, checkpointRead.Status);
+        var (status, reasonCode, abandonGate) = ComposeStatus(gateState.State, budgetRead.Status, checkpointRead.Status);
 
         // Step 6: Execute recovery transactions for terminal statuses that require side effects.
         if (status == AgentToolPreDispatchReconciliationStatus.Released)
@@ -218,6 +218,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                     new AgentToolBudgetFinalizeRequest
                     {
                         ReservationId = budgetRead.Reservation.ReservationId,
+                        TenantId = identity.LogicalInvocationKey.TenantId,
                         AttemptId = identity.AttemptId,
                         InvocationFingerprint = budgetRead.Reservation.InvocationFingerprint,
                         RequestedState = AgentToolBudgetReservationState.Released,
@@ -307,7 +308,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
             }
 
             // Transition Gate to terminal via identity-based release/abandon.
-            if (gateState.State == AgentToolInvocationPreDispatchState.Pending)
+            // Abandon when the checkpoint was never recorded (attempt did not exist
+            // durably); release otherwise. The decision is part of the composed status
+            // so Ready + Reserved + Missing converges to Abandon and Ready + Reserved +
+            // Accepted converges to Released.
+            if (abandonGate)
             {
                 // Unrecorded attempt — abandon the gate.
                 var abandonResult = await _gate.AbandonByIdentityAsync(identity, releaseReason, cancellationToken)
@@ -322,7 +327,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
             }
             else
             {
-                // Accepted → Released.
+                // Ready/Accepted → Released.
                 var releaseResult = await _gate.ReleaseByIdentityAsync(identity, releaseReason, cancellationToken)
                     .ConfigureAwait(false);
                 if (releaseResult.State != AgentToolInvocationPreDispatchState.Released)
@@ -345,53 +350,109 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         return await CreateObservationResultAsync(identity, status, reasonCode, cancellationToken);
     }
 
-    private static (AgentToolPreDispatchReconciliationStatus, string) ComposeStatus(
+    private static (AgentToolPreDispatchReconciliationStatus Status, string ReasonCode, bool AbandonGate) ComposeStatus(
         AgentToolInvocationPreDispatchState gateState,
         AgentToolBudgetReadStatus budgetStatus,
         AgentToolGovernancePreDispatchReadStatus checkpointStatus)
     {
-        // §7.7: Pending + authoritative Budget Missing + authoritative Checkpoint Missing + dispatch false → Abandoned
+        // ── Pending gate ────────────────────────────────────────────────────────────
+        // §7.7: Pending + authoritative Budget Missing + authoritative Checkpoint Missing → Abandoned.
         if (gateState == AgentToolInvocationPreDispatchState.Pending
             && budgetStatus == AgentToolBudgetReadStatus.Missing
             && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Missing)
         {
-            return (AgentToolPreDispatchReconciliationStatus.Released, "abandoned_unrecorded");
+            return (AgentToolPreDispatchReconciliationStatus.Released, "abandoned_unrecorded", AbandonGate: true);
         }
 
-        // Pending with budget reserved or checkpoint accepted → StillPending (attempt may still be in-flight)
-        // BUT: Pending + Committed → Conflict (budget committed without dispatch)
+        // CW04/CW05: Reserve committed (response lost) or reservation returned before the
+        // gate bound it — checkpoint was never recorded. Release the reservation and
+        // abandon the attempt.
+        if (gateState == AgentToolInvocationPreDispatchState.Pending
+            && budgetStatus == AgentToolBudgetReadStatus.Reserved
+            && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Missing)
+        {
+            return (AgentToolPreDispatchReconciliationStatus.Released, "budget_reserved_no_checkpoint", AbandonGate: true);
+        }
+
+        // A previous reconciliation already released the reservation but crashed before the
+        // gate transition — converge by abandoning the unrecorded attempt.
+        if (gateState == AgentToolInvocationPreDispatchState.Pending
+            && budgetStatus == AgentToolBudgetReadStatus.Released
+            && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Missing)
+        {
+            return (AgentToolPreDispatchReconciliationStatus.Released, "budget_released_no_checkpoint", AbandonGate: true);
+        }
+
+        // Pending + Committed → Conflict (budget committed without dispatch)
         if (gateState == AgentToolInvocationPreDispatchState.Pending
             && budgetStatus == AgentToolBudgetReadStatus.Committed)
         {
-            return (AgentToolPreDispatchReconciliationStatus.Conflict, "budget_committed_no_dispatch");
+            return (AgentToolPreDispatchReconciliationStatus.Conflict, "budget_committed_no_dispatch", AbandonGate: false);
         }
 
         // Pending + Accepted checkpoint → Conflict (checkpoint advanced past gate)
         if (gateState == AgentToolInvocationPreDispatchState.Pending
             && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Accepted)
         {
-            return (AgentToolPreDispatchReconciliationStatus.Conflict, "checkpoint_accepted_but_gate_pending");
+            return (AgentToolPreDispatchReconciliationStatus.Conflict, "checkpoint_accepted_but_gate_pending", AbandonGate: false);
         }
 
         // Pending with budget reserved or checkpoint accepted → StillPending (attempt may still be in-flight)
         if (gateState == AgentToolInvocationPreDispatchState.Pending)
         {
-            return (AgentToolPreDispatchReconciliationStatus.StillPending, "pending_in_flight");
+            return (AgentToolPreDispatchReconciliationStatus.StillPending, "pending_in_flight", AbandonGate: false);
+        }
+
+        // ── Ready gate ──────────────────────────────────────────────────────────────
+        // CW04/CW05: reservation returned and gate bound it, checkpoint never recorded.
+        // Release the reservation and abandon the attempt.
+        if (gateState == AgentToolInvocationPreDispatchState.Ready
+            && budgetStatus == AgentToolBudgetReadStatus.Reserved
+            && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Missing)
+        {
+            return (AgentToolPreDispatchReconciliationStatus.Released, "budget_reserved_no_checkpoint", AbandonGate: true);
+        }
+
+        // Crash between budget finalize and gate transition for an unrecorded attempt.
+        if (gateState == AgentToolInvocationPreDispatchState.Ready
+            && budgetStatus == AgentToolBudgetReadStatus.Released
+            && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Missing)
+        {
+            return (AgentToolPreDispatchReconciliationStatus.Released, "budget_released_no_checkpoint", AbandonGate: true);
+        }
+
+        // CW07/CW08/CW09: checkpoint committed (response lost) or receipt obtained before
+        // the gate advanced. Validate the full checkpoint, finalize governance, release
+        // the reservation, and release the attempt without dispatch.
+        if (gateState == AgentToolInvocationPreDispatchState.Ready
+            && budgetStatus == AgentToolBudgetReadStatus.Reserved
+            && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Accepted)
+        {
+            return (AgentToolPreDispatchReconciliationStatus.Released, "released_no_dispatch", AbandonGate: false);
+        }
+
+        // Crash between budget finalize and gate transition with a recorded checkpoint.
+        if (gateState == AgentToolInvocationPreDispatchState.Ready
+            && budgetStatus == AgentToolBudgetReadStatus.Released
+            && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Accepted)
+        {
+            return (AgentToolPreDispatchReconciliationStatus.Released, "released_no_dispatch", AbandonGate: false);
         }
 
         // §7.10: Ready/Accepted + Budget Missing → Conflict
         if (gateState is AgentToolInvocationPreDispatchState.Ready or AgentToolInvocationPreDispatchState.Accepted
             && budgetStatus == AgentToolBudgetReadStatus.Missing)
         {
-            return (AgentToolPreDispatchReconciliationStatus.Conflict, "budget_missing_after_bind");
+            return (AgentToolPreDispatchReconciliationStatus.Conflict, "budget_missing_after_bind", AbandonGate: false);
         }
 
+        // ── Accepted gate ───────────────────────────────────────────────────────────
         // §7.9: Accepted + Reserved → release/finalize/publish without dispatch
         if (gateState == AgentToolInvocationPreDispatchState.Accepted
             && budgetStatus == AgentToolBudgetReadStatus.Reserved
             && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Accepted)
         {
-            return (AgentToolPreDispatchReconciliationStatus.Released, "released_no_dispatch");
+            return (AgentToolPreDispatchReconciliationStatus.Released, "released_no_dispatch", AbandonGate: false);
         }
 
         // §7.8: Accepted checkpoint + Released budget → converge
@@ -399,29 +460,30 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
             && budgetStatus == AgentToolBudgetReadStatus.Released
             && checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Accepted)
         {
-            return (AgentToolPreDispatchReconciliationStatus.Released, "released_no_dispatch");
+            return (AgentToolPreDispatchReconciliationStatus.Released, "released_no_dispatch", AbandonGate: false);
         }
 
+        // ── Generic conflict / unavailable ──────────────────────────────────────────
         // §7.10: Committed budget → Conflict (budget committed without dispatch)
         if (budgetStatus == AgentToolBudgetReadStatus.Committed)
         {
-            return (AgentToolPreDispatchReconciliationStatus.Conflict, "budget_committed_no_dispatch");
+            return (AgentToolPreDispatchReconciliationStatus.Conflict, "budget_committed_no_dispatch", AbandonGate: false);
         }
 
         // §7.10: Indeterminate budget → StillPending
         if (budgetStatus == AgentToolBudgetReadStatus.Indeterminate)
         {
-            return (AgentToolPreDispatchReconciliationStatus.StillPending, "budget_indeterminate");
+            return (AgentToolPreDispatchReconciliationStatus.StillPending, "budget_indeterminate", AbandonGate: false);
         }
 
         // Authority unavailable → StillPending
         if (budgetStatus == AgentToolBudgetReadStatus.Unknown
             || checkpointStatus == AgentToolGovernancePreDispatchReadStatus.Unknown)
         {
-            return (AgentToolPreDispatchReconciliationStatus.StillPending, "authority_unavailable");
+            return (AgentToolPreDispatchReconciliationStatus.StillPending, "authority_unavailable", AbandonGate: false);
         }
 
-        return (AgentToolPreDispatchReconciliationStatus.StillPending, "unresolved");
+        return (AgentToolPreDispatchReconciliationStatus.StillPending, "unresolved", AbandonGate: false);
     }
 
     private static bool IsTerminal(AgentToolPreDispatchReconciliationStatus status)
@@ -607,9 +669,17 @@ public sealed class AgentToolPreDispatchReconciliationAccountabilityProducer : I
                 },
                 Outcome = new AuditOutcome
                 {
-                    Status = status == AgentToolPreDispatchReconciliationStatus.Released
-                        ? AuditOutcomeStatuses.Succeeded
-                        : AuditOutcomeStatuses.Succeeded,
+                    // P1-05: map reconciliation outcomes to accountability semantics.
+                    // Released → succeeded; Conflict → rejected; PostDispatchUnknown and
+                    // StillPending → indeterminate (the attempt did not fail, but its
+                    // terminal disposition is not confirmable).
+                    Status = status switch
+                    {
+                        AgentToolPreDispatchReconciliationStatus.Released => AuditOutcomeStatuses.Succeeded,
+                        AgentToolPreDispatchReconciliationStatus.Conflict => AuditOutcomeStatuses.Rejected,
+                        AgentToolPreDispatchReconciliationStatus.PostDispatchUnknown => AuditOutcomeStatuses.Indeterminate,
+                        _ => AuditOutcomeStatuses.Indeterminate
+                    },
                     Code = reasonCode
                 },
                 Tags = AuditTagMap.Empty.Add("reconciliation.status", status.ToString())

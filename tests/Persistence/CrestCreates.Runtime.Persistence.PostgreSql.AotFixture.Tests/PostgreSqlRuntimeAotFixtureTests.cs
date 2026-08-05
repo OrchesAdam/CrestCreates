@@ -43,12 +43,19 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             var execution = await RunAsync(
                 executable,
                 $"\"{postgres.GetConnectionString()}\" {schema}",
-                TimeSpan.FromMinutes(2));
+                TimeSpan.FromMinutes(5));
             execution.ExitCode.Should().Be(0, execution.Output);
             execution.Output.Should().Contain("PHASE9B_POSTGRES_SUSPENSION_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_PIN_RECOVERY_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
+            // Real CrashWorker-style subprocess commit → kill → fresh-process recovery
+            // for each of the five pre-dispatch crash windows.
+            execution.Output.Should().Contain("CRESTCREATES_AGENTTOOL_PREDISPATCH_CW04_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AGENTTOOL_PREDISPATCH_CW05_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AGENTTOOL_PREDISPATCH_CW07_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AGENTTOOL_PREDISPATCH_CW08_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AGENTTOOL_PREDISPATCH_CW09_OK");
             execution.Output.Should().Contain("CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK");
         }
         finally

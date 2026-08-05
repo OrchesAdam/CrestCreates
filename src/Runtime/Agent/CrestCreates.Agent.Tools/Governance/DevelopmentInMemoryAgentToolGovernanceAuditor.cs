@@ -195,6 +195,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
 
     public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
         string auditId,
+        string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(auditId);
@@ -202,6 +203,17 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
         lock (_sync)
         {
             if (!_entriesById.TryGetValue(auditId, out var entry))
+            {
+                return ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
+                {
+                    Status = AgentToolGovernanceFinalizationStatus.Unknown
+                });
+            }
+
+            // Tenant identity is part of every lookup (INV-15). A lookup that
+            // does not match the exact tenant must not return the record.
+            if (tenantId is not null
+                && !string.Equals(entry.PreDispatch.Context.LogicalInvocationKey.TenantId, tenantId, StringComparison.Ordinal))
             {
                 return ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
                 {

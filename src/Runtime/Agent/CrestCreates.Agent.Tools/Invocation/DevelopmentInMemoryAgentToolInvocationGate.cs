@@ -724,6 +724,7 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
             return ValueTask.FromResult(new AgentToolInvocationPreDispatchResult
             {
                 State = entry.PreDispatchState,
+                Indeterminate = entry.Indeterminate,
                 Intent = entry.Intent,
                 BoundReservationId = entry.BoundReservationId,
                 AcceptedReceipt = entry.AcceptedReceipt,

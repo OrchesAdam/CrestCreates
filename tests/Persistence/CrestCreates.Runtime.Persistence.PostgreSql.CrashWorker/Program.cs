@@ -5,6 +5,7 @@ using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
+using CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -12,6 +13,9 @@ if (args.Length < 5)
 {
     Console.Error.WriteLine("Usage: <connection-string> <schema> <operation-id> <application-name> <scenario>");
     Console.Error.WriteLine("Scenarios: commit-without-response | crash-after-human-task-insert");
+    Console.Error.WriteLine("           | predispatch-cw04-budget-committed | predispatch-cw05-reservation-returned");
+    Console.Error.WriteLine("           | predispatch-cw07-record-ambiguous | predispatch-cw08-checkpoint-committed");
+    Console.Error.WriteLine("           | predispatch-cw09-receipt-obtained");
     return 2;
 }
 
@@ -19,6 +23,14 @@ var (connectionString, schema, operationId, applicationName, scenario) =
     (args[0], args[1], args[2], args[3], args[4]);
 
 var options = new PostgreSqlRuntimePersistenceOptions { ConnectionString = connectionString, Schema = schema };
+
+// Phase 9b+ pre-dispatch crash windows operate on the Agent Tool durable
+// participants only; they do not create workflow/human-task rows.
+if (scenario.StartsWith("predispatch-", StringComparison.Ordinal))
+{
+    return await PreDispatchCrashScenarios.RunAsync(options, scenario, applicationName);
+}
+
 using var provider = new ServiceCollection().AddCrestCreatesPostgreSqlRuntimePersistence(options).BuildServiceProvider();
 var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
 var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();

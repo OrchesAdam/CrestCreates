@@ -512,6 +512,58 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
                 };
     }
 
+    private async ValueTask<GateRow> ReadGateRowAsync(
+        AgentToolInvocationLease lease, CancellationToken ct)
+    {
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            select pre_dispatch_state, bound_reservation_id, accepted_receipt_json,
+                   abandoned_receipt_json, intent_json, last_reason_code,
+                   indeterminate_at, indeterminate_reason,
+                   completion_outcome_json, completion_prepared_at,
+                   release_outcome_json, release_prepared_at
+            from {_options.Schema}.agent_tool_invocation_pre_dispatch
+            where lease_id = @lid
+              and attempt_id = @aid
+              and fencing_token = @ft
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
+        cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
+        cmd.Parameters.Add(new NpgsqlParameter("ft", lease.FencingToken));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            return new GateRow(AgentToolInvocationPreDispatchState.Unknown);
+        return ReadGateRow(reader);
+    }
+
+    private static GateRow ReadGateRow(System.Data.Common.DbDataReader reader)
+    {
+        var state = (AgentToolInvocationPreDispatchState)reader.GetInt32(0);
+        var boundReservationId = reader.IsDBNull(1) ? null : reader.GetString(1);
+        AgentToolGovernancePreDispatchReceipt? acceptedReceipt = null;
+        AgentToolInvocationAbandonedReceipt? abandonedReceipt = null;
+        AgentToolInvocationPreDispatchIntentSnapshot? intent = null;
+        if (!reader.IsDBNull(2))
+            acceptedReceipt = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(2), PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernancePreDispatchReceipt);
+        if (!reader.IsDBNull(3))
+            abandonedReceipt = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(3), PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationAbandonedReceipt);
+        if (!reader.IsDBNull(4))
+            intent = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(4), PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPreDispatchIntentSnapshot);
+        return new GateRow(
+            state,
+            boundReservationId,
+            acceptedReceipt,
+            abandonedReceipt,
+            intent,
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            reader.IsDBNull(6) ? null : reader.GetFieldValue<DateTimeOffset>(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            reader.IsDBNull(9) ? null : reader.GetFieldValue<DateTimeOffset>(9),
+            reader.IsDBNull(10) ? null : reader.GetString(10),
+            reader.IsDBNull(11) ? null : reader.GetFieldValue<DateTimeOffset>(11));
+    }
+
     private async ValueTask<AgentToolInvocationPreDispatchResult> ReadCurrentStateAsync(
         AgentToolInvocationLease lease, CancellationToken ct)
     {
@@ -582,7 +634,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.CommandText = $"""
             select pre_dispatch_state, bound_reservation_id, accepted_receipt_json,
                    abandoned_receipt_json, intent_json, lease_id, attempt_id,
-                   fencing_token, acquired_at, expires_at, last_reason_code
+                   fencing_token, acquired_at, expires_at, last_reason_code, indeterminate_at
             from {_options.Schema}.agent_tool_invocation_pre_dispatch
             where tenant_id = @tid
               and attempt_id = @aid
@@ -612,7 +664,8 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
             AcceptedReceipt = acceptedReceipt,
             AbandonedReceipt = abandonedReceipt,
             Intent = intent,
-            ReasonCode = reader.IsDBNull(10) ? null : reader.GetString(10)
+            ReasonCode = reader.IsDBNull(10) ? null : reader.GetString(10),
+            Indeterminate = !reader.IsDBNull(11)
         };
     }
 
@@ -732,11 +785,45 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
     private async ValueTask PrepareCompletionCoreAsync(
         AgentToolInvocationLease lease, AgentToolInvocationPrepareCompletionRequest req, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(req);
+        ArgumentNullException.ThrowIfNull(req.Outcome);
+        ArgumentException.ThrowIfNullOrWhiteSpace(req.BudgetReservationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(req.ReasonCode);
+        if (req.Outcome.Kind is not (
+                AgentToolInvocationOutcomeKind.Succeeded
+                or AgentToolInvocationOutcomeKind.CapabilityFailure
+                or AgentToolInvocationOutcomeKind.InternalContractFailure))
+            throw new ArgumentException("The completion outcome is not publishable.", nameof(req));
+
+        var requestJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            req, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPrepareCompletionRequest);
+
+        var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+        if (row.State == AgentToolInvocationPreDispatchState.Unknown)
+            throw new InvalidOperationException("The invocation lease is stale or unknown.");
+
+        // Same complete request → idempotent; changed request → conflict.
+        if (row.State is AgentToolInvocationPreDispatchState.Completed
+            or AgentToolInvocationPreDispatchState.CompletionPending)
+        {
+            if (string.Equals(row.CompletionOutcomeJson, requestJson, StringComparison.Ordinal))
+                return;
+            throw new InvalidOperationException(
+                row.State == AgentToolInvocationPreDispatchState.Completed
+                    ? "The completed invocation outcome cannot be changed."
+                    : "The pending completion outcome cannot be changed.");
+        }
+
+        if (row.State != AgentToolInvocationPreDispatchState.DispatchStarted)
+            throw new InvalidOperationException("Dispatch has not started.");
+
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             update {_options.Schema}.agent_tool_invocation_pre_dispatch
             set pre_dispatch_state = @st,
                 completion_outcome_json = @coj,
+                completion_prepared_at = @cpa,
+                last_reason_code = @rc,
                 revision = revision + 1,
                 updated_at = clock_timestamp()
             where lease_id = @lid
@@ -744,6 +831,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and fencing_token = @ft
               and expires_at > @now
               and pre_dispatch_state = @ps
+            returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
         cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
@@ -751,13 +839,27 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.Parameters.Add(new NpgsqlParameter("now", DateTimeOffset.UtcNow));
         cmd.Parameters.Add(IntParam("st", (int)AgentToolInvocationPreDispatchState.CompletionPending));
         cmd.Parameters.Add(IntParam("ps", (int)AgentToolInvocationPreDispatchState.DispatchStarted));
-        cmd.Parameters.Add(JsonParam("coj", PostgreSqlRuntimeStoreSupport.Serialize(req, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPrepareCompletionRequest)));
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        cmd.Parameters.Add(JsonParam("coj", requestJson));
+        cmd.Parameters.Add(new NpgsqlParameter("cpa", DateTimeOffset.UtcNow));
+        cmd.Parameters.Add(new NpgsqlParameter("rc", req.ReasonCode));
+        var r = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (r is null)
+            throw new InvalidOperationException("The invocation lease is stale or expired.");
     }
 
     private async ValueTask<AgentToolInvocationCompletionResult> PublishCompletionCoreAsync(
         AgentToolInvocationLease lease, CancellationToken ct)
     {
+        var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+        if (row.State == AgentToolInvocationPreDispatchState.Unknown)
+            return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
+        if (row.IsIndeterminate)
+            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Indeterminate);
+        if (row.State == AgentToolInvocationPreDispatchState.Completed)
+            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Completed);
+        if (row.State != AgentToolInvocationPreDispatchState.CompletionPending)
+            return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
+
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             update {_options.Schema}.agent_tool_invocation_pre_dispatch
@@ -776,46 +878,91 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.Parameters.Add(IntParam("st", (int)AgentToolInvocationPreDispatchState.Completed));
         cmd.Parameters.Add(IntParam("ps", (int)AgentToolInvocationPreDispatchState.CompletionPending));
         var r = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return new AgentToolInvocationCompletionResult
+        if (r is null)
         {
-            State = r is not null ? AgentToolInvocationCompletionState.Completed : AgentToolInvocationCompletionState.Unknown
-        };
+            // Lost CAS race — re-read and produce the current terminal receipt.
+            row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+            if (row.State == AgentToolInvocationPreDispatchState.Completed)
+                return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Completed);
+            return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
+        }
+
+        return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Completed);
     }
 
     private async ValueTask<AgentToolInvocationCompletionResult> GetCompletionStateCoreAsync(
         AgentToolInvocationLease lease, CancellationToken ct)
     {
-        await using var cmd = Conn().CreateCommand();
-        cmd.CommandText = $"""
-            select pre_dispatch_state
-            from {_options.Schema}.agent_tool_invocation_pre_dispatch
-            where lease_id = @lid
-              and attempt_id = @aid
-              and fencing_token = @ft
-            """;
-        cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
-        cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
-        cmd.Parameters.Add(new NpgsqlParameter("ft", lease.FencingToken));
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+        if (row.State == AgentToolInvocationPreDispatchState.Unknown)
             return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
-        var state = (AgentToolInvocationPreDispatchState)reader.GetInt32(0);
+        if (row.State == AgentToolInvocationPreDispatchState.Completed)
+            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Completed);
+        if (row.State == AgentToolInvocationPreDispatchState.CompletionPending)
+            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.CompletionPending);
+        if (row.IsIndeterminate)
+            return CompletionResultFromRow(row, AgentToolInvocationCompletionState.Indeterminate);
+        return new AgentToolInvocationCompletionResult { State = AgentToolInvocationCompletionState.Unknown };
+    }
+
+    private static AgentToolInvocationCompletionResult CompletionResultFromRow(
+        GateRow row, AgentToolInvocationCompletionState state)
+    {
+        AgentToolInvocationPrepareCompletionRequest? request = null;
+        if (row.CompletionOutcomeJson is not null)
+        {
+            request = PostgreSqlRuntimeStoreSupport.Deserialize(
+                row.CompletionOutcomeJson,
+                PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPrepareCompletionRequest);
+        }
+
         return new AgentToolInvocationCompletionResult
         {
-            State = state == AgentToolInvocationPreDispatchState.Completed
-                ? AgentToolInvocationCompletionState.Completed
-                : AgentToolInvocationCompletionState.Unknown
+            State = state,
+            Outcome = request?.Outcome,
+            PreparedAt = row.CompletionPreparedAt,
+            AuditId = request?.AuditId,
+            BudgetReservationId = request?.BudgetReservationId,
+            ReasonCode = request?.ReasonCode ?? row.LastReasonCode
         };
     }
 
     private async ValueTask PrepareReleaseCoreAsync(
         AgentToolInvocationLease lease, AgentToolInvocationPrepareReleaseRequest req, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(req);
+        ArgumentException.ThrowIfNullOrWhiteSpace(req.BudgetReservationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(req.ReasonCode);
+
+        var requestJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            req, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPrepareReleaseRequest);
+
+        var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+        if (row.State == AgentToolInvocationPreDispatchState.Unknown)
+            throw new InvalidOperationException("The invocation lease is stale or unknown.");
+
+        // Same complete request → idempotent; changed request → conflict.
+        if (row.State is AgentToolInvocationPreDispatchState.Released
+            or AgentToolInvocationPreDispatchState.ReleasePending)
+        {
+            if (string.Equals(row.ReleaseOutcomeJson, requestJson, StringComparison.Ordinal))
+                return;
+            throw new InvalidOperationException(
+                row.State == AgentToolInvocationPreDispatchState.Released
+                    ? "The released invocation receipt cannot be changed."
+                    : "The pending release receipt cannot be changed.");
+        }
+
+        if (row.State == AgentToolInvocationPreDispatchState.DispatchStarted)
+            throw new InvalidOperationException("A dispatched invocation cannot prepare release.");
+
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             update {_options.Schema}.agent_tool_invocation_pre_dispatch
             set pre_dispatch_state = @st,
                 release_outcome_json = @roj,
+                release_prepared_at = @rpa,
+                last_reason_code = @rc,
                 revision = revision + 1,
                 updated_at = clock_timestamp()
             where lease_id = @lid
@@ -823,6 +970,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
               and fencing_token = @ft
               and expires_at > @now
               and pre_dispatch_state = @ps
+            returning 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
         cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
@@ -830,13 +978,27 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.Parameters.Add(new NpgsqlParameter("now", DateTimeOffset.UtcNow));
         cmd.Parameters.Add(IntParam("st", (int)AgentToolInvocationPreDispatchState.ReleasePending));
         cmd.Parameters.Add(IntParam("ps", (int)AgentToolInvocationPreDispatchState.Accepted));
-        cmd.Parameters.Add(JsonParam("roj", PostgreSqlRuntimeStoreSupport.Serialize(req, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPrepareReleaseRequest)));
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        cmd.Parameters.Add(JsonParam("roj", requestJson));
+        cmd.Parameters.Add(new NpgsqlParameter("rpa", DateTimeOffset.UtcNow));
+        cmd.Parameters.Add(new NpgsqlParameter("rc", req.ReasonCode));
+        var r = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (r is null)
+            throw new InvalidOperationException("The invocation lease is stale or expired.");
     }
 
     private async ValueTask<AgentToolInvocationReleaseResult> PublishReleaseCoreAsync(
         AgentToolInvocationLease lease, CancellationToken ct)
     {
+        var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+        if (row.State == AgentToolInvocationPreDispatchState.Unknown)
+            return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
+        if (row.IsIndeterminate)
+            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Indeterminate);
+        if (row.State == AgentToolInvocationPreDispatchState.Released)
+            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Released);
+        if (row.State != AgentToolInvocationPreDispatchState.ReleasePending)
+            return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
+
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             update {_options.Schema}.agent_tool_invocation_pre_dispatch
@@ -855,60 +1017,89 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.Parameters.Add(IntParam("st", (int)AgentToolInvocationPreDispatchState.Released));
         cmd.Parameters.Add(IntParam("ps", (int)AgentToolInvocationPreDispatchState.ReleasePending));
         var r = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return new AgentToolInvocationReleaseResult
+        if (r is null)
         {
-            State = r is not null ? AgentToolInvocationReleaseState.Released : AgentToolInvocationReleaseState.Unknown
-        };
+            // Lost CAS race — re-read and produce the current terminal receipt.
+            row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+            if (row.State == AgentToolInvocationPreDispatchState.Released)
+                return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Released);
+            return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
+        }
+
+        return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Released);
     }
 
     private async ValueTask<AgentToolInvocationReleaseResult> GetReleaseStateCoreAsync(
         AgentToolInvocationLease lease, CancellationToken ct)
     {
-        await using var cmd = Conn().CreateCommand();
-        cmd.CommandText = $"""
-            select pre_dispatch_state
-            from {_options.Schema}.agent_tool_invocation_pre_dispatch
-            where lease_id = @lid
-              and attempt_id = @aid
-              and fencing_token = @ft
-            """;
-        cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
-        cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
-        cmd.Parameters.Add(new NpgsqlParameter("ft", lease.FencingToken));
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+        if (row.State == AgentToolInvocationPreDispatchState.Unknown)
             return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
-        var state = (AgentToolInvocationPreDispatchState)reader.GetInt32(0);
+        if (row.State == AgentToolInvocationPreDispatchState.Released)
+            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Released);
+        if (row.State == AgentToolInvocationPreDispatchState.ReleasePending)
+            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.ReleasePending);
+        if (row.IsIndeterminate)
+            return ReleaseResultFromRow(row, AgentToolInvocationReleaseState.Indeterminate);
+        return new AgentToolInvocationReleaseResult { State = AgentToolInvocationReleaseState.Unknown };
+    }
+
+    private static AgentToolInvocationReleaseResult ReleaseResultFromRow(
+        GateRow row, AgentToolInvocationReleaseState state)
+    {
+        AgentToolInvocationPrepareReleaseRequest? request = null;
+        if (row.ReleaseOutcomeJson is not null)
+        {
+            request = PostgreSqlRuntimeStoreSupport.Deserialize(
+                row.ReleaseOutcomeJson,
+                PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationPrepareReleaseRequest);
+        }
+
         return new AgentToolInvocationReleaseResult
         {
-            State = state == AgentToolInvocationPreDispatchState.Released
-                ? AgentToolInvocationReleaseState.Released
-                : AgentToolInvocationReleaseState.Unknown
+            State = state,
+            PreparedAt = row.ReleasePreparedAt,
+            AuditId = request?.AuditId,
+            BudgetReservationId = request?.BudgetReservationId,
+            ReasonCode = request?.ReasonCode ?? row.LastReasonCode
         };
     }
 
     private async ValueTask MarkIndeterminateCoreAsync(AgentToolInvocationLease lease, string reasonCode, CancellationToken ct)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+
+        var row = await ReadGateRowAsync(lease, ct).ConfigureAwait(false);
+        if (row.State == AgentToolInvocationPreDispatchState.Unknown)
+            throw new InvalidOperationException("The invocation lease is stale or unknown.");
+        if (row.State == AgentToolInvocationPreDispatchState.Completed
+            || row.State == AgentToolInvocationPreDispatchState.Released)
+        {
+            throw new InvalidOperationException("A published terminal receipt cannot be changed.");
+        }
+        if (row.IsIndeterminate)
+            return;
+
+        // Indeterminate is a logical/operational marker; the underlying
+        // Pending/Ready/Accepted recovery substate is preserved.
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             update {_options.Schema}.agent_tool_invocation_pre_dispatch
-            set pre_dispatch_state = @st,
+            set indeterminate_at = @iat,
+                indeterminate_reason = @irc,
                 last_reason_code = @rc,
                 revision = revision + 1,
                 updated_at = clock_timestamp()
             where lease_id = @lid
               and attempt_id = @aid
               and fencing_token = @ft
-              and pre_dispatch_state not in (@abandoned, @released, @completed)
             """;
         cmd.Parameters.Add(new NpgsqlParameter("lid", lease.LeaseId));
         cmd.Parameters.Add(new NpgsqlParameter("aid", lease.AttemptId));
         cmd.Parameters.Add(new NpgsqlParameter("ft", lease.FencingToken));
+        cmd.Parameters.Add(new NpgsqlParameter("iat", DateTimeOffset.UtcNow));
+        cmd.Parameters.Add(new NpgsqlParameter("irc", reasonCode));
         cmd.Parameters.Add(new NpgsqlParameter("rc", reasonCode));
-        cmd.Parameters.Add(IntParam("abandoned", (int)AgentToolInvocationPreDispatchState.Abandoned));
-        cmd.Parameters.Add(IntParam("released", (int)AgentToolInvocationPreDispatchState.Released));
-        cmd.Parameters.Add(IntParam("completed", (int)AgentToolInvocationPreDispatchState.Completed));
-        cmd.Parameters.Add(IntParam("st", (int)AgentToolInvocationPreDispatchState.Indeterminate));
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
@@ -967,11 +1158,26 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
     {
         var logicalKeyJson = PostgreSqlRuntimeStoreSupport.Serialize(
             identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey);
+        var abandonedReceipt = new AgentToolInvocationAbandonedReceipt
+        {
+            Identity = identity,
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.GovernanceDenied,
+                Code = reasonCode,
+                Message = reasonCode
+            },
+            ReasonCode = reasonCode,
+            AbandonedAt = DateTimeOffset.UtcNow
+        };
+        var abandonedReceiptJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            abandonedReceipt, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolInvocationAbandonedReceipt);
 
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             update {_options.Schema}.agent_tool_invocation_pre_dispatch
             set pre_dispatch_state = @st,
+                abandoned_receipt_json = @arj,
                 last_reason_code = @rc,
                 revision = revision + 1,
                 updated_at = clock_timestamp()
@@ -986,6 +1192,7 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         cmd.Parameters.Add(new NpgsqlParameter("aid", identity.AttemptId));
         cmd.Parameters.Add(IntParam("st", (int)AgentToolInvocationPreDispatchState.Abandoned));
         cmd.Parameters.Add(new NpgsqlParameter("rc", reasonCode));
+        cmd.Parameters.Add(JsonParam("arj", abandonedReceiptJson));
         cmd.Parameters.Add(IntParam("ps_accepted", (int)AgentToolInvocationPreDispatchState.Accepted));
         cmd.Parameters.Add(IntParam("ps_ready", (int)AgentToolInvocationPreDispatchState.Ready));
         cmd.Parameters.Add(IntParam("ps_pending", (int)AgentToolInvocationPreDispatchState.Pending));
@@ -1008,7 +1215,8 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         return new AgentToolInvocationPreDispatchResult
         {
             State = AgentToolInvocationPreDispatchState.Abandoned,
-            ReasonCode = reasonCode
+            ReasonCode = reasonCode,
+            AbandonedReceipt = abandonedReceipt
         };
     }
 
@@ -1029,4 +1237,21 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
                     left.Value.GetRawText(),
                     right!.Value.GetRawText(),
                     StringComparison.Ordinal));
+
+    private sealed record GateRow(
+        AgentToolInvocationPreDispatchState State,
+        string? BoundReservationId = null,
+        AgentToolGovernancePreDispatchReceipt? AcceptedReceipt = null,
+        AgentToolInvocationAbandonedReceipt? AbandonedReceipt = null,
+        AgentToolInvocationPreDispatchIntentSnapshot? Intent = null,
+        string? LastReasonCode = null,
+        DateTimeOffset? IndeterminateAt = null,
+        string? IndeterminateReason = null,
+        string? CompletionOutcomeJson = null,
+        DateTimeOffset? CompletionPreparedAt = null,
+        string? ReleaseOutcomeJson = null,
+        DateTimeOffset? ReleasePreparedAt = null)
+    {
+        public bool IsIndeterminate => IndeterminateAt is not null;
+    }
 }

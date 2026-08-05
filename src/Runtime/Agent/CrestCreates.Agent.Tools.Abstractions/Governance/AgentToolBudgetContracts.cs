@@ -58,6 +58,13 @@ public sealed record AgentToolBudgetFinalizeRequest
     public required AgentToolBudgetReservationState RequestedState { get; init; }
 
     public required string ReasonCode { get; init; }
+
+    /// <summary>
+    /// Tenant scope of the reservation. Durable providers must include the
+    /// tenant in every lookup (INV-15); null means exact host scope, never
+    /// wildcard.
+    /// </summary>
+    public string? TenantId { get; init; }
 }
 
 public interface IAgentToolBudgetGate

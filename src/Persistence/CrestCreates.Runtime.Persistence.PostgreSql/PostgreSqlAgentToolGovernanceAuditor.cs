@@ -31,28 +31,109 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
     public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(AgentToolGovernanceFinalizationRecord record, CancellationToken cancellationToken = default)
         => _coordinator.ExecuteAsync(ct => FinalizeCoreAsync(record, ct), cancellationToken);
 
-    public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(string auditId, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(ct => GetFinalizationStateCoreAsync(auditId, ct), cancellationToken);
+    public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(string auditId, string? tenantId, CancellationToken cancellationToken = default)
+        => _coordinator.ExecuteAsync(ct => GetFinalizationStateCoreAsync(auditId, tenantId, ct), cancellationToken);
 
     private NpgsqlConnection Conn() => _coordinator.RequireSession().Connection;
 
     private async ValueTask RecordDecisionCoreAsync(AgentToolGovernanceDecisionRecord record, CancellationToken cancellationToken)
     {
-        var auditId = Guid.NewGuid().ToString("N");
+        var tenantId = record.Context.LogicalInvocationKey.TenantId ?? string.Empty;
+        var logicalKeyJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            record.Context.LogicalInvocationKey,
+            PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey);
+        // Stable decision identity: tenant + logical invocation + attempt + decision kind.
+        // A retry of the same decision reuses the same AuditId, so the primary key conflict
+        // fires instead of appending a second record.
+        var auditId = StableDecisionAuditId(tenantId, logicalKeyJson, record.Context.AttemptId, (int)record.Decision);
         await using var cmd = Conn().CreateCommand();
         cmd.CommandText = $"""
             insert into {_options.Schema}.agent_tool_governance_decisions
                 (tenant_id, audit_id, logical_invocation_key, attempt_id, decision_state, decision_json)
             values (@tenantId, @auditId, @lik, @attemptId, @decisionState, @decisionJson)
-            on conflict (tenant_id, audit_id) do nothing
+            on conflict do nothing
             """;
-        cmd.Parameters.Add(new NpgsqlParameter("tenantId", record.Context.LogicalInvocationKey.TenantId ?? string.Empty));
+        cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId));
         cmd.Parameters.Add(new NpgsqlParameter("auditId", auditId));
-        cmd.Parameters.Add(new NpgsqlParameter("lik", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.Context.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
+        cmd.Parameters.Add(new NpgsqlParameter("lik", NpgsqlDbType.Jsonb) { Value = logicalKeyJson });
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", record.Context.AttemptId));
         cmd.Parameters.Add(new NpgsqlParameter("decisionState", (int)record.Decision));
         cmd.Parameters.Add(new NpgsqlParameter("decisionJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernanceDecisionRecord) });
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        var affected = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (affected > 0)
+            return;
+
+        // Idempotent retry of the same decision, or a conflicting decision for the same attempt.
+        var existingJson = await ReadDecisionJsonAsync(tenantId, logicalKeyJson, record.Context.AttemptId, cancellationToken);
+        if (existingJson is not null)
+        {
+            var existing = PostgreSqlRuntimeStoreSupport.Deserialize(
+                existingJson,
+                PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernanceDecisionRecord);
+            if (DecisionEquivalent(existing, record))
+                return;
+            throw new InvalidOperationException(
+                "The governance decision conflicts with the existing AttemptId.");
+        }
+
+        throw new InvalidOperationException("The governance decision could not be recorded.");
+    }
+
+    private async ValueTask<string?> ReadDecisionJsonAsync(
+        string tenantId,
+        string logicalKeyJson,
+        string attemptId,
+        CancellationToken cancellationToken)
+    {
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            select decision_json
+            from {_options.Schema}.agent_tool_governance_decisions
+            where tenant_id = @tenantId
+              and logical_invocation_key = @lik
+              and attempt_id = @attemptId
+            order by created_at desc
+            limit 1
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId));
+        cmd.Parameters.Add(new NpgsqlParameter("lik", NpgsqlDbType.Jsonb) { Value = logicalKeyJson });
+        cmd.Parameters.Add(new NpgsqlParameter("attemptId", attemptId));
+        var result = (string?)await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+
+    private static bool DecisionEquivalent(
+        AgentToolGovernanceDecisionRecord left,
+        AgentToolGovernanceDecisionRecord right)
+        => left.Context.LogicalInvocationKey == right.Context.LogicalInvocationKey
+            && string.Equals(left.Context.AttemptId, right.Context.AttemptId, StringComparison.Ordinal)
+            && left.Context.Equals(right.Context)
+            && string.Equals(left.Context.InvocationFingerprint, right.Context.InvocationFingerprint, StringComparison.Ordinal)
+            && left.Decision == right.Decision
+            && left.Outcome.Kind == right.Outcome.Kind
+            && string.Equals(left.Outcome.Code, right.Outcome.Code, StringComparison.Ordinal)
+            && string.Equals(left.Outcome.Message, right.Outcome.Message, StringComparison.Ordinal)
+            && left.Outcome.Issues.SequenceEqual(right.Outcome.Issues)
+            && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal)
+            && Equals(left.ObservedReservation, right.ObservedReservation);
+
+    private static string StableDecisionAuditId(string tenantId, string logicalKeyJson, string attemptId, int decisionState)
+    {
+        var data = System.Text.Encoding.UTF8.GetBytes($"{tenantId}|{logicalKeyJson}|{attemptId}|{decisionState}");
+        return $"decision-{Fnv1a64(data):x16}";
+    }
+
+    private static ulong Fnv1a64(byte[] data)
+    {
+        const ulong offsetBasis = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+        var hash = offsetBasis;
+        foreach (var b in data)
+        {
+            hash ^= b;
+            hash *= prime;
+        }
+        return hash;
     }
 
     private async ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchCoreAsync(AgentToolGovernancePreDispatchRecord record, CancellationToken cancellationToken)
@@ -172,14 +253,17 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         };
     }
 
-    private async ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateCoreAsync(string auditId, CancellationToken cancellationToken)
+    private async ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateCoreAsync(string auditId, string? tenantId, CancellationToken cancellationToken)
     {
         await using var cmd = Conn().CreateCommand();
+        // INV-15: tenant identity is part of every lookup.
         cmd.CommandText = $"""
             select finalization_json
             from {_options.Schema}.agent_tool_governance_finalizations
-            where audit_id = @auditId
+            where tenant_id = @tenantId
+              and audit_id = @auditId
             """;
+        cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId ?? string.Empty));
         cmd.Parameters.Add(new NpgsqlParameter("auditId", auditId));
         var result = (string?)await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         var record = result is null

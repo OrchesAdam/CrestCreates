@@ -244,7 +244,8 @@ public sealed class AgentToolInvokerTests
             new AgentToolInvocationRequest(harness.ToolName));
 
         outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
-        audit.RecordCalls.Should().Be(2);
+        // P0-03: authoritative read recovers the committed receipt — no second write.
+        audit.RecordCalls.Should().Be(1);
         harness.Dispatcher.CallCount.Should().Be(1);
     }
 
@@ -258,9 +259,45 @@ public sealed class AgentToolInvokerTests
             new AgentToolInvocationRequest(harness.ToolName));
 
         outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
-        audit.RecordCalls.Should().Be(2);
+        // P0-03: authoritative read recovers the committed receipt — no second write.
+        audit.RecordCalls.Should().Be(1);
         audit.Inner.Finalizations.Should().ContainSingle();
         harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_AuthoritativeMissingPerformsSingleBoundedRecordRetry()
+    {
+        // P0-03: only an authoritative Missing lookup permits one identical
+        // Record retry. The write itself fails once (response lost before commit
+        // became observable), the authoritative read says Missing, and the
+        // single bounded retry succeeds.
+        var audit = new MissingThenAcceptsAuditor();
+        var harness = CreateHarness(requiredAudit: true, audit: audit);
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        audit.RecordCalls.Should().Be(2);
+        harness.Dispatcher.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Invoke_LookupThrowsFencesIndeterminateWithoutRecordRetry()
+    {
+        // P0-03: a lookup that did not complete (Unavailable) must NOT retry the
+        // write — it stays fenced Indeterminate so no second fuzzy commit window
+        // is created.
+        var audit = new ThrowingLookupAuditor();
+        var harness = CreateHarness(requiredAudit: true, audit: audit);
+
+        var outcome = await harness.Invoker.InvokeAsync(
+            new AgentToolInvocationRequest(harness.ToolName));
+
+        outcome.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        audit.RecordCalls.Should().Be(1);
+        harness.Dispatcher.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -899,6 +936,7 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
+            string? tenantId = null,
             CancellationToken cancellationToken = default)
             => ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
             {
@@ -1154,6 +1192,7 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
+            string? tenantId = null,
             CancellationToken cancellationToken = default)
             => ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
             {
@@ -1185,9 +1224,10 @@ public sealed class AgentToolInvokerTests
 
         public async ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
+            string? tenantId = null,
             CancellationToken cancellationToken = default)
         {
-            var result = await _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+            var result = await _inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
             return result.Record is not { } record
                 ? result
                 : result with
@@ -1237,11 +1277,94 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
+            string? tenantId = null,
             CancellationToken cancellationToken = default)
-            => Inner.GetFinalizationStateAsync(auditId, cancellationToken);
+            => Inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
     public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
-        => ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult { Status = AgentToolGovernancePreDispatchReadStatus.Accepted });
+        => Inner.GetPreDispatchStateAsync(identity, cancellationToken);
 
+    }
+
+    private sealed class MissingThenAcceptsAuditor : IAgentToolGovernanceAuditor
+    {
+        private readonly DevelopmentInMemoryAgentToolGovernanceAuditor _inner = new();
+
+        public int RecordCalls { get; private set; }
+
+        public ValueTask RecordDecisionAsync(
+            AgentToolGovernanceDecisionRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.RecordDecisionAsync(record, cancellationToken);
+
+        public async ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
+            AgentToolGovernancePreDispatchRecord record,
+            CancellationToken cancellationToken = default)
+        {
+            RecordCalls++;
+            if (RecordCalls == 1)
+                throw new IOException("pre-dispatch audit write failed before commit observable");
+            return await _inner.RecordPreDispatchAsync(record, cancellationToken);
+        }
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
+            AgentToolGovernanceFinalizationRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.FinalizeAsync(record, cancellationToken);
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+            string auditId,
+            string? tenantId = null,
+            CancellationToken cancellationToken = default)
+            => _inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
+
+        // Authoritative Missing: the read completed and proves nothing was persisted.
+        public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(
+            AgentToolPreDispatchIdentity identity,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult
+            {
+                Status = AgentToolGovernancePreDispatchReadStatus.Missing
+            });
+    }
+
+    private sealed class ThrowingLookupAuditor : IAgentToolGovernanceAuditor
+    {
+        private readonly DevelopmentInMemoryAgentToolGovernanceAuditor _inner = new();
+
+        public int RecordCalls { get; private set; }
+
+        public ValueTask RecordDecisionAsync(
+            AgentToolGovernanceDecisionRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.RecordDecisionAsync(record, cancellationToken);
+
+        public async ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
+            AgentToolGovernancePreDispatchRecord record,
+            CancellationToken cancellationToken = default)
+        {
+            RecordCalls++;
+            if (RecordCalls == 1)
+                throw new IOException("pre-dispatch audit response lost after commit");
+            return await _inner.RecordPreDispatchAsync(record, cancellationToken);
+        }
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> FinalizeAsync(
+            AgentToolGovernanceFinalizationRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.FinalizeAsync(record, cancellationToken);
+
+        public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+            string auditId,
+            string? tenantId = null,
+            CancellationToken cancellationToken = default)
+            => _inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
+
+        // Lookup did not complete — indistinguishable from a partial commit.
+        public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(
+            AgentToolPreDispatchIdentity identity,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromException<AgentToolGovernancePreDispatchReadResult>(
+                new IOException("pre-dispatch lookup unavailable"));
     }
 
     private sealed class MismatchedFinalizationAuditor : IAgentToolGovernanceAuditor
@@ -1276,8 +1399,9 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
+            string? tenantId = null,
             CancellationToken cancellationToken = default)
-            => _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+            => _inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
     public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
         => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
 
@@ -1328,8 +1452,9 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
+            string? tenantId = null,
             CancellationToken cancellationToken = default)
-            => _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+            => _inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
     public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
         => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
 
@@ -1366,8 +1491,9 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
+            string? tenantId = null,
             CancellationToken cancellationToken = default)
-            => _inner.GetFinalizationStateAsync(auditId, cancellationToken);
+            => _inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
     public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
         => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
 
@@ -1416,6 +1542,7 @@ public sealed class AgentToolInvokerTests
 
         public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
+            string? tenantId = null,
             CancellationToken cancellationToken = default)
             => ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
             {

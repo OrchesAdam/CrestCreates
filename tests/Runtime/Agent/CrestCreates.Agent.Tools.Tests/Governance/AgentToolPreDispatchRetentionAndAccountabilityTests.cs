@@ -6,6 +6,7 @@ using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Accountability.Abstractions.Recording;
 using CrestCreates.Agent.Tools;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CrestCreates.Agent.Tools.Tests.Governance;
@@ -124,7 +125,7 @@ public sealed class AgentToolPreDispatchRetentionAndAccountabilityTests
         readObs!.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending);
     }
 
-    // F19: configured retention too short — startup validation fails
+    // F19: configured retention too short — startup validation fails through the real composition path.
     [Fact]
     public void F19_TooShort_Retention_Should_Fail_Startup()
     {
@@ -135,12 +136,27 @@ public sealed class AgentToolPreDispatchRetentionAndAccountabilityTests
             BudgetReservationRetention = TimeSpan.FromDays(3) // < 7 days floor
         };
 
-        // F19: BudgetReservationRetention must be >= MaximumInvocationReconciliationWindow.
-        // The validator is internal, so we verify the invariant by checking that
-        // the options can be constructed with valid values and that the retention
-        // floor is enforced at the configuration level.
-        options.BudgetReservationRetention.Should().BeLessThan(options.MaximumInvocationReconciliationWindow);
-        options.MaximumInvocationReconciliationWindow.Should().Be(TimeSpan.FromDays(7));
+        // The real composition entry point validates before any connection is opened;
+        // an invalid retention floor must fail registration.
+        var act = () => new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(options);
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*BudgetReservationRetention must be >= MaximumInvocationReconciliationWindow*");
+    }
+
+    // F19 companion: a valid configuration passes the real composition validation.
+    [Fact]
+    public void F19_Valid_Retention_Should_Pass_Startup()
+    {
+        var options = new PostgreSqlRuntimePersistenceOptions
+        {
+            ConnectionString = "Host=localhost",
+            MaximumInvocationReconciliationWindow = TimeSpan.FromDays(7),
+            BudgetReservationRetention = TimeSpan.FromDays(30)
+        };
+
+        var services = new ServiceCollection();
+        services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
     }
 
     // F22: Accountability projection fails — control result preserved

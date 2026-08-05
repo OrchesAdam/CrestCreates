@@ -237,9 +237,9 @@ public sealed class AgentToolGovernanceAuditorTests
             AgentToolGovernanceAttemptFinalState.Completed,
             AgentToolInvocationTerminalState.Completed);
 
-        var before = await auditor.GetFinalizationStateAsync(handle.Receipt!.AuditId);
+        var before = await auditor.GetFinalizationStateAsync(handle.Receipt!.AuditId, handle.Receipt!.Identity.LogicalInvocationKey.TenantId);
         var persisted = await auditor.FinalizeAsync(finalization);
-        var after = await auditor.GetFinalizationStateAsync(handle.Receipt!.AuditId);
+        var after = await auditor.GetFinalizationStateAsync(handle.Receipt!.AuditId, handle.Receipt!.Identity.LogicalInvocationKey.TenantId);
 
         before.Status.Should().Be(AgentToolGovernanceFinalizationStatus.NotFinalized);
         before.Record.Should().BeNull();

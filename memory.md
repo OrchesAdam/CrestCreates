@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-03 (Phase 9b+ durable agent tool pre-dispatch reconciliation — all 7 slices complete, CI green)
+Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation — slices implemented; PostgreSQL contract/crash/NativeAOT evidence restored as required CI gates, pending green)
 
 ## Purpose
 
@@ -2080,12 +2080,15 @@ Compatibility GET
 - Dynamic API: 73 passed.
 - MCP Runtime: 66 passed; MCP E2E: 28 passed.
 - Agent Tools Runtime: 116 passed.
- - Dependency Boundaries: 50 passed.
- - CodeGenerator: 283 passed.
+- Dependency Boundaries: 50 passed.
+- CodeGenerator: 283 passed.
 
-### Phase 9b+ — Durable Agent Tool Pre-Dispatch Reconciliation (2026-08-03)
+### Phase 9b+ — Durable Agent Tool Pre-Dispatch Reconciliation (2026-08-03, remediated 2026-08-06)
 
-**Status**: All 7 slices complete. CI green (including all NativeAOT fixtures).
+**Status**: All 7 slices implemented. PostgreSQL contract, crash-window, retention and
+NativeAOT evidence restored as required CI gates (Docker-backed job re-enabled in
+`.github/workflows/ci.yml`); "CI green" is only claimed once that job passes on the
+PR. The PR must not be closed against #70 before that evidence is green.
 
 **PR**: #72
 
@@ -2129,16 +2132,25 @@ Compatibility GET
   - `AgentToolPreDispatchReconciliationAccountabilityProducer` wired to `IAuditRecorder` — emits safe AuditEnvelope (IDs/descriptors/reason only, no arguments/hints/outputs/SQL/provider errors)
   - Accountability failure does not change reconciliation result
 
-- **NativeAOT evidence** (Slice 7):
-  - Pre-dispatch scenario added to PostgreSQL AotHost: composes participants, executes full state machine, simulates lost acknowledgement, recovers with new provider, reconciles with zero dispatcher calls, prints `CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK`
-  - AotFixture test asserts sentinel output
-  - All NativeAOT fixtures pass in CI
+- **NativeAOT evidence** (Slice 7, remediated):
+  - Pre-dispatch scenario upgraded from provider dispose→rebuild to real
+    CrashWorker-style subprocess recovery: the AotHost spawns its own native
+    executable per crash window, the child commits the durable writes and prints
+    the sentinel + AttemptId, the parent kills the process tree, waits for the
+    PostgreSQL backend to exit, and a fresh process recovers by identity and
+    reconciles with zero dispatcher calls.
+  - Covers CW04/CW05/CW07/CW08/CW09; per-window markers
+    `CRESTCREATES_AGENTTOOL_PREDISPATCH_CWxx_OK` plus
+    `CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK`; AotFixture test asserts them
+  - Docker-backed CI job re-enabled so PostgreSQL contract tests, crash-window
+    tests (real subprocess kill/recovery) and the NativeAOT publish-link-run
+    fixture are required evidence again (previously excluded by a87a3597)
 
 - **Test infrastructure**:
   - Runner-free `CrestCreates.Agent.Tools.Persistence.Testing` project (Abstractions-only, no runners)
   - 70-ID manifest (H01-H10, B01-B18, F01-F30, C01-C12) as ARCH test
   - 8 ARCH tests + 5 BOUND tests
-  - 250 Agent.Tools tests, 93 boundary tests, 16 abstractions tests
+  - 270 Agent.Tools tests, 93 boundary tests, 16 abstractions tests
 
 **Key decisions**:
 - `AgentToolGovernancePreDispatchComparer` moved to Abstractions (not runtime) per Spec 9.1 — Persistence providers need it for conflict detection

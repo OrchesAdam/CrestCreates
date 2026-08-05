@@ -254,6 +254,15 @@ public class AgentToolPreDispatchReconcilerTests
         // §7.9: Accepted + Reserved + Accepted checkpoint → Released
         new object[] { AgentToolInvocationPreDispatchState.Accepted, AgentToolBudgetReadStatus.Reserved, AgentToolGovernancePreDispatchReadStatus.Accepted, AgentToolPreDispatchReconciliationStatus.Released, true },
 
+        // CW07/CW08/CW09: Ready + Reserved + Accepted checkpoint → validate + finalize + release.
+        new object[] { AgentToolInvocationPreDispatchState.Ready, AgentToolBudgetReadStatus.Reserved, AgentToolGovernancePreDispatchReadStatus.Accepted, AgentToolPreDispatchReconciliationStatus.Released, true },
+
+        // Crash between budget finalize and gate transition (recorded attempt) → converge.
+        new object[] { AgentToolInvocationPreDispatchState.Ready, AgentToolBudgetReadStatus.Released, AgentToolGovernancePreDispatchReadStatus.Accepted, AgentToolPreDispatchReconciliationStatus.Released, true },
+
+        // Crash between budget finalize and gate transition (unrecorded attempt) → abandon.
+        new object[] { AgentToolInvocationPreDispatchState.Pending, AgentToolBudgetReadStatus.Released, AgentToolGovernancePreDispatchReadStatus.Missing, AgentToolPreDispatchReconciliationStatus.Released, true },
+
         // §7.8: Accepted + Released budget + Accepted checkpoint → Released (converge)
         new object[] { AgentToolInvocationPreDispatchState.Accepted, AgentToolBudgetReadStatus.Released, AgentToolGovernancePreDispatchReadStatus.Accepted, AgentToolPreDispatchReconciliationStatus.Released, true },
 
@@ -266,11 +275,11 @@ public class AgentToolPreDispatchReconcilerTests
         // Authority unavailable → StillPending
         new object[] { AgentToolInvocationPreDispatchState.Pending, AgentToolBudgetReadStatus.Unknown, AgentToolGovernancePreDispatchReadStatus.Unknown, AgentToolPreDispatchReconciliationStatus.StillPending, false },
 
-        // Pending + Reserved + Missing checkpoint → StillPending (can't prove dispatch false yet)
-        new object[] { AgentToolInvocationPreDispatchState.Pending, AgentToolBudgetReadStatus.Reserved, AgentToolGovernancePreDispatchReadStatus.Missing, AgentToolPreDispatchReconciliationStatus.StillPending, false },
+        // CW04/CW05: Pending + Reserved + Missing checkpoint → reservation released, attempt abandoned.
+        new object[] { AgentToolInvocationPreDispatchState.Pending, AgentToolBudgetReadStatus.Reserved, AgentToolGovernancePreDispatchReadStatus.Missing, AgentToolPreDispatchReconciliationStatus.Released, true },
 
-        // Ready + Reserved + Missing checkpoint → StillPending
-        new object[] { AgentToolInvocationPreDispatchState.Ready, AgentToolBudgetReadStatus.Reserved, AgentToolGovernancePreDispatchReadStatus.Missing, AgentToolPreDispatchReconciliationStatus.StillPending, false },
+        // CW04/CW05: Ready + Reserved + Missing checkpoint → reservation released, attempt abandoned.
+        new object[] { AgentToolInvocationPreDispatchState.Ready, AgentToolBudgetReadStatus.Reserved, AgentToolGovernancePreDispatchReadStatus.Missing, AgentToolPreDispatchReconciliationStatus.Released, true },
     };
 
     private static AgentToolPreDispatchIdentity SampleIdentity(string attemptId)
@@ -542,7 +551,7 @@ public class AgentToolPreDispatchReconcilerTests
                 Record = record
             });
         }
-        public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(string auditId, CancellationToken cancellationToken = default)
+        public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(string auditId, string? tenantId = null, CancellationToken cancellationToken = default)
             => ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
             {
                 Status = AgentToolGovernanceFinalizationStatus.NotFinalized

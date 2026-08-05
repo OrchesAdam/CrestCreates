@@ -95,6 +95,15 @@ public sealed record AgentToolInvocationPreDispatchResult
 {
     public required AgentToolInvocationPreDispatchState State { get; init; }
 
+    /// <summary>
+    /// Logical/operational indeterminate marker. When set, the attempt is
+    /// fenced from further progress but the underlying <see cref="State"/>
+    /// (Pending/Ready/Accepted/ReleasePending/CompletionPending) is preserved so
+    /// a reconciler can still converge the attempt instead of losing the
+    /// recovery substate.
+    /// </summary>
+    public bool Indeterminate { get; init; }
+
     public AgentToolInvocationPreDispatchIntentSnapshot? Intent { get; init; }
 
     public string? BoundReservationId { get; init; }

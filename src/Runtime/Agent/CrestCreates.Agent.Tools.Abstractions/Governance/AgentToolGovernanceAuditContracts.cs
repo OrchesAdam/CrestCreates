@@ -147,5 +147,6 @@ public interface IAgentToolGovernanceAuditor
 
     ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
         string auditId,
+        string? tenantId,
         CancellationToken cancellationToken = default);
 }

@@ -784,7 +784,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolBudgetReservation settled;
         try
         {
-            settled = await FinalizeBudgetAsync(reservation, AgentToolBudgetReservationState.Committed, "dispatch_completed")
+            settled = await FinalizeBudgetAsync(reservation, AgentToolBudgetReservationState.Committed, "dispatch_completed", auditContext.LogicalInvocationKey.TenantId)
                 .ConfigureAwait(false);
         }
         catch
@@ -908,7 +908,10 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     {
         try
         {
-            var result = await _audit.GetFinalizationStateAsync(auditId, CancellationToken.None)
+            var result = await _audit.GetFinalizationStateAsync(
+                auditId,
+                expected.Context.LogicalInvocationKey.TenantId,
+                CancellationToken.None)
                 .ConfigureAwait(false);
             return ResolveAuditConfirmation(result, expected);
         }
@@ -1110,7 +1113,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolBudgetReservation settled;
         try
         {
-            settled = await FinalizeBudgetAsync(reservation, AgentToolBudgetReservationState.Indeterminate, reasonCode)
+            settled = await FinalizeBudgetAsync(reservation, AgentToolBudgetReservationState.Indeterminate, reasonCode, auditContext.LogicalInvocationKey.TenantId)
                 .ConfigureAwait(false);
         }
         catch
@@ -1160,7 +1163,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolBudgetReservation released;
         try
         {
-            released = await FinalizeBudgetAsync(reservation, AgentToolBudgetReservationState.Released, reasonCode)
+            released = await FinalizeBudgetAsync(reservation, AgentToolBudgetReservationState.Released, reasonCode, auditContext.LogicalInvocationKey.TenantId)
                 .ConfigureAwait(false);
         }
         catch
@@ -1312,9 +1315,30 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolGovernancePreDispatchReceipt? auditHandle,
         AgentToolGovernanceAuditContext auditContext,
         AgentToolInvocationLease lease,
-        AgentToolBudgetReservation reservation,
+        AgentToolBudgetReservation? reservation,
         string reasonCode)
     {
+        // When the fencing lookup itself failed, no reservation was produced — there
+        // is no budget to settle, so go straight to the gate-side indeterminate fence.
+        if (reservation is null)
+        {
+            return await FinalizeIndeterminateAfterGateAsync(
+                auditHandle,
+                auditContext,
+                lease,
+                new AgentToolBudgetReservation
+                {
+                    ReservationId = string.Empty,
+                    AttemptId = lease.AttemptId,
+                    InvocationFingerprint = auditContext.InvocationFingerprint,
+                    Category = "unknown",
+                    CostUnits = 0,
+                    State = AgentToolBudgetReservationState.Unknown
+                },
+                dispatchStarted: false,
+                reasonCode).ConfigureAwait(false);
+        }
+
         AgentToolBudgetReservation settled;
         try
         {
@@ -1323,7 +1347,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             settled = await FinalizeBudgetAsync(
                     reservation,
                     AgentToolBudgetReservationState.Released,
-                    reasonCode)
+                    reasonCode,
+                    auditContext.LogicalInvocationKey.TenantId)
                 .ConfigureAwait(false);
         }
         catch
@@ -1349,7 +1374,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     private ValueTask<AgentToolBudgetReservation> FinalizeBudgetAsync(
         AgentToolBudgetReservation reservation,
         AgentToolBudgetReservationState state,
-        string reasonCode)
+        string reasonCode,
+        string? tenantId)
         => _budget.FinalizeAsync(
             new AgentToolBudgetFinalizeRequest
             {
@@ -1357,7 +1383,8 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 AttemptId = reservation.AttemptId,
                 InvocationFingerprint = reservation.InvocationFingerprint,
                 RequestedState = state,
-                ReasonCode = reasonCode
+                ReasonCode = reasonCode,
+                TenantId = tenantId
             },
             CancellationToken.None);
 
@@ -1557,29 +1584,42 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     {
         // Authoritative recovery: query the auditor for the persisted state first.
         var identity = new AgentToolPreDispatchIdentity(record.Context.LogicalInvocationKey, record.Context.AttemptId);
+        AgentToolGovernancePreDispatchReadResult readResult;
         try
         {
-            var readResult = await _audit.GetPreDispatchStateAsync(identity, cancellationToken)
+            readResult = await _audit.GetPreDispatchStateAsync(identity, cancellationToken)
                 .ConfigureAwait(false);
-            if (readResult.Status == AgentToolGovernancePreDispatchReadStatus.Accepted
-                && readResult.Receipt is not null
-                && readResult.Checkpoint is not null)
-            {
-                // Validate the full checkpoint against the expected record using the shared comparer.
-                if (!AgentToolGovernancePreDispatchComparer.Equivalent(readResult.Checkpoint, record))
-                    return null; // Checkpoint mismatch — cannot safely proceed.
-                // Validate receipt identity matches.
-                if (!string.Equals(readResult.Receipt.Identity.AttemptId, record.Context.AttemptId, StringComparison.Ordinal))
-                    return null;
-                return readResult.Receipt;
-            }
         }
         catch
         {
-            // Authority unavailable — fall through to write retry.
+            // Provider unavailable / timeout — the lookup did NOT complete. We
+            // cannot distinguish "write never landed" from "write landed and
+            // response was lost", so a retry write would create a second fuzzy
+            // commit window. Keep the worker fenced and go Indeterminate.
+            return null;
         }
 
-        // Authority says Missing or was unavailable — retry the write to establish the checkpoint.
+        if (readResult.Status == AgentToolGovernancePreDispatchReadStatus.Accepted
+            && readResult.Receipt is not null
+            && readResult.Checkpoint is not null)
+        {
+            // Validate the full checkpoint against the expected record using the shared comparer.
+            if (!AgentToolGovernancePreDispatchComparer.Equivalent(readResult.Checkpoint, record))
+                return null; // Checkpoint mismatch — cannot safely proceed.
+            // Validate receipt identity matches.
+            if (!string.Equals(readResult.Receipt.Identity.AttemptId, record.Context.AttemptId, StringComparison.Ordinal))
+                return null;
+            return readResult.Receipt;
+        }
+
+        if (readResult.Status != AgentToolGovernancePreDispatchReadStatus.Missing)
+        {
+            // Invalid/unknown lookup outcome — do not rewrite.
+            return null;
+        }
+
+        // Authoritative Missing: this live worker may perform one bounded retry
+        // of the identical record. A second retry is not allowed.
         try
         {
             var writeResult = await _audit.RecordPreDispatchAsync(record, cancellationToken)

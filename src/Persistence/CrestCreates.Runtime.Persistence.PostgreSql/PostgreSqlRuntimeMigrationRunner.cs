@@ -554,8 +554,15 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["tenant_id"] = Text, ["reservation_id"] = Text, ["attempt_id"] = Text,
                 ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
                 ["category"] = Text, ["cost_units"] = BigInt, ["max_calls_per_execution"] = IntegerNullable,
-                ["state"] = Integer, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
-            }, ["tenant_id", "reservation_id"], [], [], []),
+                ["state"] = Integer, ["created_at"] = Timestamp, ["updated_at"] = Timestamp,
+                ["tool_contract_json"] = Json, ["capacity_key"] = Text
+            }, ["tenant_id", "reservation_id"],
+            [new("ck_agent_tool_budget_state_range", "check ((state >= 0) and (state <= 4))"),
+             new("ck_agent_tool_budget_positive_costs", "check (cost_units > 0)"),
+             new("ck_agent_tool_budget_maxcalls", "check ((max_calls_per_execution is null) or (max_calls_per_execution > 0))")],
+            [new("ux_agent_tool_budget_attempt", ["tenant_id", "attempt_id"], ""),
+             new("ix_agent_tool_budget_capacity", ["tenant_id", "capacity_key"], "", Unique: false)],
+            []),
             new("agent_tool_invocation_pre_dispatch", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["lease_id"] = Text, ["attempt_id"] = Text,
@@ -568,22 +575,41 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["last_reason_code"] = NullableText,
                 ["dispatch_started_at"] = NullableTimestamp,
                 ["completion_outcome_json"] = NullableJson, ["release_outcome_json"] = NullableJson,
+                ["indeterminate_at"] = NullableTimestamp, ["indeterminate_reason"] = NullableText,
+                ["completion_prepared_at"] = NullableTimestamp, ["release_prepared_at"] = NullableTimestamp,
                 ["created_at"] = Timestamp, ["updated_at"] = Timestamp
-            }, ["tenant_id", "lease_id"], [], [], []),
+            }, ["tenant_id", "lease_id"],
+            [new("ck_agent_tool_pre_dispatch_state_range", "check ((pre_dispatch_state >= 0) and (pre_dispatch_state <= 10))"),
+             new("ck_agent_tool_pre_dispatch_revision", "check (revision > 0)"),
+             new("ck_agent_tool_pre_dispatch_fencing", "check (fencing_token > 0)"),
+             new("ck_agent_tool_pre_dispatch_ready_shape", "check ((pre_dispatch_state <> 2) or (bound_reservation_id is not null))"),
+             new("ck_agent_tool_pre_dispatch_accepted_shape", "check ((pre_dispatch_state <> 3) or (accepted_receipt_json is not null))"),
+             new("ck_agent_tool_pre_dispatch_abandoned_shape", "check ((pre_dispatch_state <> 5) or (abandoned_receipt_json is not null))"),
+             new("ck_agent_tool_pre_dispatch_release_pending_shape", "check ((pre_dispatch_state <> 6) or (release_outcome_json is not null))"),
+             new("ck_agent_tool_pre_dispatch_completion_pending_shape", "check ((pre_dispatch_state <> 8) or (completion_outcome_json is not null))")],
+            [new("ux_agent_tool_invocation_pre_dispatch_attempt", ["tenant_id", "attempt_id"], ""),
+             new("ux_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "pre_dispatch_state = any (array[0, 1, 2, 3, 4, 6, 8, 10])"),
+             new("ix_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "", Unique: false)],
+            []),
             new("agent_tool_governance_decisions", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["audit_id"] = Text,
                 ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
                 ["decision_state"] = Integer, ["decision_json"] = Json,
                 ["created_at"] = Timestamp
-            }, ["tenant_id", "audit_id"], [], [], []),
+            }, ["tenant_id", "audit_id"],
+            [new("ck_agent_tool_decision_state_range", "check ((decision_state >= 0) and (decision_state <= 2))")],
+            [new("ux_agent_tool_decision_identity", ["tenant_id", "logical_invocation_key", "attempt_id"], "")],
+            []),
             new("agent_tool_governance_finalizations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["audit_id"] = Text,
                 ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
                 ["attempt_state"] = Integer, ["finalization_json"] = Json,
                 ["created_at"] = Timestamp
-            }, ["tenant_id", "audit_id"], [], [], []),
+            }, ["tenant_id", "audit_id"],
+            [new("ck_agent_tool_finalization_state_range", "check ((attempt_state >= 0) and (attempt_state <= 10))")],
+            [], []),
             new("agent_tool_reconciliation_observations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
@@ -895,6 +921,49 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 created_at timestamptz not null default clock_timestamp(),
                 primary key (tenant_id, logical_invocation_key, attempt_id)
             );
+            """)
+        , new RuntimeMigration("V008", "agent_tool_pre_dispatch_durable_semantics", """
+            -- Phase 8f budget semantics: materialize the tool contract and capacity key
+            -- so Reserve can enforce logical-invocation conflicts and MaxCallsPerExecution.
+            alter table {schema}.agent_tool_budget_reservations
+                add column tool_contract_json jsonb not null default '{}'::jsonb,
+                add column capacity_key text not null default '';
+            create index ix_agent_tool_budget_capacity on {schema}.agent_tool_budget_reservations (tenant_id, capacity_key);
+
+            -- Indeterminate is a logical marker; the underlying Pending/Ready/Accepted
+            -- recovery substate is preserved. Prepared-at timestamps support full
+            -- completion/release receipt replay.
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                add column indeterminate_at timestamptz null,
+                add column indeterminate_reason text null,
+                add column completion_prepared_at timestamptz null,
+                add column release_prepared_at timestamptz null;
+
+            -- State-shape invariants.
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                add constraint ck_agent_tool_pre_dispatch_state_range check (pre_dispatch_state >= 0 and pre_dispatch_state <= 10),
+                add constraint ck_agent_tool_pre_dispatch_revision check (revision > 0),
+                add constraint ck_agent_tool_pre_dispatch_fencing check (fencing_token > 0),
+                add constraint ck_agent_tool_pre_dispatch_ready_shape check (pre_dispatch_state <> 2 or bound_reservation_id is not null),
+                add constraint ck_agent_tool_pre_dispatch_accepted_shape check (pre_dispatch_state <> 3 or accepted_receipt_json is not null),
+                add constraint ck_agent_tool_pre_dispatch_abandoned_shape check (pre_dispatch_state <> 5 or abandoned_receipt_json is not null),
+                add constraint ck_agent_tool_pre_dispatch_release_pending_shape check (pre_dispatch_state <> 6 or release_outcome_json is not null),
+                add constraint ck_agent_tool_pre_dispatch_completion_pending_shape check (pre_dispatch_state <> 8 or completion_outcome_json is not null);
+
+            alter table {schema}.agent_tool_budget_reservations
+                add constraint ck_agent_tool_budget_state_range check (state >= 0 and state <= 4),
+                add constraint ck_agent_tool_budget_positive_costs check (cost_units > 0),
+                add constraint ck_agent_tool_budget_maxcalls check (max_calls_per_execution is null or max_calls_per_execution > 0);
+
+            alter table {schema}.agent_tool_governance_decisions
+                add constraint ck_agent_tool_decision_state_range check (decision_state >= 0 and decision_state <= 2);
+
+            alter table {schema}.agent_tool_governance_finalizations
+                add constraint ck_agent_tool_finalization_state_range check (attempt_state >= 0 and attempt_state <= 10);
+
+            -- Stable decision identity: one decision per (tenant, logical invocation, attempt).
+            create unique index ux_agent_tool_decision_identity
+                on {schema}.agent_tool_governance_decisions (tenant_id, logical_invocation_key, attempt_id);
             """)
     ];
 }
