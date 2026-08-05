@@ -108,10 +108,9 @@ jobs:
           dotnet test tests/Runtime/Workflow/CrestCreates.Workflow.Tests --no-build
           dotnet test tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests --no-build
 
-      - name: Test — Persistence / PostgreSQL direct Npgsql provider
-        run: |
-          dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build
-          dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests --no-build
+      # PostgreSQL contract and AOT fixture tests use Testcontainers and are intentionally
+      # excluded from pull-request CI. Run both projects explicitly in a Docker-enabled
+      # environment when validating the direct Npgsql provider.
 
       - name: Test — Runtime / Agent
         run: |
