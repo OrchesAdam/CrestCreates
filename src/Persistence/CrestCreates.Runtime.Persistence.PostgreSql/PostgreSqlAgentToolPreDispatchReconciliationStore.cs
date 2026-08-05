@@ -76,6 +76,8 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
         CancellationToken cancellationToken)
     {
         var connection = _coordinator.RequireSession().Connection;
+        await AcquireIdentityLockAsync(connection, observation.Identity, cancellationToken).ConfigureAwait(false);
+
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = $"""
             insert into {_options.Schema}.agent_tool_reconciliation_observations
@@ -145,39 +147,62 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
         CancellationToken cancellationToken)
     {
         var connection = _coordinator.RequireSession().Connection;
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"""
-            with inserted as (
+        await AcquireIdentityLockAsync(connection, receipt.Identity, cancellationToken).ConfigureAwait(false);
+
+        var logicalKeyJson = PostgreSqlRuntimeStoreSupport.Serialize(
+            receipt.Identity.LogicalInvocationKey,
+            PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey);
+
+        bool inserted;
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.CommandText = $"""
                 insert into {_options.Schema}.agent_tool_reconciliation_receipts
                     (tenant_id, logical_invocation_key, attempt_id, status, reason_code, terminal_at, integrity_value, receipt_json)
                 values (@tenantId, @logicalKey::jsonb, @attemptId, @status, @reasonCode, @terminalAt, @integrityValue, @receiptJson::jsonb)
                 on conflict (tenant_id, logical_invocation_key, attempt_id) do nothing
                 returning 1
-            ), cleared_observation as (
-                delete from {_options.Schema}.agent_tool_reconciliation_observations o
-                where o.tenant_id = @tenantId
-                  and o.logical_invocation_key = @logicalKey::jsonb
-                  and o.attempt_id = @attemptId
-                  and exists (
-                      select 1
-                      from {_options.Schema}.agent_tool_reconciliation_receipts r
-                      where r.tenant_id = o.tenant_id
-                        and r.logical_invocation_key = o.logical_invocation_key
-                        and r.attempt_id = o.attempt_id)
-                returning 1
-            )
-            select exists(select 1 from inserted)
-            """;
-        cmd.Parameters.Add(new NpgsqlParameter("tenantId", receipt.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
-        cmd.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(receipt.Identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey) });
-        cmd.Parameters.Add(new NpgsqlParameter("attemptId", receipt.Identity.AttemptId));
-        cmd.Parameters.Add(new NpgsqlParameter("status", (int)receipt.Status));
-        cmd.Parameters.Add(new NpgsqlParameter("reasonCode", receipt.ReasonCode));
-        cmd.Parameters.Add(new NpgsqlParameter("terminalAt", receipt.TerminalAt));
-        cmd.Parameters.Add(new NpgsqlParameter("integrityValue", receipt.IntegrityValue));
-        cmd.Parameters.Add(new NpgsqlParameter("receiptJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(receipt, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolPreDispatchReconciliationReceipt) });
+                """;
+            insert.Parameters.Add(new NpgsqlParameter("tenantId", receipt.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
+            insert.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = logicalKeyJson });
+            insert.Parameters.Add(new NpgsqlParameter("attemptId", receipt.Identity.AttemptId));
+            insert.Parameters.Add(new NpgsqlParameter("status", (int)receipt.Status));
+            insert.Parameters.Add(new NpgsqlParameter("reasonCode", receipt.ReasonCode));
+            insert.Parameters.Add(new NpgsqlParameter("terminalAt", receipt.TerminalAt));
+            insert.Parameters.Add(new NpgsqlParameter("integrityValue", receipt.IntegrityValue));
+            insert.Parameters.Add(new NpgsqlParameter("receiptJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(receipt, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolPreDispatchReconciliationReceipt) });
 
-        var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return result is true;
+            inserted = await insert.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null;
+        }
+
+        await using (var clearObservation = connection.CreateCommand())
+        {
+            clearObservation.CommandText = $"""
+                delete from {_options.Schema}.agent_tool_reconciliation_observations
+                where tenant_id = @tenantId
+                  and logical_invocation_key = @logicalKey::jsonb
+                  and attempt_id = @attemptId
+                """;
+            clearObservation.Parameters.Add(new NpgsqlParameter("tenantId", receipt.Identity.LogicalInvocationKey.TenantId ?? string.Empty));
+            clearObservation.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = logicalKeyJson });
+            clearObservation.Parameters.Add(new NpgsqlParameter("attemptId", receipt.Identity.AttemptId));
+            await clearObservation.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return inserted;
+    }
+
+    private static async ValueTask AcquireIdentityLockAsync(
+        NpgsqlConnection connection,
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken)
+    {
+        // A terminal receipt and its mutable observation must transition as one identity-scoped aggregate.
+        await using var command = connection.CreateCommand();
+        command.CommandText = "select pg_advisory_xact_lock(hashtextextended(@identity, 0));";
+        command.Parameters.Add(new NpgsqlParameter(
+            "identity",
+            $"{PostgreSqlRuntimeStoreSupport.Serialize(identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey)}\n{identity.AttemptId}"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }
