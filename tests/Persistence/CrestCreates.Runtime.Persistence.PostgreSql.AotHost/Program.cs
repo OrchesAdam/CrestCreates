@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Core.Abstractions.Serialization;
@@ -321,6 +322,7 @@ static async Task RunPreDispatchScenarioAsync(PostgreSqlRuntimePersistenceOption
 static ServiceProvider BuildPreDispatchProvider(PostgreSqlRuntimePersistenceOptions options)
 {
     var services = new ServiceCollection();
+    services.AddAccountability();
     services.AddCrestAgentTools();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
     var provider = services.BuildServiceProvider();

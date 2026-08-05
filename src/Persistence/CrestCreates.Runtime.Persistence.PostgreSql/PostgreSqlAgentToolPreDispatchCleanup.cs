@@ -54,37 +54,60 @@ internal sealed class PostgreSqlAgentToolPreDispatchCleanup
             (int)AgentToolInvocationPreDispatchState.Indeterminate);
 
         // 1. Clean up terminal governance checkpoints — only for attempts that have
-        //    reached a terminal state in the invocation gate. Must run BEFORE deleting
-        //    gate rows so the terminal-state check can see them.
+        //    reached a true terminal state (Released, Completed, Abandoned) in the
+        //    invocation gate. Indeterminate is PROTECTED and must NOT be cleaned up.
+        //    Must run BEFORE deleting gate rows so the terminal-state check can see them.
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
             DELETE FROM {_options.Schema}.agent_tool_pre_dispatch_checkpoints
             WHERE accepted_at < @cutoff_checkpoint
-              AND attempt_id IN (
-                  SELECT i.attempt_id
+              AND tenant_id IN (
+                  SELECT i.tenant_id
                   FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
-                  WHERE i.attempt_id = agent_tool_pre_dispatch_checkpoints.attempt_id
+                  WHERE i.tenant_id = agent_tool_pre_dispatch_checkpoints.tenant_id
+                    AND i.attempt_id = agent_tool_pre_dispatch_checkpoints.attempt_id
+                    AND i.logical_invocation_key = agent_tool_pre_dispatch_checkpoints.logical_invocation_key
                     AND i.pre_dispatch_state IN (
                         {(int)AgentToolInvocationPreDispatchState.Released},
                         {(int)AgentToolInvocationPreDispatchState.Completed},
-                        {(int)AgentToolInvocationPreDispatchState.Abandoned},
-                        {(int)AgentToolInvocationPreDispatchState.Indeterminate}
+                        {(int)AgentToolInvocationPreDispatchState.Abandoned}
                     )
               )
             """,
             ("cutoff_checkpoint", cutoffCheckpoint));
 
-        // 2. Clean up terminal governance finalizations and decisions
+        // 2. Clean up terminal governance finalizations and decisions — only for
+        //    attempts whose invocation gate has reached a true terminal state.
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
             DELETE FROM {_options.Schema}.agent_tool_governance_finalizations
             WHERE created_at < @cutoff_finalization
+              AND attempt_id IN (
+                  SELECT i.attempt_id
+                  FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
+                  WHERE i.attempt_id = agent_tool_governance_finalizations.attempt_id
+                    AND i.pre_dispatch_state IN (
+                        {(int)AgentToolInvocationPreDispatchState.Released},
+                        {(int)AgentToolInvocationPreDispatchState.Completed},
+                        {(int)AgentToolInvocationPreDispatchState.Abandoned}
+                    )
+              )
             """,
             ("cutoff_finalization", cutoffFinalization));
         totalDeleted += await ExecuteNonQueryAsync(session,
             $"""
             DELETE FROM {_options.Schema}.agent_tool_governance_decisions
             WHERE created_at < @cutoff_finalization
+              AND attempt_id IN (
+                  SELECT i.attempt_id
+                  FROM {_options.Schema}.agent_tool_invocation_pre_dispatch i
+                  WHERE i.attempt_id = agent_tool_governance_decisions.attempt_id
+                    AND i.pre_dispatch_state IN (
+                        {(int)AgentToolInvocationPreDispatchState.Released},
+                        {(int)AgentToolInvocationPreDispatchState.Completed},
+                        {(int)AgentToolInvocationPreDispatchState.Abandoned}
+                    )
+              )
             """,
             ("cutoff_finalization", cutoffFinalization));
 

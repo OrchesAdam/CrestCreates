@@ -121,8 +121,12 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
             var existing = await ReadReservationByIdReservationIdAsync(request.ReservationId, ct);
             if (existing is null)
                 throw new InvalidOperationException($"Budget reservation {request.ReservationId} not found.");
-            // Already terminal — return the existing reservation (idempotent).
-            return existing;
+            // Already terminal — only idempotent if the existing state matches the requested state.
+            if (existing.State == targetState)
+                return existing;
+            // Different terminal state — conflict, not idempotent success.
+            throw new InvalidOperationException(
+                $"Budget reservation {request.ReservationId} is in terminal state {existing.State}, cannot finalize to {targetState}.");
         }
 
         return ReadReservation(reader);
@@ -168,6 +172,8 @@ internal sealed class PostgreSqlAgentToolBudgetGate : IAgentToolBudgetGate
             select reservation_id, attempt_id, invocation_fingerprint, category, cost_units, max_calls_per_execution, state
             from {_options.Schema}.agent_tool_budget_reservations
             where tenant_id = @tenantId and attempt_id = @attemptId
+            order by created_at desc
+            limit 1
             """;
         cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId));
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", attemptId));

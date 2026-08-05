@@ -547,7 +547,9 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         if (preDispatchState.State != AgentToolInvocationPreDispatchState.Accepted
             || preDispatchState.AcceptedReceipt is null
             || !string.Equals(preDispatchState.AcceptedReceipt.AuditId, auditHandle!.AuditId, StringComparison.Ordinal)
-            || !string.Equals(preDispatchState.AcceptedReceipt.Identity.AttemptId, auditHandle.Identity.AttemptId, StringComparison.Ordinal))
+            || !string.Equals(preDispatchState.AcceptedReceipt.Identity.AttemptId, auditHandle.Identity.AttemptId, StringComparison.Ordinal)
+            || !preDispatchState.AcceptedReceipt.Identity.LogicalInvocationKey.Equals(auditHandle.Identity.LogicalInvocationKey)
+            || preDispatchState.AcceptedReceipt.AcceptedAt != auditHandle.AcceptedAt)
         {
             return await FinishFenceIndeterminateAsync(
                 auditHandle, auditContext, lease, reservation,

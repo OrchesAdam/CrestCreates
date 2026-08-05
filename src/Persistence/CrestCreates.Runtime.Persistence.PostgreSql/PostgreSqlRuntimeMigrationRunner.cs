@@ -477,6 +477,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         private static readonly (string Type, string Nullable) Integer = ("integer", "NO");
         private static readonly (string Type, string Nullable) Json = ("jsonb", "NO");
         private static readonly (string Type, string Nullable) NullableJson = ("jsonb", "YES");
+        private static readonly (string Type, string Nullable) IntegerNullable = ("integer", "YES");
+        private static readonly (string Type, string Nullable) Boolean = ("boolean", "NO");
         private static readonly (string Type, string Nullable) Timestamp = ("timestamp with time zone", "NO");
         private static readonly (string Type, string Nullable) NullableTimestamp = ("timestamp with time zone", "YES");
 
@@ -538,35 +540,47 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             new("agent_tool_pre_dispatch_checkpoints", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["audit_id"] = Text, ["attempt_id"] = Text,
-                ["logical_invocation_key"] = NullableText, ["invocation_fingerprint"] = NullableText,
-                ["lease_id"] = Text, ["fencing_token"] = BigInt,
-                ["arguments_hash"] = NullableText, ["agent_roles_hash"] = NullableText,
-                ["checkpoint_json"] = Json, ["accepted_at"] = Timestamp
-            }, ["tenant_id", "audit_id"], [], [], []),
+                ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
+                ["arguments_hash"] = NullableText, ["arguments_evaluated"] = Boolean,
+                ["call_origin"] = Integer, ["agent_roles_hash"] = NullableText,
+                ["tool_contract_json"] = Json, ["capability_contract_json"] = Json,
+                ["input_schema_contract_json"] = NullableJson, ["output_schema_contract_json"] = NullableJson,
+                ["governance_json"] = Json, ["lease_json"] = Json,
+                ["approval_json"] = Json, ["budget_reservation_json"] = Json,
+                ["accepted_at"] = Timestamp, ["created_at"] = Timestamp
+            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], []),
             new("agent_tool_budget_reservations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["reservation_id"] = Text, ["attempt_id"] = Text,
-                ["logical_invocation_key"] = NullableText, ["invocation_fingerprint"] = NullableText,
-                ["reservation_json"] = Json, ["state"] = Integer, ["created_at"] = Timestamp
+                ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
+                ["category"] = Text, ["cost_units"] = BigInt, ["max_calls_per_execution"] = IntegerNullable,
+                ["state"] = Integer, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
             }, ["tenant_id", "reservation_id"], [], [], []),
             new("agent_tool_invocation_pre_dispatch", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
-                ["tenant_id"] = Text, ["attempt_id"] = Text, ["lease_id"] = Text,
-                ["logical_invocation_key"] = NullableText, ["invocation_fingerprint"] = NullableText,
-                ["fencing_token"] = BigInt, ["pre_dispatch_state"] = Integer,
-                ["bound_reservation_id"] = NullableText,
+                ["tenant_id"] = Text, ["lease_id"] = Text, ["attempt_id"] = Text,
+                ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
+                ["fencing_token"] = BigInt, ["acquired_at"] = Timestamp, ["expires_at"] = Timestamp,
+                ["pre_dispatch_state"] = Integer, ["revision"] = BigInt,
+                ["intent_json"] = NullableJson, ["bound_reservation_id"] = NullableText,
                 ["accepted_receipt_json"] = NullableJson, ["abandoned_receipt_json"] = NullableJson,
-                ["intent_json"] = NullableJson, ["created_at"] = Timestamp
-            }, ["tenant_id", "attempt_id"], [], [], []),
+                ["last_reason_code"] = NullableText,
+                ["dispatch_started_at"] = NullableTimestamp,
+                ["completion_outcome_json"] = NullableJson, ["release_outcome_json"] = NullableJson,
+                ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["tenant_id", "lease_id"], [], [], []),
             new("agent_tool_governance_decisions", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
-                ["tenant_id"] = Text, ["audit_id"] = Text, ["decision_json"] = Json,
+                ["tenant_id"] = Text, ["audit_id"] = Text,
+                ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
+                ["decision_state"] = Integer, ["decision_json"] = Json,
                 ["created_at"] = Timestamp
             }, ["tenant_id", "audit_id"], [], [], []),
             new("agent_tool_governance_finalizations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
-                ["tenant_id"] = Text, ["audit_id"] = Text, ["attempt_state"] = Integer,
-                ["finalization_json"] = NullableJson, ["created_at"] = Timestamp
+                ["tenant_id"] = Text, ["audit_id"] = Text,
+                ["attempt_state"] = Integer, ["finalization_json"] = NullableJson,
+                ["created_at"] = Timestamp
             }, ["tenant_id", "audit_id"], [], [], []),
             new("agent_tool_reconciliation_observations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
             {
@@ -818,6 +832,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 bound_reservation_id text null,
                 accepted_receipt_json jsonb null,
                 abandoned_receipt_json jsonb null,
+                last_reason_code text null,
                 dispatch_started_at timestamptz null,
                 completion_outcome_json jsonb null,
                 release_outcome_json jsonb null,
@@ -826,6 +841,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 primary key (tenant_id, lease_id)
             );
             create unique index ux_agent_tool_invocation_pre_dispatch_attempt on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, attempt_id);
+            create unique index ux_agent_tool_invocation_pre_dispatch_logical on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key) where pre_dispatch_state in (0, 1, 2, 3, 4);
             create index ix_agent_tool_invocation_pre_dispatch_logical on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key);
 
             create table {schema}.agent_tool_governance_decisions (

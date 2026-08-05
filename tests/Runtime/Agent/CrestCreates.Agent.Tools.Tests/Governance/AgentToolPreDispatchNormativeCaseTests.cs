@@ -165,6 +165,15 @@ public class AgentToolPreDispatchNormativeCaseTests
         var mismatchResult = reconciler.ReconcileAsync(mismatchIdentity).Result;
         mismatchResult.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending,
             "mismatched attempt identity should not match any gate state");
+
+        // Mutation case 2: reconciler with accepted gate + missing budget + accepted checkpoint
+        // → Conflict (budget_missing_after_bind).
+        var tamperedBudgetGate = new DevelopmentInMemoryAgentToolBudgetGate();
+        var tamperedStore = new InMemoryReconciliationStore();
+        var tamperedReconciler = new DefaultAgentToolPreDispatchReconciler(gate, tamperedBudgetGate, auditor, tamperedStore);
+        var tamperedResult = tamperedReconciler.ReconcileAsync(identity).Result;
+        tamperedResult.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Conflict,
+            "accepted gate with missing budget must produce Conflict, not Released");
     }
 
     [Fact]

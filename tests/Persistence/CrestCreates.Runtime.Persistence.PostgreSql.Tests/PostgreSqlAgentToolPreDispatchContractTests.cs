@@ -276,9 +276,34 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
         var receipt = await _auditor.RecordPreDispatchAsync(checkpointRecord);
         receipt.Status.Should().Be(AgentToolGovernancePreDispatchWriteStatus.Accepted);
 
-        // Record again — must not overwrite (ON CONFLICT DO NOTHING).
-        var second = await _auditor.RecordPreDispatchAsync(checkpointRecord);
-        second.Status.Should().Be(AgentToolGovernancePreDispatchWriteStatus.Duplicate);
+        // Finalize the governance record.
+        var finalization = new AgentToolGovernanceFinalizationRecord
+        {
+            AuditId = receipt.Receipt!.AuditId,
+            Context = context,
+            Lease = checkpointRecord.Lease!,
+            DispatchStarted = false,
+            BudgetReservation = checkpointRecord.BudgetReservation!,
+            AttemptState = AgentToolGovernanceAttemptFinalState.Released,
+            Outcome = new AgentToolInvocationOutcome
+            {
+                Kind = AgentToolInvocationOutcomeKind.Succeeded,
+                Code = "succeeded",
+                Message = "completed"
+            },
+            OutcomeHash = "hash-1",
+            ReasonCode = "released"
+        };
+        var finalizeResult = await _auditor.FinalizeAsync(finalization);
+        finalizeResult.Status.Should().Be(AgentToolGovernanceFinalizationStatus.Finalized);
+
+        // Second finalize with same content — must be idempotent (Finalized, not NotFinalized).
+        var secondFinalize = await _auditor.FinalizeAsync(finalization);
+        secondFinalize.Status.Should().Be(AgentToolGovernanceFinalizationStatus.Finalized);
+
+        // Verify the finalization state is readable.
+        var state = await _auditor.GetFinalizationStateAsync(receipt.Receipt!.AuditId);
+        state.Status.Should().Be(AgentToolGovernanceFinalizationStatus.Finalized);
     }
 
     private async Task PrepareAndBindAsync(AgentToolInvocationLease lease)

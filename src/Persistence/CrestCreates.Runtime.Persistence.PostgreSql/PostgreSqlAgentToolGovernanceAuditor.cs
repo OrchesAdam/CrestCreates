@@ -154,9 +154,14 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         cmd.Parameters.Add(new NpgsqlParameter("attemptState", (int)record.AttemptState));
         cmd.Parameters.Add(new NpgsqlParameter("finalizationJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernanceFinalizationRecord) });
         var result = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        if (result is not null)
+            return new AgentToolGovernanceFinalizationResult { Status = AgentToolGovernanceFinalizationStatus.Finalized };
+
+        // Duplicate: read the existing finalization record to confirm it exists.
+        var existing = await ReadFinalizationAsync(record.Context.LogicalInvocationKey.TenantId ?? string.Empty, record.AuditId, cancellationToken);
         return new AgentToolGovernanceFinalizationResult
         {
-            Status = result is not null ? AgentToolGovernanceFinalizationStatus.Finalized : AgentToolGovernanceFinalizationStatus.NotFinalized
+            Status = existing is not null ? AgentToolGovernanceFinalizationStatus.Finalized : AgentToolGovernanceFinalizationStatus.NotFinalized
         };
     }
 
@@ -196,6 +201,22 @@ internal sealed class PostgreSqlAgentToolGovernanceAuditor : IAgentToolGovernanc
         cmd.Parameters.Add(new NpgsqlParameter("approvalJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.Approval, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolApprovalResult) });
         cmd.Parameters.Add(new NpgsqlParameter("budgetJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(record.BudgetReservation, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolBudgetReservation) });
         cmd.Parameters.Add(new NpgsqlParameter("acceptedAt", acceptedAt));
+    }
+
+    private async ValueTask<AgentToolGovernanceFinalizationRecord?> ReadFinalizationAsync(string tenantId, string auditId, CancellationToken cancellationToken)
+    {
+        await using var cmd = Conn().CreateCommand();
+        cmd.CommandText = $"""
+            select finalization_json
+            from {_options.Schema}.agent_tool_governance_finalizations
+            where tenant_id = @tenantId and audit_id = @auditId
+            """;
+        cmd.Parameters.Add(new NpgsqlParameter("tenantId", tenantId));
+        cmd.Parameters.Add(new NpgsqlParameter("auditId", auditId));
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false) || reader.IsDBNull(0))
+            return null;
+        return PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(0), PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolGovernanceFinalizationRecord);
     }
 
     private static AgentToolGovernancePreDispatchRecord ReadCheckpoint(NpgsqlDataReader reader)
