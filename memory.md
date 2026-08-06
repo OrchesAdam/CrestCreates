@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation all slices + review rounds 1–3 remediated; Issue #73 Phase 9b+ complexity consolidation complete — 4 slices, PR #72 mergeable, #70 closed)
+Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation all slices + review rounds 1–3 remediated; Issue #73 Phase 9b+ complexity consolidation complete — 4 slices + PR #74 review remediation (1×P0/1×P1/2×P2) closed, PR #72 mergeable, #70 closed)
 
 ## Purpose
 
@@ -2296,6 +2296,33 @@ fixtures are all required CI evidence and green on the final head.
   path still respects `EffectiveAuditMode` for AGENT_TOOL_BUDGET_DENIED vs
   AGENT_TOOL_AUDIT_FAILURE.
 - Issue #73 is complete; #70 closed after PR #72 merged (CI evidence on final head).
+
+**PR #74 review remediation** (`260f6d31`, 2026-08-06) — closed latest review round
+1×P0 / 1×P1 / 2×P2:
+- P0 — terminal result durability: removed `AgentToolPreDispatchSettlementPersistence.None`;
+  every terminal disposition (Released / Conflict / PostDispatchUnknown) now persists an
+  immutable receipt via ResultWriter, every retryable disposition an observation. Budget /
+  gate settlement mismatch is classified by actual state (Committed/Indeterminate → durable
+  Conflict; still-Reserved → retryable Observation; DispatchStarted → PostDispatchUnknown;
+  Released/Abandoned → Released; ReconciliationPending → Observation). Reconciler checkpoint
+  validation conflicts all route through `ResultWriter.WriteTerminalAsync`.
+- P1 — single semantic authority: `Completed` audit confirmation now reuses
+  `AgentToolGovernancePreDispatchComparer.Equivalent`; removed the looser
+  `EquivalentFinalization`/`EquivalentContext` helpers. Narrow `HasSameFinalizationIdentity`
+  only classifies an existing Indeterminate (never exact Completed).
+- P2 — architecture gates: `RecoveryPolicy_Should_HaveNoProviderDependencies`,
+  `SettlementExecutor_Should_HaveNoDispatcherDependency`,
+  `ConsolidationTypes_Should_AllBeInternal`, `PersistedEnums_Should_HaveExactFrozenMemberSets`
+  (Architecture suite 32/32).
+- P2 — `RequiresOwnershipClaim` is now a derived property from `GateAction`
+  (ClaimAndAbandon/ClaimAndRelease); no dual-expression of claim state.
+- New tests: `AgentToolPreDispatchResultContractTests` (12),
+  `AgentToolGovernanceFinalizationConfirmationTests` (10). Invoker regression tests tightened
+  to strict canonical semantics (`Invoke_AuditConflict...` → InvocationIndeterminate/InProgress;
+  stub auditor no longer redacts durable read).
+- Evidence: Agent.Tools 392/392, Boundary 93/93, PG contract 86/86, PG NativeAOT fixture
+  1/1, Abstractions 16/16, E2E 1/1/1. No schema/migration, ReasonCode, state-semantic or
+  existing-assertion changes.
 
 ## Recommended Next Thread Entry Prompt
 
