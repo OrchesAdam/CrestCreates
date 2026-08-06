@@ -5,12 +5,13 @@ namespace CrestCreates.Agent.Tools;
 /// <list type="bullet">
 /// <item><see cref="AgentToolPreDispatchSettlementPersistence.TerminalReceipt"/> — immutable terminal receipt.</item>
 /// <item><see cref="AgentToolPreDispatchSettlementPersistence.Observation"/> — mutable revision-CAS observation (retryable).</item>
-/// <item><see cref="AgentToolPreDispatchSettlementPersistence.None"/> — bare result; no durable write (pure state mismatch).</item>
 /// </list>
+/// A settlement outcome always persists its durable result: terminal dispositions
+/// carry an immutable receipt, retryable dispositions carry an observation. A bare
+/// result with no durable write is not an allowed protocol outcome.
 /// </summary>
 internal enum AgentToolPreDispatchSettlementPersistence
 {
-    None,
     Observation,
     TerminalReceipt
 }
@@ -20,8 +21,7 @@ internal enum AgentToolPreDispatchSettlementPersistence
 /// to the result writer based on <see cref="Persistence"/>:
 /// terminal receipt for released / durable conflict / post-dispatch outcomes,
 /// mutable observation for still-pending outcomes (ownership not lost, authority
-/// unavailable), and no write for pure state mismatches (budget finalize mismatch,
-/// missing claim, gate completion mismatch).
+/// unavailable).
 /// </summary>
 internal sealed record AgentToolPreDispatchSettlementResult
 {
@@ -152,9 +152,21 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
                 cancellationToken).ConfigureAwait(false);
 
             // Verify the budget actually reached the requested terminal state.
+            // A mismatched finalization is never a bare conflict: a reservation that
+            // moved to another terminal state is a deterministic conflict (durable
+            // receipt), while a reservation that is still Reserved/Unknown means the
+            // authority did not confirm the release (retryable observation).
             if (finalizeResult.State != AgentToolBudgetReservationState.Released)
             {
-                return Bare(AgentToolPreDispatchReconciliationStatus.Conflict);
+                if (finalizeResult.State is AgentToolBudgetReservationState.Committed
+                    or AgentToolBudgetReservationState.Indeterminate)
+                {
+                    return Terminal(
+                        AgentToolPreDispatchReconciliationStatus.Conflict,
+                        "budget_finalize_conflict");
+                }
+
+                return Observation("budget_finalize_unconfirmed");
             }
 
             terminalReservation = finalizeResult;
@@ -235,7 +247,9 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
         if (claim is null)
         {
             // A claim could not be granted or recovered — no terminal transition.
-            return Bare(AgentToolPreDispatchReconciliationStatus.Conflict);
+            // Ownership was not established, so this is a retryable authority
+            // outcome (observation), never a bare terminal result.
+            return Observation("reconciliation_claim_unavailable");
         }
 
         var completeResult = await _gate.CompletePreDispatchReconciliationAsync(
@@ -245,7 +259,34 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
             cancellationToken).ConfigureAwait(false);
         if (completeResult.State != terminalState)
         {
-            return Bare(AgentToolPreDispatchReconciliationStatus.Conflict);
+            // The gate did not reach the requested terminal outcome. Classify the
+            // actual outcome instead of returning a bare conflict: a live worker may
+            // have won dispatch (PostDispatchUnknown), the gate may already be in
+            // the other terminal state (Released), or the completion did not take
+            // (retryable observation while the claim is still held).
+            if (completeResult.State == AgentToolInvocationPreDispatchState.DispatchStarted)
+            {
+                return Terminal(
+                    AgentToolPreDispatchReconciliationStatus.PostDispatchUnknown,
+                    "dispatch_started");
+            }
+
+            if (completeResult.State is AgentToolInvocationPreDispatchState.Released
+                or AgentToolInvocationPreDispatchState.Abandoned)
+            {
+                return Terminal(
+                    AgentToolPreDispatchReconciliationStatus.Released,
+                    completeResult.ReasonCode ?? "terminal_recovered");
+            }
+
+            if (completeResult.State == AgentToolInvocationPreDispatchState.ReconciliationPending)
+            {
+                return Observation("reconciliation_completion_unconfirmed");
+            }
+
+            return Terminal(
+                AgentToolPreDispatchReconciliationStatus.Conflict,
+                "reconciliation_completion_conflict");
         }
 
         return new AgentToolPreDispatchSettlementResult
@@ -299,13 +340,5 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
             Status = AgentToolPreDispatchReconciliationStatus.StillPending,
             ReasonCode = reasonCode,
             Persistence = AgentToolPreDispatchSettlementPersistence.Observation
-        };
-
-    private static AgentToolPreDispatchSettlementResult Bare(
-        AgentToolPreDispatchReconciliationStatus status)
-        => new()
-        {
-            Status = status,
-            Persistence = AgentToolPreDispatchSettlementPersistence.None
         };
 }

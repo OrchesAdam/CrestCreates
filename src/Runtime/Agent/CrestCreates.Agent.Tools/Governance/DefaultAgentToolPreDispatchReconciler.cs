@@ -122,10 +122,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
         {
             if (checkpointRead.Checkpoint is null || checkpointRead.Receipt is null)
             {
-                return new AgentToolPreDispatchReconciliationResult
-                {
-                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                };
+                return await _resultWriter.WriteTerminalAsync(
+                    identity,
+                    AgentToolPreDispatchReconciliationStatus.Conflict,
+                    "checkpoint_evidence_missing",
+                    cancellationToken).ConfigureAwait(false);
             }
 
             var checkpoint = checkpointRead.Checkpoint;
@@ -134,20 +135,22 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 || checkpoint.Approval is null
                 || checkpoint.BudgetReservation is null)
             {
-                return new AgentToolPreDispatchReconciliationResult
-                {
-                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                };
+                return await _resultWriter.WriteTerminalAsync(
+                    identity,
+                    AgentToolPreDispatchReconciliationStatus.Conflict,
+                    "checkpoint_incomplete",
+                    cancellationToken).ConfigureAwait(false);
             }
 
             // Validate identity: checkpoint's AttemptId and LogicalInvocationKey
             // must match the recovery identity.
             if (!AgentToolGovernancePreDispatchComparer.ValidateIdentity(checkpoint, identity))
             {
-                return new AgentToolPreDispatchReconciliationResult
-                {
-                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                };
+                return await _resultWriter.WriteTerminalAsync(
+                    identity,
+                    AgentToolPreDispatchReconciliationStatus.Conflict,
+                    "checkpoint_identity_mismatch",
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (checkpointRead.Receipt.Identity != identity
@@ -156,10 +159,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                     gateState.Intent,
                     checkpoint))
             {
-                return new AgentToolPreDispatchReconciliationResult
-                {
-                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                };
+                return await _resultWriter.WriteTerminalAsync(
+                    identity,
+                    AgentToolPreDispatchReconciliationStatus.Conflict,
+                    "checkpoint_intent_mismatch",
+                    cancellationToken).ConfigureAwait(false);
             }
 
             // Cross-verify: if Budget was read, the checkpoint's reservation
@@ -169,10 +173,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                     checkpoint.BudgetReservation,
                     budgetRead.Reservation))
             {
-                return new AgentToolPreDispatchReconciliationResult
-                {
-                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                };
+                return await _resultWriter.WriteTerminalAsync(
+                    identity,
+                    AgentToolPreDispatchReconciliationStatus.Conflict,
+                    "checkpoint_reservation_mismatch",
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (effectiveGateState is AgentToolInvocationPreDispatchState.Ready
@@ -182,10 +187,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                     checkpoint.BudgetReservation.ReservationId,
                     StringComparison.Ordinal))
             {
-                return new AgentToolPreDispatchReconciliationResult
-                {
-                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                };
+                return await _resultWriter.WriteTerminalAsync(
+                    identity,
+                    AgentToolPreDispatchReconciliationStatus.Conflict,
+                    "checkpoint_bound_reservation_mismatch",
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (effectiveGateState == AgentToolInvocationPreDispatchState.Accepted
@@ -194,10 +200,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                         gateState.AcceptedReceipt,
                         checkpointRead.Receipt)))
             {
-                return new AgentToolPreDispatchReconciliationResult
-                {
-                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                };
+                return await _resultWriter.WriteTerminalAsync(
+                    identity,
+                    AgentToolPreDispatchReconciliationStatus.Conflict,
+                    "checkpoint_accepted_receipt_mismatch",
+                    cancellationToken).ConfigureAwait(false);
             }
 
             // Cross-verify: checkpoint's lease AttemptId must match identity.
@@ -206,10 +213,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                     identity.AttemptId,
                     StringComparison.Ordinal))
             {
-                return new AgentToolPreDispatchReconciliationResult
-                {
-                    Status = AgentToolPreDispatchReconciliationStatus.Conflict
-                };
+                return await _resultWriter.WriteTerminalAsync(
+                    identity,
+                    AgentToolPreDispatchReconciliationStatus.Conflict,
+                    "checkpoint_lease_mismatch",
+                    cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -248,7 +256,10 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 context,
                 cancellationToken).ConfigureAwait(false);
 
-            // Route the settlement outcome to durable persistence.
+            // Route the settlement outcome to durable persistence. Every settlement
+            // outcome must carry a durable form: terminal → immutable receipt,
+            // retryable → mutable observation. A bare terminal result is never
+            // returned by the executor.
             if (settlement.Persistence == AgentToolPreDispatchSettlementPersistence.TerminalReceipt)
             {
                 return await _resultWriter.WriteTerminalAsync(
@@ -258,19 +269,11 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                     cancellationToken).ConfigureAwait(false);
             }
 
-            if (settlement.Persistence == AgentToolPreDispatchSettlementPersistence.Observation)
-            {
-                return await _resultWriter.WriteObservationAsync(
-                    identity,
-                    settlement.Status,
-                    settlement.ReasonCode ?? reasonCode,
-                    cancellationToken).ConfigureAwait(false);
-            }
-
-            return new AgentToolPreDispatchReconciliationResult
-            {
-                Status = settlement.Status
-            };
+            return await _resultWriter.WriteObservationAsync(
+                identity,
+                settlement.Status,
+                settlement.ReasonCode ?? reasonCode,
+                cancellationToken).ConfigureAwait(false);
         }
 
         // Step 7/8: StillPending — persist mutable observation; terminal statuses

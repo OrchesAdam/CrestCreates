@@ -559,8 +559,8 @@ public sealed class AgentToolInvokerTests
         var retry = await harness.Invoker.InvokeAsync(
             new AgentToolInvocationRequest(harness.ToolName));
 
-        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
-        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.Succeeded);
+        first.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvocationIndeterminate);
+        retry.Kind.Should().Be(AgentToolInvocationOutcomeKind.InProgress);
         harness.Dispatcher.CallCount.Should().Be(1);
     }
 
@@ -1246,27 +1246,11 @@ public sealed class AgentToolInvokerTests
             throw new IOException("audit finalization response lost");
         }
 
-        public async ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
+        public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
             string auditId,
             string? tenantId = null,
             CancellationToken cancellationToken = default)
-        {
-            var result = await _inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
-            return result.Record is not { } record
-                ? result
-                : result with
-                {
-                    Record = record with
-                    {
-                        Outcome = new AgentToolInvocationOutcome
-                        {
-                            Kind = record.Outcome.Kind,
-                            Code = record.Outcome.Code,
-                            Message = "redacted audit outcome"
-                        }
-                    }
-                };
-        }
+            => _inner.GetFinalizationStateAsync(auditId, tenantId, cancellationToken);
     public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
         => _inner.GetPreDispatchStateAsync(identity, cancellationToken);
 

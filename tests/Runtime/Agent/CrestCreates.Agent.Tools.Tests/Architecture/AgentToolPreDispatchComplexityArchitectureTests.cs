@@ -48,6 +48,112 @@ public class AgentToolPreDispatchComplexityArchitectureTests
     }
 
     [Fact]
+    public void RecoveryPolicy_Should_HaveNoProviderDependencies()
+    {
+        // Issue #73: recovery policy is a pure decision component. It must not
+        // reach into any provider (gate, budget, auditor, store, dispatcher) or
+        // hold injected state — otherwise it becomes an orchestration component.
+        var policyType = AgentToolsAssembly
+            .GetType("CrestCreates.Agent.Tools.AgentToolPreDispatchRecoveryPolicy");
+        policyType.Should().NotBeNull();
+
+        var forbiddenTypes = new[]
+        {
+            "IAgentToolInvocationGate",
+            "IAgentToolBudgetGate",
+            "IAgentToolGovernanceAuditor",
+            "IAgentToolPreDispatchReconciliationStore",
+            "ICapabilityDispatcher"
+        };
+
+        var fields = policyType!.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        var ctorParams = policyType.GetConstructors()
+            .SelectMany(c => c.GetParameters());
+
+        foreach (var forbidden in forbiddenTypes)
+        {
+            fields.Should().NotContain(f => f.FieldType.Name == forbidden,
+                $"{policyType.Name} must not hold a {forbidden} field.");
+            ctorParams.Should().NotContain(p => p.ParameterType.Name == forbidden,
+                $"{policyType.Name} must not receive a {forbidden} constructor parameter.");
+        }
+    }
+
+    [Fact]
+    public void SettlementExecutor_Should_HaveNoDispatcherDependency()
+    {
+        // Issue #73: the settlement executor is claim-first and settles budget /
+        // governance. It must never depend on the capability dispatcher, which
+        // belongs solely to the live invoker.
+        var executorType = AgentToolsAssembly
+            .GetType("CrestCreates.Agent.Tools.AgentToolPreDispatchSettlementExecutor");
+        executorType.Should().NotBeNull();
+
+        var forbidden = "ICapabilityDispatcher";
+
+        var fields = executorType!.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        var ctorParams = executorType.GetConstructors()
+            .SelectMany(c => c.GetParameters());
+
+        fields.Should().NotContain(f => f.FieldType.Name == forbidden,
+            $"{executorType.Name} must not hold an {forbidden} field.");
+        ctorParams.Should().NotContain(p => p.ParameterType.Name == forbidden,
+            $"{executorType.Name} must not receive an {forbidden} constructor parameter.");
+    }
+
+    [Fact]
+    public void ConsolidationTypes_Should_AllBeInternal()
+    {
+        // Issue #73: the consolidation types are implementation details of the
+        // Agent.Tools assembly and must never become public API.
+        var consolidationTypes = new[]
+        {
+            "CrestCreates.Agent.Tools.AgentToolPreDispatchRecoveryPolicy",
+            "CrestCreates.Agent.Tools.AgentToolPreDispatchSettlementExecutor",
+            "CrestCreates.Agent.Tools.AgentToolPreDispatchResultWriter",
+            "CrestCreates.Agent.Tools.AgentToolPreDispatchFinalizer",
+            "CrestCreates.Agent.Tools.AgentToolPreDispatchCoordinator"
+        };
+
+        foreach (var typeName in consolidationTypes)
+        {
+            var type = AgentToolsAssembly.GetType(typeName);
+            type.Should().NotBeNull($"{typeName} should exist.");
+            type!.IsPublic.Should().BeFalse(
+                $"{typeName} must be internal; it is a complexity-consolidation implementation detail.");
+        }
+    }
+
+    [Theory]
+    [InlineData(
+        "AgentToolInvocationPreDispatchState",
+        "Unknown,Pending,Ready,Accepted,DispatchStarted,Abandoned,ReleasePending,Released,CompletionPending,Completed,Indeterminate,ReconciliationPending")]
+    [InlineData(
+        "AgentToolPreDispatchReconciliationStatus",
+        "Unknown,Released,AlreadyReleased,StillPending,Conflict,PostDispatchUnknown,Missing")]
+    [InlineData(
+        "AgentToolBudgetReservationState",
+        "Unknown,Reserved,Released,Committed,Indeterminate")]
+    [InlineData(
+        "AgentToolPreDispatchPersistenceCapability",
+        "FullSemantic,FullDurable")]
+    public void PersistedEnums_Should_HaveExactFrozenMemberSets(string enumName, string expectedMembersCsv)
+    {
+        // Issue #73: persisted enums must have an exact, frozen member set.
+        // Adding a member is a durable-schema change and must be called out,
+        // not silently introduced by complexity consolidation.
+        var enumType = AbstractionsAssembly
+            .GetTypes()
+            .Single(t => t.Name == enumName);
+
+        var expected = expectedMembersCsv.Split(',');
+        var actual = Enum.GetNames(enumType);
+
+        actual.Should().BeEquivalentTo(expected, o => o.WithStrictOrdering(),
+            $"persisted enum {enumName} must have exactly the frozen member set.");
+    }
+
+    [Fact]
     public void ProductionAbstractions_Should_NotExposeCrashWindow()
     {
         var publicType = AbstractionsAssembly

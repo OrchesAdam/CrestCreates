@@ -100,9 +100,14 @@ internal sealed class AgentToolPreDispatchFinalizer
         if (result.Status != AgentToolGovernanceFinalizationStatus.Finalized
             || result.Record is null)
             return AgentToolAuditConfirmation.Unconfirmed;
-        if (EquivalentFinalization(result.Record, expected))
+        // Exact Completed confirmation must use the sole semantic authority:
+        // the canonical finalization comparer compares the complete record
+        // (context, lease including timing, budget reservation, attempt state,
+        // outcome, outcome hash, audit facts, reason code). A second, looser
+        // equality rule must never decide Completed.
+        if (AgentToolGovernancePreDispatchComparer.Equivalent(result.Record, expected))
             return AgentToolAuditConfirmation.Completed;
-        if (SameFinalizationIdentity(result.Record, expected)
+        if (HasSameFinalizationIdentity(result.Record, expected)
             && result.Record.AttemptState == AgentToolGovernanceAttemptFinalState.Indeterminate
             && result.Record.InvocationState is null or AgentToolInvocationTerminalState.Indeterminate)
             return AgentToolAuditConfirmation.Indeterminate;
@@ -125,38 +130,14 @@ internal sealed class AgentToolPreDispatchFinalizer
                 StringComparison.Ordinal)
             && string.Equals(result.ReasonCode, expectedReasonCode, StringComparison.Ordinal);
 
-    internal static bool EquivalentFinalization(
-        AgentToolGovernanceFinalizationRecord left,
-        AgentToolGovernanceFinalizationRecord right)
-        => SameFinalizationIdentity(left, right)
-            && EquivalentContext(left.Context, right.Context)
-            && left.DispatchStarted == right.DispatchStarted
-            && left.BudgetReservation.Equals(right.BudgetReservation)
-            && left.AttemptState == right.AttemptState
-            && left.InvocationState == right.InvocationState
-            && string.Equals(
-                left.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(left.Outcome, left.AuditFacts),
-                right.OutcomeHash ?? AgentToolGovernanceOutcomeHasher.Compute(right.Outcome, right.AuditFacts),
-                StringComparison.Ordinal)
-            && string.Equals(left.ReasonCode, right.ReasonCode, StringComparison.Ordinal);
-
-    internal static bool EquivalentContext(
-        AgentToolGovernanceAuditContext left,
-        AgentToolGovernanceAuditContext right)
-        => left.LogicalInvocationKey == right.LogicalInvocationKey
-            && string.Equals(left.AttemptId, right.AttemptId, StringComparison.Ordinal)
-            && string.Equals(left.InvocationFingerprint, right.InvocationFingerprint, StringComparison.Ordinal)
-            && string.Equals(left.ArgumentsHash, right.ArgumentsHash, StringComparison.Ordinal)
-            && left.ArgumentsEvaluated == right.ArgumentsEvaluated
-            && left.CallOrigin == right.CallOrigin
-            && string.Equals(left.AgentRolesHash, right.AgentRolesHash, StringComparison.Ordinal)
-            && left.ToolContract.Equals(right.ToolContract)
-            && left.CapabilityContract.Equals(right.CapabilityContract)
-            && Equals(left.InputSchemaContract, right.InputSchemaContract)
-            && Equals(left.OutputSchemaContract, right.OutputSchemaContract)
-            && left.Governance.Equals(right.Governance);
-
-    internal static bool SameFinalizationIdentity(
+    /// <summary>
+    /// Narrow identity-only comparison used exclusively to classify an already
+    /// persisted Indeterminate finalization for the same logical attempt. It is
+    /// intentionally narrower than the canonical
+    /// <see cref="AgentToolGovernancePreDispatchComparer.Equivalent(AgentToolGovernanceFinalizationRecord, AgentToolGovernanceFinalizationRecord)"/>
+    /// and must never be used to confirm an exact Completed finalization.
+    /// </summary>
+    internal static bool HasSameFinalizationIdentity(
         AgentToolGovernanceFinalizationRecord left,
         AgentToolGovernanceFinalizationRecord right)
         => string.Equals(left.AuditId, right.AuditId, StringComparison.Ordinal)

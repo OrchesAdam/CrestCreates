@@ -75,8 +75,6 @@ internal sealed record AgentToolPreDispatchRecoveryDecision
 
     public required AgentToolPreDispatchGovernanceAction GovernanceAction { get; init; }
 
-    public required bool RequiresOwnershipClaim { get; init; }
-
     public required string ReasonCode { get; init; }
 
     public bool IsTerminal
@@ -85,6 +83,16 @@ internal sealed record AgentToolPreDispatchRecoveryDecision
             or AgentToolPreDispatchReconciliationStatus.PostDispatchUnknown;
 
     public bool AbandonGate => GateAction == AgentToolPreDispatchGateAction.ClaimAndAbandon;
+
+    /// <summary>
+    /// Whether the settlement executor must first acquire (or recover) Gate
+    /// reconciliation ownership. Derived from <see cref="GateAction"/> so a
+    /// decision can never describe a claim in one place and not in another:
+    /// any terminal Gate mutation is claim-gated by construction.
+    /// </summary>
+    public bool RequiresOwnershipClaim
+        => GateAction is AgentToolPreDispatchGateAction.ClaimAndAbandon
+            or AgentToolPreDispatchGateAction.ClaimAndRelease;
 }
 
 /// <summary>
@@ -275,7 +283,6 @@ internal sealed class AgentToolPreDispatchRecoveryPolicy
             GateAction = gateAction,
             BudgetAction = budgetAction,
             GovernanceAction = governanceAction,
-            RequiresOwnershipClaim = true,
             ReasonCode = reasonCode
         };
 
@@ -286,7 +293,6 @@ internal sealed class AgentToolPreDispatchRecoveryPolicy
             GateAction = AgentToolPreDispatchGateAction.None,
             BudgetAction = AgentToolPreDispatchBudgetAction.None,
             GovernanceAction = AgentToolPreDispatchGovernanceAction.None,
-            RequiresOwnershipClaim = false,
             ReasonCode = reasonCode
         };
 
@@ -297,7 +303,6 @@ internal sealed class AgentToolPreDispatchRecoveryPolicy
             GateAction = AgentToolPreDispatchGateAction.None,
             BudgetAction = AgentToolPreDispatchBudgetAction.None,
             GovernanceAction = AgentToolPreDispatchGovernanceAction.None,
-            RequiresOwnershipClaim = false,
             ReasonCode = reasonCode
         };
 
@@ -308,7 +313,6 @@ internal sealed class AgentToolPreDispatchRecoveryPolicy
             GateAction = AgentToolPreDispatchGateAction.None,
             BudgetAction = AgentToolPreDispatchBudgetAction.None,
             GovernanceAction = AgentToolPreDispatchGovernanceAction.None,
-            RequiresOwnershipClaim = false,
             ReasonCode = reasonCode
         };
 }

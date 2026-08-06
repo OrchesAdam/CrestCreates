@@ -123,8 +123,36 @@ public class AgentToolPreDispatchSettlementExecutorTests
             Snapshot(harness.Gate.CurrentState, AgentToolBudgetReadStatus.Reserved, AgentToolGovernancePreDispatchReadStatus.Accepted),
             context: null);
 
+        // A reservation that is still Reserved means the authority did not confirm
+        // the release. That is a retryable authority outcome, never a bare conflict:
+        // it must carry a mutable observation so a later reconciler can converge.
+        result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending);
+        result.Persistence.Should().Be(AgentToolPreDispatchSettlementPersistence.Observation);
+        result.ReasonCode.Should().Be("budget_finalize_unconfirmed");
+
+        harness.Gate.CompleteCallCount.Should().Be(0);
+        harness.Auditor.FinalizeCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task BudgetFinalizeToCommitted_Should_ReturnConflictWithTerminalReceipt()
+    {
+        var (executor, harness) = CreateExecutor(AgentToolInvocationPreDispatchState.Accepted);
+        // A reservation that moved to another terminal state (Committed) is a
+        // deterministic conflict and must persist a terminal receipt.
+        harness.BudgetGate.FinalizeResultState = AgentToolBudgetReservationState.Committed;
+
+        var result = await executor.ExecuteAsync(
+            SampleIdentity("attempt-1"),
+            ReleasedDecision(
+                budgetAction: AgentToolPreDispatchBudgetAction.FinalizeReleased,
+                governanceAction: AgentToolPreDispatchGovernanceAction.FinalizeReleasedNoDispatch),
+            Snapshot(harness.Gate.CurrentState, AgentToolBudgetReadStatus.Reserved, AgentToolGovernancePreDispatchReadStatus.Accepted),
+            context: null);
+
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Conflict);
-        result.Persistence.Should().Be(AgentToolPreDispatchSettlementPersistence.None);
+        result.Persistence.Should().Be(AgentToolPreDispatchSettlementPersistence.TerminalReceipt);
+        result.ReasonCode.Should().Be("budget_finalize_conflict");
 
         harness.Gate.CompleteCallCount.Should().Be(0);
         harness.Auditor.FinalizeCallCount.Should().Be(0);
@@ -337,7 +365,6 @@ public class AgentToolPreDispatchSettlementExecutorTests
             GateAction = gateAction,
             BudgetAction = budgetAction,
             GovernanceAction = governanceAction,
-            RequiresOwnershipClaim = true,
             ReasonCode = "released_no_dispatch"
         };
 
@@ -348,7 +375,6 @@ public class AgentToolPreDispatchSettlementExecutorTests
             GateAction = AgentToolPreDispatchGateAction.ClaimAndAbandon,
             BudgetAction = AgentToolPreDispatchBudgetAction.FinalizeReleased,
             GovernanceAction = AgentToolPreDispatchGovernanceAction.None,
-            RequiresOwnershipClaim = true,
             ReasonCode = "budget_reserved_no_checkpoint"
         };
 
