@@ -14,11 +14,38 @@ public class AgentToolPreDispatchComplexityArchitectureTests
     private static readonly Assembly AbstractionsAssembly =
         typeof(AgentToolPreDispatchIdentity).Assembly;
 
+    private static readonly Assembly AgentToolsAssembly =
+        typeof(AgentToolInvoker).Assembly;
+
     private static readonly HashSet<string> TestOnlyTypeNames = new()
     {
         "AgentToolPreDispatchCrashWindow",
         "StoredAgentToolPreDispatchSnapshot"
     };
+
+    [Fact]
+    public void Invoker_Should_NotDependOnReconciliationStore()
+    {
+        // Slice 8.4: the live pre-dispatch mainline moved out of the invoker.
+        // The invoker must no longer reach into the durable reconciliation store.
+        var storeInterface = AbstractionsAssembly
+            .GetTypes()
+            .SingleOrDefault(t => t.Name == "IAgentToolPreDispatchReconciliationStore");
+
+        storeInterface.Should().NotBeNull("the store contract should still exist in Abstractions.");
+
+        var invoker = AgentToolsAssembly.GetType("CrestCreates.Agent.Tools.AgentToolInvoker");
+        invoker.Should().NotBeNull();
+
+        var storeDependency = invoker!.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .Any(f => f.FieldType == storeInterface)
+            || invoker.GetConstructors()
+                .SelectMany(c => c.GetParameters())
+                .Any(p => p.ParameterType == storeInterface);
+
+        storeDependency.Should().BeFalse(
+            "AgentToolInvoker must not hold or receive the reconciliation store; the pre-dispatch mainline lives in the coordinator.");
+    }
 
     [Fact]
     public void ProductionAbstractions_Should_NotExposeCrashWindow()
