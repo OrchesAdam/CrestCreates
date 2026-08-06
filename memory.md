@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-07-31 (Phase 9b durable persistence CI and NativeAOT evidence verified)
+Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation — all slices implemented; PostgreSQL contract/crash/NativeAOT evidence green in CI run 30994557565; review rounds 1–3 remediated, round-3 MarkIndeterminate CAS linearization closed)
 
 ## Purpose
 
@@ -2082,6 +2082,171 @@ Compatibility GET
 - Agent Tools Runtime: 116 passed.
 - Dependency Boundaries: 50 passed.
 - CodeGenerator: 283 passed.
+
+### Phase 9b+ — Durable Agent Tool Pre-Dispatch Reconciliation (2026-08-03, remediated 2026-08-06, ownership-fence 2026-08-06, MarkIndeterminate CAS 2026-08-06)
+
+**Status**: All 7 slices implemented. PostgreSQL contract, crash-window, retention and
+NativeAOT evidence restored as required CI gates (Docker-backed job re-enabled in
+`.github/workflows/ci.yml`). The evidence gate is **green in CI**
+(run 30994557565: PostgreSQL contract/crash 64/64, PostgreSQL AOT fixture 1/1,
+all other jobs green); PR #72 re-added `Closes #70`.
+
+Second review round (ownership fence) closed with a new P0 fix:
+- `Indeterminate` is now a real fence: `MarkIndeterminateAsync` freezes the current
+  lease into `frozen_lease_json` (V009); all 12 live-worker
+  forward transitions CAS on lease + attempt + fencing token and additionally require
+  `indeterminate_at is null`. InMemory clears the active lease on Indeterminate, so both
+  providers converge on the same observable semantics.
+- Reconciliation is now claim-first: the reconciler calls
+  `TryBeginPreDispatchReconciliationAsync` (single CAS: state ∈ Pending/Ready/Accepted,
+  `DispatchStarted == false`, indeterminate OR expired lease OR `OwnershipLost` proof,
+  expected revision) to obtain a durable `ReconciliationPending` claim that invalidates
+  the worker's fencing token — only then does it settle budget, finalize governance, and
+  publish the terminal outcome via `CompletePreDispatchReconciliationAsync`.
+- 13 shared ownership-fence contract cases (IndeterminatePending/Ready/Accepted fence,
+  LivePending/LiveReady safety, ExpiredLease/MarkedIndeterminate convergence,
+  ClaimWins × 3, DispatchWins × 2, live race single-winner) run against **both** the
+  InMemory and PostgreSQL providers from the shared Testing project.
+
+Third review round (MarkIndeterminate linearization) closed with one more P0 fix:
+- `PostgreSqlAgentToolInvocationGate.MarkIndeterminateCoreAsync` is now a single
+  atomic CAS: it pre-reads `revision + state` by lease identity, then
+  `UPDATE ... WHERE lease_id AND attempt_id AND fencing_token AND revision = @rev
+  AND pre_dispatch_state = @ps AND indeterminate_at is null RETURNING revision`.
+  The UPDATE is the linearization point, so a concurrently published terminal
+  receipt (`PublishCompletion`/`PublishRelease`) or a competing ownership transition
+  can never be overwritten by a late fence.
+- A zero-row CAS is **never reported as success**: the method re-reads without the
+  fencing-token predicate (`ReadGateRowByLeaseAsync`) and classifies the outcome —
+  same existing Indeterminate → idempotent success; Completed/Released → terminal
+  conflict throw; different revision/state → ownership-changed throw; missing row →
+  stale throw.
+- The fencing-token bump was **removed** from `MarkIndeterminate` (V009 keeps the
+  frozen lease). InMemory keeps the token on MarkIndeterminate, and keeping it lets
+  `GetCompletionStateAsync`/`GetReleaseStateAsync` (keyed by the original lease)
+  observe the Indeterminate marker, preserving provider-equivalent semantics. Fencing
+  comes from the `indeterminate_at is null` CAS guards; the reconciliation claim
+  (which does bump the token) remains the ownership hand-over path.
+- Read-order fixes in `PublishCompletionCoreAsync`, `GetCompletionStateCoreAsync`,
+  `PublishReleaseCoreAsync`, `GetReleaseStateCoreAsync`: terminal state →
+  `IsIndeterminate` → Pending → Unknown, so a Pending row with an indeterminate
+  marker reads as Indeterminate (matching InMemory). `PrepareCompletionCoreAsync` /
+  `PrepareReleaseCoreAsync` reject an already-fenced row up front.
+- 10 new shared contract cases added (PublishedCompletion/Release never accept a late
+  indeterminate mutation, CompletionPending/ReleasePending with marker read as
+  Indeterminate, MarkIndeterminate idempotent on existing marker, zero-affected-rows
+  not reported as success, MarkIndeterminate vs DispatchStarted/Completion/Release
+  linearizable single-winner with a second independent provider/connection), all
+  green on both InMemory and PostgreSQL runners. No schema change — no V010 required.
+
+First real execution (previously the job was excluded) surfaced contract failures
+that were fixed and re-verified locally against PostgreSQL 16:
+
+- JSONB normalization broke raw-string comparison of `tool_contract_json` and
+  completion/release payloads — comparisons now use semantic JSON equality
+  (`PostgreSqlRuntimeStoreSupport.JsonEquals`), restoring attempt idempotency,
+  capacity enforcement, logical-conflict rejection and prepare-replay.
+- CrashWorker/AotHost built `AgentExecutionContext` values that contradicted their
+  `LogicalInvocationKey`, so `AgentToolGovernanceGuard.IsValid` denied every reserve —
+  contexts now derive from the key.
+- Budget finalization lookups are tenant-scoped (INV-15); tests pass `TenantId`.
+- Release prepare requires a non-dispatched (Accepted) attempt, matching the
+  InMemory contract; release tests use that flow.
+- Reconciliation receipt tests truncate timestamps to PostgreSQL microsecond precision.
+- AotHost per-window markers derived from the sentinel (`CW04`…`CW09`), not the
+  last two scenario characters.
+
+Verified locally (PostgreSQL 16 on 127.0.0.1): 86/86 PostgreSQL contract/crash tests
+pass (64 contract/crash + 13 ownership-fence + 9 MarkIndeterminate-CAS), AotFixture native publish-link-run +
+subprocess crash recovery passes, 292 Agent.Tools (270 + 13 ownership-fence + 9 MarkIndeterminate-CAS) +
+93 boundary + 16 abstractions tests pass.
+
+**PR**: #72
+
+**What was built**:
+
+- **Pre-dispatch contracts** (3 new contract files in Abstractions):
+  - `AgentToolPreDispatchContracts.cs` — identity, receipt, write/read results, budget read result
+  - `AgentToolPreDispatchReconciliationContracts.cs` — IAgentToolPreDispatchReconciler, reconciliation status/observation/receipt/result, store with CAS semantics, persistence capabilities, dormant accountability producer
+  - `AgentToolInvocationPreDispatchContracts.cs` — intent snapshot, bind reservation/accepted requests, pre-dispatch result
+
+- **Semantic comparer** (`AgentToolGovernancePreDispatchComparer`, moved to Abstractions):
+  - Full INV-04 dispatch-authorizing fact validation: identity+AttemptId, fingerprint/args/roles, contract identities, effective governance, lease, approval+evidence, reservation
+  - 56 mutation test rows proving detection coverage
+
+- **Extended interfaces** (3 existing interfaces extended):
+  - `IAgentToolGovernanceAuditor` — `RecordPreDispatchAsync` returns typed write result; added `GetPreDispatchStateAsync`
+  - `IAgentToolBudgetGate` — added `GetReservationStateAsync`
+  - `IAgentToolInvocationGate` — 5 pre-dispatch methods; `TryMarkDispatchStartedAsync` requires receipt + reservationId (INV-08 CAS)
+
+- **Pre-dispatch state machine** (Slice 3):
+  - Full Pending → Ready → Accepted → DispatchStarted state machine in gate
+  - Invoker refactored to stepwise orchestration with acknowledgement-loss recovery at every boundary
+  - Budget gate attempt-idempotent reserve/read contract
+  - `AgentToolGovernanceAuditHandle` deleted (superseded by `AgentToolGovernancePreDispatchReceipt`)
+
+- **Default reconciler** (Slice 4):
+  - Spec 7.6 sequential reconciliation: read Gate → read Budget → read checkpoint → compare → release → persist
+  - Observation/receipt semantics with CAS (optimistic observations, first-write-wins terminal receipts)
+  - Repeated reconciliation returns `AlreadyReleased` from existing terminal receipt
+  - Best-effort accountability producer (no-op until Slice 6)
+
+- **PostgreSQL participants** (Slice 5):
+  - V007 migration: `agent_tool_pre_dispatch_checkpoints`, `agent_tool_budget_reservations`, `agent_tool_invocation_pre_dispatch`, `agent_tool_reconciliation_observations`, `agent_tool_reconciliation_receipts`
+  - `PostgreSqlAgentToolGovernanceAuditor`, `PostgreSqlAgentToolBudgetGate`, `PostgreSqlAgentToolInvocationGate`, `PostgreSqlAgentToolPreDispatchReconciliationStore`
+  - `[UnconditionalSuppressMessage]` for Tier 3 IL2026/IL3050 (JSON serialization of known record types)
+  - DI registration in `AddCrestCreatesPostgreSqlRuntimePersistence`
+
+- **Retention, cleanup, accountability** (Slice 6):
+  - `PostgreSqlAgentToolPreDispatchCleanup` with state-protected deletion (Pending, Ready, Accepted, ReleasePending, CompletionPending, Indeterminate are not cleanable)
+  - Retention options: `PreDispatchReceiptRetentionDays` (90), `PreDispatchObservationRetentionDays` (14), `PreDispatchFinalizationRetentionDays` (7)
+  - `AgentToolPreDispatchReconciliationAccountabilityProducer` wired to `IAuditRecorder` — emits safe AuditEnvelope (IDs/descriptors/reason only, no arguments/hints/outputs/SQL/provider errors)
+  - Accountability failure does not change reconciliation result
+
+- **NativeAOT evidence** (Slice 7, remediated):
+  - Pre-dispatch scenario upgraded from provider dispose→rebuild to real
+    CrashWorker-style subprocess recovery: the AotHost spawns its own native
+    executable per crash window, the child commits the durable writes and prints
+    the sentinel + AttemptId, the parent kills the process tree, waits for the
+    PostgreSQL backend to exit, and a fresh process recovers by identity and
+    reconciles with zero dispatcher calls.
+  - Covers CW04/CW05/CW07/CW08/CW09; per-window markers
+    `CRESTCREATES_AGENTTOOL_PREDISPATCH_CWxx_OK` plus
+    `CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK`; AotFixture test asserts them
+  - Docker-backed CI job re-enabled so PostgreSQL contract tests, crash-window
+    tests (real subprocess kill/recovery) and the NativeAOT publish-link-run
+    fixture are required evidence again (previously excluded by a87a3597)
+
+- **Test infrastructure**:
+  - Runner-free `CrestCreates.Agent.Tools.Persistence.Testing` project (Abstractions-only, no runners)
+  - 70-ID manifest (H01-H10, B01-B18, F01-F30, C01-C12) as ARCH test
+  - 8 ARCH tests + 5 BOUND tests
+  - 283 Agent.Tools tests, 93 boundary tests, 16 abstractions tests
+  - 13 shared ownership-fence contract cases executed by both InMemory
+    (`AgentToolPreDispatchOwnershipFenceTests`) and PostgreSQL
+    (`PostgreSqlAgentToolPreDispatchOwnershipFenceTests`) runners
+
+**Ownership-fence remediation** (second review round P0):
+- `AgentToolPreDispatchReconciliationClaimContracts.cs` — claim request/result/claim,
+  completion kind; two new `IAgentToolInvocationGate` methods
+  (`TryBeginPreDispatchReconciliationAsync`, `CompletePreDispatchReconciliationAsync`)
+- `ReconciliationPending = 11` gate state; `Revision`, `ReconciliationClaimToken`,
+  `ReconciliationClaimedState`, `ReconciliationClaimedAt` on the pre-dispatch result
+- V009 migration: `frozen_lease_json`, `reconciliation_claim_*`, `indeterminate_*`
+  columns; `indeterminate_at is null` guards on 12 CAS transitions
+- Reconciler reorder: claim Gate ownership FIRST → settle budget → finalize governance
+  → `CompletePreDispatchReconciliationAsync`; DispatchStarted early-out is
+  `PostDispatchUnknown`; claim refusal with a live lease returns `StillPending`
+- PG auditor `accepted_at` normalized to PostgreSQL microsecond precision so the
+  returned receipt exactly matches the persisted value (comparer `AcceptedAt ==`
+  holds across providers)
+
+**Key decisions**:
+- `AgentToolGovernancePreDispatchComparer` moved to Abstractions (not runtime) per Spec 9.1 — Persistence providers need it for conflict detection
+- `AgentToolGovernanceAuditHandle` deleted outright (not deprecated) — fully superseded by `AgentToolGovernancePreDispatchReceipt`
+- Accountability producer uses `IAuditRecorder` (not `IAuditSink`) per boundary rules
+- Reconciler does not reference `ICapabilityDispatcher` or `IAgentToolApprovalGate` (review gate)
+- Ownership fence: the Gate decides who owns the Attempt BEFORE any budget/governance mutation — the reconciliation claim invalidates the worker's fencing token, so budget release and governance finalization can only follow a granted claim (never precede it)
 
 ## Recommended Next Thread Entry Prompt
 

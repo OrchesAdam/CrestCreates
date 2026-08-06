@@ -15,7 +15,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
 {
     private readonly object _sync = new();
     private readonly TimeProvider _timeProvider;
-    private readonly Dictionary<AuditKey, AuditEntry> _entriesByKey = [];
+    private readonly Dictionary<AgentToolPreDispatchIdentity, AuditEntry> _entriesByKey = [];
     private readonly Dictionary<string, AuditEntry> _entriesById
         = new(StringComparer.Ordinal);
     private readonly List<AgentToolGovernanceDecisionRecord> _decisions = [];
@@ -85,7 +85,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask<AgentToolGovernanceAuditHandle> RecordPreDispatchAsync(
+    public ValueTask<AgentToolGovernancePreDispatchWriteResult> RecordPreDispatchAsync(
         AgentToolGovernancePreDispatchRecord record,
         CancellationToken cancellationToken = default)
     {
@@ -95,29 +95,64 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
 
         lock (_sync)
         {
-            var key = new AuditKey(
+            var identity = new AgentToolPreDispatchIdentity(
                 record.Context.LogicalInvocationKey,
                 record.Context.AttemptId);
-            if (_entriesByKey.TryGetValue(key, out var existing))
+            if (_entriesByKey.TryGetValue(identity, out var existing))
             {
                 if (!Equivalent(existing.PreDispatch, record))
                 {
-                    throw new InvalidOperationException(
-                        "The governance pre-dispatch checkpoint conflicts with the existing AuditId.");
+                    return ValueTask.FromResult(new AgentToolGovernancePreDispatchWriteResult
+                    {
+                        Status = AgentToolGovernancePreDispatchWriteStatus.Conflict
+                    });
                 }
 
-                return ValueTask.FromResult(existing.Handle);
+                return ValueTask.FromResult(new AgentToolGovernancePreDispatchWriteResult
+                {
+                    Status = AgentToolGovernancePreDispatchWriteStatus.Duplicate,
+                    Receipt = existing.Receipt
+                });
             }
 
-            var handle = new AgentToolGovernanceAuditHandle
+            var receipt = new AgentToolGovernancePreDispatchReceipt
             {
+                Identity = identity,
                 AuditId = $"audit-{Guid.NewGuid():N}",
                 AcceptedAt = _timeProvider.GetUtcNow()
             };
-            var entry = new AuditEntry(handle, record);
-            _entriesByKey.Add(key, entry);
-            _entriesById.Add(handle.AuditId, entry);
-            return ValueTask.FromResult(handle);
+            var entry = new AuditEntry(receipt, record);
+            _entriesByKey.Add(identity, entry);
+            _entriesById.Add(receipt.AuditId, entry);
+            return ValueTask.FromResult(new AgentToolGovernancePreDispatchWriteResult
+            {
+                Status = AgentToolGovernancePreDispatchWriteStatus.Accepted,
+                Receipt = receipt
+            });
+        }
+    }
+
+    public ValueTask<AgentToolGovernancePreDispatchReadResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (!_entriesByKey.TryGetValue(identity, out var existing))
+            {
+                return ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult
+                {
+                    Status = AgentToolGovernancePreDispatchReadStatus.Missing
+                });
+            }
+
+            return ValueTask.FromResult(new AgentToolGovernancePreDispatchReadResult
+            {
+                Status = AgentToolGovernancePreDispatchReadStatus.Accepted,
+                Receipt = existing.Receipt,
+                Checkpoint = DeepClone(existing.PreDispatch)
+            });
         }
     }
 
@@ -160,6 +195,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
 
     public ValueTask<AgentToolGovernanceFinalizationResult> GetFinalizationStateAsync(
         string auditId,
+        string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(auditId);
@@ -167,6 +203,17 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
         lock (_sync)
         {
             if (!_entriesById.TryGetValue(auditId, out var entry))
+            {
+                return ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
+                {
+                    Status = AgentToolGovernanceFinalizationStatus.Unknown
+                });
+            }
+
+            // Tenant identity is part of every lookup (INV-15). A lookup that
+            // does not match the exact tenant must not return the record.
+            if (tenantId is not null
+                && !string.Equals(entry.PreDispatch.Context.LogicalInvocationKey.TenantId, tenantId, StringComparison.Ordinal))
             {
                 return ValueTask.FromResult(new AgentToolGovernanceFinalizationResult
                 {
@@ -332,11 +379,7 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
     private static bool Equivalent(
         AgentToolGovernancePreDispatchRecord left,
         AgentToolGovernancePreDispatchRecord right)
-        => left.Context.LogicalInvocationKey == right.Context.LogicalInvocationKey
-            && EquivalentContext(left.Context, right.Context)
-            && left.Lease.Equals(right.Lease)
-            && left.BudgetReservation.Equals(right.BudgetReservation)
-            && left.Approval.Equals(right.Approval);
+        => AgentToolGovernancePreDispatchComparer.Equivalent(left, right);
 
     private static bool MatchesPreDispatch(
         AgentToolGovernancePreDispatchRecord preDispatch,
@@ -471,18 +514,33 @@ public sealed class DevelopmentInMemoryAgentToolGovernanceAuditor
             _ => false
         };
 
+    private static AgentToolGovernancePreDispatchRecord DeepClone(
+        AgentToolGovernancePreDispatchRecord source)
+    {
+        var context = source.Context with
+        {
+            Governance = source.Context.Governance with
+            {
+                Budget = source.Context.Governance.Budget with { }
+            }
+        };
+        return source with
+        {
+            Context = context,
+            Lease = source.Lease with { },
+            Approval = source.Approval with { },
+            BudgetReservation = source.BudgetReservation with { }
+        };
+    }
+
     private sealed class AuditEntry(
-        AgentToolGovernanceAuditHandle handle,
+        AgentToolGovernancePreDispatchReceipt receipt,
         AgentToolGovernancePreDispatchRecord preDispatch)
     {
-        public AgentToolGovernanceAuditHandle Handle { get; } = handle;
+        public AgentToolGovernancePreDispatchReceipt Receipt { get; } = receipt;
 
         public AgentToolGovernancePreDispatchRecord PreDispatch { get; } = preDispatch;
 
         public AgentToolGovernanceFinalizationRecord? Finalization { get; set; }
     }
-
-    private readonly record struct AuditKey(
-        AgentToolLogicalInvocationKey LogicalInvocationKey,
-        string AttemptId);
 }

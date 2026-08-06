@@ -61,6 +61,30 @@ internal static class PostgreSqlRuntimeStoreSupport
         => exception.SqlState == PostgresErrorCodes.UniqueViolation
             && string.Equals(exception.ConstraintName, constraint, StringComparison.Ordinal);
 
+    /// <summary>
+    /// Semantic JSON equality. PostgreSQL normalizes jsonb values (sorted keys,
+    /// no insignificant whitespace), so a stored jsonb read back as text never
+    /// string-matches a freshly serialized payload even when the documents are
+    /// equivalent. Compare parsed documents instead.
+    /// </summary>
+    public static bool JsonEquals(string? left, string? right)
+    {
+        if (string.Equals(left, right, StringComparison.Ordinal))
+            return true;
+        if (left is null || right is null)
+            return false;
+        try
+        {
+            using var leftDocument = JsonDocument.Parse(left);
+            using var rightDocument = JsonDocument.Parse(right);
+            return JsonElement.DeepEquals(leftDocument.RootElement, rightDocument.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     public static RuntimePersistenceContractException TranslateForeignKeyViolation(PostgresException exception)
     {
         var code = exception.ConstraintName switch

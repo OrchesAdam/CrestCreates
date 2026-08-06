@@ -4,7 +4,12 @@ using CrestCreates.Metadata.AgentTool;
 
 namespace CrestCreates.Agent.Tools;
 
-internal static class AgentToolGovernanceGuard
+/// <summary>
+/// Shared authority for validating governance contexts and their component
+/// facts. Lives in Abstractions so every durable provider (InMemory, PostgreSQL)
+/// applies the exact same validation instead of diverging per implementation.
+/// </summary>
+public static class AgentToolGovernanceGuard
 {
     public static bool IsValid(AgentToolGovernanceContext context)
         => context is not null

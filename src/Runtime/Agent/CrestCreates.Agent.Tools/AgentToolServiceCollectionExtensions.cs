@@ -56,6 +56,20 @@ public static class AgentToolServiceCollectionExtensions
         services.TryAddSingleton<AgentToolResultMapper>();
         services.TryAddScoped<IAgentToolCatalog, AgentToolCatalog>();
         services.TryAddScoped<IAgentToolInvoker, AgentToolInvoker>();
+
+        // Pre-dispatch reconciliation: register the reconciler, accountability
+        // producer, and development in-memory participants. Durable providers
+        // (PostgreSQL etc.) replace the in-memory participants via RemoveAll/Replace
+        // in their own extension — the reconciler and producer remain.
+        services.TryAddSingleton<DevelopmentInMemoryAgentToolInvocationGate>();
+        services.TryAddSingleton<IAgentToolInvocationGate>(sp => sp.GetRequiredService<DevelopmentInMemoryAgentToolInvocationGate>());
+        services.TryAddSingleton<IAgentToolInvocationLeaseAbandoner>(sp => sp.GetRequiredService<DevelopmentInMemoryAgentToolInvocationGate>());
+        services.TryAddSingleton<IAgentToolPreDispatchPersistenceCapabilities>(sp => sp.GetRequiredService<DevelopmentInMemoryAgentToolInvocationGate>());
+        services.TryAddSingleton<IAgentToolBudgetGate, DevelopmentInMemoryAgentToolBudgetGate>();
+        services.TryAddSingleton<IAgentToolGovernanceAuditor, DevelopmentInMemoryAgentToolGovernanceAuditor>();
+        services.TryAddSingleton<IAgentToolPreDispatchReconciliationStore, DevelopmentInMemoryAgentToolPreDispatchReconciliationStore>();
+        services.TryAddSingleton<IAgentToolPreDispatchReconciliationAccountabilityProducer, AgentToolPreDispatchReconciliationAccountabilityProducer>();
+        services.TryAddSingleton<IAgentToolPreDispatchReconciler, DefaultAgentToolPreDispatchReconciler>();
         return services;
     }
 }

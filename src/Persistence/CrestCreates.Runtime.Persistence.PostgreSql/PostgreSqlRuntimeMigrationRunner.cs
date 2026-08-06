@@ -175,7 +175,14 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             "runtime_operation_receipts",
             "descriptor_snapshots",
             "descriptor_snapshot_entries",
-            "runtime_audit_envelopes"
+            "runtime_audit_envelopes",
+            "agent_tool_pre_dispatch_checkpoints",
+            "agent_tool_budget_reservations",
+            "agent_tool_invocation_pre_dispatch",
+            "agent_tool_governance_decisions",
+            "agent_tool_governance_finalizations",
+            "agent_tool_reconciliation_observations",
+            "agent_tool_reconciliation_receipts"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -469,6 +476,9 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         private static readonly (string Type, string Nullable) BigInt = ("bigint", "NO");
         private static readonly (string Type, string Nullable) Integer = ("integer", "NO");
         private static readonly (string Type, string Nullable) Json = ("jsonb", "NO");
+        private static readonly (string Type, string Nullable) NullableJson = ("jsonb", "YES");
+        private static readonly (string Type, string Nullable) IntegerNullable = ("integer", "YES");
+        private static readonly (string Type, string Nullable) Boolean = ("boolean", "NO");
         private static readonly (string Type, string Nullable) Timestamp = ("timestamp with time zone", "NO");
         private static readonly (string Type, string Nullable) NullableTimestamp = ("timestamp with time zone", "YES");
 
@@ -526,7 +536,98 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             {
                 ["sink_id"] = Text, ["audit_id"] = Text, ["integrity_json"] = Json,
                 ["envelope_json"] = Json, ["accepted_at"] = Timestamp
-            }, ["sink_id", "audit_id"], [], [], [])
+            }, ["sink_id", "audit_id"], [], [], []),
+            new("agent_tool_pre_dispatch_checkpoints", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["audit_id"] = Text, ["attempt_id"] = Text,
+                ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
+                ["arguments_hash"] = NullableText, ["arguments_evaluated"] = Boolean,
+                ["call_origin"] = Integer, ["agent_roles_hash"] = NullableText,
+                ["tool_contract_json"] = Json, ["capability_contract_json"] = Json,
+                ["input_schema_contract_json"] = NullableJson, ["output_schema_contract_json"] = NullableJson,
+                ["governance_json"] = Json, ["lease_json"] = Json,
+                ["approval_json"] = Json, ["budget_reservation_json"] = Json,
+                ["accepted_at"] = Timestamp, ["created_at"] = Timestamp
+            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], []),
+            new("agent_tool_budget_reservations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["reservation_id"] = Text, ["attempt_id"] = Text,
+                ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
+                ["category"] = Text, ["cost_units"] = BigInt, ["max_calls_per_execution"] = IntegerNullable,
+                ["state"] = Integer, ["created_at"] = Timestamp, ["updated_at"] = Timestamp,
+                ["tool_contract_json"] = Json, ["capacity_key"] = Text
+            }, ["tenant_id", "reservation_id"],
+            [new("ck_agent_tool_budget_state_range", "check ((state >= 0) and (state <= 4))"),
+             new("ck_agent_tool_budget_positive_costs", "check (cost_units > 0)"),
+             new("ck_agent_tool_budget_maxcalls", "check ((max_calls_per_execution is null) or (max_calls_per_execution > 0))")],
+            [new("ux_agent_tool_budget_attempt", ["tenant_id", "attempt_id"], ""),
+             new("ix_agent_tool_budget_capacity", ["tenant_id", "capacity_key"], "", Unique: false)],
+            []),
+            new("agent_tool_invocation_pre_dispatch", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["lease_id"] = Text, ["attempt_id"] = Text,
+                ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
+                ["fencing_token"] = BigInt, ["acquired_at"] = Timestamp, ["expires_at"] = Timestamp,
+                ["pre_dispatch_state"] = Integer, ["revision"] = BigInt,
+                ["intent_json"] = NullableJson, ["bound_reservation_id"] = NullableText,
+                ["bound_reservation_json"] = NullableJson,
+                ["accepted_receipt_json"] = NullableJson, ["abandoned_receipt_json"] = NullableJson,
+                ["last_reason_code"] = NullableText,
+                ["dispatch_started_at"] = NullableTimestamp,
+                ["completion_outcome_json"] = NullableJson, ["release_outcome_json"] = NullableJson,
+                ["indeterminate_at"] = NullableTimestamp, ["indeterminate_reason"] = NullableText,
+                ["completion_prepared_at"] = NullableTimestamp, ["release_prepared_at"] = NullableTimestamp,
+                ["frozen_lease_json"] = NullableJson, ["reconciliation_claim_token"] = NullableText,
+                ["reconciliation_claimed_at"] = NullableTimestamp,
+                ["reconciliation_claimed_state"] = IntegerNullable,
+                ["reconciliation_ownership_evidence"] = NullableText,
+                ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["tenant_id", "lease_id"],
+            [new("ck_agent_tool_pre_dispatch_state_range", "check ((pre_dispatch_state >= 0) and (pre_dispatch_state <= 11))"),
+             new("ck_agent_tool_pre_dispatch_revision", "check (revision > 0)"),
+             new("ck_agent_tool_pre_dispatch_fencing", "check (fencing_token > 0)"),
+             new("ck_agent_tool_pre_dispatch_ready_shape", "check ((pre_dispatch_state <> 2) or (bound_reservation_id is not null))"),
+             new("ck_agent_tool_pre_dispatch_accepted_shape", "check ((pre_dispatch_state <> 3) or (accepted_receipt_json is not null))"),
+             new("ck_agent_tool_pre_dispatch_abandoned_shape", "check ((pre_dispatch_state <> 5) or (abandoned_receipt_json is not null))"),
+             new("ck_agent_tool_pre_dispatch_release_pending_shape", "check ((pre_dispatch_state <> 6) or (release_outcome_json is not null))"),
+             new("ck_agent_tool_pre_dispatch_completion_pending_shape", "check ((pre_dispatch_state <> 8) or (completion_outcome_json is not null))"),
+             new("ck_agent_tool_pre_dispatch_reconciliation_shape", "check ((pre_dispatch_state <> 11) or (reconciliation_claim_token is not null))")],
+            [new("ux_agent_tool_invocation_pre_dispatch_attempt", ["tenant_id", "attempt_id"], ""),
+             new("ux_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "pre_dispatch_state = any (array[0, 1, 2, 3, 4, 6, 8, 10, 11])"),
+             new("ix_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "", Unique: false)],
+            []),
+            new("agent_tool_governance_decisions", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["audit_id"] = Text,
+                ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
+                ["decision_state"] = Integer, ["decision_json"] = Json,
+                ["created_at"] = Timestamp
+            }, ["tenant_id", "audit_id"],
+            [new("ck_agent_tool_decision_state_range", "check ((decision_state >= 0) and (decision_state <= 2))")],
+            [new("ux_agent_tool_decision_identity", ["tenant_id", "logical_invocation_key", "attempt_id"], "")],
+            []),
+            new("agent_tool_governance_finalizations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["audit_id"] = Text,
+                ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
+                ["attempt_state"] = Integer, ["finalization_json"] = Json,
+                ["created_at"] = Timestamp
+            }, ["tenant_id", "audit_id"],
+            [new("ck_agent_tool_finalization_state_range", "check ((attempt_state >= 0) and (attempt_state <= 10))")],
+            [], []),
+            new("agent_tool_reconciliation_observations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
+                ["revision"] = BigInt, ["status"] = Integer, ["reason_code"] = Text,
+                ["observed_at"] = Timestamp, ["observation_json"] = NullableJson
+            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], []),
+            new("agent_tool_reconciliation_receipts", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
+                ["status"] = Integer, ["reason_code"] = Text,
+                ["terminal_at"] = Timestamp, ["integrity_value"] = Text,
+                ["receipt_json"] = Json, ["created_at"] = Timestamp
+            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], [])
         ];
     }
 
@@ -708,6 +809,191 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             alter table {schema}.runtime_operation_receipts
                 add constraint ck_runtime_receipt_transition_revision check (workflow_to_revision = workflow_from_revision + 1),
                 add constraint ck_runtime_receipt_tenant_scope check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''));
+            """),
+        new RuntimeMigration("V007", "agent_tool_pre_dispatch_reconciliation", """
+            create table {schema}.agent_tool_pre_dispatch_checkpoints (
+                tenant_id text not null,
+                audit_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                invocation_fingerprint text not null,
+                arguments_hash text null,
+                arguments_evaluated boolean not null,
+                call_origin integer not null,
+                agent_roles_hash text null,
+                tool_contract_json jsonb not null,
+                capability_contract_json jsonb not null,
+                input_schema_contract_json jsonb null,
+                output_schema_contract_json jsonb null,
+                governance_json jsonb not null,
+                lease_json jsonb not null,
+                approval_json jsonb not null,
+                budget_reservation_json jsonb not null,
+                accepted_at timestamptz not null,
+                created_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, logical_invocation_key, attempt_id)
+            );
+
+            create table {schema}.agent_tool_budget_reservations (
+                tenant_id text not null,
+                reservation_id text not null,
+                attempt_id text not null,
+                logical_invocation_key jsonb not null,
+                invocation_fingerprint text not null,
+                category text not null,
+                cost_units bigint not null,
+                max_calls_per_execution integer null,
+                state integer not null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, reservation_id)
+            );
+            create unique index ux_agent_tool_budget_attempt on {schema}.agent_tool_budget_reservations (tenant_id, attempt_id);
+
+            create sequence {schema}.agent_tool_fencing_token_seq as bigint;
+
+            create table {schema}.agent_tool_invocation_pre_dispatch (
+                tenant_id text not null,
+                lease_id text not null,
+                attempt_id text not null,
+                logical_invocation_key jsonb not null,
+                invocation_fingerprint text not null,
+                fencing_token bigint not null,
+                acquired_at timestamptz not null,
+                expires_at timestamptz not null,
+                pre_dispatch_state integer not null default 0,
+                revision bigint not null default 1,
+                intent_json jsonb null,
+                bound_reservation_id text null,
+                bound_reservation_json jsonb null,
+                accepted_receipt_json jsonb null,
+                abandoned_receipt_json jsonb null,
+                last_reason_code text null,
+                dispatch_started_at timestamptz null,
+                completion_outcome_json jsonb null,
+                release_outcome_json jsonb null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, lease_id)
+            );
+            create unique index ux_agent_tool_invocation_pre_dispatch_attempt on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, attempt_id);
+            create unique index ux_agent_tool_invocation_pre_dispatch_logical on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key) where pre_dispatch_state in (0, 1, 2, 3, 4, 6, 8, 10);
+            create index ix_agent_tool_invocation_pre_dispatch_logical on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key);
+
+            create table {schema}.agent_tool_governance_decisions (
+                tenant_id text not null,
+                audit_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                decision_state integer not null,
+                decision_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, audit_id)
+            );
+
+            create table {schema}.agent_tool_governance_finalizations (
+                tenant_id text not null,
+                audit_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                attempt_state integer not null,
+                finalization_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, audit_id)
+            );
+
+            create table {schema}.agent_tool_reconciliation_observations (
+                tenant_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                revision bigint not null check (revision > 0),
+                status integer not null,
+                reason_code text not null,
+                observed_at timestamptz not null default clock_timestamp(),
+                observation_json jsonb null,
+                primary key (tenant_id, logical_invocation_key, attempt_id)
+            );
+
+            create table {schema}.agent_tool_reconciliation_receipts (
+                tenant_id text not null,
+                logical_invocation_key jsonb not null,
+                attempt_id text not null,
+                status integer not null,
+                reason_code text not null,
+                terminal_at timestamptz not null,
+                integrity_value text not null,
+                receipt_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, logical_invocation_key, attempt_id)
+            );
+            """)
+        , new RuntimeMigration("V008", "agent_tool_pre_dispatch_durable_semantics", """
+            -- Phase 8f budget semantics: materialize the tool contract and capacity key
+            -- so Reserve can enforce logical-invocation conflicts and MaxCallsPerExecution.
+            alter table {schema}.agent_tool_budget_reservations
+                add column tool_contract_json jsonb not null default '{}'::jsonb,
+                add column capacity_key text not null default '';
+            create index ix_agent_tool_budget_capacity on {schema}.agent_tool_budget_reservations (tenant_id, capacity_key);
+
+            -- Indeterminate is a logical marker; the underlying Pending/Ready/Accepted
+            -- recovery substate is preserved. Prepared-at timestamps support full
+            -- completion/release receipt replay.
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                add column indeterminate_at timestamptz null,
+                add column indeterminate_reason text null,
+                add column completion_prepared_at timestamptz null,
+                add column release_prepared_at timestamptz null;
+
+            -- State-shape invariants.
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                add constraint ck_agent_tool_pre_dispatch_state_range check (pre_dispatch_state >= 0 and pre_dispatch_state <= 10),
+                add constraint ck_agent_tool_pre_dispatch_revision check (revision > 0),
+                add constraint ck_agent_tool_pre_dispatch_fencing check (fencing_token > 0),
+                add constraint ck_agent_tool_pre_dispatch_ready_shape check (pre_dispatch_state <> 2 or bound_reservation_id is not null),
+                add constraint ck_agent_tool_pre_dispatch_accepted_shape check (pre_dispatch_state <> 3 or accepted_receipt_json is not null),
+                add constraint ck_agent_tool_pre_dispatch_abandoned_shape check (pre_dispatch_state <> 5 or abandoned_receipt_json is not null),
+                add constraint ck_agent_tool_pre_dispatch_release_pending_shape check (pre_dispatch_state <> 6 or release_outcome_json is not null),
+                add constraint ck_agent_tool_pre_dispatch_completion_pending_shape check (pre_dispatch_state <> 8 or completion_outcome_json is not null);
+
+            alter table {schema}.agent_tool_budget_reservations
+                add constraint ck_agent_tool_budget_state_range check (state >= 0 and state <= 4),
+                add constraint ck_agent_tool_budget_positive_costs check (cost_units > 0),
+                add constraint ck_agent_tool_budget_maxcalls check (max_calls_per_execution is null or max_calls_per_execution > 0);
+
+            alter table {schema}.agent_tool_governance_decisions
+                add constraint ck_agent_tool_decision_state_range check (decision_state >= 0 and decision_state <= 2);
+
+            alter table {schema}.agent_tool_governance_finalizations
+                add constraint ck_agent_tool_finalization_state_range check (attempt_state >= 0 and attempt_state <= 10);
+
+            -- Stable decision identity: one decision per (tenant, logical invocation, attempt).
+            create unique index ux_agent_tool_decision_identity
+                on {schema}.agent_tool_governance_decisions (tenant_id, logical_invocation_key, attempt_id);
+            """)
+        , new RuntimeMigration("V009", "agent_tool_pre_dispatch_reconciliation_ownership", """
+            -- Gate-owned reconciliation claim (P0: ownership fence). A claimed
+            -- Attempt moves to state 11 (ReconciliationPending) with an immutable
+            -- claim token; the live lease/fencing evidence is frozen in
+            -- frozen_lease_json so governance finalization can still reference it.
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                add column frozen_lease_json jsonb null,
+                add column reconciliation_claim_token text null,
+                add column reconciliation_claimed_at timestamptz null,
+                add column reconciliation_claimed_state integer null,
+                add column reconciliation_ownership_evidence text null;
+
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                drop constraint ck_agent_tool_pre_dispatch_state_range;
+            alter table {schema}.agent_tool_invocation_pre_dispatch
+                add constraint ck_agent_tool_pre_dispatch_state_range check (pre_dispatch_state >= 0 and pre_dispatch_state <= 11),
+                add constraint ck_agent_tool_pre_dispatch_reconciliation_shape check (pre_dispatch_state <> 11 or reconciliation_claim_token is not null);
+
+            -- A claimed Attempt is still a logical-invocation fence: extend the
+            -- partial unique index so Acquire cannot create a parallel Attempt.
+            drop index {schema}.ux_agent_tool_invocation_pre_dispatch_logical;
+            create unique index ux_agent_tool_invocation_pre_dispatch_logical
+                on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key)
+                where pre_dispatch_state in (0, 1, 2, 3, 4, 6, 8, 10, 11);
             """)
     ];
 }

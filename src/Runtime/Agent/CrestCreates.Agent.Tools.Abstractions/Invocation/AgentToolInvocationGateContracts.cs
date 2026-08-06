@@ -131,8 +131,34 @@ public interface IAgentToolInvocationGate
         AgentToolInvocationLease lease,
         CancellationToken cancellationToken = default);
 
+    ValueTask<AgentToolInvocationPreDispatchResult> PreparePreDispatchIntentAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPreparePreDispatchIntentRequest request,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationPreDispatchResult> BindPreDispatchReservationAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindReservationRequest request,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationPreDispatchResult> BindAcceptedPreDispatchAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationBindPreDispatchRequest request,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationPreDispatchResult> GetPreDispatchStateAsync(
+        AgentToolPreDispatchIdentity identity,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationPreDispatchResult> PublishBudgetDenialAsync(
+        AgentToolInvocationLease lease,
+        AgentToolInvocationPublishDenialRequest request,
+        CancellationToken cancellationToken = default);
+
     ValueTask<bool> TryMarkDispatchStartedAsync(
         AgentToolInvocationLease lease,
+        AgentToolGovernancePreDispatchReceipt receipt,
+        string reservationId,
         CancellationToken cancellationToken = default);
 
     ValueTask PrepareCompletionAsync(
@@ -166,4 +192,23 @@ public interface IAgentToolInvocationGate
         string reasonCode,
         CancellationToken cancellationToken = default);
 
+    ValueTask<AgentToolInvocationPreDispatchResult> ReleaseByIdentityAsync(
+        AgentToolPreDispatchIdentity identity,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationPreDispatchResult> AbandonByIdentityAsync(
+        AgentToolPreDispatchIdentity identity,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolPreDispatchReconciliationClaimResult> TryBeginPreDispatchReconciliationAsync(
+        AgentToolPreDispatchReconciliationClaimRequest request,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AgentToolInvocationPreDispatchResult> CompletePreDispatchReconciliationAsync(
+        AgentToolPreDispatchReconciliationClaim claim,
+        AgentToolPreDispatchReconciliationCompletionKind kind,
+        string reasonCode,
+        CancellationToken cancellationToken = default);
 }
