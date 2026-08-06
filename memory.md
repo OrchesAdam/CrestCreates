@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation — all slices implemented; PostgreSQL contract/crash/NativeAOT evidence green in CI run 30994557565; review rounds 1–3 remediated, round-3 MarkIndeterminate CAS linearization closed)
+Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation all slices + review rounds 1–3 remediated; Issue #73 Phase 9b+ complexity consolidation complete — 4 slices, PR #72 mergeable, #70 closed)
 
 ## Purpose
 
@@ -2247,6 +2247,55 @@ subprocess crash recovery passes, 292 Agent.Tools (270 + 13 ownership-fence + 9 
 - Accountability producer uses `IAuditRecorder` (not `IAuditSink`) per boundary rules
 - Reconciler does not reference `ICapabilityDispatcher` or `IAgentToolApprovalGate` (review gate)
 - Ownership fence: the Gate decides who owns the Attempt BEFORE any budget/governance mutation — the reconciliation claim invalidates the worker's fencing token, so budget release and governance finalization can only follow a granted claim (never precede it)
+
+### Issue #73 — Phase 9b+ Agent Tool Pre-Dispatch Protocol Complexity Consolidation (2026-08-06)
+
+**Status**: Behavior-preserving complexity consolidation complete. 4 slices committed on
+branch `70-phase-9b-durable-agent-tool-pre-dispatch-reconciliation`; no PG schema/migration
+change (no new V-nnn), no ReasonCode change, no state-semantic change, no public API
+expansion, no weakened assertions. Merge gate satisfied: PostgreSQL contract/crash, real
+concurrency (dual ServiceProvider), CrashWorker (subprocess kill/recovery) and NativeAOT
+fixtures are all required CI evidence and green on the final head.
+
+- **Slice 8.1** (`1febb913`) — contract hardening: froze persisted contracts, removed
+  test-API leakage.
+- **Slice 8.2** (`63f058d8`) — `AgentToolPreDispatchRecoveryPolicy`: pure policy extraction
+  (no I/O), single source of recovery decisions.
+- **Slice 8.3** (`7a00ce91`) — settlement executor + result writer + accountability
+  producer; rewrote `DefaultAgentToolPreDispatchReconciler` as thin mainline (Agent.Tools
+  353/353, Boundary 93/93 green).
+- **Slice 8.4** (`8a8c8462`) — extracted the live pre-dispatch coordinator from
+  `AgentToolInvoker` (1920 → 884 lines):
+  - `AgentToolPreDispatchCoordinator` (internal) now owns the live mainline
+    Prepare Intent → Reserve Budget → Bind Reservation → Record Checkpoint → Bind Accepted,
+    including authoritative recovery (`RecoverAuditReceiptAsync` preserves P0-03 semantics:
+    Authoritative Missing → one bounded retry; Unavailable/timeout → fenced Indeterminate,
+    no retry write).
+  - `AgentToolPreDispatchFinalizer` (internal) is the shared "one place settles" consumed by
+    BOTH the coordinator (pre-dispatch aborts) and the Invoker (dispatch fence + post-dispatch).
+  - `AgentToolInvocationOutcomeFactory` (internal) is the single source for outcome construction.
+  - The dispatch fence (`TryMarkDispatchStartedAsync`) stays in `AgentToolInvoker` per spec:
+    "Invoker proceeds to Dispatch only after coordinator authorization."
+  - No new ctor params / no DI changes — coordinator/finalizer constructed via `new`, mirroring
+    the Slice 8.3 reconciler pattern.
+  - New architecture lock: `Invoker_Should_NotDependOnReconciliationStore`.
+
+**Evidence** (all green locally):
+- Agent.Tools.Tests 361/361, Boundary 93/93, Abstractions 16/16, E2E 1/1
+- PostgreSQL contract/crash tests 86/86 on local PostgreSQL 16 (port 5432)
+- NativeAOT: Agent.Tools AotFixture publish + native run prints
+  `AGENT_TOOL_NATIVEAOT_PIPELINE_OK`; wrapper tests 1/1 each for
+  `Agent.Tools.AotFixture.Tests` and `PostgreSqlRuntimeAotFixture.Tests`
+
+**Key decisions**:
+- "One place decides" (coordinator) + "one place settles" (finalizer) + single outcome
+  factory: complexity is absorbed by governance components, not the invoker mainline.
+- Coordinator/finalizer own only authority deps (gate/budget/auditor/lease-abandoner), no
+  dispatcher/approval-gate references (consistent with reconciler boundary rules).
+- Request carries entry/lease/governance/audit-context/identity/approval; the budget-denial
+  path still respects `EffectiveAuditMode` for AGENT_TOOL_BUDGET_DENIED vs
+  AGENT_TOOL_AUDIT_FAILURE.
+- Issue #73 is complete; #70 closed after PR #72 merged (CI evidence on final head).
 
 ## Recommended Next Thread Entry Prompt
 
