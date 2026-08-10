@@ -2353,6 +2353,33 @@ CHANGES (1×P0 writer CAS-loser / 1×P1 ReasonCode boundary):
   compile clean. PG contract/crash suites not re-run locally (port 5432 closed); unchanged
   code paths only. No public API change; ReasonCode values for existing codes unchanged.
 
+**PR #74 review remediation round 4** (`1f8d78d8`, 2026-08-10) — closed final REQUEST
+CHANGES (1×P0 PostgreSQL null ReasonCode / 1×P1 TOCTOU in CAS-loser recovery):
+- P0 — runtime may produce `ReasonCode = null` (Conflict receipt, StillPending observation)
+  but V007 schema is `reason_code text not null` on both reconciliation tables, so the
+  PostgreSQL store could not persist it. Kept the frozen schema: the provider now encodes
+  null as the empty string via private `EncodeReasonCode`/`DecodeReasonCode` helpers,
+  applied on observation read/write and receipt read/write in
+  `PostgreSqlAgentToolPreDispatchReconciliationStore`. Public nullable contract preserved,
+  PG `NOT NULL` invariant unchanged, `IntegrityValue` unaffected (null interpolation
+  already forms an empty segment).
+- P1 — observation CAS-loser recovery (`ReadReceipt → null; ReadObservation → null; throw`)
+  had a TOCTOU window: a concurrent writer can commit a terminal receipt and remove the
+  observation (under the identity advisory lock) between the two reads, misreporting a
+  normal race as persistence inconsistency. Added one bounded convergence re-read of the
+  terminal receipt before throwing in `AgentToolPreDispatchResultWriter.WriteObservationAsync`.
+- New tests: 3 shared null-reason cases in
+  `AgentToolPreDispatchReconciliationContractCases` wired into PostgreSQL
+  (`PostgreSql_NullReasonObservation_Should_RoundTripAsNull`,
+  `PostgreSql_NullReasonTerminalReceipt_Should_RoundTripAsNull`,
+  `PostgreSql_NullReasonTerminalReceipt_Should_ReplayAfterRestart`) and into an in-memory
+  durable-store runner (`Shared_NullReasonContractCases_Should_Pass_ThroughInMemoryDurableStore`);
+  TOCTOU test (`ObservationCasLoss_TerminalAppearsBetweenWinnerReads_Should_ReplayTerminal`)
+  via `ObservationReadsUntilTerminalAppears`/`InjectedTerminalReceipt` injection flags.
+- Evidence: Agent.Tools 397/397 (was 395; +2 new), PG test project compiles clean. PG
+  contract/crash suites run in CI only (port 5432 closed locally). No schema/migration,
+  ReasonCode value, state-semantic, existing-assertion or public-API changes.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:
