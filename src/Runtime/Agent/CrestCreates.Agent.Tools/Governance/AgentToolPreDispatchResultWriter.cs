@@ -134,6 +134,19 @@ internal sealed class AgentToolPreDispatchResultWriter
                 };
             }
 
+            // Bounded convergence re-read: a concurrent writer may have committed a terminal
+            // receipt (and removed the observation) between the reads above, so re-check once
+            // before declaring the durable form missing.
+            var convergedTerminal = await _store.ReadReceiptAsync(identity, cancellationToken).ConfigureAwait(false);
+            if (convergedTerminal is not null)
+            {
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = ReplayStatus(convergedTerminal),
+                    Receipt = convergedTerminal
+                };
+            }
+
             // Neither a terminal receipt nor an observation could be read back — the durable
             // form is missing. Do not fabricate a protocol result.
             throw new InvalidOperationException(

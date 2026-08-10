@@ -1,5 +1,7 @@
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Agent.Tools.Persistence.Testing.Cases;
+using CrestCreates.Agent.Tools.Persistence.Testing.Drivers;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.AgentTool;
 using FluentAssertions;
@@ -159,6 +161,57 @@ public class AgentToolPreDispatchResultContractTests
             identity, AgentToolPreDispatchReconciliationStatus.Conflict, null, default);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ObservationCasLoss_TerminalAppearsBetweenWinnerReads_Should_ReplayTerminal()
+    {
+        var (resultWriter, store) = CreateWriterHarness();
+        var identity = SampleIdentity("attempt-1");
+
+        // A concurrent reconciler already holds a StillPending observation.
+        var existing = new AgentToolPreDispatchReconciliationObservation
+        {
+            Identity = identity,
+            Status = AgentToolPreDispatchReconciliationStatus.StillPending,
+            ReasonCode = "authority_unavailable",
+            ObservedAt = DateTimeOffset.UtcNow,
+            Revision = 1
+        };
+        (await store.TryUpsertObservationAsync(existing, 0)).Should().BeTrue();
+
+        // The observation CAS loses to a concurrent revision bump, and a concurrent
+        // reconciler commits a terminal receipt (removing the observation) between the
+        // CAS-loser's first receipt read and its observation read — the TOCTOU window.
+        store.FailNextObservationUpsert = true;
+        store.ObservationReadsUntilTerminalAppears = 2;
+
+        var result = await resultWriter.WriteObservationAsync(
+            identity, AgentToolPreDispatchReconciliationStatus.StillPending, null, default);
+
+        // The bounded convergence re-read must find the terminal winner and replay it
+        // instead of misreporting a persistence inconsistency.
+        result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Conflict);
+        result.Observation.Should().BeNull();
+        result.Receipt.Should().NotBeNull();
+        result.Receipt!.ReasonCode.Should().BeNull();
+        result.Receipt!.IntegrityValue.Should().Be(store.InjectedTerminalReceipt!.IntegrityValue);
+    }
+
+    [Fact]
+    public async Task Shared_NullReasonContractCases_Should_Pass_ThroughInMemoryDurableStore()
+    {
+        var identity1 = SampleIdentity("shared-null-reason-obs");
+        var identity2 = SampleIdentity("shared-null-reason-receipt");
+        var identity3 = SampleIdentity("shared-null-reason-restart");
+        var driver = new InMemoryDurableContractDriver();
+
+        await AgentToolPreDispatchReconciliationContractCases.NullReasonObservation_Should_RoundTripAsNull(
+            driver, identity1, default);
+        await AgentToolPreDispatchReconciliationContractCases.NullReasonTerminalReceipt_Should_RoundTripAsNull(
+            driver, identity2, default);
+        await AgentToolPreDispatchReconciliationContractCases.NullReasonTerminalReceipt_Should_ReplayAfterRestart(
+            driver, identity3, default);
     }
 
     [Fact]
@@ -473,11 +526,35 @@ public class AgentToolPreDispatchResultContractTests
         public bool FailNextObservationUpsert { get; set; }
         public bool FailNextReceiptInsert { get; set; }
 
+        // TOCTOU injection: when > 0, each observation read counts down, and on the read
+        // where it reaches 0 a concurrent reconciler appears to commit a terminal receipt
+        // (and remove the observation) — exactly between the CAS-loser's winner reads.
+        public int ObservationReadsUntilTerminalAppears { get; set; }
+        public AgentToolPreDispatchReconciliationReceipt? InjectedTerminalReceipt { get; private set; }
+
         public ValueTask<AgentToolPreDispatchReconciliationObservation?> ReadObservationAsync(
             AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
         {
             lock (_lock)
             {
+                if (ObservationReadsUntilTerminalAppears > 0)
+                {
+                    ObservationReadsUntilTerminalAppears--;
+                    if (ObservationReadsUntilTerminalAppears == 0)
+                    {
+                        InjectedTerminalReceipt = new AgentToolPreDispatchReconciliationReceipt
+                        {
+                            Identity = identity,
+                            Status = AgentToolPreDispatchReconciliationStatus.Conflict,
+                            ReasonCode = null,
+                            TerminalAt = DateTimeOffset.UtcNow,
+                            IntegrityValue = "integrity-terminal-appears-between-reads"
+                        };
+                        _receipts[identity.AttemptId] = InjectedTerminalReceipt;
+                        _observations.Remove(identity.AttemptId);
+                    }
+                }
+
                 _observations.TryGetValue(identity.AttemptId, out var obs);
                 return ValueTask.FromResult(obs);
             }
@@ -545,6 +622,25 @@ public class AgentToolPreDispatchResultContractTests
                 return ValueTask.FromResult(true);
             }
         }
+    }
+
+    /// <summary>
+    /// In-memory durable driver used to run the shared persistence contract cases
+    /// locally without PostgreSQL. The store object is the durable database, so a
+    /// "restart" is a no-op; the contract cases never touch the auditor/gates.
+    /// </summary>
+    private sealed class InMemoryDurableContractDriver : IDurableAgentToolPreDispatchContractDriver
+    {
+        public InMemoryContractStore Store { get; } = new();
+
+        IAgentToolGovernanceAuditor IAgentToolPreDispatchContractDriver.Auditor => null!;
+        IAgentToolBudgetGate IAgentToolPreDispatchContractDriver.BudgetGate => null!;
+        IAgentToolInvocationGate IAgentToolPreDispatchContractDriver.InvocationGate => null!;
+        IAgentToolPreDispatchReconciliationStore IDurableAgentToolPreDispatchContractDriver.ReconciliationStore => Store;
+
+        ValueTask IDurableAgentToolPreDispatchContractDriver.RestartProviderAsync(
+            CancellationToken cancellationToken)
+            => ValueTask.CompletedTask;
     }
 
     private sealed class SettlementContractHarness

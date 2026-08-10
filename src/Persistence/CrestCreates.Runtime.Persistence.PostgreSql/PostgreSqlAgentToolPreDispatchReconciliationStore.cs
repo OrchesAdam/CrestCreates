@@ -65,7 +65,7 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
             Identity = identity,
             Revision = reader.GetInt64(0),
             Status = (AgentToolPreDispatchReconciliationStatus)reader.GetInt32(1),
-            ReasonCode = reader.IsDBNull(2) ? null : reader.GetString(2),
+            ReasonCode = DecodeReasonCode(reader.GetString(2)),
             ObservedAt = reader.GetFieldValue<DateTimeOffset>(3)
         };
     }
@@ -103,7 +103,7 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
         cmd.Parameters.Add(new NpgsqlParameter("attemptId", observation.Identity.AttemptId));
         cmd.Parameters.Add(new NpgsqlParameter("revision", observation.Revision));
         cmd.Parameters.Add(new NpgsqlParameter("status", (int)observation.Status));
-        cmd.Parameters.Add(new NpgsqlParameter("reasonCode", observation.ReasonCode ?? (object)DBNull.Value));
+        cmd.Parameters.Add(new NpgsqlParameter("reasonCode", EncodeReasonCode(observation.ReasonCode)));
         cmd.Parameters.Add(new NpgsqlParameter("observedAt", observation.ObservedAt));
         cmd.Parameters.Add(new NpgsqlParameter("expectedRevision", expectedRevision));
 
@@ -136,7 +136,7 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
         {
             Identity = identity,
             Status = (AgentToolPreDispatchReconciliationStatus)reader.GetInt32(0),
-            ReasonCode = reader.GetString(1),
+            ReasonCode = DecodeReasonCode(reader.GetString(1)),
             TerminalAt = reader.GetFieldValue<DateTimeOffset>(2),
             IntegrityValue = reader.GetString(3)
         };
@@ -167,7 +167,7 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
             insert.Parameters.Add(new NpgsqlParameter("logicalKey", NpgsqlDbType.Jsonb) { Value = logicalKeyJson });
             insert.Parameters.Add(new NpgsqlParameter("attemptId", receipt.Identity.AttemptId));
             insert.Parameters.Add(new NpgsqlParameter("status", (int)receipt.Status));
-            insert.Parameters.Add(new NpgsqlParameter("reasonCode", receipt.ReasonCode));
+            insert.Parameters.Add(new NpgsqlParameter("reasonCode", EncodeReasonCode(receipt.ReasonCode)));
             insert.Parameters.Add(new NpgsqlParameter("terminalAt", receipt.TerminalAt));
             insert.Parameters.Add(new NpgsqlParameter("integrityValue", receipt.IntegrityValue));
             insert.Parameters.Add(new NpgsqlParameter("receiptJson", NpgsqlDbType.Jsonb) { Value = PostgreSqlRuntimeStoreSupport.Serialize(receipt, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolPreDispatchReconciliationReceipt) });
@@ -205,4 +205,13 @@ internal sealed class PostgreSqlAgentToolPreDispatchReconciliationStore : IAgent
             $"{PostgreSqlRuntimeStoreSupport.Serialize(identity.LogicalInvocationKey, PostgreSqlRuntimeJsonSerializerContext.Default.AgentToolLogicalInvocationKey)}\n{identity.AttemptId}"));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    // The reconciliation tables keep reason_code as NOT NULL text (schema is frozen). The runtime
+    // semantic null (a conflict/observation with no reason family) is encoded as the empty string so
+    // it can round-trip without a schema change, and decoded back to null on read.
+    private static object EncodeReasonCode(string? reasonCode)
+        => reasonCode ?? string.Empty;
+
+    private static string? DecodeReasonCode(string value)
+        => value.Length == 0 ? null : value;
 }

@@ -1,5 +1,7 @@
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Agent.Tools.Persistence.Testing.Cases;
+using CrestCreates.Agent.Tools.Persistence.Testing.Drivers;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.AgentTool;
 using CrestCreates.Runtime.Persistence.PostgreSql;
@@ -12,7 +14,7 @@ using Xunit;
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 
 [Collection(PostgreSqlRuntimeCollection.Name)]
-public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
+public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime, IDurableAgentToolPreDispatchContractDriver
 {
     private readonly PostgreSqlRuntimeCollectionFixture _fixture;
     private PostgreSqlRuntimeSchemaLease _lease = null!;
@@ -43,6 +45,25 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
     {
         await _provider.DisposeAsync();
         await _lease.DisposeAsync();
+    }
+
+    IAgentToolGovernanceAuditor IAgentToolPreDispatchContractDriver.Auditor => _auditor;
+    IAgentToolBudgetGate IAgentToolPreDispatchContractDriver.BudgetGate => _budgetGate;
+    IAgentToolInvocationGate IAgentToolPreDispatchContractDriver.InvocationGate => _gate;
+    IAgentToolPreDispatchReconciliationStore IDurableAgentToolPreDispatchContractDriver.ReconciliationStore => _reconciliationStore;
+
+    // Restart the provider container while keeping the same schema lease, so durable
+    // rows (receipts, observations) are read back through a freshly built provider.
+    async ValueTask IDurableAgentToolPreDispatchContractDriver.RestartProviderAsync(
+        CancellationToken cancellationToken)
+    {
+        await _provider.DisposeAsync();
+        _provider = BuildProvider(_lease.Options);
+        _gate = _provider.GetRequiredService<PostgreSqlAgentToolInvocationGate>();
+        _budgetGate = _provider.GetRequiredService<PostgreSqlAgentToolBudgetGate>();
+        _auditor = _provider.GetRequiredService<PostgreSqlAgentToolGovernanceAuditor>();
+        _reconciliationStore = _provider.GetRequiredService<IAgentToolPreDispatchReconciliationStore>();
+        _cleanup = _provider.GetRequiredService<PostgreSqlAgentToolPreDispatchCleanup>();
     }
 
     private static ServiceProvider BuildProvider(PostgreSqlRuntimePersistenceOptions options)
@@ -83,6 +104,21 @@ public sealed class PostgreSqlAgentToolPreDispatchContractTests : IAsyncLifetime
         (await _reconciliationStore.TryUpsertObservationAsync(observation with { Revision = 2 }, 0))
             .Should().BeFalse();
     }
+
+    [Fact]
+    public async Task PostgreSql_NullReasonObservation_Should_RoundTripAsNull()
+        => await AgentToolPreDispatchReconciliationContractCases.NullReasonObservation_Should_RoundTripAsNull(
+            this, new AgentToolPreDispatchIdentity(LogicalKey, "attempt-null-reason-obs"), default);
+
+    [Fact]
+    public async Task PostgreSql_NullReasonTerminalReceipt_Should_RoundTripAsNull()
+        => await AgentToolPreDispatchReconciliationContractCases.NullReasonTerminalReceipt_Should_RoundTripAsNull(
+            this, new AgentToolPreDispatchIdentity(LogicalKey, "attempt-null-reason-receipt"), default);
+
+    [Fact]
+    public async Task PostgreSql_NullReasonTerminalReceipt_Should_ReplayAfterRestart()
+        => await AgentToolPreDispatchReconciliationContractCases.NullReasonTerminalReceipt_Should_ReplayAfterRestart(
+            this, new AgentToolPreDispatchIdentity(LogicalKey, "attempt-null-reason-restart"), default);
 
     [Fact]
     public async Task Cleanup_Should_Not_Delete_Aged_PreDispatchReadyAttempt()
