@@ -3,20 +3,22 @@ namespace CrestCreates.Agent.Tools;
 /// <summary>
 /// Attempt-level pre-dispatch state tracked by the Invocation Gate.
 /// </summary>
+// Persisted as the `pre_dispatch_state` integer column. Values are frozen
+// protocol values matching the PostgreSQL migrations — do not reorder.
 public enum AgentToolInvocationPreDispatchState
 {
     Unknown = 0,
-    Pending,
-    Ready,
-    Accepted,
-    DispatchStarted,
-    Abandoned,
-    ReleasePending,
-    Released,
-    CompletionPending,
-    Completed,
-    Indeterminate,
-    ReconciliationPending
+    Pending = 1,
+    Ready = 2,
+    Accepted = 3,
+    DispatchStarted = 4,
+    Abandoned = 5,
+    ReleasePending = 6,
+    Released = 7,
+    CompletionPending = 8,
+    Completed = 9,
+    Indeterminate = 10,
+    ReconciliationPending = 11
 }
 
 /// <summary>
@@ -152,42 +154,4 @@ public sealed record AgentToolInvocationPublishDenialRequest
     public required AgentToolInvocationOutcome Outcome { get; init; }
 
     public required string ReasonCode { get; init; }
-}
-
-/// <summary>
-/// Test-support snapshot of stored pre-dispatch state. This is test-support data
-/// only; provider-private rows do not escape through production contracts.
-/// </summary>
-public sealed record StoredAgentToolPreDispatchSnapshot
-{
-    public required AgentToolPreDispatchIdentity Identity { get; init; }
-
-    public required AgentToolInvocationPreDispatchState State { get; init; }
-
-    public AgentToolInvocationPreDispatchIntentSnapshot? Intent { get; init; }
-
-    public string? BoundReservationId { get; init; }
-
-    public AgentToolGovernancePreDispatchReceipt? AcceptedReceipt { get; init; }
-
-    public AgentToolInvocationAbandonedReceipt? AbandonedReceipt { get; init; }
-
-    public bool DispatchStarted { get; init; }
-
-    public string? ReasonCode { get; init; }
-}
-
-/// <summary>
-/// Crash window identifiers for deterministic crash-test scenarios.
-/// </summary>
-public enum AgentToolPreDispatchCrashWindow
-{
-    CW02,
-    CW04,
-    CW06,
-    CW08,
-    CW12,
-    CW13,
-    CW15,
-    CW16
 }

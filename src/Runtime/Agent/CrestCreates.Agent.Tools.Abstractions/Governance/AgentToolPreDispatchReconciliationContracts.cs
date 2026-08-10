@@ -2,16 +2,18 @@ namespace CrestCreates.Agent.Tools;
 
 /// <summary>
 /// Reconciliation status returned by the pre-dispatch reconciler.
+/// Persisted as the `status` integer column — values are frozen protocol
+/// values matching the PostgreSQL migrations; do not reorder.
 /// </summary>
 public enum AgentToolPreDispatchReconciliationStatus
 {
     Unknown = 0,
-    Released,
-    AlreadyReleased,
-    StillPending,
-    Conflict,
-    PostDispatchUnknown,
-    Missing
+    Released = 1,
+    AlreadyReleased = 2,
+    StillPending = 3,
+    Conflict = 4,
+    PostDispatchUnknown = 5,
+    Missing = 6
 }
 
 /// <summary>
@@ -119,12 +121,13 @@ public interface IAgentToolPreDispatchReconciliationStore
 
 /// <summary>
 /// Reports provider durability capability without coupling the generic Runtime
-/// Persistence capability contract to Agent Tool types.
+/// Persistence capability contract to Agent Tool types. Values are frozen
+/// protocol values; do not reorder.
 /// </summary>
 public enum AgentToolPreDispatchPersistenceCapability
 {
-    FullSemantic,
-    FullDurable
+    FullSemantic = 0,
+    FullDurable = 1
 }
 
 public interface IAgentToolPreDispatchPersistenceCapabilities

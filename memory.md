@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation — all slices implemented; PostgreSQL contract/crash/NativeAOT evidence green in CI run 30994557565; review rounds 1–3 remediated, round-3 MarkIndeterminate CAS linearization closed)
+Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation all slices + review rounds 1–3 remediated; Issue #73 Phase 9b+ complexity consolidation complete — 4 slices + PR #74 review remediation rounds closed (round 3 = CAS-loser writer + ReasonCode boundary), PR #72 mergeable, #70 closed)
 
 ## Purpose
 
@@ -2247,6 +2247,138 @@ subprocess crash recovery passes, 292 Agent.Tools (270 + 13 ownership-fence + 9 
 - Accountability producer uses `IAuditRecorder` (not `IAuditSink`) per boundary rules
 - Reconciler does not reference `ICapabilityDispatcher` or `IAgentToolApprovalGate` (review gate)
 - Ownership fence: the Gate decides who owns the Attempt BEFORE any budget/governance mutation — the reconciliation claim invalidates the worker's fencing token, so budget release and governance finalization can only follow a granted claim (never precede it)
+
+### Issue #73 — Phase 9b+ Agent Tool Pre-Dispatch Protocol Complexity Consolidation (2026-08-06)
+
+**Status**: Behavior-preserving complexity consolidation complete. 4 slices committed on
+branch `70-phase-9b-durable-agent-tool-pre-dispatch-reconciliation`; no PG schema/migration
+change (no new V-nnn), no ReasonCode change, no state-semantic change, no public API
+expansion, no weakened assertions. Merge gate satisfied: PostgreSQL contract/crash, real
+concurrency (dual ServiceProvider), CrashWorker (subprocess kill/recovery) and NativeAOT
+fixtures are all required CI evidence and green on the final head.
+
+- **Slice 8.1** (`1febb913`) — contract hardening: froze persisted contracts, removed
+  test-API leakage.
+- **Slice 8.2** (`63f058d8`) — `AgentToolPreDispatchRecoveryPolicy`: pure policy extraction
+  (no I/O), single source of recovery decisions.
+- **Slice 8.3** (`7a00ce91`) — settlement executor + result writer + accountability
+  producer; rewrote `DefaultAgentToolPreDispatchReconciler` as thin mainline (Agent.Tools
+  353/353, Boundary 93/93 green).
+- **Slice 8.4** (`8a8c8462`) — extracted the live pre-dispatch coordinator from
+  `AgentToolInvoker` (1920 → 884 lines):
+  - `AgentToolPreDispatchCoordinator` (internal) now owns the live mainline
+    Prepare Intent → Reserve Budget → Bind Reservation → Record Checkpoint → Bind Accepted,
+    including authoritative recovery (`RecoverAuditReceiptAsync` preserves P0-03 semantics:
+    Authoritative Missing → one bounded retry; Unavailable/timeout → fenced Indeterminate,
+    no retry write).
+  - `AgentToolPreDispatchFinalizer` (internal) is the shared "one place settles" consumed by
+    BOTH the coordinator (pre-dispatch aborts) and the Invoker (dispatch fence + post-dispatch).
+  - `AgentToolInvocationOutcomeFactory` (internal) is the single source for outcome construction.
+  - The dispatch fence (`TryMarkDispatchStartedAsync`) stays in `AgentToolInvoker` per spec:
+    "Invoker proceeds to Dispatch only after coordinator authorization."
+  - No new ctor params / no DI changes — coordinator/finalizer constructed via `new`, mirroring
+    the Slice 8.3 reconciler pattern.
+  - New architecture lock: `Invoker_Should_NotDependOnReconciliationStore`.
+
+**Evidence** (all green locally):
+- Agent.Tools.Tests 361/361, Boundary 93/93, Abstractions 16/16, E2E 1/1
+- PostgreSQL contract/crash tests 86/86 on local PostgreSQL 16 (port 5432)
+- NativeAOT: Agent.Tools AotFixture publish + native run prints
+  `AGENT_TOOL_NATIVEAOT_PIPELINE_OK`; wrapper tests 1/1 each for
+  `Agent.Tools.AotFixture.Tests` and `PostgreSqlRuntimeAotFixture.Tests`
+
+**Key decisions**:
+- "One place decides" (coordinator) + "one place settles" (finalizer) + single outcome
+  factory: complexity is absorbed by governance components, not the invoker mainline.
+- Coordinator/finalizer own only authority deps (gate/budget/auditor/lease-abandoner), no
+  dispatcher/approval-gate references (consistent with reconciler boundary rules).
+- Request carries entry/lease/governance/audit-context/identity/approval; the budget-denial
+  path still respects `EffectiveAuditMode` for AGENT_TOOL_BUDGET_DENIED vs
+  AGENT_TOOL_AUDIT_FAILURE.
+- Issue #73 is complete; #70 closed after PR #72 merged (CI evidence on final head).
+
+**PR #74 review remediation** (`260f6d31`, 2026-08-06) — closed latest review round
+1×P0 / 1×P1 / 2×P2:
+- P0 — terminal result durability: removed `AgentToolPreDispatchSettlementPersistence.None`;
+  every terminal disposition (Released / Conflict / PostDispatchUnknown) now persists an
+  immutable receipt via ResultWriter, every retryable disposition an observation. Budget /
+  gate settlement mismatch is classified by actual state (Committed/Indeterminate → durable
+  Conflict; still-Reserved → retryable Observation; DispatchStarted → PostDispatchUnknown;
+  Released/Abandoned → Released; ReconciliationPending → Observation). Reconciler checkpoint
+  validation conflicts all route through `ResultWriter.WriteTerminalAsync`.
+- P1 — single semantic authority: `Completed` audit confirmation now reuses
+  `AgentToolGovernancePreDispatchComparer.Equivalent`; removed the looser
+  `EquivalentFinalization`/`EquivalentContext` helpers. Narrow `HasSameFinalizationIdentity`
+  only classifies an existing Indeterminate (never exact Completed).
+- P2 — architecture gates: `RecoveryPolicy_Should_HaveNoProviderDependencies`,
+  `SettlementExecutor_Should_HaveNoDispatcherDependency`,
+  `ConsolidationTypes_Should_AllBeInternal`, `PersistedEnums_Should_HaveExactFrozenMemberSets`
+  (Architecture suite 32/32).
+- P2 — `RequiresOwnershipClaim` is now a derived property from `GateAction`
+  (ClaimAndAbandon/ClaimAndRelease); no dual-expression of claim state.
+- New tests: `AgentToolPreDispatchResultContractTests` (12),
+  `AgentToolGovernanceFinalizationConfirmationTests` (10). Invoker regression tests tightened
+  to strict canonical semantics (`Invoke_AuditConflict...` → InvocationIndeterminate/InProgress;
+  stub auditor no longer redacts durable read).
+- Evidence: Agent.Tools 392/392, Boundary 93/93, PG contract 86/86, PG NativeAOT fixture
+  1/1, Abstractions 16/16, E2E 1/1/1. No schema/migration, ReasonCode, state-semantic or
+  existing-assertion changes.
+
+**PR #74 review remediation round 3** (`9cbd1fd6`, 2026-08-06) — closed final REQUEST
+CHANGES (1×P0 writer CAS-loser / 1×P1 ReasonCode boundary):
+- P0 — ResultWriter never returns a bare `Conflict` (no Receipt + no Observation):
+  `WriteObservationAsync` CAS-miss re-reads the durable store and replays the winner
+  (terminal receipt → replay; else current observation → return it; else throw
+  `InvalidOperationException`); `WriteTerminalAsync` insert-miss with no readable receipt
+  throws `InvalidOperationException` instead of fabricating an unpersisted Conflict.
+  The `Result = Observation XOR Receipt` invariant now holds on every writer exit.
+- P1 — keep Issue #73 "No ReasonCode changes" boundary: newly materialized terminal
+  diagnostics (8 `checkpoint_*` in reconciler, 5 `budget_finalize_*`/`reconciliation_*`
+  in settlement executor) all map to previously-bare-Conflict paths and now use
+  `ReasonCode = null` (the field is already nullable). Reconciler settlement routing uses
+  `settlement.ReasonCode` directly (no `?? reasonCode` fallback). Pre-existing
+  governance/recovery codes (`governance_finalization_*`, `dispatch_started`,
+  `terminal_recovered`, `releaseReason`, early `gate_missing`/`abandoned_*`/`released_*`)
+  unchanged. ResultWriter internal signatures `string` → `string?`; public contract
+  unchanged (`PublishAsync` call site passes `reasonCode ?? string.Empty`).
+- Gate emissions kept: PostgreSqlGate:1546 and InMemoryGate:639/652/666/673 still emit
+  `reconciliation_completion_conflict` as the gate's own reason code (out of scope).
+- New tests: `AgentToolPreDispatchResultContractTests` now 15 (added
+  `ObservationCasLoss_Should_ReturnDurableWinner`,
+  `ObservationCasLoss_WithoutDurableForm_Should_Throw`,
+  `TerminalInsertCasLossWithoutWinner_Should_NotReturnBareConflict`) with
+  `FailNextObservationUpsert`/`FailNextReceiptInsert` injection flags on the contract store.
+- Evidence: Agent.Tools 395/395 (was 392; +3 new), downstream
+  `CrestCreates.Runtime.Persistence.PostgreSql.Tests` + `CrestCreates.Agent.Memory.Tools.E2E.Tests`
+  compile clean. PG contract/crash suites not re-run locally (port 5432 closed); unchanged
+  code paths only. No public API change; ReasonCode values for existing codes unchanged.
+
+**PR #74 review remediation round 4** (`1f8d78d8`, 2026-08-10) — closed final REQUEST
+CHANGES (1×P0 PostgreSQL null ReasonCode / 1×P1 TOCTOU in CAS-loser recovery):
+- P0 — runtime may produce `ReasonCode = null` (Conflict receipt, StillPending observation)
+  but V007 schema is `reason_code text not null` on both reconciliation tables, so the
+  PostgreSQL store could not persist it. Kept the frozen schema: the provider now encodes
+  null as the empty string via private `EncodeReasonCode`/`DecodeReasonCode` helpers,
+  applied on observation read/write and receipt read/write in
+  `PostgreSqlAgentToolPreDispatchReconciliationStore`. Public nullable contract preserved,
+  PG `NOT NULL` invariant unchanged, `IntegrityValue` unaffected (null interpolation
+  already forms an empty segment).
+- P1 — observation CAS-loser recovery (`ReadReceipt → null; ReadObservation → null; throw`)
+  had a TOCTOU window: a concurrent writer can commit a terminal receipt and remove the
+  observation (under the identity advisory lock) between the two reads, misreporting a
+  normal race as persistence inconsistency. Added one bounded convergence re-read of the
+  terminal receipt before throwing in `AgentToolPreDispatchResultWriter.WriteObservationAsync`.
+- New tests: 3 shared null-reason cases in
+  `AgentToolPreDispatchReconciliationContractCases` wired into PostgreSQL
+  (`PostgreSql_NullReasonObservation_Should_RoundTripAsNull`,
+  `PostgreSql_NullReasonTerminalReceipt_Should_RoundTripAsNull`,
+  `PostgreSql_NullReasonTerminalReceipt_Should_ReplayAfterRestart`) and into an in-memory
+  durable-store runner (`Shared_NullReasonContractCases_Should_Pass_ThroughInMemoryDurableStore`);
+  TOCTOU test (`ObservationCasLoss_TerminalAppearsBetweenWinnerReads_Should_ReplayTerminal`)
+  via `ObservationReadsUntilTerminalAppears`/`InjectedTerminalReceipt` injection flags.
+- Evidence: Agent.Tools 397/397 (was 395; +2 new), PG test project compiles clean. PG
+  contract/crash suites run in CI only (port 5432 closed locally). No schema/migration,
+  ReasonCode value, state-semantic, existing-assertion or public-API changes.
 
 ## Recommended Next Thread Entry Prompt
 
