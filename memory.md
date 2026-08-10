@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation all slices + review rounds 1–3 remediated; Issue #73 Phase 9b+ complexity consolidation complete — 4 slices + PR #74 review remediation (1×P0/1×P1/2×P2) closed, PR #72 mergeable, #70 closed)
+Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation all slices + review rounds 1–3 remediated; Issue #73 Phase 9b+ complexity consolidation complete — 4 slices + PR #74 review remediation rounds closed (round 3 = CAS-loser writer + ReasonCode boundary), PR #72 mergeable, #70 closed)
 
 ## Purpose
 
@@ -2323,6 +2323,35 @@ fixtures are all required CI evidence and green on the final head.
 - Evidence: Agent.Tools 392/392, Boundary 93/93, PG contract 86/86, PG NativeAOT fixture
   1/1, Abstractions 16/16, E2E 1/1/1. No schema/migration, ReasonCode, state-semantic or
   existing-assertion changes.
+
+**PR #74 review remediation round 3** (`9cbd1fd6`, 2026-08-06) — closed final REQUEST
+CHANGES (1×P0 writer CAS-loser / 1×P1 ReasonCode boundary):
+- P0 — ResultWriter never returns a bare `Conflict` (no Receipt + no Observation):
+  `WriteObservationAsync` CAS-miss re-reads the durable store and replays the winner
+  (terminal receipt → replay; else current observation → return it; else throw
+  `InvalidOperationException`); `WriteTerminalAsync` insert-miss with no readable receipt
+  throws `InvalidOperationException` instead of fabricating an unpersisted Conflict.
+  The `Result = Observation XOR Receipt` invariant now holds on every writer exit.
+- P1 — keep Issue #73 "No ReasonCode changes" boundary: newly materialized terminal
+  diagnostics (8 `checkpoint_*` in reconciler, 5 `budget_finalize_*`/`reconciliation_*`
+  in settlement executor) all map to previously-bare-Conflict paths and now use
+  `ReasonCode = null` (the field is already nullable). Reconciler settlement routing uses
+  `settlement.ReasonCode` directly (no `?? reasonCode` fallback). Pre-existing
+  governance/recovery codes (`governance_finalization_*`, `dispatch_started`,
+  `terminal_recovered`, `releaseReason`, early `gate_missing`/`abandoned_*`/`released_*`)
+  unchanged. ResultWriter internal signatures `string` → `string?`; public contract
+  unchanged (`PublishAsync` call site passes `reasonCode ?? string.Empty`).
+- Gate emissions kept: PostgreSqlGate:1546 and InMemoryGate:639/652/666/673 still emit
+  `reconciliation_completion_conflict` as the gate's own reason code (out of scope).
+- New tests: `AgentToolPreDispatchResultContractTests` now 15 (added
+  `ObservationCasLoss_Should_ReturnDurableWinner`,
+  `ObservationCasLoss_WithoutDurableForm_Should_Throw`,
+  `TerminalInsertCasLossWithoutWinner_Should_NotReturnBareConflict`) with
+  `FailNextObservationUpsert`/`FailNextReceiptInsert` injection flags on the contract store.
+- Evidence: Agent.Tools 395/395 (was 392; +3 new), downstream
+  `CrestCreates.Runtime.Persistence.PostgreSql.Tests` + `CrestCreates.Agent.Memory.Tools.E2E.Tests`
+  compile clean. PG contract/crash suites not re-run locally (port 5432 closed); unchanged
+  code paths only. No public API change; ReasonCode values for existing codes unchanged.
 
 ## Recommended Next Thread Entry Prompt
 
