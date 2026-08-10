@@ -163,10 +163,10 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
                 {
                     return Terminal(
                         AgentToolPreDispatchReconciliationStatus.Conflict,
-                        "budget_finalize_conflict");
+                        null);
                 }
 
-                return Observation("budget_finalize_unconfirmed");
+                return Observation(null);
             }
 
             terminalReservation = finalizeResult;
@@ -249,7 +249,7 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
             // A claim could not be granted or recovered — no terminal transition.
             // Ownership was not established, so this is a retryable authority
             // outcome (observation), never a bare terminal result.
-            return Observation("reconciliation_claim_unavailable");
+            return Observation(null);
         }
 
         var completeResult = await _gate.CompletePreDispatchReconciliationAsync(
@@ -281,12 +281,12 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
 
             if (completeResult.State == AgentToolInvocationPreDispatchState.ReconciliationPending)
             {
-                return Observation("reconciliation_completion_unconfirmed");
+                return Observation(null);
             }
 
             return Terminal(
                 AgentToolPreDispatchReconciliationStatus.Conflict,
-                "reconciliation_completion_conflict");
+                null);
         }
 
         return new AgentToolPreDispatchSettlementResult
@@ -326,7 +326,7 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
 
     private static AgentToolPreDispatchSettlementResult Terminal(
         AgentToolPreDispatchReconciliationStatus status,
-        string reasonCode)
+        string? reasonCode)
         => new()
         {
             Status = status,
@@ -334,7 +334,7 @@ internal sealed class AgentToolPreDispatchSettlementExecutor
             Persistence = AgentToolPreDispatchSettlementPersistence.TerminalReceipt
         };
 
-    private static AgentToolPreDispatchSettlementResult Observation(string reasonCode)
+    private static AgentToolPreDispatchSettlementResult Observation(string? reasonCode)
         => new()
         {
             Status = AgentToolPreDispatchReconciliationStatus.StillPending,

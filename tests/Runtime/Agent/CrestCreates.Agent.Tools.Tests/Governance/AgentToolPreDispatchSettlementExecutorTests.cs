@@ -128,7 +128,7 @@ public class AgentToolPreDispatchSettlementExecutorTests
         // it must carry a mutable observation so a later reconciler can converge.
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending);
         result.Persistence.Should().Be(AgentToolPreDispatchSettlementPersistence.Observation);
-        result.ReasonCode.Should().Be("budget_finalize_unconfirmed");
+        result.ReasonCode.Should().BeNull();
 
         harness.Gate.CompleteCallCount.Should().Be(0);
         harness.Auditor.FinalizeCallCount.Should().Be(0);
@@ -152,7 +152,7 @@ public class AgentToolPreDispatchSettlementExecutorTests
 
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Conflict);
         result.Persistence.Should().Be(AgentToolPreDispatchSettlementPersistence.TerminalReceipt);
-        result.ReasonCode.Should().Be("budget_finalize_conflict");
+        result.ReasonCode.Should().BeNull();
 
         harness.Gate.CompleteCallCount.Should().Be(0);
         harness.Auditor.FinalizeCallCount.Should().Be(0);

@@ -93,6 +93,75 @@ public class AgentToolPreDispatchResultContractTests
     }
 
     [Fact]
+    public async Task ObservationCasLoss_Should_ReturnDurableWinner()
+    {
+        var identity = SampleIdentity("attempt-1");
+
+        // Branch 1: the race winner established a terminal receipt — the CAS loser
+        // must replay it, never return a bare Conflict with no durable form.
+        var (receiptWriter, receiptStore) = CreateWriterHarness();
+        var winner = await receiptWriter.WriteTerminalAsync(
+            identity, AgentToolPreDispatchReconciliationStatus.Conflict, null, default);
+        var loser = new AgentToolPreDispatchResultWriter(receiptStore, TimeProvider.System, null);
+
+        var replayed = await loser.WriteObservationAsync(
+            identity, AgentToolPreDispatchReconciliationStatus.StillPending, null, default);
+
+        replayed.Status.Should().Be(winner.Status);
+        replayed.Receipt.Should().NotBeNull(
+            "a CAS loser must replay the durable terminal receipt, never a bare Conflict.");
+        replayed.Receipt!.IntegrityValue.Should().Be(winner.Receipt!.IntegrityValue);
+        replayed.Observation.Should().BeNull();
+
+        // Branch 2: no terminal receipt, but a concurrent writer advanced the
+        // observation — the CAS loser must return the current durable observation.
+        var (observationWriter, observationStore) = CreateWriterHarness();
+        await observationWriter.WriteObservationAsync(
+            identity, AgentToolPreDispatchReconciliationStatus.StillPending, "first", default);
+        observationStore.FailNextObservationUpsert = true;
+
+        var current = await observationWriter.WriteObservationAsync(
+            identity, AgentToolPreDispatchReconciliationStatus.StillPending, "second", default);
+
+        current.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending);
+        current.Observation.Should().NotBeNull(
+            "a CAS loser must return the current durable observation, never a bare Conflict.");
+        current.Observation!.Revision.Should().BeGreaterThan(1);
+        current.Receipt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ObservationCasLoss_WithoutDurableForm_Should_Throw()
+    {
+        var (resultWriter, store) = CreateWriterHarness();
+        var identity = SampleIdentity("attempt-1");
+        store.FailNextObservationUpsert = true;
+
+        // No terminal receipt and no current observation can be read back — the
+        // durable form is missing, so the writer must fail rather than fabricate
+        // a protocol result with no durable backing.
+        var act = async () => await resultWriter.WriteObservationAsync(
+            identity, AgentToolPreDispatchReconciliationStatus.StillPending, null, default);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task TerminalInsertCasLossWithoutWinner_Should_NotReturnBareConflict()
+    {
+        var (resultWriter, store) = CreateWriterHarness();
+        var identity = SampleIdentity("attempt-1");
+        store.FailNextReceiptInsert = true;
+
+        // Insert fails with no existing receipt — no durable winner to replay. The
+        // writer must not fabricate a bare Conflict result without a durable form.
+        var act = async () => await resultWriter.WriteTerminalAsync(
+            identity, AgentToolPreDispatchReconciliationStatus.Conflict, null, default);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task BudgetFinalizeMismatch_Should_NotReturnBareTerminalResult()
     {
         var (executor, harness) = CreateExecutorHarness(AgentToolInvocationPreDispatchState.Accepted);
@@ -109,7 +178,7 @@ public class AgentToolPreDispatchResultContractTests
 
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Conflict);
         result.Persistence.Should().Be(AgentToolPreDispatchSettlementPersistence.TerminalReceipt);
-        result.ReasonCode.Should().Be("budget_finalize_conflict");
+        result.ReasonCode.Should().BeNull();
         harness.Gate.CompleteCallCount.Should().Be(0);
     }
 
@@ -129,7 +198,7 @@ public class AgentToolPreDispatchResultContractTests
 
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending);
         result.Persistence.Should().Be(AgentToolPreDispatchSettlementPersistence.Observation);
-        result.ReasonCode.Should().Be("budget_finalize_unconfirmed");
+        result.ReasonCode.Should().BeNull();
         harness.Gate.CompleteCallCount.Should().Be(0);
     }
 
@@ -150,7 +219,7 @@ public class AgentToolPreDispatchResultContractTests
 
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.StillPending);
         result.Persistence.Should().Be(AgentToolPreDispatchSettlementPersistence.Observation);
-        result.ReasonCode.Should().Be("reconciliation_completion_unconfirmed");
+        result.ReasonCode.Should().BeNull();
     }
 
     [Fact]
@@ -188,12 +257,12 @@ public class AgentToolPreDispatchResultContractTests
         result.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Conflict);
         result.Receipt.Should().NotBeNull(
             "a checkpoint-validation conflict is a terminal disposition and must be persisted as an immutable receipt.");
-        result.Receipt!.ReasonCode.Should().Be("checkpoint_identity_mismatch");
+        result.Receipt!.ReasonCode.Should().BeNull();
         result.Observation.Should().BeNull();
 
         var persisted = await harness.Store.ReadReceiptAsync(SampleIdentity("attempt-1"));
         persisted.Should().NotBeNull("the terminal receipt must be durable, not just returned.");
-        persisted!.ReasonCode.Should().Be("checkpoint_identity_mismatch");
+        persisted!.ReasonCode.Should().BeNull();
     }
 
     [Fact]
@@ -216,7 +285,7 @@ public class AgentToolPreDispatchResultContractTests
         second.Status.Should().Be(AgentToolPreDispatchReconciliationStatus.Conflict);
         second.Receipt.Should().NotBeNull();
         second.Receipt!.IntegrityValue.Should().Be(first.Receipt!.IntegrityValue);
-        second.Receipt.ReasonCode.Should().Be("checkpoint_identity_mismatch");
+        second.Receipt.ReasonCode.Should().BeNull();
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -399,6 +468,11 @@ public class AgentToolPreDispatchResultContractTests
         private readonly Dictionary<string, AgentToolPreDispatchReconciliationReceipt> _receipts = new();
         private readonly object _lock = new();
 
+        // CAS-failure injection: when set, the next observation upsert / receipt insert
+        // fails as if a concurrent reconciler won the race (or the store rejected it).
+        public bool FailNextObservationUpsert { get; set; }
+        public bool FailNextReceiptInsert { get; set; }
+
         public ValueTask<AgentToolPreDispatchReconciliationObservation?> ReadObservationAsync(
             AgentToolPreDispatchIdentity identity, CancellationToken cancellationToken = default)
         {
@@ -417,6 +491,15 @@ public class AgentToolPreDispatchResultContractTests
             {
                 if (_receipts.ContainsKey(observation.Identity.AttemptId))
                     return ValueTask.FromResult(false);
+
+                if (FailNextObservationUpsert)
+                {
+                    FailNextObservationUpsert = false;
+                    // Simulate a concurrent writer that advanced the revision before this CAS.
+                    if (_observations.TryGetValue(observation.Identity.AttemptId, out var newer))
+                        _observations[observation.Identity.AttemptId] = newer with { Revision = newer.Revision + 1 };
+                    return ValueTask.FromResult(false);
+                }
 
                 if (_observations.TryGetValue(observation.Identity.AttemptId, out var existing))
                 {
@@ -448,6 +531,15 @@ public class AgentToolPreDispatchResultContractTests
                     _observations.Remove(receipt.Identity.AttemptId);
                     return ValueTask.FromResult(false);
                 }
+
+                if (FailNextReceiptInsert)
+                {
+                    FailNextReceiptInsert = false;
+                    // Simulate a store that rejected the insert with no existing receipt and
+                    // no other durable form — nothing was durably established.
+                    return ValueTask.FromResult(false);
+                }
+
                 _receipts[receipt.Identity.AttemptId] = receipt;
                 _observations.Remove(receipt.Identity.AttemptId);
                 return ValueTask.FromResult(true);

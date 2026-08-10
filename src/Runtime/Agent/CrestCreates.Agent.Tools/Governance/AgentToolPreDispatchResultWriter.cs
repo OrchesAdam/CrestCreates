@@ -26,7 +26,7 @@ internal sealed class AgentToolPreDispatchResultWriter
     public async ValueTask<AgentToolPreDispatchReconciliationResult> WriteTerminalAsync(
         AgentToolPreDispatchIdentity identity,
         AgentToolPreDispatchReconciliationStatus status,
-        string reasonCode,
+        string? reasonCode,
         CancellationToken cancellationToken)
     {
         var now = _timeProvider.GetUtcNow();
@@ -55,12 +55,10 @@ internal sealed class AgentToolPreDispatchResultWriter
             }
 
             // CAS failed AND no existing receipt found — the store is in an inconsistent state.
-            // Do NOT return an unpersisted receipt. Return Conflict so the caller knows
-            // the terminal state could not be durably established.
-            return new AgentToolPreDispatchReconciliationResult
-            {
-                Status = AgentToolPreDispatchReconciliationStatus.Conflict
-            };
+            // The durable terminal form was not established; do not fabricate a protocol result.
+            throw new InvalidOperationException(
+                $"Terminal receipt insert failed for attempt '{identity.AttemptId}' and no existing " +
+                "receipt could be read back; refusing to return an unpersisted terminal result.");
         }
 
         // Receipt was successfully persisted. Publish accountability best-effort.
@@ -69,7 +67,7 @@ internal sealed class AgentToolPreDispatchResultWriter
         {
             try
             {
-                await _accountabilityProducer.PublishAsync(identity, status, reasonCode, cancellationToken)
+                await _accountabilityProducer.PublishAsync(identity, status, reasonCode ?? string.Empty, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch
@@ -88,7 +86,7 @@ internal sealed class AgentToolPreDispatchResultWriter
     public async ValueTask<AgentToolPreDispatchReconciliationResult> WriteObservationAsync(
         AgentToolPreDispatchIdentity identity,
         AgentToolPreDispatchReconciliationStatus status,
-        string reasonCode,
+        string? reasonCode,
         CancellationToken cancellationToken)
     {
         var now = _timeProvider.GetUtcNow();
@@ -105,17 +103,42 @@ internal sealed class AgentToolPreDispatchResultWriter
         };
 
         // Check observation CAS result — if the upsert failed (concurrent revision change),
-        // return Conflict so the caller knows the observation was not persisted.
+        // re-read the durable store and return the winner's state instead of fabricating a result.
         var upserted = await _store.TryUpsertObservationAsync(
             observation,
             existing?.Revision ?? 0,
             cancellationToken).ConfigureAwait(false);
         if (!upserted)
         {
-            return new AgentToolPreDispatchReconciliationResult
+            // Observation CAS miss — another reconciler advanced the revision. Re-read the
+            // durable store and return the winner's state instead of fabricating a result.
+            var terminalReceipt = await _store.ReadReceiptAsync(identity, cancellationToken).ConfigureAwait(false);
+            if (terminalReceipt is not null)
             {
-                Status = AgentToolPreDispatchReconciliationStatus.Conflict
-            };
+                // The race winner already established a terminal receipt — replay it.
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = ReplayStatus(terminalReceipt),
+                    Receipt = terminalReceipt
+                };
+            }
+
+            var current = await _store.ReadObservationAsync(identity, cancellationToken).ConfigureAwait(false);
+            if (current is not null)
+            {
+                // Return the current durable observation (still-pending), not the lost write.
+                return new AgentToolPreDispatchReconciliationResult
+                {
+                    Status = current.Status,
+                    Observation = current
+                };
+            }
+
+            // Neither a terminal receipt nor an observation could be read back — the durable
+            // form is missing. Do not fabricate a protocol result.
+            throw new InvalidOperationException(
+                $"Observation CAS upsert failed for attempt '{identity.AttemptId}' and no durable " +
+                "terminal receipt or observation could be read back; refusing to return an unpersisted result.");
         }
 
         return new AgentToolPreDispatchReconciliationResult
@@ -139,7 +162,7 @@ internal sealed class AgentToolPreDispatchResultWriter
     internal static string ComputeIntegrity(
         AgentToolPreDispatchIdentity identity,
         AgentToolPreDispatchReconciliationStatus status,
-        string reasonCode,
+        string? reasonCode,
         DateTimeOffset terminalAt)
         => $"{identity.AttemptId}:{identity.LogicalInvocationKey.InvocationId}:{status}:{reasonCode}:{terminalAt:O}";
 }

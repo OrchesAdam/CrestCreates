@@ -125,7 +125,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     AgentToolPreDispatchReconciliationStatus.Conflict,
-                    "checkpoint_evidence_missing",
+                    null,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -138,7 +138,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     AgentToolPreDispatchReconciliationStatus.Conflict,
-                    "checkpoint_incomplete",
+                    null,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -149,7 +149,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     AgentToolPreDispatchReconciliationStatus.Conflict,
-                    "checkpoint_identity_mismatch",
+                    null,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -162,7 +162,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     AgentToolPreDispatchReconciliationStatus.Conflict,
-                    "checkpoint_intent_mismatch",
+                    null,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -176,7 +176,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     AgentToolPreDispatchReconciliationStatus.Conflict,
-                    "checkpoint_reservation_mismatch",
+                    null,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -190,7 +190,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     AgentToolPreDispatchReconciliationStatus.Conflict,
-                    "checkpoint_bound_reservation_mismatch",
+                    null,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -203,7 +203,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     AgentToolPreDispatchReconciliationStatus.Conflict,
-                    "checkpoint_accepted_receipt_mismatch",
+                    null,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -216,7 +216,7 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     AgentToolPreDispatchReconciliationStatus.Conflict,
-                    "checkpoint_lease_mismatch",
+                    null,
                     cancellationToken).ConfigureAwait(false);
             }
         }
@@ -265,14 +265,14 @@ public sealed class DefaultAgentToolPreDispatchReconciler : IAgentToolPreDispatc
                 return await _resultWriter.WriteTerminalAsync(
                     identity,
                     settlement.Status,
-                    settlement.ReasonCode ?? reasonCode,
+                    settlement.ReasonCode,
                     cancellationToken).ConfigureAwait(false);
             }
 
             return await _resultWriter.WriteObservationAsync(
                 identity,
                 settlement.Status,
-                settlement.ReasonCode ?? reasonCode,
+                settlement.ReasonCode,
                 cancellationToken).ConfigureAwait(false);
         }
 
