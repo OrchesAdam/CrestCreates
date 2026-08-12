@@ -3,6 +3,7 @@ using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Bootstrap;
 using CrestCreates.Metadata.Abstractions.Registry;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.Agent.Memory.Bootstrap;
@@ -16,19 +17,16 @@ public sealed class AgentMemoryCurationCompositionValidator : IBootstrapValidato
 {
     private readonly IAgentMemoryFormalCurationMarker? _marker;
     private readonly IAgentMemoryStore? _store;
-    private readonly IAgentMemoryPromotionService? _promotion;
-    private readonly IAgentMemoryCurationServiceCapabilities? _promotionCapabilities;
+    private readonly IServiceProvider? _services;
 
     public AgentMemoryCurationCompositionValidator(
         IAgentMemoryFormalCurationMarker? marker = null,
         IAgentMemoryStore? store = null,
-        IAgentMemoryPromotionService? promotion = null,
-        IAgentMemoryCurationServiceCapabilities? promotionCapabilities = null)
+        IServiceProvider? services = null)
     {
         _marker = marker;
         _store = store;
-        _promotion = promotion;
-        _promotionCapabilities = promotionCapabilities;
+        _services = services;
     }
 
     public int Order => -100;
@@ -62,17 +60,22 @@ public sealed class AgentMemoryCurationCompositionValidator : IBootstrapValidato
             return false;
         }
 
-        if (_promotion is null
-            || _promotionCapabilities is null
-            || _promotionCapabilities.OutcomeGuarantee != AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic)
-        {
-            message = "Selected Agent Memory promotion service does not guarantee ConfirmedAtomic formal curation outcomes.";
-            return false;
-        }
-
         if (_store is not IAgentMemoryConditionalCurationStore)
         {
             message = "Agent Memory store does not support conditional curation transitions (IAgentMemoryConditionalCurationStore).";
+            return false;
+        }
+
+        // Resolve the selected promotion service only after the store shape has
+        // passed. This preserves fail-closed diagnostics for a malformed store
+        // even when its default service has additional unresolved dependencies.
+        var promotion = _services?.GetService<IAgentMemoryPromotionService>();
+        var promotionCapabilities = _services?.GetService<IAgentMemoryCurationServiceCapabilities>();
+        if (promotion is null
+            || promotionCapabilities is null
+            || promotionCapabilities.OutcomeGuarantee != AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic)
+        {
+            message = "Selected Agent Memory promotion service does not guarantee ConfirmedAtomic formal curation outcomes.";
             return false;
         }
 
