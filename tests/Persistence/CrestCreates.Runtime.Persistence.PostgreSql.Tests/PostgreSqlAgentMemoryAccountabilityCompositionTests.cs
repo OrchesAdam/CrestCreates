@@ -77,12 +77,12 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
         {
             Value = value,
             Algorithm = "SHA-256",
-            AlgorithmVersion = "v1",
-            ArtifactKind = "AgentMemoryEffectivePack",
-            Scope = "TenantVisible",
-            Purpose = "Accountability",
-            ContractVersion = "v1",
-            CanonicalShapeVersion = "v1"
+            AlgorithmVersion = "sha256-canonical-json-v1",
+            ArtifactKind = AgentMemoryAccountabilityPayloadKinds.EffectivePackArtifactKind,
+            Scope = AgentMemoryAccountabilityPayloadKinds.EffectivePackScope,
+            Purpose = AgentMemoryAccountabilityPayloadKinds.EffectivePackPurpose,
+            ContractVersion = AgentMemoryAccountabilityPayloadKinds.EffectivePackContractVersion,
+            CanonicalShapeVersion = AgentMemoryAccountabilityPayloadKinds.EffectivePackCanonicalShapeVersion
         };
 
     private async Task<long> CountAsync(PostgreSqlRuntimePersistenceOptions options)
