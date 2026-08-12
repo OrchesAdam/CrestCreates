@@ -4,11 +4,13 @@ using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Agent.Memory.Accountability.Bootstrap;
+using CrestCreates.Agent.Memory.Accountability.Production;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using Xunit;
 
@@ -21,9 +23,11 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
     public async Task MemoryProducer_Should_PersistAcceptedDuplicateConflictAndTenantIsolation()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
+        var logger = new RecordingLogger();
         using var provider = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
             .AddAccountability()
+            .AddSingleton<ILogger<AgentMemoryAccountabilityProducer>>(logger)
             .AddAgentMemoryAccountability()
             .BuildServiceProvider();
 
@@ -44,12 +48,15 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
 
         await producer.PublishRecallAsync(identity, firstContext, payload);
         (await CountAsync(lease.Options)).Should().Be(1);
+        logger.Messages.Should().Contain(x => x.Contains("AGENT_MEMORY_ACCOUNTABILITY_RECORDED", StringComparison.Ordinal));
 
         await producer.PublishRecallAsync(identity, firstContext, payload);
         (await CountAsync(lease.Options)).Should().Be(1, "the same complete Memory fact must be Duplicate");
+        logger.Messages.Should().Contain(x => x.Contains("AGENT_MEMORY_ACCOUNTABILITY_DUPLICATE", StringComparison.Ordinal));
 
         await producer.PublishRecallAsync(identity, firstContext with { CausationId = "cause-b", ParentAuditId = "parent-b" }, payload);
         (await CountAsync(lease.Options)).Should().Be(1, "a changed Capability execution must be Conflict without replacing the first snapshot");
+        logger.Messages.Should().Contain(x => x.Contains("AGENT_MEMORY_ACCOUNTABILITY_CONFLICT", StringComparison.Ordinal));
         var persisted = await ReadEnvelopeAsync(lease.Options);
         persisted.RootElement.GetProperty("causationId").GetString().Should().Be("cause-a");
 
@@ -103,5 +110,25 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
             $"select envelope_json::text from \"{options.Schema}\".runtime_audit_envelopes where sink_id=@sink limit 1;", connection);
         command.Parameters.AddWithValue("sink", "postgresql-runtime-audit");
         return JsonDocument.Parse((string)(await command.ExecuteScalarAsync())!);
+    }
+
+    private sealed class RecordingLogger : ILogger<AgentMemoryAccountabilityProducer>
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (IsEnabled(logLevel))
+                Messages.Add(formatter(state, exception));
+        }
     }
 }

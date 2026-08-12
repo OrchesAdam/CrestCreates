@@ -64,6 +64,7 @@ public sealed class SourceExpansionPayloadSanitizationRule : AgentMemoryPayloadS
             errors.Add(("AUDIT_FIELD_REQUIRED", "Payload.Sanitization"));
         else
             ValidateSanitizationSummary(payload.Sanitization, errors);
-        ValidateCodeList(payload.DiagnosticCodes, "Payload.DiagnosticCodes", errors);
+        ValidateCodeList(payload.DiagnosticCodes, "Payload.DiagnosticCodes", errors,
+            AgentMemoryAccountabilityPayloadKinds.DiagnosticCodeAllowList);
     }
 }

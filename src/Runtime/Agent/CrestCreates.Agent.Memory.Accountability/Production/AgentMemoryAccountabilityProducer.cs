@@ -307,12 +307,25 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         if (string.IsNullOrWhiteSpace(context.TenantId)
             || string.IsNullOrWhiteSpace(context.ActorId)
             || string.IsNullOrWhiteSpace(context.ActorKind)
-            || string.IsNullOrWhiteSpace(context.CorrelationId))
+            || string.IsNullOrWhiteSpace(context.CorrelationId)
+            || string.IsNullOrWhiteSpace(context.InvocationSource))
         {
             throw new InvalidOperationException(
                 $"{AgentMemoryAccountabilityDiagnosticCodes.ProducerContractInvalid.Value}: trusted tenant, actor, and correlation context are required");
         }
+        if (!IsStableActorKind(context.ActorKind)
+            || !IsStableInvocationSource(context.InvocationSource))
+        {
+            throw new InvalidOperationException(
+                $"{AgentMemoryAccountabilityDiagnosticCodes.ProducerContractInvalid.Value}: actor and invocation source must use explicit stable mappings");
+        }
     }
+
+    private static bool IsStableActorKind(string actorKind)
+        => actorKind is AuditActorKinds.User or AuditActorKinds.Anonymous or AuditActorKinds.System
+            or AuditActorKinds.Workflow or AuditActorKinds.HumanTask or AuditActorKinds.Agent
+            or AuditActorKinds.Integration or AuditActorKinds.Scheduler or AuditActorKinds.McpClient
+            or AuditActorKinds.Unknown;
 
     private static string MapActorKind(string actorKind)
         => actorKind switch
@@ -327,8 +340,15 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
             AuditActorKinds.Scheduler => AuditActorKinds.Scheduler,
             AuditActorKinds.McpClient => AuditActorKinds.McpClient,
             AuditActorKinds.Unknown => AuditActorKinds.Unknown,
-            _ => AuditActorKinds.Unknown
+            _ => throw new InvalidOperationException(
+                $"{AgentMemoryAccountabilityDiagnosticCodes.ProducerContractInvalid.Value}: unsupported actor kind")
         };
+
+    private static bool IsStableInvocationSource(string? invocationSource)
+        => invocationSource is AuditInvocationSources.Http or AuditInvocationSources.Workflow
+            or AuditInvocationSources.HumanTask or AuditInvocationSources.Agent
+            or AuditInvocationSources.Mcp or AuditInvocationSources.Integration
+            or AuditInvocationSources.System;
 
     private static string MapInvocationSource(string? invocationSource)
         => invocationSource switch
@@ -339,6 +359,7 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
             AuditInvocationSources.Agent => AuditInvocationSources.Agent,
             AuditInvocationSources.Mcp => AuditInvocationSources.Mcp,
             AuditInvocationSources.Integration => AuditInvocationSources.Integration,
-            _ => AuditInvocationSources.System
+            _ => throw new InvalidOperationException(
+                $"{AgentMemoryAccountabilityDiagnosticCodes.ProducerContractInvalid.Value}: unsupported invocation source")
         };
 }

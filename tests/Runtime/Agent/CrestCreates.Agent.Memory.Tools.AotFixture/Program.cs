@@ -159,9 +159,22 @@ internal static class MemoryToolFixtureRunner
                 .Where(record => record.Payload?.Kind is not null
                     && requiredMemoryPayloadKinds.Contains(record.Payload.Kind))
                 .ToArray();
-            if (memoryRecords.Any(record => string.IsNullOrWhiteSpace(record.CorrelationId)
-                    || string.IsNullOrWhiteSpace(record.CausationId)
-                    || string.IsNullOrWhiteSpace(record.ParentAuditId))) return 9;
+            var capabilityRecords = accountabilityRecords
+                .Where(record => record.Action?.Kind == "capability.execute")
+                .ToArray();
+            if (memoryRecords.Any(memory =>
+                    string.IsNullOrWhiteSpace(memory.CorrelationId)
+                    || string.IsNullOrWhiteSpace(memory.CausationId)
+                    || string.IsNullOrWhiteSpace(memory.ParentAuditId))) return 9;
+            if (memoryRecords.Any(memory =>
+            {
+                var capability = capabilityRecords.FirstOrDefault(candidate =>
+                    string.Equals(candidate.AuditId, memory.ParentAuditId, StringComparison.Ordinal));
+                return capability is null
+                    || !string.Equals(memory.CorrelationId, capability.CorrelationId, StringComparison.Ordinal)
+                    || !string.Equals(memory.CausationId, capability.Runtime?.ExecutionId, StringComparison.Ordinal)
+                    || memory.Action?.Kind == "capability.execute";
+            })) return 10;
             Console.WriteLine("agent_memory_accountability: OK");
             Console.WriteLine("AGENT_MEMORY_TOOL_NATIVEAOT_PIPELINE_OK");
             return 0;

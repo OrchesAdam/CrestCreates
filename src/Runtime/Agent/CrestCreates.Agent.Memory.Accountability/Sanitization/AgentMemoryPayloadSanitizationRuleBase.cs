@@ -139,7 +139,11 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
             errors.Add(("AUDIT_FIELD_REQUIRED", path));
     }
 
-    protected void ValidateCodeList(IReadOnlyList<string>? codes, string path, List<(string Code, string Path)> errors)
+    protected void ValidateCodeList(
+        IReadOnlyList<string>? codes,
+        string path,
+        List<(string Code, string Path)> errors,
+        IReadOnlySet<string>? allowedCodes = null)
     {
         if (codes is null || codes.Count == 0)
             return;
@@ -164,9 +168,24 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
                 return;
             }
         }
+        if (allowedCodes is not null)
+        {
+            for (var i = 0; i < codes.Count; i++)
+            {
+                if (!allowedCodes.Contains(codes[i]))
+                {
+                    errors.Add(("AUDIT_CODE_NOT_ALLOWLISTED", $"{path}[{i}]"));
+                    return;
+                }
+            }
+        }
     }
 
-    protected void ValidateRedactionList(IReadOnlyList<string>? codes, string path, List<(string Code, string Path)> errors)
+    protected void ValidateRedactionList(
+        IReadOnlyList<string>? codes,
+        string path,
+        List<(string Code, string Path)> errors,
+        IReadOnlySet<string>? allowedCodes = null)
     {
         if (codes is null || codes.Count == 0)
             return;
@@ -189,6 +208,17 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
             {
                 errors.Add(("AUDIT_CODES_NOT_SORTED_OR_DUPLICATE", path));
                 return;
+            }
+        }
+        if (allowedCodes is not null)
+        {
+            for (var i = 0; i < codes.Count; i++)
+            {
+                if (!allowedCodes.Contains(codes[i]))
+                {
+                    errors.Add(("AUDIT_REDACTION_NOT_ALLOWLISTED", $"{path}[{i}]"));
+                    return;
+                }
             }
         }
     }
@@ -231,8 +261,10 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
             errors.Add(("AUDIT_FIELD_INVALID", "Payload.Sanitization.State"));
             return;
         }
-        ValidateRedactionList(summary.RedactionCodes, "Payload.Sanitization.RedactionCodes", errors);
-        ValidateCodeList(summary.DiagnosticCodes, "Payload.Sanitization.DiagnosticCodes", errors);
+        ValidateRedactionList(summary.RedactionCodes, "Payload.Sanitization.RedactionCodes", errors,
+            AgentMemoryAccountabilityPayloadKinds.RedactionCodeAllowList);
+        ValidateCodeList(summary.DiagnosticCodes, "Payload.Sanitization.DiagnosticCodes", errors,
+            AgentMemoryAccountabilityPayloadKinds.DiagnosticCodeAllowList);
     }
 
     protected void ValidateAllowList(string? value, IReadOnlyCollection<string> allowed, string path, List<(string Code, string Path)> errors)

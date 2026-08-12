@@ -65,7 +65,8 @@ public sealed class RecallPayloadSanitizationRule : AgentMemoryPayloadSanitizati
                 AgentMemoryAccountabilityPayloadKinds.MinimumConfidenceAllowList,
                 "Payload.MinimumConfidence",
                 errors);
-        ValidateCodeList(payload.DiagnosticCodes, "Payload.DiagnosticCodes", errors);
+        ValidateCodeList(payload.DiagnosticCodes, "Payload.DiagnosticCodes", errors,
+            AgentMemoryAccountabilityPayloadKinds.DiagnosticCodeAllowList);
         ValidateRequestedKinds(payload.RequestedKinds, "Payload.RequestedKinds", errors);
         if (payload.RequestedKinds.Any(kind => !AgentMemoryAccountabilityPayloadKinds.RequestedKindAllowList.Contains(kind)))
             errors.Add(("AUDIT_FIELD_INVALID", "Payload.RequestedKinds"));

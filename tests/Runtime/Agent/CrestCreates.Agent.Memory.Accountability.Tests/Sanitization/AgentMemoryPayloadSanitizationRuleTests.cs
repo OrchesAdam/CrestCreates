@@ -465,6 +465,43 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
     }
 
     [Fact]
+    public void Recall_Should_RejectDiagnosticCodeOutsideStableAllowList()
+    {
+        var rule = new RecallPayloadSanitizationRule();
+        var payload = AccountabilityTestFixture.CreateRecallPayload(result: "completed") with
+        {
+            DiagnosticCodes = new[] { "user-secret-diagnostic" }
+        };
+        var input = AccountabilityTestFixture.CreateAuditPayload(payload, Infos.Recall, AgentMemoryAccountabilityPayloadKinds.Recall);
+
+        var ex = Record.Exception(() => rule.Sanitize(input));
+
+        ex.Should().BeOfType<AuditSanitizationException>()
+            .Which.Code.Should().Be("AUDIT_CODE_NOT_ALLOWLISTED");
+    }
+
+    [Fact]
+    public void SourceExpansion_Should_RejectRedactionCodeOutsideStableAllowList()
+    {
+        var rule = new SourceExpansionPayloadSanitizationRule();
+        var payload = AccountabilityTestFixture.CreateSourceExpansionPayload(status: "expanded") with
+        {
+            Sanitization = new AgentMemoryAccountabilitySanitizationSummary
+            {
+                State = "redacted",
+                RedactionCodes = new[] { "user-secret-redaction" },
+                DiagnosticCodes = Array.Empty<string>()
+            }
+        };
+        var input = AccountabilityTestFixture.CreateAuditPayload(payload, Infos.SourceExpansion, AgentMemoryAccountabilityPayloadKinds.SourceExpansion);
+
+        var ex = Record.Exception(() => rule.Sanitize(input));
+
+        ex.Should().BeOfType<AuditSanitizationException>()
+            .Which.Code.Should().Be("AUDIT_REDACTION_NOT_ALLOWLISTED");
+    }
+
+    [Fact]
     public void Recall_Should_RejectTooManyRequestedKinds()
     {
         var rule = new RecallPayloadSanitizationRule();

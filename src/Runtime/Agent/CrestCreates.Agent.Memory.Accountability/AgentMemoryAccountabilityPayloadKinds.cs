@@ -49,6 +49,40 @@ public static class AgentMemoryAccountabilityPayloadKinds
             "MemoryCandidate", "MemoryItem"
         };
 
+    // These are the only stable codes emitted by the current Memory
+    // sanitization/domain contracts.  Accountability must not become a
+    // free-form diagnostic channel: provider/user text is rejected even when
+    // it is placed in a field named "Code".
+    public static IReadOnlySet<string> DiagnosticCodeAllowList { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "AGENT_MEMORY_BLOCK_SANITIZED",
+            "AGENT_MEMORY_CONTENT_REDACTED",
+            "AGENT_MEMORY_CONTENT_REJECTED",
+            "AGENT_MEMORY_EMPTY_CONTENT",
+            "AGENT_MEMORY_SOURCE_NOT_FOUND",
+            "AGENT_MEMORY_SOURCE_NOT_EXPANDABLE",
+            "AGENT_MEMORY_BUDGET_TRUNCATED",
+            "AGENT_MEMORY_VISIBILITY_KIND_UNRESOLVABLE",
+            "AGENT_MEMORY_LLM_BLOCK_COUNT_TRUNCATED",
+            "AGENT_MEMORY_LLM_BLOCK_TRUNCATED",
+            "AGENT_MEMORY_LLM_CANDIDATE_COUNT_TRUNCATED",
+            "AGENT_MEMORY_LLM_CANDIDATE_TRUNCATED",
+            "AGENT_MEMORY_LLM_CONTENT_REJECTED",
+            "AGENT_MEMORY_LLM_REDACTION_OCCURRED",
+            "AGENT_MEMORY_LLM_SOURCE_REF_MISSING"
+        };
+
+    public static IReadOnlySet<string> RedactionCodeAllowList { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "empty-content",
+            "bearer-token",
+            "credential",
+            "connection-credential",
+            "long-token"
+        };
+
     public static IReadOnlySet<string> RecallFailureCodeAllowList { get; } =
         new HashSet<string>(StringComparer.Ordinal) { "budget-invalid", "resource-unavailable" };
 

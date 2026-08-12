@@ -354,12 +354,28 @@ internal static class McpMemoryAotFixtureRunner
                 .Where(record => record.Payload?.Kind is not null
                     && requiredMemoryPayloadKinds.Contains(record.Payload.Kind))
                 .ToArray();
+            var capabilityRecords = accountabilityRecords
+                .Where(record => record.Action?.Kind == "capability.execute")
+                .ToArray();
             if (memoryRecords.Any(record => string.IsNullOrWhiteSpace(record.CorrelationId)
                     || string.IsNullOrWhiteSpace(record.CausationId)
                     || string.IsNullOrWhiteSpace(record.ParentAuditId)))
             {
                 Console.Error.WriteLine("FAIL: Memory facts did not preserve MCP causality");
                 return 10;
+            }
+            if (memoryRecords.Any(memory =>
+            {
+                var capability = capabilityRecords.FirstOrDefault(candidate =>
+                    string.Equals(candidate.AuditId, memory.ParentAuditId, StringComparison.Ordinal));
+                return capability is null
+                    || !string.Equals(memory.CorrelationId, capability.CorrelationId, StringComparison.Ordinal)
+                    || !string.Equals(memory.CausationId, capability.Runtime?.ExecutionId, StringComparison.Ordinal)
+                    || memory.Action?.Kind == "capability.execute";
+            }))
+            {
+                Console.Error.WriteLine("FAIL: Memory facts did not match the authoritative MCP Capability fact");
+                return 11;
             }
             Console.WriteLine("memory_accountability: OK");
 

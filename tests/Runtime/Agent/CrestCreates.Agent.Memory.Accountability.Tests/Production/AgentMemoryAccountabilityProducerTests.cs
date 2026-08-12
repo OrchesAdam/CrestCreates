@@ -426,4 +426,30 @@ public sealed class AgentMemoryAccountabilityProducerTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*AGENT_MEMORY_ACCOUNTABILITY_PRODUCER_CONTRACT_INVALID*correlation context*");
     }
+
+    [Fact]
+    public async Task UnknownActorKind_Should_ThrowContractInvalid()
+    {
+        using var harness = new AccountabilityTestFixture.ProducerHarness();
+        var act = () => harness.Producer.PublishRecallAsync(
+            AccountabilityTestFixture.CreateIdentity(),
+            AccountabilityTestFixture.CreateContext() with { ActorKind = "custom-user" },
+            AccountabilityTestFixture.CreateRecallPayload()).AsTask();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*AGENT_MEMORY_ACCOUNTABILITY_PRODUCER_CONTRACT_INVALID*stable mappings*");
+    }
+
+    [Fact]
+    public async Task MissingInvocationSource_Should_ThrowContractInvalid()
+    {
+        using var harness = new AccountabilityTestFixture.ProducerHarness();
+        var act = () => harness.Producer.PublishRecallAsync(
+            AccountabilityTestFixture.CreateIdentity(),
+            AccountabilityTestFixture.CreateContext(invocationSource: null),
+            AccountabilityTestFixture.CreateRecallPayload()).AsTask();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*AGENT_MEMORY_ACCOUNTABILITY_PRODUCER_CONTRACT_INVALID*trusted tenant*");
+    }
 }
