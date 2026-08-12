@@ -14,6 +14,7 @@ using CrestCreates.Agent.Tools;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Accountability.InMemory;
 using CrestCreates.Agent.Memory.Accountability.Bootstrap;
+using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Metadata;
@@ -146,7 +147,14 @@ internal static class MemoryToolFixtureRunner
             if (!replay.IsSuccess) return 7;
             Console.WriteLine("agent_memory_curation_replay: OK");
             var accountabilityRecords = services.GetRequiredService<InMemoryAuditSink>().GetRecords();
-            if (accountabilityRecords.Count == 0 || accountabilityRecords.Any(record => record.Actor.Kind != "agent")) return 8;
+            var requiredMemoryPayloadKinds = new[]
+            {
+                AgentMemoryAccountabilityPayloadKinds.Recall,
+                AgentMemoryAccountabilityPayloadKinds.SourceExpansion,
+                AgentMemoryAccountabilityPayloadKinds.Curation
+            };
+            if (requiredMemoryPayloadKinds.Any(kind =>
+                    !accountabilityRecords.Any(record => record.Payload?.Kind == kind))) return 8;
             Console.WriteLine("agent_memory_accountability: OK");
             Console.WriteLine("AGENT_MEMORY_TOOL_NATIVEAOT_PIPELINE_OK");
             return 0;

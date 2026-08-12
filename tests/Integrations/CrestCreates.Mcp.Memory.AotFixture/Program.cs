@@ -10,6 +10,7 @@ using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Accountability.InMemory;
 using CrestCreates.Agent.Memory.Accountability.Bootstrap;
+using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
@@ -337,7 +338,14 @@ internal static class McpMemoryAotFixtureRunner
                 return 1;
             }
 
-            if (host.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Count == 0)
+            var accountabilityRecords = host.Services.GetRequiredService<InMemoryAuditSink>().GetRecords();
+            var requiredMemoryPayloadKinds = new[]
+            {
+                AgentMemoryAccountabilityPayloadKinds.Recall,
+                AgentMemoryAccountabilityPayloadKinds.SourceExpansion
+            };
+            if (requiredMemoryPayloadKinds.Any(kind =>
+                    !accountabilityRecords.Any(record => record.Payload?.Kind == kind)))
             {
                 Console.Error.WriteLine("FAIL: Accountability bridge did not persist a Memory fact");
                 return 9;

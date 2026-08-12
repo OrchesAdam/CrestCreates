@@ -551,6 +551,37 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
     }
 
     [Fact]
+    public void CurationArchiveCommitted_FromActive_ShouldPass()
+    {
+        var rule = new CurationPayloadSanitizationRule();
+        var payload = AccountabilityTestFixture.CreateCurationPayload(
+            operation: "archive", result: "committed", memoryId: "memory-active");
+        var input = AccountabilityTestFixture.CreateAuditPayload(
+            payload, Infos.Curation, AgentMemoryAccountabilityPayloadKinds.Curation);
+
+        var result = rule.Sanitize(input);
+
+        result.Kind.Should().Be(AgentMemoryAccountabilityPayloadKinds.Curation);
+    }
+
+    [Fact]
+    public void CurationArchiveCommitted_FromSuperseded_ShouldPass()
+    {
+        var rule = new CurationPayloadSanitizationRule();
+        var payload = AccountabilityTestFixture.CreateCurationPayload(
+            operation: "archive", result: "committed", memoryId: "memory-superseded") with
+        {
+            PreviousState = "superseded"
+        };
+        var input = AccountabilityTestFixture.CreateAuditPayload(
+            payload, Infos.Curation, AgentMemoryAccountabilityPayloadKinds.Curation);
+
+        var result = rule.Sanitize(input);
+
+        result.Kind.Should().Be(AgentMemoryAccountabilityPayloadKinds.Curation);
+    }
+
+    [Fact]
     public void Curation_Should_AlwaysValidateNewMemoryId()
     {
         var rule = new CurationPayloadSanitizationRule();

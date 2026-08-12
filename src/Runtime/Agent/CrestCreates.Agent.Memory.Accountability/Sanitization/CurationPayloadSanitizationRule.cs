@@ -77,16 +77,26 @@ public sealed class CurationPayloadSanitizationRule : AgentMemoryPayloadSanitiza
         {
             ValidateRequiredNonEmpty(payload.ResultingState, "Payload.ResultingState", errors);
             ValidateRequiredNonEmpty(payload.PreviousState, "Payload.PreviousState", errors);
-            var expectedStates = payload.Operation switch
+            var previousStateIsValid = payload.Operation switch
             {
-                "promote" or "reject" => (Previous: "candidate", Resulting: payload.Operation == "promote" ? "active" : "rejected"),
-                "supersede" => (Previous: "active", Resulting: "superseded"),
-                "archive" => (Previous: "active", Resulting: "archived"),
-                _ => (Previous: string.Empty, Resulting: string.Empty)
+                "promote" or "reject" => string.Equals(payload.PreviousState, "candidate", StringComparison.Ordinal),
+                "supersede" => string.Equals(payload.PreviousState, "active", StringComparison.Ordinal),
+                // Archive is valid from either supported terminal predecessor.
+                "archive" => payload.PreviousState is "active" or "superseded",
+                _ => false
             };
-            if (payload.PreviousState is not null && !string.Equals(payload.PreviousState, expectedStates.Previous, StringComparison.Ordinal))
+            if (payload.PreviousState is not null && !previousStateIsValid)
                 errors.Add(("AUDIT_FIELD_INVALID", "Payload.PreviousState"));
-            if (payload.ResultingState is not null && !string.Equals(payload.ResultingState, expectedStates.Resulting, StringComparison.Ordinal))
+            var expectedResultingState = payload.Operation switch
+            {
+                "promote" => "active",
+                "reject" => "rejected",
+                "supersede" => "superseded",
+                "archive" => "archived",
+                _ => string.Empty
+            };
+            if (payload.ResultingState is not null
+                && !string.Equals(payload.ResultingState, expectedResultingState, StringComparison.Ordinal))
                 errors.Add(("AUDIT_FIELD_INVALID", "Payload.ResultingState"));
             if (payload.StableFailureCode is not null)
                 errors.Add(("AUDIT_FIELD_INVALID", "Payload.StableFailureCode"));
