@@ -1,7 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
+using CrestCreates.Accountability.Abstractions.Semantics;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.ReadCore;
 using CrestCreates.Agent.Tools;
@@ -16,16 +19,20 @@ internal sealed class ExpandAgentMemorySourceHandler : AgentMemoryToolHandlerBas
 {
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
     private readonly IAgentMemorySourceExpandCore _expandCore;
+    private readonly IAgentMemoryOperationIdentityFactory _identities;
 
     public ExpandAgentMemorySourceHandler(
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
-        IAgentMemorySourceExpandCore expandCore)
-        : base(capabilityContext, agentExecution)
+        IAgentMemorySourceExpandCore expandCore,
+        IAgentMemoryOperationIdentityFactory identities)
+        : base(capabilityContext, agentExecution, auditContexts)
     {
         _scopeProvider = scopeProvider;
         _expandCore = expandCore;
+        _identities = identities;
     }
 
     public async Task<ExpandAgentMemorySourceResult> ExecuteAsync(ExpandAgentMemorySourceInput input, CancellationToken ct)
@@ -38,11 +45,21 @@ internal sealed class ExpandAgentMemorySourceHandler : AgentMemoryToolHandlerBas
         var newPrincipal = ToAccessPrincipal(principal);
         var newScope = ToAccessScope(scope, principal.TenantId);
         var origin = ToAgentToolOrigin(principal);
+        var identity = _identities.Create();
+        var request = new AgentMemorySourceExpansionOperationRequest
+        {
+            Principal = newPrincipal,
+            Origin = origin,
+            Identity = identity,
+            InvocationContext = AgentToolInvocationContext(principal, newPrincipal.TenantId, newPrincipal.UserId),
+            Scope = newScope,
+            Input = input
+        };
 
         AgentMemoryReadCoreOutcome<ExpandAgentMemorySourceResult>? outcome = null;
         try
         {
-            outcome = await _expandCore.ExpandAsync(newPrincipal, origin, newScope, input, ct).ConfigureAwait(false);
+            outcome = await _expandCore.ExpandAsync(request, ct).ConfigureAwait(false);
         }
         catch (AgentMemoryReadCoreException ex)
         {

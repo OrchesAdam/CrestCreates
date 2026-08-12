@@ -1,11 +1,14 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.ReadCore;
+using CrestCreates.Agent.Memory.ReadCore.Accountability;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.CanonicalHashing;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -42,6 +45,33 @@ public class AgentMemoryReadCoreTests
             },
             OperationId = "op1"
         };
+
+    private static AgentMemoryRecallOperationRequest MakeRequest(
+        AgentMemoryAccessPrincipal principal,
+        AgentMemoryArtifactOrigin origin,
+        AgentMemoryAccessScope scope,
+        BuildAgentMemoryPackInput input)
+        => new()
+        {
+            Principal = principal,
+            Origin = origin,
+            Identity = new AgentMemoryOperationIdentity
+            {
+                OperationId = $"op_{Guid.NewGuid():N}",
+                OccurredAt = DateTimeOffset.UtcNow
+            },
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = "t1",
+                ActorId = "u1",
+                ActorKind = "User"
+            },
+            Scope = scope,
+            Input = input
+        };
+
+    private static AgentMemoryEffectiveResultHashProjector MakeProjector()
+        => new(new DefaultCanonicalHashComputer());
 
     private static AgentMemoryAccessScope MakeScope(bool allowUnscoped = false)
         => new()
@@ -163,9 +193,9 @@ public class AgentMemoryReadCoreTests
 
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, mockHandleResolver.Object,
-            mockCoordinator.Object, lifetimePolicy, Mock.Of<IAgentMemoryCurrentClosureProvider>(), timeProvider);
+            mockCoordinator.Object, lifetimePolicy, Mock.Of<IAgentMemoryCurrentClosureProvider>(), timeProvider, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
 
         outcome.Should().NotBeNull();
         outcome.Result.Should().NotBeNull();
@@ -184,9 +214,9 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
             Mock.Of<IAgentMemoryCurrentClosureProvider>(),
-            TimeProvider.System);
+            TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var act = async () => await core.RecallAsync(MakePrincipal(), MakeOrigin(), scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(MakePrincipal(), MakeOrigin(), scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("budget-invalid");
     }
@@ -202,9 +232,9 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
             Mock.Of<IAgentMemoryCurrentClosureProvider>(),
-            TimeProvider.System);
+            TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var act = async () => await core.RecallAsync(MakePrincipal(), MakeOrigin(), scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(MakePrincipal(), MakeOrigin(), scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("budget-invalid");
     }
@@ -222,9 +252,9 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
             Mock.Of<IAgentMemoryCurrentClosureProvider>(),
-            TimeProvider.System);
+            TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var act = async () => await core.RecallAsync(MakePrincipal(), MakeOrigin(), scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(MakePrincipal(), MakeOrigin(), scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("budget-invalid");
     }
@@ -242,9 +272,9 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
             Mock.Of<IAgentMemoryCurrentClosureProvider>(),
-            TimeProvider.System);
+            TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var act = async () => await core.RecallAsync(MakePrincipal(), MakeOrigin(), scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(MakePrincipal(), MakeOrigin(), scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("budget-invalid");
     }
@@ -273,9 +303,9 @@ public class AgentMemoryReadCoreTests
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(),
             Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
             Mock.Of<IAgentMemoryCurrentClosureProvider>(),
-            TimeProvider.System);
+            TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var act = async () => await core.RecallAsync(principal, origin, scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("resource-unavailable");
     }
@@ -315,9 +345,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Result.Items.Should().HaveCount(1); // Kept even with different refs
     }
 
@@ -365,9 +395,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Result.Items.Should().BeEmpty("cross-tenant memory must be filtered out");
     }
 
@@ -428,9 +458,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Result.Items.Should().BeEmpty("memory with invisible SourceRef descriptor must be filtered out");
     }
 
@@ -518,9 +548,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
 
         capturedGrants.Should().NotBeNull();
         capturedGrants.Should().HaveCount(1);
@@ -617,9 +647,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
 
         capturedGrants.Should().NotBeNull();
         capturedGrants.Should().HaveCount(2, "grants with different SourceKind must not collide");
@@ -680,9 +710,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
 
         // No grant should be created for the unsupported SourceKind
         capturedGrants.Should().NotBeNull();
@@ -771,9 +801,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
 
         // Diagnostic: check if coordinator was called (visibility filtering may have excluded the memory)
         outcome.Should().NotBeNull("ReadCore should return a result");
@@ -861,9 +891,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
 
         capturedGrants.Should().NotBeNull();
         capturedGrants.Should().HaveCount(1);
@@ -917,9 +947,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         grantCapture.Grants.Should().NotBeNull();
         grantCapture.Grants.Should().ContainSingle(g =>
             g.RequiredDescriptorRefs.Count == 0 && g.IsUnscoped == false,
@@ -968,9 +998,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         grantCapture.Grants.Should().NotBeNull();
         grantCapture.Grants.Should().ContainSingle(g =>
             g.RequiredDescriptorRefs.Count == 0 && g.IsUnscoped == false,
@@ -1020,9 +1050,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         grantCapture.Grants.Should().NotBeNull();
         grantCapture.Grants.Should().ContainSingle(g =>
             g.RequiredDescriptorRefs.Count == 0 && g.IsUnscoped == false,
@@ -1082,10 +1112,10 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
         // Coordinator rejection propagates — Descriptor-bound grant with empty closure + AllowUnscopedMemory=false is invalid
-        await Assert.ThrowsAsync<InvalidOperationException>(() => core.RecallAsync(principal, origin, scope, input).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => core.RecallAsync(MakeRequest(principal, origin, scope, input)).AsTask());
     }
 
     [Fact]
@@ -1131,9 +1161,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         grantCapture.Grants.Should().BeNullOrEmpty("TaskRecord with Range must not issue Grant");
     }
 
@@ -1179,9 +1209,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         grantCapture.Grants.Should().BeNullOrEmpty("CompressedContextBlock with Range must not issue Grant");
     }
 
@@ -1227,9 +1257,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         grantCapture.Grants.Should().BeNullOrEmpty("MemoryItem with Range must not issue Grant");
     }
 
@@ -1275,9 +1305,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosureProvider.Object, TimeProvider.System);
+            mockClosureProvider.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         grantCapture.Grants.Should().BeNullOrEmpty("MemoryCandidate with Range must not issue Grant");
     }
 
@@ -1356,9 +1386,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             Mock.Of<IAgentMemoryAccessArtifactCoordinator>(), Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("tenant-boundary");
     }
@@ -1420,9 +1450,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         var exception = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         exception.And.Code.Should().Be("handle-contract");
         revoked.Should().BeFalse("the invalid handle plan is rejected before any artifact is prepared");
@@ -1488,9 +1518,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosure.Object, TimeProvider.System);
+            mockClosure.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         revoked.Should().BeTrue();
     }
@@ -1544,9 +1574,9 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System);
+            Mock.Of<IAgentMemoryCurrentClosureProvider>(), TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Completed);
         revoked.Should().BeFalse();
     }
@@ -1588,10 +1618,10 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosure.Object, TimeProvider.System);
+            mockClosure.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
         var input = new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 10_000 };
-        var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Completed);
     }
 
@@ -1632,10 +1662,10 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosure.Object, TimeProvider.System);
+            mockClosure.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
         var input = new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 10_000 };
-        await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         grantCapture.Grants.Should().HaveCount(1, "same SourceKey across two items must produce exactly one Grant");
     }
 
@@ -1676,10 +1706,10 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosure.Object, TimeProvider.System);
+            mockClosure.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
         var input = new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 10_000 };
-        var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         outcome.Result.Items.Should().HaveCount(2);
         var grantId1 = outcome.Result.Items[0].SourceGrants.FirstOrDefault()?.GrantId;
         var grantId2 = outcome.Result.Items[1].SourceGrants.FirstOrDefault()?.GrantId;
@@ -1756,10 +1786,10 @@ public class AgentMemoryReadCoreTests
         var core = new AgentMemoryReadCore(
             mockRetriever.Object, Mock.Of<IAgentMemoryAccessHandleResolver>(),
             mockCoordinator.Object, Mock.Of<IAgentMemoryArtifactLifetimePolicy>(),
-            mockClosure.Object, TimeProvider.System);
+            mockClosure.Object, TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
         var input = new BuildAgentMemoryPackInput { MaximumCount = 10, CharacterBudget = 10_000 };
-        var act = async () => await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var act = async () => await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         coordinatorCalled.Should().BeFalse("conflicting descriptor refs must reject before Coordinator is called");
     }
@@ -1876,9 +1906,9 @@ public class AgentMemoryReadCoreTests
             coordinator,
             new DefaultAgentMemoryArtifactLifetimePolicy(options),
             Mock.Of<IAgentMemoryCurrentClosureProvider>(),
-            timeProvider);
+            timeProvider, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
-        var outcome = await core.RecallAsync(
+        var outcome = await core.RecallAsync(MakeRequest(
             principal,
             MakeOrigin(),
             scope,
@@ -1886,7 +1916,7 @@ public class AgentMemoryReadCoreTests
             {
                 MaximumCount = 5,
                 CharacterBudget = 10_000
-            });
+            }));
 
         var outputHandles = outcome.Result.Items
             .Select(item => item.MemoryHandle)
@@ -1955,18 +1985,18 @@ public class AgentMemoryReadCoreTests
             coordinator,
             lifetimePolicy,
             closureProvider.Object,
-            timeProvider);
+            timeProvider, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
         var input = new BuildAgentMemoryPackInput
         {
             MaximumCount = 5,
             CharacterBudget = 10_000
         };
 
-        var first = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var first = await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         var firstHandle = first.Result.Items.Single().MemoryHandle;
         timeProvider.Advance(scope.ResourceHandleLifetime + TimeSpan.FromSeconds(1));
 
-        var retry = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+        var retry = await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         var retryHandle = retry.Result.Items.Single().MemoryHandle;
         var resolved = await resolver.ResolveAsync(
             retryHandle,
@@ -2073,11 +2103,11 @@ public class AgentMemoryReadCoreTests
             coordinator.Object,
             new DefaultAgentMemoryArtifactLifetimePolicy(new AgentMemoryProjectionSecurityOptions()),
             Mock.Of<IAgentMemoryCurrentClosureProvider>(),
-            TimeProvider.System);
+            TimeProvider.System, Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
         try
         {
-            var outcome = await core.RecallAsync(principal, MakeOrigin(), scope, input);
+            var outcome = await core.RecallAsync(MakeRequest(principal, MakeOrigin(), scope, input));
             return new HandleContractScenario(outcome, null, revoked, confirmedHandles);
         }
         catch (AgentMemoryReadCoreException exception)

@@ -192,6 +192,25 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
         }
     }
 
+    public ValueTask<AgentMemoryItem> ArchiveAsync(string tenantId, AgentMemoryItemExpectation memory, AgentMemoryOperationRequest operation, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var hashes = RequireHashes();
+            var existing = GetMemoryUnsafe(tenantId, memory.MemoryId)
+                ?? throw Unavailable("Memory is unavailable.");
+            EnsureTenant(existing.TenantId, tenantId);
+            EnsureMemoryExpectation(existing, memory, hashes);
+            if (existing.Status is not (AgentMemoryStatus.Active or AgentMemoryStatus.Superseded))
+                throw InvalidLifecycle("Memory cannot be archived from its current state.");
+
+            var archived = existing with { Status = AgentMemoryStatus.Archived };
+            _memories[(tenantId, existing.MemoryId)] = archived.Snapshot();
+            return ValueTask.FromResult(archived.Snapshot());
+        }
+    }
+
     private AgentMemoryCanonicalHashProjector RequireHashes()
         => _stateHashes ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "State hash projector is unavailable.");
 
@@ -209,7 +228,7 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
             Kind = candidate.Kind,
             Content = candidate.Content,
             CanonicalContentHash = candidate.CanonicalContentHash,
-            PromotedAt = operation.Timestamp,
+            PromotedAt = operation.Identity.OccurredAt,
             Confidence = candidate.Confidence,
             Status = AgentMemoryStatus.Active,
             IsAuthoritative = false,

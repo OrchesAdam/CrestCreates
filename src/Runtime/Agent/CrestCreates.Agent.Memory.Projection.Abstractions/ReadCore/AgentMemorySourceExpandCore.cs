@@ -9,9 +9,6 @@ namespace CrestCreates.Agent.Memory.Projection.Abstractions;
 public interface IAgentMemorySourceExpandCore
 {
     ValueTask<AgentMemoryReadCoreOutcome<ExpandAgentMemorySourceResult>> ExpandAsync(
-        AgentMemoryAccessPrincipal principal,
-        AgentMemoryArtifactOrigin origin,
-        AgentMemoryAccessScope scope,
-        ExpandAgentMemorySourceInput input,
+        AgentMemorySourceExpansionOperationRequest request,
         CancellationToken cancellationToken = default);
 }

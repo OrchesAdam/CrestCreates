@@ -1,9 +1,12 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Agent.Memory.ReadCore.Accountability;
 
 namespace CrestCreates.Agent.Memory.ReadCore;
 
@@ -19,6 +22,8 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
     private readonly IAgentMemoryArtifactLifetimePolicy _lifetimePolicy;
     private readonly IAgentMemoryCurrentClosureProvider _closureProvider;
     private readonly TimeProvider _timeProvider;
+    private readonly IAgentMemoryAccountabilityProducer _producer;
+    private readonly AgentMemoryEffectiveResultHashProjector _effectiveResultHashProjector;
 
     public AgentMemoryReadCore(
         IAgentMemoryRetriever retriever,
@@ -26,7 +31,9 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         IAgentMemoryAccessArtifactCoordinator coordinator,
         IAgentMemoryArtifactLifetimePolicy lifetimePolicy,
         IAgentMemoryCurrentClosureProvider closureProvider,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IAgentMemoryAccountabilityProducer producer,
+        AgentMemoryEffectiveResultHashProjector effectiveResultHashProjector)
     {
         _retriever = retriever;
         _handleResolver = handleResolver;
@@ -34,15 +41,36 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         _lifetimePolicy = lifetimePolicy;
         _closureProvider = closureProvider;
         _timeProvider = timeProvider;
+        _producer = producer;
+        _effectiveResultHashProjector = effectiveResultHashProjector;
     }
 
     public async ValueTask<AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>> RecallAsync(
-        AgentMemoryAccessPrincipal principal,
-        AgentMemoryArtifactOrigin origin,
-        AgentMemoryAccessScope scope,
-        BuildAgentMemoryPackInput input,
+        AgentMemoryRecallOperationRequest request,
         CancellationToken cancellationToken = default)
     {
+        try
+        {
+            return await RecallCoreAsync(request, cancellationToken);
+        }
+        catch (AgentMemoryReadCoreException ex) when (ex.Code is "budget-invalid" or "resource-unavailable")
+        {
+            // Deterministic pre-result rejections with complete trusted identity/context
+            // may produce a rejected Recall fact. All other failures produce none.
+            await PublishRejectedRecallFactAsync(request, ex.Code);
+            throw;
+        }
+    }
+
+    private async ValueTask<AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>> RecallCoreAsync(
+        AgentMemoryRecallOperationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var principal = request.Principal;
+        var origin = request.Origin;
+        var scope = request.Scope;
+        var input = request.Input;
+
         // Validate budget — reject zero/negative before scope checks
         if (input.MaximumCount <= 0)
             throw new AgentMemoryReadCoreException("budget-invalid", "MaximumCount must be positive");
@@ -300,6 +328,19 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                 Diagnostics = new List<AgentMemoryToolDiagnosticDto>()
             };
 
+            // Post-result fence: once the terminal Memory result is established,
+            // all Accountability work is best-effort. No exception from this fence
+            // may replace the established result or trigger the compensation
+            // token revoke in the outer catch.
+            try
+            {
+                await PublishCompletedRecallFactAsync(request, result);
+            }
+            catch
+            {
+                // Swallow: an Accountability failure must not change the Recall result.
+            }
+
             return new AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>
             {
                 Result = result,
@@ -314,6 +355,74 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
             if (prepared.CompensationToken is not null)
                 await _coordinator.RevokeCreatedAsync(prepared.CompensationToken, CancellationToken.None);
             throw;
+        }
+    }
+
+    private async ValueTask PublishCompletedRecallFactAsync(
+        AgentMemoryRecallOperationRequest request,
+        BuildAgentMemoryPackResult result)
+    {
+        var effectiveHashes = new List<CanonicalHash>(result.Items.Count);
+        foreach (var item in result.Items)
+        {
+            effectiveHashes.Add(_effectiveResultHashProjector.ComputeEffectiveVisibleContentHash(
+                request.Principal.TenantId,
+                item.Content));
+        }
+
+        var requestedKinds = AgentMemoryEffectiveResultHashProjector.MapRequestedKinds(request.Input.Kinds);
+        var minimumConfidence = AgentMemoryEffectiveResultHashProjector.MapMinimumConfidence(request.Input.MinimumConfidence);
+
+        var effectivePackHash = _effectiveResultHashProjector.ComputeEffectivePackHash(
+            request.Principal.TenantId,
+            effectiveHashes,
+            result.ReturnedCount,
+            result.WasTruncated,
+            requestedKinds,
+            request.Input.MaximumCount,
+            request.Input.CharacterBudget,
+            minimumConfidence);
+
+        var payload = new AgentMemoryRecallAccountabilityPayload
+        {
+            OperationId = request.Identity.OperationId,
+            Result = "completed",
+            EffectivePackHash = effectivePackHash,
+            ReturnedCount = result.ReturnedCount,
+            WasTruncated = result.WasTruncated,
+            RequestedKinds = requestedKinds,
+            MaximumCount = request.Input.MaximumCount,
+            CharacterBudget = request.Input.CharacterBudget,
+            MinimumConfidence = minimumConfidence
+        };
+
+        await _producer.PublishRecallAsync(request.Identity, request.InvocationContext, payload);
+    }
+
+    private async ValueTask PublishRejectedRecallFactAsync(
+        AgentMemoryRecallOperationRequest request,
+        string failureCode)
+    {
+        try
+        {
+            var payload = new AgentMemoryRecallAccountabilityPayload
+            {
+                OperationId = request.Identity.OperationId,
+                Result = "rejected",
+                StableFailureCode = failureCode,
+                ReturnedCount = 0,
+                WasTruncated = false,
+                RequestedKinds = AgentMemoryEffectiveResultHashProjector.MapRequestedKinds(request.Input.Kinds),
+                MaximumCount = request.Input.MaximumCount,
+                CharacterBudget = request.Input.CharacterBudget,
+                MinimumConfidence = AgentMemoryEffectiveResultHashProjector.MapMinimumConfidence(request.Input.MinimumConfidence)
+            };
+
+            await _producer.PublishRecallAsync(request.Identity, request.InvocationContext, payload);
+        }
+        catch
+        {
+            // Swallow: publishing a rejected fact must never change the original exception.
         }
     }
 

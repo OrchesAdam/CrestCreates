@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Abstractions;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Tools;
@@ -25,6 +26,7 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
     public CompressAgentHistoryHandler(
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryHistoryAccessAuthorizer authorizer,
         IAgentMemoryResourceHandleResolver handleResolver,
@@ -36,7 +38,7 @@ internal sealed class CompressAgentHistoryHandler : AgentMemoryToolHandlerBase, 
         IAgentMemoryContentSanitizer sanitizer,
         IAgentMemoryArtifactIdGenerator ids,
         TimeProvider time)
-        : base(capabilityContext, agentExecution)
+        : base(capabilityContext, agentExecution, auditContexts)
     {
         _scopeProvider = scopeProvider; _authorizer = authorizer; _artifacts = artifacts;
         _handleResolver = handleResolver;

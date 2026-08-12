@@ -8,6 +8,7 @@ using CrestCreates.Mcp.Memory.Security;
 using CrestCreates.Metadata.Abstractions.Bootstrap;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.Mcp.Memory;
 
@@ -44,6 +45,15 @@ public static class McpMemoryServiceCollectionExtensions
         // Bootstrap validator (fail-closed: rejects unknown scope providers)
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IBootstrapValidator, McpMemoryScopeProviderValidator>());
+
+        // Accountability composition gate (fail-closed: MCP Memory facts require
+        // the audit context accessor from AddAccountability to attribute a
+        // Capability execution). Surfaces a clean composition diagnostic instead
+        // of a raw DI resolution error, and also fails at host startup.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IBootstrapValidator, McpMemoryAccountabilityCompositionValidator>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, McpMemoryAccountabilityCompositionValidator>());
 
         return services;
     }

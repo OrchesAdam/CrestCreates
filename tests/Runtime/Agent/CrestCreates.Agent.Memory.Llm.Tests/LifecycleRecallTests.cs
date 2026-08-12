@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Llm.Clients;
 using CrestCreates.Agent.Memory.Llm.Compression;
 using CrestCreates.Agent.Memory.Llm.Extraction;
@@ -97,7 +98,7 @@ public class LifecycleRecallTests
                 },
                 Reason = "Test promotion",
                 Explanation = "Integration test promotion",
-                Timestamp = DateTimeOffset.UtcNow
+                Identity = new AgentMemoryOperationIdentity { OperationId = "op-lr-1", OccurredAt = DateTimeOffset.UtcNow }
             });
 
         // Step 5: Recall

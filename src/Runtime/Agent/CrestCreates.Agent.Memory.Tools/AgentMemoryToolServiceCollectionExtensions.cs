@@ -1,3 +1,4 @@
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
@@ -123,6 +124,12 @@ internal sealed class AgentMemoryToolCapabilityGateHostedService : IHostedServic
         {
             throw new InvalidOperationException(
                 "Memory curation tools require the selected promotion service instance to prove ConfirmedAtomic outcome semantics.");
+        }
+        if (_services.GetService<IAuditOperationContextAccessor>() is null)
+        {
+            throw new InvalidOperationException(
+                "Memory curation tools require the Accountability audit context accessor. " +
+                "Call AddAccountability() before AddAgentMemoryTools().");
         }
         return Task.CompletedTask;
     }

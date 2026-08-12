@@ -1,9 +1,17 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
+using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
+using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.ReadCore;
+using CrestCreates.Agent.Memory.ReadCore.Accountability;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.CanonicalHashing;
 using FluentAssertions;
 using Moq;
 using Xunit;
@@ -59,6 +67,85 @@ public class AgentMemorySourceExpandCoreTests
     private static AgentContextSourceRef MakeSourceRef()
         => new() { SourceKind = AgentSourceKind.ConversationTurn, TenantId = "t1", SourceId = "src1" };
 
+    private static AgentMemorySourceExpansionOperationRequest MakeRequest(
+        AgentMemoryAccessPrincipal principal,
+        AgentMemoryArtifactOrigin origin,
+        AgentMemoryAccessScope scope,
+        ExpandAgentMemorySourceInput input)
+        => new()
+        {
+            Principal = principal,
+            Origin = origin,
+            Identity = new AgentMemoryOperationIdentity
+            {
+                OperationId = $"op_{Guid.NewGuid():N}",
+                OccurredAt = DateTimeOffset.UtcNow
+            },
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = "t1",
+                ActorId = "u1",
+                ActorKind = "User"
+            },
+            Scope = scope,
+            Input = input
+        };
+
+    private static CanonicalHash MakeContentHash()
+        => new()
+        {
+            Value = "abc",
+            Algorithm = "SHA-256",
+            AlgorithmVersion = "v1",
+            ArtifactKind = "test",
+            Scope = "test",
+            Purpose = "test",
+            ContractVersion = "v1",
+            CanonicalShapeVersion = "v1"
+        };
+
+    /// <summary>
+    /// A pass-through sanitizer that keeps the expander content untouched with no
+    /// redactions, so these core tests focus on budget/grant/status behavior.
+    /// </summary>
+    private static Mock<IAgentMemoryContentSanitizer> MakePassThroughSanitizer()
+    {
+        var mock = new Mock<IAgentMemoryContentSanitizer>();
+        mock.Setup(s => s.Sanitize(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<AgentContextSourceRef>>()))
+            .Returns((string tenantId, string content, IReadOnlyList<AgentContextSourceRef> sourceRefs) =>
+                new SanitizedAgentContent
+                {
+                    SanitizedContent = content,
+                    CanonicalContentHash = MakeContentHash()
+                });
+        return mock;
+    }
+
+    private static AgentMemorySourceExpandCore MakeCore(
+        IAgentMemoryAccessGrantResolver resolver,
+        IAgentContextSourceExpander expander,
+        IAgentMemoryAccountabilityProducer producer)
+        => new(
+            resolver,
+            expander,
+            producer,
+            new AgentMemoryEffectiveResultHashProjector(new DefaultCanonicalHashComputer()),
+            MakePassThroughSanitizer().Object);
+
+    private static AgentMemoryAccessSourceGrant MakeGrant(
+        AgentMemoryAccessPrincipal principal,
+        AgentContextSourceRef sourceRef)
+        => new()
+        {
+            GrantId = "g1",
+            SourceRef = sourceRef,
+            Principal = principal,
+            ScopeFingerprint = "fp",
+            IssuingOperationId = "op1",
+            IssuedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+        };
+
     [Fact]
     public async Task ExpandAsync_ValidGrant_ReturnsOutcomeWithNullCompensationToken()
     {
@@ -68,16 +155,7 @@ public class AgentMemorySourceExpandCoreTests
 
         var mockResolver = new Mock<IAgentMemoryAccessGrantResolver>();
         mockResolver.Setup(r => r.ResolveAsync("g1", principal, scope, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentMemoryAccessSourceGrant
-            {
-                GrantId = "g1",
-                SourceRef = MakeSourceRef(),
-                Principal = principal,
-                ScopeFingerprint = "fp",
-                IssuingOperationId = "op1",
-                IssuedAt = DateTimeOffset.UtcNow,
-                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
-            });
+            .ReturnsAsync(MakeGrant(principal, MakeSourceRef()));
 
         var mockExpander = new Mock<IAgentContextSourceExpander>();
         mockExpander.Setup(e => e.ExpandAsync(It.IsAny<AgentContextSourceRef>(), It.IsAny<CancellationToken>()))
@@ -88,9 +166,9 @@ public class AgentMemorySourceExpandCoreTests
                 SanitizedContent = "expanded content"
             });
 
-        var core = new AgentMemorySourceExpandCore(mockResolver.Object, mockExpander.Object);
+        var core = MakeCore(mockResolver.Object, mockExpander.Object, Mock.Of<IAgentMemoryAccountabilityProducer>());
 
-        var outcome = await core.ExpandAsync(principal, MakeOrigin(), scope, input);
+        var outcome = await core.ExpandAsync(MakeRequest(principal, MakeOrigin(), scope, input));
 
         outcome.Should().NotBeNull();
         outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Completed);
@@ -102,11 +180,12 @@ public class AgentMemorySourceExpandCoreTests
     {
         var scope = MakeScope();
         var input = new ExpandAgentMemorySourceInput { GrantId = "g1", MaximumCharacters = 999_999 };
-        var core = new AgentMemorySourceExpandCore(
+        var core = MakeCore(
             Mock.Of<IAgentMemoryAccessGrantResolver>(),
-            Mock.Of<IAgentContextSourceExpander>());
+            Mock.Of<IAgentContextSourceExpander>(),
+            Mock.Of<IAgentMemoryAccountabilityProducer>());
 
-        var act = async () => await core.ExpandAsync(MakePrincipal(), MakeOrigin(), scope, input);
+        var act = async () => await core.ExpandAsync(MakeRequest(MakePrincipal(), MakeOrigin(), scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("budget-invalid");
     }
@@ -118,11 +197,12 @@ public class AgentMemorySourceExpandCoreTests
     {
         var scope = MakeScope();
         var input = new ExpandAgentMemorySourceInput { GrantId = "g1", MaximumCharacters = maximumCharacters };
-        var core = new AgentMemorySourceExpandCore(
+        var core = MakeCore(
             Mock.Of<IAgentMemoryAccessGrantResolver>(),
-            Mock.Of<IAgentContextSourceExpander>());
+            Mock.Of<IAgentContextSourceExpander>(),
+            Mock.Of<IAgentMemoryAccountabilityProducer>());
 
-        var act = async () => await core.ExpandAsync(MakePrincipal(), MakeOrigin(), scope, input);
+        var act = async () => await core.ExpandAsync(MakeRequest(MakePrincipal(), MakeOrigin(), scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("budget-invalid");
     }
@@ -138,9 +218,9 @@ public class AgentMemorySourceExpandCoreTests
         mockResolver.Setup(r => r.ResolveAsync("bad", principal, scope, It.IsAny<CancellationToken>()))
             .ReturnsAsync((AgentMemoryAccessSourceGrant?)null);
 
-        var core = new AgentMemorySourceExpandCore(mockResolver.Object, Mock.Of<IAgentContextSourceExpander>());
+        var core = MakeCore(mockResolver.Object, Mock.Of<IAgentContextSourceExpander>(), Mock.Of<IAgentMemoryAccountabilityProducer>());
 
-        var act = async () => await core.ExpandAsync(principal, MakeOrigin(), scope, input);
+        var act = async () => await core.ExpandAsync(MakeRequest(principal, MakeOrigin(), scope, input));
         var ex = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
         ex.And.Code.Should().Be("resource-unavailable");
     }
@@ -154,12 +234,7 @@ public class AgentMemorySourceExpandCoreTests
 
         var mockResolver = new Mock<IAgentMemoryAccessGrantResolver>();
         mockResolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), principal, scope, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentMemoryAccessSourceGrant
-            {
-                GrantId = "g1", SourceRef = MakeSourceRef(), Principal = principal,
-                ScopeFingerprint = "fp", IssuingOperationId = "op1",
-                IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
-            });
+            .ReturnsAsync(MakeGrant(principal, MakeSourceRef()));
 
         var mockExpander = new Mock<IAgentContextSourceExpander>();
         mockExpander.Setup(e => e.ExpandAsync(It.IsAny<AgentContextSourceRef>(), It.IsAny<CancellationToken>()))
@@ -169,8 +244,8 @@ public class AgentMemorySourceExpandCoreTests
                 Status = AgentMemorySourceExpansionStatus.Redacted
             });
 
-        var core = new AgentMemorySourceExpandCore(mockResolver.Object, mockExpander.Object);
-        var outcome = await core.ExpandAsync(principal, MakeOrigin(), scope, input);
+        var core = MakeCore(mockResolver.Object, mockExpander.Object, Mock.Of<IAgentMemoryAccountabilityProducer>());
+        var outcome = await core.ExpandAsync(MakeRequest(principal, MakeOrigin(), scope, input));
 
         outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.Redacted);
     }
@@ -184,12 +259,7 @@ public class AgentMemorySourceExpandCoreTests
 
         var mockResolver = new Mock<IAgentMemoryAccessGrantResolver>();
         mockResolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), principal, scope, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentMemoryAccessSourceGrant
-            {
-                GrantId = "g1", SourceRef = MakeSourceRef(), Principal = principal,
-                ScopeFingerprint = "fp", IssuingOperationId = "op1",
-                IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
-            });
+            .ReturnsAsync(MakeGrant(principal, MakeSourceRef()));
 
         var mockExpander = new Mock<IAgentContextSourceExpander>();
         mockExpander.Setup(e => e.ExpandAsync(It.IsAny<AgentContextSourceRef>(), It.IsAny<CancellationToken>()))
@@ -199,8 +269,8 @@ public class AgentMemorySourceExpandCoreTests
                 Status = AgentMemorySourceExpansionStatus.NotExpandable
             });
 
-        var core = new AgentMemorySourceExpandCore(mockResolver.Object, mockExpander.Object);
-        var outcome = await core.ExpandAsync(principal, MakeOrigin(), scope, input);
+        var core = MakeCore(mockResolver.Object, mockExpander.Object, Mock.Of<IAgentMemoryAccountabilityProducer>());
+        var outcome = await core.ExpandAsync(MakeRequest(principal, MakeOrigin(), scope, input));
 
         outcome.Result.OperationStatus.Should().Be(AgentMemoryToolOperationStatus.NotExpandable);
     }
@@ -214,12 +284,7 @@ public class AgentMemorySourceExpandCoreTests
 
         var mockResolver = new Mock<IAgentMemoryAccessGrantResolver>();
         mockResolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), principal, scope, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AgentMemoryAccessSourceGrant
-            {
-                GrantId = "g1", SourceRef = MakeSourceRef(), Principal = principal,
-                ScopeFingerprint = "fp", IssuingOperationId = "op1",
-                IssuedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
-            });
+            .ReturnsAsync(MakeGrant(principal, MakeSourceRef()));
 
         var mockExpander = new Mock<IAgentContextSourceExpander>();
         mockExpander.Setup(e => e.ExpandAsync(It.IsAny<AgentContextSourceRef>(), It.IsAny<CancellationToken>()))
@@ -230,8 +295,8 @@ public class AgentMemorySourceExpandCoreTests
                 SanitizedContent = "very long content here"
             });
 
-        var core = new AgentMemorySourceExpandCore(mockResolver.Object, mockExpander.Object);
-        var outcome = await core.ExpandAsync(principal, MakeOrigin(), scope, input);
+        var core = MakeCore(mockResolver.Object, mockExpander.Object, Mock.Of<IAgentMemoryAccountabilityProducer>());
+        var outcome = await core.ExpandAsync(MakeRequest(principal, MakeOrigin(), scope, input));
 
         outcome.Result.WasTruncated.Should().BeTrue();
         outcome.Result.SanitizedContent.Should().HaveLength(5);

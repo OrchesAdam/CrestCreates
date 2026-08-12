@@ -8,9 +8,6 @@ namespace CrestCreates.Agent.Memory.Projection.Abstractions;
 public interface IAgentMemoryReadCore
 {
     ValueTask<AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>> RecallAsync(
-        AgentMemoryAccessPrincipal principal,
-        AgentMemoryArtifactOrigin origin,
-        AgentMemoryAccessScope scope,
-        BuildAgentMemoryPackInput input,
+        AgentMemoryRecallOperationRequest request,
         CancellationToken cancellationToken = default);
 }

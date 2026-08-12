@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Abstractions;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Tools;
@@ -22,6 +23,7 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
     public ExtractMemoryCandidatesHandler(
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryResourceHandleResolver handleResolver,
         IAgentMemorySecurityArtifactCoordinator artifacts,
@@ -31,7 +33,7 @@ internal sealed class ExtractMemoryCandidatesHandler : AgentMemoryToolHandlerBas
         IAgentMemoryContentSanitizer sanitizer,
         IAgentMemoryArtifactIdGenerator ids,
         TimeProvider time)
-        : base(capabilityContext, agentExecution)
+        : base(capabilityContext, agentExecution, auditContexts)
     {
         _scopeProvider = scopeProvider; _artifacts = artifacts; _contexts = contexts;
         _handleResolver = handleResolver;

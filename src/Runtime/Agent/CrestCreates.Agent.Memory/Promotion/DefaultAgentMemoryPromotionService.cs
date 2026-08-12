@@ -1,4 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Identity;
 
@@ -7,17 +9,23 @@ namespace CrestCreates.Agent.Memory.Promotion;
 public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionService, IAgentMemoryCurationServiceCapabilities
 {
     private readonly IAgentMemoryStore _store;
+    private readonly AgentMemoryCanonicalHashProjector _hashes;
     private readonly IAgentMemoryArtifactIdGenerator _ids;
-    private readonly AgentMemoryCanonicalHashProjector? _hashes;
+    private readonly IAgentMemoryAccountabilityProducer _producer;
+    private readonly AgentMemoryCurationFactProjector _factProjector;
 
     public DefaultAgentMemoryPromotionService(
         IAgentMemoryStore store,
+        AgentMemoryCanonicalHashProjector hashes,
         IAgentMemoryArtifactIdGenerator? ids = null,
-        AgentMemoryCanonicalHashProjector? hashes = null)
+        IAgentMemoryAccountabilityProducer? producer = null,
+        AgentMemoryCurationFactProjector? factProjector = null)
     {
-        _store = store;
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _hashes = hashes ?? throw new ArgumentNullException(nameof(hashes));
         _ids = ids ?? new DefaultAgentMemoryArtifactIdGenerator();
-        _hashes = hashes;
+        _producer = producer ?? new NullAgentMemoryAccountabilityProducer();
+        _factProjector = factProjector ?? new AgentMemoryCurationFactProjector();
     }
 
     public AgentMemoryCurationOutcomeGuarantee OutcomeGuarantee
@@ -26,42 +34,69 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             ? capabilities.CurationOutcomeGuarantee
             : AgentMemoryCurationOutcomeGuarantee.Unknown;
 
-    public ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, AgentMemoryPromotionPlan plan, CancellationToken cancellationToken = default)
+    public async ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, AgentMemoryPromotionPlan plan, CancellationToken cancellationToken = default)
     {
         ValidateOperationRequest(tenantId, plan.Operation, nameof(PromoteAsync));
         if (_store is not IAgentMemoryConditionalCurationStore conditional)
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "Store does not provide conditional curation transitions.");
-        return conditional.PromoteAsync(tenantId, plan, CancellationToken.None);
+        try
+        {
+            var committed = await conditional.PromoteAsync(tenantId, plan, cancellationToken);
+            await PublishCommittedAsync(plan.Operation, () => _factProjector.PromoteCommitted(plan.Operation, plan, committed));
+            return committed;
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordable(ex.Code))
+        {
+            await PublishFailureAsync(plan.Operation, () => _factProjector.PromoteFailure(plan.Operation, plan, ex.Code));
+            throw;
+        }
     }
 
-    public ValueTask RejectAsync(string tenantId, AgentMemoryCandidateExpectation candidate, AgentMemoryOperationRequest operation, CancellationToken cancellationToken = default)
+    public async ValueTask RejectAsync(string tenantId, AgentMemoryCandidateExpectation candidate, AgentMemoryOperationRequest operation, CancellationToken cancellationToken = default)
     {
         ValidateOperationRequest(tenantId, operation, nameof(RejectAsync));
         if (_store is not IAgentMemoryConditionalCurationStore conditional)
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "Store does not provide conditional curation transitions.");
-        return conditional.RejectAsync(tenantId, candidate, operation, CancellationToken.None);
+        try
+        {
+            await conditional.RejectAsync(tenantId, candidate, operation, cancellationToken);
+            await PublishCommittedAsync(operation, () => _factProjector.RejectCommitted(operation, candidate));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordable(ex.Code))
+        {
+            await PublishFailureAsync(operation, () => _factProjector.RejectFailure(operation, candidate, ex.Code));
+            throw;
+        }
     }
 
-    public ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, AgentMemorySupersessionPlan plan, CancellationToken cancellationToken = default)
+    public async ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, AgentMemorySupersessionPlan plan, CancellationToken cancellationToken = default)
     {
         ValidateOperationRequest(tenantId, plan.Operation, nameof(SupersedeAsync));
         if (_store is not IAgentMemoryConditionalCurationStore conditional)
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "Store does not provide conditional curation transitions.");
-        return conditional.SupersedeAsync(tenantId, plan, CancellationToken.None);
+        try
+        {
+            var committed = await conditional.SupersedeAsync(tenantId, plan, cancellationToken);
+            await PublishCommittedAsync(plan.Operation, () => _factProjector.SupersedeCommitted(plan.Operation, plan, committed));
+            return committed;
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordable(ex.Code))
+        {
+            await PublishFailureAsync(plan.Operation, () => _factProjector.SupersedeFailure(plan.Operation, plan, ex.Code));
+            throw;
+        }
     }
 
     public ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, string candidateId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
         => PromoteAsync(tenantId, candidateId, _ids.CreateMemoryId(), request, cancellationToken);
 
-    public ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, string candidateId, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
+    public async ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, string candidateId, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
     {
         ValidateOperationRequest(tenantId, request, nameof(PromoteAsync));
-        var candidate = _store.GetCandidateAsync(tenantId, candidateId, cancellationToken).GetAwaiter().GetResult()
+        var candidate = await _store.GetCandidateAsync(tenantId, candidateId, cancellationToken)
             ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
-        if (_hashes is null || _store is not IAgentMemoryConditionalCurationStore)
-            return ValueTask.FromResult(LegacyPromote(tenantId, candidate, newMemoryId, request, cancellationToken));
         var memory = CreatePromotedMemory(candidate, newMemoryId, request);
-        return PromoteAsync(tenantId, new AgentMemoryPromotionPlan
+        return await PromoteAsync(tenantId, new AgentMemoryPromotionPlan
         {
             Candidate = new AgentMemoryCandidateExpectation { CandidateId = candidate.CandidateId, ExpectedStateHash = _hashes.ComputeCandidateStateHash(candidate) },
             NewMemoryId = newMemoryId,
@@ -77,14 +112,6 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
         var candidate = await _store.GetCandidateAsync(tenantId, candidateId, cancellationToken)
             ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
-        if (_hashes is null || _store is not IAgentMemoryConditionalCurationStore)
-        {
-            if (candidate.Status != AgentMemoryStatus.Candidate)
-                throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.InvalidLifecycleState, $"Candidate has status '{candidate.Status}', expected 'Candidate'.");
-            await _store.TransitionCandidateStatusAsync(
-                tenantId, candidate.CandidateId, AgentMemoryStatus.Candidate, AgentMemoryStatus.Rejected, cancellationToken);
-            return;
-        }
         await RejectAsync(tenantId,
             new AgentMemoryCandidateExpectation { CandidateId = candidate.CandidateId, ExpectedStateHash = _hashes.ComputeCandidateStateHash(candidate) },
             request, cancellationToken);
@@ -95,17 +122,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
         // must use the trusted-identity overload below.
         => SupersedeAsync(tenantId, memoryId, replacement.CandidateId, replacement.CandidateId, request, cancellationToken);
 
-    public ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, string memoryId, string replacementCandidateId, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
+    public async ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, string memoryId, string replacementCandidateId, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
     {
         ValidateOperationRequest(tenantId, request, nameof(SupersedeAsync));
-        var existing = _store.GetMemoryAsync(tenantId, memoryId, cancellationToken).GetAwaiter().GetResult()
+        var existing = await _store.GetMemoryAsync(tenantId, memoryId, cancellationToken)
             ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Target Memory is unavailable.");
-        var replacement = _store.GetCandidateAsync(tenantId, replacementCandidateId, cancellationToken).GetAwaiter().GetResult()
+        var replacement = await _store.GetCandidateAsync(tenantId, replacementCandidateId, cancellationToken)
             ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Replacement Candidate is unavailable.");
-        if (_hashes is null || _store is not IAgentMemoryConditionalCurationStore)
-            return ValueTask.FromResult(LegacySupersede(tenantId, existing, replacement, newMemoryId, request, cancellationToken));
         var newMemory = CreatePromotedMemory(replacement, newMemoryId, request) with { SupersedesMemoryId = existing.MemoryId };
-        return SupersedeAsync(tenantId, new AgentMemorySupersessionPlan
+        return await SupersedeAsync(tenantId, new AgentMemorySupersessionPlan
         {
             TargetMemory = new AgentMemoryItemExpectation { MemoryId = existing.MemoryId, ExpectedStateHash = _hashes.ComputeMemoryStateHash(existing) },
             ReplacementCandidate = new AgentMemoryCandidateExpectation { CandidateId = replacement.CandidateId, ExpectedStateHash = _hashes.ComputeCandidateStateHash(replacement) },
@@ -126,14 +151,75 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Memory is unavailable.");
         }
 
-        if (memory.Status is not (AgentMemoryStatus.Active or AgentMemoryStatus.Superseded))
-        {
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.InvalidLifecycleState, "Memory cannot be archived from its current state.");
-        }
+        if (_store is not IAgentMemoryConditionalCurationStore conditional)
+            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "Store does not provide conditional curation transitions.");
 
-        var archived = memory with { Status = AgentMemoryStatus.Archived };
-        await _store.SaveMemoryAsync(archived, cancellationToken);
+        var expectation = new AgentMemoryItemExpectation
+        {
+            MemoryId = memory.MemoryId,
+            ExpectedStateHash = _hashes.ComputeMemoryStateHash(memory)
+        };
+        await ArchiveCoreAsync(conditional, tenantId, expectation, memory.Status, request, cancellationToken);
     }
+
+    private async ValueTask ArchiveCoreAsync(
+        IAgentMemoryConditionalCurationStore conditional,
+        string tenantId,
+        AgentMemoryItemExpectation expectation,
+        AgentMemoryStatus previousStatus,
+        AgentMemoryOperationRequest operation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var archived = await conditional.ArchiveAsync(tenantId, expectation, operation, cancellationToken);
+            await PublishCommittedAsync(operation, () => _factProjector.ArchiveCommitted(operation, expectation, previousStatus, archived));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordable(ex.Code))
+        {
+            await PublishFailureAsync(operation, () => _factProjector.ArchiveFailure(operation, expectation, ex.Code));
+            throw;
+        }
+    }
+
+    private async ValueTask PublishCommittedAsync(AgentMemoryOperationRequest operation, Func<AgentMemoryCurationAccountabilityPayload> projection)
+    {
+        try
+        {
+            await PublishAsync(operation, projection());
+        }
+        catch
+        {
+            // Projection or publication must never replace a confirmed committed outcome.
+        }
+    }
+
+    private async ValueTask PublishFailureAsync(AgentMemoryOperationRequest operation, Func<AgentMemoryCurationAccountabilityPayload> projection)
+    {
+        try
+        {
+            await PublishAsync(operation, projection());
+        }
+        catch
+        {
+            // A failed fact must never mask the original typed rejection/conflict.
+        }
+    }
+
+    private async ValueTask PublishAsync(AgentMemoryOperationRequest operation, AgentMemoryCurationAccountabilityPayload payload)
+    {
+        try
+        {
+            await _producer.PublishCurationAsync(operation.Identity, operation.InvocationContext, payload);
+        }
+        catch
+        {
+            // Accountability publication is best-effort; it must never alter the operation outcome.
+        }
+    }
+
+    private static bool IsRecordable(AgentMemoryOperationFailureCode code)
+        => code != AgentMemoryOperationFailureCode.Unknown;
 
     private static AgentMemoryItem CreatePromotedMemory(AgentMemoryCandidate candidate, string memoryId, AgentMemoryOperationRequest operation)
         => new()
@@ -143,7 +229,7 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             Kind = candidate.Kind,
             Content = candidate.Content,
             CanonicalContentHash = candidate.CanonicalContentHash,
-            PromotedAt = operation.Timestamp,
+            PromotedAt = operation.Identity.OccurredAt,
             Confidence = candidate.Confidence,
             Status = AgentMemoryStatus.Active,
             IsAuthoritative = false,
@@ -153,36 +239,6 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             RedactionKinds = candidate.RedactionKinds,
             SanitizationDiagnostics = candidate.SanitizationDiagnostics
         };
-
-    private AgentMemoryItem LegacyPromote(string tenantId, AgentMemoryCandidate candidate, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken)
-    {
-        if (candidate.Status != AgentMemoryStatus.Candidate)
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.InvalidLifecycleState, $"Candidate has status '{candidate.Status}', expected 'Candidate'.");
-        if (string.IsNullOrWhiteSpace(newMemoryId) || _store.GetMemoryAsync(tenantId, newMemoryId, cancellationToken).GetAwaiter().GetResult() is not null)
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Memory identity conflicts.");
-        var memory = CreatePromotedMemory(candidate, newMemoryId, request);
-        _store.SaveMemoryAsync(memory, cancellationToken).GetAwaiter().GetResult();
-        _store.TransitionCandidateStatusAsync(
-            tenantId, candidate.CandidateId, AgentMemoryStatus.Candidate, AgentMemoryStatus.Active, cancellationToken).GetAwaiter().GetResult();
-        return memory;
-    }
-
-    private AgentMemoryItem LegacySupersede(string tenantId, AgentMemoryItem existing, AgentMemoryCandidate replacement, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken)
-    {
-        if (existing.Status != AgentMemoryStatus.Active)
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.InvalidLifecycleState, $"Memory has status '{existing.Status}', expected 'Active'.");
-        if (replacement.Status != AgentMemoryStatus.Candidate)
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.InvalidLifecycleState, $"Candidate has status '{replacement.Status}', expected 'Candidate'.");
-        if (string.IsNullOrWhiteSpace(newMemoryId) || _store.GetMemoryAsync(tenantId, newMemoryId, cancellationToken).GetAwaiter().GetResult() is not null)
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Memory identity conflicts.");
-        var superseded = existing with { Status = AgentMemoryStatus.Superseded, SupersededByMemoryId = newMemoryId };
-        var memory = CreatePromotedMemory(replacement, newMemoryId, request) with { SupersedesMemoryId = existing.MemoryId };
-        _store.SaveMemoryAsync(superseded, cancellationToken).GetAwaiter().GetResult();
-        _store.SaveMemoryAsync(memory, cancellationToken).GetAwaiter().GetResult();
-        _store.TransitionCandidateStatusAsync(
-            tenantId, replacement.CandidateId, AgentMemoryStatus.Candidate, AgentMemoryStatus.Active, cancellationToken).GetAwaiter().GetResult();
-        return memory;
-    }
 
     private static void ValidateOperationRequest(string tenantId, AgentMemoryOperationRequest request, string operationName)
     {
@@ -217,10 +273,12 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingReason, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingReason}: Reason is required.");
         }
 
-        // 4. Timestamp
-        if (request.Timestamp == default(DateTimeOffset))
+        // 4. Identity
+        if (request.Identity is null
+            || string.IsNullOrWhiteSpace(request.Identity.OperationId)
+            || request.Identity.OccurredAt == default(DateTimeOffset))
         {
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingTimestamp, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingTimestamp}: Timestamp is required and must not be default.");
+            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingTimestamp, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingTimestamp}: Operation identity is required and must carry a non-empty OperationId and non-default OccurredAt.");
         }
 
         // 5. SourceRefs or Explanation

@@ -64,7 +64,7 @@ internal static class McpMemoryAotFixtureRunner
             builder.Services.AddSingleton<ITenantContext>(new AotTenantContext("aot-tenant"));
             builder.Services.AddSingleton<ICurrentUser>(new AotCurrentUser("aot-user", "aot-tenant"));
             builder.Services.AddSingleton<IPermissionChecker, AotPermissionChecker>();
-            builder.Services.AddAgentMemoryRuntime();
+            builder.Services.AddAgentMemoryReadRuntime();
             builder.Services.AddCapabilityRuntime();
             builder.Services.AddAccountability();
             builder.Services.AddCrestMcpToolProjection(options =>

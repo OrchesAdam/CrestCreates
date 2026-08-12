@@ -1,3 +1,5 @@
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
+
 namespace CrestCreates.Agent.Memory.Abstractions;
 
 public interface IAgentConversationStore
@@ -72,6 +74,27 @@ public interface IAgentMemoryConditionalCurationStore
         string tenantId,
         AgentMemorySupersessionPlan plan,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Atomically transitions an Active or Superseded memory to Archived after
+    /// verifying the caller's expectation (state hash) matches the current item.
+    /// Cancellation must be observed before any lifecycle write.
+    /// </summary>
+    ValueTask<AgentMemoryItem> ArchiveAsync(
+        string tenantId,
+        AgentMemoryItemExpectation memory,
+        AgentMemoryOperationRequest operation,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Marker surfaced by AddAgentMemoryCuration. Read-only runtimes that never
+/// curate (no promotion/archive) must not register it; the curation composition
+/// validator fails closed when the marker is present but the store is not a
+/// conditional curation store.
+/// </summary>
+public interface IAgentMemoryFormalCurationMarker
+{
 }
 
 public interface IAgentMemoryCurationServiceCapabilities
@@ -94,6 +117,16 @@ public interface IAgentMemoryArtifactIdGenerator
     string CreateBlockId();
     string CreateCandidateId();
     string CreateMemoryId();
+}
+
+/// <summary>
+/// Allocates the stable identity pair of one admitted Memory operation exactly once.
+/// The factory is invoked by first-party adapters at operation admission; producers
+/// never call it, and republication reuses the snapshot pair.
+/// </summary>
+public interface IAgentMemoryOperationIdentityFactory
+{
+    AgentMemoryOperationIdentity Create();
 }
 
 public interface IAgentContextCompressor

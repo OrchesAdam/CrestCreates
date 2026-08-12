@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Abstractions.Json;
 using CrestCreates.Core.Abstractions.Identity;
 using FluentAssertions;
@@ -86,5 +87,22 @@ public sealed class ContractTests
             .ToArray();
 
         mutableProperties.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AgentMemoryOperationRequest_Should_UseIdentity_NotTimestamp()
+    {
+        typeof(AgentMemoryOperationRequest).GetProperty("Timestamp").Should().BeNull();
+        typeof(AgentMemoryOperationRequest).GetProperty("Identity").Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AgentMemoryOperationIdentity_Should_NotReplaceInvocationContext()
+    {
+        typeof(AgentMemoryOperationIdentity).GetProperty("TenantId").Should().BeNull();
+        typeof(AgentMemoryOperationIdentity).GetProperty("ActorId").Should().BeNull();
+        typeof(AgentMemoryOperationIdentity).GetProperty("ActorKind").Should().BeNull();
+        typeof(AgentMemoryOperationIdentity).GetProperty("CorrelationId").Should().BeNull();
+        typeof(AgentMemoryOperationIdentity).GetProperty("CausationId").Should().BeNull();
     }
 }

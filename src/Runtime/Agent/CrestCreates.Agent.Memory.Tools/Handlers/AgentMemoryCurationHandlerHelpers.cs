@@ -1,4 +1,7 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Accountability.Abstractions.Context;
+using CrestCreates.Agent.Memory.ReadCore.Accountability;
 using CrestCreates.Capability.Abstractions;
 
 namespace CrestCreates.Agent.Memory.Tools;
@@ -7,16 +10,18 @@ internal static class AgentMemoryCurationHandlerHelpers
 {
     public static AgentMemoryOperationRequest CreateRequest(
         AgentMemoryToolPrincipal principal,
-        CrestCreates.Agent.Abstractions.AgentExecutionContext execution,
         CapabilityExecutionContext context,
         string reason,
         string? explanation,
-        DateTimeOffset timestamp)
-        => new()
+        AgentMemoryOperationIdentity identity,
+        AuditOperationContext? ambient)
+    {
+        var causality = AgentMemoryCapabilityCausalityMapper.FromCapability(context, ambient);
+        return new AgentMemoryOperationRequest
         {
             TenantId = principal.TenantId,
             Reason = reason,
-            Timestamp = timestamp,
+            Identity = identity,
             Explanation = explanation,
             InvocationContext = new AgentMemoryInvocationContext
             {
@@ -25,8 +30,9 @@ internal static class AgentMemoryCurationHandlerHelpers
                 ActorKind = "User",
                 AgentId = principal.AgentId,
                 SessionId = principal.ExecutionId,
-                CorrelationId = execution.InvocationId,
-                CausationId = execution.CausationId,
+                CorrelationId = causality.CorrelationId,
+                CausationId = causality.CausationId,
+                ParentAuditId = causality.ParentAuditId,
                 InvocationSource = "AgentTool",
                 TraceAttributes = new Dictionary<string, string>
                 {
@@ -34,4 +40,5 @@ internal static class AgentMemoryCurationHandlerHelpers
                 }
             }
         };
+    }
 }

@@ -9,6 +9,8 @@
     <ProjectReference Include="../CrestCreates.Agent.Memory.Projection.Abstractions/CrestCreates.Agent.Memory.Projection.Abstractions.csproj" />
     <ProjectReference Include="../CrestCreates.Agent.Memory.Projection/CrestCreates.Agent.Memory.Projection.csproj" />
     <ProjectReference Include="../CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
+    <ProjectReference Include="../../Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
+    <ProjectReference Include="../../Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="CrestCreates.Agent.Memory.ReadCore.Tests" />

@@ -1,5 +1,9 @@
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Accountability.Abstractions.Context;
+using CrestCreates.Accountability.Abstractions.Semantics;
+using CrestCreates.Agent.Memory.ReadCore.Accountability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Schema.Abstractions;
@@ -10,13 +14,42 @@ internal abstract class AgentMemoryToolHandlerBase
 {
     private readonly ICapabilityExecutionContextAccessor _capabilityContext;
     private readonly IAgentExecutionContextAccessor _agentExecution;
+    private readonly IAuditOperationContextAccessor _auditContexts;
 
     protected AgentMemoryToolHandlerBase(
         ICapabilityExecutionContextAccessor capabilityContext,
-        IAgentExecutionContextAccessor agentExecution)
+        IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts)
     {
         _capabilityContext = capabilityContext;
         _agentExecution = agentExecution;
+        _auditContexts = auditContexts;
+    }
+
+    protected AuditOperationContext? AmbientAudit => _auditContexts.Current;
+
+    protected AgentMemoryInvocationContext AgentToolInvocationContext(
+        AgentMemoryToolPrincipal principal,
+        string tenantId,
+        string actorId)
+    {
+        var causality = AgentMemoryCapabilityCausalityMapper.FromCapability(Context, AmbientAudit);
+        return new AgentMemoryInvocationContext
+        {
+            TenantId = tenantId,
+            ActorId = actorId,
+            ActorKind = AuditActorKinds.User,
+            AgentId = principal.AgentId,
+            SessionId = principal.ExecutionId,
+            CorrelationId = causality.CorrelationId,
+            CausationId = causality.CausationId,
+            ParentAuditId = causality.ParentAuditId,
+            InvocationSource = AuditInvocationSources.Agent,
+            TraceAttributes = new Dictionary<string, string>
+            {
+                ["capability"] = Context.CapabilityId
+            }
+        };
     }
 
     protected CapabilityExecutionContext Context
