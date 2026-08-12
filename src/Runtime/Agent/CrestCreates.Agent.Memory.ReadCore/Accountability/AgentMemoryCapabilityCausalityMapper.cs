@@ -54,6 +54,11 @@ public static class AgentMemoryCapabilityCausalityMapper
                 "capability-ambient-audit-missing",
                 "Memory Accountability requires a matching ambient Accountability scope.");
 
+        if (string.IsNullOrWhiteSpace(ambient.EnclosingAuditId))
+            throw new AgentMemoryCapabilityCausalityException(
+                "capability-parent-audit-missing",
+                "Memory Accountability requires the matching Capability AuditId as its direct parent.");
+
         if (!string.Equals(ambient.CorrelationId, context.CorrelationId, StringComparison.Ordinal))
             throw new AgentMemoryCapabilityCausalityException(
                 "capability-ambient-correlation-mismatch",

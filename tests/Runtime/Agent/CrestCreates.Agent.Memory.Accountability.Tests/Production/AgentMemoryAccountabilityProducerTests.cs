@@ -403,6 +403,23 @@ public sealed class AgentMemoryAccountabilityProducerTests
     }
 
     [Fact]
+    public async Task Envelope_Should_MapSystemInvocationSourceExplicitly()
+    {
+        using var harness = new AccountabilityTestFixture.ProducerHarness();
+
+        await harness.Producer.PublishRecallAsync(
+            AccountabilityTestFixture.CreateIdentity(),
+            AccountabilityTestFixture.CreateContext(invocationSource: AuditInvocationSources.System) with
+            {
+                ActorKind = AuditActorKinds.System,
+                ActorId = "system"
+            },
+            AccountabilityTestFixture.CreateRecallPayload());
+
+        harness.Records[0].Runtime!.InvocationSource.Should().Be(AuditInvocationSources.System);
+    }
+
+    [Fact]
     public async Task Envelope_Should_NotPersistDisplayName()
     {
         using var harness = new AccountabilityTestFixture.ProducerHarness();

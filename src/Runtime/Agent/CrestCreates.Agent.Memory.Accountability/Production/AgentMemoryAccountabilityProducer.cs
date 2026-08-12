@@ -359,6 +359,7 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
             AuditInvocationSources.Agent => AuditInvocationSources.Agent,
             AuditInvocationSources.Mcp => AuditInvocationSources.Mcp,
             AuditInvocationSources.Integration => AuditInvocationSources.Integration,
+            AuditInvocationSources.System => AuditInvocationSources.System,
             _ => throw new InvalidOperationException(
                 $"{AgentMemoryAccountabilityDiagnosticCodes.ProducerContractInvalid.Value}: unsupported invocation source")
         };

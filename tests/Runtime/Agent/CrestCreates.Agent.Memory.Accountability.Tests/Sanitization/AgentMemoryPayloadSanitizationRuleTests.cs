@@ -481,6 +481,51 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
     }
 
     [Fact]
+    public void Curation_Should_AcceptAllStableLlmDiagnosticCodes()
+    {
+        var rule = new CurationPayloadSanitizationRule();
+        var payload = AccountabilityTestFixture.CreateCurationPayload() with
+        {
+            Sanitization = new AgentMemoryAccountabilitySanitizationSummary
+            {
+                State = "none",
+                RedactionCodes = Array.Empty<string>(),
+                DiagnosticCodes = new[]
+                {
+                    "AGENT_MEMORY_LLM_BLOCK_COUNT_TRUNCATED",
+                    "AGENT_MEMORY_LLM_BLOCK_TRUNCATED",
+                    "AGENT_MEMORY_LLM_CANDIDATE_CONFIDENCE_CAPPED",
+                    "AGENT_MEMORY_LLM_CANDIDATE_COUNT_TRUNCATED",
+                    "AGENT_MEMORY_LLM_CANDIDATE_TRUNCATED",
+                    "AGENT_MEMORY_LLM_COMPRESSION_PARSE_ERROR",
+                    "AGENT_MEMORY_LLM_CONTENT_REJECTED",
+                    "AGENT_MEMORY_LLM_CREDENTIAL_UNAVAILABLE",
+                    "AGENT_MEMORY_LLM_EXTRACTION_PARSE_ERROR",
+                    "AGENT_MEMORY_LLM_FALLBACK_TO_DETERMINISTIC_COMPRESSOR",
+                    "AGENT_MEMORY_LLM_FALLBACK_TO_DETERMINISTIC_EXTRACTOR",
+                    "AGENT_MEMORY_LLM_INVALID_SOURCE_REF",
+                    "AGENT_MEMORY_LLM_NETWORK_ERROR",
+                    "AGENT_MEMORY_LLM_NON_AUTHORITATIVE_OUTPUT_ENFORCED",
+                    "AGENT_MEMORY_LLM_PARSE_FAILED",
+                    "AGENT_MEMORY_LLM_PROVIDER_RETURNED_EMPTY_OUTPUT",
+                    "AGENT_MEMORY_LLM_PROVIDER_UNAVAILABLE",
+                    "AGENT_MEMORY_LLM_RATE_LIMITED",
+                    "AGENT_MEMORY_LLM_REDACTION_OCCURRED",
+                    "AGENT_MEMORY_LLM_SOURCE_REF_MISSING",
+                    "AGENT_MEMORY_LLM_TIMEOUT",
+                    "AGENT_MEMORY_LLM_UNAUTHORIZED"
+                }
+            }
+        };
+        var input = AccountabilityTestFixture.CreateAuditPayload(
+            payload, Infos.Curation, AgentMemoryAccountabilityPayloadKinds.Curation);
+
+        var result = rule.Sanitize(input);
+
+        result.Data.ValueKind.Should().Be(JsonValueKind.Object);
+    }
+
+    [Fact]
     public void SourceExpansion_Should_RejectRedactionCodeOutsideStableAllowList()
     {
         var rule = new SourceExpansionPayloadSanitizationRule();

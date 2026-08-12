@@ -65,6 +65,19 @@ public sealed class AgentMemoryCapabilityCausalityMapperTests
     }
 
     [Fact]
+    public void FromCapability_ParentAuditMissing_ShouldFailClosed()
+    {
+        var context = MakeCapabilityContext(correlationId: Correlation, executionId: Execution);
+        context.AccountabilityActor = new AuditActor { Kind = "agent", Id = "actor-1" };
+        var ambient = MakeAmbient(enclosingAuditId: null, actorKind: "agent", actorId: "actor-1");
+
+        var act = () => AgentMemoryCapabilityCausalityMapper.FromCapability(context, ambient);
+
+        act.Should().Throw<AgentMemoryCapabilityCausalityException>()
+            .Which.Code.Should().Be("capability-parent-audit-missing");
+    }
+
+    [Fact]
     public void FromCapability_CorrelationMismatch_ShouldThrowCapabilityAmbientCorrelationMismatch()
     {
         var context = MakeCapabilityContext(correlationId: Correlation, executionId: Execution);
@@ -247,13 +260,14 @@ public sealed class AgentMemoryCapabilityCausalityMapperTests
         string? correlationId = Correlation,
         string? operationId = Execution,
         string? tenantId = Tenant,
+        string? enclosingAuditId = EnclosingAuditId,
         string? actorKind = "agent",
         string? actorId = "actor-1")
         => new()
         {
             CorrelationId = correlationId!,
             OperationId = operationId!,
-            EnclosingAuditId = EnclosingAuditId,
+            EnclosingAuditId = enclosingAuditId,
             TenantId = tenantId,
             Actor = new AuditActor { Kind = actorKind!, Id = actorId! },
             InvocationSource = "agent"
