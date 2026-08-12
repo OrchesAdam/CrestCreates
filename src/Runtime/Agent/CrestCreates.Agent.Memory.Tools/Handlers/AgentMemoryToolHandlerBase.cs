@@ -2,8 +2,6 @@ using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Accountability.Abstractions.Context;
-using CrestCreates.Accountability.Abstractions.Semantics;
-using CrestCreates.Agent.Memory.ReadCore.Accountability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Schema.Abstractions;
@@ -31,27 +29,8 @@ internal abstract class AgentMemoryToolHandlerBase
     protected AgentMemoryInvocationContext AgentToolInvocationContext(
         AgentMemoryToolPrincipal principal,
         string tenantId)
-    {
-        var causality = AgentMemoryCapabilityCausalityMapper.FromCapability(Context, AmbientAudit);
-        var actor = Context.AccountabilityActor
-            ?? throw new InvalidOperationException("Capability accountability actor is unavailable.");
-        return new AgentMemoryInvocationContext
-        {
-            TenantId = tenantId,
-            ActorId = actor.Id,
-            ActorKind = actor.Kind,
-            AgentId = principal.AgentId,
-            SessionId = principal.ExecutionId,
-            CorrelationId = causality.CorrelationId,
-            CausationId = causality.CausationId,
-            ParentAuditId = causality.ParentAuditId,
-            InvocationSource = AuditInvocationSources.Agent,
-            TraceAttributes = new Dictionary<string, string>
-            {
-                ["capability"] = Context.CapabilityId
-            }
-        };
-    }
+        => AgentMemoryToolInvocationContextMapper.Create(
+            principal, tenantId, Context, AmbientAudit);
 
     protected CapabilityExecutionContext Context
         => _capabilityContext.Current ?? throw new InvalidOperationException("Capability context is unavailable.");

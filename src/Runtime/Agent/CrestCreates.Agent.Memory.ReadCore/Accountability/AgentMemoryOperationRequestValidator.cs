@@ -10,7 +10,8 @@ internal static class AgentMemoryOperationRequestValidator
         AgentMemoryAccessPrincipal principal,
         AgentMemoryAccessScope scope,
         AgentMemoryOperationIdentity identity,
-        AgentMemoryInvocationContext context)
+        AgentMemoryInvocationContext context,
+        AgentMemoryArtifactOrigin origin)
     {
         if (identity is null
             || string.IsNullOrWhiteSpace(identity.OperationId)
@@ -26,5 +27,16 @@ internal static class AgentMemoryOperationRequestValidator
         if (!string.Equals(principal.TenantId, context.TenantId, StringComparison.Ordinal)
             || !string.Equals(scope.TenantId, context.TenantId, StringComparison.Ordinal))
             throw new AgentMemoryReadCoreException("tenant-boundary", "Memory operation tenant does not match trusted context.");
+
+        if (context.InvocationSource is "agent" or "mcp")
+        {
+            var expectedKind = context.InvocationSource == "agent"
+                ? AgentMemoryArtifactOriginKind.AgentToolInvocation
+                : AgentMemoryArtifactOriginKind.McpInvocation;
+            if (origin is null || origin.Kind != expectedKind
+                || string.IsNullOrWhiteSpace(context.InvocationId)
+                || !string.Equals(origin.OperationId, context.InvocationId, StringComparison.Ordinal))
+                throw new AgentMemoryReadCoreException("upstream-origin-mismatch", "Memory artifact origin does not match the admitted invocation.");
+        }
     }
 }

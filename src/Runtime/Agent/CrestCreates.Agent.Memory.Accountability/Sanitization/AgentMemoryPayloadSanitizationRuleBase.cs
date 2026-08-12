@@ -231,4 +231,14 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
             errors.Add(("AUDIT_HASH_METADATA_INVALID", path));
         }
     }
+
+    protected void ValidateRequiredHashMetadata(CanonicalHash? hash, string path, List<(string Code, string Path)> errors)
+    {
+        if (hash is null)
+        {
+            errors.Add(("AUDIT_HASH_METADATA_REQUIRED", path));
+            return;
+        }
+        ValidateHashMetadata(hash, path, errors);
+    }
 }

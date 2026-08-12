@@ -8,6 +8,7 @@ using CrestCreates.Agent.Memory.ReadCore.Accountability;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Mcp.Memory.Security;
+using CrestCreates.Mcp.Abstractions;
 
 namespace CrestCreates.Mcp.Memory.Handlers;
 
@@ -67,6 +68,8 @@ internal sealed class MemoryRecallHandler : ICapabilityHandler<BuildAgentMemoryP
                 CorrelationId = causality.CorrelationId,
                 CausationId = causality.CausationId,
                 ParentAuditId = causality.ParentAuditId,
+                InvocationId = GetContextItem(context, McpCapabilityContextItemNames.InvocationId),
+                SessionId = GetContextItem(context, McpCapabilityContextItemNames.SessionId),
                 InvocationSource = AuditInvocationSources.Mcp,
                 TraceAttributes = new Dictionary<string, string>
                 {
@@ -80,4 +83,7 @@ internal sealed class MemoryRecallHandler : ICapabilityHandler<BuildAgentMemoryP
         var outcome = await _readCore.RecallAsync(request, ct);
         return outcome.Result;
     }
+
+    private static string? GetContextItem(CapabilityExecutionContext context, string key)
+        => context.Items.TryGetValue(key, out var value) ? value as string : null;
 }

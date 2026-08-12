@@ -47,7 +47,7 @@ internal sealed class AgentMemorySourceExpandCore : IAgentMemorySourceExpandCore
         CancellationToken cancellationToken = default)
     {
         AgentMemoryOperationRequestValidator.Validate(
-            request.Principal, request.Scope, request.Identity, request.InvocationContext);
+            request.Principal, request.Scope, request.Identity, request.InvocationContext, request.Origin);
         var principal = request.Principal;
         var scope = request.Scope;
         var input = request.Input;

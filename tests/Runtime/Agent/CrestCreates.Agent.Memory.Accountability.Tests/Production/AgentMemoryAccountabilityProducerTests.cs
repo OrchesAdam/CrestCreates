@@ -62,7 +62,7 @@ public sealed class AgentMemoryAccountabilityProducerTests
     {
         using var harness = new AccountabilityTestFixture.ProducerHarness();
         var payload = AccountabilityTestFixture.CreateRecallPayload(
-            result: "rejected", stableFailureCode: "not-found");
+            result: "rejected", stableFailureCode: "resource-unavailable");
 
         await harness.Producer.PublishRecallAsync(
             AccountabilityTestFixture.CreateIdentity(),
@@ -71,7 +71,7 @@ public sealed class AgentMemoryAccountabilityProducerTests
 
         harness.Records.Should().HaveCount(1);
         harness.Records[0].Outcome!.Status.Should().Be(AuditOutcomeStatuses.Rejected);
-        harness.Records[0].Outcome!.Code.Should().Be("not-found");
+        harness.Records[0].Outcome!.Code.Should().Be("resource-unavailable");
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public sealed class AgentMemoryAccountabilityProducerTests
         harness.Records.Should().HaveCount(1);
         var record = harness.Records[0];
         record.Outcome!.Status.Should().Be(AuditOutcomeStatuses.Rejected);
-        record.Outcome!.Code.Should().Be("conflict");
+        record.Outcome!.Code.Should().Be("state-conflict");
     }
 
     [Fact]
@@ -372,7 +372,7 @@ public sealed class AgentMemoryAccountabilityProducerTests
         record.Actor!.Id.Should().Be(AccountabilityTestFixture.FixedActorId);
         record.Runtime!.InvocationSource.Should().Be(AuditInvocationSources.Agent);
         record.Runtime!.ExecutionId.Should().Be(AccountabilityTestFixture.FixedOperationId);
-        record.Runtime!.References.Should().Contain(new AuditRuntimeReference("agent-invocation", AccountabilityTestFixture.FixedAgentId));
+        record.Runtime!.References.Should().Contain(new AuditRuntimeReference("agent-invocation", AccountabilityTestFixture.FixedInvocationId));
         record.Runtime!.References.Should().Contain(new AuditRuntimeReference("agent-session", AccountabilityTestFixture.FixedSessionId));
     }
 

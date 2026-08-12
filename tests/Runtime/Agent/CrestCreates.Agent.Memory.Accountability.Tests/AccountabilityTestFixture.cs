@@ -36,6 +36,7 @@ internal static class AccountabilityTestFixture
     public const string FixedActorId = "actor-1";
     public const string FixedAgentId = "agent-1";
     public const string FixedSessionId = "session-1";
+    public const string FixedInvocationId = "invocation-1";
     public const string FixedCorrelationId = "correlation-1";
     public const string FixedCausationId = "causation-1";
     public const string FixedOperationId = "op_0123456789abcdef";
@@ -98,6 +99,7 @@ internal static class AccountabilityTestFixture
         string actorId = FixedActorId,
         string? agentId = FixedAgentId,
         string? sessionId = FixedSessionId,
+        string? invocationId = FixedInvocationId,
         string? correlationId = FixedCorrelationId,
         string? causationId = FixedCausationId,
         string? invocationSource = "agent",
@@ -109,6 +111,7 @@ internal static class AccountabilityTestFixture
             ActorKind = "agent",
             AgentId = agentId,
             SessionId = sessionId,
+            InvocationId = invocationId,
             CorrelationId = correlationId,
             CausationId = causationId,
             ParentAuditId = parentAuditId,
@@ -155,9 +158,9 @@ internal static class AccountabilityTestFixture
         {
             OperationId = operationId,
             Result = result,
-            StableFailureCode = stableFailureCode ?? "rejected-reason",
+            StableFailureCode = stableFailureCode ?? "resource-unavailable",
             EffectivePackHash = null,
-            ReturnedCount = returnedCount,
+            ReturnedCount = 0,
             WasTruncated = false,
             DiagnosticCodes = Array.Empty<string>(),
             RequestedKinds = Array.Empty<string>(),
@@ -175,7 +178,7 @@ internal static class AccountabilityTestFixture
         string? memoryId = "memory-1",
         string? replacementCandidateId = null,
         string? newMemoryId = "new-memory-1",
-        string? resultingState = "promoted",
+        string? resultingState = null,
         string? stableFailureCode = null)
         => new()
         {
@@ -184,15 +187,32 @@ internal static class AccountabilityTestFixture
             CandidateId = operation is "promote" or "reject" ? candidateId : null,
             MemoryId = operation is "supersede" or "archive" ? memoryId : null,
             ReplacementCandidateId = operation == "supersede" ? replacementCandidateId : null,
-            NewMemoryId = newMemoryId,
+            NewMemoryId = operation is "promote" or "supersede" ? newMemoryId : null,
             ExpectedCandidateStateHash = null,
             ExpectedMemoryStateHash = null,
             ExpectedReplacementStateHash = null,
             ExpectedContentHash = null,
-            PreviousState = null,
-            ResultingState = result == "committed" ? resultingState : null,
+            PreviousState = result == "committed" ? operation switch
+            {
+                "promote" or "reject" => "candidate",
+                "supersede" or "archive" => "active",
+                _ => null
+            } : null,
+            ResultingState = result == "committed" ? resultingState ?? operation switch
+            {
+                "promote" => "active",
+                "reject" => "rejected",
+                "supersede" => "superseded",
+                "archive" => "archived",
+                _ => null
+            } : null,
             Result = result,
-            StableFailureCode = result == "rejected" ? (stableFailureCode ?? "curation-rejected") : null,
+            StableFailureCode = result switch
+            {
+                "conflict" => stableFailureCode ?? "state-conflict",
+                "rejected" => stableFailureCode ?? "resource-unavailable",
+                _ => null
+            },
             Sanitization = null
         };
 

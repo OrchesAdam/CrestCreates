@@ -35,13 +35,21 @@ public sealed class RecallPayloadSanitizationRule : AgentMemoryPayloadSanitizati
 
         if (payload.Result == "completed")
         {
-            ValidateHashMetadata(payload.EffectivePackHash, "Payload.EffectivePackHash", errors);
+            ValidateRequiredHashMetadata(payload.EffectivePackHash, "Payload.EffectivePackHash", errors);
+            if (payload.StableFailureCode is not null)
+                errors.Add(("AUDIT_FIELD_INVALID", "Payload.StableFailureCode"));
         }
         else if (payload.Result == "rejected")
         {
             ValidateRequiredNonEmpty(payload.StableFailureCode, "Payload.StableFailureCode", errors);
+            if (!string.IsNullOrWhiteSpace(payload.StableFailureCode))
+                ValidateAllowList(payload.StableFailureCode, AgentMemoryAccountabilityPayloadKinds.RecallFailureCodeAllowList, "Payload.StableFailureCode", errors);
             if (payload.EffectivePackHash is not null)
                 errors.Add(("AUDIT_FIELD_INVALID", "Payload.EffectivePackHash"));
+            if (payload.ReturnedCount != 0)
+                errors.Add(("AUDIT_FIELD_INVALID", "Payload.ReturnedCount"));
+            if (payload.WasTruncated)
+                errors.Add(("AUDIT_FIELD_INVALID", "Payload.WasTruncated"));
         }
 
         if (payload.ReturnedCount < 0)

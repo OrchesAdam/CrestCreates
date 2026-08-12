@@ -102,7 +102,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "rejected",
-            StableFailureCode = "rejected-reason",
+            StableFailureCode = "resource-unavailable",
             EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
             ReturnedCount = 0,
             WasTruncated = false,
@@ -536,7 +536,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Operation = "archive",
             MemoryId = null,
-            NewMemoryId = null,
+            NewMemoryId = "memory-1",
             Result = "committed",
             ResultingState = "archived"
         };
@@ -561,6 +561,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             CandidateId = "candidate-1",
             NewMemoryId = "   ",
             Result = "committed",
+            PreviousState = "candidate",
             ResultingState = "promoted"
         };
         var input = AccountabilityTestFixture.CreateAuditPayload(payload, Infos.Curation, AgentMemoryAccountabilityPayloadKinds.Curation);
@@ -673,7 +674,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Operation = "promote",
             CandidateId = "candidate-1",
-            NewMemoryId = null,
+            NewMemoryId = "memory-1",
             ExpectedContentHash = new CanonicalHash
             {
                 Value = "aabb",
@@ -686,6 +687,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
                 CanonicalShapeVersion = "accountability-record-hash-v1"
             },
             Result = "committed",
+            PreviousState = "candidate",
             ResultingState = "promoted"
         };
         var input = AccountabilityTestFixture.CreateAuditPayload(payload, Infos.Curation, AgentMemoryAccountabilityPayloadKinds.Curation);
@@ -707,9 +709,10 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Operation = "promote",
             CandidateId = "candidate-1",
-            NewMemoryId = null,
+            NewMemoryId = "memory-1",
             Result = "committed",
-            ResultingState = "promoted",
+            PreviousState = "candidate",
+            ResultingState = "active",
             Sanitization = new AgentMemoryAccountabilitySanitizationSummary
             {
                 State = "mystery",
@@ -739,9 +742,10 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Operation = "promote",
             CandidateId = "candidate-1",
-            NewMemoryId = null,
+            NewMemoryId = "memory-1",
             Result = "committed",
-            ResultingState = "promoted",
+            PreviousState = "candidate",
+            ResultingState = "active",
             Sanitization = new AgentMemoryAccountabilitySanitizationSummary
             {
                 State = "redacted",

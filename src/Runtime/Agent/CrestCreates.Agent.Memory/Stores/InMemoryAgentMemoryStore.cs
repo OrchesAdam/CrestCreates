@@ -58,8 +58,10 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
         AgentMemoryStatus newStatus,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!_candidates.TryGetValue((tenantId, candidateId), out var candidate))
                 throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
             if (candidate.Status != expectedStatus)
@@ -122,8 +124,10 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
 
     public ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, AgentMemoryPromotionPlan plan, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var hashes = RequireHashes();
             var candidate = GetCandidateUnsafe(tenantId, plan.Candidate.CandidateId)
                 ?? throw Unavailable("Candidate is unavailable.");
@@ -146,8 +150,10 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
 
     public ValueTask RejectAsync(string tenantId, AgentMemoryCandidateExpectation expectation, AgentMemoryOperationRequest operation, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var hashes = RequireHashes();
             var candidate = GetCandidateUnsafe(tenantId, expectation.CandidateId)
                 ?? throw Unavailable("Candidate is unavailable.");
@@ -162,8 +168,10 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
 
     public ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, AgentMemorySupersessionPlan plan, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var hashes = RequireHashes();
             var existing = GetMemoryUnsafe(tenantId, plan.TargetMemory.MemoryId)
                 ?? throw Unavailable("Target Memory is unavailable.");
@@ -197,6 +205,7 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var hashes = RequireHashes();
             var existing = GetMemoryUnsafe(tenantId, memory.MemoryId)
                 ?? throw Unavailable("Memory is unavailable.");

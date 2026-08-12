@@ -50,7 +50,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         CancellationToken cancellationToken = default)
     {
         AgentMemoryOperationRequestValidator.Validate(
-            request.Principal, request.Scope, request.Identity, request.InvocationContext);
+            request.Principal, request.Scope, request.Identity, request.InvocationContext, request.Origin);
         try
         {
             return await RecallCoreAsync(request, cancellationToken);

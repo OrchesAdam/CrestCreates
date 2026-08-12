@@ -15,6 +15,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory.Accountability/CrestCreates.Agent.Memory.Accountability.csproj" />
     <ProjectReference Include="../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
     <ProjectReference Include="../../../src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
     <ProjectReference Include="../../../src/Integrations/CrestCreates.Mcp.Memory/CrestCreates.Mcp.Memory.csproj" />

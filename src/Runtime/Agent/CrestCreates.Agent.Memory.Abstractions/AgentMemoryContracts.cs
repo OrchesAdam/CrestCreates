@@ -124,6 +124,7 @@ public sealed record AgentMemoryInvocationContext : ISnapshotable<AgentMemoryInv
     public required string ActorKind { get; init; }
     public string? AgentId { get; init; }
     public string? SessionId { get; init; }
+    public string? InvocationId { get; init; }
     public string? CorrelationId { get; init; }
     public string? CausationId { get; init; }
     public string? ParentAuditId { get; init; }

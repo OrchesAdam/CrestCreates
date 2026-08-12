@@ -101,7 +101,7 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
             "conflict" => new AuditOutcome
             {
                 Status = AuditOutcomeStatuses.Rejected,
-                Code = "conflict"
+                Code = payload.StableFailureCode ?? "conflict"
             },
             _ => new AuditOutcome
             {
@@ -165,10 +165,11 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         JsonTypeInfo<T> typeInfo)
     {
         var runtimeReferences = ImmutableArray.CreateBuilder<AuditRuntimeReference>();
-        if (!string.IsNullOrWhiteSpace(context.AgentId))
-            runtimeReferences.Add(new AuditRuntimeReference("agent-invocation", context.AgentId));
+        var isMcp = string.Equals(context.InvocationSource, AuditInvocationSources.Mcp, StringComparison.Ordinal);
+        if (!string.IsNullOrWhiteSpace(context.InvocationId))
+            runtimeReferences.Add(new AuditRuntimeReference(isMcp ? "mcp-invocation" : "agent-invocation", context.InvocationId));
         if (!string.IsNullOrWhiteSpace(context.SessionId))
-            runtimeReferences.Add(new AuditRuntimeReference("agent-session", context.SessionId));
+            runtimeReferences.Add(new AuditRuntimeReference(isMcp ? "mcp-session" : "agent-session", context.SessionId));
 
         return new AuditEnvelope
         {

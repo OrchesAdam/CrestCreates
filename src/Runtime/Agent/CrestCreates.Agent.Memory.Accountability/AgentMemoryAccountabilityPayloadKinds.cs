@@ -37,4 +37,17 @@ public static class AgentMemoryAccountabilityPayloadKinds
             "ConversationTurn", "TaskRecord", "TaskEvent", "CompressedContextBlock",
             "MemoryCandidate", "MemoryItem"
         };
+
+    public static IReadOnlySet<string> RecallFailureCodeAllowList { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "budget-invalid", "resource-unavailable" };
+
+    public static IReadOnlySet<string> CurationRejectedCodeAllowList { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "resource-unavailable", "invalid-lifecycle-state", "tenant-mismatch",
+            "missing-actor", "missing-reason", "missing-timestamp", "missing-source-or-explanation"
+        };
+
+    public static IReadOnlySet<string> CurationConflictCodeAllowList { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "state-conflict", "identity-conflict" };
 }

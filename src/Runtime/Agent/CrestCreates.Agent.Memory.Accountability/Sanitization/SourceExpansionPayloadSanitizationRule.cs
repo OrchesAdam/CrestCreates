@@ -48,11 +48,14 @@ public sealed class SourceExpansionPayloadSanitizationRule : AgentMemoryPayloadS
 
         if (payload.Status == "expanded")
         {
-            ValidateHashMetadata(payload.EffectiveVisibleContentHash, "Payload.EffectiveVisibleContentHash", errors);
+            ValidateRequiredHashMetadata(payload.EffectiveVisibleContentHash, "Payload.EffectiveVisibleContentHash", errors);
         }
-        else if (payload.EffectiveVisibleContentHash is not null)
+        else
         {
-            errors.Add(("AUDIT_FIELD_INVALID", "Payload.EffectiveVisibleContentHash"));
+            if (payload.EffectiveVisibleContentHash is not null)
+                errors.Add(("AUDIT_FIELD_INVALID", "Payload.EffectiveVisibleContentHash"));
+            if (payload.WasTruncated)
+                errors.Add(("AUDIT_FIELD_INVALID", "Payload.WasTruncated"));
         }
 
         if (payload.MaximumCharacters < 0)

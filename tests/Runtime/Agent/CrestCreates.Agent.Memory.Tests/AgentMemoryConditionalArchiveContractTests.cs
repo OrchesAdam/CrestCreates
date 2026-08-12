@@ -20,6 +20,93 @@ public sealed class AgentMemoryConditionalArchiveContractTests
     private const string TenantId = "tenant-1";
 
     [Fact]
+    public async Task CancelledPromoteBeforeTransition_Should_NotCommit()
+    {
+        var (store, promotion) = MemoryTestFixture.CreateCurationFixture();
+        var hashes = MemoryTestFixture.CreateTestHashProjector();
+        var candidate = await MemoryTestFixture.CreateCandidateAsync(store, hashes, TenantId, "c-promote-cancel");
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId);
+        var memory = MemoryTestFixture.CreateExpectedPromotedMemory(candidate, "m-promote-cancel", operation);
+        var plan = new AgentMemoryPromotionPlan
+        {
+            Candidate = new AgentMemoryCandidateExpectation
+            {
+                CandidateId = candidate.CandidateId,
+                ExpectedStateHash = hashes.ComputeCandidateStateHash(candidate)
+            },
+            NewMemoryId = memory.MemoryId,
+            ExpectedMemoryContentHash = candidate.CanonicalContentHash,
+            ExpectedMemoryStateHash = hashes.ComputeMemoryStateHash(memory),
+            Operation = operation
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await FluentActions.Invoking(() => store.PromoteAsync(TenantId, plan, cts.Token).AsTask())
+            .Should().ThrowAsync<OperationCanceledException>();
+        (await store.GetCandidateAsync(TenantId, candidate.CandidateId))!.Status.Should().Be(AgentMemoryStatus.Candidate);
+        (await store.GetMemoryAsync(TenantId, memory.MemoryId)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CancelledRejectBeforeTransition_Should_NotCommit()
+    {
+        var (store, promotion) = MemoryTestFixture.CreateCurationFixture();
+        var hashes = MemoryTestFixture.CreateTestHashProjector();
+        var candidate = await MemoryTestFixture.CreateCandidateAsync(store, hashes, TenantId, "c-reject-cancel");
+        var expectation = new AgentMemoryCandidateExpectation
+        {
+            CandidateId = candidate.CandidateId,
+            ExpectedStateHash = hashes.ComputeCandidateStateHash(candidate)
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await FluentActions.Invoking(() => store.RejectAsync(TenantId, expectation, MemoryTestFixture.CreateOperationRequest(TenantId), cts.Token).AsTask())
+            .Should().ThrowAsync<OperationCanceledException>();
+        (await store.GetCandidateAsync(TenantId, candidate.CandidateId))!.Status.Should().Be(AgentMemoryStatus.Candidate);
+    }
+
+    [Fact]
+    public async Task CancelledSupersedeBeforeTransition_Should_NotCommit()
+    {
+        var (store, promotion) = MemoryTestFixture.CreateCurationFixture();
+        var hashes = MemoryTestFixture.CreateTestHashProjector();
+        var target = await MemoryTestFixture.PromoteActiveMemoryAsync(store, promotion, hashes, TenantId, "c-target-cancel", "m-target-cancel");
+        var replacement = await MemoryTestFixture.CreateCandidateAsync(store, hashes, TenantId, "c-replacement-cancel");
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId);
+        var memory = MemoryTestFixture.CreateExpectedPromotedMemory(replacement, "m-replacement-cancel", operation) with
+        {
+            SupersedesMemoryId = target.MemoryId
+        };
+        var plan = new AgentMemorySupersessionPlan
+        {
+            TargetMemory = new AgentMemoryItemExpectation
+            {
+                MemoryId = target.MemoryId,
+                ExpectedStateHash = hashes.ComputeMemoryStateHash(target)
+            },
+            ReplacementCandidate = new AgentMemoryCandidateExpectation
+            {
+                CandidateId = replacement.CandidateId,
+                ExpectedStateHash = hashes.ComputeCandidateStateHash(replacement)
+            },
+            NewMemoryId = memory.MemoryId,
+            ExpectedMemoryContentHash = replacement.CanonicalContentHash,
+            ExpectedMemoryStateHash = hashes.ComputeMemoryStateHash(memory),
+            Operation = operation
+        };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await FluentActions.Invoking(() => store.SupersedeAsync(TenantId, plan, cts.Token).AsTask())
+            .Should().ThrowAsync<OperationCanceledException>();
+        (await store.GetMemoryAsync(TenantId, target.MemoryId))!.Status.Should().Be(AgentMemoryStatus.Active);
+        (await store.GetCandidateAsync(TenantId, replacement.CandidateId))!.Status.Should().Be(AgentMemoryStatus.Candidate);
+        (await store.GetMemoryAsync(TenantId, memory.MemoryId)).Should().BeNull();
+    }
+
+    [Fact]
     public async Task Active_Should_ArchiveAtomically()
     {
         var (store, promotion) = MemoryTestFixture.CreateCurationFixture();

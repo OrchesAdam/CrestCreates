@@ -369,6 +369,34 @@ public class AgentMemoryRecallAccountabilityTests
     }
 
     [Fact]
+    public async Task Recall_UpstreamOriginBindingMismatch_ShouldFailBeforeRetriever()
+    {
+        var principal = MakePrincipal();
+        var scope = MakeScope();
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10_000 };
+        var origin = MakeOrigin() with { OperationId = "origin-invocation" };
+        var request = MakeRequest(principal, origin, scope, input) with
+        {
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = principal.TenantId,
+                ActorId = "actor-1",
+                ActorKind = "agent",
+                InvocationSource = "agent",
+                InvocationId = "admitted-invocation"
+            }
+        };
+        var retriever = new Mock<IAgentMemoryRetriever>(MockBehavior.Strict);
+        var core = MakeCore(retriever.Object, Mock.Of<IAgentMemoryAccountabilityProducer>());
+
+        var act = async () => await core.RecallAsync(request);
+
+        var exception = await act.Should().ThrowAsync<AgentMemoryReadCoreException>();
+        exception.And.Code.Should().Be("upstream-origin-mismatch");
+        retriever.Verify(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task EmptyRecall_Should_NotLeakHiddenResources()
     {
         var principal = MakePrincipal();

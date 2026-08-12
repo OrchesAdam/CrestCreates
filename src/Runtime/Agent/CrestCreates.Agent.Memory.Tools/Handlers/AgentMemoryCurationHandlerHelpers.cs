@@ -16,29 +16,14 @@ internal static class AgentMemoryCurationHandlerHelpers
         AgentMemoryOperationIdentity identity,
         AuditOperationContext? ambient)
     {
-        var causality = AgentMemoryCapabilityCausalityMapper.FromCapability(context, ambient);
         return new AgentMemoryOperationRequest
         {
             TenantId = principal.TenantId,
             Reason = reason,
             Identity = identity,
             Explanation = explanation,
-            InvocationContext = new AgentMemoryInvocationContext
-            {
-                TenantId = principal.TenantId,
-                ActorId = principal.UserId,
-                ActorKind = "User",
-                AgentId = principal.AgentId,
-                SessionId = principal.ExecutionId,
-                CorrelationId = causality.CorrelationId,
-                CausationId = causality.CausationId,
-                ParentAuditId = causality.ParentAuditId,
-                InvocationSource = "AgentTool",
-                TraceAttributes = new Dictionary<string, string>
-                {
-                    ["capability"] = context.CapabilityId
-                }
-            }
+            InvocationContext = AgentMemoryToolInvocationContextMapper.Create(
+                principal, principal.TenantId, context, ambient)
         };
     }
 }
