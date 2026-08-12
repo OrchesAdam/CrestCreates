@@ -16,13 +16,19 @@ public sealed class AgentMemoryCurationCompositionValidator : IBootstrapValidato
 {
     private readonly IAgentMemoryFormalCurationMarker? _marker;
     private readonly IAgentMemoryStore? _store;
+    private readonly IAgentMemoryPromotionService? _promotion;
+    private readonly IAgentMemoryCurationServiceCapabilities? _promotionCapabilities;
 
     public AgentMemoryCurationCompositionValidator(
         IAgentMemoryFormalCurationMarker? marker = null,
-        IAgentMemoryStore? store = null)
+        IAgentMemoryStore? store = null,
+        IAgentMemoryPromotionService? promotion = null,
+        IAgentMemoryCurationServiceCapabilities? promotionCapabilities = null)
     {
         _marker = marker;
         _store = store;
+        _promotion = promotion;
+        _promotionCapabilities = promotionCapabilities;
     }
 
     public int Order => -100;
@@ -53,6 +59,14 @@ public sealed class AgentMemoryCurationCompositionValidator : IBootstrapValidato
         if (_store is null)
         {
             message = "Agent Memory store is not registered.";
+            return false;
+        }
+
+        if (_promotion is null
+            || _promotionCapabilities is null
+            || _promotionCapabilities.OutcomeGuarantee != AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic)
+        {
+            message = "Selected Agent Memory promotion service does not guarantee ConfirmedAtomic formal curation outcomes.";
             return false;
         }
 

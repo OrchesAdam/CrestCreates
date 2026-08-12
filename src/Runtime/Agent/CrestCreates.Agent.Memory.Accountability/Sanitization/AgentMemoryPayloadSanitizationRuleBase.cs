@@ -184,6 +184,14 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
                 return;
             }
         }
+        for (var i = 1; i < kinds.Count; i++)
+        {
+            if (string.CompareOrdinal(kinds[i - 1], kinds[i]) >= 0)
+            {
+                errors.Add(("AUDIT_REQUESTED_KINDS_NOT_SORTED_OR_DUPLICATE", path));
+                return;
+            }
+        }
     }
 
     protected void ValidateSanitizationSummary(

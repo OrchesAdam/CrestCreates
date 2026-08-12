@@ -14,11 +14,11 @@ best-effort recording, and Agent Tool/MCP causal containment.
 
 **Issue:** #56
 
-**Branch:** `docs/issue-56-phase-9b-agent-memory-accountability`
+**Branch:** `agents/agent-memory-accountability-integration`
 
 **Spec status:** APPROVED
 
-**Plan status:** IMPLEMENTED — awaiting CI confirmation
+**Plan status:** IMPLEMENTED — CI confirmed
 
 ```text
 Memory fact identity:       fresh OperationId + OccurredAt per admitted execution

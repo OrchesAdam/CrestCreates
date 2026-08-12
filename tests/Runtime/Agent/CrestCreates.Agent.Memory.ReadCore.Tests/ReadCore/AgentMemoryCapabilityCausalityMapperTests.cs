@@ -114,17 +114,16 @@ public sealed class AgentMemoryCapabilityCausalityMapperTests
     }
 
     [Fact]
-    public void FromCapability_ActorNullOnContext_ShouldNotRequireAmbientActor()
+    public void FromCapability_ActorNullOnContext_ShouldFailClosed()
     {
         var context = MakeCapabilityContext(correlationId: Correlation, executionId: Execution);
         context.AccountabilityActor = null;
         var ambient = MakeAmbient();
 
-        var result = AgentMemoryCapabilityCausalityMapper.FromCapability(context, ambient);
+        var act = () => AgentMemoryCapabilityCausalityMapper.FromCapability(context, ambient);
 
-        result.CorrelationId.Should().Be(Correlation);
-        result.CausationId.Should().Be(Execution);
-        result.ParentAuditId.Should().Be(EnclosingAuditId);
+        act.Should().Throw<AgentMemoryCapabilityCausalityException>()
+            .Which.Code.Should().Be("capability-actor-missing");
     }
 
     [Fact]
@@ -156,15 +155,14 @@ public sealed class AgentMemoryCapabilityCausalityMapperTests
     }
 
     [Fact]
-    public void FromDirectHost_NullCorrelationAndCausation_ShouldMapToEmptyStrings()
+    public void FromDirectHost_NullCorrelation_ShouldFailClosed()
     {
         var context = MakeInvocationContext(correlationId: null, causationId: null);
 
-        var result = AgentMemoryCapabilityCausalityMapper.FromDirectHost(context, ambient: null);
+        var act = () => AgentMemoryCapabilityCausalityMapper.FromDirectHost(context, ambient: null);
 
-        result.CorrelationId.Should().BeEmpty();
-        result.CausationId.Should().BeEmpty();
-        result.ParentAuditId.Should().BeNull();
+        act.Should().Throw<AgentMemoryCapabilityCausalityException>()
+            .Which.Code.Should().Be("direct-host-correlation-missing");
     }
 
     [Fact]

@@ -21,4 +21,20 @@ public static class AgentMemoryAccountabilityPayloadKinds
     public const int MaxIdentifierLength = 256;
     public const int MaxCodeLength = 128;
     public const int MaxPayloadVersion = 1;
+
+    public static IReadOnlySet<string> RequestedKindAllowList { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Preference", "ProjectFact", "Decision", "Constraint", "WorkflowHint", "Risk"
+        };
+
+    public static IReadOnlySet<string> MinimumConfidenceAllowList { get; } =
+        new HashSet<string>(StringComparer.Ordinal) { "0.0", "0.3", "0.5", "0.8" };
+
+    public static IReadOnlySet<string> SourceKindAllowList { get; } =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "ConversationTurn", "TaskRecord", "TaskEvent", "CompressedContextBlock",
+            "MemoryCandidate", "MemoryItem"
+        };
 }

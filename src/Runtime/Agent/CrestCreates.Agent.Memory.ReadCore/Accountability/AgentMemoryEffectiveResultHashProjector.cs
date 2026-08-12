@@ -159,13 +159,14 @@ public sealed class AgentMemoryEffectiveResultHashProjector
 
     /// <summary>
     /// Maps the requested tool kinds to ordinal canonical order: distinct kinds
-    /// sorted by enum value with Unknown filtered out, rendered as enum names.
+    /// sorted by the explicit semantic wire value with Unknown filtered out.
     /// </summary>
     public static IReadOnlyList<string> MapRequestedKinds(IReadOnlyList<AgentMemoryToolKind> kinds)
         => kinds
             .Where(kind => kind != AgentMemoryToolKind.Unknown)
             .Distinct()
-            .OrderBy(kind => (int)kind)
-            .Select(kind => kind.ToString())
+            .Select(AgentMemoryStableWireMappings.MapRequestedKind)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(kind => kind, StringComparer.Ordinal)
             .ToArray();
 }

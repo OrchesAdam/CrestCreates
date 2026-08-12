@@ -199,7 +199,7 @@ internal static class AccountabilityTestFixture
     public static AgentMemorySourceExpansionAccountabilityPayload CreateSourceExpansionPayload(
         string operationId = FixedOperationId,
         string status = "expanded",
-        string sourceKind = "external-doc",
+        string sourceKind = "ConversationTurn",
         string sourceId = "source-1",
         CanonicalHash? effectiveVisibleContentHash = null,
         int maximumCharacters = 4000,

@@ -69,14 +69,19 @@ public static class AgentMemoryCapabilityCausalityMapper
                 "capability-ambient-tenant-mismatch",
                 "Memory Accountability tenant does not match the ambient scope.");
 
-        if (context.AccountabilityActor is { } actor && !ActorsAgree(actor, ambient.Actor))
+        if (context.AccountabilityActor is not { } actor)
+            throw new AgentMemoryCapabilityCausalityException(
+                "capability-actor-missing",
+                "Memory Accountability requires the authoritative Capability actor.");
+
+        if (!ActorsAgree(actor, ambient.Actor))
             throw new AgentMemoryCapabilityCausalityException(
                 "capability-ambient-actor-mismatch",
                 "Memory Accountability actor does not match the ambient scope.");
 
         return new AgentMemoryCapabilityCausality
         {
-            CorrelationId = context.CorrelationId,
+            CorrelationId = context.CorrelationId!,
             CausationId = context.ExecutionId!,
             ParentAuditId = ambient.EnclosingAuditId
         };
@@ -94,6 +99,11 @@ public static class AgentMemoryCapabilityCausalityMapper
         AgentMemoryInvocationContext context,
         AuditOperationContext? ambient)
     {
+        if (string.IsNullOrWhiteSpace(context.CorrelationId))
+            throw new AgentMemoryCapabilityCausalityException(
+                "direct-host-correlation-missing",
+                "A direct trusted host must supply a non-empty Memory correlation id.");
+
         var adoptedParent = ambient is { } scope
             && string.Equals(scope.TenantId, context.TenantId, StringComparison.Ordinal)
             && string.Equals(scope.CorrelationId, context.CorrelationId, StringComparison.Ordinal)
@@ -103,7 +113,7 @@ public static class AgentMemoryCapabilityCausalityMapper
 
         return new AgentMemoryCapabilityCausality
         {
-            CorrelationId = context.CorrelationId ?? string.Empty,
+            CorrelationId = context.CorrelationId!,
             CausationId = context.CausationId ?? string.Empty,
             ParentAuditId = adoptedParent
         };

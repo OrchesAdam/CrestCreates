@@ -375,4 +375,29 @@ public sealed class AgentMemoryAccountabilityProducerTests
         record.Runtime!.References.Should().Contain(new AuditRuntimeReference("agent-invocation", AccountabilityTestFixture.FixedAgentId));
         record.Runtime!.References.Should().Contain(new AuditRuntimeReference("agent-session", AccountabilityTestFixture.FixedSessionId));
     }
+
+    [Fact]
+    public async Task Envelope_Should_NotPersistDisplayName()
+    {
+        using var harness = new AccountabilityTestFixture.ProducerHarness();
+        await harness.Producer.PublishRecallAsync(
+            AccountabilityTestFixture.CreateIdentity(),
+            AccountabilityTestFixture.CreateContext() with { DisplayName = "private display name" },
+            AccountabilityTestFixture.CreateRecallPayload());
+
+        harness.Records[0].Actor!.DisplayName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MissingCorrelation_Should_ThrowContractInvalid()
+    {
+        using var harness = new AccountabilityTestFixture.ProducerHarness();
+        var act = () => harness.Producer.PublishRecallAsync(
+            AccountabilityTestFixture.CreateIdentity(),
+            AccountabilityTestFixture.CreateContext(correlationId: null),
+            AccountabilityTestFixture.CreateRecallPayload()).AsTask();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*AGENT_MEMORY_ACCOUNTABILITY_PRODUCER_CONTRACT_INVALID*correlation context*");
+    }
 }

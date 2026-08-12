@@ -157,7 +157,14 @@ public sealed class McpToolInvoker : IMcpToolInvoker
         JsonElement arguments)
     {
         execution.CausationId = call.RequestId;
-        execution.AccountabilityActor = new AuditActor { Kind = "unknown", Id = "unknown" };
+        // MCP Memory is a user-scoped operation. Keep the authoritative actor
+        // on Capability context so downstream Memory facts do not invent a
+        // second identity chain.
+        execution.AccountabilityActor = new AuditActor
+        {
+            Kind = "user",
+            Id = execution.UserId ?? "unknown"
+        };
         var references = ImmutableArray.CreateBuilder<AuditRuntimeReference>();
         references.Add(new AuditRuntimeReference("mcp-request", call.RequestId));
         references.Add(new AuditRuntimeReference("mcp-invocation", call.InvocationId));

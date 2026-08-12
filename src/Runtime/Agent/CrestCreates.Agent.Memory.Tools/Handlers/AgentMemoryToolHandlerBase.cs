@@ -30,15 +30,16 @@ internal abstract class AgentMemoryToolHandlerBase
 
     protected AgentMemoryInvocationContext AgentToolInvocationContext(
         AgentMemoryToolPrincipal principal,
-        string tenantId,
-        string actorId)
+        string tenantId)
     {
         var causality = AgentMemoryCapabilityCausalityMapper.FromCapability(Context, AmbientAudit);
+        var actor = Context.AccountabilityActor
+            ?? throw new InvalidOperationException("Capability accountability actor is unavailable.");
         return new AgentMemoryInvocationContext
         {
             TenantId = tenantId,
-            ActorId = actorId,
-            ActorKind = AuditActorKinds.User,
+            ActorId = actor.Id,
+            ActorKind = actor.Kind,
             AgentId = principal.AgentId,
             SessionId = principal.ExecutionId,
             CorrelationId = causality.CorrelationId,

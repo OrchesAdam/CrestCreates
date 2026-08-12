@@ -54,7 +54,7 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
             Principal = newPrincipal,
             Origin = origin,
             Identity = identity,
-            InvocationContext = AgentToolInvocationContext(principal, newPrincipal.TenantId, newPrincipal.UserId),
+            InvocationContext = AgentToolInvocationContext(principal, newPrincipal.TenantId),
             Scope = newScope,
             Input = input
         };

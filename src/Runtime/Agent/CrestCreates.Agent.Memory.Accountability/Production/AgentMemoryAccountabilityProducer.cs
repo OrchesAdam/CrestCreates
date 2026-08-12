@@ -46,7 +46,7 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         AgentMemoryInvocationContext context,
         AgentMemoryRecallAccountabilityPayload payload)
     {
-        ValidateContract(identity, payload.OperationId);
+        ValidateContract(identity, context, payload.OperationId);
 
         var action = new AuditAction { Kind = "agent-memory.recall", Name = "recall" };
         var target = new AuditTarget { Kind = "agent-memory-pack", Id = payload.OperationId };
@@ -77,7 +77,7 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         AgentMemoryInvocationContext context,
         AgentMemoryCurationAccountabilityPayload payload)
     {
-        ValidateContract(identity, payload.OperationId);
+        ValidateContract(identity, context, payload.OperationId);
 
         var (actionKind, actionName, targetKind, targetId) = payload.Operation switch
         {
@@ -123,7 +123,7 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         AgentMemoryInvocationContext context,
         AgentMemorySourceExpansionAccountabilityPayload payload)
     {
-        ValidateContract(identity, payload.OperationId);
+        ValidateContract(identity, context, payload.OperationId);
 
         var action = new AuditAction { Kind = "agent-memory.source-expand", Name = "source-expand" };
         var target = new AuditTarget { Kind = "agent-memory-source", Id = payload.SourceId };
@@ -181,14 +181,15 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
                 AgentMemoryAccountabilityPayloadKinds.Version),
             OccurredAt = identity.OccurredAt,
             TenantId = context.TenantId,
-            CorrelationId = context.CorrelationId ?? identity.OperationId,
+            CorrelationId = context.CorrelationId!,
             CausationId = context.CausationId,
             ParentAuditId = context.ParentAuditId,
             Actor = new AuditActor
             {
                 Kind = MapActorKind(context.ActorKind),
                 Id = context.ActorId,
-                DisplayName = context.DisplayName
+                // DisplayName is non-accountability input. Never persist it in
+                // the envelope (it would also become part of RecordHash).
             },
             Action = action,
             Target = target,
@@ -264,7 +265,10 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
             code, auditId, actionKind, payloadKind);
     }
 
-    private static void ValidateContract(AgentMemoryOperationIdentity identity, string payloadOperationId)
+    private static void ValidateContract(
+        AgentMemoryOperationIdentity identity,
+        AgentMemoryInvocationContext context,
+        string payloadOperationId)
     {
         if (string.IsNullOrWhiteSpace(identity.OperationId)
             || !string.Equals(identity.OperationId, payloadOperationId, StringComparison.Ordinal))
@@ -276,6 +280,14 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         {
             throw new InvalidOperationException(
                 $"{AgentMemoryAccountabilityDiagnosticCodes.ProducerContractInvalid.Value}: OccurredAt must be supplied");
+        }
+        if (string.IsNullOrWhiteSpace(context.TenantId)
+            || string.IsNullOrWhiteSpace(context.ActorId)
+            || string.IsNullOrWhiteSpace(context.ActorKind)
+            || string.IsNullOrWhiteSpace(context.CorrelationId))
+        {
+            throw new InvalidOperationException(
+                $"{AgentMemoryAccountabilityDiagnosticCodes.ProducerContractInvalid.Value}: trusted tenant, actor, and correlation context are required");
         }
     }
 

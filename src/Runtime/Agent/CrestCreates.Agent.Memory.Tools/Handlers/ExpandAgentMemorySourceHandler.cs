@@ -51,7 +51,7 @@ internal sealed class ExpandAgentMemorySourceHandler : AgentMemoryToolHandlerBas
             Principal = newPrincipal,
             Origin = origin,
             Identity = identity,
-            InvocationContext = AgentToolInvocationContext(principal, newPrincipal.TenantId, newPrincipal.UserId),
+            InvocationContext = AgentToolInvocationContext(principal, newPrincipal.TenantId),
             Scope = newScope,
             Input = input
         };

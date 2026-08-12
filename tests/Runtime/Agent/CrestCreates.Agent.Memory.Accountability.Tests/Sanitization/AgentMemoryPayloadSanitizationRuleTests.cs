@@ -785,7 +785,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         var payload = new AgentMemorySourceExpansionAccountabilityPayload
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
-            SourceKind = "external-doc",
+            SourceKind = "ConversationTurn",
             SourceId = "source-1",
             Status = "redacted",
             EffectiveVisibleContentHash = AccountabilityTestFixture.CreateValidHash(),
@@ -815,7 +815,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         var payload = new AgentMemorySourceExpansionAccountabilityPayload
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
-            SourceKind = "external-doc",
+            SourceKind = "ConversationTurn",
             SourceId = "source-1",
             Status = "halfway",
             MaximumCharacters = 4000,
@@ -873,7 +873,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         var payload = new AgentMemorySourceExpansionAccountabilityPayload
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
-            SourceKind = "external-doc",
+            SourceKind = "ConversationTurn",
             SourceId = "   ",
             Status = "not-found",
             MaximumCharacters = 4000,
@@ -902,7 +902,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         var payload = new AgentMemorySourceExpansionAccountabilityPayload
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
-            SourceKind = "external-doc",
+            SourceKind = "ConversationTurn",
             SourceId = "source-1",
             Status = "expanded",
             EffectiveVisibleContentHash = AccountabilityTestFixture.CreateValidHash(),

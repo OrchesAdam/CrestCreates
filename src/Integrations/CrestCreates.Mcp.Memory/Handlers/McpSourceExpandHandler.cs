@@ -58,8 +58,8 @@ internal sealed class McpSourceExpandHandler : ICapabilityHandler<ExpandAgentMem
             InvocationContext = new AgentMemoryInvocationContext
             {
                 TenantId = principal.TenantId,
-                ActorId = principal.UserId,
-                ActorKind = AuditActorKinds.McpClient,
+                ActorId = context.AccountabilityActor!.Id,
+                ActorKind = context.AccountabilityActor.Kind,
                 CorrelationId = causality.CorrelationId,
                 CausationId = causality.CausationId,
                 ParentAuditId = causality.ParentAuditId,

@@ -46,6 +46,8 @@ internal sealed class AgentMemorySourceExpandCore : IAgentMemorySourceExpandCore
         AgentMemorySourceExpansionOperationRequest request,
         CancellationToken cancellationToken = default)
     {
+        AgentMemoryOperationRequestValidator.Validate(
+            request.Principal, request.Scope, request.Identity, request.InvocationContext);
         var principal = request.Principal;
         var scope = request.Scope;
         var input = request.Input;
@@ -105,7 +107,7 @@ internal sealed class AgentMemorySourceExpandCore : IAgentMemorySourceExpandCore
         ExpandAgentMemorySourceInput input)
     {
         var sourceRef = grant.SourceRef;
-        var sourceKind = sourceRef.SourceKind.ToString();
+        var sourceKind = AgentMemoryStableWireMappings.MapSourceKind(sourceRef.SourceKind);
         var sourceId = sourceRef.SourceId;
         var rangeStart = sourceRef.RangeStart;
         var rangeEnd = sourceRef.RangeEnd;

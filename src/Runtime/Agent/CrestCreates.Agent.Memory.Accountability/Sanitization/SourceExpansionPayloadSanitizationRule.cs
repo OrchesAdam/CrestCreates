@@ -32,6 +32,12 @@ public sealed class SourceExpansionPayloadSanitizationRule : AgentMemoryPayloadS
     {
         ValidateIdentifier(payload.OperationId, "Payload.OperationId", errors);
         ValidateRequiredNonEmpty(payload.SourceKind, "Payload.SourceKind", errors);
+        if (!string.IsNullOrWhiteSpace(payload.SourceKind))
+            ValidateAllowList(
+                payload.SourceKind,
+                AgentMemoryAccountabilityPayloadKinds.SourceKindAllowList,
+                "Payload.SourceKind",
+                errors);
         ValidateIdentifier(payload.SourceId, "Payload.SourceId", errors);
 
         ValidateAllowList(
@@ -51,7 +57,10 @@ public sealed class SourceExpansionPayloadSanitizationRule : AgentMemoryPayloadS
 
         if (payload.MaximumCharacters < 0)
             errors.Add(("AUDIT_FIELD_INVALID", "Payload.MaximumCharacters"));
-        ValidateSanitizationSummary(payload.Sanitization, errors);
+        if (payload.Sanitization is null)
+            errors.Add(("AUDIT_FIELD_REQUIRED", "Payload.Sanitization"));
+        else
+            ValidateSanitizationSummary(payload.Sanitization, errors);
         ValidateCodeList(payload.DiagnosticCodes, "Payload.DiagnosticCodes", errors);
     }
 }
