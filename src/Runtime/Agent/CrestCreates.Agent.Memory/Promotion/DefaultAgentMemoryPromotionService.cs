@@ -8,6 +8,7 @@ namespace CrestCreates.Agent.Memory.Promotion;
 
 public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionService, IAgentMemoryCurationServiceCapabilities
 {
+    private const int MaxIdentifierLength = 256;
     private readonly IAgentMemoryStore _store;
     private readonly AgentMemoryCanonicalHashProjector _hashes;
     private readonly IAgentMemoryArtifactIdGenerator _ids;
@@ -258,13 +259,32 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
         {
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.TenantMismatch, $"{AgentMemoryDiagnosticCodes.InvalidOperationTenantMismatch}: InvocationContext tenant does not match the trusted tenant.");
         }
-        if (string.IsNullOrWhiteSpace(request.InvocationContext.ActorId))
+        if (!IsBoundedIdentifier(tenantId)
+            || !IsBoundedIdentifier(request.InvocationContext.TenantId)
+            || !IsBoundedIdentifier(request.InvocationContext.ActorId)
+            || !IsBoundedIdentifier(request.InvocationContext.ActorKind)
+            || !IsBoundedIdentifier(request.InvocationContext.CorrelationId, required: false)
+            || !IsBoundedIdentifier(request.InvocationContext.CausationId, required: false)
+            || !IsBoundedIdentifier(request.InvocationContext.ParentAuditId, required: false)
+            || !IsBoundedIdentifier(request.InvocationContext.InvocationId, required: false)
+            || !IsBoundedIdentifier(request.InvocationContext.SessionId, required: false))
         {
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingActor, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingActor}: InvocationContext.ActorId is required.");
         }
         if (string.IsNullOrWhiteSpace(request.InvocationContext.ActorKind))
         {
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingActor, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingActor}: InvocationContext.ActorKind is required.");
+        }
+        if (request.InvocationContext.InvocationSource is "agent" or "mcp")
+        {
+            var actorKindIsTrusted = request.InvocationContext.InvocationSource == "agent"
+                ? string.Equals(request.InvocationContext.ActorKind, "agent", StringComparison.Ordinal)
+                : string.Equals(request.InvocationContext.ActorKind, "mcp-client", StringComparison.Ordinal)
+                    || string.Equals(request.InvocationContext.ActorKind, "user", StringComparison.Ordinal);
+            if (!actorKindIsTrusted || string.IsNullOrWhiteSpace(request.InvocationContext.CorrelationId))
+            {
+                throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingActor, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingActor}: first-party invocation context is incomplete.");
+            }
         }
 
         // 3. Reason
@@ -276,6 +296,7 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
         // 4. Identity
         if (request.Identity is null
             || string.IsNullOrWhiteSpace(request.Identity.OperationId)
+            || request.Identity.OperationId.Length > AgentMemoryOperationIdentity.MaxOperationIdLength
             || request.Identity.OccurredAt == default(DateTimeOffset))
         {
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingTimestamp, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingTimestamp}: Operation identity is required and must carry a non-empty OperationId and non-default OccurredAt.");
@@ -287,4 +308,8 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingSourceOrExplanation, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingSourceOrExplanation}: SourceRefs or Explanation is required.");
         }
     }
+
+    private static bool IsBoundedIdentifier(string? value, bool required = true)
+        => (required ? !string.IsNullOrWhiteSpace(value) : string.IsNullOrWhiteSpace(value) || value.Length <= MaxIdentifierLength)
+            && (string.IsNullOrWhiteSpace(value) || value.Length <= MaxIdentifierLength);
 }

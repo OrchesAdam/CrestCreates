@@ -94,6 +94,30 @@ internal static class AccountabilityTestFixture
         CanonicalShapeVersion = "accountability-record-hash-v1"
     };
 
+    public static CanonicalHash CreateEffectivePackHash(string value = "aabb") => new()
+    {
+        Value = value,
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = AgentMemoryAccountabilityPayloadKinds.EffectivePackArtifactKind,
+        Scope = AgentMemoryAccountabilityPayloadKinds.EffectivePackScope,
+        Purpose = AgentMemoryAccountabilityPayloadKinds.EffectivePackPurpose,
+        ContractVersion = AgentMemoryAccountabilityPayloadKinds.EffectivePackContractVersion,
+        CanonicalShapeVersion = AgentMemoryAccountabilityPayloadKinds.EffectivePackCanonicalShapeVersion
+    };
+
+    public static CanonicalHash CreateEffectiveContentHash(string value = "aabb") => new()
+    {
+        Value = value,
+        Algorithm = "SHA-256",
+        AlgorithmVersion = "sha256-canonical-json-v1",
+        ArtifactKind = AgentMemoryAccountabilityPayloadKinds.EffectiveContentArtifactKind,
+        Scope = AgentMemoryAccountabilityPayloadKinds.EffectiveContentScope,
+        Purpose = AgentMemoryAccountabilityPayloadKinds.EffectiveContentPurpose,
+        ContractVersion = AgentMemoryAccountabilityPayloadKinds.EffectiveContentContractVersion,
+        CanonicalShapeVersion = AgentMemoryAccountabilityPayloadKinds.EffectiveContentCanonicalShapeVersion
+    };
+
     public static AgentMemoryInvocationContext CreateContext(
         string tenantId = FixedTenantId,
         string actorId = FixedActorId,
@@ -143,7 +167,7 @@ internal static class AccountabilityTestFixture
             {
                 OperationId = operationId,
                 Result = result,
-                EffectivePackHash = effectivePackHash ?? CreateValidHash(),
+                EffectivePackHash = effectivePackHash ?? CreateEffectivePackHash(),
                 ReturnedCount = returnedCount,
                 WasTruncated = false,
                 DiagnosticCodes = Array.Empty<string>(),
@@ -233,7 +257,7 @@ internal static class AccountabilityTestFixture
             RangeStart = null,
             RangeEnd = null,
             Status = status,
-            EffectiveVisibleContentHash = status == "expanded" ? effectiveVisibleContentHash ?? CreateValidHash() : null,
+            EffectiveVisibleContentHash = status == "expanded" ? effectiveVisibleContentHash ?? CreateEffectiveContentHash() : null,
             MaximumCharacters = maximumCharacters,
             WasTruncated = wasTruncated,
             Sanitization = new AgentMemoryAccountabilitySanitizationSummary

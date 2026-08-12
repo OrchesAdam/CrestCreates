@@ -155,6 +155,13 @@ internal static class MemoryToolFixtureRunner
             };
             if (requiredMemoryPayloadKinds.Any(kind =>
                     !accountabilityRecords.Any(record => record.Payload?.Kind == kind))) return 8;
+            var memoryRecords = accountabilityRecords
+                .Where(record => record.Payload?.Kind is not null
+                    && requiredMemoryPayloadKinds.Contains(record.Payload.Kind))
+                .ToArray();
+            if (memoryRecords.Any(record => string.IsNullOrWhiteSpace(record.CorrelationId)
+                    || string.IsNullOrWhiteSpace(record.CausationId)
+                    || string.IsNullOrWhiteSpace(record.ParentAuditId))) return 9;
             Console.WriteLine("agent_memory_accountability: OK");
             Console.WriteLine("AGENT_MEMORY_TOOL_NATIVEAOT_PIPELINE_OK");
             return 0;

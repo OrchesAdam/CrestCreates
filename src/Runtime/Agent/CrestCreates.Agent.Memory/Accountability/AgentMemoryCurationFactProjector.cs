@@ -14,6 +14,7 @@ namespace CrestCreates.Agent.Memory.Accountability;
 public class AgentMemoryCurationFactProjector
 {
     private const int MaxDiagnosticCodes = 32;
+    private const int MaxRedactionCodes = 16;
 
     public virtual AgentMemoryCurationAccountabilityPayload PromoteCommitted(
         AgentMemoryOperationRequest operation,
@@ -190,15 +191,15 @@ public class AgentMemoryCurationFactProjector
         => new()
         {
             State = item.RedactionKinds.Count > 0 ? "redacted" : "none",
-            RedactionCodes = NormalizeCodes(item.RedactionKinds),
-            DiagnosticCodes = NormalizeCodes(item.SanitizationDiagnostics.Select(d => d.Code.RequireValue()))
+            RedactionCodes = NormalizeCodes(item.RedactionKinds, MaxRedactionCodes),
+            DiagnosticCodes = NormalizeCodes(item.SanitizationDiagnostics.Select(d => d.Code.RequireValue()), MaxDiagnosticCodes)
         };
 
-    private static string[] NormalizeCodes(IEnumerable<string> codes)
+    private static string[] NormalizeCodes(IEnumerable<string> codes, int maxCount)
         => codes
             .Where(code => !string.IsNullOrWhiteSpace(code))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(code => code, StringComparer.Ordinal)
-            .Take(MaxDiagnosticCodes)
+            .Take(maxCount)
             .ToArray();
 }

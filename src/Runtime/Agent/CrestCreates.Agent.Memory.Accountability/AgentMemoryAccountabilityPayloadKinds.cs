@@ -22,6 +22,17 @@ public static class AgentMemoryAccountabilityPayloadKinds
     public const int MaxCodeLength = 128;
     public const int MaxPayloadVersion = 1;
 
+    public const string EffectiveContentArtifactKind = "AgentMemoryAccountabilityEffectiveVisibleContent";
+    public const string EffectiveContentPurpose = "AuditEvidence";
+    public const string EffectiveContentScope = "TenantVisible";
+    public const string EffectiveContentContractVersion = "agent-memory-accountability-effective-content-v1";
+    public const string EffectiveContentCanonicalShapeVersion = "agent-memory-accountability-effective-content-v1";
+    public const string EffectivePackArtifactKind = "AgentMemoryAccountabilityEffectivePack";
+    public const string EffectivePackPurpose = "AuditEvidence";
+    public const string EffectivePackScope = "TenantVisible";
+    public const string EffectivePackContractVersion = "agent-memory-accountability-effective-pack-v1";
+    public const string EffectivePackCanonicalShapeVersion = "agent-memory-accountability-effective-pack-v1";
+
     public static IReadOnlySet<string> RequestedKindAllowList { get; } =
         new HashSet<string>(StringComparer.Ordinal)
         {

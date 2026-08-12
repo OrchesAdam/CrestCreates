@@ -58,12 +58,11 @@ public class AgentMemoryAccountabilityPayloadContractTests
     {
         var context = AgentMemoryAccountabilityJsonSerializerContext.Default;
 
-        AssertMetadataObjectRoot(context.AgentMemoryOperationIdentity, typeof(AgentMemoryOperationIdentity));
-        AssertMetadataObjectRoot(context.AgentMemoryAccountabilitySanitizationSummary, typeof(AgentMemoryAccountabilitySanitizationSummary));
         AssertMetadataObjectRoot(context.AgentMemoryRecallAccountabilityPayload, typeof(AgentMemoryRecallAccountabilityPayload));
         AssertMetadataObjectRoot(context.AgentMemoryCurationAccountabilityPayload, typeof(AgentMemoryCurationAccountabilityPayload));
         AssertMetadataObjectRoot(context.AgentMemorySourceExpansionAccountabilityPayload, typeof(AgentMemorySourceExpansionAccountabilityPayload));
-        AssertMetadataObjectRoot(context.CanonicalHash, typeof(CanonicalHash));
+        context.GetTypeInfo(typeof(AgentMemoryAccountabilitySanitizationSummary)).Should().NotBeNull();
+        context.GetTypeInfo(typeof(CanonicalHash)).Should().NotBeNull();
 
         // The exact contract exposes no unrelated roots.
         // Note: typeof(object) has a built-in System.Text.Json type info, so the

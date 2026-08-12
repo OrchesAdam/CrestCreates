@@ -35,7 +35,7 @@ public sealed class RecallPayloadSanitizationRule : AgentMemoryPayloadSanitizati
 
         if (payload.Result == "completed")
         {
-            ValidateRequiredHashMetadata(payload.EffectivePackHash, "Payload.EffectivePackHash", errors);
+            ValidateEffectivePackHash(payload.EffectivePackHash, "Payload.EffectivePackHash", errors);
             if (payload.StableFailureCode is not null)
                 errors.Add(("AUDIT_FIELD_INVALID", "Payload.StableFailureCode"));
         }

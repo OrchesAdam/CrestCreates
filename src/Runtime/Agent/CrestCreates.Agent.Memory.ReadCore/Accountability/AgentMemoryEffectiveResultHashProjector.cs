@@ -17,14 +17,14 @@ namespace CrestCreates.Agent.Memory.ReadCore.Accountability;
 public sealed class AgentMemoryEffectiveResultHashProjector
 {
     public const string ContentArtifactKind = "AgentMemoryAccountabilityEffectiveVisibleContent";
-    public const string ContentPurpose = CanonicalHashPurposeNames.AuditEvidence;
-    public const string ContentScope = CanonicalHashScopeNames.TenantVisible;
+    public const string ContentPurpose = "AuditEvidence";
+    public const string ContentScope = "TenantVisible";
     public const string ContentContractVersion = "agent-memory-accountability-effective-content-v1";
     public const string ContentCanonicalShapeVersion = "agent-memory-accountability-effective-content-v1";
 
     public const string PackArtifactKind = "AgentMemoryAccountabilityEffectivePack";
-    public const string PackPurpose = CanonicalHashPurposeNames.AuditEvidence;
-    public const string PackScope = CanonicalHashScopeNames.TenantVisible;
+    public const string PackPurpose = "AuditEvidence";
+    public const string PackScope = "TenantVisible";
     public const string PackContractVersion = "agent-memory-accountability-effective-pack-v1";
     public const string PackCanonicalShapeVersion = "agent-memory-accountability-effective-pack-v1";
 

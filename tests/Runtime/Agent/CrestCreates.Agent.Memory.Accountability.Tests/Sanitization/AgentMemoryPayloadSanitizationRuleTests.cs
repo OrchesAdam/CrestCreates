@@ -55,6 +55,29 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
     }
 
     [Fact]
+    public void Recall_Should_RejectDuplicateJsonProperties()
+    {
+        var rule = new RecallPayloadSanitizationRule();
+        var payload = AccountabilityTestFixture.CreateRecallPayload(result: "completed");
+        var serialized = JsonSerializer.Serialize(payload, Infos.Recall);
+        var duplicateJson = serialized[..^1] + ",\"operationId\":\"second-operation\"}";
+        using var document = JsonDocument.Parse(duplicateJson);
+        var input = new AuditPayload
+        {
+            Kind = AgentMemoryAccountabilityPayloadKinds.Recall,
+            Version = AgentMemoryAccountabilityPayloadKinds.Version,
+            Data = document.RootElement.Clone()
+        };
+
+        var ex = Record.Exception(() => rule.Sanitize(input));
+
+        ex.Should().BeOfType<AuditSanitizationException>()
+            .Which.Code.Should().Be("AUDIT_PAYLOAD_INVALID");
+        ex.Should().BeOfType<AuditSanitizationException>()
+            .Which.Path.Should().Be("Payload.Data");
+    }
+
+    [Fact]
     public void RecallRejected_Should_PassWithStableFailureCode()
     {
         var rule = new RecallPayloadSanitizationRule();
@@ -103,7 +126,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "rejected",
             StableFailureCode = "resource-unavailable",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             MaximumCount = 10,
@@ -188,7 +211,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = -1,
             WasTruncated = false,
             MaximumCount = 10,
@@ -213,7 +236,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             MaximumCount = -1,
@@ -238,7 +261,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             MaximumCount = 10,
@@ -263,7 +286,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             MaximumCount = 10,
@@ -288,7 +311,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = "   ",
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             MaximumCount = 10,
@@ -317,7 +340,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = new string('x', AgentMemoryAccountabilityPayloadKinds.MaxIdentifierLength + 1),
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             MaximumCount = 10,
@@ -345,7 +368,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             DiagnosticCodes = codes,
@@ -371,7 +394,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             DiagnosticCodes = new[] { "b-code", "a-code" },
@@ -397,7 +420,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             DiagnosticCodes = new[] { "a-code", "a-code" },
@@ -423,7 +446,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             DiagnosticCodes = new[] { new string('c', AgentMemoryAccountabilityPayloadKinds.MaxCodeLength + 1) },
@@ -452,7 +475,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
         {
             OperationId = AccountabilityTestFixture.FixedOperationId,
             Result = "completed",
-            EffectivePackHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectivePackHash = AccountabilityTestFixture.CreateEffectivePackHash(),
             ReturnedCount = 0,
             WasTruncated = false,
             RequestedKinds = kinds,
@@ -823,7 +846,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             SourceKind = "ConversationTurn",
             SourceId = "source-1",
             Status = "redacted",
-            EffectiveVisibleContentHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectiveVisibleContentHash = AccountabilityTestFixture.CreateEffectiveContentHash(),
             MaximumCharacters = 4000,
             WasTruncated = false,
             Sanitization = new AgentMemoryAccountabilitySanitizationSummary
@@ -940,7 +963,7 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             SourceKind = "ConversationTurn",
             SourceId = "source-1",
             Status = "expanded",
-            EffectiveVisibleContentHash = AccountabilityTestFixture.CreateValidHash(),
+            EffectiveVisibleContentHash = AccountabilityTestFixture.CreateEffectiveContentHash(),
             MaximumCharacters = -1,
             WasTruncated = false,
             Sanitization = new AgentMemoryAccountabilitySanitizationSummary

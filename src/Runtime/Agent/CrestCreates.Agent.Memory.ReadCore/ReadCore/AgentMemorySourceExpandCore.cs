@@ -21,6 +21,7 @@ namespace CrestCreates.Agent.Memory.ReadCore;
 internal sealed class AgentMemorySourceExpandCore : IAgentMemorySourceExpandCore
 {
     private const int MaxDiagnosticCodes = 32;
+    private const int MaxRedactionCodes = 16;
 
     private readonly IAgentMemoryAccessGrantResolver _grantResolver;
     private readonly IAgentContextSourceExpander _expander;
@@ -116,7 +117,7 @@ internal sealed class AgentMemorySourceExpandCore : IAgentMemorySourceExpandCore
             Code = d.Code.RequireValue(),
             Severity = MapSeverity(d.Severity)
         }).ToList();
-        var expanderDiagnosticCodes = NormalizeCodes(expansion.Diagnostics.Select(d => d.Code.RequireValue()));
+        var expanderDiagnosticCodes = NormalizeCodes(expansion.Diagnostics.Select(d => d.Code.RequireValue()), MaxDiagnosticCodes);
 
         if (expansion.Status != AgentMemorySourceExpansionStatus.Expanded)
         {
@@ -175,8 +176,8 @@ internal sealed class AgentMemorySourceExpandCore : IAgentMemorySourceExpandCore
             var rejectedSanitization = new AgentMemoryAccountabilitySanitizationSummary
             {
                 State = "rejected",
-                RedactionCodes = NormalizeCodes(sanitized.RedactionKinds),
-                DiagnosticCodes = NormalizeCodes(sanitized.Diagnostics.Select(d => d.Code.RequireValue()))
+                RedactionCodes = NormalizeCodes(sanitized.RedactionKinds, MaxRedactionCodes),
+                DiagnosticCodes = NormalizeCodes(sanitized.Diagnostics.Select(d => d.Code.RequireValue()), MaxDiagnosticCodes)
             };
 
             var rejectedResult = new ExpandAgentMemorySourceResult
@@ -207,8 +208,8 @@ internal sealed class AgentMemorySourceExpandCore : IAgentMemorySourceExpandCore
         var sanitization = new AgentMemoryAccountabilitySanitizationSummary
         {
             State = sanitizationState,
-            RedactionCodes = NormalizeCodes(sanitized.RedactionKinds),
-            DiagnosticCodes = NormalizeCodes(sanitized.Diagnostics.Select(d => d.Code.RequireValue()))
+            RedactionCodes = NormalizeCodes(sanitized.RedactionKinds, MaxRedactionCodes),
+            DiagnosticCodes = NormalizeCodes(sanitized.Diagnostics.Select(d => d.Code.RequireValue()), MaxDiagnosticCodes)
         };
 
         // Truncate the sanitized content to the operation budget, then project the
@@ -268,12 +269,12 @@ internal sealed class AgentMemorySourceExpandCore : IAgentMemorySourceExpandCore
         };
     }
 
-    private static string[] NormalizeCodes(IEnumerable<string> codes)
+    private static string[] NormalizeCodes(IEnumerable<string> codes, int maxCount)
         => codes
             .Where(code => !string.IsNullOrWhiteSpace(code))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(code => code, StringComparer.Ordinal)
-            .Take(MaxDiagnosticCodes)
+            .Take(maxCount)
             .ToArray();
 
     private static AgentMemoryToolCanonicalHashDto MapCanonicalHashDto(CanonicalHash hash)

@@ -9,10 +9,7 @@ namespace CrestCreates.Agent.Memory.Abstractions.Json;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     GenerationMode = JsonSourceGenerationMode.Metadata)]
-[JsonSerializable(typeof(AgentMemoryOperationIdentity))]
-[JsonSerializable(typeof(AgentMemoryAccountabilitySanitizationSummary))]
 [JsonSerializable(typeof(AgentMemoryRecallAccountabilityPayload))]
 [JsonSerializable(typeof(AgentMemoryCurationAccountabilityPayload))]
 [JsonSerializable(typeof(AgentMemorySourceExpansionAccountabilityPayload))]
-[JsonSerializable(typeof(CanonicalHash))]
 public sealed partial class AgentMemoryAccountabilityJsonSerializerContext : JsonSerializerContext;

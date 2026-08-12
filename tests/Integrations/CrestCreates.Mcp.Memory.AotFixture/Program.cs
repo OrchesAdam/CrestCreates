@@ -350,6 +350,17 @@ internal static class McpMemoryAotFixtureRunner
                 Console.Error.WriteLine("FAIL: Accountability bridge did not persist a Memory fact");
                 return 9;
             }
+            var memoryRecords = accountabilityRecords
+                .Where(record => record.Payload?.Kind is not null
+                    && requiredMemoryPayloadKinds.Contains(record.Payload.Kind))
+                .ToArray();
+            if (memoryRecords.Any(record => string.IsNullOrWhiteSpace(record.CorrelationId)
+                    || string.IsNullOrWhiteSpace(record.CausationId)
+                    || string.IsNullOrWhiteSpace(record.ParentAuditId)))
+            {
+                Console.Error.WriteLine("FAIL: Memory facts did not preserve MCP causality");
+                return 10;
+            }
             Console.WriteLine("memory_accountability: OK");
 
             Console.WriteLine("MCP_MEMORY_NATIVEAOT_PIPELINE_OK");

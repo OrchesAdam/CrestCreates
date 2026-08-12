@@ -218,12 +218,20 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         using var budget = new CancellationTokenSource();
         budget.CancelAfter(_options.WriteTimeout);
         AuditRecordResult result;
+        Task<AuditRecordResult>? recordingTask = null;
         try
         {
-            result = await _recorder.RecordAsync(envelope, budget.Token).ConfigureAwait(false);
+            recordingTask = _recorder.RecordAsync(envelope, budget.Token).AsTask();
+            // Recorder implementations are required to observe the token, but
+            // the Memory contract cannot delegate its hard deadline to an
+            // arbitrary provider. WaitAsync makes the producer's finite budget
+            // an actual upper bound even when a recorder ignores cancellation.
+            result = await recordingTask.WaitAsync(budget.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
+            if (recordingTask is not null)
+                _ = ObserveLateRecorderFailureAsync(recordingTask);
             LogSafe(AgentMemoryAccountabilityDiagnosticCodes.Timeout.Value, envelope.AuditId, envelope.Action?.Kind, envelope.Payload?.Kind);
             return;
         }
@@ -234,6 +242,20 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         }
 
         LogOutcome(result, envelope);
+    }
+
+    private static async Task ObserveLateRecorderFailureAsync(Task<AuditRecordResult> recordingTask)
+    {
+        try
+        {
+            await recordingTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The bounded producer attempt has already completed. Observe a
+            // late provider fault without allowing it to escape or become an
+            // unobserved task exception.
+        }
     }
 
     private void LogOutcome(AuditRecordResult result, AuditEnvelope envelope)

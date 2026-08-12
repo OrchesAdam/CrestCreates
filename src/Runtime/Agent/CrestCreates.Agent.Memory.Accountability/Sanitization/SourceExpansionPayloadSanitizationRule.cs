@@ -48,7 +48,7 @@ public sealed class SourceExpansionPayloadSanitizationRule : AgentMemoryPayloadS
 
         if (payload.Status == "expanded")
         {
-            ValidateRequiredHashMetadata(payload.EffectiveVisibleContentHash, "Payload.EffectiveVisibleContentHash", errors);
+            ValidateEffectiveVisibleContentHash(payload.EffectiveVisibleContentHash, "Payload.EffectiveVisibleContentHash", errors);
         }
         else
         {

@@ -49,6 +49,9 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
         if (payload.Version != AgentMemoryAccountabilityPayloadKinds.Version)
             throw new AuditSanitizationException("AUDIT_PAYLOAD_VERSION_UNSUPPORTED", "Payload.Version");
 
+        if (ContainsDuplicateObjectProperty(payload.Data))
+            throw new AuditSanitizationException("AUDIT_PAYLOAD_INVALID", "Payload.Data");
+
         T? typed;
         try
         {
@@ -78,6 +81,29 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
     }
 
     protected abstract void ValidateTyped(T payload, List<(string Code, string Path)> errors);
+
+    private static bool ContainsDuplicateObjectProperty(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name) || ContainsDuplicateObjectProperty(property.Value))
+                    return true;
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (ContainsDuplicateObjectProperty(item))
+                    return true;
+            }
+        }
+
+        return false;
+    }
 
     protected void ValidateIdentifier(string? value, string path, List<(string Code, string Path)> errors)
     {
@@ -240,5 +266,57 @@ public abstract class AgentMemoryPayloadSanitizationRuleBase<T> : IAuditPayloadS
             return;
         }
         ValidateHashMetadata(hash, path, errors);
+    }
+
+    protected void ValidateEffectivePackHash(CanonicalHash? hash, string path, List<(string Code, string Path)> errors)
+        => ValidateExactHashMetadata(
+            hash,
+            path,
+            AgentMemoryAccountabilityPayloadKinds.EffectivePackArtifactKind,
+            AgentMemoryAccountabilityPayloadKinds.EffectivePackPurpose,
+            AgentMemoryAccountabilityPayloadKinds.EffectivePackScope,
+            AgentMemoryAccountabilityPayloadKinds.EffectivePackContractVersion,
+            AgentMemoryAccountabilityPayloadKinds.EffectivePackCanonicalShapeVersion,
+            errors);
+
+    protected void ValidateEffectiveVisibleContentHash(CanonicalHash? hash, string path, List<(string Code, string Path)> errors)
+        => ValidateExactHashMetadata(
+            hash,
+            path,
+            AgentMemoryAccountabilityPayloadKinds.EffectiveContentArtifactKind,
+            AgentMemoryAccountabilityPayloadKinds.EffectiveContentPurpose,
+            AgentMemoryAccountabilityPayloadKinds.EffectiveContentScope,
+            AgentMemoryAccountabilityPayloadKinds.EffectiveContentContractVersion,
+            AgentMemoryAccountabilityPayloadKinds.EffectiveContentCanonicalShapeVersion,
+            errors);
+
+    private void ValidateExactHashMetadata(
+        CanonicalHash? hash,
+        string path,
+        string artifactKind,
+        string purpose,
+        string scope,
+        string contractVersion,
+        string canonicalShapeVersion,
+        List<(string Code, string Path)> errors)
+    {
+        if (hash is null)
+        {
+            errors.Add(("AUDIT_HASH_METADATA_REQUIRED", path));
+            return;
+        }
+
+        ValidateHashMetadata(hash, path, errors);
+        if (errors.Any(error => error.Path == path))
+            return;
+
+        if (hash.ArtifactKind != artifactKind
+            || hash.Purpose != purpose
+            || hash.Scope != scope
+            || hash.Algorithm != "SHA-256"
+            || hash.AlgorithmVersion != "sha256-canonical-json-v1"
+            || hash.ContractVersion != contractVersion
+            || hash.CanonicalShapeVersion != canonicalShapeVersion)
+            errors.Add(("AUDIT_HASH_METADATA_INVALID", path));
     }
 }

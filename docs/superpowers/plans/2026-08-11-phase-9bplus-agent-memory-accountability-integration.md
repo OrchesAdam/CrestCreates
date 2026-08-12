@@ -18,7 +18,7 @@ best-effort recording, and Agent Tool/MCP causal containment.
 
 **Spec status:** APPROVED
 
-**Plan status:** IMPLEMENTED — CI confirmed
+**Plan status:** IMPLEMENTED — local closure complete; final PR CI pending
 
 ```text
 Memory fact identity:       fresh OperationId + OccurredAt per admitted execution
@@ -680,20 +680,29 @@ JSON unit tests alone.
 
 ## 12. Completion Ledger
 
-Before closing #56, record exact command, exit code, and relevant sentinel for:
+The implementation-side evidence below is recorded before the final PR push.
+The PostgreSQL gate is intentionally left to the linked GitHub Actions run,
+because the local environment has no Docker or PostgreSQL service. The final
+CI run must repeat every provider/AOT gate on the exact pushed commit.
+
+| Evidence | Command | Result / sentinel |
+|---|---|---|
+| Agent Memory Abstractions/Runtime | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj --no-restore` | exit 0; 101 passed |
+| Agent Memory ReadCore | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests/CrestCreates.Agent.Memory.ReadCore.Tests.csproj --no-restore` | exit 0; 129 passed |
+| Accountability bridge | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Accountability.Tests/CrestCreates.Agent.Memory.Accountability.Tests.csproj --no-restore` | exit 0; 105 passed |
+| Agent Memory Tool unit | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.Tests/CrestCreates.Agent.Memory.Tools.Tests.csproj --no-restore` | exit 0; 23 passed |
+| MCP Memory unit | `rtk dotnet test tests/Integrations/CrestCreates.Mcp.Memory.Tests/CrestCreates.Mcp.Memory.Tests.csproj --no-restore` | exit 0; 35 passed |
+| Capability causal regressions | covered by Tool/MCP and CI Capability suites | pending final CI repetition |
+| PostgreSQL Audit sink Memory composition | `rtk dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --filter "FullyQualifiedName~Audit|FullyQualifiedName~AgentMemory"` | pending final CI; no local PostgreSQL service |
+| Dependency boundaries | `rtk dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj --no-restore` | exit 0; 93 passed |
+| Agent Memory Tool NativeAOT publish-link-run | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.AotFixture.Tests/CrestCreates.Agent.Memory.Tools.AotFixture.Tests.csproj --no-restore` | exit 0; native sentinel passed |
+| MCP Memory NativeAOT publish-link-run | `rtk dotnet test tests/Integrations/CrestCreates.Mcp.Memory.AotFixture.Tests/CrestCreates.Mcp.Memory.AotFixture.Tests.csproj --no-restore` | exit 0; native sentinel passed |
+| Canonical solution build | `rtk dotnet build CrestCreates.slnx --no-restore` | exit 0; 242 projects, 0 errors |
 
 ```text
-Agent Memory Abstractions/Runtime tests
-Agent Memory ReadCore tests
-Agent Memory Accountability bridge tests
-Agent Memory Tool unit + E2E tests
-MCP Memory unit tests
-Capability causal-context regressions
-PostgreSQL Audit sink Memory composition
-Dependency boundaries
-Agent Memory Tool NativeAOT publish-link-run
-MCP Memory NativeAOT publish-link-run
-Canonical solution build
+Final closure rule: do not mark this ledger complete, or update memory.md to
+NativeAOT-verified, until the final pushed commit has green PostgreSQL,
+Capability, E2E, and both original-binary AOT jobs in GitHub Actions.
 ```
 
 Completion is blocked if any evidence relies on a hidden MemoryId/set hash,

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Recording;
@@ -5,6 +6,7 @@ using CrestCreates.Accountability.Abstractions.Semantics;
 using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Accountability;
+using CrestCreates.Agent.Memory.Accountability.Options;
 using FluentAssertions;
 using Moq;
 using Xunit;
@@ -302,6 +304,30 @@ public sealed class AgentMemoryAccountabilityProducerTests
             AccountabilityTestFixture.CreateRecallPayload());
 
         harness.HasMessage("AGENT_MEMORY_ACCOUNTABILITY_TIMEOUT").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RecorderIgnoringCancellation_Should_RespectHardWriteDeadline()
+    {
+        var completion = new TaskCompletionSource<AuditRecordResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recorder = new Mock<IAuditRecorder>();
+        recorder
+            .Setup(r => r.RecordAsync(It.IsAny<AuditEnvelope>(), It.IsAny<CancellationToken>()))
+            .Returns(new ValueTask<AuditRecordResult>(completion.Task));
+        using var harness = new AccountabilityTestFixture.ProducerHarness(
+            options: new AgentMemoryAccountabilityOptions { WriteTimeout = TimeSpan.FromMilliseconds(25) },
+            recorder: recorder.Object);
+
+        var stopwatch = Stopwatch.StartNew();
+        await harness.Producer.PublishRecallAsync(
+            AccountabilityTestFixture.CreateIdentity(),
+            AccountabilityTestFixture.CreateContext(),
+            AccountabilityTestFixture.CreateRecallPayload());
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+        harness.HasMessage("AGENT_MEMORY_ACCOUNTABILITY_TIMEOUT").Should().BeTrue();
+        completion.TrySetCanceled();
     }
 
     [Fact]

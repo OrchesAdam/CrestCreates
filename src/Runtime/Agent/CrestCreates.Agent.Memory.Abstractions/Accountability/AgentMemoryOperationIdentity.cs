@@ -8,6 +8,8 @@ namespace CrestCreates.Agent.Memory.Abstractions.Accountability;
 /// </summary>
 public sealed record AgentMemoryOperationIdentity
 {
+    public const int MaxOperationIdLength = 256;
+
     public required string OperationId { get; init; }
 
     public required DateTimeOffset OccurredAt { get; init; }
