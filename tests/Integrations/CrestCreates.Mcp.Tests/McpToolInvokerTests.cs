@@ -32,7 +32,7 @@ public sealed class McpToolInvokerTests
         dispatcher.Descriptor.Should().BeSameAs(entry.Capability);
         dispatcher.Source.Should().Be(InvocationSource.Mcp);
         dispatcher.Context!.CausationId.Should().Be("request-1");
-        dispatcher.Context.AccountabilityActor!.Kind.Should().Be("unknown");
+        dispatcher.Context.AccountabilityActor!.Kind.Should().Be("user");
         dispatcher.Context.AccountabilityActor.Id.Should().Be("unknown",
             "MCP request identity is not a trusted client principal");
         dispatcher.Context.AccountabilityRuntimeReferences.Should().Contain(reference =>
