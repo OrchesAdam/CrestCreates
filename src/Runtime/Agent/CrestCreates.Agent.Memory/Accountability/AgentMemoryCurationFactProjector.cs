@@ -129,6 +129,37 @@ public class AgentMemoryCurationFactProjector
             memoryId: expectation.MemoryId,
             expectedMemoryStateHash: expectation.ExpectedStateHash);
 
+    public virtual AgentMemoryCurationAccountabilityPayload PromoteValidationFailure(
+        AgentMemoryOperationRequest operation,
+        string candidateId,
+        string newMemoryId,
+        AgentMemoryOperationFailureCode code)
+        => TypedFailure(operation, "promote", code, candidateId: candidateId, newMemoryId: newMemoryId);
+
+    public virtual AgentMemoryCurationAccountabilityPayload RejectValidationFailure(
+        AgentMemoryOperationRequest operation,
+        string candidateId,
+        AgentMemoryOperationFailureCode code)
+        => TypedFailure(operation, "reject", code, candidateId: candidateId);
+
+    public virtual AgentMemoryCurationAccountabilityPayload SupersedeValidationFailure(
+        AgentMemoryOperationRequest operation,
+        string memoryId,
+        string replacementCandidateId,
+        string newMemoryId,
+        AgentMemoryOperationFailureCode code)
+        => TypedFailure(
+            operation, "supersede", code,
+            memoryId: memoryId,
+            replacementCandidateId: replacementCandidateId,
+            newMemoryId: newMemoryId);
+
+    public virtual AgentMemoryCurationAccountabilityPayload ArchiveValidationFailure(
+        AgentMemoryOperationRequest operation,
+        string memoryId,
+        AgentMemoryOperationFailureCode code)
+        => TypedFailure(operation, "archive", code, memoryId: memoryId);
+
     private static AgentMemoryCurationAccountabilityPayload TypedFailure(
         AgentMemoryOperationRequest operation,
         string operationName,

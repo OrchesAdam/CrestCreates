@@ -119,6 +119,8 @@ public sealed class AgentMemoryEffectiveResultHashProjector
         {
             // CanonicalHash inputs include their governed metadata plus value.
             writer.WriteStartObject();
+            writer.WriteString("Algorithm", hash.Algorithm);
+            writer.WriteString("AlgorithmVersion", hash.AlgorithmVersion);
             writer.WriteString("ArtifactKind", hash.ArtifactKind);
             writer.WriteString("Purpose", hash.Purpose);
             writer.WriteString("Scope", hash.Scope);

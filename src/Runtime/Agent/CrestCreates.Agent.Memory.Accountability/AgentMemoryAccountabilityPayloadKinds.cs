@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace CrestCreates.Agent.Memory.Accountability;
 
 /// <summary>
@@ -33,28 +35,28 @@ public static class AgentMemoryAccountabilityPayloadKinds
     public const string EffectivePackContractVersion = "agent-memory-accountability-effective-pack-v1";
     public const string EffectivePackCanonicalShapeVersion = "agent-memory-accountability-effective-pack-v1";
 
-    public static IReadOnlySet<string> RequestedKindAllowList { get; } =
-        new HashSet<string>(StringComparer.Ordinal)
+    public static FrozenSet<string> RequestedKindAllowList { get; } =
+        new[]
         {
             "Preference", "ProjectFact", "Decision", "Constraint", "WorkflowHint", "Risk"
-        };
+        }.ToFrozenSet(StringComparer.Ordinal);
 
-    public static IReadOnlySet<string> MinimumConfidenceAllowList { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "0.0", "0.3", "0.5", "0.8" };
+    public static FrozenSet<string> MinimumConfidenceAllowList { get; } =
+        new[] { "0.0", "0.3", "0.5", "0.8" }.ToFrozenSet(StringComparer.Ordinal);
 
-    public static IReadOnlySet<string> SourceKindAllowList { get; } =
-        new HashSet<string>(StringComparer.Ordinal)
+    public static FrozenSet<string> SourceKindAllowList { get; } =
+        new[]
         {
             "ConversationTurn", "TaskRecord", "TaskEvent", "CompressedContextBlock",
             "MemoryCandidate", "MemoryItem"
-        };
+        }.ToFrozenSet(StringComparer.Ordinal);
 
     // These are the only stable codes emitted by the current Memory
     // sanitization/domain contracts.  Accountability must not become a
     // free-form diagnostic channel: provider/user text is rejected even when
     // it is placed in a field named "Code".
-    public static IReadOnlySet<string> DiagnosticCodeAllowList { get; } =
-        new HashSet<string>(StringComparer.Ordinal)
+    public static FrozenSet<string> DiagnosticCodeAllowList { get; } =
+        new[]
         {
             "AGENT_MEMORY_BLOCK_SANITIZED",
             "AGENT_MEMORY_CONTENT_REDACTED",
@@ -86,28 +88,28 @@ public static class AgentMemoryAccountabilityPayloadKinds
             "AGENT_MEMORY_LLM_CANDIDATE_CONFIDENCE_CAPPED",
             "AGENT_MEMORY_LLM_COMPRESSION_PARSE_ERROR",
             "AGENT_MEMORY_LLM_EXTRACTION_PARSE_ERROR"
-        };
+        }.ToFrozenSet(StringComparer.Ordinal);
 
-    public static IReadOnlySet<string> RedactionCodeAllowList { get; } =
-        new HashSet<string>(StringComparer.Ordinal)
+    public static FrozenSet<string> RedactionCodeAllowList { get; } =
+        new[]
         {
             "empty-content",
             "bearer-token",
             "credential",
             "connection-credential",
             "long-token"
-        };
+        }.ToFrozenSet(StringComparer.Ordinal);
 
-    public static IReadOnlySet<string> RecallFailureCodeAllowList { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "budget-invalid", "resource-unavailable" };
+    public static FrozenSet<string> RecallFailureCodeAllowList { get; } =
+        new[] { "budget-invalid", "resource-unavailable" }.ToFrozenSet(StringComparer.Ordinal);
 
-    public static IReadOnlySet<string> CurationRejectedCodeAllowList { get; } =
-        new HashSet<string>(StringComparer.Ordinal)
+    public static FrozenSet<string> CurationRejectedCodeAllowList { get; } =
+        new[]
         {
             "resource-unavailable", "invalid-lifecycle-state", "tenant-mismatch",
             "missing-actor", "missing-reason", "missing-timestamp", "missing-source-or-explanation"
-        };
+        }.ToFrozenSet(StringComparer.Ordinal);
 
-    public static IReadOnlySet<string> CurationConflictCodeAllowList { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "state-conflict", "identity-conflict" };
+    public static FrozenSet<string> CurationConflictCodeAllowList { get; } =
+        new[] { "state-conflict", "identity-conflict" }.ToFrozenSet(StringComparer.Ordinal);
 }

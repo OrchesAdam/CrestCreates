@@ -512,6 +512,62 @@ public sealed class AgentMemoryCurationAccountabilityTests
     }
 
     [Fact]
+    public async Task MissingReason_WithCompleteTrustedContext_Should_RecordRejectedFact()
+    {
+        var (producer, captures) = MakeCapturingProducer();
+        var store = MakeConditionalStoreMock();
+        var promotion = MakePromotionService(store, producer);
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId) with
+        {
+            Reason = " ",
+            InvocationContext = MemoryTestFixture.CreateOperationRequest(TenantId).InvocationContext with
+            {
+                ActorKind = "agent",
+                CorrelationId = "correlation-1",
+                InvocationSource = "agent"
+            }
+        };
+        var plan = MakePromotionPlan(MakeDummyCandidate("c-1"), MemoryTestFixture.CreateTestHashProjector(), operation, "m-1");
+
+        var act = async () => await promotion.PromoteAsync(TenantId, plan);
+
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(ex => ex.Code == AgentMemoryOperationFailureCode.MissingReason);
+        captures.Payload.Should().NotBeNull();
+        captures.Payload!.Result.Should().Be("rejected");
+        captures.Payload.StableFailureCode.Should().Be("missing-reason");
+        captures.Payload.CandidateId.Should().Be("c-1");
+    }
+
+    [Fact]
+    public async Task MissingSourceOrExplanation_WithCompleteTrustedContext_Should_RecordRejectedFact()
+    {
+        var (producer, captures) = MakeCapturingProducer();
+        var store = MakeConditionalStoreMock();
+        var promotion = MakePromotionService(store, producer);
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId) with
+        {
+            Explanation = null,
+            SourceRefs = Array.Empty<AgentContextSourceRef>(),
+            InvocationContext = MemoryTestFixture.CreateOperationRequest(TenantId).InvocationContext with
+            {
+                ActorKind = "agent",
+                CorrelationId = "correlation-1",
+                InvocationSource = "agent"
+            }
+        };
+        var plan = MakePromotionPlan(MakeDummyCandidate("c-1"), MemoryTestFixture.CreateTestHashProjector(), operation, "m-1");
+
+        var act = async () => await promotion.PromoteAsync(TenantId, plan);
+
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(ex => ex.Code == AgentMemoryOperationFailureCode.MissingSourceOrExplanation);
+        captures.Payload.Should().NotBeNull();
+        captures.Payload!.Result.Should().Be("rejected");
+        captures.Payload.StableFailureCode.Should().Be("missing-source-or-explanation");
+    }
+
+    [Fact]
     public async Task IndeterminateProviderCancellation_Should_NotClaimFailure()
     {
         var (producer, captures) = MakeCapturingProducer();

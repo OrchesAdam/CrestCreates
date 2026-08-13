@@ -37,7 +37,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
     public async ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, AgentMemoryPromotionPlan plan, CancellationToken cancellationToken = default)
     {
-        ValidateOperationRequest(tenantId, plan.Operation, nameof(PromoteAsync));
+        try
+        {
+            ValidateOperationRequest(tenantId, plan.Operation, nameof(PromoteAsync));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordableValidation(ex.Code))
+        {
+            await PublishValidationFailureAsync(plan.Operation, () => _factProjector.PromoteFailure(plan.Operation, plan, ex.Code));
+            throw;
+        }
         if (_store is not IAgentMemoryConditionalCurationStore conditional)
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "Store does not provide conditional curation transitions.");
         try
@@ -55,7 +63,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
     public async ValueTask RejectAsync(string tenantId, AgentMemoryCandidateExpectation candidate, AgentMemoryOperationRequest operation, CancellationToken cancellationToken = default)
     {
-        ValidateOperationRequest(tenantId, operation, nameof(RejectAsync));
+        try
+        {
+            ValidateOperationRequest(tenantId, operation, nameof(RejectAsync));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordableValidation(ex.Code))
+        {
+            await PublishValidationFailureAsync(operation, () => _factProjector.RejectFailure(operation, candidate, ex.Code));
+            throw;
+        }
         if (_store is not IAgentMemoryConditionalCurationStore conditional)
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "Store does not provide conditional curation transitions.");
         try
@@ -72,7 +88,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
     public async ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, AgentMemorySupersessionPlan plan, CancellationToken cancellationToken = default)
     {
-        ValidateOperationRequest(tenantId, plan.Operation, nameof(SupersedeAsync));
+        try
+        {
+            ValidateOperationRequest(tenantId, plan.Operation, nameof(SupersedeAsync));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordableValidation(ex.Code))
+        {
+            await PublishValidationFailureAsync(plan.Operation, () => _factProjector.SupersedeFailure(plan.Operation, plan, ex.Code));
+            throw;
+        }
         if (_store is not IAgentMemoryConditionalCurationStore conditional)
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "Store does not provide conditional curation transitions.");
         try
@@ -93,7 +117,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
     public async ValueTask<AgentMemoryItem> PromoteAsync(string tenantId, string candidateId, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
     {
-        ValidateOperationRequest(tenantId, request, nameof(PromoteAsync));
+        try
+        {
+            ValidateOperationRequest(tenantId, request, nameof(PromoteAsync));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordableValidation(ex.Code))
+        {
+            await PublishValidationFailureAsync(request, () => _factProjector.PromoteValidationFailure(request, candidateId, newMemoryId, ex.Code));
+            throw;
+        }
         var candidate = await _store.GetCandidateAsync(tenantId, candidateId, cancellationToken)
             ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
         var memory = CreatePromotedMemory(candidate, newMemoryId, request);
@@ -109,7 +141,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
     public async ValueTask RejectAsync(string tenantId, string candidateId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
     {
-        ValidateOperationRequest(tenantId, request, nameof(RejectAsync));
+        try
+        {
+            ValidateOperationRequest(tenantId, request, nameof(RejectAsync));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordableValidation(ex.Code))
+        {
+            await PublishValidationFailureAsync(request, () => _factProjector.RejectValidationFailure(request, candidateId, ex.Code));
+            throw;
+        }
 
         var candidate = await _store.GetCandidateAsync(tenantId, candidateId, cancellationToken)
             ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
@@ -125,7 +165,16 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
     public async ValueTask<AgentMemoryItem> SupersedeAsync(string tenantId, string memoryId, string replacementCandidateId, string newMemoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
     {
-        ValidateOperationRequest(tenantId, request, nameof(SupersedeAsync));
+        try
+        {
+            ValidateOperationRequest(tenantId, request, nameof(SupersedeAsync));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordableValidation(ex.Code))
+        {
+            await PublishValidationFailureAsync(request, () => _factProjector.SupersedeValidationFailure(
+                request, memoryId, replacementCandidateId, newMemoryId, ex.Code));
+            throw;
+        }
         var existing = await _store.GetMemoryAsync(tenantId, memoryId, cancellationToken)
             ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Target Memory is unavailable.");
         var replacement = await _store.GetCandidateAsync(tenantId, replacementCandidateId, cancellationToken)
@@ -144,7 +193,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
     public async ValueTask ArchiveAsync(string tenantId, string memoryId, AgentMemoryOperationRequest request, CancellationToken cancellationToken = default)
     {
-        ValidateOperationRequest(tenantId, request, nameof(ArchiveAsync));
+        try
+        {
+            ValidateOperationRequest(tenantId, request, nameof(ArchiveAsync));
+        }
+        catch (AgentMemoryOperationException ex) when (IsRecordableValidation(ex.Code))
+        {
+            await PublishValidationFailureAsync(request, () => _factProjector.ArchiveValidationFailure(request, memoryId, ex.Code));
+            throw;
+        }
 
         var memory = await _store.GetMemoryAsync(tenantId, memoryId, cancellationToken);
         if (memory is null)
@@ -207,6 +264,16 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
         }
     }
 
+    private async ValueTask PublishValidationFailureAsync(
+        AgentMemoryOperationRequest operation,
+        Func<AgentMemoryCurationAccountabilityPayload> projection)
+    {
+        if (!CanFormAccountabilityEnvelope(operation))
+            return;
+
+        await PublishFailureAsync(operation, projection);
+    }
+
     private async ValueTask PublishAsync(AgentMemoryOperationRequest operation, AgentMemoryCurationAccountabilityPayload payload)
     {
         try
@@ -221,6 +288,22 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
 
     private static bool IsRecordable(AgentMemoryOperationFailureCode code)
         => code != AgentMemoryOperationFailureCode.Unknown;
+
+    private static bool IsRecordableValidation(AgentMemoryOperationFailureCode code)
+        => code is AgentMemoryOperationFailureCode.MissingReason
+            or AgentMemoryOperationFailureCode.MissingSourceOrExplanation;
+
+    private static bool CanFormAccountabilityEnvelope(AgentMemoryOperationRequest operation)
+        => operation.Identity is { } identity
+            && !string.IsNullOrWhiteSpace(identity.OperationId)
+            && identity.OccurredAt != default
+            && operation.InvocationContext is { } context
+            && string.Equals(operation.TenantId, context.TenantId, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(context.TenantId)
+            && !string.IsNullOrWhiteSpace(context.ActorId)
+            && !string.IsNullOrWhiteSpace(context.ActorKind)
+            && !string.IsNullOrWhiteSpace(context.CorrelationId)
+            && !string.IsNullOrWhiteSpace(context.InvocationSource);
 
     private static AgentMemoryItem CreatePromotedMemory(AgentMemoryCandidate candidate, string memoryId, AgentMemoryOperationRequest operation)
         => new()

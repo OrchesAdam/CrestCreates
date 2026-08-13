@@ -18,9 +18,9 @@ best-effort recording, and Agent Tool/MCP causal containment.
 
 **Spec status:** APPROVED
 
-**Plan status:** IMPLEMENTED — implementation head `e34c472b` passed the full PR CI
-matrix in run `31599922227`; this document-only evidence refresh is included in
-the same PR.
+**Plan status:** IMPLEMENTED — implementation head `3f899229` passed the full PR CI
+matrix in run `31609006303`; this follow-up closes the remaining contract review
+gaps and refreshes the evidence ledger.
 
 ```text
 Memory fact identity:       fresh OperationId + OccurredAt per admitted execution
@@ -684,14 +684,14 @@ JSON unit tests alone.
 
 The implementation-side evidence below is supplemented by the linked GitHub
 Actions run because the local environment has no Docker or PostgreSQL service.
-Run `31599922227` passed every provider, Capability, E2E, and NativeAOT gate on
-implementation head `e34c472b`.
+Run `31609006303` passed every provider, Capability, E2E, and NativeAOT gate on
+implementation head `3f899229`.
 
 | Evidence | Command | Result / sentinel |
 |---|---|---|
-| Agent Memory Abstractions/Runtime | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj --no-restore` | exit 0; 101 passed |
-| Agent Memory ReadCore | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests/CrestCreates.Agent.Memory.ReadCore.Tests.csproj --no-restore` | exit 0; 129 passed |
-| Accountability bridge | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Accountability.Tests/CrestCreates.Agent.Memory.Accountability.Tests.csproj --no-restore` | exit 0; 109 passed |
+| Agent Memory Abstractions/Runtime | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj --no-restore` | exit 0; 103 passed |
+| Agent Memory ReadCore | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests/CrestCreates.Agent.Memory.ReadCore.Tests.csproj --no-restore` | exit 0; 130 passed |
+| Accountability bridge | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Accountability.Tests/CrestCreates.Agent.Memory.Accountability.Tests.csproj --no-restore` | exit 0; 114 passed |
 | Agent Memory Tool unit | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.Tests/CrestCreates.Agent.Memory.Tools.Tests.csproj --no-restore` | exit 0; 23 passed |
 | MCP Memory unit | `rtk dotnet test tests/Integrations/CrestCreates.Mcp.Memory.Tests/CrestCreates.Mcp.Memory.Tests.csproj --no-restore` | exit 0; 35 passed |
 | Capability causal regressions | covered by Tool/MCP and CI Capability suites | exit 0 in CI run `31599922227` |
@@ -702,10 +702,9 @@ implementation head `e34c472b`.
 | Canonical solution build | `rtk dotnet build CrestCreates.slnx --no-restore` | exit 0; 242 projects, 0 errors |
 
 ```text
-Final closure rule: this ledger is complete because the implementation head
-has green PostgreSQL, Capability, E2E, and both original-binary AOT jobs in
-GitHub Actions run `31599922227`. The subsequent commit only refreshes this
-evidence text and does not change production behavior.
+Final closure rule: this ledger is complete because implementation head
+`3f899229` has green PostgreSQL, Capability, E2E, and both original-binary AOT
+jobs in GitHub Actions run `31609006303`.
 ```
 
 Completion is blocked if any evidence relies on a hidden MemoryId/set hash,

@@ -63,7 +63,19 @@ public sealed class SourceExpansionPayloadSanitizationRule : AgentMemoryPayloadS
         if (payload.Sanitization is null)
             errors.Add(("AUDIT_FIELD_REQUIRED", "Payload.Sanitization"));
         else
+        {
             ValidateSanitizationSummary(payload.Sanitization, errors);
+            var stateMatchesStatus = payload.Status switch
+            {
+                "expanded" => payload.Sanitization.State is "none" or "redacted",
+                "redacted" => payload.Sanitization.State is "redacted" or "rejected",
+                "not-found" or "not-expandable" or "external-source-not-supported"
+                    => payload.Sanitization.State == "none",
+                _ => false
+            };
+            if (!stateMatchesStatus)
+                errors.Add(("AUDIT_FIELD_INVALID", "Payload.Sanitization.State"));
+        }
         ValidateCodeList(payload.DiagnosticCodes, "Payload.DiagnosticCodes", errors,
             AgentMemoryAccountabilityPayloadKinds.DiagnosticCodeAllowList);
     }

@@ -948,6 +948,30 @@ public sealed class AgentMemoryPayloadSanitizationRuleTests
             .Which.Path.Should().Be("Payload.EffectiveVisibleContentHash");
     }
 
+    [Theory]
+    [InlineData("expanded", "rejected")]
+    [InlineData("redacted", "none")]
+    [InlineData("not-found", "redacted")]
+    public void SourceExpansion_Should_RejectInconsistentSanitizationState(string status, string state)
+    {
+        var rule = new SourceExpansionPayloadSanitizationRule();
+        var payload = AccountabilityTestFixture.CreateSourceExpansionPayload(status: status) with
+        {
+            Sanitization = new AgentMemoryAccountabilitySanitizationSummary
+            {
+                State = state,
+                RedactionCodes = Array.Empty<string>(),
+                DiagnosticCodes = Array.Empty<string>()
+            }
+        };
+        var input = AccountabilityTestFixture.CreateAuditPayload(payload, Infos.SourceExpansion, AgentMemoryAccountabilityPayloadKinds.SourceExpansion);
+
+        var ex = Record.Exception(() => rule.Sanitize(input));
+
+        ex.Should().BeOfType<AuditSanitizationException>()
+            .Which.Path.Should().Be("Payload.Sanitization.State");
+    }
+
     [Fact]
     public void SourceExpansion_Should_RejectUnknownStatus()
     {

@@ -232,12 +232,12 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
         {
             if (recordingTask is not null)
                 _ = ObserveLateRecorderFailureAsync(recordingTask);
-            LogSafe(AgentMemoryAccountabilityDiagnosticCodes.Timeout.Value, envelope.AuditId, envelope.Action?.Kind, envelope.Payload?.Kind);
+            LogSafe(AgentMemoryAccountabilityDiagnosticCodes.Timeout.Value, envelope);
             return;
         }
         catch (Exception)
         {
-            LogSafe(AgentMemoryAccountabilityDiagnosticCodes.RecorderFailed.Value, envelope.AuditId, envelope.Action?.Kind, envelope.Payload?.Kind);
+            LogSafe(AgentMemoryAccountabilityDiagnosticCodes.RecorderFailed.Value, envelope);
             return;
         }
 
@@ -276,16 +276,25 @@ public sealed class AgentMemoryAccountabilityProducer : IAgentMemoryAccountabili
                     AuditRecordStatus.NoSinkConfigured => AgentMemoryAccountabilityDiagnosticCodes.NoSink,
                     _ => AgentMemoryAccountabilityDiagnosticCodes.SinkFailed
                 };
-        LogSafe(code.Value, envelope.AuditId, envelope.Action?.Kind, envelope.Payload?.Kind);
+        LogSafe(code.Value, envelope);
     }
 
-    private void LogSafe(string? code, string? auditId, string? actionKind, string? payloadKind)
+    private void LogSafe(string? code, AuditEnvelope envelope)
     {
         if (_logger is null || string.IsNullOrWhiteSpace(code))
             return;
+        var operationId = envelope.Runtime.ExecutionId;
+        if (string.Equals(code, AgentMemoryAccountabilityDiagnosticCodes.Conflict.Value, StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "{Code} AuditId={AuditId} OperationId={OperationId} ActionKind={ActionKind} PayloadKind={PayloadKind} PayloadVersion={PayloadVersion}",
+                code, envelope.AuditId, operationId, envelope.Action?.Kind, envelope.Payload?.Kind, envelope.Payload?.Version);
+            return;
+        }
+
         _logger.LogInformation(
-            "{Code} AuditId={AuditId} ActionKind={ActionKind} PayloadKind={PayloadKind}",
-            code, auditId, actionKind, payloadKind);
+            "{Code} AuditId={AuditId} OperationId={OperationId} ActionKind={ActionKind} PayloadKind={PayloadKind} PayloadVersion={PayloadVersion}",
+            code, envelope.AuditId, operationId, envelope.Action?.Kind, envelope.Payload?.Kind, envelope.Payload?.Version);
     }
 
     private static void ValidateContract(
