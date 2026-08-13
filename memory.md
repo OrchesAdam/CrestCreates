@@ -2383,7 +2383,7 @@ CHANGES (1×P0 PostgreSQL null ReasonCode / 1×P1 TOCTOU in CAS-loser recovery):
 ### Issue #56 — Phase 9b+ Agent Memory Accountability Integration (2026-08-12)
 
 **Status**: Implemented and CI-verified on PR #75 implementation head
-`dbf87c4b` (final evidence run `31656580443`).
+`2ba2f775` (review evidence run `31663216616`).
 
 - Recall, Source Expansion, and conditional Curation project through the single
   `IAgentMemoryAccountabilityProducer` bridge with exact Duplicate/Conflict semantics.
@@ -2399,7 +2399,7 @@ CHANGES (1×P0 PostgreSQL null ReasonCode / 1×P1 TOCTOU in CAS-loser recovery):
   an explicit conditional-composition surface. Reliable delivery, mutation/audit atomicity,
   and business replay safety remain outside this phase (#25/#55).
 
-**Evidence**: PR CI run `31656580443` passed the full solution matrix, PostgreSQL
+**Evidence**: PR CI run `31663216616` passed the full solution matrix, PostgreSQL
 composition suite with Accepted/Duplicate/Conflict assertions, dependency boundaries,
 and all NativeAOT publish-link-run fixtures with exact Capability causal matching.
 

@@ -18,9 +18,9 @@ best-effort recording, and Agent Tool/MCP causal containment.
 
 **Spec status:** APPROVED
 
-**Plan status:** IMPLEMENTED — implementation head `dbf87c4b` passed the full PR CI
-matrix in run `31609006303`; this follow-up closes the remaining contract review
-gaps and refreshes the evidence ledger.
+**Plan status:** IMPLEMENTED — reviewed implementation head `2ba2f775` passed the
+full PR CI matrix in run `31663216616`, including PostgreSQL composition,
+Capability/Agent/MCP suites, dependency boundaries, and NativeAOT publish-link-run.
 
 ```text
 Memory fact identity:       fresh OperationId + OccurredAt per admitted execution
@@ -684,27 +684,27 @@ JSON unit tests alone.
 
 The implementation-side evidence below is supplemented by the linked GitHub
 Actions run because the local environment has no Docker or PostgreSQL service.
-Run `31609006303` passed every provider, Capability, E2E, and NativeAOT gate on
-implementation head `dbf87c4b`.
+Run `31663216616` passed every provider, Capability, E2E, and NativeAOT gate on
+reviewed implementation head `2ba2f775`.
 
 | Evidence | Command | Result / sentinel |
 |---|---|---|
-| Agent Memory Abstractions/Runtime | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj --no-restore` | exit 0; 103 passed |
-| Agent Memory ReadCore | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests/CrestCreates.Agent.Memory.ReadCore.Tests.csproj --no-restore` | exit 0; 130 passed |
+| Agent Memory Abstractions/Runtime | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests/CrestCreates.Agent.Memory.Tests.csproj --no-restore` | exit 0; 112 passed |
+| Agent Memory ReadCore | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests/CrestCreates.Agent.Memory.ReadCore.Tests.csproj --no-restore` | exit 0; 135 passed |
 | Accountability bridge | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Accountability.Tests/CrestCreates.Agent.Memory.Accountability.Tests.csproj --no-restore` | exit 0; 114 passed |
 | Agent Memory Tool unit | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.Tests/CrestCreates.Agent.Memory.Tools.Tests.csproj --no-restore` | exit 0; 23 passed |
 | MCP Memory unit | `rtk dotnet test tests/Integrations/CrestCreates.Mcp.Memory.Tests/CrestCreates.Mcp.Memory.Tests.csproj --no-restore` | exit 0; 35 passed |
-| Capability causal regressions | covered by Tool/MCP and CI Capability suites | exit 0 in CI run `31599922227` |
-| PostgreSQL Audit sink Memory composition | `rtk dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --filter "FullyQualifiedName~Audit|FullyQualifiedName~AgentMemory"` | exit 0 in CI run `31599922227`; no local PostgreSQL service |
+| Capability causal regressions | covered by Tool/MCP and CI Capability suites | exit 0 in CI run `31663216616` |
+| PostgreSQL Audit sink Memory composition | `rtk dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --filter "FullyQualifiedName~Audit|FullyQualifiedName~AgentMemory"` | exit 0 in CI run `31663216616`; no local PostgreSQL service |
 | Dependency boundaries | `rtk dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj --no-restore` | exit 0; 93 passed |
 | Agent Memory Tool NativeAOT publish-link-run | `rtk dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tools.AotFixture.Tests/CrestCreates.Agent.Memory.Tools.AotFixture.Tests.csproj --no-restore` | exit 0; native sentinel passed |
 | MCP Memory NativeAOT publish-link-run | `rtk dotnet test tests/Integrations/CrestCreates.Mcp.Memory.AotFixture.Tests/CrestCreates.Mcp.Memory.AotFixture.Tests.csproj --no-restore` | exit 0; native sentinel passed |
-| Canonical solution build | `rtk dotnet build CrestCreates.slnx --no-restore` | exit 0; 242 projects, 0 errors |
+| Canonical solution build | `rtk dotnet build solutions/CrestCreates.All.slnx --no-restore --no-incremental` | exit 0; 239 projects, 0 errors |
 
 ```text
-Final closure rule: this ledger is complete because implementation head
-`dbf87c4b` has green PostgreSQL, Capability, E2E, and both original-binary AOT
-jobs in GitHub Actions run `31609006303`.
+Final closure rule: this ledger is complete because reviewed implementation head
+`2ba2f775` has green PostgreSQL, Capability, E2E, and original-binary AOT jobs
+in GitHub Actions run `31663216616`.
 ```
 
 Completion is blocked if any evidence relies on a hidden MemoryId/set hash,
