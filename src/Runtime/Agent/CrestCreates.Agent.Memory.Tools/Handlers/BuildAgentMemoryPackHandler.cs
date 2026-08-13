@@ -1,7 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
+using CrestCreates.Accountability.Abstractions.Semantics;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.ReadCore;
 using CrestCreates.Agent.Tools;
@@ -17,18 +20,22 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
     private readonly IAgentMemoryReadCore _readCore;
     private readonly IAgentMemoryAccessArtifactCoordinator _coordinator;
+    private readonly IAgentMemoryOperationIdentityFactory _identities;
 
     public BuildAgentMemoryPackHandler(
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryReadCore readCore,
-        IAgentMemoryAccessArtifactCoordinator coordinator)
-        : base(capabilityContext, agentExecution)
+        IAgentMemoryAccessArtifactCoordinator coordinator,
+        IAgentMemoryOperationIdentityFactory identities)
+        : base(capabilityContext, agentExecution, auditContexts)
     {
         _scopeProvider = scopeProvider;
         _readCore = readCore;
         _coordinator = coordinator;
+        _identities = identities;
     }
 
     public async Task<BuildAgentMemoryPackResult> ExecuteAsync(BuildAgentMemoryPackInput input, CancellationToken ct)
@@ -41,11 +48,21 @@ internal sealed class BuildAgentMemoryPackHandler : AgentMemoryToolHandlerBase, 
         var newPrincipal = ToAccessPrincipal(principal);
         var newScope = ToAccessScope(scope, principal.TenantId);
         var origin = ToAgentToolOrigin(principal);
+        var identity = _identities.Create();
+        var request = new AgentMemoryRecallOperationRequest
+        {
+            Principal = newPrincipal,
+            Origin = origin,
+            Identity = identity,
+            InvocationContext = AgentToolInvocationContext(principal, newPrincipal.TenantId),
+            Scope = newScope,
+            Input = input
+        };
 
         AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>? outcome = null;
         try
         {
-            outcome = await _readCore.RecallAsync(newPrincipal, origin, newScope, input, ct).ConfigureAwait(false);
+            outcome = await _readCore.RecallAsync(request, ct).ConfigureAwait(false);
         }
         catch (AgentMemoryReadCoreException ex)
         {

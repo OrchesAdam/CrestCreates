@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Authoring;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Compression;
@@ -32,30 +33,15 @@ public sealed class MainChainTests
         CanonicalShapeVersion = "memory-content-hash-v1"
     };
 
-    private static AgentMemoryCanonicalHashProjector CreateTestHashProjector()
-    {
-        var hashComputer = new Mock<ICanonicalHashComputer>();
-        hashComputer
-            .Setup(h => h.ComputeFromProjection(It.IsAny<CanonicalHashProjectionResult>()))
-            .Returns((CanonicalHashProjectionResult p) => new CanonicalHash
-            {
-                Value = $"hash-{Guid.NewGuid():N}"[..16],
-                Algorithm = "SHA-256",
-                AlgorithmVersion = p.Metadata.AlgorithmVersion,
-                ArtifactKind = p.Metadata.ArtifactKind,
-                Scope = p.Metadata.Scope,
-                Purpose = p.Metadata.Purpose,
-                ContractVersion = p.Metadata.ContractVersion,
-                CanonicalShapeVersion = p.Metadata.CanonicalShapeVersion
-            });
-        return new AgentMemoryCanonicalHashProjector(hashComputer.Object);
-    }
+    private static AgentMemoryCanonicalHashProjector CreateTestHashProjector() => MemoryTestFixture.CreateTestHashProjector();
 
     private static AgentMemoryInvocationContext CreateTestInvocationContext(string tenantId) => new()
     {
         TenantId = tenantId,
         ActorId = "agent-1",
-        ActorKind = "Agent"
+        ActorKind = "system",
+        CorrelationId = "correlation-test",
+        InvocationSource = "system"
     };
 
     [Fact]
@@ -66,10 +52,9 @@ public sealed class MainChainTests
         var conversationStore = new InMemoryAgentConversationStore(sanitizer);
         var taskStore = new InMemoryAgentTaskHistoryStore(sanitizer);
         var contextStore = new InMemoryAgentCompressedContextStore();
-        var memoryStore = new InMemoryAgentMemoryStore();
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
         var compressor = new DefaultAgentContextCompressor(sanitizer);
         var extractor = new DefaultAgentMemoryExtractor();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
         var retriever = new DefaultAgentMemoryRetriever(memoryStore, CreateTestHashProjector());
         var expander = new DefaultAgentContextSourceExpander(conversationStore, taskStore, contextStore, memoryStore);
         var builder = new DefaultAgentAuthoringContextBuilder();
@@ -123,7 +108,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "User preference detected",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-1", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Promoting based on conversation analysis"
         };
         var promotedMemory = await promotionService.PromoteAsync(tenantId, candidates[0].CandidateId, operationRequest);
@@ -151,8 +136,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Promotion_RejectsNonCandidateStatus()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
 
@@ -172,19 +156,18 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Test",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-2", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing"
         };
 
         var act = async () => await promotionService.PromoteAsync(tenantId, "c-already", request);
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*status*Candidate*");
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Candidate*state*");
     }
 
     [Fact]
     public async Task Supersede_CreatesLink()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
 
@@ -204,7 +187,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Initial",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-3", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Initial promotion"
         };
         var original = await promotionService.PromoteAsync(tenantId, "c-1", promoteRequest);
@@ -225,7 +208,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Updated preference",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-4", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Updating preference"
         };
         var superseding = await promotionService.SupersedeAsync(tenantId, original.MemoryId, replacement, supersedeRequest);
@@ -400,8 +383,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Promotion_RejectsAlreadyRejectedCandidate()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
 
@@ -421,19 +403,18 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Test",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-5", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing"
         };
 
         var act = async () => await promotionService.RejectAsync(tenantId, "c-rejected", request);
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*status*Rejected*");
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Candidate*state*");
     }
 
     [Fact]
     public async Task Supersede_RejectsArchivedMemory()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
 
@@ -453,7 +434,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Initial",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-6", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Initial promotion"
         };
         var memory = await promotionService.PromoteAsync(tenantId, "c-1", promoteRequest);
@@ -463,7 +444,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Archive",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-7", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Archiving memory"
         };
         await promotionService.ArchiveAsync(tenantId, memory.MemoryId, archiveRequest);
@@ -484,19 +465,18 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Supersede attempt",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-8", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Attempting supersede"
         };
 
         var act = async () => await promotionService.SupersedeAsync(tenantId, memory.MemoryId, replacement, supersedeRequest);
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*status*Archived*");
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Target Memory*Active*");
     }
 
     [Fact]
     public async Task Archive_RejectsCandidateStatusMemory()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
 
@@ -518,7 +498,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Test",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-9", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing"
         };
 
@@ -831,8 +811,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Promotion_RequiresNonEmptyReason()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
         var candidate = new AgentMemoryCandidate
@@ -850,7 +829,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-10", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing empty reason"
         };
 
@@ -862,8 +841,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Promotion_RequiresSourceRefsOrExplanation()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
         var candidate = new AgentMemoryCandidate
@@ -881,7 +859,7 @@ public sealed class MainChainTests
             TenantId = tenantId,
             InvocationContext = CreateTestInvocationContext(tenantId),
             Reason = "Valid reason",
-            Timestamp = DateTimeOffset.UtcNow
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-11", OccurredAt = DateTimeOffset.UtcNow }
             // No SourceRefs and no Explanation
         };
 
@@ -893,8 +871,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Promotion_RequiresActorContext()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
         var candidate = new AgentMemoryCandidate
@@ -910,9 +887,16 @@ public sealed class MainChainTests
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            InvocationContext = new AgentMemoryInvocationContext { TenantId = tenantId, ActorId = "", ActorKind = "Agent" },
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = tenantId,
+                ActorId = "",
+                ActorKind = "system",
+                CorrelationId = "correlation-test",
+                InvocationSource = "system"
+            },
             Reason = "Valid reason",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-12", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing empty ActorId"
         };
 
@@ -924,8 +908,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Promotion_RequiresMatchingTenantId()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
         var candidate = new AgentMemoryCandidate
@@ -941,9 +924,16 @@ public sealed class MainChainTests
         var request = new AgentMemoryOperationRequest
         {
             TenantId = "tenant-2", // Mismatched!
-            InvocationContext = new AgentMemoryInvocationContext { TenantId = "tenant-2", ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = "tenant-2",
+                ActorId = "agent-1",
+                ActorKind = "system",
+                CorrelationId = "correlation-test",
+                InvocationSource = "system"
+            },
             Reason = "Valid reason",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-13", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing tenant mismatch"
         };
 
@@ -1509,8 +1499,7 @@ public sealed class MainChainTests
     [Fact]
     public async Task Promotion_RequiresInvocationContextTenantMatch()
     {
-        var memoryStore = new InMemoryAgentMemoryStore();
-        var promotionService = new DefaultAgentMemoryPromotionService(memoryStore);
+        var (memoryStore, promotionService) = MemoryTestFixture.CreateCurationFixture();
 
         const string tenantId = "tenant-1";
         var candidate = new AgentMemoryCandidate
@@ -1531,10 +1520,12 @@ public sealed class MainChainTests
             {
                 TenantId = "tenant-other",
                 ActorId = "agent-1",
-                ActorKind = "Agent"
+                ActorKind = "system",
+                CorrelationId = "correlation-test",
+                InvocationSource = "system"
             },
             Reason = "Valid reason",
-            Timestamp = DateTimeOffset.UtcNow,
+            Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-14", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing InvocationContext tenant mismatch"
         };
 

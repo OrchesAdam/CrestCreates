@@ -2380,6 +2380,29 @@ CHANGES (1×P0 PostgreSQL null ReasonCode / 1×P1 TOCTOU in CAS-loser recovery):
   contract/crash suites run in CI only (port 5432 closed locally). No schema/migration,
   ReasonCode value, state-semantic, existing-assertion or public-API changes.
 
+### Issue #56 — Phase 9b+ Agent Memory Accountability Integration (2026-08-12)
+
+**Status**: Implemented and CI-verified on PR #75 implementation head
+`2ba2f775` (review evidence run `31663216616`).
+
+- Recall, Source Expansion, and conditional Curation project through the single
+  `IAgentMemoryAccountabilityProducer` bridge with exact Duplicate/Conflict semantics.
+- Effective-visible hashes exclude MemoryId, Handle, SourceRef, DescriptorRef,
+  Retriever hashes, and domain provenance hashes; `VisibleMemorySetHash` is not persisted.
+- Producer writes have a hard finite deadline even when a recorder ignores cancellation;
+  payload sanitization rejects duplicate JSON properties, enforces closed diagnostic/redaction
+  allowlists, and enforces exact effective-hash metadata. Unknown actor/source identities fail closed.
+- Agent Tool and MCP AOT fixtures execute the real native binaries and assert Capability
+  correlation, causation, and parent accountability fields. PostgreSQL Accepted/Duplicate/
+  Conflict and tenant isolation composition evidence is green in CI.
+- Read-only registration owns the identity factory and null producer; formal curation remains
+  an explicit conditional-composition surface. Reliable delivery, mutation/audit atomicity,
+  and business replay safety remain outside this phase (#25/#55).
+
+**Evidence**: PR CI run `31663216616` passed the full solution matrix, PostgreSQL
+composition suite with Accepted/Duplicate/Conflict assertions, dependency boundaries,
+and all NativeAOT publish-link-run fixtures with exact Capability causal matching.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:

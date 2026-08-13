@@ -1,5 +1,7 @@
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Schema.Abstractions;
@@ -10,14 +12,25 @@ internal abstract class AgentMemoryToolHandlerBase
 {
     private readonly ICapabilityExecutionContextAccessor _capabilityContext;
     private readonly IAgentExecutionContextAccessor _agentExecution;
+    private readonly IAuditOperationContextAccessor _auditContexts;
 
     protected AgentMemoryToolHandlerBase(
         ICapabilityExecutionContextAccessor capabilityContext,
-        IAgentExecutionContextAccessor agentExecution)
+        IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts)
     {
         _capabilityContext = capabilityContext;
         _agentExecution = agentExecution;
+        _auditContexts = auditContexts;
     }
+
+    protected AuditOperationContext? AmbientAudit => _auditContexts.Current;
+
+    protected AgentMemoryInvocationContext AgentToolInvocationContext(
+        AgentMemoryToolPrincipal principal,
+        string tenantId)
+        => AgentMemoryToolInvocationContextMapper.Create(
+            principal, tenantId, Context, AmbientAudit);
 
     protected CapabilityExecutionContext Context
         => _capabilityContext.Current ?? throw new InvalidOperationException("Capability context is unavailable.");

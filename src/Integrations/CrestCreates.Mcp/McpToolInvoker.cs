@@ -157,7 +157,16 @@ public sealed class McpToolInvoker : IMcpToolInvoker
         JsonElement arguments)
     {
         execution.CausationId = call.RequestId;
-        execution.AccountabilityActor = new AuditActor { Kind = "unknown", Id = "unknown" };
+        // Keep the authoritative actor on Capability context so downstream
+        // Memory facts do not invent a second identity chain. A missing
+        // trusted user is explicitly unknown; never mix an unknown id with
+        // the user actor kind.
+        var trustedUserId = string.IsNullOrWhiteSpace(execution.UserId) ? null : execution.UserId;
+        execution.AccountabilityActor = new AuditActor
+        {
+            Kind = trustedUserId is null ? "unknown" : "user",
+            Id = trustedUserId ?? "unknown"
+        };
         var references = ImmutableArray.CreateBuilder<AuditRuntimeReference>();
         references.Add(new AuditRuntimeReference("mcp-request", call.RequestId));
         references.Add(new AuditRuntimeReference("mcp-invocation", call.InvocationId));

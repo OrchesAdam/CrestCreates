@@ -8,6 +8,9 @@ using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.Stores;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.InMemory;
+using CrestCreates.Agent.Memory.Accountability.Bootstrap;
+using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
@@ -64,9 +67,13 @@ internal static class McpMemoryAotFixtureRunner
             builder.Services.AddSingleton<ITenantContext>(new AotTenantContext("aot-tenant"));
             builder.Services.AddSingleton<ICurrentUser>(new AotCurrentUser("aot-user", "aot-tenant"));
             builder.Services.AddSingleton<IPermissionChecker, AotPermissionChecker>();
-            builder.Services.AddAgentMemoryRuntime();
+            builder.Services.AddAgentMemoryReadRuntime();
             builder.Services.AddCapabilityRuntime();
             builder.Services.AddAccountability();
+            builder.Services.AddSingleton<InMemoryAuditSink>();
+            builder.Services.AddSingleton<CrestCreates.Accountability.Abstractions.Sinks.IAuditSink>(
+                sp => sp.GetRequiredService<InMemoryAuditSink>());
+            builder.Services.AddAgentMemoryAccountability();
             builder.Services.AddCrestMcpToolProjection(options =>
             {
                 options.SerializerOptions.TypeInfoResolver = McpMemoryAotJsonContext.Default;
@@ -330,6 +337,47 @@ internal static class McpMemoryAotFixtureRunner
                 Console.Error.WriteLine("AOT_FIXTURE_FAILED");
                 return 1;
             }
+
+            var accountabilityRecords = host.Services.GetRequiredService<InMemoryAuditSink>().GetRecords();
+            var requiredMemoryPayloadKinds = new[]
+            {
+                AgentMemoryAccountabilityPayloadKinds.Recall,
+                AgentMemoryAccountabilityPayloadKinds.SourceExpansion
+            };
+            if (requiredMemoryPayloadKinds.Any(kind =>
+                    !accountabilityRecords.Any(record => record.Payload?.Kind == kind)))
+            {
+                Console.Error.WriteLine("FAIL: Accountability bridge did not persist a Memory fact");
+                return 9;
+            }
+            var memoryRecords = accountabilityRecords
+                .Where(record => record.Payload?.Kind is not null
+                    && requiredMemoryPayloadKinds.Contains(record.Payload.Kind))
+                .ToArray();
+            var capabilityRecords = accountabilityRecords
+                .Where(record => record.Action?.Kind == "capability.execute")
+                .ToArray();
+            if (memoryRecords.Any(record => string.IsNullOrWhiteSpace(record.CorrelationId)
+                    || string.IsNullOrWhiteSpace(record.CausationId)
+                    || string.IsNullOrWhiteSpace(record.ParentAuditId)))
+            {
+                Console.Error.WriteLine("FAIL: Memory facts did not preserve MCP causality");
+                return 10;
+            }
+            if (memoryRecords.Any(memory =>
+            {
+                var capability = capabilityRecords.FirstOrDefault(candidate =>
+                    string.Equals(candidate.AuditId, memory.ParentAuditId, StringComparison.Ordinal));
+                return capability is null
+                    || !string.Equals(memory.CorrelationId, capability.CorrelationId, StringComparison.Ordinal)
+                    || !string.Equals(memory.CausationId, capability.Runtime?.ExecutionId, StringComparison.Ordinal)
+                    || memory.Action?.Kind == "capability.execute";
+            }))
+            {
+                Console.Error.WriteLine("FAIL: Memory facts did not match the authoritative MCP Capability fact");
+                return 11;
+            }
+            Console.WriteLine("memory_accountability: OK");
 
             Console.WriteLine("MCP_MEMORY_NATIVEAOT_PIPELINE_OK");
             return 0;

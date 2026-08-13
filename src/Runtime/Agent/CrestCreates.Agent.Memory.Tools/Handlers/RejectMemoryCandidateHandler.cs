@@ -1,5 +1,7 @@
 using CrestCreates.Agent.Abstractions;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Capability.Abstractions;
@@ -12,19 +14,20 @@ internal sealed class RejectMemoryCandidateHandler : AgentMemoryToolHandlerBase,
     private readonly IAgentMemoryToolAccessScopeProvider _scopeProvider;
     private readonly IAgentMemoryResourceHandleResolver _handleResolver;
     private readonly IAgentMemoryPromotionService _promotion;
+    private readonly IAgentMemoryOperationIdentityFactory _identities;
     private readonly AgentMemoryCanonicalHashProjector _hashes;
-    private readonly TimeProvider _time;
 
     public RejectMemoryCandidateHandler(
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryResourceHandleResolver handleResolver,
         AgentMemoryToolRuntimeBinding runtimeBinding,
         AgentMemoryCanonicalHashProjector hashes,
-        TimeProvider time)
-        : base(capabilityContext, agentExecution)
-    { _scopeProvider = scopeProvider; _handleResolver = handleResolver; _promotion = runtimeBinding.PromotionService; _hashes = hashes; _time = time; }
+        IAgentMemoryOperationIdentityFactory identities)
+        : base(capabilityContext, agentExecution, auditContexts)
+    { _scopeProvider = scopeProvider; _handleResolver = handleResolver; _promotion = runtimeBinding.PromotionService; _hashes = hashes; _identities = identities; }
 
     public async Task<RejectMemoryCandidateResult> ExecuteAsync(RejectMemoryCandidateInput input, CancellationToken ct)
     {
@@ -52,7 +55,8 @@ internal sealed class RejectMemoryCandidateHandler : AgentMemoryToolHandlerBase,
             ("unavailable", PrepareOutput(unavailable)));
         try
         {
-            var request = AgentMemoryCurationHandlerHelpers.CreateRequest(principal, Execution, Context, "AgentToolRejection", input.Explanation, _time.GetUtcNow());
+            var identity = _identities.Create();
+            var request = AgentMemoryCurationHandlerHelpers.CreateRequest(principal, Context, "AgentToolRejection", input.Explanation, identity, AmbientAudit);
             await _promotion.RejectAsync(principal.TenantId,
                 new AgentMemoryCandidateExpectation
                 {

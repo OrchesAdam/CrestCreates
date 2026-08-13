@@ -43,6 +43,7 @@ public sealed class McpMemoryAotFixtureTests
             execution.Output.Should().Contain("ctx_expand: OK");
             execution.Output.Should().Contain("memory_recall: OK");
             execution.Output.Should().Contain("memory_source_expand: OK");
+            execution.Output.Should().Contain("memory_accountability: OK");
             execution.Output.Should().Contain("MCP_MEMORY_NATIVEAOT_PIPELINE_OK");
         }
         finally

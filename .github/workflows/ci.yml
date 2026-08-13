@@ -121,6 +121,7 @@ jobs:
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests --no-build
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Accountability.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Llm.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Prompting.Tests --no-build

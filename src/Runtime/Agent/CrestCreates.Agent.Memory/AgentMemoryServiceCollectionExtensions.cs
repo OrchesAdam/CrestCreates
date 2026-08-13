@@ -1,5 +1,8 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Agent.Memory.Authoring;
+using CrestCreates.Agent.Memory.Bootstrap;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Compression;
 using CrestCreates.Agent.Memory.Extraction;
@@ -8,8 +11,10 @@ using CrestCreates.Agent.Memory.Promotion;
 using CrestCreates.Agent.Memory.Recall;
 using CrestCreates.Agent.Memory.Sanitization;
 using CrestCreates.Agent.Memory.Stores;
+using CrestCreates.Metadata.Abstractions.Bootstrap;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace CrestCreates.Agent.Memory;
 
@@ -31,8 +36,21 @@ namespace CrestCreates.Agent.Memory;
 /// </remarks>
 public static class AgentMemoryServiceCollectionExtensions
 {
-    public static IServiceCollection AddAgentMemoryRuntime(this IServiceCollection services)
+    /// <summary>
+    /// Registers the read-only half of the Agent Memory runtime: stores, sanitization,
+    /// compression, extraction, recall, expansion, authoring, and canonical hashing.
+    /// No curation (promotion/archive) is registered. Use <see cref="AddAgentMemoryCuration"/>
+    /// to add formal curation on top of a runtime that owns a conditional store.
+    /// </summary>
+    public static IServiceCollection AddAgentMemoryReadRuntime(this IServiceCollection services)
     {
+        // TimeProvider
+        services.TryAddSingleton(TimeProvider.System);
+
+        // Accountability primitives
+        services.TryAddSingleton<IAgentMemoryOperationIdentityFactory, DefaultAgentMemoryOperationIdentityFactory>();
+        services.TryAddSingleton<IAgentMemoryAccountabilityProducer, NullAgentMemoryAccountabilityProducer>();
+
         // Stores
         services.TryAddSingleton<IAgentMemoryArtifactIdGenerator, DefaultAgentMemoryArtifactIdGenerator>();
         services.TryAddSingleton<IAgentConversationStore, InMemoryAgentConversationStore>();
@@ -50,18 +68,13 @@ public static class AgentMemoryServiceCollectionExtensions
         services.TryAddSingleton<IAgentContextCompressor>(sp =>
             sp.GetRequiredService<DefaultAgentContextCompressor>());
 
-        // Extraction & Promotion
+        // Extraction
         services.TryAddSingleton<DefaultAgentMemoryExtractor>(sp =>
             new DefaultAgentMemoryExtractor(
                 sp.GetRequiredService<IAgentMemoryArtifactIdGenerator>(),
                 sp.GetRequiredService<AgentMemoryCanonicalHashProjector>()));
         services.TryAddSingleton<IAgentMemoryExtractor>(sp =>
             sp.GetRequiredService<DefaultAgentMemoryExtractor>());
-        services.TryAddSingleton<DefaultAgentMemoryPromotionService>();
-        services.TryAddSingleton<IAgentMemoryPromotionService>(sp =>
-            sp.GetRequiredService<DefaultAgentMemoryPromotionService>());
-        services.TryAddSingleton<IAgentMemoryCurationServiceCapabilities>(sp =>
-            sp.GetRequiredService<DefaultAgentMemoryPromotionService>());
 
         // Recall & Expansion
         services.TryAddSingleton<IAgentMemoryRetriever, DefaultAgentMemoryRetriever>();
@@ -73,9 +86,47 @@ public static class AgentMemoryServiceCollectionExtensions
         // Canonical Hashing
         services.TryAddSingleton<AgentMemoryCanonicalHashProjector>();
 
-        // TimeProvider
-        services.TryAddSingleton(TimeProvider.System);
+        return services;
+    }
+
+    /// <summary>
+    /// Registers formal curation (promotion, rejection, supersession, archive) on top of
+    /// an Agent Memory read runtime. Requires a conditional, atomic store
+    /// (<see cref="IAgentMemoryConditionalCurationStore"/> with
+    /// <see cref="AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic"/>); the
+    /// <see cref="AgentMemoryCurationCompositionValidator"/> fails closed otherwise.
+    /// </summary>
+    public static IServiceCollection AddAgentMemoryCuration(this IServiceCollection services)
+    {
+        // Formal curation marker: absent in read-only runtimes.
+        services.TryAddSingleton<IAgentMemoryFormalCurationMarker, AgentMemoryFormalCurationMarker>();
+
+        // Promotion service (concrete + capabilities surfaces).
+        services.TryAddSingleton<DefaultAgentMemoryPromotionService>();
+        services.TryAddSingleton<AgentMemoryCurationFactProjector>();
+        services.TryAddSingleton<IAgentMemoryPromotionService>(sp =>
+            sp.GetRequiredService<DefaultAgentMemoryPromotionService>());
+        services.TryAddSingleton<IAgentMemoryCurationServiceCapabilities>(sp =>
+            sp.GetRequiredService<DefaultAgentMemoryPromotionService>());
+
+        // One shared singleton surfaced as both validator and hosted service.
+        // TryAddEnumerable requires an implementation type and cannot deduplicate a
+        // factory descriptor, so gate the two surface registrations on the concrete
+        // singleton: AddAgentMemoryCuration() called twice must not double-register.
+        var validatorAlreadyRegistered = services.Any(d =>
+            d.ServiceType == typeof(AgentMemoryCurationCompositionValidator));
+        services.TryAddSingleton<AgentMemoryCurationCompositionValidator>();
+        if (!validatorAlreadyRegistered)
+        {
+            services.Add(ServiceDescriptor.Singleton<IBootstrapValidator>(sp =>
+                sp.GetRequiredService<AgentMemoryCurationCompositionValidator>()));
+            services.Add(ServiceDescriptor.Singleton<IHostedService>(sp =>
+                sp.GetRequiredService<AgentMemoryCurationCompositionValidator>()));
+        }
 
         return services;
     }
+
+    public static IServiceCollection AddAgentMemoryRuntime(this IServiceCollection services)
+        => services.AddAgentMemoryReadRuntime().AddAgentMemoryCuration();
 }

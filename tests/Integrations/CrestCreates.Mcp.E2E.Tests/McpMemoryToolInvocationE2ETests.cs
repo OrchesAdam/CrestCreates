@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Identity;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.ReadCore;
 using CrestCreates.Agent.Memory.Stores;
@@ -126,6 +127,9 @@ public sealed class McpMemoryToolInvocationE2ETests
 
         // TimeProvider
         builder.Services.AddSingleton<TimeProvider>(new TestTimeProvider());
+
+        // Identity factory for Memory capability handlers
+        builder.Services.TryAddSingleton<IAgentMemoryOperationIdentityFactory, DefaultAgentMemoryOperationIdentityFactory>();
 
         // MCP Memory tools (registers ReadCores via TryAdd — our mocks must be
         // registered first so TryAddSingleton does not override them)
@@ -567,10 +571,7 @@ public sealed class McpMemoryToolInvocationE2ETests
     private sealed class MockMemoryReadCore : IAgentMemoryReadCore
     {
         public ValueTask<AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>> RecallAsync(
-            AgentMemoryAccessPrincipal principal,
-            AgentMemoryArtifactOrigin origin,
-            AgentMemoryAccessScope scope,
-            BuildAgentMemoryPackInput input,
+            AgentMemoryRecallOperationRequest request,
             CancellationToken cancellationToken = default)
         {
             var result = new BuildAgentMemoryPackResult
@@ -624,10 +625,7 @@ public sealed class McpMemoryToolInvocationE2ETests
         private static readonly string[] Contents = ["test-expanded-content", "test-source-expanded-content"];
 
         public ValueTask<AgentMemoryReadCoreOutcome<ExpandAgentMemorySourceResult>> ExpandAsync(
-            AgentMemoryAccessPrincipal principal,
-            AgentMemoryArtifactOrigin origin,
-            AgentMemoryAccessScope scope,
-            ExpandAgentMemorySourceInput input,
+            AgentMemorySourceExpansionOperationRequest request,
             CancellationToken cancellationToken = default)
         {
             var idx = Interlocked.Increment(ref _callIndex) - 1;
@@ -726,12 +724,10 @@ public sealed class McpMemoryToolInvocationE2ETests
     private sealed class MockTenantFilteringReadCore(string allowedTenantId) : IAgentMemoryReadCore
     {
         public ValueTask<AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>> RecallAsync(
-            AgentMemoryAccessPrincipal principal,
-            AgentMemoryArtifactOrigin origin,
-            AgentMemoryAccessScope scope,
-            BuildAgentMemoryPackInput input,
+            AgentMemoryRecallOperationRequest request,
             CancellationToken cancellationToken = default)
         {
+            var scope = request.Scope;
             // Simulate real ReadCore: only return items matching scope.TenantId
             var result = new BuildAgentMemoryPackResult
             {
@@ -853,7 +849,7 @@ public sealed class McpMemoryToolInvocationE2ETests
         builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 
         builder.Services.AddSingleton<ICanonicalHashComputer>(new StubCanonicalHashComputer());
-        builder.Services.AddAgentMemoryRuntime();
+        builder.Services.AddAgentMemoryReadRuntime();
         if (sharedHandleStore is not null)
         {
             builder.Services.AddSingleton(sharedHandleStore);

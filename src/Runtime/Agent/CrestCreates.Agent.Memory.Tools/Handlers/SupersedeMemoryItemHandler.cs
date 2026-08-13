@@ -1,5 +1,7 @@
 using CrestCreates.Agent.Abstractions;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Tools;
@@ -15,21 +17,24 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
     private readonly IAgentMemorySecurityArtifactCoordinator _artifacts;
     private readonly IAgentMemoryPromotionService _promotion;
     private readonly IAgentMemoryArtifactIdGenerator _ids;
+    private readonly IAgentMemoryOperationIdentityFactory _identities;
     private readonly AgentMemoryCanonicalHashProjector _hashes;
     private readonly TimeProvider _time;
 
     public SupersedeMemoryItemHandler(
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryResourceHandleResolver handleResolver,
         IAgentMemorySecurityArtifactCoordinator artifacts,
         AgentMemoryToolRuntimeBinding runtimeBinding,
         IAgentMemoryArtifactIdGenerator ids,
         AgentMemoryCanonicalHashProjector hashes,
+        IAgentMemoryOperationIdentityFactory identities,
         TimeProvider time)
-        : base(capabilityContext, agentExecution)
-    { _scopeProvider = scopeProvider; _handleResolver = handleResolver; _artifacts = artifacts; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _time = time; }
+        : base(capabilityContext, agentExecution, auditContexts)
+    { _scopeProvider = scopeProvider; _handleResolver = handleResolver; _artifacts = artifacts; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _identities = identities; _time = time; }
 
     public async Task<SupersedeMemoryItemResult> ExecuteAsync(SupersedeMemoryItemInput input, CancellationToken ct)
     {
@@ -43,6 +48,7 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
         if (target.Status != AgentMemoryStatus.Active || replacement.Status != AgentMemoryStatus.Candidate) return PrepareOutcome(scope, "supersede-memory-item", "conflict", Conflict("lifecycle-conflict"));
         var newMemoryId = _ids.CreateMemoryId();
         var now = _time.GetUtcNow();
+        var identity = _identities.Create();
         var newHandle = new AgentMemoryResourceHandle
         {
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Memory,
@@ -109,12 +115,12 @@ internal sealed class SupersedeMemoryItemHandler : AgentMemoryToolHandlerBase, I
         AgentMemoryItem memory;
         try
         {
-            var request = AgentMemoryCurationHandlerHelpers.CreateRequest(principal, Execution, Context, "AgentToolSupersession", input.Explanation, now);
+            var request = AgentMemoryCurationHandlerHelpers.CreateRequest(principal, Context, "AgentToolSupersession", input.Explanation, identity, AmbientAudit);
             var plannedMemory = new AgentMemoryItem
             {
                 MemoryId = newMemoryId, TenantId = replacement.TenantId, Kind = replacement.Kind,
                 Content = replacement.Content, CanonicalContentHash = replacement.CanonicalContentHash,
-                PromotedAt = request.Timestamp, Confidence = replacement.Confidence,
+                PromotedAt = request.Identity.OccurredAt, Confidence = replacement.Confidence,
                 Status = AgentMemoryStatus.Active, IsAuthoritative = false, Tags = replacement.Tags,
                 DescriptorRefs = replacement.DescriptorRefs, SourceRefs = replacement.SourceRefs,
                 SupersedesMemoryId = target.MemoryId, RedactionKinds = replacement.RedactionKinds,

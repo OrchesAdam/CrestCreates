@@ -12,6 +12,9 @@ using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.InMemory;
+using CrestCreates.Agent.Memory.Accountability.Bootstrap;
+using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Metadata;
@@ -55,6 +58,10 @@ internal static class MemoryToolFixtureRunner
             builder.Services.AddAgentMemoryRuntime();
             builder.Services.AddCapabilityRuntime();
             builder.Services.AddAccountability();
+            builder.Services.AddSingleton<InMemoryAuditSink>();
+            builder.Services.AddSingleton<CrestCreates.Accountability.Abstractions.Sinks.IAuditSink>(
+                sp => sp.GetRequiredService<InMemoryAuditSink>());
+            builder.Services.AddAgentMemoryAccountability();
             builder.Services.AddCrestAgentTools();
             builder.Services.AddAgentMemoryTools();
             using var host = builder.Build();
@@ -139,6 +146,36 @@ internal static class MemoryToolFixtureRunner
             var replay = await InvokeAsync(services, AgentMemoryToolCapabilityIds.PromoteCandidate, new CandidateInput { CandidateHandle = candidateHandle!, Explanation = "aot" }, FixtureJsonContext.Default.CandidateInput);
             if (!replay.IsSuccess) return 7;
             Console.WriteLine("agent_memory_curation_replay: OK");
+            var accountabilityRecords = services.GetRequiredService<InMemoryAuditSink>().GetRecords();
+            var requiredMemoryPayloadKinds = new[]
+            {
+                AgentMemoryAccountabilityPayloadKinds.Recall,
+                AgentMemoryAccountabilityPayloadKinds.SourceExpansion,
+                AgentMemoryAccountabilityPayloadKinds.Curation
+            };
+            if (requiredMemoryPayloadKinds.Any(kind =>
+                    !accountabilityRecords.Any(record => record.Payload?.Kind == kind))) return 8;
+            var memoryRecords = accountabilityRecords
+                .Where(record => record.Payload?.Kind is not null
+                    && requiredMemoryPayloadKinds.Contains(record.Payload.Kind))
+                .ToArray();
+            var capabilityRecords = accountabilityRecords
+                .Where(record => record.Action?.Kind == "capability.execute")
+                .ToArray();
+            if (memoryRecords.Any(memory =>
+                    string.IsNullOrWhiteSpace(memory.CorrelationId)
+                    || string.IsNullOrWhiteSpace(memory.CausationId)
+                    || string.IsNullOrWhiteSpace(memory.ParentAuditId))) return 9;
+            if (memoryRecords.Any(memory =>
+            {
+                var capability = capabilityRecords.FirstOrDefault(candidate =>
+                    string.Equals(candidate.AuditId, memory.ParentAuditId, StringComparison.Ordinal));
+                return capability is null
+                    || !string.Equals(memory.CorrelationId, capability.CorrelationId, StringComparison.Ordinal)
+                    || !string.Equals(memory.CausationId, capability.Runtime?.ExecutionId, StringComparison.Ordinal)
+                    || memory.Action?.Kind == "capability.execute";
+            })) return 10;
+            Console.WriteLine("agent_memory_accountability: OK");
             Console.WriteLine("AGENT_MEMORY_TOOL_NATIVEAOT_PIPELINE_OK");
             return 0;
         }

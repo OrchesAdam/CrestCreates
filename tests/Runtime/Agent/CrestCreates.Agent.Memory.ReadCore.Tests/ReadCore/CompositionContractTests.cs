@@ -1,13 +1,16 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
 using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
 using CrestCreates.Agent.Memory.Projection.Security;
 using CrestCreates.Agent.Memory.ReadCore;
+using CrestCreates.Agent.Memory.ReadCore.Accountability;
 using CrestCreates.Agent.Memory.Recall;
 using CrestCreates.Agent.Memory.Stores;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.CanonicalHashing;
 using FluentAssertions;
 using Moq;
 using Xunit;
@@ -42,6 +45,36 @@ public sealed class CompositionContractTests
 
     private static AgentMemoryArtifactOrigin MakeOrigin() =>
         new() { Kind = AgentMemoryArtifactOriginKind.AgentToolInvocation, BindingHash = MakeContentHash(), OperationId = "op-1" };
+
+    private static AgentMemoryRecallOperationRequest MakeRequest(
+        AgentMemoryAccessPrincipal principal,
+        AgentMemoryArtifactOrigin origin,
+        AgentMemoryAccessScope scope,
+        BuildAgentMemoryPackInput input)
+        => new()
+        {
+            Principal = principal,
+            Origin = origin,
+            Identity = new AgentMemoryOperationIdentity
+            {
+                OperationId = $"op_{Guid.NewGuid():N}",
+                OccurredAt = DateTimeOffset.UtcNow
+            },
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = principal.TenantId,
+                ActorId = principal.UserId ?? "user-1",
+                ActorKind = "agent",
+                CorrelationId = "correlation-test",
+                InvocationId = origin.OperationId,
+                InvocationSource = "agent"
+            },
+            Scope = scope,
+            Input = input
+        };
+
+    private static AgentMemoryEffectiveResultHashProjector MakeProjector()
+        => new(new DefaultCanonicalHashComputer());
 
     private static AgentMemoryAccessScope MakeScope(DescriptorRef[] visibleRefs, bool allowUnscoped = false) =>
         new()
@@ -143,7 +176,8 @@ public sealed class CompositionContractTests
         retrieverMock = new Mock<IAgentMemoryRetriever>();
         var core = new AgentMemoryReadCore(
             retrieverMock.Object, handleResolver, mockCoordinator.Object,
-            lifetimePolicy, currentClosureProvider, TimeProvider.System);
+            lifetimePolicy, currentClosureProvider, TimeProvider.System,
+            Mock.Of<IAgentMemoryAccountabilityProducer>(), MakeProjector());
 
         var expander = new DefaultAgentContextSourceExpander(
             conversationStore, taskStore, contextStore, memoryStore);
@@ -214,7 +248,7 @@ public sealed class CompositionContractTests
         var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
 
         // Issue
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Should().NotBeNull();
         capturedGrants.Should().ContainSingle("one grant for the CompressedContextBlock source");
 
@@ -297,7 +331,7 @@ public sealed class CompositionContractTests
         var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
 
         // Issue
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Should().NotBeNull();
         capturedGrants.Should().ContainSingle();
 
@@ -375,7 +409,7 @@ public sealed class CompositionContractTests
         var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
 
         // Issue — invalid range should cause closure provider to return null → no grant
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Should().NotBeNull();
         capturedGrants.Should().BeEmpty("invalid range should prevent grant issuance");
     }
@@ -460,7 +494,7 @@ public sealed class CompositionContractTests
         var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
 
         // Issue
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Should().NotBeNull();
         capturedGrants.Should().ContainSingle();
 
@@ -548,7 +582,7 @@ public sealed class CompositionContractTests
         var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
 
         // Issue — real Coordinator must accept ExistenceOnly grant with empty RequiredDescriptorRefs
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Should().NotBeNull();
         capturedGrants.Should().ContainSingle();
 
@@ -623,7 +657,7 @@ public sealed class CompositionContractTests
         var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
 
         // Issue
-        var outcome = await core.RecallAsync(principal, origin, scope, input);
+        var outcome = await core.RecallAsync(MakeRequest(principal, origin, scope, input));
         outcome.Should().NotBeNull();
         capturedGrants.Should().ContainSingle();
 

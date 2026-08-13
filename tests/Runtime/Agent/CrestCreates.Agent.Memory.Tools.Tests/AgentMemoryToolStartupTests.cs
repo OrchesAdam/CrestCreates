@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Memory;
+using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Tools;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Accountability.Bootstrap;
@@ -12,7 +13,9 @@ using CrestCreates.Schema.Abstractions;
 using CrestCreates.Metadata.Registry;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.Agent.Memory.Tools.Tests;
@@ -39,6 +42,78 @@ public sealed class AgentMemoryToolStartupTests
         firstResolver.Should().NotBeSameAs(secondResolver);
         firstResolver.Resolve(AgentMemoryToolCapabilityIds.BuildPack).Should().NotBeNull();
         secondResolver.Resolve(AgentMemoryToolCapabilityIds.BuildPack).Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// The formal-curation marker is what gates the composition validator, not the
+    /// Accountability producer. Even with the null producer registered by
+    /// AddAgentMemoryRuntime, a store that is only IAgentMemoryStore must fail
+    /// closed at startup.
+    /// </summary>
+    [Fact]
+    public async Task Startup_FailsClosed_WhenStoreIsReadOnlyEvenWithNullProducer()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        var schemas = new SchemaRegistry(
+            new RegistryValidationEngine<SchemaDescriptor>(Array.Empty<IRegistryValidator<SchemaDescriptor>>()));
+        builder.Services.AddSingleton<ISchemaRegistry>(schemas);
+        builder.Services.AddAgentMemoryRuntime();
+        // Override the InMemory store with a read-only store that is not conditional.
+        builder.Services.RemoveAll<IAgentMemoryStore>();
+        builder.Services.AddSingleton<IAgentMemoryStore>(new Mock<IAgentMemoryStore>().Object);
+        builder.Services.AddCapabilityRuntime();
+        builder.Services.AddAccountability();
+        builder.Services.AddCrestAgentTools();
+        builder.Services.AddAgentMemoryTools();
+        schemas.Build(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
+        builder.Services.AddSingleton<IAgentToolInvocationGate, DevelopmentInMemoryAgentToolInvocationGate>();
+        builder.Services.AddSingleton<IAgentToolInvocationLeaseAbandoner>(sp =>
+            (IAgentToolInvocationLeaseAbandoner)sp.GetRequiredService<IAgentToolInvocationGate>());
+        builder.Services.AddSingleton<IAgentToolBudgetGate, DevelopmentInMemoryAgentToolBudgetGate>();
+        builder.Services.AddSingleton<IAgentToolGovernanceAuditor, DevelopmentInMemoryAgentToolGovernanceAuditor>();
+
+        using var host = builder.Build();
+        var act = async () => await host.StartAsync();
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*" + AgentMemoryDiagnosticCodes.CurationCompositionInvalid + "*");
+    }
+
+    /// <summary>
+    /// A store that implements the conditional interface but advertises Unknown
+    /// outcome semantics is still a partial provider: it must not pass startup.
+    /// </summary>
+    [Fact]
+    public async Task Startup_FailsClosed_WhenConditionalStoreAdvertisesUnknownGuarantee()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        var schemas = new SchemaRegistry(
+            new RegistryValidationEngine<SchemaDescriptor>(Array.Empty<IRegistryValidator<SchemaDescriptor>>()));
+        builder.Services.AddSingleton<ISchemaRegistry>(schemas);
+        builder.Services.AddAgentMemoryRuntime();
+        // A store that is IAgentMemoryStore + IAgentMemoryConditionalCurationStore
+        // but advertises Unknown (partial conditional provider).
+        var store = new Mock<IAgentMemoryStore>();
+        store.As<IAgentMemoryConditionalCurationStore>();
+        store.As<IAgentMemoryStoreCapabilities>()
+            .Setup(c => c.CurationOutcomeGuarantee)
+            .Returns(AgentMemoryCurationOutcomeGuarantee.Unknown);
+        builder.Services.RemoveAll<IAgentMemoryStore>();
+        builder.Services.AddSingleton<IAgentMemoryStore>(store.Object);
+        builder.Services.AddCapabilityRuntime();
+        builder.Services.AddAccountability();
+        builder.Services.AddCrestAgentTools();
+        builder.Services.AddAgentMemoryTools();
+        schemas.Build(DescriptorProviderRegistry.GetProviders<SchemaDescriptor>());
+        builder.Services.AddSingleton<IAgentToolInvocationGate, DevelopmentInMemoryAgentToolInvocationGate>();
+        builder.Services.AddSingleton<IAgentToolInvocationLeaseAbandoner>(sp =>
+            (IAgentToolInvocationLeaseAbandoner)sp.GetRequiredService<IAgentToolInvocationGate>());
+        builder.Services.AddSingleton<IAgentToolBudgetGate, DevelopmentInMemoryAgentToolBudgetGate>();
+        builder.Services.AddSingleton<IAgentToolGovernanceAuditor, DevelopmentInMemoryAgentToolGovernanceAuditor>();
+
+        using var host = builder.Build();
+        var act = async () => await host.StartAsync();
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*" + AgentMemoryDiagnosticCodes.CurationCompositionInvalid + "*");
     }
 
     [Fact]

@@ -23,7 +23,7 @@ public sealed class ServiceCollectionTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
-        services.AddAgentMemoryRuntime();
+        services.AddAgentMemoryReadRuntime();
 
         using var provider = services.BuildServiceProvider();
 
@@ -38,7 +38,7 @@ public sealed class ServiceCollectionTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
-        services.AddAgentMemoryRuntime();
+        services.AddAgentMemoryReadRuntime();
         services.AddAgentPrompting();
         services.AddSingleton<IAgentMemoryLlmModelClient>(_ => new FakeAgentMemoryLlmModelClient());
         services.AddAgentMemoryLlmCompressor();
@@ -59,7 +59,7 @@ public sealed class ServiceCollectionTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
-        services.AddAgentMemoryRuntime();
+        services.AddAgentMemoryReadRuntime();
         services.AddAgentPrompting();
         services.AddSingleton<IAgentMemoryLlmModelClient>(_ => new FakeAgentMemoryLlmModelClient());
         services.AddAgentMemoryLlmExtractor();
@@ -80,7 +80,7 @@ public sealed class ServiceCollectionTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<ICanonicalHashComputer, DefaultCanonicalHashComputer>();
-        services.AddAgentMemoryRuntime();
+        services.AddAgentMemoryReadRuntime();
         services.AddAgentPrompting();
         services.AddSingleton<IAgentMemoryLlmModelClient>(_ => new FakeAgentMemoryLlmModelClient());
         services.AddAgentMemoryLlm();

@@ -1,4 +1,4 @@
-namespace CrestCreates.Accountability.Sanitization;
+namespace CrestCreates.Accountability.Abstractions.Sanitization;
 
 public sealed class AuditSanitizationException : Exception
 {

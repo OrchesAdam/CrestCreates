@@ -131,6 +131,7 @@
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Projection.Abstractions/CrestCreates.Agent.Memory.Projection.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Projection/CrestCreates.Agent.Memory.Projection.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore/CrestCreates.Agent.Memory.ReadCore.csproj" />
+    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Accountability/CrestCreates.Agent.Memory.Accountability.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Llm/CrestCreates.Agent.Memory.Llm.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
@@ -269,6 +270,7 @@
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Llm.Tests/CrestCreates.Agent.Memory.Llm.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Projection.Tests/CrestCreates.Agent.Memory.Projection.Tests.csproj" />
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests/CrestCreates.Agent.Memory.ReadCore.Tests.csproj" />
+    <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.Memory.Accountability.Tests/CrestCreates.Agent.Memory.Accountability.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Eventing/">
     <Project Path="../tests/Runtime/Eventing/CrestCreates.Event.Tests/CrestCreates.Event.Tests.csproj" />

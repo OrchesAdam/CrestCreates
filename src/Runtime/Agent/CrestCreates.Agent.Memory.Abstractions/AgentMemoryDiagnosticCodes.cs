@@ -43,6 +43,9 @@ public static class AgentMemoryDiagnosticCodes
     private const string VisibilityKindUnresolvableValue = "AGENT_MEMORY_VISIBILITY_KIND_UNRESOLVABLE";
     public static DiagnosticCode VisibilityKindUnresolvable { get; } = new(VisibilityKindUnresolvableValue);
 
+    private const string CurationCompositionInvalidValue = "AGENT_MEMORY_CURATION_COMPOSITION_INVALID";
+    public static DiagnosticCode CurationCompositionInvalid { get; } = new(CurationCompositionInvalidValue);
+
     public static class AgentMemoryRedactionKinds
     {
         public const string EmptyContent = "empty-content";

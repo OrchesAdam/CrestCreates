@@ -1,3 +1,4 @@
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Prompting.Abstractions;
 using CrestCreates.Snapshot.Abstractions;
 
@@ -123,8 +124,10 @@ public sealed record AgentMemoryInvocationContext : ISnapshotable<AgentMemoryInv
     public required string ActorKind { get; init; }
     public string? AgentId { get; init; }
     public string? SessionId { get; init; }
+    public string? InvocationId { get; init; }
     public string? CorrelationId { get; init; }
     public string? CausationId { get; init; }
+    public string? ParentAuditId { get; init; }
     public string? InvocationSource { get; init; }
     public string? DisplayName { get; init; }
     public IReadOnlyDictionary<string, string> TraceAttributes { get; init; } = new Dictionary<string, string>();
@@ -441,7 +444,7 @@ public sealed record AgentMemoryOperationRequest : ISnapshotable<AgentMemoryOper
     public required string TenantId { get; init; }
     public required AgentMemoryInvocationContext InvocationContext { get; init; }
     public required string Reason { get; init; }
-    public required DateTimeOffset Timestamp { get; init; }
+    public required AgentMemoryOperationIdentity Identity { get; init; }
     public IReadOnlyList<AgentContextSourceRef> SourceRefs { get; init; } = Array.Empty<AgentContextSourceRef>();
     public string? Explanation { get; init; }
 

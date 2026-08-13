@@ -1,5 +1,7 @@
 using CrestCreates.Agent.Abstractions;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Identity;
 using CrestCreates.Agent.Memory.Projection.Abstractions.Security;
@@ -16,22 +18,25 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
     private readonly IAgentMemorySecurityArtifactCoordinator _artifacts;
     private readonly IAgentMemoryPromotionService _promotion;
     private readonly IAgentMemoryArtifactIdGenerator _ids;
+    private readonly IAgentMemoryOperationIdentityFactory _identities;
     private readonly AgentMemoryCanonicalHashProjector _hashes;
     private readonly TimeProvider _time;
 
     public PromoteMemoryCandidateHandler(
         ICapabilityExecutionContextAccessor capabilityContext,
         IAgentExecutionContextAccessor agentExecution,
+        IAuditOperationContextAccessor auditContexts,
         IAgentMemoryToolAccessScopeProvider scopeProvider,
         IAgentMemoryResourceHandleResolver handleResolver,
         IAgentMemorySecurityArtifactCoordinator artifacts,
         AgentMemoryToolRuntimeBinding runtimeBinding,
         IAgentMemoryArtifactIdGenerator ids,
         AgentMemoryCanonicalHashProjector hashes,
+        IAgentMemoryOperationIdentityFactory identities,
         TimeProvider time)
-        : base(capabilityContext, agentExecution)
+        : base(capabilityContext, agentExecution, auditContexts)
     {
-        _scopeProvider = scopeProvider; _handleResolver = handleResolver; _artifacts = artifacts; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _time = time;
+        _scopeProvider = scopeProvider; _handleResolver = handleResolver; _artifacts = artifacts; _promotion = runtimeBinding.PromotionService; _ids = ids; _hashes = hashes; _identities = identities; _time = time;
     }
 
     public async Task<PromoteMemoryCandidateResult> ExecuteAsync(PromoteMemoryCandidateInput input, CancellationToken ct)
@@ -45,6 +50,7 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
         if (candidate.Status != AgentMemoryStatus.Candidate) return PrepareOutcome(scope, "promote-memory-candidate", "conflict", Conflict("candidate-consumed"));
         var newMemoryId = _ids.CreateMemoryId();
         var now = _time.GetUtcNow();
+        var identity = _identities.Create();
         var itemHandle = new AgentMemoryResourceHandle
         {
             HandleId = AgentMemorySecurityArtifactIdGenerator.Create("hnd"), ResourceKind = AgentMemoryResourceKind.Memory,
@@ -112,12 +118,12 @@ internal sealed class PromoteMemoryCandidateHandler : AgentMemoryToolHandlerBase
         AgentMemoryItem memory;
         try
         {
-            var request = AgentMemoryCurationHandlerHelpers.CreateRequest(principal, Execution, Context, "AgentToolPromotion", input.Explanation, now);
+            var request = AgentMemoryCurationHandlerHelpers.CreateRequest(principal, Context, "AgentToolPromotion", input.Explanation, identity, AmbientAudit);
             var plannedMemory = new AgentMemoryItem
             {
                 MemoryId = newMemoryId, TenantId = candidate.TenantId, Kind = candidate.Kind,
                 Content = candidate.Content, CanonicalContentHash = candidate.CanonicalContentHash,
-                PromotedAt = request.Timestamp, Confidence = candidate.Confidence,
+                PromotedAt = request.Identity.OccurredAt, Confidence = candidate.Confidence,
                 Status = AgentMemoryStatus.Active, IsAuthoritative = false, Tags = candidate.Tags,
                 DescriptorRefs = candidate.DescriptorRefs, SourceRefs = candidate.SourceRefs,
                 RedactionKinds = candidate.RedactionKinds, SanitizationDiagnostics = candidate.SanitizationDiagnostics

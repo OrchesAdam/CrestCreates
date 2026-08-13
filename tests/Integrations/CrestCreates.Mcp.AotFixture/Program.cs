@@ -2,6 +2,7 @@ using System.Text.Json;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Generated;
 using CrestCreates.Mcp;
 using CrestCreates.Mcp.AotFixture;
 using CrestCreates.Metadata;
@@ -13,6 +14,7 @@ using CrestCreates.Metadata.Registry;
 using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 
 try
@@ -43,6 +45,9 @@ try
     builder.Services.AddSingleton<ICapabilityRegistry>(capabilities);
     builder.Services.AddScoped<FixtureEchoHandler>();
     builder.Services.AddCapabilityRuntime();
+    builder.Services.TryAddEnumerable(
+        ServiceDescriptor.Singleton<ICapabilityHandlerModule>(
+            GeneratedCapabilityHandlerModule.Instance));
     builder.Services.AddAccountability();
     builder.Services.AddCrestMcpToolProjection(options =>
         options.SerializerOptions.TypeInfoResolver = McpFixtureJsonContext.Default);
@@ -61,7 +66,14 @@ try
     if (outcome.IsError
         || outcome.StructuredContent?.GetProperty("value").GetString() != "trimmed"
         || FixtureEchoHandler.LastInput?.Value != "trimmed")
+    {
+        Console.Error.WriteLine(
+            $"MCP fixture outcome mismatch: IsError={outcome.IsError}, ErrorCode={outcome.ErrorCode ?? "<null>"}, "
+            + $"StructuredContent={outcome.StructuredContent?.GetRawText() ?? "<null>"}, "
+            + $"LastInput={FixtureEchoHandler.LastInput?.Value ?? "<null>"}, "
+            + $"Content={string.Join(" | ", outcome.Content.OfType<McpToolTextContent>().Select(item => item.Text))}");
         return 2;
+    }
 
     Console.WriteLine("MCP_NATIVEAOT_PIPELINE_OK");
     return 0;
