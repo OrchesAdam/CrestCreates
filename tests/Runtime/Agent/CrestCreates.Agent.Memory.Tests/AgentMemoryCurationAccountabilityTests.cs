@@ -353,7 +353,9 @@ public sealed class AgentMemoryCurationAccountabilityTests
             {
                 TenantId = TenantId,
                 ActorId = "agent-1",
-                ActorKind = "Agent"
+                ActorKind = "system",
+                CorrelationId = "correlation-test",
+                InvocationSource = "system"
             },
             Reason = "SENSITIVE-REASON-abc123",
             Explanation = "SENSITIVE-EXPLANATION-xyz789",
@@ -565,6 +567,145 @@ public sealed class AgentMemoryCurationAccountabilityTests
         captures.Payload.Should().NotBeNull();
         captures.Payload!.Result.Should().Be("rejected");
         captures.Payload.StableFailureCode.Should().Be("missing-source-or-explanation");
+    }
+
+    [Fact]
+    public async Task PromoteMissingCandidate_WithCompleteTrustedContext_Should_RecordRejectedFact()
+    {
+        var (producer, captures) = MakeCapturingProducer();
+        var store = MakeConditionalStoreMock();
+        var promotion = MakePromotionService(store, producer);
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId);
+
+        var act = async () => await promotion.PromoteAsync(TenantId, "c-missing", "m-1", operation);
+
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(ex => ex.Code == AgentMemoryOperationFailureCode.ResourceUnavailable);
+        captures.Payload.Should().NotBeNull();
+        captures.Payload!.Operation.Should().Be("promote");
+        captures.Payload.Result.Should().Be("rejected");
+        captures.Payload.StableFailureCode.Should().Be("resource-unavailable");
+        captures.Payload.CandidateId.Should().Be("c-missing");
+        captures.Payload.NewMemoryId.Should().Be("m-1");
+    }
+
+    [Fact]
+    public async Task RejectMissingCandidate_WithCompleteTrustedContext_Should_RecordRejectedFact()
+    {
+        var (producer, captures) = MakeCapturingProducer();
+        var store = MakeConditionalStoreMock();
+        var promotion = MakePromotionService(store, producer);
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId);
+
+        var act = async () => await promotion.RejectAsync(TenantId, "c-missing", operation);
+
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(ex => ex.Code == AgentMemoryOperationFailureCode.ResourceUnavailable);
+        captures.Payload.Should().NotBeNull();
+        captures.Payload!.Operation.Should().Be("reject");
+        captures.Payload.Result.Should().Be("rejected");
+        captures.Payload.StableFailureCode.Should().Be("resource-unavailable");
+        captures.Payload.CandidateId.Should().Be("c-missing");
+    }
+
+    [Fact]
+    public async Task SupersedeMissingResource_WithCompleteTrustedContext_Should_RecordRejectedFact()
+    {
+        var (producer, captures) = MakeCapturingProducer();
+        var store = MakeConditionalStoreMock();
+        var promotion = MakePromotionService(store, producer);
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId);
+
+        var act = async () => await promotion.SupersedeAsync(
+            TenantId, "m-missing", "c-replacement", "m-new", operation);
+
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(ex => ex.Code == AgentMemoryOperationFailureCode.ResourceUnavailable);
+        captures.Payload.Should().NotBeNull();
+        captures.Payload!.Operation.Should().Be("supersede");
+        captures.Payload.Result.Should().Be("rejected");
+        captures.Payload.StableFailureCode.Should().Be("resource-unavailable");
+        captures.Payload.MemoryId.Should().Be("m-missing");
+        captures.Payload.ReplacementCandidateId.Should().Be("c-replacement");
+        captures.Payload.NewMemoryId.Should().Be("m-new");
+    }
+
+    [Fact]
+    public async Task ArchiveMissingMemory_WithCompleteTrustedContext_Should_RecordRejectedFact()
+    {
+        var (producer, captures) = MakeCapturingProducer();
+        var store = MakeConditionalStoreMock();
+        var promotion = MakePromotionService(store, producer);
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId);
+
+        var act = async () => await promotion.ArchiveAsync(TenantId, "m-missing", operation);
+
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(ex => ex.Code == AgentMemoryOperationFailureCode.ResourceUnavailable);
+        captures.Payload.Should().NotBeNull();
+        captures.Payload!.Operation.Should().Be("archive");
+        captures.Payload.Result.Should().Be("rejected");
+        captures.Payload.StableFailureCode.Should().Be("resource-unavailable");
+        captures.Payload.MemoryId.Should().Be("m-missing");
+    }
+
+    [Fact]
+    public async Task ProviderStableLookingFailureBeforeTransition_Should_NotClaimRejectedFact()
+    {
+        var (producer, captures) = MakeCapturingProducer();
+        var store = MakeConditionalStoreMock();
+        store.As<IAgentMemoryStore>().Setup(s => s.GetCandidateAsync(
+                TenantId,
+                "c-provider-failure",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.ResourceUnavailable,
+                "provider reused a stable-looking code"));
+        var promotion = MakePromotionService(store, producer);
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId);
+
+        var act = async () => await promotion.PromoteAsync(
+            TenantId, "c-provider-failure", "m-1", operation);
+
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(ex => ex.Code == AgentMemoryOperationFailureCode.ResourceUnavailable);
+        captures.Payload.Should().BeNull();
+        store.Verify(s => s.PromoteAsync(
+            It.IsAny<string>(), It.IsAny<AgentMemoryPromotionPlan>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(null, "system", "system")]
+    [InlineData("correlation-test", null, "system")]
+    [InlineData("correlation-test", "custom-host", "system")]
+    [InlineData("correlation-test", "system", "custom-actor")]
+    public async Task IncompleteAccountabilityContext_ShouldFailBeforeCurationTransition(
+        string? correlationId,
+        string? invocationSource,
+        string actorKind)
+    {
+        var (producer, captures) = MakeCapturingProducer();
+        var store = MakeConditionalStoreMock();
+        var promotion = MakePromotionService(store, producer);
+        var operation = MemoryTestFixture.CreateOperationRequest(TenantId) with
+        {
+            InvocationContext = MemoryTestFixture.CreateOperationRequest(TenantId).InvocationContext with
+            {
+                CorrelationId = correlationId,
+                InvocationSource = invocationSource,
+                ActorKind = actorKind
+            }
+        };
+        var plan = MakePromotionPlan(
+            MakeDummyCandidate("c-1"), MemoryTestFixture.CreateTestHashProjector(), operation, "m-1");
+
+        var act = async () => await promotion.PromoteAsync(TenantId, plan);
+
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(ex => ex.Code == AgentMemoryOperationFailureCode.MissingActor);
+        captures.Payload.Should().BeNull();
+        store.Verify(s => s.PromoteAsync(
+            It.IsAny<string>(), It.IsAny<AgentMemoryPromotionPlan>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

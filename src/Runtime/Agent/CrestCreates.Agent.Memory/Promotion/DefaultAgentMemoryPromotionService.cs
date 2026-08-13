@@ -126,8 +126,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             await PublishValidationFailureAsync(request, () => _factProjector.PromoteValidationFailure(request, candidateId, newMemoryId, ex.Code));
             throw;
         }
-        var candidate = await _store.GetCandidateAsync(tenantId, candidateId, cancellationToken)
-            ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
+        var candidate = await _store.GetCandidateAsync(tenantId, candidateId, cancellationToken);
+        if (candidate is null)
+        {
+            await PublishFailureAsync(request, () => _factProjector.PromoteValidationFailure(
+                request, candidateId, newMemoryId, AgentMemoryOperationFailureCode.ResourceUnavailable));
+            throw new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.ResourceUnavailable,
+                "Candidate is unavailable.");
+        }
         var memory = CreatePromotedMemory(candidate, newMemoryId, request);
         return await PromoteAsync(tenantId, new AgentMemoryPromotionPlan
         {
@@ -151,8 +158,15 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             throw;
         }
 
-        var candidate = await _store.GetCandidateAsync(tenantId, candidateId, cancellationToken)
-            ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
+        var candidate = await _store.GetCandidateAsync(tenantId, candidateId, cancellationToken);
+        if (candidate is null)
+        {
+            await PublishFailureAsync(request, () => _factProjector.RejectValidationFailure(
+                request, candidateId, AgentMemoryOperationFailureCode.ResourceUnavailable));
+            throw new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.ResourceUnavailable,
+                "Candidate is unavailable.");
+        }
         await RejectAsync(tenantId,
             new AgentMemoryCandidateExpectation { CandidateId = candidate.CandidateId, ExpectedStateHash = _hashes.ComputeCandidateStateHash(candidate) },
             request, cancellationToken);
@@ -175,10 +189,25 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
                 request, memoryId, replacementCandidateId, newMemoryId, ex.Code));
             throw;
         }
-        var existing = await _store.GetMemoryAsync(tenantId, memoryId, cancellationToken)
-            ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Target Memory is unavailable.");
-        var replacement = await _store.GetCandidateAsync(tenantId, replacementCandidateId, cancellationToken)
-            ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Replacement Candidate is unavailable.");
+        var existing = await _store.GetMemoryAsync(tenantId, memoryId, cancellationToken);
+        if (existing is null)
+        {
+            await PublishFailureAsync(request, () => _factProjector.SupersedeValidationFailure(
+                request, memoryId, replacementCandidateId, newMemoryId, AgentMemoryOperationFailureCode.ResourceUnavailable));
+            throw new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.ResourceUnavailable,
+                "Target Memory is unavailable.");
+        }
+
+        var replacement = await _store.GetCandidateAsync(tenantId, replacementCandidateId, cancellationToken);
+        if (replacement is null)
+        {
+            await PublishFailureAsync(request, () => _factProjector.SupersedeValidationFailure(
+                request, memoryId, replacementCandidateId, newMemoryId, AgentMemoryOperationFailureCode.ResourceUnavailable));
+            throw new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.ResourceUnavailable,
+                "Replacement Candidate is unavailable.");
+        }
         var newMemory = CreatePromotedMemory(replacement, newMemoryId, request) with { SupersedesMemoryId = existing.MemoryId };
         return await SupersedeAsync(tenantId, new AgentMemorySupersessionPlan
         {
@@ -206,7 +235,11 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
         var memory = await _store.GetMemoryAsync(tenantId, memoryId, cancellationToken);
         if (memory is null)
         {
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Memory is unavailable.");
+            await PublishFailureAsync(request, () => _factProjector.ArchiveValidationFailure(
+                request, memoryId, AgentMemoryOperationFailureCode.ResourceUnavailable));
+            throw new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.ResourceUnavailable,
+                "Memory is unavailable.");
         }
 
         if (_store is not IAgentMemoryConditionalCurationStore conditional)
@@ -345,12 +378,13 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
         if (!IsBoundedIdentifier(tenantId)
             || !IsBoundedIdentifier(request.InvocationContext.TenantId)
             || !IsBoundedIdentifier(request.InvocationContext.ActorId)
-            || !IsBoundedIdentifier(request.InvocationContext.ActorKind)
-            || !IsBoundedIdentifier(request.InvocationContext.CorrelationId, required: false)
+            || !IsStableActorKind(request.InvocationContext.ActorKind)
+            || !IsBoundedIdentifier(request.InvocationContext.CorrelationId)
             || !IsBoundedIdentifier(request.InvocationContext.CausationId, required: false)
             || !IsBoundedIdentifier(request.InvocationContext.ParentAuditId, required: false)
             || !IsBoundedIdentifier(request.InvocationContext.InvocationId, required: false)
-            || !IsBoundedIdentifier(request.InvocationContext.SessionId, required: false))
+            || !IsBoundedIdentifier(request.InvocationContext.SessionId, required: false)
+            || !IsStableInvocationSource(request.InvocationContext.InvocationSource))
         {
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.MissingActor, $"{AgentMemoryDiagnosticCodes.InvalidOperationMissingActor}: InvocationContext.ActorId is required.");
         }
@@ -395,4 +429,13 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
     private static bool IsBoundedIdentifier(string? value, bool required = true)
         => (required ? !string.IsNullOrWhiteSpace(value) : string.IsNullOrWhiteSpace(value) || value.Length <= MaxIdentifierLength)
             && (string.IsNullOrWhiteSpace(value) || value.Length <= MaxIdentifierLength);
+
+    private static bool IsStableInvocationSource(string? invocationSource)
+        => invocationSource is "http" or "workflow" or "human-task" or "agent"
+            or "mcp" or "integration" or "system";
+
+    private static bool IsStableActorKind(string? actorKind)
+        => actorKind is "user" or "anonymous" or "system" or "workflow"
+            or "human-task" or "agent" or "integration" or "scheduler"
+            or "mcp-client" or "unknown";
 }

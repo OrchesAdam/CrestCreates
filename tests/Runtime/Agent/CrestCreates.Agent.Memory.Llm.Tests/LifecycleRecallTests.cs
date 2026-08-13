@@ -94,7 +94,9 @@ public class LifecycleRecallTests
                 {
                     TenantId = candidate.TenantId,
                     ActorId = "test-actor",
-                    ActorKind = "test"
+                    ActorKind = "system",
+                    CorrelationId = "lifecycle-recall-test",
+                    InvocationSource = "system"
                 },
                 Reason = "Test promotion",
                 Explanation = "Integration test promotion",

@@ -64,7 +64,10 @@ public sealed class CompositionContractTests
             {
                 TenantId = principal.TenantId,
                 ActorId = principal.UserId ?? "user-1",
-                ActorKind = "User"
+                ActorKind = "agent",
+                CorrelationId = "correlation-test",
+                InvocationId = origin.OperationId,
+                InvocationSource = "agent"
             },
             Scope = scope,
             Input = input

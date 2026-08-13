@@ -73,7 +73,10 @@ public class AgentMemoryRecallAccountabilityTests
             {
                 TenantId = "t1",
                 ActorId = "u1",
-                ActorKind = "User"
+                ActorKind = "agent",
+                CorrelationId = "correlation-test",
+                InvocationId = origin.OperationId,
+                InvocationSource = "agent"
             },
             Scope = scope,
             Input = input
@@ -382,6 +385,7 @@ public class AgentMemoryRecallAccountabilityTests
                 TenantId = principal.TenantId,
                 ActorId = "actor-1",
                 ActorKind = "agent",
+                CorrelationId = "correlation-test",
                 InvocationSource = "agent",
                 InvocationId = "admitted-invocation"
             }
@@ -877,6 +881,73 @@ public class AgentMemoryRecallAccountabilityTests
             It.IsAny<AgentMemoryOperationIdentity>(),
             It.IsAny<AgentMemoryInvocationContext>(),
             It.IsAny<AgentMemoryRecallAccountabilityPayload>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProviderStableLookingFailureCode_Should_NotClaimDeterministicFailure()
+    {
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope();
+        var input = new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 };
+
+        var mockRetriever = new Mock<IAgentMemoryRetriever>();
+        mockRetriever.Setup(r => r.RecallAsync(It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AgentMemoryReadCoreException(
+                "resource-unavailable",
+                "provider reused a stable-looking code"));
+
+        var (producer, captures) = MakeCapturingProducer();
+        var core = MakeCore(mockRetriever.Object, producer.Object);
+
+        var act = async () => await core.RecallAsync(MakeRequest(principal, origin, scope, input));
+
+        await act.Should().ThrowAsync<AgentMemoryReadCoreException>()
+            .Where(ex => ex.Code == "resource-unavailable");
+        captures.Payload.Should().BeNull();
+        producer.Verify(p => p.PublishRecallAsync(
+            It.IsAny<AgentMemoryOperationIdentity>(),
+            It.IsAny<AgentMemoryInvocationContext>(),
+            It.IsAny<AgentMemoryRecallAccountabilityPayload>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(null, "system", "system")]
+    [InlineData("correlation-test", null, "system")]
+    [InlineData("correlation-test", "custom-host", "system")]
+    [InlineData("correlation-test", "system", "custom-actor")]
+    public async Task IncompleteDirectHostAccountabilityContext_ShouldFailBeforeDomainExecution(
+        string? correlationId,
+        string? invocationSource,
+        string actorKind)
+    {
+        var principal = MakePrincipal();
+        var origin = MakeOrigin();
+        var scope = MakeScope();
+        var request = MakeRequest(
+            principal,
+            origin,
+            scope,
+            new BuildAgentMemoryPackInput { MaximumCount = 5, CharacterBudget = 10000 }) with
+        {
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = principal.TenantId,
+                ActorId = "host-actor",
+                ActorKind = actorKind,
+                CorrelationId = correlationId,
+                InvocationSource = invocationSource
+            }
+        };
+        var retriever = new Mock<IAgentMemoryRetriever>(MockBehavior.Strict);
+        var core = MakeCore(retriever.Object, Mock.Of<IAgentMemoryAccountabilityProducer>());
+
+        var act = async () => await core.RecallAsync(request);
+
+        await act.Should().ThrowAsync<AgentMemoryReadCoreException>()
+            .Where(ex => ex.Code == "identity-invalid");
+        retriever.Verify(r => r.RecallAsync(
+            It.IsAny<AgentMemoryQuery>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -39,7 +39,9 @@ public sealed class MainChainTests
     {
         TenantId = tenantId,
         ActorId = "agent-1",
-        ActorKind = "Agent"
+        ActorKind = "system",
+        CorrelationId = "correlation-test",
+        InvocationSource = "system"
     };
 
     [Fact]
@@ -885,7 +887,14 @@ public sealed class MainChainTests
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
-            InvocationContext = new AgentMemoryInvocationContext { TenantId = tenantId, ActorId = "", ActorKind = "Agent" },
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = tenantId,
+                ActorId = "",
+                ActorKind = "system",
+                CorrelationId = "correlation-test",
+                InvocationSource = "system"
+            },
             Reason = "Valid reason",
             Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-12", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing empty ActorId"
@@ -915,7 +924,14 @@ public sealed class MainChainTests
         var request = new AgentMemoryOperationRequest
         {
             TenantId = "tenant-2", // Mismatched!
-            InvocationContext = new AgentMemoryInvocationContext { TenantId = "tenant-2", ActorId = "agent-1", ActorKind = "Agent" },
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = "tenant-2",
+                ActorId = "agent-1",
+                ActorKind = "system",
+                CorrelationId = "correlation-test",
+                InvocationSource = "system"
+            },
             Reason = "Valid reason",
             Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-13", OccurredAt = DateTimeOffset.UtcNow },
             Explanation = "Testing tenant mismatch"
@@ -1504,7 +1520,9 @@ public sealed class MainChainTests
             {
                 TenantId = "tenant-other",
                 ActorId = "agent-1",
-                ActorKind = "Agent"
+                ActorKind = "system",
+                CorrelationId = "correlation-test",
+                InvocationSource = "system"
             },
             Reason = "Valid reason",
             Identity = new AgentMemoryOperationIdentity { OperationId = "op-mc-14", OccurredAt = DateTimeOffset.UtcNow },

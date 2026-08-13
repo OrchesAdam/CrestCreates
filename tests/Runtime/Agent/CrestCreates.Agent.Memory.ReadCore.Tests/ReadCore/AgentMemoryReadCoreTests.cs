@@ -64,7 +64,10 @@ public class AgentMemoryReadCoreTests
             {
                 TenantId = "t1",
                 ActorId = "u1",
-                ActorKind = "User"
+                ActorKind = "agent",
+                CorrelationId = "correlation-test",
+                InvocationId = origin.OperationId,
+                InvocationSource = "agent"
             },
             Scope = scope,
             Input = input

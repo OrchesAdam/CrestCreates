@@ -148,7 +148,9 @@ internal static class MemoryTestFixture
             {
                 TenantId = tenantId,
                 ActorId = "agent-1",
-                ActorKind = "Agent"
+                ActorKind = "system",
+                CorrelationId = "correlation-test",
+                InvocationSource = "system"
             },
             Reason = "archiving",
             Identity = new AgentMemoryOperationIdentity

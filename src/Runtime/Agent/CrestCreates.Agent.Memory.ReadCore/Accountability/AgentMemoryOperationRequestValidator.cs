@@ -23,12 +23,13 @@ internal static class AgentMemoryOperationRequestValidator
         if (context is null
             || !IsBoundedIdentifier(context.TenantId)
             || !IsBoundedIdentifier(context.ActorId)
-            || !IsBoundedIdentifier(context.ActorKind)
-            || !IsBoundedIdentifier(context.CorrelationId, required: false)
+            || !IsStableActorKind(context.ActorKind)
+            || !IsBoundedIdentifier(context.CorrelationId)
             || !IsBoundedIdentifier(context.CausationId, required: false)
             || !IsBoundedIdentifier(context.ParentAuditId, required: false)
             || !IsBoundedIdentifier(context.InvocationId, required: false)
-            || !IsBoundedIdentifier(context.SessionId, required: false))
+            || !IsBoundedIdentifier(context.SessionId, required: false)
+            || !IsStableInvocationSource(context.InvocationSource))
             throw new AgentMemoryReadCoreException("identity-invalid", "Trusted Memory invocation context is incomplete.");
 
         if (!string.Equals(principal.TenantId, context.TenantId, StringComparison.Ordinal)
@@ -56,4 +57,13 @@ internal static class AgentMemoryOperationRequestValidator
     private static bool IsBoundedIdentifier(string? value, bool required = true)
         => (required ? !string.IsNullOrWhiteSpace(value) : string.IsNullOrWhiteSpace(value) || value.Length <= AuditContractLimits.MaxIdentifierLength)
             && (string.IsNullOrWhiteSpace(value) || value.Length <= AuditContractLimits.MaxIdentifierLength);
+
+    private static bool IsStableInvocationSource(string? invocationSource)
+        => invocationSource is "http" or "workflow" or "human-task" or "agent"
+            or "mcp" or "integration" or "system";
+
+    private static bool IsStableActorKind(string? actorKind)
+        => actorKind is "user" or "anonymous" or "system" or "workflow"
+            or "human-task" or "agent" or "integration" or "scheduler"
+            or "mcp-client" or "unknown";
 }

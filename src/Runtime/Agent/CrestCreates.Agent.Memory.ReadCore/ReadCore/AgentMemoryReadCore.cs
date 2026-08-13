@@ -51,17 +51,7 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
     {
         AgentMemoryOperationRequestValidator.Validate(
             request.Principal, request.Scope, request.Identity, request.InvocationContext, request.Origin);
-        try
-        {
-            return await RecallCoreAsync(request, cancellationToken);
-        }
-        catch (AgentMemoryReadCoreException ex) when (ex.Code is "budget-invalid" or "resource-unavailable")
-        {
-            // Deterministic pre-result rejections with complete trusted identity/context
-            // may produce a rejected Recall fact. All other failures produce none.
-            await PublishRejectedRecallFactAsync(request, ex.Code);
-            throw;
-        }
+        return await RecallCoreAsync(request, cancellationToken);
     }
 
     private async ValueTask<AgentMemoryReadCoreOutcome<BuildAgentMemoryPackResult>> RecallCoreAsync(
@@ -75,14 +65,14 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
 
         // Validate budget — reject zero/negative before scope checks
         if (input.MaximumCount <= 0)
-            throw new AgentMemoryReadCoreException("budget-invalid", "MaximumCount must be positive");
+            await RejectRecallAsync(request, "budget-invalid", "MaximumCount must be positive");
         if (input.CharacterBudget <= 0)
-            throw new AgentMemoryReadCoreException("budget-invalid", "CharacterBudget must be positive");
+            await RejectRecallAsync(request, "budget-invalid", "CharacterBudget must be positive");
 
         if (input.MaximumCount > scope.MaxRecallCount)
-            throw new AgentMemoryReadCoreException("budget-invalid", "MaximumCount exceeds scope limit");
+            await RejectRecallAsync(request, "budget-invalid", "MaximumCount exceeds scope limit");
         if (input.CharacterBudget > scope.MaxRecallCharacters)
-            throw new AgentMemoryReadCoreException("budget-invalid", "CharacterBudget exceeds scope limit");
+            await RejectRecallAsync(request, "budget-invalid", "CharacterBudget exceeds scope limit");
 
         // Resolve input handles to resource IDs
         var resourceIds = new List<string>();
@@ -93,8 +83,8 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
                 var resolved = await _handleResolver.ResolveAsync(
                     handleId, AgentMemoryResourceKind.Memory, principal, scope, cancellationToken);
                 if (resolved is null)
-                    throw new AgentMemoryReadCoreException("resource-unavailable", $"Handle {handleId} not resolvable");
-                resourceIds.Add(resolved.Handle.ResourceId);
+                    await RejectRecallAsync(request, "resource-unavailable", "Memory Handle is not resolvable");
+                resourceIds.Add(resolved!.Handle.ResourceId);
             }
         }
 
@@ -426,6 +416,15 @@ internal sealed class AgentMemoryReadCore : IAgentMemoryReadCore
         {
             // Swallow: publishing a rejected fact must never change the original exception.
         }
+    }
+
+    private async ValueTask RejectRecallAsync(
+        AgentMemoryRecallOperationRequest request,
+        string failureCode,
+        string message)
+    {
+        await PublishRejectedRecallFactAsync(request, failureCode);
+        throw new AgentMemoryReadCoreException(failureCode, message);
     }
 
     private static bool IsVisibleInScope(
