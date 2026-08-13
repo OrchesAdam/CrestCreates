@@ -18,7 +18,7 @@ best-effort recording, and Agent Tool/MCP causal containment.
 
 **Spec status:** APPROVED
 
-**Plan status:** IMPLEMENTED — implementation head `3f899229` passed the full PR CI
+**Plan status:** IMPLEMENTED — implementation head `dbf87c4b` passed the full PR CI
 matrix in run `31609006303`; this follow-up closes the remaining contract review
 gaps and refreshes the evidence ledger.
 
@@ -685,7 +685,7 @@ JSON unit tests alone.
 The implementation-side evidence below is supplemented by the linked GitHub
 Actions run because the local environment has no Docker or PostgreSQL service.
 Run `31609006303` passed every provider, Capability, E2E, and NativeAOT gate on
-implementation head `3f899229`.
+implementation head `dbf87c4b`.
 
 | Evidence | Command | Result / sentinel |
 |---|---|---|
@@ -703,7 +703,7 @@ implementation head `3f899229`.
 
 ```text
 Final closure rule: this ledger is complete because implementation head
-`3f899229` has green PostgreSQL, Capability, E2E, and both original-binary AOT
+`dbf87c4b` has green PostgreSQL, Capability, E2E, and both original-binary AOT
 jobs in GitHub Actions run `31609006303`.
 ```
 
