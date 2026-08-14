@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Agent.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Tools;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
@@ -44,6 +45,12 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 [JsonSerializable(typeof(AgentToolBudgetReserveRequest))]
 [JsonSerializable(typeof(AgentToolBudgetFinalizeRequest))]
 [JsonSerializable(typeof(AgentToolInvocationAcquireRequest))]
+[JsonSerializable(typeof(AgentConversationRecord))]
+[JsonSerializable(typeof(AgentTaskRecord))]
+[JsonSerializable(typeof(AgentCompressedContext))]
+[JsonSerializable(typeof(AgentCompressedContextBlock))]
+[JsonSerializable(typeof(AgentMemoryCandidate))]
+[JsonSerializable(typeof(AgentMemoryItem))]
 internal sealed partial class PostgreSqlRuntimeJsonSerializerContext : JsonSerializerContext
 {
 }

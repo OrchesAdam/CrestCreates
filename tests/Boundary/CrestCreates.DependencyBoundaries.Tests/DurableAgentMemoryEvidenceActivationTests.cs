@@ -94,6 +94,12 @@ public sealed class Slice2EvidenceActivationTests : DurableAgentMemoryEvidenceAc
     protected override int Slice => 2;
 }
 
+/// <summary>Slice 3 — V010 schema, JSON roots, and explicit DI selection.</summary>
+public sealed class Slice3EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 3;
+}
+
 /// <summary>
 /// Source-level static discovery: an exact namespace, class, and method
 /// declaration must exist in the owning test project. Discovery is scoped to

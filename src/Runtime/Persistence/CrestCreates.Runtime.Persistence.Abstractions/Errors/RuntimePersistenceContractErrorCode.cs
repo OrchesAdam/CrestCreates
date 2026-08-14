@@ -6,5 +6,6 @@ public enum RuntimePersistenceContractErrorCode
     ActiveStepCorrelationConflict = 1,
     WaitingTaskCorrelationConflict = 2,
     PersistedInvariantViolation = 3,
-    ConcurrentAmbientUse = 4
+    ConcurrentAmbientUse = 4,
+    AmbientCommitBoundaryUnsupported = 5
 }
