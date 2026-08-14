@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-06 (Phase 9b+ durable agent tool pre-dispatch reconciliation all slices + review rounds 1–3 remediated; Issue #73 Phase 9b+ complexity consolidation complete — 4 slices + PR #74 review remediation rounds closed (round 3 = CAS-loser writer + ReasonCode boundary), PR #72 mergeable, #70 closed)
+Last Updated: 2026-08-14 (Phase 9b+ durable Agent Memory store provider implemented — Issue #55: V010 schema, four PostgreSQL Stores, shared hash/curation/comparer semantics, atomic Promote/Reject/Supersede/Archive with top-level COMMIT boundary, restart/crash/concurrency evidence, NativeAOT mainline sentinel CRESTCREATES_DURABLE_AGENT_MEMORY_OK)
 
 ## Purpose
 
@@ -727,6 +727,53 @@ Expected final standard:
 ---
 
 ## Not Yet Started or Not Yet Closed as Formal Platform Work
+
+
+### Issue #55 — Phase 9b+ Durable Agent Memory Store Provider
+
+Status: Implemented on `codex/issue-55-durable-agent-memory-store-spec`.
+Adds one direct-Npgsql durable implementation for each existing Agent Memory
+Store contract in the existing `CrestCreates.Runtime.Persistence.PostgreSql`
+kernel (no second provider kernel):
+
+- V010 `agent_memory_durable_store` migration: six tenant-scoped tables,
+  `C` collation on identity/order columns, named checks/indexes, Block FK
+  `ON DELETE CASCADE`, Memory graph self-FKs deferrable/initially-deferred
+  with `NO ACTION`, and schema-manifest validation of column collation and
+  exact FK delete action.
+- `PostgreSqlAgentConversationStore`, `PostgreSqlAgentTaskHistoryStore`,
+  `PostgreSqlAgentCompressedContextStore`, `PostgreSqlAgentMemoryStore` with
+  sanitization-before-JSON, source-generated JSON roots, advisory/row locking,
+  tenant-wide Block identity, parent-first Context replacement, and exact
+  create-or-exact-replay `SaveMemoryAsync`.
+- Shared provider-neutral semantic surface consumed by Promotion Service,
+  InMemory, and PostgreSQL: `IAgentMemoryStateHashProjector`,
+  `IAgentMemoryCurationProjector`, `IAgentMemoryCurationStateMachine`, and
+  `IAgentMemoryPersistenceComparer`; no copied projection/state machine in the
+  provider.
+- Formal Promote/Reject/Supersede/Archive are one atomic top-level transaction
+  each (`ExecuteTopLevelAsync`), rejecting a pre-existing ambient Runtime
+  transaction with `AmbientCommitBoundaryUnsupported` (code 5) so #56 can
+  never publish committed Accountability before the durable COMMIT.
+- Explicit `AddCrestCreatesPostgreSqlAgentMemoryPersistence()` opt-in replaces
+  the four development Stores in either registration order; the selected
+  `IAgentMemoryStore` implements conditional curation + capabilities by cast.
+- Evidence: 59 design cases / 98 required evidence tuples (44 exact Spec §18
+  skeleton names), InMemory + PostgreSQL shared contract cases, restart,
+  concurrency, failure-taxonomy, CrashWorker, migration, composition,
+  recall/expansion parity, and the NativeAOT linux-x64 publish-link-run
+  fixture printing `CRESTCREATES_DURABLE_AGENT_MEMORY_OK`.
+
+Boundary statements:
+
+- InMemory remains semantic-only; PostgreSQL is the durable provider.
+- Memory remains non-authoritative context; durability never changes
+  `IsAuthoritative` semantics.
+- Mutation and #56 Accountability persistence are post-result, not atomic.
+- No Outbox/reliable delivery, automatic replay, exactly-once business
+  effects, vector retrieval, retention/TTL, or a second database provider.
+- `SaveMemoryAsync` is create-or-exact-replay only; formal lifecycle
+  transitions are the only graph writers.
 
 ### Issue #24 — Phase 9b Durable Persistence Foundation
 

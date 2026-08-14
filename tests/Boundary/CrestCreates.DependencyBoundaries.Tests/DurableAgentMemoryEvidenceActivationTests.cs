@@ -141,6 +141,80 @@ public sealed class Slice10EvidenceActivationTests : DurableAgentMemoryEvidenceA
     protected override int Slice => 10;
 }
 
+/// <summary>Slice 11 union guard — every skeleton name and evidence tuple must
+/// be discoverable, including shared names in both runners.</summary>
+public sealed class Slice11EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 11;
+
+    [Fact]
+    public void SharedSkeletonNames_Should_BeDiscoverableInBothRunners()
+    {
+        var missing = new List<string>();
+        foreach (var entry in DurableAgentMemorySpecTestSkeleton.SharedRequiredMethodNames)
+        {
+            if (!DurableAgentMemorySourceDiscovery.HasMethodInRunner(
+                    InMemoryRunnerProject, "CrestCreates.Agent.Memory.Tests.Persistence", entry.Name))
+                missing.Add($"InMemory shared method {entry.Name}");
+            if (!DurableAgentMemorySourceDiscovery.HasMethodInRunner(
+                    PostgreSqlRunnerProject, "CrestCreates.Runtime.Persistence.PostgreSql.Tests", entry.Name))
+                missing.Add($"PostgreSQL shared method {entry.Name}");
+        }
+
+        Assert.True(
+            missing.Count == 0,
+            $"Shared skeleton names must exist in both runners:{Environment.NewLine}{string.Join(Environment.NewLine, missing)}");
+    }
+}
+
+/// <summary>Slice 11 discovery-completeness union over all 44 skeleton names
+/// and all 98 evidence tuples.</summary>
+public sealed class AllDurableAgentMemoryEvidenceTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 11;
+
+    [Fact]
+    public void EverySkeletonNameAndEvidenceTuple_Should_BeDiscoverable()
+    {
+        var missingSkeleton = new List<string>();
+        foreach (var name in DurableAgentMemorySpecTestSkeleton.SpecRequiredTestNames)
+        {
+            if (DurableAgentMemorySpecTestSkeleton.SharedRequiredMethodNames.Any(e => e.Name == name))
+            {
+                if (!DurableAgentMemorySourceDiscovery.HasMethodInRunner(
+                        InMemoryRunnerProject, "CrestCreates.Agent.Memory.Tests.Persistence", name)
+                    || !DurableAgentMemorySourceDiscovery.HasMethodInRunner(
+                        PostgreSqlRunnerProject, "CrestCreates.Runtime.Persistence.PostgreSql.Tests", name))
+                {
+                    missingSkeleton.Add($"shared method {name} (both runners)");
+                }
+            }
+            else if (DurableAgentMemorySpecTestSkeleton.PostgreSqlRequiredGroupNames.Any(e => e.Name == name))
+            {
+                if (!DurableAgentMemorySourceDiscovery.HasClassInRunner(
+                        PostgreSqlRunnerProject, "CrestCreates.Runtime.Persistence.PostgreSql.Tests", name))
+                    missingSkeleton.Add($"PostgreSQL group {name}");
+            }
+            else if (!DurableAgentMemorySourceDiscovery.HasMethodInRunner(
+                         PostgreSqlRunnerProject, "CrestCreates.Runtime.Persistence.PostgreSql.Tests", name))
+            {
+                missingSkeleton.Add($"PostgreSQL method {name}");
+            }
+        }
+
+        var missingEvidence = DurableAgentMemoryCaseManifest.EvidenceTuples
+            .Where(tuple => !IsDiscoverable(tuple.ExactFullyQualifiedTestName))
+            .Select(tuple => $"{tuple.CaseId}/{tuple.Kind}: {tuple.ExactFullyQualifiedTestName}")
+            .ToArray();
+
+        Assert.True(
+            missingSkeleton.Count == 0 && missingEvidence.Length == 0,
+            $"All skeleton names and evidence tuples must be activated.{Environment.NewLine}"
+            + $"Skeleton missing: {string.Join(Environment.NewLine, missingSkeleton)}{Environment.NewLine}"
+            + $"Evidence missing: {string.Join(Environment.NewLine, missingEvidence)}");
+    }
+}
+
 /// <summary>
 /// Source-level static discovery: an exact namespace, class, and method
 /// declaration must exist in the owning test project. Discovery is scoped to

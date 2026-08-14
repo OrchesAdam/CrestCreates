@@ -144,9 +144,10 @@ public sealed class PostgreSqlAgentMemoryCompositionTests
         context.GetType().FullName.Should().Contain("PostgreSqlAgentCompressedContextStore");
         memory.GetType().FullName.Should().Contain("PostgreSqlAgentMemoryStore");
 
-        // Capability is truthful by implementation phase: Unknown until Slice 8.
+        // All four formal primitives are implemented atomically, so the
+        // selected durable Store truthfully reports ConfirmedAtomic.
         ((IAgentMemoryStoreCapabilities)memory).CurationOutcomeGuarantee
-            .Should().Be(AgentMemoryCurationOutcomeGuarantee.Unknown);
+            .Should().Be(AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic);
     }
 
     [Fact]

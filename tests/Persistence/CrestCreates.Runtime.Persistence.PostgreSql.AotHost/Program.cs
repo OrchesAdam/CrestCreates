@@ -17,6 +17,12 @@ using CrestCreates.Metadata.AgentTool;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Agent.Memory;
+using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Agent.Memory.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
@@ -157,7 +163,12 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
 // CW04/CW05/CW07/CW08/CW09, converging without any dispatcher call.
 await RunPreDispatchCrashScenariosAsync(options);
 
+// Phase 9b+ Durable Agent Memory mainline: sanitized Conversation/Task,
+// Context/Block projection, formal curation through the real service, restart
+// read, Recall/Source Expansion, and #56 Accountability.
+await RunDurableAgentMemoryMainlineAsync(options);
 return 0;
+
 
 static async Task RunPreDispatchCrashScenariosAsync(PostgreSqlRuntimePersistenceOptions options)
 {
@@ -476,6 +487,220 @@ static CanonicalHash RuntimeHash(string value, string purpose) => new()
     CanonicalShapeVersion = "phase9b-aot-v1"
 };
 
+static async Task RunDurableAgentMemoryMainlineAsync(PostgreSqlRuntimePersistenceOptions options)
+{
+    // First provider: full durable mainline.
+    await using (var provider = BuildAgentMemoryProvider(options))
+    {
+        using var scope = provider.CreateScope();
+        var services = scope.ServiceProvider;
+        var conversations = services.GetRequiredService<IAgentConversationStore>();
+        var tasks = services.GetRequiredService<IAgentTaskHistoryStore>();
+        var contexts = services.GetRequiredService<IAgentCompressedContextStore>();
+        var memoryStore = services.GetRequiredService<IAgentMemoryStore>();
+        var promotion = services.GetRequiredService<IAgentMemoryPromotionService>();
+        var hashes = services.GetRequiredService<AgentMemoryCanonicalHashProjector>();
+
+        // 1. Conversation with accepted and rejected raw content.
+        var conversation = new AgentConversationRecord
+        {
+            TenantId = "aot",
+            ConversationId = "conversation-aot",
+            Turns =
+            [
+                new AgentConversationTurn
+                {
+                    TurnId = "turn-1",
+                    TenantId = "aot",
+                    Role = AgentConversationRole.User,
+                    Content = "accepted durable content",
+                    CreatedAt = DateTimeOffset.UnixEpoch
+                },
+                new AgentConversationTurn
+                {
+                    TurnId = "turn-2",
+                    TenantId = "aot",
+                    Role = AgentConversationRole.Assistant,
+                    Content = "   ",
+                    CreatedAt = DateTimeOffset.UnixEpoch.AddSeconds(1)
+                }
+            ]
+        };
+        await conversations.SaveConversationAsync(conversation);
+
+        // 2. Task + appended Event.
+        var task = new AgentTaskRecord
+        {
+            TenantId = "aot",
+            TaskId = "task-aot",
+            Title = "aot task"
+        };
+        await tasks.SaveTaskAsync(task);
+        await tasks.AppendEventAsync("aot", "task-aot", new AgentTaskEvent
+        {
+            EventId = "event-1",
+            TenantId = "aot",
+            TaskId = "task-aot",
+            EventKind = "progress",
+            Content = "appended event",
+            CreatedAt = DateTimeOffset.UnixEpoch
+        });
+
+        // 3. Context with Blocks + direct Block projection.
+        var context = new AgentCompressedContext
+        {
+            TenantId = "aot",
+            ContextId = "context-aot",
+            Blocks =
+            [
+                new AgentCompressedContextBlock
+                {
+                    BlockId = "block-1",
+                    TenantId = "aot",
+                    Content = "block content",
+                    CanonicalContentHash = hashes.ComputeContentHash("aot", AgentSourceKind.ConversationTurn, "source-1", 0, 0, "block content"),
+                    SourceRefs =
+                    [
+                        new AgentContextSourceRef
+                        {
+                            SourceKind = AgentSourceKind.ConversationTurn,
+                            TenantId = "aot",
+                            SourceId = "conversation-aot",
+                            RangeStart = 0,
+                            RangeEnd = 0
+                        }
+                    ]
+                }
+            ]
+        };
+        await contexts.CreateCompressedContextAsync(context);
+
+        // 4. Candidate → formal Promote through the real service.
+        var candidate = new AgentMemoryCandidate
+        {
+            TenantId = "aot",
+            CandidateId = "candidate-aot",
+            Kind = AgentMemoryKind.Decision,
+            Content = "durable memory content",
+            CanonicalContentHash = hashes.ComputeContentHash("aot", AgentSourceKind.ConversationTurn, "source-1", 0, 0, "durable memory content"),
+            Confidence = AgentMemoryConfidence.High
+        };
+        await memoryStore.CreateCandidateAsync(candidate);
+        var operation = new AgentMemoryOperationRequest
+        {
+            TenantId = "aot",
+            InvocationContext = new AgentMemoryInvocationContext
+            {
+                TenantId = "aot",
+                ActorId = "aot-host",
+                ActorKind = "system",
+                CorrelationId = "aot-correlation",
+                InvocationSource = "system"
+            },
+            Reason = "aot mainline",
+            Identity = new AgentMemoryOperationIdentity
+            {
+                OperationId = "op-aot-promote",
+                OccurredAt = DateTimeOffset.UnixEpoch
+            },
+            Explanation = "aot mainline explanation"
+        };
+        var promoted = await promotion.PromoteAsync("aot", "candidate-aot", "memory-aot", operation);
+
+        // 5. Replacement Candidate → formal Supersede through the real service.
+        var replacement = new AgentMemoryCandidate
+        {
+            TenantId = "aot",
+            CandidateId = "candidate-aot-replacement",
+            Kind = AgentMemoryKind.Decision,
+            Content = "replacement memory content",
+            CanonicalContentHash = hashes.ComputeContentHash("aot", AgentSourceKind.ConversationTurn, "source-1", 0, 0, "replacement memory content"),
+            Confidence = AgentMemoryConfidence.High
+        };
+        await memoryStore.CreateCandidateAsync(replacement);
+        await promotion.SupersedeAsync(
+            "aot", "memory-aot", "candidate-aot-replacement", "memory-aot-replacement", operation);
+
+        // 6. Verify the reciprocal graph.
+        var oldMemory = await memoryStore.GetMemoryAsync("aot", "memory-aot");
+        var newMemory = await memoryStore.GetMemoryAsync("aot", "memory-aot-replacement");
+        if (oldMemory?.Status != AgentMemoryStatus.Superseded
+            || oldMemory.SupersededByMemoryId != "memory-aot-replacement"
+            || newMemory?.SupersedesMemoryId != "memory-aot"
+            || newMemory?.Status != AgentMemoryStatus.Active)
+        {
+            throw new InvalidOperationException("AOT durable Memory graph is not reciprocal.");
+        }
+    }
+
+    // Fresh provider over the same schema: restart durability.
+    await using (var fresh = BuildAgentMemoryProvider(options))
+    {
+        using var scope = fresh.CreateScope();
+        var services = scope.ServiceProvider;
+        var conversations = services.GetRequiredService<IAgentConversationStore>();
+        var tasks = services.GetRequiredService<IAgentTaskHistoryStore>();
+        var contexts = services.GetRequiredService<IAgentCompressedContextStore>();
+        var memoryStore = services.GetRequiredService<IAgentMemoryStore>();
+        var retriever = services.GetRequiredService<IAgentMemoryRetriever>();
+        var expander = services.GetRequiredService<IAgentContextSourceExpander>();
+
+        // 7. Restart reads.
+        var conversation = await conversations.GetConversationAsync("aot", "conversation-aot");
+        if (conversation?.Turns.Count != 1 || conversation.Turns[0].Content != "accepted durable content")
+            throw new InvalidOperationException("AOT Conversation restart read failed.");
+        var task = await tasks.GetTaskAsync("aot", "task-aot");
+        if (task?.Events.Count != 1 || task.Events[0].Content != "appended event")
+            throw new InvalidOperationException("AOT Task restart read failed.");
+        var context = await contexts.GetCompressedContextAsync("aot", "context-aot");
+        var block = await contexts.GetCompressedContextBlockAsync("aot", "block-1");
+        if (context?.Blocks.Count != 1 || block?.Content != "block content")
+            throw new InvalidOperationException("AOT Context/Block restart read failed.");
+
+        // 8. Recall through the real Retriever.
+        var pack = await retriever.RecallAsync(new AgentMemoryQuery { TenantId = "aot" });
+        if (!pack.Memories.Any(m => m.MemoryId == "memory-aot-replacement"))
+            throw new InvalidOperationException("AOT Recall lost the active Memory.");
+
+        // 9. Source Expansion through the real Expander.
+        var expanded = await expander.ExpandAsync(new AgentContextSourceRef
+        {
+            SourceKind = AgentSourceKind.ConversationTurn,
+            TenantId = "aot",
+            SourceId = "conversation-aot",
+            RangeStart = 0,
+            RangeEnd = 0
+        });
+        if (expanded.Status != AgentMemorySourceExpansionStatus.Expanded
+            || !expanded.SanitizedContent!.Contains("accepted durable content", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("AOT Source Expansion failed after restart.");
+        }
+
+        // 10. Curation capabilities + #56 Accountability composition validator.
+        var capabilities = memoryStore as IAgentMemoryStoreCapabilities;
+        if (capabilities is null
+            || capabilities.CurationOutcomeGuarantee != AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic
+            || memoryStore is not IAgentMemoryConditionalCurationStore)
+        {
+            throw new InvalidOperationException("AOT durable Memory capabilities are not ConfirmedAtomic.");
+        }
+        if (services.GetService<IAgentMemoryFormalCurationMarker>() is null)
+            throw new InvalidOperationException("AOT formal curation marker is missing.");
+    }
+
+    Console.WriteLine("CRESTCREATES_DURABLE_AGENT_MEMORY_OK");
+}
+
+static ServiceProvider BuildAgentMemoryProvider(PostgreSqlRuntimePersistenceOptions options)
+    => new ServiceCollection()
+        .AddSingleton<ICanonicalHashComputer>(new AotHashComputer())
+        .AddAgentMemoryRuntime()
+        .AddCrestCreatesPostgreSqlRuntimePersistence(options)
+        .AddCrestCreatesPostgreSqlAgentMemoryPersistence()
+        .BuildServiceProvider();
+
+
 internal sealed class SingleDescriptorProvider<TDescriptor>(TDescriptor descriptor) : IDescriptorProvider<TDescriptor>
     where TDescriptor : IDescriptor
 {
@@ -507,4 +732,29 @@ public sealed partial class AotRuntimeStateJsonSerializerContext : JsonSerialize
 internal interface IAotRuntimeStateJsonSurface
 {
     MutableNestedAotState State(MutableNestedAotState value);
+}
+
+sealed class AotHashComputer : ICanonicalHashComputer
+{
+    public CanonicalHash ComputeContractHash(IDescriptor descriptor, CanonicalHashScope scope)
+        => Hash(descriptor.GetType().Name + "-contract");
+
+    public CanonicalHash ComputeDefinitionHash(IDescriptor descriptor, CanonicalHashScope scope)
+        => Hash(descriptor.GetType().Name + "-definition");
+
+    public CanonicalHash ComputeFromProjection(CanonicalHashProjectionResult projection)
+        => Hash(projection.Metadata.ArtifactKind + "-" + projection.Metadata.Purpose);
+
+    private static CanonicalHash Hash(string value)
+        => new()
+        {
+            Value = value,
+            Algorithm = "SHA-256",
+            AlgorithmVersion = "sha256-canonical-json-v1",
+            ArtifactKind = "AgentMemoryAot",
+            Scope = "InternalFull",
+            Purpose = "Aot",
+            ContractVersion = "memory-hash-v1",
+            CanonicalShapeVersion = "aot-v1"
+        };
 }
