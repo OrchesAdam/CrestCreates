@@ -389,11 +389,11 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
 
         await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options, sql);
         command.Parameters.AddWithValue("tenant", query.TenantId);
-        command.Parameters.AddWithValue("statuses", statuses);
+        command.Parameters.Add("statuses", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value = statuses;
         if (query.Kinds.Count > 0)
-            command.Parameters.AddWithValue("kinds", query.Kinds.Select(kind => (int)kind).ToArray());
+            command.Parameters.Add("kinds", NpgsqlDbType.Array | NpgsqlDbType.Integer).Value = query.Kinds.Select(kind => (int)kind).ToArray();
         if (query.MemoryIds.Count > 0)
-            command.Parameters.AddWithValue("ids", query.MemoryIds);
+            command.Parameters.Add("ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = query.MemoryIds;
 
         var records = new List<AgentMemoryItem>();
         using (var lease = session.EnterCommand())

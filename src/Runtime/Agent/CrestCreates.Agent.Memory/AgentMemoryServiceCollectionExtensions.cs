@@ -94,7 +94,9 @@ public static class AgentMemoryServiceCollectionExtensions
         services.TryAddSingleton<AgentMemoryCanonicalHashProjector>();
         services.TryAddSingleton<IAgentMemoryStateHashProjector>(sp =>
             sp.GetRequiredService<AgentMemoryCanonicalHashProjector>());
-        services.TryAddSingleton<IAgentMemoryCurationProjector, DefaultAgentMemoryCurationProjector>();
+        services.TryAddSingleton<DefaultAgentMemoryCurationProjector>();
+        services.TryAddSingleton<IAgentMemoryCurationProjector>(sp =>
+            sp.GetRequiredService<DefaultAgentMemoryCurationProjector>());
         services.TryAddSingleton<IAgentMemoryCurationStateMachine, DefaultAgentMemoryCurationStateMachine>();
         services.TryAddSingleton<IAgentMemoryPersistenceComparer, DefaultAgentMemoryPersistenceComparer>();
 

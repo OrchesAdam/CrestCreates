@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
@@ -101,7 +102,7 @@ internal sealed class PostgreSqlAgentCompressedContextStore : IAgentCompressedCo
                 where tenant_id = @tenant and block_id = any(@blocks);
                 """);
             availability.Parameters.AddWithValue("tenant", context.TenantId);
-            availability.Parameters.AddWithValue("blocks", newBlockIds);
+            availability.Parameters.Add("blocks", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = newBlockIds;
             using var lease = session.EnterCommand();
             await using var reader = await availability.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
