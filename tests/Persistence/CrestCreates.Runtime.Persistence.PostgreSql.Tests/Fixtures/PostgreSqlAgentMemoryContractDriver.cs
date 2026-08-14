@@ -3,6 +3,7 @@ using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Curation;
+using CrestCreates.Agent.Memory.Persistence.Testing;
 using CrestCreates.Agent.Memory.Persistence.Testing.Drivers;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -33,6 +34,8 @@ public sealed class PostgreSqlAgentMemoryContractDriver : IAgentMemoryDurability
         RebuildProviderAsync().AsTask().GetAwaiter().GetResult();
     }
 
+    public ServiceProvider Provider => _provider;
+
     public IAgentConversationStore ConversationStore => _conversationStore;
     public IAgentTaskHistoryStore TaskStore => _taskStore;
     public IAgentCompressedContextStore ContextStore => _contextStore;
@@ -55,7 +58,7 @@ public sealed class PostgreSqlAgentMemoryContractDriver : IAgentMemoryDurability
         _taskStore = _provider.GetRequiredService<IAgentTaskHistoryStore>();
         _contextStore = _provider.GetRequiredService<IAgentCompressedContextStore>();
         _memoryStore = _provider.GetRequiredService<IAgentMemoryStore>();
-        _sanitizer = _provider.GetRequiredService<IAgentMemoryContentSanitizer>();
+        _sanitizer = new RejectingSanitizer(_provider.GetRequiredService<IAgentMemoryContentSanitizer>());
     }
 
     public ValueTask<IAgentMemoryStoreContractDriver> CreateFreshReaderAsync(CancellationToken cancellationToken = default)
@@ -186,4 +189,41 @@ public sealed class PostgreSqlAgentMemoryContractDriver : IAgentMemoryDurability
                 CanonicalShapeVersion = "test-v1"
             };
     }
+
+    /// <summary>Wraps the real sanitizer and rejects the contract sentinel so
+    /// shared sanitization cases observe deterministic rejection.</summary>
+    private sealed class RejectingSanitizer : IAgentMemoryContentSanitizer
+    {
+        private readonly IAgentMemoryContentSanitizer _inner;
+
+        public RejectingSanitizer(IAgentMemoryContentSanitizer inner)
+        {
+            _inner = inner;
+        }
+
+        public SanitizedAgentContent Sanitize(string tenantId, string content, IReadOnlyList<AgentContextSourceRef> sourceRefs)
+        {
+            if (content.Contains(AgentMemoryPersistenceContractMarkers.RejectedContentSentinel, StringComparison.Ordinal))
+            {
+                return new SanitizedAgentContent
+                {
+                    SanitizedContent = string.Empty,
+                    CanonicalContentHash = _inner.Sanitize(tenantId, string.Empty, sourceRefs).CanonicalContentHash,
+                    Rejected = true,
+                    RedactionKinds = [],
+                    Diagnostics =
+                    [
+                        new AgentMemoryDiagnostic
+                        {
+                            Code = AgentMemoryDiagnosticCodes.ContentRejected,
+                            Message = "Content rejected by contract fixture.",
+                            Severity = CrestCreates.Core.Abstractions.Identity.SeverityLevel.Warning
+                        }
+                    ]
+                };
+            }
+            return _inner.Sanitize(tenantId, content, sourceRefs);
+        }
+    }
 }
+

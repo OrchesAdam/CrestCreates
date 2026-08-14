@@ -71,8 +71,9 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
         var plan = _driver.PreparePromotionPlan(candidate, "memory-ambient", Operation("tenant-a", "op-ambient"));
         var conditional = (IAgentMemoryConditionalCurationStore)_driver.MemoryStore;
 
-        // Build an ambient Runtime transaction through the public coordinator.
-        var coordinator = PostgreSqlAgentMemoryContractDriver.BuildProvider(_lease.Options)
+        // Build an ambient Runtime transaction through the public coordinator
+        // of the SAME provider that owns the Store, so the accessor is shared.
+        var coordinator = _driver.Provider
             .GetRequiredService<CrestCreates.Runtime.Persistence.Abstractions.Transactions.IRuntimeTransactionCoordinator>();
 
         var failure = await Record.ExceptionAsync(async () =>
@@ -100,16 +101,16 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
             CompressedContext("tenant-a", "context-conflict",
                 ContextBlock("tenant-a", "block-a", "old", 0)));
 
-        // Another tenant claims the same BlockId — the shared case asserts the
-        // conflict path; here we prove the old projection survives a failed replace.
-        var conflicting = CompressedContext("tenant-a", "context-conflict",
-            ContextBlock("tenant-a", "block-a", "new", 0),
-            ContextBlock("tenant-a", "block-new", "extra", 1));
-
-        // Same-context reuse is legal; instead force a foreign-context conflict.
+        // A different context claims a block the replacement wants to adopt —
+        // the shared case asserts the conflict path; here we prove the old
+        // projection survives the failed replace.
         await _driver.ContextStore.CreateCompressedContextAsync(
             CompressedContext("tenant-a", "context-other",
-                ContextBlock("tenant-a", "block-a", "other", 0)));
+                ContextBlock("tenant-a", "block-foreign", "other", 0)));
+
+        var conflicting = CompressedContext("tenant-a", "context-conflict",
+            ContextBlock("tenant-a", "block-a", "new", 0),
+            ContextBlock("tenant-a", "block-foreign", "extra", 1));
 
         var act = async () => await _driver.ContextStore.SaveCompressedContextAsync(conflicting);
         await act.Should().ThrowAsync<AgentMemoryOperationException>()
@@ -152,7 +153,7 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
 
         await TamperAsync($"""
             update "{_lease.Options.Schema}".agent_memories
-            set state_contract_version = 99
+            set canonical_content_hash = '0000000000000000000000000000000000000000000000000000000000000000'
             where tenant_id = 'tenant-a' and memory_id = 'memory-malformed';
             """);
 

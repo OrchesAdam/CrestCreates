@@ -65,6 +65,7 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
             try
             {
                 var result = await work(cancellationToken).ConfigureAwait(false);
+                await PostgreSqlRuntimeTestHooks.NotifyBeforeCommitAsync(CancellationToken.None).ConfigureAwait(false);
                 try
                 {
                     await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);

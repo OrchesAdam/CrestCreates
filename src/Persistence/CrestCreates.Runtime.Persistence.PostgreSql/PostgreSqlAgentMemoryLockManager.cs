@@ -50,7 +50,7 @@ internal sealed class PostgreSqlAgentMemoryLockManager
     {
         var clauses = new List<string>(count);
         for (var index = 0; index < count; index++)
-            clauses.Add($"select pg_advisory_lock(hashtextextended(@key{index}, 0));");
+            clauses.Add($"select pg_advisory_xact_lock(hashtextextended(@key{index}, 0));");
         return string.Join(Environment.NewLine, clauses);
     }
 }

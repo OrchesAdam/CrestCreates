@@ -187,7 +187,16 @@ private static async Task AssertTableExistsAsync(PostgreSqlRuntimePersistenceOpt
         await using var reader = await command.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
             return null;
-        return new ForeignKeyInfo(reader.GetString(0), reader.GetBoolean(1), reader.GetBoolean(2));
+        var deleteAction = reader.GetString(0) switch
+        {
+            "c" => "cascade",
+            "a" => "no action",
+            "r" => "restrict",
+            "n" => "set null",
+            "d" => "set default",
+            var other => other
+        };
+        return new ForeignKeyInfo(deleteAction, reader.GetBoolean(1), reader.GetBoolean(2));
     }
 
     private static async Task<long> CountChecksAsync(PostgreSqlRuntimePersistenceOptions options, string table)

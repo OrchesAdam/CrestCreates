@@ -112,8 +112,8 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
         var payload = new AgentMemoryRecallAccountabilityPayload
         {
             OperationId = identity.OperationId,
-            Result = "failed",
-            EffectivePackHash = Hash("pack-unknown"),
+            Result = "rejected",
+            StableFailureCode = "resource-unavailable",
             ReturnedCount = 0,
             WasTruncated = false,
             MaximumCount = 10,

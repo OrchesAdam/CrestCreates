@@ -103,10 +103,16 @@ internal static class AgentMemoryCrashScenarios
 
                 if (scenario.EndsWith("before-promote-commit", StringComparison.Ordinal))
                 {
-                    // Durable writes complete, then the parent kills the process
-                    // before the provider-owned COMMIT acknowledgement.
+                    // Durable writes complete inside the transaction, then the
+                    // worker prints the sentinel and blocks; the parent kills
+                    // the tree so the provider-owned COMMIT never acknowledges.
+                    using var beforeCommit = PostgreSqlRuntimeTestHooks.BlockBeforeCommit(async ct =>
+                    {
+                        Console.WriteLine("AGENT_MEMORY_BEFORE_PROMOTE_COMMIT");
+                        await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+                    });
                     await conditional.PromoteAsync("crash-tenant", plan);
-                    Console.WriteLine("AGENT_MEMORY_BEFORE_PROMOTE_COMMIT");
+                    throw new InvalidOperationException("before-COMMIT block must not be released before the parent kill.");
                 }
                 else
                 {
@@ -189,8 +195,13 @@ internal static class AgentMemoryCrashScenarios
 
                 if (scenario.EndsWith("before-supersede-commit", StringComparison.Ordinal))
                 {
+                    using var beforeCommit = PostgreSqlRuntimeTestHooks.BlockBeforeCommit(async ct =>
+                    {
+                        Console.WriteLine("AGENT_MEMORY_BEFORE_SUPERSEDE_COMMIT");
+                        await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+                    });
                     await conditional.SupersedeAsync("crash-tenant", supersession);
-                    Console.WriteLine("AGENT_MEMORY_BEFORE_SUPERSEDE_COMMIT");
+                    throw new InvalidOperationException("before-COMMIT block must not be released before the parent kill.");
                 }
                 else
                 {
