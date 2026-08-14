@@ -2,6 +2,7 @@ using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.CanonicalHashing;
+using CrestCreates.Agent.Memory.Sanitization;
 using CrestCreates.Agent.Memory.Curation;
 using CrestCreates.Agent.Memory.Persistence.Testing;
 using CrestCreates.Agent.Memory.Persistence.Testing.Drivers;
@@ -144,6 +145,8 @@ public sealed class PostgreSqlAgentMemoryContractDriver : IAgentMemoryDurability
     internal static ServiceProvider BuildProvider(PostgreSqlRuntimePersistenceOptions options)
         => new ServiceCollection()
             .AddSingleton<ICanonicalHashComputer>(new DeterministicHashComputer())
+            .AddSingleton<IAgentMemoryContentSanitizer>(
+                sp => new RejectingSanitizer(sp.GetRequiredService<DefaultAgentMemoryContentSanitizer>()))
             .AddAgentMemoryRuntime()
             .AddCrestCreatesPostgreSqlRuntimePersistence(options)
             .AddCrestCreatesPostgreSqlAgentMemoryPersistence()
