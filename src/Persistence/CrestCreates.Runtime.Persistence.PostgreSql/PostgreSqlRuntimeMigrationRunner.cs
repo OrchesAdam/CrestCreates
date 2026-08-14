@@ -666,8 +666,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
             }, ["tenant_id", "task_id"],
             [new("ck_agent_memory_tasks_revision", "check (revision > 0)"),
-             new("ck_agent_memory_tasks_contract_version", "check (state_contract_version = 1)")],
-            [new("ix_agent_memory_tasks_tenant_task", ["tenant_id", "task_id"], "", Unique: false)], []),
+             new("ck_agent_memory_tasks_contract_version", "check (state_contract_version = 1)")], [], []),
             new("agent_memory_compressed_contexts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = TextC, ["context_id"] = TextC,
