@@ -110,19 +110,54 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
         var stateHashes = snapshots.Select(snapshot => _stateHashes.ComputeCandidateStateHash(snapshot)).ToArray();
 
         var session = _coordinator.RequireSession();
-        foreach (var group in snapshots.GroupBy(item => item.TenantId, StringComparer.Ordinal))
+
+        // Frozen batch algorithm: lock all identities in a global deterministic
+        // order, precheck every occupancy, then insert. A global (tenant, id)
+        // order across the whole batch prevents deadlock between batches that
+        // present the same cross-tenant identities in different tenant orders,
+        // and prechecking all identities before the first INSERT prevents a
+        // catch-then-commit ambient caller from committing a partial batch.
+        var ordered = snapshots
+            .Select((snapshot, index) => (snapshot, index))
+            .OrderBy(pair => pair.snapshot.TenantId, StringComparer.Ordinal)
+            .ThenBy(pair => pair.snapshot.CandidateId, StringComparer.Ordinal)
+            .ToArray();
+        foreach (var group in ordered.GroupBy(pair => pair.snapshot.TenantId, StringComparer.Ordinal))
         {
             await _lockManager.AcquireAsync(
                 session,
                 group.Key,
                 "candidate",
-                group.Select(item => item.CandidateId).ToArray(),
+                group.Select(pair => pair.snapshot.CandidateId).ToArray(),
                 ct).ConfigureAwait(false);
         }
 
-        for (var index = 0; index < snapshots.Length; index++)
+        // Occupancy precheck: every identity must be absent before any write.
+        await using (var occupancy = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options, $"""
+            select candidate_id
+            from {PostgreSqlAgentMemoryStoreSupport.Table(_options, "agent_memory_candidates")}
+            where tenant_id = @tenant and candidate_id = any(@ids);
+            """))
         {
-            var candidate = snapshots[index];
+            foreach (var group in ordered.GroupBy(pair => pair.snapshot.TenantId, StringComparer.Ordinal))
+            {
+                occupancy.Parameters.Clear();
+                occupancy.Parameters.AddWithValue("tenant", group.Key);
+                occupancy.Parameters.Add("ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value =
+                    group.Select(pair => pair.snapshot.CandidateId).ToArray();
+                using var lease = session.EnterCommand();
+                await using var reader = await occupancy.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    throw new AgentMemoryOperationException(
+                        AgentMemoryOperationFailureCode.IdentityConflict,
+                        "Candidate identity already exists.");
+                }
+            }
+        }
+
+        foreach (var (candidate, index) in ordered)
+        {
             await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options, $"""
                 insert into {PostgreSqlAgentMemoryStoreSupport.Table(_options, "agent_memory_candidates")}
                     (tenant_id, candidate_id, revision, status, kind, canonical_content_hash, state_hash,
@@ -159,10 +194,14 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
 
         AgentMemoryCandidate? current = null;
         long revision = 0;
+        int status = 0;
+        int kind = 0;
+        string contentHash = string.Empty;
+        string persistedStateHash = string.Empty;
         int version = 0;
         string stateJson = string.Empty;
         await using (var select = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options, $"""
-            select revision, state_contract_version, state_json
+            select revision, status, kind, canonical_content_hash, state_hash, state_contract_version, state_json
             from {PostgreSqlAgentMemoryStoreSupport.Table(_options, "agent_memory_candidates")}
             where tenant_id = @tenant and candidate_id = @candidate
             for update;
@@ -175,12 +214,16 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
             if (!await reader.ReadAsync(ct).ConfigureAwait(false))
                 throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Candidate is unavailable.");
             revision = reader.GetInt64(0);
-            version = reader.GetInt32(1);
-            stateJson = reader.GetString(2);
+            status = reader.GetInt32(1);
+            kind = reader.GetInt32(2);
+            contentHash = reader.GetString(3);
+            persistedStateHash = reader.GetString(4);
+            version = reader.GetInt32(5);
+            stateJson = reader.GetString(6);
         }
 
         current = PostgreSqlAgentMemoryRowMapper.MapCandidate(
-            tenantId, candidateId, revision, version, 0, string.Empty, 1, stateJson,
+            tenantId, candidateId, revision, status, kind, contentHash, persistedStateHash, version, stateJson,
             PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryCandidate,
             _stateHashes);
         if (current.Status != expectedStatus)
@@ -232,6 +275,7 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
             reader.GetInt32(3),
             reader.GetInt32(4),
             reader.GetString(5),
+            reader.GetString(6),
             reader.GetInt32(7),
             reader.GetString(8),
             PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryCandidate,
@@ -342,28 +386,89 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
             """);
         command.Parameters.AddWithValue("tenant", tenantId);
         command.Parameters.AddWithValue("memory", memoryId);
-        using var lease = session.EnterCommand();
-        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
-            return null;
+        string? supersedes = null;
+        string? supersededBy = null;
+        AgentMemoryItem? memory = null;
+        using (var lease = session.EnterCommand())
+        {
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+                return null;
 
-        var memory = PostgreSqlAgentMemoryRowMapper.MapMemory(
-            tenantId,
-            memoryId,
-            reader.GetInt64(2),
-            reader.GetInt32(3),
-            reader.GetInt32(4),
-            reader.GetInt32(5),
-            reader.GetFieldValue<DateTimeOffset>(6),
-            reader.GetString(7),
-            reader.GetString(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9),
-            reader.IsDBNull(10) ? null : reader.GetString(10),
-            reader.GetInt32(11),
-            reader.GetString(12),
-            PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryItem,
-            _stateHashes);
+            supersedes = reader.IsDBNull(9) ? null : reader.GetString(9);
+            supersededBy = reader.IsDBNull(10) ? null : reader.GetString(10);
+            memory = PostgreSqlAgentMemoryRowMapper.MapMemory(
+                tenantId,
+                memoryId,
+                reader.GetInt64(2),
+                reader.GetInt32(3),
+                reader.GetInt32(4),
+                reader.GetInt32(5),
+                reader.GetFieldValue<DateTimeOffset>(6),
+                reader.GetString(7),
+                reader.GetString(8),
+                supersedes,
+                supersededBy,
+                reader.GetInt32(11),
+                reader.GetString(12),
+                PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryItem,
+                _stateHashes);
+        }
+
+        await ValidateReciprocalEdgesAsync(session, tenantId, memoryId, supersedes, supersededBy, ct).ConfigureAwait(false);
         return memory;
+    }
+
+    /// <summary>Validates the frozen read invariant: every link column must be
+    /// reciprocated by its endpoint. B.Supersedes=A requires A.SupersededBy=B
+    /// and vice versa; a FK-valid but one-sided edge is persisted corruption.</summary>
+    private async ValueTask ValidateReciprocalEdgesAsync(
+        PostgreSqlRuntimeSession session,
+        string tenantId,
+        string memoryId,
+        string? supersedes,
+        string? supersededBy,
+        CancellationToken ct)
+    {
+        var candidates = new List<(string Link, string Column)>();
+        if (supersedes is not null)
+            candidates.Add((supersedes, "supersedes_memory_id"));
+        if (supersededBy is not null)
+            candidates.Add((supersededBy, "superseded_by_memory_id"));
+        if (candidates.Count == 0)
+            return;
+
+        await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options, $"""
+            select memory_id, supersedes_memory_id, superseded_by_memory_id
+            from {PostgreSqlAgentMemoryStoreSupport.Table(_options, "agent_memories")}
+            where tenant_id = @tenant and memory_id = any(@ids);
+            """);
+        command.Parameters.AddWithValue("tenant", tenantId);
+        command.Parameters.Add("ids", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = candidates.Select(pair => pair.Link).ToArray();
+        using var lease = session.EnterCommand();
+        var endpoints = new Dictionary<string, (string? Supersedes, string? SupersededBy)>(StringComparer.Ordinal);
+        await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                endpoints[reader.GetString(0)] = (
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2));
+            }
+        }
+
+        foreach (var (link, column) in candidates)
+        {
+            if (!endpoints.TryGetValue(link, out var endpoint))
+                throw PostgreSqlAgentMemoryStoreSupport.Invariant(
+                    $"Memory {memoryId} references missing endpoint {link} via {column}.");
+            if (column == "supersedes_memory_id" && !string.Equals(endpoint.SupersededBy, memoryId, StringComparison.Ordinal))
+                throw PostgreSqlAgentMemoryStoreSupport.Invariant(
+                    $"Memory {memoryId} supersedes {link} but {link} does not reciprocate via superseded_by_memory_id.");
+            if (column == "superseded_by_memory_id" && !string.Equals(endpoint.Supersedes, memoryId, StringComparison.Ordinal))
+                throw PostgreSqlAgentMemoryStoreSupport.Invariant(
+                    $"Memory {memoryId} is superseded by {link} but {link} does not reciprocate via supersedes_memory_id.");
+        }
     }
 
     private async ValueTask<IReadOnlyList<AgentMemoryItem>> ListMemoriesCoreAsync(AgentMemoryQuery query, CancellationToken ct)
@@ -420,6 +525,16 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
             }
         }
 
+        // Bounded reciprocal endpoint validation over the result batch: every
+        // link column must be reciprocated by its endpoint within the query
+        // result, and endpoints absent from the batch are loaded explicitly.
+        foreach (var record in records)
+        {
+            await ValidateReciprocalEdgesAsync(
+                session, query.TenantId, record.MemoryId,
+                record.SupersedesMemoryId, record.SupersededByMemoryId, ct).ConfigureAwait(false);
+        }
+
         var filtered = records
             .Where(memory => query.Tags.Count == 0 || query.Tags.Any(tag => memory.Tags.Contains(tag)))
             .Where(memory => query.DescriptorRefs.Count == 0
@@ -462,6 +577,7 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
                     reader.GetInt32(3),
                     reader.GetInt32(4),
                     reader.GetString(5),
+                    reader.GetString(6),
                     reader.GetInt32(7),
                     reader.GetString(8),
                     PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryCandidate,
@@ -518,6 +634,7 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
                     reader.GetInt32(3),
                     reader.GetInt32(4),
                     reader.GetString(5),
+                    reader.GetString(6),
                     reader.GetInt32(7),
                     reader.GetString(8),
                     PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryCandidate,
@@ -601,6 +718,7 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
                     reader.GetInt32(3),
                     reader.GetInt32(4),
                     reader.GetString(5),
+                    reader.GetString(6),
                     reader.GetInt32(7),
                     reader.GetString(8),
                     PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryCandidate,
@@ -626,8 +744,11 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
         var candidateHash = _stateHashes.ComputeCandidateStateHash(mutation.ReplacementCandidate);
 
         await UpdateMemoryAsync(session, mutation.SupersededMemory, oldHash, oldSerialized, ct).ConfigureAwait(false);
+        await PostgreSqlRuntimeTestHooks.NotifyAfterWritePointAsync("supersede:update-target-memory", ct).ConfigureAwait(false);
         await InsertMemoryAsync(session, mutation.SupersedingMemory, newHash, newSerialized, ct).ConfigureAwait(false);
+        await PostgreSqlRuntimeTestHooks.NotifyAfterWritePointAsync("supersede:insert-new-memory", ct).ConfigureAwait(false);
         await UpdateCandidateAsync(session, mutation.ReplacementCandidate, candidateHash, candidateSerialized, ct).ConfigureAwait(false);
+        await PostgreSqlRuntimeTestHooks.NotifyAfterWritePointAsync("supersede:update-replacement-candidate", ct).ConfigureAwait(false);
 
         return mutation.SupersedingMemory.Snapshot();
     }

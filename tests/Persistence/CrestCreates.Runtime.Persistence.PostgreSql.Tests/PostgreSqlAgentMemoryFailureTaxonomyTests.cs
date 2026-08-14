@@ -1,6 +1,7 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Persistence.Testing;
+using CrestCreates.Agent.Memory.Persistence.Testing.Drivers;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
@@ -45,18 +46,25 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
     [Fact]
     public async Task RejectedRawContent_Should_BeAbsentFromDatabaseParametersAndRows()
     {
-        var sentinel = "###REJECTED_RAW_SENTINEL###";
+        // Feed the exact sentinel through the Store's sanitizer chain: the
+        // provider rejects it, and neither the parameters nor the persisted
+        // rows may ever contain the raw sentinel.
+        var sentinel = AgentMemoryPersistenceContractMarkers.RejectedContentSentinel;
+        var rejected = _driver.Sanitizer.Sanitize("tenant-a", sentinel, Array.Empty<AgentContextSourceRef>());
+        rejected.Rejected.Should().BeTrue("the fixture sanitizer must reject the contract sentinel.");
+
         var conversation = Conversation(
             "tenant-a",
             "conversation-sanitized",
             Turn("tenant-a", "turn-1", "accepted", 0),
-            Turn("tenant-a", "turn-2", "   ", 1));
+            Turn("tenant-a", "turn-2", sentinel, 1));
         await _driver.ConversationStore.SaveConversationAsync(conversation);
 
         var read = await _driver.ConversationStore.GetConversationAsync("tenant-a", "conversation-sanitized");
         read.Should().NotBeNull();
         read!.Turns.Should().HaveCount(1);
-        read.Turns[0].Content.Should().NotContain("   ");
+        read.Turns[0].Content.Should().NotContain(sentinel);
+        read.Turns.Should().NotContain(turn => turn.Content.Contains(sentinel, StringComparison.Ordinal));
 
         // Raw rejected content must be absent from the persisted JSON row.
         var raw = await ReadStateJsonAsync("agent_memory_conversations", "tenant-a", "conversation-sanitized");
@@ -198,45 +206,79 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
     [Fact]
     public async Task Supersede_FailureAfterEachWritePoint_Should_ExposeNoPartialGraph()
     {
-        var candidate = Candidate("tenant-a", "candidate-supersede-fail");
-        await _driver.MemoryStore.CreateCandidateAsync(candidate);
-        var promotePlan = _driver.PreparePromotionPlan(candidate, "memory-supersede-target", Operation("tenant-a", "op-ss-1"));
-        var conditional = (IAgentMemoryConditionalCurationStore)_driver.MemoryStore;
-        var target = await conditional.PromoteAsync("tenant-a", promotePlan);
+        // For every curation SQL write point, inject a failure and prove the
+        // whole three-node graph rolls back: the old Memory stays Active with
+        // no link, the new Memory never appears, the replacement Candidate
+        // stays Candidate.
+        var writePoints = new[]
+        {
+            "supersede:update-target-memory",
+            "supersede:insert-new-memory",
+            "supersede:update-replacement-candidate"
+        };
+        foreach (var writePoint in writePoints)
+        {
+            await AssertSupersedeRollbackAtAsync(writePoint);
+        }
+    }
 
-        var replacement = Candidate("tenant-a", "candidate-supersede-repl-fail");
+    private async Task AssertSupersedeRollbackAtAsync(string writePoint)
+    {
+        var suffix = writePoint.Replace(':', '_');
+        var candidate = Candidate("tenant-a", $"candidate-wp-{suffix}");
+        await _driver.MemoryStore.CreateCandidateAsync(candidate);
+        var promotePlan = _driver.PreparePromotionPlan(candidate, $"memory-wp-old-{suffix}", Operation("tenant-a", $"op-wp-promote-{suffix}"));
+        var conditional = (IAgentMemoryConditionalCurationStore)_driver.MemoryStore;
+        var original = await conditional.PromoteAsync("tenant-a", promotePlan);
+
+        var replacement = Candidate("tenant-a", $"candidate-wp-repl-{suffix}", AgentMemoryKind.Decision);
         await _driver.MemoryStore.CreateCandidateAsync(replacement);
         var supersession = _driver.PrepareSupersessionPlan(
-            target, replacement, "memory-supersede-new", Operation("tenant-a", "op-ss-2"));
+            original, replacement, $"memory-wp-new-{suffix}", Operation("tenant-a", $"op-wp-supersede-{suffix}"));
 
-        // Stale target expectation must roll back the complete three-node graph.
-        var stale = supersession with
+        using var injection = PostgreSqlRuntimeTestHooks.BlockAfterWritePoint(async (point, ct) =>
         {
-            TargetMemory = new AgentMemoryItemExpectation
-            {
-                MemoryId = target.MemoryId,
-                ExpectedStateHash = supersession.TargetMemory.ExpectedStateHash with { Value = supersession.TargetMemory.ExpectedStateHash.Value + "-tampered" }
-            }
-        };
+            if (point == writePoint)
+                throw new InvalidOperationException($"injected failure at {point}");
+        });
+        var act = async () => await conditional.SupersedeAsync("tenant-a", supersession);
+        await act.Should().ThrowAsync<InvalidOperationException>();
 
-        var act = async () => await conditional.SupersedeAsync("tenant-a", stale);
-        await act.Should().ThrowAsync<AgentMemoryOperationException>()
-            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.StateConflict);
-
-        (await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-supersede-new")).Should().BeNull();
-        var old = await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-supersede-target");
-        old!.Status.Should().Be(AgentMemoryStatus.Active);
-        old.SupersededByMemoryId.Should().BeNull();
-        var repl = await _driver.MemoryStore.GetCandidateAsync("tenant-a", "candidate-supersede-repl-fail");
-        repl!.Status.Should().Be(AgentMemoryStatus.Candidate);
+        var oldMemory = await _driver.MemoryStore.GetMemoryAsync("tenant-a", $"memory-wp-old-{suffix}");
+        oldMemory.Should().NotBeNull();
+        oldMemory!.Status.Should().Be(AgentMemoryStatus.Active, $"{writePoint} must leave the old Memory Active.");
+        oldMemory.SupersededByMemoryId.Should().BeNull($"{writePoint} must not link the old Memory.");
+        (await _driver.MemoryStore.GetMemoryAsync("tenant-a", $"memory-wp-new-{suffix}")).Should().BeNull($"{writePoint} must not create the new Memory.");
+        var repl = await _driver.MemoryStore.GetCandidateAsync("tenant-a", $"candidate-wp-repl-{suffix}");
+        repl!.Status.Should().Be(AgentMemoryStatus.Candidate, $"{writePoint} must leave the replacement Candidate unchanged.");
     }
 
     [Fact]
     public async Task CommitAcknowledgementLoss_Should_RemainCommitUnknown()
     {
-        // The coordinator taxonomy test proves the commit-unknown translation
-        // path; this test pins the exception type in the Agent Memory context.
-        typeof(RuntimeTransactionCommitUnknownException).FullName.Should().NotBeNullOrEmpty();
+        // Force the provider-owned COMMIT to fail with a non-Postgres error
+        // after all durable mutations: the coordinator must surface
+        // CommitUnknown (never a false rollback), and the mutation must not be
+        // observable as committed.
+        var candidate = Candidate("tenant-a", "candidate-commit-unknown");
+        await _driver.MemoryStore.CreateCandidateAsync(candidate);
+        var plan = _driver.PreparePromotionPlan(candidate, "memory-commit-unknown", Operation("tenant-a", "op-commit-unknown"));
+        var conditional = (IAgentMemoryConditionalCurationStore)_driver.MemoryStore;
+
+        // Roll the transaction back inside the before-COMMIT block: the
+        // subsequent CommitAsync fails with a non-Postgres error, which the
+        // coordinator translates to CommitUnknown instead of a false rollback.
+        using var injection = PostgreSqlRuntimeTestHooks.BlockBeforeCommit(async ct =>
+        {
+            await _driver.Provider.GetRequiredService<PostgreSqlRuntimeTransactionAccessor>()
+                .Current!.Transaction.RollbackAsync(ct);
+        });
+
+        var failure = await Record.ExceptionAsync(() => conditional.PromoteAsync("tenant-a", plan).AsTask());
+        var unwrapped = Unwrap(failure!);
+        unwrapped.Should().BeOfType<RuntimeTransactionCommitUnknownException>();
+
+        (await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-commit-unknown")).Should().BeNull();
     }
 
 
@@ -255,6 +297,142 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
         var failure = await Record.ExceptionAsync(async () => await connection.OpenAsync());
         failure.Should().NotBeNull();
         failure.Should().NotBeOfType<AgentMemoryOperationException>();
+    }
+
+
+    [Fact]
+    public async Task TransitionCandidateStatus_Should_TransitionAndValidatePersistedHash()
+    {
+        var candidate = Candidate("tenant-a", "candidate-transition");
+        await _driver.MemoryStore.CreateCandidateAsync(candidate);
+
+        await _driver.MemoryStore.TransitionCandidateStatusAsync(
+            "tenant-a", "candidate-transition", AgentMemoryStatus.Candidate, AgentMemoryStatus.Active);
+
+        var read = await _driver.MemoryStore.GetCandidateAsync("tenant-a", "candidate-transition");
+        read.Should().NotBeNull();
+        read!.Status.Should().Be(AgentMemoryStatus.Active);
+        read.Kind.Should().Be(AgentMemoryKind.Preference);
+        read.CanonicalContentHash.Value.Should().Be(candidate.CanonicalContentHash.Value);
+    }
+
+    [Fact]
+    public async Task TamperedCandidateStateHash_Should_FailPersistedInvariantValidation()
+    {
+        var candidate = Candidate("tenant-a", "candidate-tampered-hash");
+        await _driver.MemoryStore.CreateCandidateAsync(candidate);
+
+        await TamperAsync($"""
+            update "{_lease.Options.Schema}".agent_memory_candidates
+            set state_hash = '0000000000000000000000000000000000000000000000000000000000000000'
+            where tenant_id = 'tenant-a' and candidate_id = 'candidate-tampered-hash';
+            """);
+
+        var failure = await Record.ExceptionAsync(
+            () => _driver.MemoryStore.GetCandidateAsync("tenant-a", "candidate-tampered-hash").AsTask());
+        var unwrapped = Unwrap(failure!);
+        unwrapped.Should().BeOfType<RuntimePersistenceContractException>();
+        ((RuntimePersistenceContractException)unwrapped!).Code
+            .Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+
+    [Fact]
+    public async Task OneSidedGraphLink_Should_FailReciprocalInvariantOnRead()
+    {
+        // A FK-valid but one-sided graph edge must be rejected: when B points
+        // at A via SupersedesMemoryId but A does not point back via
+        // SupersededByMemoryId, GetMemoryAsync must fail closed.
+        var candidate = Candidate("tenant-a", "candidate-reciprocal-source");
+        await _driver.MemoryStore.CreateCandidateAsync(candidate);
+        var promotePlan = _driver.PreparePromotionPlan(candidate, "memory-reciprocal-old", Operation("tenant-a", "op-rec-1"));
+        var conditional = (IAgentMemoryConditionalCurationStore)_driver.MemoryStore;
+        await conditional.PromoteAsync("tenant-a", promotePlan);
+
+        var replacement = Candidate("tenant-a", "candidate-reciprocal-repl", AgentMemoryKind.Decision);
+        await _driver.MemoryStore.CreateCandidateAsync(replacement);
+        var supersession = _driver.PrepareSupersessionPlan(
+            await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-reciprocal-old")!,
+            replacement, "memory-reciprocal-new", Operation("tenant-a", "op-rec-2"));
+        await conditional.SupersedeAsync("tenant-a", supersession);
+
+        // Sever the reciprocal edge from the old Memory: A.superseded_by is
+        // cleared while B.supersedes still points at A. The FK remains valid.
+        await TamperAsync($"""
+            update "{_lease.Options.Schema}".agent_memories
+            set superseded_by_memory_id = null,
+                state_hash = '0000000000000000000000000000000000000000000000000000000000000000'
+            where tenant_id = 'tenant-a' and memory_id = 'memory-reciprocal-old';
+            """);
+
+        var failure = await Record.ExceptionAsync(
+            () => _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-reciprocal-new").AsTask());
+        failure.Should().NotBeNull("a one-sided graph edge must fail the reciprocal read invariant.");
+        Unwrap(failure!).Should().BeOfType<RuntimePersistenceContractException>();
+    }
+
+
+    [Fact]
+    public async Task CandidateBatch_ReversedCrossTenantConcurrency_Should_NotDeadlock()
+    {
+        // Two batches present the same cross-tenant identities in opposite
+        // tenant orders; the global lock order must prevent deadlock and both
+        // batches must complete.
+        var batchA = new[]
+        {
+            Candidate("tenant-a", "cross-a-1"),
+            Candidate("tenant-b", "cross-b-1")
+        };
+        var batchB = new[]
+        {
+            Candidate("tenant-b", "cross-b-2"),
+            Candidate("tenant-a", "cross-a-2")
+        };
+
+        await using var driverA = new PostgreSqlAgentMemoryContractDriver(_lease);
+        await using var driverB = new PostgreSqlAgentMemoryContractDriver(_lease);
+
+        await System.Threading.Tasks.Task.WhenAll(
+            driverA.MemoryStore.CreateCandidatesAsync(batchA).AsTask(),
+            driverB.MemoryStore.CreateCandidatesAsync(batchB).AsTask());
+
+        (await driverA.MemoryStore.GetCandidateAsync("tenant-a", "cross-a-1")).Should().NotBeNull();
+        (await driverB.MemoryStore.GetCandidateAsync("tenant-b", "cross-b-2")).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task CandidateBatch_AmbientCatchCommit_Should_NotCommitPartialBatch()
+    {
+        // With a pre-existing ambient Runtime transaction, the caller may catch
+        // the IdentityConflict and continue; the frozen algorithm must precheck
+        // occupancy before any INSERT so no earlier batch member is committed.
+        var batch = new[]
+        {
+            Candidate("tenant-a", "ambient-batch-1"),
+            Candidate("tenant-a", "ambient-batch-existing"),
+            Candidate("tenant-a", "ambient-batch-3")
+        };
+        await _driver.MemoryStore.CreateCandidateAsync(Candidate("tenant-a", "ambient-batch-existing"));
+
+        var coordinator = _driver.Provider
+            .GetRequiredService<CrestCreates.Runtime.Persistence.Abstractions.Transactions.IRuntimeTransactionCoordinator>();
+        var store = _driver.MemoryStore;
+
+        var failure = await Record.ExceptionAsync(async () => await coordinator.ExecuteAsync(async ct =>
+        {
+            try
+            {
+                await store.CreateCandidatesAsync(batch, ct);
+            }
+            catch (AgentMemoryOperationException)
+            {
+                // Simulate a caller that swallows the conflict and continues.
+            }
+        }));
+
+        failure.Should().BeNull("the ambient caller must be able to continue after catching the conflict.");
+        (await _driver.MemoryStore.GetCandidateAsync("tenant-a", "ambient-batch-1")).Should().BeNull("no batch member may be committed after a caught conflict.");
+        (await _driver.MemoryStore.GetCandidateAsync("tenant-a", "ambient-batch-3")).Should().BeNull("no batch member may be committed after a caught conflict.");
     }
 
 
@@ -319,12 +497,12 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
     private static AgentCompressedContext CompressedContext(string tenantId, string contextId, params AgentCompressedContextBlock[] blocks)
         => new() { TenantId = tenantId, ContextId = contextId, Blocks = blocks };
 
-    private static AgentMemoryCandidate Candidate(string tenantId, string candidateId)
+    private static AgentMemoryCandidate Candidate(string tenantId, string candidateId, AgentMemoryKind kind = AgentMemoryKind.Preference)
         => new()
         {
             TenantId = tenantId,
             CandidateId = candidateId,
-            Kind = AgentMemoryKind.Preference,
+            Kind = kind,
             Content = $"content-{candidateId}",
             CanonicalContentHash = CanonicalHashStub.For($"candidate-{candidateId}"),
             Confidence = AgentMemoryConfidence.Medium

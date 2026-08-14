@@ -69,6 +69,10 @@ public sealed class PostgreSqlAgentMemoryCurationContractTests : IAsyncLifetime
     public Task ConcurrentArchive_Should_Have_ExactlyOneWinner()
         => AgentMemoryCurationStoreContractCases.ConcurrentArchive_Should_Have_ExactlyOneWinner(Driver);
 
+
+    [Fact]
+    public Task BlankNewMemoryIdentity_Should_BeRejected()
+        => AgentMemoryCurationStoreContractCases.BlankNewMemoryIdentity_Should_BeRejected(Driver);
     [Fact]
     public Task CurationCapabilities_Should_Be_ConfirmedAtomic()
         => AgentMemoryCurationStoreContractCases.CurationCapabilities_Should_Be_ConfirmedAtomic(Driver);
@@ -89,11 +93,11 @@ public sealed class PostgreSqlAgentMemoryCurationContractTests : IAsyncLifetime
 
     [Fact]
     public Task Archive_Should_RetainGraphLinks_AfterRestart()
-        => AgentMemoryCurationStoreContractCases.Archive_Should_Be_Conditional(Driver);
+        => AgentMemoryCurationStoreContractCases.Archive_Should_RetainGraphLinks(Driver);
 
     [Fact]
     public Task Promote_OccupiedMemoryIdentity_Should_LeaveCandidateUnchanged()
-        => AgentMemoryCurationStoreContractCases.Promote_Should_Be_Atomic(Driver);
+        => AgentMemoryCurationStoreContractCases.Promote_OccupiedMemoryIdentity_Should_LeaveCandidateUnchanged(Driver);
 
     [Fact]
     public Task Promote_StaleCandidateHash_Should_ConflictWithoutMutation()
@@ -101,7 +105,7 @@ public sealed class PostgreSqlAgentMemoryCurationContractTests : IAsyncLifetime
 
     [Fact]
     public Task Reject_StaleExpectation_Should_HaveZeroMutation()
-        => AgentMemoryCurationStoreContractCases.Reject_Should_Be_Conditional(Driver);
+        => AgentMemoryCurationStoreContractCases.Reject_StaleExpectation_Should_HaveZeroMutation(Driver);
 
     [Fact]
     public Task PromotionPreparation_AndStoreMutation_Should_UseSameCurationProjection_Evidence()

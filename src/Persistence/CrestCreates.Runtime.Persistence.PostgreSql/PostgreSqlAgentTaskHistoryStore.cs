@@ -28,22 +28,39 @@ internal sealed class PostgreSqlAgentTaskHistoryStore : IAgentTaskHistoryStore
     }
 
     public ValueTask SaveTaskAsync(AgentTaskRecord task, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(ct => SaveCoreAsync(task, ct), cancellationToken);
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        // INV-04: sanitization happens before the Runtime transaction opens.
+        var record = SanitizeTask(task);
+        return _coordinator.ExecuteAsync(ct => SaveCoreAsync(record, ct), cancellationToken);
+    }
 
     public ValueTask<AgentTaskRecord?> GetTaskAsync(string tenantId, string taskId, CancellationToken cancellationToken = default)
         => _coordinator.ExecuteAsync(ct => GetCoreAsync(tenantId, taskId, ct), cancellationToken);
 
     public ValueTask AppendEventAsync(string tenantId, string taskId, AgentTaskEvent taskEvent, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(ct => AppendCoreAsync(tenantId, taskId, taskEvent, ct), cancellationToken);
+    {
+        ArgumentNullException.ThrowIfNull(taskEvent);
+        // INV-04: sanitize/copy the Event before the Runtime transaction opens;
+        // the transactional core still checks the Task exists (a rejected Event
+        // is a no-op, but existence is verified inside the transaction).
+        var sanitized = _sanitizer.Sanitize(tenantId, taskEvent.Content, taskEvent.SourceRefs);
+        var prepared = sanitized.Rejected
+            ? null
+            : taskEvent with
+            {
+                Content = sanitized.SanitizedContent,
+                SourceRefs = taskEvent.SourceRefs.ToArray(),
+                Diagnostics = sanitized.Diagnostics.ToArray()
+            };
+        return _coordinator.ExecuteAsync(ct => AppendCoreAsync(tenantId, taskId, prepared, ct), cancellationToken);
+    }
 
     public ValueTask<IReadOnlyList<AgentTaskRecord>> ListTasksAsync(string tenantId, CancellationToken cancellationToken = default)
         => _coordinator.ExecuteAsync(ct => ListCoreAsync(tenantId, ct), cancellationToken);
 
-    private async ValueTask SaveCoreAsync(AgentTaskRecord task, CancellationToken ct)
+    private AgentTaskRecord SanitizeTask(AgentTaskRecord task)
     {
-        ArgumentNullException.ThrowIfNull(task);
-        ct.ThrowIfCancellationRequested();
-
         var diagnostics = new List<AgentMemoryDiagnostic>();
         string? sanitizedSummary = null;
         if (task.Summary is not null)
@@ -88,12 +105,18 @@ internal sealed class PostgreSqlAgentTaskHistoryStore : IAgentTaskHistoryStore
             });
         }
 
-        var record = (task with
+        return (task with
         {
             Summary = sanitizedSummary,
             Events = sanitizedEvents.ToArray(),
             Diagnostics = diagnostics.ToArray()
         }).Snapshot();
+    }
+
+    private async ValueTask SaveCoreAsync(AgentTaskRecord record, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ct.ThrowIfCancellationRequested();
 
         var serialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
             record, PostgreSqlRuntimeJsonSerializerContext.Default.AgentTaskRecord);
@@ -141,21 +164,13 @@ internal sealed class PostgreSqlAgentTaskHistoryStore : IAgentTaskHistoryStore
         return snapshot;
     }
 
-    private async ValueTask AppendCoreAsync(string tenantId, string taskId, AgentTaskEvent taskEvent, CancellationToken ct)
+    private async ValueTask AppendCoreAsync(string tenantId, string taskId, AgentTaskEvent? taskEvent, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(taskEvent);
-        ct.ThrowIfCancellationRequested();
-
-        // Sanitize/copy the Event before any JSON materialization.
-        var sanitized = _sanitizer.Sanitize(tenantId, taskEvent.Content, taskEvent.SourceRefs);
-        var sanitizedEvent = sanitized.Rejected
-            ? null
-            : taskEvent with
-            {
-                Content = sanitized.SanitizedContent,
-                SourceRefs = taskEvent.SourceRefs.ToArray(),
-                Diagnostics = sanitized.Diagnostics.ToArray()
-            };
+        // INV-04: the Event is sanitized and copied before the Runtime
+        // transaction opens; a rejected Event arrives as null. The transactional
+        // core still verifies the Task exists (no-op on rejection, but the
+        // existence contract holds inside the transaction).
+        var sanitizedEvent = taskEvent;
 
         var session = _coordinator.RequireSession();
         await _lockManager.AcquireAsync(session, tenantId, "task", [taskId], ct).ConfigureAwait(false);

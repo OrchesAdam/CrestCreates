@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-14 (Phase 9b+ durable Agent Memory store provider implemented — Issue #55: V010 schema, four PostgreSQL Stores, shared hash/curation/comparer semantics, atomic Promote/Reject/Supersede/Archive with top-level COMMIT boundary, restart/crash/concurrency evidence, NativeAOT mainline sentinel CRESTCREATES_DURABLE_AGENT_MEMORY_OK)
+Last Updated: 2026-08-14 (Phase 9b+ durable Agent Memory store provider implemented — Issue #55: V010 schema, four PostgreSQL Stores, shared hash/curation/comparer semantics, atomic Promote/Reject/Supersede/Archive with top-level COMMIT boundary, restart/crash/concurrency evidence, NativeAOT mainline sentinel CRESTCREATES_DURABLE_AGENT_MEMORY_OK; PR #77 review round 1 remediated: persisted Candidate state-hash validation, evidence-tuple semantic audit, reciprocal graph read invariants, deep replay equality, INV-04 sanitization boundary, global-lock-order batch composition, blank Memory identity rejection, AOT #56 fact presence)
 
 ## Purpose
 
@@ -774,6 +774,31 @@ Boundary statements:
   effects, vector retrieval, retention/TTL, or a second database provider.
 - `SaveMemoryAsync` is create-or-exact-replay only; formal lifecycle
   transitions are the only graph writers.
+
+Review round 1 remediation (2026-08-14):
+
+- Candidate reads validate the persisted `state_hash` against the JSON
+  snapshot; `TransitionCandidateStatusAsync` passes all structured columns.
+- Evidence tuples are semantic, not name-only: occupied-identity Promote,
+  stale Reject, graph-linked Archive, per-write-point Supersede failure
+  injection (BlockAfterWritePoint hook), real CommitUnknown translation,
+  Store-path database unavailability, raw-sentinel rejection, and #56
+  composition through the real Store COMMIT gate.
+- `GetMemoryAsync` / `ListMemoriesAsync` validate reciprocal graph edges
+  (FK-valid one-sided links fail closed as persisted corruption).
+- `DefaultAgentMemoryPersistenceComparer` recurses into nested provenance
+  (SourceRefs → DescriptorRefs, Diagnostics → SourceRefs) and null-safe
+  hashes; exact replay no longer misreports StateConflict on JSON round-trips.
+- Conversation/Task sanitization runs before the Runtime transaction opens
+  (INV-04); the transactional core only locks, checks, and persists.
+- Candidate batches lock all identities in a global deterministic order and
+  precheck occupancy before the first INSERT; reversed cross-tenant batches
+  cannot deadlock and ambient catch-then-commit cannot persist a partial batch.
+- Empty/whitespace `NewMemoryId` is rejected provider-neutrally as
+  IdentityConflict in the shared state machine.
+- The NativeAOT mainline composes `AddAccountability` +
+  `AddAgentMemoryAccountability` and asserts exactly one durable
+  `agent-memory.promote` fact row (CRESTCREATES_DURABLE_AGENT_MEMORY_OK).
 
 ### Issue #24 — Phase 9b Durable Persistence Foundation
 

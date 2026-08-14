@@ -36,6 +36,7 @@ public sealed class DefaultAgentMemoryCurationStateMachine : IAgentMemoryCuratio
         ArgumentNullException.ThrowIfNull(candidate);
         ArgumentNullException.ThrowIfNull(plan);
         EnsureTenant(candidate.TenantId, tenantId);
+        EnsureMemoryIdentity(plan.NewMemoryId);
         EnsureCandidateExpectation(candidate, plan.Candidate);
         EnsureLifecycle(candidate.Status == AgentMemoryStatus.Candidate, "Candidate is not in Candidate state.");
         EnsureContentHash(candidate.CanonicalContentHash, plan.ExpectedMemoryContentHash);
@@ -83,6 +84,7 @@ public sealed class DefaultAgentMemoryCurationStateMachine : IAgentMemoryCuratio
         EnsureCandidateExpectation(replacementCandidate, plan.ReplacementCandidate);
         EnsureLifecycle(replacementCandidate.Status == AgentMemoryStatus.Candidate, "Replacement Candidate is not in Candidate state.");
         EnsureContentHash(replacementCandidate.CanonicalContentHash, plan.ExpectedMemoryContentHash);
+        EnsureMemoryIdentity(plan.NewMemoryId);
         if (string.Equals(targetMemory.MemoryId, plan.NewMemoryId, StringComparison.Ordinal))
             throw StateConflict("Supersede cannot replace a Memory with itself.");
 
@@ -142,6 +144,14 @@ public sealed class DefaultAgentMemoryCurationStateMachine : IAgentMemoryCuratio
     {
         if (!actual.Equals(expected))
             throw StateConflict("Prepared content hash does not match Candidate payload.");
+    }
+
+    private static void EnsureMemoryIdentity(string memoryId)
+    {
+        if (string.IsNullOrWhiteSpace(memoryId))
+            throw new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.IdentityConflict,
+                "New Memory identity must not be empty or whitespace.");
     }
 
     private static void EnsureTenant(string actual, string expected)

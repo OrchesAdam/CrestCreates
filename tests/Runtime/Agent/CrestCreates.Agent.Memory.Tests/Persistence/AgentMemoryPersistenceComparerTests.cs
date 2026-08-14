@@ -134,6 +134,90 @@ public sealed class AgentMemoryPersistenceComparerTests
         _comparer.Equals(left, right).Should().BeFalse("nested snapshot values participate in equality.");
     }
 
+    [Fact]
+    public void NestedProvenanceSnapshots_Should_CompareEqual()
+    {
+        // Records' default equality does not recurse into collection fields:
+        // SourceRefs carry DescriptorRefs lists and Diagnostics carry
+        // SourceRefs lists. Two independently constructed but semantically
+        // identical memories must still replay-equal after Snapshot().
+        var baseline = Memory() with
+        {
+            SourceRefs =
+            [
+                new AgentContextSourceRef
+                {
+                    SourceKind = AgentSourceKind.ConversationTurn,
+                    TenantId = "tenant-a",
+                    SourceId = "conversation-1",
+                    RangeStart = 0,
+                    RangeEnd = 2,
+                    DescriptorRefs =
+                    [
+                        new DescriptorRef("tenant-a.module", "turn-schema"),
+                        new DescriptorRef("tenant-a.module", "turn-schema", 1)
+                    ]
+                }
+            ],
+            SanitizationDiagnostics =
+            [
+                new AgentMemoryDiagnostic
+                {
+                    Code = new DiagnosticCode("AGENT_MEMORY_REDACTED"),
+                    Message = "redacted",
+                    Severity = SeverityLevel.Warning,
+                    SourceRefs =
+                    [
+                        new AgentContextSourceRef
+                        {
+                            SourceKind = AgentSourceKind.ConversationTurn,
+                            TenantId = "tenant-a",
+                            SourceId = "conversation-1",
+                            RangeStart = 0,
+                            RangeEnd = 1,
+                            DescriptorRefs = [new DescriptorRef("tenant-a.module", "turn-schema")]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var snapshot = baseline.Snapshot();
+
+        _comparer.Equals(baseline, snapshot).Should().BeTrue("nested provenance must replay-equal after Snapshot().");
+        _comparer.Equals(snapshot, baseline).Should().BeTrue();
+    }
+
+    [Fact]
+    public void NestedProvenanceDifference_Should_CompareUnequal()
+    {
+        var left = Memory() with
+        {
+            SourceRefs =
+            [
+                new AgentContextSourceRef
+                {
+                    SourceKind = AgentSourceKind.ConversationTurn,
+                    TenantId = "tenant-a",
+                    SourceId = "conversation-1",
+                    DescriptorRefs = [new DescriptorRef("tenant-a.module", "turn-schema")]
+                }
+            ]
+        };
+        var right = left with
+        {
+            SourceRefs =
+            [
+                left.SourceRefs[0] with
+                {
+                    DescriptorRefs = [new DescriptorRef("tenant-a.module", "turn-schema", 2)]
+                }
+            ]
+        };
+
+        _comparer.Equals(left, right).Should().BeFalse("a nested DescriptorRef difference must be detected.");
+    }
+
     private static AgentMemoryItem Memory()
         => new()
         {

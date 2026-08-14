@@ -20,8 +20,7 @@ failure taxonomy, and original-binary NativeAOT execution.
 
 **Spec status:** APPROVED — R3 review passed
 
-**Plan status:** DRAFT R3 — closure review round 2 corrections applied; do not
-begin implementation until this Plan passes final closure review
+**Plan status:** IMPLEMENTED — PR #77 (codex/issue-55-durable-agent-memory-store-spec); review round 1 P0/P1 remediations applied (persisted Candidate integrity, evidence semantic audit, reciprocal graph validation, deep replay equality, sanitization boundary, batch composition, identity boundary, AOT #56 closure)
 
 **Review revision:** Preserves the Spec §18 acceptance skeleton as an independent
 44-name contract, separates discovery/activation guards from owning-project

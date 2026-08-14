@@ -276,6 +276,125 @@ public static class AgentMemoryCurationStoreContractCases
         ContractAssertions.Equal(projected, stored, "prepared projection and persisted Memory must be value-identical.");
     }
 
+    public static async Task Promote_OccupiedMemoryIdentity_Should_LeaveCandidateUnchanged(
+        IAgentMemoryStoreContractDriver driver,
+        CancellationToken cancellationToken = default)
+    {
+        var store = RequireConditionalStore(driver);
+        var first = Candidate("tenant-a", "candidate-occupied-first");
+        await driver.MemoryStore.CreateCandidateAsync(first, cancellationToken);
+        var firstPlan = driver.PreparePromotionPlan(first, "memory-occupied", Operation("tenant-a", "op-occupied-1"));
+        var committed = await store.PromoteAsync("tenant-a", firstPlan, cancellationToken);
+
+        // A second Candidate attempts the same Memory identity: the occupancy
+        // check must fail without touching the first Memory or the second
+        // Candidate.
+        var second = Candidate("tenant-a", "candidate-occupied-second", AgentMemoryKind.Decision);
+        await driver.MemoryStore.CreateCandidateAsync(second, cancellationToken);
+        var secondPlan = driver.PreparePromotionPlan(second, "memory-occupied", Operation("tenant-a", "op-occupied-2"));
+
+        var failure = await ContractAssertions.ThrowsAsync<AgentMemoryOperationException>(
+            () => store.PromoteAsync("tenant-a", secondPlan, cancellationToken).AsTask(),
+            "Promote onto an occupied Memory identity must fail.");
+
+        ContractAssertions.MemoryOperationFailure(
+            AgentMemoryOperationFailureCode.IdentityConflict,
+            failure,
+            "Occupied Memory identity must surface IdentityConflict.");
+
+        var firstMemory = await driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-occupied", cancellationToken);
+        ContractAssertions.NotNull(firstMemory, "the first Memory must remain after the failed Promote.");
+        ContractAssertions.Equal(committed, firstMemory, "the first Memory must be unchanged.");
+        var secondCandidate = await driver.MemoryStore.GetCandidateAsync("tenant-a", second.CandidateId, cancellationToken);
+        ContractAssertions.Equal(AgentMemoryStatus.Candidate, secondCandidate!.Status, "the second Candidate must remain Candidate.");
+    }
+
+    public static async Task Reject_StaleExpectation_Should_HaveZeroMutation(
+        IAgentMemoryStoreContractDriver driver,
+        CancellationToken cancellationToken = default)
+    {
+        var store = RequireConditionalStore(driver);
+        var candidate = Candidate("tenant-a", "candidate-stale-reject");
+        await driver.MemoryStore.CreateCandidateAsync(candidate, cancellationToken);
+
+        var expectation = driver.PrepareCandidateExpectation(candidate);
+        var staleExpectation = expectation with
+        {
+            ExpectedStateHash = Tampered(expectation.ExpectedStateHash)
+        };
+
+        var failure = await ContractAssertions.ThrowsAsync<AgentMemoryOperationException>(
+            () => store.RejectAsync("tenant-a", staleExpectation, Operation("tenant-a", "op-stale-reject"), cancellationToken).AsTask(),
+            "Reject with a stale expectation must fail.");
+
+        ContractAssertions.MemoryOperationFailure(
+            AgentMemoryOperationFailureCode.StateConflict,
+            failure,
+            "Stale reject expectation must surface StateConflict.");
+
+        var stored = await driver.MemoryStore.GetCandidateAsync("tenant-a", candidate.CandidateId, cancellationToken);
+        ContractAssertions.NotNull(stored, "Candidate must remain after the failed Reject.");
+        ContractAssertions.Equal(AgentMemoryStatus.Candidate, stored!.Status, "failed Reject must leave the Candidate unchanged.");
+        ContractAssertions.Equal(candidate.Content, stored.Content, "failed Reject must not mutate Candidate content.");
+    }
+
+    public static async Task Archive_Should_RetainGraphLinks(
+        IAgentMemoryStoreContractDriver driver,
+        CancellationToken cancellationToken = default)
+    {
+        var store = RequireConditionalStore(driver);
+        var candidate = Candidate("tenant-a", "candidate-archive-graph");
+        await driver.MemoryStore.CreateCandidateAsync(candidate, cancellationToken);
+        var promotePlan = driver.PreparePromotionPlan(candidate, "memory-archive-graph-old", Operation("tenant-a", "op-ag-1"));
+        var original = await store.PromoteAsync("tenant-a", promotePlan, cancellationToken);
+
+        var replacement = Candidate("tenant-a", "candidate-archive-graph-repl", AgentMemoryKind.Decision);
+        await driver.MemoryStore.CreateCandidateAsync(replacement, cancellationToken);
+        var supersession = driver.PrepareSupersessionPlan(
+            original, replacement, "memory-archive-graph-new", Operation("tenant-a", "op-ag-2"));
+        var newMemory = await store.SupersedeAsync("tenant-a", supersession, cancellationToken);
+
+        // Archiving a graph-linked Memory must preserve the reciprocal links.
+        var expectation = driver.PrepareMemoryExpectation(newMemory);
+        var archived = await store.ArchiveAsync("tenant-a", expectation, Operation("tenant-a", "op-ag-3"), cancellationToken);
+        ContractAssertions.Equal(AgentMemoryStatus.Archived, archived.Status, "Archive must return the Archived Memory.");
+        ContractAssertions.Equal("memory-archive-graph-old", archived.SupersedesMemoryId, "archived Memory must retain its SupersedesMemoryId.");
+
+        var oldMemory = await driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-archive-graph-old", cancellationToken);
+        ContractAssertions.Equal("memory-archive-graph-new", oldMemory!.SupersededByMemoryId, "the old Memory must still point to the archived Memory.");
+
+        var stored = await driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-archive-graph-new", cancellationToken);
+        ContractAssertions.Equal(AgentMemoryStatus.Archived, stored!.Status, "stored Memory must be Archived.");
+        ContractAssertions.Equal("memory-archive-graph-old", stored.SupersedesMemoryId, "stored archived Memory must retain the graph link.");
+    }
+
+
+    public static async Task BlankNewMemoryIdentity_Should_BeRejected(
+        IAgentMemoryStoreContractDriver driver,
+        CancellationToken cancellationToken = default)
+    {
+        var store = RequireConditionalStore(driver);
+        var candidate = Candidate("tenant-a", "candidate-blank-id");
+        await driver.MemoryStore.CreateCandidateAsync(candidate, cancellationToken);
+
+        foreach (var blankId in new[] { string.Empty, "   " })
+        {
+            var plan = driver.PreparePromotionPlan(candidate, blankId, Operation("tenant-a", $"op-blank-{blankId.Length}"));
+            var failure = await ContractAssertions.ThrowsAsync<AgentMemoryOperationException>(
+                () => store.PromoteAsync("tenant-a", plan, cancellationToken).AsTask(),
+                $"Promote with a blank NewMemoryId ({blankId.Length} chars) must fail.");
+
+            ContractAssertions.MemoryOperationFailure(
+                AgentMemoryOperationFailureCode.IdentityConflict,
+                failure,
+                "Blank New Memory identity must surface IdentityConflict.");
+
+            var stored = await driver.MemoryStore.GetCandidateAsync("tenant-a", candidate.CandidateId, cancellationToken);
+            ContractAssertions.Equal(AgentMemoryStatus.Candidate, stored!.Status, "a blank-id failure must leave the Candidate unchanged.");
+        }
+    }
+
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private static IAgentMemoryConditionalCurationStore RequireConditionalStore(IAgentMemoryStoreContractDriver driver)

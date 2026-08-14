@@ -25,16 +25,20 @@ internal sealed class PostgreSqlAgentConversationStore : IAgentConversationStore
     }
 
     public ValueTask SaveConversationAsync(AgentConversationRecord conversation, CancellationToken cancellationToken = default)
-        => _coordinator.ExecuteAsync(ct => SaveCoreAsync(conversation, ct), cancellationToken);
+    {
+        ArgumentNullException.ThrowIfNull(conversation);
+        // INV-04: sanitization and copy preparation happen before the Runtime
+        // transaction opens; the transactional core only locks, checks, and
+        // persists the sanitized snapshot.
+        var record = SanitizeRecord(conversation);
+        return _coordinator.ExecuteAsync(ct => SaveCoreAsync(record, ct), cancellationToken);
+    }
 
     public ValueTask<AgentConversationRecord?> GetConversationAsync(string tenantId, string conversationId, CancellationToken cancellationToken = default)
         => _coordinator.ExecuteAsync(ct => GetCoreAsync(tenantId, conversationId, ct), cancellationToken);
 
-    private async ValueTask SaveCoreAsync(AgentConversationRecord conversation, CancellationToken ct)
+    private AgentConversationRecord SanitizeRecord(AgentConversationRecord conversation)
     {
-        ArgumentNullException.ThrowIfNull(conversation);
-        ct.ThrowIfCancellationRequested();
-
         var sanitizedTurns = new List<AgentConversationTurn>();
         var diagnostics = new List<AgentMemoryDiagnostic>();
         foreach (var turn in conversation.Turns)
@@ -60,11 +64,18 @@ internal sealed class PostgreSqlAgentConversationStore : IAgentConversationStore
             });
         }
 
-        var record = (conversation with
+        return (conversation with
         {
             Turns = sanitizedTurns.ToArray(),
             Diagnostics = diagnostics.ToArray()
         }).Snapshot();
+    }
+
+    private async ValueTask SaveCoreAsync(AgentConversationRecord record, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ct.ThrowIfCancellationRequested();
+        var conversation = record;
 
         var serialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
             record, PostgreSqlRuntimeJsonSerializerContext.Default.AgentConversationRecord);

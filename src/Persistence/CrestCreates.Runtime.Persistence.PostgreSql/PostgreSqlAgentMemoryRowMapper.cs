@@ -86,6 +86,7 @@ public static class PostgreSqlAgentMemoryRowMapper
         int status,
         int kind,
         string canonicalContentHash,
+        string stateHash,
         int stateContractVersion,
         string stateJson,
         JsonTypeInfo<AgentMemoryCandidate> typeInfo,
@@ -108,11 +109,8 @@ public static class PostgreSqlAgentMemoryRowMapper
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate enum columns disagree with the JSON snapshot.");
         if (!string.Equals(snapshot.CanonicalContentHash.Value, canonicalContentHash, StringComparison.Ordinal))
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate canonical content hash disagrees with the JSON snapshot.");
-        if (!stateHashes.ComputeCandidateStateHash(snapshot).Equals(
-                stateHashes.ComputeCandidateStateHash(snapshot with { })))
-        {
-            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate state hash could not be validated.");
-        }
+        if (!string.Equals(stateHashes.ComputeCandidateStateHash(snapshot).Value, stateHash, StringComparison.Ordinal))
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate state hash disagrees with the JSON snapshot.");
         return snapshot;
     }
 

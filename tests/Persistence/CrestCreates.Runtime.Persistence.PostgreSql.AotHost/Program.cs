@@ -20,6 +20,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Agent.Memory.Accountability.Bootstrap;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -687,9 +688,27 @@ static async Task RunDurableAgentMemoryMainlineAsync(PostgreSqlRuntimePersistenc
         }
         if (services.GetService<IAgentMemoryFormalCurationMarker>() is null)
             throw new InvalidOperationException("AOT formal curation marker is missing.");
+
+        // #56: the committed Promote must have produced a durable curation
+        // Accountability fact in the Runtime audit table.
+        var factCount = await CountAuditFactsAsync(options, "agent-memory.promote");
+        if (factCount != 1)
+            throw new InvalidOperationException($"AOT durable Accountability fact count is {factCount}, expected 1.");
     }
 
     Console.WriteLine("CRESTCREATES_DURABLE_AGENT_MEMORY_OK");
+}
+
+static async Task<long> CountAuditFactsAsync(PostgreSqlRuntimePersistenceOptions options, string actionKind)
+{
+    await using var connection = new NpgsqlConnection(options.ConnectionString);
+    await connection.OpenAsync();
+    await using var command = new NpgsqlCommand(
+        $"select count(*) from \"{options.Schema}\".runtime_audit_envelopes where sink_id = @sink and envelope_json -> 'action' ->> 'kind' = @kind;",
+        connection);
+    command.Parameters.AddWithValue("sink", "postgresql-runtime-audit");
+    command.Parameters.AddWithValue("kind", actionKind);
+    return (long)(await command.ExecuteScalarAsync())!;
 }
 
 static ServiceProvider BuildAgentMemoryProvider(PostgreSqlRuntimePersistenceOptions options)
@@ -698,6 +717,8 @@ static ServiceProvider BuildAgentMemoryProvider(PostgreSqlRuntimePersistenceOpti
         .AddAgentMemoryRuntime()
         .AddCrestCreatesPostgreSqlRuntimePersistence(options)
         .AddCrestCreatesPostgreSqlAgentMemoryPersistence()
+        .AddAccountability()
+        .AddAgentMemoryAccountability()
         .BuildServiceProvider();
 
 
