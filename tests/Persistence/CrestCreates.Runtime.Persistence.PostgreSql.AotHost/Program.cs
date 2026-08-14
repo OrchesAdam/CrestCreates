@@ -743,7 +743,13 @@ sealed class AotHashComputer : ICanonicalHashComputer
         => Hash(descriptor.GetType().Name + "-definition");
 
     public CanonicalHash ComputeFromProjection(CanonicalHashProjectionResult projection)
-        => Hash(projection.Metadata.ArtifactKind + "-" + projection.Metadata.Purpose);
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(stream))
+            projection.WriteCanonicalJson(writer);
+        return Hash(Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(stream.ToArray())).ToLowerInvariant());
+    }
 
     private static CanonicalHash Hash(string value)
         => new()

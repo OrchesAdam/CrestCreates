@@ -160,6 +160,10 @@ internal sealed class PostgreSqlAgentTaskHistoryStore : IAgentTaskHistoryStore
         var session = _coordinator.RequireSession();
         await _lockManager.AcquireAsync(session, tenantId, "task", [taskId], ct).ConfigureAwait(false);
 
+        AgentMemoryOperationException? unavailable = null;
+        long revision = 0;
+        int contractVersion = 0;
+        string stateJson = string.Empty;
         await using (var select = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options, $"""
             select revision, state_contract_version, state_json
             from {PostgreSqlAgentMemoryStoreSupport.Table(_options, "agent_memory_tasks")}
@@ -173,39 +177,46 @@ internal sealed class PostgreSqlAgentTaskHistoryStore : IAgentTaskHistoryStore
             await using var reader = await select.ExecuteReaderAsync(ct).ConfigureAwait(false);
             if (!await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                throw new AgentMemoryOperationException(
+                unavailable = new AgentMemoryOperationException(
                     AgentMemoryOperationFailureCode.ResourceUnavailable,
                     $"Task '{taskId}' is unavailable for tenant '{tenantId}'. Use SaveTaskAsync to create a task first.");
             }
-
-            var revision = reader.GetInt64(0);
-            var contractVersion = reader.GetInt32(1);
-            var stateJson = reader.GetString(2);
-
-            var current = PostgreSqlAgentMemoryRowMapper.MapTask(
-                tenantId, taskId, revision, contractVersion, stateJson,
-                PostgreSqlRuntimeJsonSerializerContext.Default.AgentTaskRecord);
-
-            if (sanitizedEvent is null)
-                return; // Rejected event: no-op, but the existence contract above still holds.
-
-            var updated = (current with
+            else
             {
-                Events = [.. current.Events, sanitizedEvent]
-            }).Snapshot();
-            var serialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
-                updated, PostgreSqlRuntimeJsonSerializerContext.Default.AgentTaskRecord);
+                revision = reader.GetInt64(0);
+                contractVersion = reader.GetInt32(1);
+                stateJson = reader.GetString(2);
+            }
+        }
+        if (unavailable is not null)
+            throw unavailable;
 
-            await using var update = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options, $"""
-                update {PostgreSqlAgentMemoryStoreSupport.Table(_options, "agent_memory_tasks")}
-                set state_json = @state,
-                    revision = revision + 1,
-                    updated_at = clock_timestamp()
-                where tenant_id = @tenant and task_id = @task;
-                """);
+        var current = PostgreSqlAgentMemoryRowMapper.MapTask(
+            tenantId, taskId, revision, contractVersion, stateJson,
+            PostgreSqlRuntimeJsonSerializerContext.Default.AgentTaskRecord);
+
+        if (sanitizedEvent is null)
+            return; // Rejected event: no-op, but the existence contract above still holds.
+
+        var updated = (current with
+        {
+            Events = [.. current.Events, sanitizedEvent]
+        }).Snapshot();
+        var serialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
+            updated, PostgreSqlRuntimeJsonSerializerContext.Default.AgentTaskRecord);
+
+        await using (var update = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options, $"""
+            update {PostgreSqlAgentMemoryStoreSupport.Table(_options, "agent_memory_tasks")}
+            set state_json = @state,
+                revision = revision + 1,
+                updated_at = clock_timestamp()
+            where tenant_id = @tenant and task_id = @task;
+            """))
+        {
             update.Parameters.AddWithValue("tenant", tenantId);
             update.Parameters.AddWithValue("task", taskId);
             PostgreSqlAgentMemoryStoreSupport.AddJsonParameter(update, "state", serialized);
+            using var lease = session.EnterCommand();
             await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
     }

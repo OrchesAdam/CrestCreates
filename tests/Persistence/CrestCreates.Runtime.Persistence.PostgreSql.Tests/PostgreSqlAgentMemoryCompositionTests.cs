@@ -58,11 +58,14 @@ public sealed class PostgreSqlAgentMemoryCompositionTests
             => Deterministic(descriptor, scope, "definition");
 
         public CanonicalHash ComputeFromProjection(CanonicalHashProjectionResult projection)
-            => new()
+        {
+            using var stream = new MemoryStream();
+            using (var writer = new System.Text.Json.Utf8JsonWriter(stream))
+                projection.WriteCanonicalJson(writer);
+            var digest = System.Security.Cryptography.SHA256.HashData(stream.ToArray());
+            return new CanonicalHash
             {
-                Value = Convert.ToHexString(
-                    System.Security.Cryptography.SHA256.HashData(
-                        System.Text.Encoding.UTF8.GetBytes(projection.Metadata.ArtifactKind + "-" + Guid.NewGuid().ToString("N")))).ToLowerInvariant(),
+                Value = Convert.ToHexString(digest).ToLowerInvariant(),
                 Algorithm = "SHA-256",
                 AlgorithmVersion = projection.Metadata.AlgorithmVersion,
                 ArtifactKind = projection.Metadata.ArtifactKind,
@@ -71,6 +74,7 @@ public sealed class PostgreSqlAgentMemoryCompositionTests
                 ContractVersion = projection.Metadata.ContractVersion,
                 CanonicalShapeVersion = projection.Metadata.CanonicalShapeVersion
             };
+        }
 
         private static CanonicalHash Deterministic(IDescriptor descriptor, CanonicalHashScope scope, string kind)
             => new()

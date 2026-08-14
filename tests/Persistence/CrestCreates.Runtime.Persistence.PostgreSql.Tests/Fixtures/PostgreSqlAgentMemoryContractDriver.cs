@@ -156,8 +156,10 @@ public sealed class PostgreSqlAgentMemoryContractDriver : IAgentMemoryDurability
 
         public CanonicalHash ComputeFromProjection(CanonicalHashProjectionResult projection)
         {
-            var digest = System.Security.Cryptography.SHA256.HashData(
-                System.Text.Encoding.UTF8.GetBytes(projection.Metadata.ArtifactKind + "-" + Guid.NewGuid().ToString("N")));
+            using var stream = new MemoryStream();
+            using (var writer = new System.Text.Json.Utf8JsonWriter(stream))
+                projection.WriteCanonicalJson(writer);
+            var digest = System.Security.Cryptography.SHA256.HashData(stream.ToArray());
             return new CanonicalHash
             {
                 Value = Convert.ToHexString(digest).ToLowerInvariant(),
