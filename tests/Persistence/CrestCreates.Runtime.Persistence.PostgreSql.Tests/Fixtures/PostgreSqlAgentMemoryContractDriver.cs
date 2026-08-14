@@ -145,6 +145,7 @@ public sealed class PostgreSqlAgentMemoryContractDriver : IAgentMemoryDurability
     internal static ServiceProvider BuildProvider(PostgreSqlRuntimePersistenceOptions options)
         => new ServiceCollection()
             .AddSingleton<ICanonicalHashComputer>(new DeterministicHashComputer())
+            .AddSingleton<DefaultAgentMemoryContentSanitizer>()
             .AddSingleton<IAgentMemoryContentSanitizer>(
                 sp => new RejectingSanitizer(sp.GetRequiredService<DefaultAgentMemoryContentSanitizer>()))
             .AddAgentMemoryRuntime()

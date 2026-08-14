@@ -278,11 +278,11 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
         await using var connection = new NpgsqlConnection(_lease.Options.ConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand(
-            $"select state_json::text from \"{_lease.Options.Schema}\".{table} where tenant_id=@tenant and (conversation_id=@id or task_id=@id or context_id=@id or memory_id=@id or candidate_id=@id);",
+            $"select state_json::text from \"{_lease.Options.Schema}\".{table} where tenant_id=@tenant and conversation_id=@id;",
             connection);
         command.Parameters.AddWithValue("tenant", tenantId);
         command.Parameters.AddWithValue("id", id);
-        return (string)await command.ExecuteScalarAsync();
+        return (string)await command.ExecuteScalarAsync()!;
     }
 
     private static AgentConversationRecord Conversation(string tenantId, string conversationId, params AgentConversationTurn[] turns)
