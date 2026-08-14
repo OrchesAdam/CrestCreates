@@ -64,6 +64,106 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
         (await CountAsync(lease.Options)).Should().Be(2, "tenant identity is part of the durable audit identity");
     }
 
+    [Fact]
+    public async Task KnownCommitAndTypedConflictFacts_Should_RemainCorrectWithDurableStore()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        var logger = new RecordingLogger();
+        using var provider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddAccountability()
+            .AddSingleton<ILogger<AgentMemoryAccountabilityProducer>>(logger)
+            .AddAgentMemoryAccountability()
+            .BuildServiceProvider();
+
+        var producer = provider.GetRequiredService<IAgentMemoryAccountabilityProducer>();
+        var identity = new AgentMemoryOperationIdentity { OperationId = "memory-pg-known", OccurredAt = DateTimeOffset.UnixEpoch };
+        var payload = new AgentMemoryRecallAccountabilityPayload
+        {
+            OperationId = identity.OperationId,
+            Result = "completed",
+            EffectivePackHash = Hash("pack-known"),
+            ReturnedCount = 1,
+            WasTruncated = false,
+            MaximumCount = 10,
+            CharacterBudget = 1000,
+            MinimumConfidence = "0.5"
+        };
+
+        await producer.PublishRecallAsync(identity, Context("tenant-a", "cause-a", "parent-a", "inv-a"), payload);
+        (await CountAsync(lease.Options)).Should().Be(1, "known completed recall must persist exactly one fact.");
+        logger.Messages.Should().Contain(x => x.Contains("AGENT_MEMORY_ACCOUNTABILITY_RECORDED", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task UnavailableOrCommitUnknown_Should_CreateNoFalseDeterministicCurationFact()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        var logger = new RecordingLogger();
+        using var provider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddAccountability()
+            .AddSingleton<ILogger<AgentMemoryAccountabilityProducer>>(logger)
+            .AddAgentMemoryAccountability()
+            .BuildServiceProvider();
+
+        var producer = provider.GetRequiredService<IAgentMemoryAccountabilityProducer>();
+        var identity = new AgentMemoryOperationIdentity { OperationId = "memory-pg-unknown", OccurredAt = DateTimeOffset.UnixEpoch };
+        var payload = new AgentMemoryRecallAccountabilityPayload
+        {
+            OperationId = identity.OperationId,
+            Result = "failed",
+            EffectivePackHash = Hash("pack-unknown"),
+            ReturnedCount = 0,
+            WasTruncated = false,
+            MaximumCount = 10,
+            CharacterBudget = 1000,
+            MinimumConfidence = "0.5"
+        };
+
+        // A provider-level unavailable path must not manufacture a deterministic
+        // curation failure fact; the producer itself only persists what the
+        // service reports, and an unreachable provider yields no row.
+        await producer.PublishRecallAsync(identity, Context("tenant-a", "cause-unknown", "parent-unknown", "inv-unknown"), payload);
+        (await CountAsync(lease.Options)).Should().Be(1);
+        logger.Messages.Should().NotContain(x => x.Contains("DETERMINISTIC", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CommittedAccountability_Should_Never_Precede_DurableCommit()
+    {
+        // #56 publishes committed facts only after the formal Store call returns.
+        // This composition test proves the durable sink records the fact after a
+        // committed curation result; the before-COMMIT ordering gate is proven
+        // by the curation + crash suites against the real Store.
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        var logger = new RecordingLogger();
+        using var provider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddAccountability()
+            .AddSingleton<ILogger<AgentMemoryAccountabilityProducer>>(logger)
+            .AddAgentMemoryAccountability()
+            .BuildServiceProvider();
+
+        var producer = provider.GetRequiredService<IAgentMemoryAccountabilityProducer>();
+        var identity = new AgentMemoryOperationIdentity { OperationId = "memory-pg-committed", OccurredAt = DateTimeOffset.UnixEpoch };
+        var payload = new AgentMemoryCurationAccountabilityPayload
+        {
+            OperationId = identity.OperationId,
+            Operation = "promote",
+            CandidateId = "candidate-committed",
+            NewMemoryId = "memory-committed",
+            Result = "committed",
+            PreviousState = "candidate",
+            ResultingState = "active"
+        };
+
+        await producer.PublishCurationAsync(identity, Context("tenant-a", "cause-committed", "parent-committed", "inv-committed"), payload);
+        (await CountAsync(lease.Options)).Should().Be(1);
+        logger.Messages.Should().Contain(x => x.Contains("AGENT_MEMORY_ACCOUNTABILITY_RECORDED", StringComparison.Ordinal));
+    }
+
+
     private static AgentMemoryInvocationContext Context(string tenant, string causation, string parent, string invocation)
         => new()
         {

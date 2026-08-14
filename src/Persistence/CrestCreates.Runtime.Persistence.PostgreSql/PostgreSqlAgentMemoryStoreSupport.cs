@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
@@ -25,6 +27,9 @@ public static class PostgreSqlAgentMemoryStoreSupport
            ?? throw new RuntimePersistenceContractException(
                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
                "PostgreSQL Agent Memory persistence returned an invalid JSON payload.");
+
+    public static void AddJsonParameter(NpgsqlCommand command, string name, string value)
+        => command.Parameters.Add(name, NpgsqlDbType.Jsonb).Value = value;
 
     public static RuntimePersistenceContractException Invariant(string message)
         => new(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, message);

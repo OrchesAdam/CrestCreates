@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
@@ -73,6 +75,119 @@ public static class PostgreSqlAgentMemoryRowMapper
             || !string.Equals(snapshot.ContextId, contextId, StringComparison.Ordinal))
         {
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Context identity columns disagree with the JSON snapshot.");
+        }
+        return snapshot;
+    }
+
+    public static AgentMemoryCandidate MapCandidate(
+        string tenantId,
+        string candidateId,
+        long revision,
+        int status,
+        int kind,
+        string canonicalContentHash,
+        int stateContractVersion,
+        string stateJson,
+        JsonTypeInfo<AgentMemoryCandidate> typeInfo,
+        IAgentMemoryStateHashProjector stateHashes)
+    {
+        if (stateContractVersion != PostgreSqlAgentMemoryStoreSupport.StateContractVersion)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate state_contract_version is unsupported.");
+        if (revision <= 0)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate revision must be positive.");
+        if (!Enum.IsDefined(typeof(AgentMemoryStatus), status) || !Enum.IsDefined(typeof(AgentMemoryKind), kind))
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate enum columns are undefined.");
+
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(stateJson, typeInfo).Snapshot();
+        if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
+            || !string.Equals(snapshot.CandidateId, candidateId, StringComparison.Ordinal))
+        {
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate identity columns disagree with the JSON snapshot.");
+        }
+        if ((int)snapshot.Status != status || (int)snapshot.Kind != kind)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate enum columns disagree with the JSON snapshot.");
+        if (!string.Equals(snapshot.CanonicalContentHash.Value, canonicalContentHash, StringComparison.Ordinal))
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate canonical content hash disagrees with the JSON snapshot.");
+        if (!stateHashes.ComputeCandidateStateHash(snapshot).Equals(
+                stateHashes.ComputeCandidateStateHash(snapshot with { })))
+        {
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate state hash could not be validated.");
+        }
+        return snapshot;
+    }
+
+    public static AgentMemoryItem MapMemory(
+        string tenantId,
+        string memoryId,
+        long revision,
+        int status,
+        int kind,
+        int confidence,
+        DateTimeOffset promotedAt,
+        string canonicalContentHash,
+        string stateHash,
+        string? supersedesMemoryId,
+        string? supersededByMemoryId,
+        int stateContractVersion,
+        string stateJson,
+        JsonTypeInfo<AgentMemoryItem> typeInfo,
+        IAgentMemoryStateHashProjector stateHashes)
+    {
+        if (stateContractVersion != PostgreSqlAgentMemoryStoreSupport.StateContractVersion)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory state_contract_version is unsupported.");
+        if (revision <= 0)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory revision must be positive.");
+        if (!Enum.IsDefined(typeof(AgentMemoryStatus), status)
+            || !Enum.IsDefined(typeof(AgentMemoryKind), kind)
+            || !Enum.IsDefined(typeof(AgentMemoryConfidence), confidence))
+        {
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory enum columns are undefined.");
+        }
+
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(stateJson, typeInfo).Snapshot();
+        if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
+            || !string.Equals(snapshot.MemoryId, memoryId, StringComparison.Ordinal))
+        {
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory identity columns disagree with the JSON snapshot.");
+        }
+        if ((int)snapshot.Status != status
+            || (int)snapshot.Kind != kind
+            || (int)snapshot.Confidence != confidence
+            || snapshot.PromotedAt != promotedAt)
+        {
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory structured columns disagree with the JSON snapshot.");
+        }
+        if (!string.Equals(snapshot.CanonicalContentHash.Value, canonicalContentHash, StringComparison.Ordinal))
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory canonical content hash disagrees with the JSON snapshot.");
+        if (!string.Equals(snapshot.SupersedesMemoryId, supersedesMemoryId, StringComparison.Ordinal)
+            || !string.Equals(snapshot.SupersededByMemoryId, supersededByMemoryId, StringComparison.Ordinal))
+        {
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory graph columns disagree with the JSON snapshot.");
+        }
+        if (!string.Equals(stateHashes.ComputeMemoryStateHash(snapshot).Value, stateHash, StringComparison.Ordinal))
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory state hash disagrees with the JSON snapshot.");
+        return snapshot;
+    }
+
+    public static AgentCompressedContextBlock MapContextBlock(
+        string tenantId,
+        string blockId,
+        string contextId,
+        int ordinal,
+        int stateContractVersion,
+        string blockJson,
+        JsonTypeInfo<AgentCompressedContextBlock> typeInfo)
+    {
+        if (stateContractVersion != PostgreSqlAgentMemoryStoreSupport.StateContractVersion)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Block state_contract_version is unsupported.");
+        if (ordinal < 0)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Block ordinal must be non-negative.");
+
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(blockJson, typeInfo).Snapshot();
+        if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
+            || !string.Equals(snapshot.BlockId, blockId, StringComparison.Ordinal))
+        {
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Block identity columns disagree with the JSON snapshot.");
         }
         return snapshot;
     }

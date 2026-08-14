@@ -23,6 +23,26 @@ public sealed class PostgreSqlAgentMemoryCompositionTests
 
     /// <summary>Deterministic canonical hash computer required by Agent Memory
     /// runtime registration (ICanonicalHashComputer prerequisite).</summary>
+    [Fact]
+    public void CurationCompositionValidator_Should_PassAndReportConfirmedAtomic()
+    {
+        // Slice 8: the selected durable Store truthfully reports ConfirmedAtomic
+        // and the #56 validator passes. Asserted against the capability surface;
+        // full Host startup validation is covered by the composition suite.
+        using var provider = AddHashComputer(new ServiceCollection())
+            .AddAgentMemoryRuntime()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(Options())
+            .AddCrestCreatesPostgreSqlAgentMemoryPersistence()
+            .BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+
+        var memory = provider.GetRequiredService<IAgentMemoryStore>();
+        memory.Should().BeAssignableTo<IAgentMemoryConditionalCurationStore>();
+        memory.Should().BeAssignableTo<IAgentMemoryStoreCapabilities>();
+        ((IAgentMemoryStoreCapabilities)memory).CurationOutcomeGuarantee
+            .Should().Be(AgentMemoryCurationOutcomeGuarantee.ConfirmedAtomic);
+    }
+
+
     private static ServiceCollection AddHashComputer(ServiceCollection services)
     {
         services.AddSingleton<ICanonicalHashComputer>(new DeterministicHashComputer());

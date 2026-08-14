@@ -31,6 +31,12 @@ if (scenario.StartsWith("predispatch-", StringComparison.Ordinal))
     return await PreDispatchCrashScenarios.RunAsync(options, scenario, applicationName);
 }
 
+// Phase 9b+ Agent Memory durable curation crash windows.
+if (scenario.StartsWith("agent-memory-", StringComparison.Ordinal))
+{
+    return await AgentMemoryCrashScenarios.RunAsync(options, scenario, applicationName, operationId);
+}
+
 using var provider = new ServiceCollection().AddCrestCreatesPostgreSqlRuntimePersistence(options).BuildServiceProvider();
 var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
 var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();

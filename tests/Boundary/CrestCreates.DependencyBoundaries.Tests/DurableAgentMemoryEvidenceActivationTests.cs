@@ -99,6 +99,47 @@ public sealed class Slice3EvidenceActivationTests : DurableAgentMemoryEvidenceAc
 {
     protected override int Slice => 3;
 }
+/// <summary>Slice 4 — durable Conversation and Task stores.</summary>
+public sealed class Slice4EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 4;
+}
+
+/// <summary>Slice 5 — durable Context and Block projection.</summary>
+public sealed class Slice5EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 5;
+}
+
+/// <summary>Slice 6 — Candidate/Memory base store and query parity.</summary>
+public sealed class Slice6EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 6;
+}
+
+/// <summary>Slice 7 — atomic Promote and Reject.</summary>
+public sealed class Slice7EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 7;
+}
+
+/// <summary>Slice 8 — atomic Supersede/Archive + truthful capability.</summary>
+public sealed class Slice8EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 8;
+}
+
+/// <summary>Slice 9 — concurrency, failure injection, and real crash evidence.</summary>
+public sealed class Slice9EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 9;
+}
+
+/// <summary>Slice 10 — restart Recall/Source Expansion and composition parity.</summary>
+public sealed class Slice10EvidenceActivationTests : DurableAgentMemoryEvidenceActivationGuard
+{
+    protected override int Slice => 10;
+}
 
 /// <summary>
 /// Source-level static discovery: an exact namespace, class, and method
