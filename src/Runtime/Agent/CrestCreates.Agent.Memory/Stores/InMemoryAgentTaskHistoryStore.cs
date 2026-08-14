@@ -6,7 +6,8 @@ namespace CrestCreates.Agent.Memory.Stores;
 
 public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
 {
-    private readonly ConcurrentDictionary<(string TenantId, string TaskId), AgentTaskRecord> _tasks = new();
+    private readonly object _gate = new();
+    private readonly Dictionary<(string TenantId, string TaskId), AgentTaskRecord> _tasks = new();
     private readonly IAgentMemoryContentSanitizer _sanitizer;
 
     public InMemoryAgentTaskHistoryStore(IAgentMemoryContentSanitizer sanitizer)
@@ -16,6 +17,7 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
 
     public ValueTask SaveTaskAsync(AgentTaskRecord task, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var diagnostics = new List<AgentMemoryDiagnostic>();
 
         string? sanitizedSummary = null;
@@ -68,13 +70,18 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
             Events = sanitizedEvents.ToArray(),
             Diagnostics = diagnostics.ToArray()
         };
-        _tasks[(task.TenantId, task.TaskId)] = record.Snapshot();
+        lock (_gate)
+        {
+            _tasks[(task.TenantId, task.TaskId)] = record.Snapshot();
+        }
         return ValueTask.CompletedTask;
     }
 
     public ValueTask<AgentTaskRecord?> GetTaskAsync(string tenantId, string taskId, CancellationToken cancellationToken = default)
     {
-        _tasks.TryGetValue((tenantId, taskId), out var task);
+        AgentTaskRecord? task;
+        lock (_gate)
+            _tasks.TryGetValue((tenantId, taskId), out task);
         if (task is null) return new ValueTask<AgentTaskRecord?>((AgentTaskRecord?)null);
 
         var snapshot = task.Snapshot();
@@ -83,41 +90,52 @@ public sealed class InMemoryAgentTaskHistoryStore : IAgentTaskHistoryStore
 
     public ValueTask AppendEventAsync(string tenantId, string taskId, AgentTaskEvent taskEvent, CancellationToken cancellationToken = default)
     {
-        var key = (tenantId, taskId);
-        if (!_tasks.TryGetValue(key, out var existing))
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
         {
-            throw new InvalidOperationException($"Task '{taskId}' not found for tenant '{tenantId}'. Use SaveTaskAsync to create a task first.");
-        }
+            if (!_tasks.TryGetValue((tenantId, taskId), out var existing))
+            {
+                throw new AgentMemoryOperationException(
+                    AgentMemoryOperationFailureCode.ResourceUnavailable,
+                    $"Task '{taskId}' is unavailable for tenant '{tenantId}'. Use SaveTaskAsync to create a task first.");
+            }
 
-        var sanitized = _sanitizer.Sanitize(tenantId, taskEvent.Content, taskEvent.SourceRefs);
-        if (sanitized.Rejected)
-        {
-            // Skip the event — content was entirely rejected after sanitization
+            var sanitized = _sanitizer.Sanitize(tenantId, taskEvent.Content, taskEvent.SourceRefs);
+            if (sanitized.Rejected)
+            {
+                // Skip the event — content was entirely rejected after sanitization.
+                // The Task existence check above remains authoritative; rejection
+                // cannot bypass the ResourceUnavailable contract.
+                return ValueTask.CompletedTask;
+            }
+
+            var sanitizedEvent = taskEvent with
+            {
+                Content = sanitized.SanitizedContent,
+                SourceRefs = taskEvent.SourceRefs.ToArray(),
+                Diagnostics = sanitized.Diagnostics.ToArray()
+            };
+
+            var updated = existing with
+            {
+                Events = [.. existing.Events, sanitizedEvent]
+            };
+            _tasks[(tenantId, taskId)] = updated.Snapshot();
             return ValueTask.CompletedTask;
         }
-
-        var sanitizedEvent = taskEvent with
-        {
-            Content = sanitized.SanitizedContent,
-            SourceRefs = taskEvent.SourceRefs.ToArray(),
-            Diagnostics = sanitized.Diagnostics.ToArray()
-        };
-
-        var updated = existing with
-        {
-            Events = [..existing.Events, sanitizedEvent]
-        };
-        _tasks[key] = updated.Snapshot();
-        return ValueTask.CompletedTask;
     }
 
     public ValueTask<IReadOnlyList<AgentTaskRecord>> ListTasksAsync(string tenantId, CancellationToken cancellationToken = default)
     {
-        var tasks = _tasks.Values
-            .Where(t => t.TenantId == tenantId)
-            .OrderBy(t => t.TaskId, StringComparer.Ordinal)
-            .Select(t => t.Snapshot())
-            .ToArray();
+        IReadOnlyList<AgentTaskRecord> tasks;
+        lock (_gate)
+        {
+            tasks = _tasks.Values
+                .Where(t => t.TenantId == tenantId)
+                .OrderBy(t => t.TaskId, StringComparer.Ordinal)
+                .Select(t => t.Snapshot())
+                .ToArray();
+        }
         return new ValueTask<IReadOnlyList<AgentTaskRecord>>(tasks);
     }
 }

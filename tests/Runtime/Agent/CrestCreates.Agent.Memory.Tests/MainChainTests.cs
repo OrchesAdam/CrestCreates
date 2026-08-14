@@ -480,7 +480,8 @@ public sealed class MainChainTests
 
         const string tenantId = "tenant-1";
 
-        // Directly save a memory with Candidate status (edge case)
+        // SaveMemoryAsync is create-or-exact-replay: a Candidate-status snapshot
+        // is never a legal initial shape and must be rejected with zero mutation.
         var memory = new AgentMemoryItem
         {
             MemoryId = "m-candidate",
@@ -491,8 +492,15 @@ public sealed class MainChainTests
             PromotedAt = DateTimeOffset.UtcNow,
             Status = AgentMemoryStatus.Candidate
         };
-        await memoryStore.SaveMemoryAsync(memory);
 
+        var createAct = async () => await memoryStore.SaveMemoryAsync(memory);
+        await createAct.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.InvalidLifecycleState);
+
+        var missing = await memoryStore.GetMemoryAsync(tenantId, "m-candidate");
+        missing.Should().BeNull("rejected create shapes must not create a row");
+
+        // Archive of a missing Memory is ResourceUnavailable — no lifecycle bypass.
         var request = new AgentMemoryOperationRequest
         {
             TenantId = tenantId,
@@ -503,7 +511,8 @@ public sealed class MainChainTests
         };
 
         var act = async () => await promotionService.ArchiveAsync(tenantId, "m-candidate", request);
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.ResourceUnavailable);
     }
 
     [Fact]
@@ -570,7 +579,9 @@ public sealed class MainChainTests
         };
 
         var act = async () => await taskStore.AppendEventAsync("tenant-1", "nonexistent-task", taskEvent);
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not found*");
+        await act.Should().ThrowAsync<AgentMemoryOperationException>()
+            .Where(exception => exception.Code == AgentMemoryOperationFailureCode.ResourceUnavailable)
+            .WithMessage("*unavailable*");
     }
 
     [Fact]
