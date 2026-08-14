@@ -116,6 +116,18 @@ jobs:
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests --no-build
 
+      # Phase 9b+ durable Agent Memory evidence gates: the frozen Spec §18 skeleton
+      # (44 names) and the 59-case / 98-tuple evidence ledger are enforced by the
+      # boundary discovery guards; the SliceN activation guards run as part of the
+      # full boundary suite. The AOT fixture above executes the original linux-x64
+      # binary and asserts CRESTCREATES_DURABLE_AGENT_MEMORY_OK.
+      - name: Test — Durable Agent Memory evidence activation guards
+        run: |
+          dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build \
+            --filter "FullyQualifiedName~DurableAgentMemory|FullyQualifiedName~Slice|FullyQualifiedName~AllDurableAgentMemoryEvidenceTests"
+          dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Tests --no-build \
+            --filter "FullyQualifiedName~Persistence|FullyQualifiedName~Curation"
+
       - name: Test — Runtime / Agent
         run: |
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests --no-build
