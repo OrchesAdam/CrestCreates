@@ -6,6 +6,7 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 internal static class PostgreSqlRuntimeTestHooks
 {
     private static Action? _afterFirstCommandLeaseAcquired;
+    private static Action? _afterFirstCommandCompleted;
     private static Func<CancellationToken, ValueTask>? _beforeCommitBlock;
     private static Func<string, CancellationToken, ValueTask>? _afterWritePointBlock;
 
@@ -19,6 +20,21 @@ internal static class PostgreSqlRuntimeTestHooks
 
     internal static void NotifyCommandLeaseAcquired()
         => Interlocked.Exchange(ref _afterFirstCommandLeaseAcquired, null)?.Invoke();
+
+    /// <summary>Installs a one-shot block that runs after the first command
+    /// completes (reader parent query has returned), so tests can pause a
+    /// reader between its parent query and its Block projection query and
+    /// deterministically reproduce a torn read under READ COMMITTED.</summary>
+    internal static IDisposable BlockAfterFirstCommand(Action afterFirstCommandCompleted)
+    {
+        ArgumentNullException.ThrowIfNull(afterFirstCommandCompleted);
+        if (Interlocked.CompareExchange(ref _afterFirstCommandCompleted, afterFirstCommandCompleted, null) is not null)
+            throw new InvalidOperationException("A PostgreSQL Runtime command-completion probe is already active.");
+        return new ResetAfterCommand();
+    }
+
+    internal static void NotifyCommandCompleted()
+        => Interlocked.Exchange(ref _afterFirstCommandCompleted, null)?.Invoke();
 
     /// <summary>Installs a one-shot block that runs after the last durable
     /// mutation but before the provider-owned COMMIT acknowledgement.</summary>
@@ -68,5 +84,10 @@ internal static class PostgreSqlRuntimeTestHooks
     private sealed class ResetAfterWritePoint : IDisposable
     {
         public void Dispose() => Interlocked.Exchange(ref _afterWritePointBlock, null);
+    }
+
+    private sealed class ResetAfterCommand : IDisposable
+    {
+        public void Dispose() => Interlocked.Exchange(ref _afterFirstCommandCompleted, null);
     }
 }

@@ -217,8 +217,11 @@ public sealed class AllDurableAgentMemoryEvidenceTests : DurableAgentMemoryEvide
 
 /// <summary>
 /// Source-level static discovery: an exact namespace, class, and method
-/// declaration must exist in the owning test project. Discovery is scoped to
-/// the concrete runner projects so shared-kit case names cannot satisfy it.
+/// declaration must exist in the owning test project AND the method must
+/// carry an xUnit test attribute ([Fact] or [Theory]) on its declaration
+/// block. Discovery is scoped to the concrete runner projects so shared-kit
+/// case names cannot satisfy it, and a deactivated (unattributed) method
+/// cannot keep the evidence guard green.
 /// </summary>
 internal static class DurableAgentMemorySourceDiscovery
 {
@@ -226,10 +229,10 @@ internal static class DurableAgentMemorySourceDiscovery
         => EnumerateSourceFiles(projectRelativePath).Any(file => ContainsClass(file, namespaceName, className));
 
     public static bool HasMethodInRunner(string projectRelativePath, string namespaceName, string methodName)
-        => EnumerateSourceFiles(projectRelativePath).Any(file => ContainsMethod(file, namespaceName, methodName: methodName, className: null));
+        => EnumerateSourceFiles(projectRelativePath).Any(file => ContainsAttributedMethod(file, namespaceName, methodName: methodName, className: null));
 
     public static bool HasMethodInRunner(string projectRelativePath, string namespaceName, string className, string methodName)
-        => EnumerateSourceFiles(projectRelativePath).Any(file => ContainsMethod(file, namespaceName, methodName, className));
+        => EnumerateSourceFiles(projectRelativePath).Any(file => ContainsAttributedMethod(file, namespaceName, methodName, className));
 
     private static IEnumerable<string> EnumerateSourceFiles(string projectRelativePath)
     {
@@ -249,7 +252,7 @@ internal static class DurableAgentMemorySourceDiscovery
             && Regex.IsMatch(content, $@"\bclass\s+{Regex.Escape(className)}\b", RegexOptions.Compiled);
     }
 
-    private static bool ContainsMethod(string file, string namespaceName, string methodName, string? className)
+    private static bool ContainsAttributedMethod(string file, string namespaceName, string methodName, string? className)
     {
         var content = File.ReadAllText(file);
         if (!content.Contains($"namespace {namespaceName}", StringComparison.Ordinal))
@@ -260,8 +263,11 @@ internal static class DurableAgentMemorySourceDiscovery
             return false;
         }
 
+        // The method declaration block must carry an xUnit test attribute
+        // ([Fact] or [Theory]) directly above it; a deactivated method cannot
+        // satisfy the evidence guard.
         var declaration = new Regex(
-            $@"^\s*(?:public|internal)\s+(?:static\s+|async\s+|virtual\s+|override\s+|sealed\s+|partial\s+)*(?:[\w<>\[\],\.\?]+\s+)+{Regex.Escape(methodName)}\s*\(",
+            $@"(?<block>(?:^|\r?\n)\s*\[\s*(Fact|Theory)\s*\]\r?\n\s*(?:public|internal)\s+(?:static\s+|async\s+|virtual\s+|override\s+|sealed\s+|partial\s+)*(?:[\w<>\[\],\.\?]+\s+)+{Regex.Escape(methodName)}\s*\()",
             RegexOptions.Compiled | RegexOptions.Multiline);
         return declaration.IsMatch(content);
     }

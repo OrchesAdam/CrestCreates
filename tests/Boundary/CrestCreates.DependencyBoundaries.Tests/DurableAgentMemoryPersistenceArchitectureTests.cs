@@ -162,6 +162,59 @@ public class DurableAgentMemoryPersistenceArchitectureTests
         }
     }
 
+    [Fact]
+    public void GlobalHookUsers_Should_All_BeInThePostgreSqlRuntimeCollection()
+    {
+        // Plan §13.1: the process-global test hooks (BlockFirstCommand,
+        // BlockBeforeCommit, BlockAfterWritePoint, BlockAfterFirstCommand) are
+        // consumed one-shot or scoped by the serializer. Any test file that
+        // installs them MUST run inside PostgreSqlRuntimeCollection, otherwise
+        // it can randomly consume another test's global hook. This guard scans
+        // the owning test project and fails closed on any hook user that is not
+        // collection-scoped.
+        var repoRoot = DependencyBoundaryTestsHelpers.FindRepoRoot();
+        var testsRoot = repoRoot.Combine("tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests");
+        Assert.True(testsRoot.Exists, "PostgreSQL test project root must exist.");
+
+        var hookTokens = new[]
+        {
+            "PostgreSqlRuntimeTestHooks.BlockFirstCommand",
+            "PostgreSqlRuntimeTestHooks.BlockBeforeCommit",
+            "PostgreSqlRuntimeTestHooks.BlockAfterWritePoint",
+            "PostgreSqlRuntimeTestHooks.BlockAfterFirstCommand"
+        };
+
+        var violations = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(testsRoot.FullName, "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var content = File.ReadAllText(file);
+            if (!hookTokens.Any(token => content.Contains(token, StringComparison.Ordinal)))
+                continue;
+
+            var relative = Path.GetRelativePath(repoRoot.FullName, file);
+            var liveLines = content
+                .Split('\n')
+                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal));
+            var insideCollection = liveLines.Any(line =>
+                line.Contains("[Collection(PostgreSqlRuntimeCollection.Name)]", StringComparison.Ordinal));
+            if (!insideCollection)
+            {
+                violations.Add($"{relative} uses a process-global hook without [Collection(PostgreSqlRuntimeCollection.Name)]");
+            }
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "Every process-global hook user must run inside PostgreSqlRuntimeCollection:"
+            + Environment.NewLine + string.Join(Environment.NewLine, violations));
+    }
+
     private static void AssertNoDirectProjectReferences(
         string projectRootRelativePath,
         string reason,

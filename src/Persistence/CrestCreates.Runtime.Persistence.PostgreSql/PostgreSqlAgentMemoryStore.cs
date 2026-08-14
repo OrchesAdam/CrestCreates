@@ -328,6 +328,8 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
             }
         }
 
+        snapshot = snapshot with { PromotedAt = PostgreSqlAgentMemoryStoreSupport.NormalizePromotedAt(snapshot.PromotedAt) };
+
         if (existing is not null)
         {
             if (!_comparer.Equals(existing, snapshot))
@@ -592,6 +594,13 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Memory identity conflicts.");
 
         var mutation = _stateMachine.PreparePromote(tenantId, candidate, plan);
+        mutation = mutation with
+        {
+            Memory = mutation.Memory with
+            {
+                PromotedAt = PostgreSqlAgentMemoryStoreSupport.NormalizePromotedAt(mutation.Memory.PromotedAt)
+            }
+        };
         var candidateSerialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
             mutation.Candidate, PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryCandidate);
         var memorySerialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
@@ -733,6 +742,17 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Memory identity conflicts.");
 
         var mutation = _stateMachine.PrepareSupersede(tenantId, target, replacement, plan);
+        mutation = mutation with
+        {
+            SupersededMemory = mutation.SupersededMemory with
+            {
+                PromotedAt = PostgreSqlAgentMemoryStoreSupport.NormalizePromotedAt(mutation.SupersededMemory.PromotedAt)
+            },
+            SupersedingMemory = mutation.SupersedingMemory with
+            {
+                PromotedAt = PostgreSqlAgentMemoryStoreSupport.NormalizePromotedAt(mutation.SupersedingMemory.PromotedAt)
+            }
+        };
         var oldSerialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
             mutation.SupersededMemory, PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryItem);
         var newSerialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
@@ -798,6 +818,13 @@ internal sealed class PostgreSqlAgentMemoryStore : IAgentMemoryStore, IAgentMemo
             throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.ResourceUnavailable, "Memory is unavailable.");
 
         var mutation = _stateMachine.PrepareArchive(tenantId, current, memory);
+        mutation = mutation with
+        {
+            Memory = mutation.Memory with
+            {
+                PromotedAt = PostgreSqlAgentMemoryStoreSupport.NormalizePromotedAt(mutation.Memory.PromotedAt)
+            }
+        };
         var serialized = PostgreSqlAgentMemoryStoreSupport.Serialize(
             mutation.Memory, PostgreSqlRuntimeJsonSerializerContext.Default.AgentMemoryItem);
         var stateHash = _stateHashes.ComputeMemoryStateHash(mutation.Memory);

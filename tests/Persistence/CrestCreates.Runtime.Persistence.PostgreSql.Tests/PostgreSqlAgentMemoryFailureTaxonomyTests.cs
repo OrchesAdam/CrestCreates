@@ -436,6 +436,51 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
     }
 
 
+    [Fact]
+    public async Task MalformedStateJson_Should_FailPersistedInvariantValidation()
+    {
+        // Malformed JSON and missing-required-member shapes must surface the
+        // frozen PersistedInvariantViolation taxonomy, never raw JsonException
+        // or NullReferenceException (Spec §15.4).
+        var memory = Memory("tenant-a", "memory-malformed-json");
+        await _driver.MemoryStore.SaveMemoryAsync(memory);
+
+        await TamperAsync(
+            $"update \"{_lease.Options.Schema}\".agent_memories "
+            + "set state_json = '{\"tenantId\": \"tenant-a\", \"memoryId\": \"memory-malformed-json\", \"status\": 0}'::jsonb "
+            + "where tenant_id = 'tenant-a' and memory_id = 'memory-malformed-json';");
+
+        var failure = await Record.ExceptionAsync(
+            () => _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-malformed-json").AsTask());
+        failure.Should().NotBeNull("a missing-required-member snapshot must fail the read.");
+        Unwrap(failure!).Should().BeOfType<RuntimePersistenceContractException>();
+        ((RuntimePersistenceContractException)Unwrap(failure!)).Code
+            .Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+    [Fact]
+    public async Task TrulyMalformedJson_Should_FailPersistedInvariantValidation()
+    {
+        var memory = Memory("tenant-a", "memory-truly-malformed");
+        await _driver.MemoryStore.SaveMemoryAsync(memory);
+
+        // jsonb cannot store syntactically invalid JSON, so the closest real
+        // corruption is a well-formed-but-wrong-shape payload: an array where
+        // the object was expected. Deserialization must fail closed.
+        await TamperAsync(
+            $"update \"{_lease.Options.Schema}\".agent_memories "
+            + "set state_json = '[1, 2, 3]'::jsonb "
+            + "where tenant_id = 'tenant-a' and memory_id = 'memory-truly-malformed';");
+
+        var failure = await Record.ExceptionAsync(
+            () => _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-truly-malformed").AsTask());
+        failure.Should().NotBeNull("truly malformed JSON must fail the read.");
+        Unwrap(failure!).Should().BeOfType<RuntimePersistenceContractException>();
+        ((RuntimePersistenceContractException)Unwrap(failure!)).Code
+            .Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+
     private static Exception Unwrap(Exception exception)
     {
         while (exception is AggregateException aggregate && aggregate.InnerExceptions.Count == 1)

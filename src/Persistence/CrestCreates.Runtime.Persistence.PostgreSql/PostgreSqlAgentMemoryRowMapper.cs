@@ -26,7 +26,7 @@ public static class PostgreSqlAgentMemoryRowMapper
         if (revision <= 0)
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Conversation revision must be positive.");
 
-        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(stateJson, typeInfo).Snapshot();
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.DeserializeSnapshot(stateJson, typeInfo);
         if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
             || !string.Equals(snapshot.ConversationId, conversationId, StringComparison.Ordinal))
         {
@@ -48,7 +48,7 @@ public static class PostgreSqlAgentMemoryRowMapper
         if (revision <= 0)
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Task revision must be positive.");
 
-        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(stateJson, typeInfo).Snapshot();
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.DeserializeSnapshot(stateJson, typeInfo);
         if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
             || !string.Equals(snapshot.TaskId, taskId, StringComparison.Ordinal))
         {
@@ -70,7 +70,7 @@ public static class PostgreSqlAgentMemoryRowMapper
         if (revision <= 0)
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Context revision must be positive.");
 
-        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(stateJson, typeInfo).Snapshot();
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.DeserializeSnapshot(stateJson, typeInfo);
         if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
             || !string.Equals(snapshot.ContextId, contextId, StringComparison.Ordinal))
         {
@@ -99,7 +99,7 @@ public static class PostgreSqlAgentMemoryRowMapper
         if (!Enum.IsDefined(typeof(AgentMemoryStatus), status) || !Enum.IsDefined(typeof(AgentMemoryKind), kind))
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate enum columns are undefined.");
 
-        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(stateJson, typeInfo).Snapshot();
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.DeserializeSnapshot(stateJson, typeInfo);
         if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
             || !string.Equals(snapshot.CandidateId, candidateId, StringComparison.Ordinal))
         {
@@ -142,7 +142,7 @@ public static class PostgreSqlAgentMemoryRowMapper
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory enum columns are undefined.");
         }
 
-        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(stateJson, typeInfo).Snapshot();
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.DeserializeSnapshot(stateJson, typeInfo);
         if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
             || !string.Equals(snapshot.MemoryId, memoryId, StringComparison.Ordinal))
         {
@@ -181,7 +181,7 @@ public static class PostgreSqlAgentMemoryRowMapper
         if (ordinal < 0)
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Block ordinal must be non-negative.");
 
-        var snapshot = PostgreSqlAgentMemoryStoreSupport.Deserialize(blockJson, typeInfo).Snapshot();
+        var snapshot = PostgreSqlAgentMemoryStoreSupport.DeserializeSnapshot(blockJson, typeInfo);
         if (!string.Equals(snapshot.TenantId, tenantId, StringComparison.Ordinal)
             || !string.Equals(snapshot.BlockId, blockId, StringComparison.Ordinal))
         {

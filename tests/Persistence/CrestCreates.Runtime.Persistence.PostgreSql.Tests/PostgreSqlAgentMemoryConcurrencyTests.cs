@@ -220,4 +220,89 @@ public sealed class PostgreSqlAgentMemoryConcurrencyTests : IAsyncLifetime
             },
             Explanation = "contract case explanation"
         };
+
+    [Fact]
+    public async Task ConcurrentContextReplacement_And_Read_Should_Not_Report_False_Corruption()
+    {
+        // The replacement commits between the reader's parent query and its
+        // Block projection query. Without a shared read lock, the reader sees
+        // an old parent with new Blocks and reports a false persisted
+        // corruption. With the Context advisory lock, the read is serialized
+        // after the replacement and returns a consistent snapshot.
+        var contextId = "context-concurrent-read";
+        var original = Context("tenant-a", contextId, "block-v1");
+        await _driver.ContextStore.CreateCompressedContextAsync(original);
+
+        var readStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Pause the reader after its parent query completes (first command
+        // done, Block projection query not yet issued). A replacement commits
+        // in this window: without a shared read lock the reader would then see
+        // an old parent with new Blocks and report a false corruption.
+        using var hook = PostgreSqlRuntimeTestHooks.BlockAfterFirstCommand(() =>
+        {
+            readStarted.SetResult();
+            releaseRead.Task.GetAwaiter().GetResult();
+        });
+
+        var readerTask = System.Threading.Tasks.Task.Run(async () =>
+        {
+            var read = await _driver.ContextStore.GetCompressedContextAsync("tenant-a", contextId);
+            read.Should().NotBeNull();
+            return read!;
+        });
+
+        await readStarted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+        // The reader is paused after its parent query, holding the Context
+        // lock. Start a replacement in the same window: it must block on the
+        // lock until the reader finishes.
+        var replacement = Context("tenant-a", contextId, "block-v2");
+        var replacementTask = System.Threading.Tasks.Task.Run(
+            () => _driver.ContextStore.SaveCompressedContextAsync(replacement).AsTask());
+        await System.Threading.Tasks.Task.Delay(300);
+        replacementTask.IsCompleted.Should().BeFalse("the replacement must wait for the in-flight reader to release the Context lock.");
+
+        // Release the reader: it finishes against the pre-replacement
+        // snapshot (consistent), then the replacement commits.
+        releaseRead.SetResult();
+        var result = await readerTask.WaitAsync(TimeSpan.FromSeconds(15));
+        result.Blocks.Select(block => block.BlockId)
+            .Should().Equal(["block-v1"], "the in-flight reader must observe the consistent pre-replacement snapshot.");
+
+        await replacementTask.WaitAsync(TimeSpan.FromSeconds(15));
+        var after = await _driver.ContextStore.GetCompressedContextAsync("tenant-a", contextId);
+        after!.Blocks.Select(block => block.BlockId)
+            .Should().Equal(["block-v2"], "the committed replacement must be observable afterwards.");
+    }
+
+    private static AgentCompressedContext Context(string tenantId, string contextId, string blockId)
+        => new()
+        {
+            TenantId = tenantId,
+            ContextId = contextId,
+            Blocks =
+            [
+                new AgentCompressedContextBlock
+                {
+                    BlockId = blockId,
+                    TenantId = tenantId,
+                    Content = $"content-{blockId}",
+                    CanonicalContentHash = CanonicalHashStub.For($"block-{blockId}"),
+                    SourceRefs = [new AgentContextSourceRef
+                    {
+                        SourceKind = AgentSourceKind.ConversationTurn,
+                        TenantId = tenantId,
+                        SourceId = $"source-{blockId}"
+                    }]
+                }
+            ]
+        };
+
+    private static Exception Unwrap(Exception exception)
+        => exception is AggregateException aggregate && aggregate.InnerExceptions.Count == 1
+            ? aggregate.InnerExceptions[0]
+            : exception;
+
 }

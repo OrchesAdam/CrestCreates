@@ -174,6 +174,13 @@ internal sealed class PostgreSqlAgentCompressedContextStore : IAgentCompressedCo
     private async ValueTask<AgentCompressedContext?> GetCoreAsync(string tenantId, string contextId, CancellationToken ct)
     {
         var session = _coordinator.RequireSession();
+        // Snapshot consistency with the writer: the parent aggregate and the
+        // Block projection are read in two statements, and a replacement can
+        // commit between them under READ COMMITTED. Holding the same Context
+        // advisory lock as the write path serializes readers against writers,
+        // so a reader always observes one consistent aggregate version.
+        await _lockManager.AcquireAsync(session, tenantId, "context", [contextId], ct).ConfigureAwait(false);
+
         AgentCompressedContext? parent = null;
         long parentRevision = 0;
         int parentVersion = 0;

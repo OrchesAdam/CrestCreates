@@ -300,6 +300,45 @@ public sealed class PostgreSqlAgentMemoryRestartTests : IAsyncLifetime
         result.SanitizedContent.Should().Contain("task expandable");
     }
 
+    [Fact]
+    public async Task Promote_RoundTrips_SubMicrosecondNonUtcPromotedAt_Consistently()
+    {
+        // Real mainline timestamps come from TimeProvider.GetUtcNow(): 100ns
+        // precision, typically non-UTC-aligned and non-microsecond-aligned.
+        // The durable Store must normalize to UTC microseconds so the JSON
+        // snapshot, structured column, and state hash agree on the same value
+        // across write, read, and restart.
+        var promotedAt = new DateTimeOffset(
+            2026, 8, 14, 10, 30, 15, 123,
+            new TimeSpan(0, 8, 0, 0))
+            .AddTicks(4567);
+        var candidate = Candidate("tenant-a", "candidate-precision");
+        await _driver.MemoryStore.CreateCandidateAsync(candidate);
+        var operation = Operation("tenant-a", "op-precision") with
+        {
+            Identity = new AgentMemoryOperationIdentity
+            {
+                OperationId = "op-precision",
+                OccurredAt = promotedAt
+            }
+        };
+        var plan = _driver.PreparePromotionPlan(candidate, "memory-precision", operation);
+        var conditional = (IAgentMemoryConditionalCurationStore)_driver.MemoryStore;
+        var committed = await conditional.PromoteAsync("tenant-a", plan);
+
+        var read = await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-precision");
+        read.Should().NotBeNull("a freshly promoted Memory must be readable.");
+        read!.PromotedAt.Should().Be(committed.PromotedAt, "read must agree with the committed snapshot.");
+
+        // Fresh provider over the same schema: the persisted value must still
+        // equal the committed snapshot (microsecond-truncated UTC).
+        await _driver.RebuildProviderAsync();
+        var afterRestart = await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-precision");
+        afterRestart.Should().NotBeNull("the promoted Memory must survive restart.");
+        afterRestart!.PromotedAt.Should().Be(committed.PromotedAt, "restart read must agree with the committed snapshot.");
+    }
+
+
     private static AgentMemoryItem Memory(string tenantId, string memoryId, AgentMemoryKind kind)
         => new()
         {
