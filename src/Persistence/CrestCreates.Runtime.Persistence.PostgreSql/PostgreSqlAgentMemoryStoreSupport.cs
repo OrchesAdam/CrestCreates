@@ -66,10 +66,9 @@ public static class PostgreSqlAgentMemoryStoreSupport
         }
     }
 
-    /// <summary>Normalizes a promoted timestamp for durable storage: UTC
-    /// instant with microsecond precision, matching PostgreSQL timestamptz.
-    /// Applied before JSON serialization and state-hash computation so the
-    /// JSON snapshot, structured column, and hash all agree on one value.</summary>
+    /// <summary>Returns the value represented by PostgreSQL's timestamptz
+    /// structured projection. This is only for comparing that physical column
+    /// with the exact domain value retained in the JSON snapshot.</summary>
     public static DateTimeOffset NormalizePromotedAt(DateTimeOffset value)
     {
         var utcTicks = value.ToUniversalTime().UtcTicks;

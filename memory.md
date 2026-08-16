@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-14 (Phase 9b+ durable Agent Memory store provider implemented — Issue #55: V010 schema, four PostgreSQL Stores, shared hash/curation/comparer semantics, atomic Promote/Reject/Supersede/Archive with top-level COMMIT boundary, restart/crash/concurrency evidence, NativeAOT mainline sentinel CRESTCREATES_DURABLE_AGENT_MEMORY_OK; PR #77 review round 1 remediated: persisted Candidate state-hash validation, evidence-tuple semantic audit, reciprocal graph read invariants, deep replay equality, INV-04 sanitization boundary, global-lock-order batch composition, blank Memory identity rejection, AOT #56 fact presence)
+Last Updated: 2026-08-16 (Phase 9b+ durable Agent Memory store provider implemented — Issue #55 / PR #77: V010 schema, four PostgreSQL Stores, shared hash/curation/comparer semantics, atomic Promote/Reject/Supersede/Archive with top-level COMMIT boundary, restart/crash/concurrency evidence, NativeAOT mainline sentinel CRESTCREATES_DURABLE_AGENT_MEMORY_OK; review round 2 closure: PostgreSQL retains exact shared domain snapshots and hashes while normalizing only structured timestamptz parameters/comparisons, persisted null canonical hashes fail as PersistedInvariantViolation, C07/C08/F09/H09/B03 evidence is executable and semantic, and the normative spec is approved)
 
 ## Purpose
 

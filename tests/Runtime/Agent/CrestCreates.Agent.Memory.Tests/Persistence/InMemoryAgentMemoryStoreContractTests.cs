@@ -134,7 +134,7 @@ public sealed class InMemoryAgentMemoryStoreContractTests
 
     [Fact]
     public Task BlockIdentity_Should_BeIndependentAcrossTenants()
-        => AgentMemoryStoreContractCases.AllStores_Should_IsolateSameIdentityAcrossTenants(Driver);
+        => AgentMemoryStoreContractCases.BlockIdentity_Should_BeIndependentAcrossTenants(Driver);
 
     [Fact]
     public Task BlockIdentity_Should_BeTenantWideUniqueAcrossContexts()

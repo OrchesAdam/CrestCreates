@@ -606,6 +606,26 @@ public static class AgentMemoryStoreContractCases
         ContractAssertions.NotNull(memoryB, "tenant-b memory must exist.");
     }
 
+    public static async Task BlockIdentity_Should_BeIndependentAcrossTenants(
+        IAgentMemoryStoreContractDriver driver,
+        CancellationToken cancellationToken = default)
+    {
+        const string blockId = "block-shared-across-tenants";
+        await driver.ContextStore.CreateCompressedContextAsync(
+            CompressedContext("tenant-a", "context-block-tenant-a", ContextBlock("tenant-a", blockId, "tenant-a content", 0)),
+            cancellationToken);
+        await driver.ContextStore.CreateCompressedContextAsync(
+            CompressedContext("tenant-b", "context-block-tenant-b", ContextBlock("tenant-b", blockId, "tenant-b content", 0)),
+            cancellationToken);
+
+        var blockA = await driver.ContextStore.GetCompressedContextBlockAsync("tenant-a", blockId, cancellationToken);
+        var blockB = await driver.ContextStore.GetCompressedContextBlockAsync("tenant-b", blockId, cancellationToken);
+        ContractAssertions.NotNull(blockA, "tenant-a must be able to own the shared BlockId.");
+        ContractAssertions.NotNull(blockB, "tenant-b must be able to own the shared BlockId.");
+        ContractAssertions.Equal("tenant-a content", blockA!.Content, "tenant-a Block content must remain isolated.");
+        ContractAssertions.Equal("tenant-b content", blockB!.Content, "tenant-b Block content must remain isolated.");
+    }
+
     public static async Task AllCrossTenantLookups_Should_ReturnNullOrEmptyWithoutLeakage(
         IAgentMemoryStoreContractDriver driver,
         CancellationToken cancellationToken = default)

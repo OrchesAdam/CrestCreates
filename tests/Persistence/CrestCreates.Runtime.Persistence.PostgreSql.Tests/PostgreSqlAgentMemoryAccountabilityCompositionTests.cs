@@ -11,6 +11,7 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -114,7 +115,8 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
         (await CountAsync(lease.Options)).Should().Be(1, "a known committed Promote must persist exactly one durable fact.");
         logger.Messages.Should().Contain(x => x.Contains("AGENT_MEMORY_ACCOUNTABILITY_RECORDED", StringComparison.Ordinal));
 
-        // A typed conflict (occupied identity) must not replace the committed fact.
+        // A typed conflict (occupied identity) is itself a deterministic curation
+        // outcome and must produce a second fact without replacing the first.
         var second = new AgentMemoryCandidate
         {
             TenantId = "tenant-a",
@@ -129,7 +131,21 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
             "tenant-a", "candidate-known-second", "memory-known",
             operation with { Identity = new AgentMemoryOperationIdentity { OperationId = "memory-pg-known-conflict", OccurredAt = DateTimeOffset.UnixEpoch } }).AsTask());
         conflict.Should().NotBeNull("occupied identity must fail the second Promote.");
-        (await CountAsync(lease.Options)).Should().Be(1, "a conflict must not manufacture an additional deterministic fact.");
+        (await CountAsync(lease.Options)).Should().Be(2, "a typed conflict is a second deterministic fact.");
+        var envelopes = await ReadEnvelopesAsync(lease.Options);
+        envelopes.Should().HaveCount(2);
+        var committed = envelopes.Single(envelope =>
+            envelope.RootElement.GetProperty("payload").GetProperty("data").GetProperty("operationId").GetString()
+            == "memory-pg-known");
+        committed.RootElement.GetProperty("payload").GetProperty("data").GetProperty("result").GetString()
+            .Should().Be("committed");
+        var typedConflict = envelopes.Single(envelope =>
+            envelope.RootElement.GetProperty("payload").GetProperty("data").GetProperty("operationId").GetString()
+            == "memory-pg-known-conflict");
+        typedConflict.RootElement.GetProperty("payload").GetProperty("data").GetProperty("result").GetString()
+            .Should().Be("conflict");
+        typedConflict.RootElement.GetProperty("payload").GetProperty("data").GetProperty("stableFailureCode").GetString()
+            .Should().Be("identity-conflict");
     }
 
     [Fact]
@@ -187,6 +203,54 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
 
         (await CountAsync(lease.Options)).Should().Be(0, "an unavailable path must never persist a deterministic curation fact.");
         logger.Messages.Should().NotContain(x => x.Contains("AGENT_MEMORY_ACCOUNTABILITY_RECORDED", StringComparison.Ordinal));
+
+        // A commit acknowledgement loss is also unknown to the service. Exercise
+        // it through the complete Store + Promotion + Accountability composition,
+        // not through the lower-level conditional Store alone.
+        using var committedProvider = new ServiceCollection()
+            .AddSingleton<ICanonicalHashComputer>(new LocalHashComputer())
+            .AddAgentMemoryRuntime()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlAgentMemoryPersistence()
+            .AddAccountability()
+            .AddSingleton<ILogger<AgentMemoryAccountabilityProducer>>(logger)
+            .AddAgentMemoryAccountability()
+            .BuildServiceProvider();
+        var committedStore = committedProvider.GetRequiredService<IAgentMemoryStore>();
+        var committedPromotion = committedProvider.GetRequiredService<IAgentMemoryPromotionService>();
+        var committedHashes = committedProvider.GetRequiredService<AgentMemoryCanonicalHashProjector>();
+        var unknownCandidate = new AgentMemoryCandidate
+        {
+            TenantId = "tenant-a",
+            CandidateId = "candidate-commit-unknown",
+            Kind = AgentMemoryKind.Decision,
+            Content = "commit unknown content",
+            CanonicalContentHash = committedHashes.ComputeContentHash(
+                "tenant-a", AgentSourceKind.ConversationTurn, "source-commit-unknown", 0, 0, "commit unknown content"),
+            Confidence = AgentMemoryConfidence.High
+        };
+        await committedStore.CreateCandidateAsync(unknownCandidate);
+        var unknownOperation = new AgentMemoryOperationRequest
+        {
+            TenantId = "tenant-a",
+            InvocationContext = Context("tenant-a", "cause-commit-unknown", "parent-commit-unknown", "inv-commit-unknown"),
+            Reason = "commit unknown composition",
+            Identity = new AgentMemoryOperationIdentity
+            {
+                OperationId = "memory-pg-commit-unknown",
+                OccurredAt = DateTimeOffset.UnixEpoch
+            },
+            Explanation = "commit unknown composition explanation"
+        };
+        using var rollback = PostgreSqlRuntimeTestHooks.BlockBeforeCommit(async ct =>
+        {
+            await committedProvider.GetRequiredService<PostgreSqlRuntimeTransactionAccessor>()
+                .Current!.Transaction.RollbackAsync(ct);
+        });
+        var unknownFailure = await Record.ExceptionAsync(() => committedPromotion.PromoteAsync(
+            "tenant-a", "candidate-commit-unknown", "memory-commit-unknown", unknownOperation).AsTask());
+        unknownFailure.Should().BeOfType<RuntimeTransactionCommitUnknownException>();
+        (await CountAsync(lease.Options)).Should().Be(0, "CommitUnknown must not create a false deterministic curation fact.");
     }
 
     [Fact]
@@ -303,6 +367,20 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
         return JsonDocument.Parse((string)(await command.ExecuteScalarAsync())!);
     }
 
+    private async Task<List<JsonDocument>> ReadEnvelopesAsync(PostgreSqlRuntimePersistenceOptions options)
+    {
+        await using var connection = new NpgsqlConnection(options.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            $"select envelope_json::text from \"{options.Schema}\".runtime_audit_envelopes where sink_id=@sink order by audit_id;", connection);
+        command.Parameters.AddWithValue("sink", "postgresql-runtime-audit");
+        await using var reader = await command.ExecuteReaderAsync();
+        var result = new List<JsonDocument>();
+        while (await reader.ReadAsync())
+            result.Add(JsonDocument.Parse(reader.GetString(0)));
+        return result;
+    }
+
     private sealed class RecordingLogger : ILogger<AgentMemoryAccountabilityProducer>
     {
         public List<string> Messages { get; } = new();
@@ -332,7 +410,23 @@ public sealed class PostgreSqlAgentMemoryAccountabilityCompositionTests(PostgreS
             => Hash($"{descriptor.GetType().Name}-definition");
 
         public CanonicalHash ComputeFromProjection(CanonicalHashProjectionResult projection)
-            => Hash(projection.Metadata.ArtifactKind + "-" + projection.Metadata.Purpose);
+        {
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+                projection.WriteCanonicalJson(writer);
+            var digest = System.Security.Cryptography.SHA256.HashData(stream.ToArray());
+            return new CanonicalHash
+            {
+                Value = Convert.ToHexString(digest).ToLowerInvariant(),
+                Algorithm = "SHA-256",
+                AlgorithmVersion = projection.Metadata.AlgorithmVersion,
+                ArtifactKind = projection.Metadata.ArtifactKind,
+                Scope = projection.Metadata.Scope,
+                Purpose = projection.Metadata.Purpose,
+                ContractVersion = projection.Metadata.ContractVersion,
+                CanonicalShapeVersion = projection.Metadata.CanonicalShapeVersion
+            };
+        }
 
         private static CanonicalHash Hash(string value)
             => new()

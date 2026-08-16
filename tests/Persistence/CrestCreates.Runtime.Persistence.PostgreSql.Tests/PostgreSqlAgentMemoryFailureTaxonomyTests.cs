@@ -174,21 +174,62 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NullCandidateCanonicalContentHash_Should_FailPersistedInvariantValidation()
+    {
+        var candidate = Candidate("tenant-a", "candidate-null-content-hash");
+        await _driver.MemoryStore.CreateCandidateAsync(candidate);
+
+        await TamperAsync($"update \"{_lease.Options.Schema}\".agent_memory_candidates "
+            + "set state_json = jsonb_set(state_json, '{canonicalContentHash}', 'null'::jsonb) "
+            + "where tenant_id = 'tenant-a' and candidate_id = 'candidate-null-content-hash';");
+
+        var failure = await Record.ExceptionAsync(
+            () => _driver.MemoryStore.GetCandidateAsync("tenant-a", "candidate-null-content-hash").AsTask());
+        failure.Should().NotBeNull();
+        var unwrapped = Unwrap(failure!);
+        unwrapped.Should().BeOfType<RuntimePersistenceContractException>();
+        ((RuntimePersistenceContractException)unwrapped).Code
+            .Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+    [Fact]
+    public async Task NullMemoryCanonicalContentHash_Should_FailPersistedInvariantValidation()
+    {
+        var memory = Memory("tenant-a", "memory-null-content-hash");
+        await _driver.MemoryStore.SaveMemoryAsync(memory);
+
+        await TamperAsync($"update \"{_lease.Options.Schema}\".agent_memories "
+            + "set state_json = jsonb_set(state_json, '{canonicalContentHash}', 'null'::jsonb) "
+            + "where tenant_id = 'tenant-a' and memory_id = 'memory-null-content-hash';");
+
+        var failure = await Record.ExceptionAsync(
+            () => _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-null-content-hash").AsTask());
+        failure.Should().NotBeNull();
+        var unwrapped = Unwrap(failure!);
+        unwrapped.Should().BeOfType<RuntimePersistenceContractException>();
+        ((RuntimePersistenceContractException)unwrapped).Code
+            .Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+    [Fact]
     public async Task DatabaseUnavailable_Should_RemainRuntimePersistenceUnavailable()
     {
-        // Point a fresh driver at an unreachable host; every Store path must
-        // surface the provider-neutral unavailable exception, not a domain code.
+        // Point a real Store composition at an unreachable host; the Store path
+        // must surface the provider-neutral unavailable exception, not a raw
+        // Npgsql connection failure or a domain code.
         var unavailable = new PostgreSqlRuntimePersistenceOptions
         {
             ConnectionString = "Host=127.0.0.1;Port=1;Timeout=1",
             Schema = "unavailable_schema"
         };
-        await using var connection = new NpgsqlConnection(unavailable.ConnectionString);
+        using var provider = PostgreSqlAgentMemoryContractDriver.BuildProvider(unavailable);
+        var store = provider.GetRequiredService<IAgentMemoryStore>();
         var failure = await Record.ExceptionAsync(async () =>
         {
-            await connection.OpenAsync();
+            await store.CreateCandidateAsync(Candidate("tenant-a", "candidate-unavailable-f09"));
         });
         failure.Should().NotBeNull();
+        failure.Should().BeOfType<RuntimePersistenceUnavailableException>();
     }
 
     [Fact]
@@ -293,10 +334,12 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
             ConnectionString = "Host=127.0.0.1;Port=1;Timeout=1",
             Schema = "unavailable_schema"
         };
-        await using var connection = new NpgsqlConnection(unavailable.ConnectionString);
-        var failure = await Record.ExceptionAsync(async () => await connection.OpenAsync());
+        using var provider = PostgreSqlAgentMemoryContractDriver.BuildProvider(unavailable);
+        var store = provider.GetRequiredService<IAgentMemoryStore>();
+        var failure = await Record.ExceptionAsync(async () =>
+            await store.CreateCandidateAsync(Candidate("tenant-a", "candidate-unavailable-c08")));
         failure.Should().NotBeNull();
-        failure.Should().NotBeOfType<AgentMemoryOperationException>();
+        failure.Should().BeOfType<RuntimePersistenceUnavailableException>();
     }
 
 

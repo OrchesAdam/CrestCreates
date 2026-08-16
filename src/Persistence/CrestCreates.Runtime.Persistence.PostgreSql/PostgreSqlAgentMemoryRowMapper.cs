@@ -107,6 +107,8 @@ public static class PostgreSqlAgentMemoryRowMapper
         }
         if ((int)snapshot.Status != status || (int)snapshot.Kind != kind)
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate enum columns disagree with the JSON snapshot.");
+        if (snapshot.CanonicalContentHash is null)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate canonical content hash is required.");
         if (!string.Equals(snapshot.CanonicalContentHash.Value, canonicalContentHash, StringComparison.Ordinal))
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Candidate canonical content hash disagrees with the JSON snapshot.");
         if (!string.Equals(stateHashes.ComputeCandidateStateHash(snapshot).Value, stateHash, StringComparison.Ordinal))
@@ -151,10 +153,12 @@ public static class PostgreSqlAgentMemoryRowMapper
         if ((int)snapshot.Status != status
             || (int)snapshot.Kind != kind
             || (int)snapshot.Confidence != confidence
-            || snapshot.PromotedAt != promotedAt)
+            || PostgreSqlAgentMemoryStoreSupport.NormalizePromotedAt(snapshot.PromotedAt) != promotedAt)
         {
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory structured columns disagree with the JSON snapshot.");
         }
+        if (snapshot.CanonicalContentHash is null)
+            throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory canonical content hash is required.");
         if (!string.Equals(snapshot.CanonicalContentHash.Value, canonicalContentHash, StringComparison.Ordinal))
             throw PostgreSqlAgentMemoryStoreSupport.Invariant("Memory canonical content hash disagrees with the JSON snapshot.");
         if (!string.Equals(snapshot.SupersedesMemoryId, supersedesMemoryId, StringComparison.Ordinal)

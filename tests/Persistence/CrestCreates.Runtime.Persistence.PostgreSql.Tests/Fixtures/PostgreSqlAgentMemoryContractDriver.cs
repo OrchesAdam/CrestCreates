@@ -11,6 +11,7 @@ using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 
@@ -70,7 +71,35 @@ public sealed class PostgreSqlAgentMemoryContractDriver : IAgentMemoryDurability
         string tenantId,
         string artifactId,
         CancellationToken cancellationToken = default)
-        => throw new InvalidOperationException("Revision observation is a PostgreSQL-only test seam; use the dedicated runner.");
+        => ReadRawRevisionCoreAsync(artifactKind, tenantId, artifactId, cancellationToken);
+
+    public async ValueTask<AgentMemoryRevisionObservation> ReadRawRevisionCoreAsync(
+        AgentMemoryArtifactKind artifactKind,
+        string tenantId,
+        string artifactId,
+        CancellationToken cancellationToken)
+    {
+        var (table, idColumn) = artifactKind switch
+        {
+            AgentMemoryArtifactKind.Conversation => ("agent_memory_conversations", "conversation_id"),
+            AgentMemoryArtifactKind.Task => ("agent_memory_tasks", "task_id"),
+            AgentMemoryArtifactKind.CompressedContext => ("agent_memory_compressed_contexts", "context_id"),
+            AgentMemoryArtifactKind.Candidate => ("agent_memory_candidates", "candidate_id"),
+            AgentMemoryArtifactKind.Memory => ("agent_memories", "memory_id"),
+            _ => throw new ArgumentOutOfRangeException(nameof(artifactKind), artifactKind, null)
+        };
+        await using var connection = new NpgsqlConnection(_lease.Options.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            $"select revision from {PostgreSqlAgentMemoryStoreSupport.Table(_lease.Options, table)} where tenant_id=@tenant and {idColumn}=@id;",
+            connection);
+        command.Parameters.AddWithValue("tenant", tenantId);
+        command.Parameters.AddWithValue("id", artifactId);
+        var raw = await command.ExecuteScalarAsync(cancellationToken);
+        if (raw is null)
+            throw new InvalidOperationException($"No {artifactKind} row exists for '{tenantId}/{artifactId}'.");
+        return new AgentMemoryRevisionObservation(artifactKind, tenantId, artifactId, (long)raw);
+    }
 
     public AgentMemoryCandidateExpectation PrepareCandidateExpectation(AgentMemoryCandidate candidate)
     {
@@ -230,4 +259,3 @@ public sealed class PostgreSqlAgentMemoryContractDriver : IAgentMemoryDurability
         }
     }
 }
-

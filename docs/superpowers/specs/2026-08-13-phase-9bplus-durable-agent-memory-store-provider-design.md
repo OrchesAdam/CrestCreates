@@ -8,7 +8,7 @@
 
 **Design input:** Issue comment `5277240292`, reconciled against `master` at `4028ea94`
 
-**Status:** DRAFT R3 — review round 2 remediated; implementation remains blocked pending approval
+**Status:** APPROVED — implemented by PR #77; post-implementation closure review pending
 
 **Review revision:** Propagates both 2026-08-13 review rounds through all
 normative sections and executable design cases

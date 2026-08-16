@@ -5,6 +5,7 @@ using CrestCreates.Agent.Memory.Persistence.Testing.Drivers;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using FluentAssertions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
+using Npgsql;
 using Xunit;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
@@ -19,7 +20,7 @@ public sealed class PostgreSqlAgentMemoryContractTests : IAsyncLifetime
 {
     private readonly PostgreSqlRuntimeCollectionFixture _fixture;
     private PostgreSqlRuntimeSchemaLease _lease = null!;
-    private IAgentMemoryStoreContractDriver _driver = null!;
+    private PostgreSqlAgentMemoryContractDriver _driver = null!;
 
     public PostgreSqlAgentMemoryContractTests(PostgreSqlRuntimeCollectionFixture fixture)
     {
@@ -139,8 +140,23 @@ public sealed class PostgreSqlAgentMemoryContractTests : IAsyncLifetime
         => AgentMemoryStoreContractCases.CompressedContext_Should_Return_Snapshot(Driver);
 
     [Fact]
-    public Task SaveMemory_ExactReplay_Should_NotMutateRevisionOrState()
-        => AgentMemoryStoreContractCases.SaveMemory_Should_Be_CreateOrExactReplay(Driver);
+    public async Task SaveMemory_ExactReplay_Should_NotMutateRevisionOrState()
+    {
+        var memory = Memory("tenant-a", "memory-exact-replay");
+        await Driver.MemoryStore.SaveMemoryAsync(memory);
+        var before = await ReadMemoryRowAsync("tenant-a", "memory-exact-replay");
+        var beforeRevision = await _driver.ReadRawRevisionAsync(
+            AgentMemoryArtifactKind.Memory, "tenant-a", "memory-exact-replay");
+
+        await Driver.MemoryStore.SaveMemoryAsync(memory);
+
+        var after = await ReadMemoryRowAsync("tenant-a", "memory-exact-replay");
+        var afterRevision = await _driver.ReadRawRevisionAsync(
+            AgentMemoryArtifactKind.Memory, "tenant-a", "memory-exact-replay");
+        afterRevision.Revision.Should().Be(beforeRevision.Revision, "exact replay must not increment PostgreSQL revision.");
+        after.StateJson.Should().Be(before.StateJson, "exact replay must not rewrite state_json.");
+        after.StateHash.Should().Be(before.StateHash, "exact replay must not rewrite state_hash.");
+    }
 
     [Fact]
     public Task AllStores_Should_IsolateSameIdentityAcrossTenants()
@@ -152,7 +168,7 @@ public sealed class PostgreSqlAgentMemoryContractTests : IAsyncLifetime
 
     [Fact]
     public Task BlockIdentity_Should_BeIndependentAcrossTenants()
-        => AgentMemoryStoreContractCases.AllStores_Should_IsolateSameIdentityAcrossTenants(Driver);
+        => AgentMemoryStoreContractCases.BlockIdentity_Should_BeIndependentAcrossTenants(Driver);
 
     [Fact]
     public Task BlockIdentity_Should_BeTenantWideUniqueAcrossContexts()
@@ -225,4 +241,30 @@ public sealed class PostgreSqlAgentMemoryContractTests : IAsyncLifetime
 
     private static AgentCompressedContext CompressedContext(string tenantId, string contextId, params AgentCompressedContextBlock[] blocks)
         => new() { TenantId = tenantId, ContextId = contextId, Blocks = blocks };
+
+    private async Task<(long Revision, string StateJson, string StateHash)> ReadMemoryRowAsync(string tenantId, string memoryId)
+    {
+        await using var connection = new NpgsqlConnection(_lease.Options.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            $"select revision, state_json::text, state_hash from \"{_lease.Options.Schema}\".agent_memories where tenant_id=@tenant and memory_id=@memory;",
+            connection);
+        command.Parameters.AddWithValue("tenant", tenantId);
+        command.Parameters.AddWithValue("memory", memoryId);
+        await using var reader = await command.ExecuteReaderAsync();
+        (await reader.ReadAsync()).Should().BeTrue("the memory row must exist for raw evidence.");
+        return (reader.GetInt64(0), reader.GetString(1), reader.GetString(2));
+    }
+
+    private static AgentMemoryItem Memory(string tenantId, string memoryId)
+        => new()
+        {
+            TenantId = tenantId,
+            MemoryId = memoryId,
+            Kind = AgentMemoryKind.Preference,
+            Content = "exact replay content",
+            CanonicalContentHash = CanonicalHashStub.For("exact-replay"),
+            Confidence = AgentMemoryConfidence.Medium,
+            PromotedAt = DateTimeOffset.UnixEpoch
+        };
 }

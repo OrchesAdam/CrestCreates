@@ -1,4 +1,5 @@
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Persistence.Testing.Cases;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
@@ -305,9 +306,8 @@ public sealed class PostgreSqlAgentMemoryRestartTests : IAsyncLifetime
     {
         // Real mainline timestamps come from TimeProvider.GetUtcNow(): 100ns
         // precision, typically non-UTC-aligned and non-microsecond-aligned.
-        // The durable Store must normalize to UTC microseconds so the JSON
-        // snapshot, structured column, and state hash agree on the same value
-        // across write, read, and restart.
+        // The domain snapshot remains exact; only PostgreSQL's structured
+        // timestamptz projection is compared at its microsecond precision.
         var promotedAt = new DateTimeOffset(
             2026, 8, 14, 10, 30, 15, 123,
             new TimeSpan(0, 8, 0, 0))
@@ -329,13 +329,20 @@ public sealed class PostgreSqlAgentMemoryRestartTests : IAsyncLifetime
         var read = await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-precision");
         read.Should().NotBeNull("a freshly promoted Memory must be readable.");
         read!.PromotedAt.Should().Be(committed.PromotedAt, "read must agree with the committed snapshot.");
+        committed.PromotedAt.Should().Be(promotedAt, "the shared projector owns the exact domain timestamp.");
+        _driver.Provider.GetRequiredService<AgentMemoryCanonicalHashProjector>()
+            .ComputeMemoryStateHash(read)
+            .Should().Be(plan.ExpectedMemoryStateHash, "the read snapshot must retain the plan hash.");
 
         // Fresh provider over the same schema: the persisted value must still
-        // equal the committed snapshot (microsecond-truncated UTC).
+        // equal the exact committed domain snapshot after restart.
         await _driver.RebuildProviderAsync();
         var afterRestart = await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-precision");
         afterRestart.Should().NotBeNull("the promoted Memory must survive restart.");
         afterRestart!.PromotedAt.Should().Be(committed.PromotedAt, "restart read must agree with the committed snapshot.");
+        _driver.Provider.GetRequiredService<AgentMemoryCanonicalHashProjector>()
+            .ComputeMemoryStateHash(afterRestart)
+            .Should().Be(plan.ExpectedMemoryStateHash, "restart read must retain the plan hash.");
     }
 
 
