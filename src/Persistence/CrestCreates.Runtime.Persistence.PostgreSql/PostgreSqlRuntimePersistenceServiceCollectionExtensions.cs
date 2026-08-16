@@ -20,7 +20,9 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(options);
         PostgreSqlRuntimePersistenceOptionsValidator.Validate(options);
         services.AddSingleton(options);
-        services.AddSingleton<NpgsqlDataSource>(_ => new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build());
+        services.AddSingleton<NpgsqlDataSource>(_ => new NpgsqlSlimDataSourceBuilder(options.ConnectionString)
+            .EnableArrays()
+            .Build());
         services.AddSingleton<PostgreSqlRuntimeMigrationRunner>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PostgreSqlRuntimeSchemaCompatibilityHostedService>());
         services.AddSingleton<PostgreSqlRuntimeTransactionAccessor>();

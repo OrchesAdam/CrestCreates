@@ -31,6 +31,32 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
         if (_accessor.Current is not null)
             return await work(cancellationToken).ConfigureAwait(false);
 
+        return await ExecuteOwnedAsync(work, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Formal-curation commit boundary. Rejects any pre-existing ambient Runtime
+    /// transaction before invoking the delegate so #56 can never publish a
+    /// committed Accountability fact before the provider-owned COMMIT completes.
+    /// </summary>
+    public async ValueTask<T> ExecuteTopLevelAsync<T>(Func<CancellationToken, ValueTask<T>> work, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+        if (_accessor.Current is not null)
+        {
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.AmbientCommitBoundaryUnsupported,
+                "Formal curation requires a provider-owned top-level COMMIT boundary and cannot join an ambient Runtime transaction.");
+        }
+
+        return await ExecuteOwnedAsync(work, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask ExecuteTopLevelAsync(Func<CancellationToken, ValueTask> work, CancellationToken cancellationToken = default)
+        => await ExecuteTopLevelAsync<object?>(async ct => { await work(ct).ConfigureAwait(false); return null; }, cancellationToken).ConfigureAwait(false);
+
+    private async ValueTask<T> ExecuteOwnedAsync<T>(Func<CancellationToken, ValueTask<T>> work, CancellationToken cancellationToken)
+    {
         try
         {
             await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -39,6 +65,7 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
             try
             {
                 var result = await work(cancellationToken).ConfigureAwait(false);
+                await PostgreSqlRuntimeTestHooks.NotifyBeforeCommitAsync(CancellationToken.None).ConfigureAwait(false);
                 try
                 {
                     await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);

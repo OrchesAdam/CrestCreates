@@ -206,18 +206,24 @@ public sealed class PostgreSqlRuntimeMigrationRunner
 
     private async Task ValidateTableColumnsAsync(NpgsqlConnection connection, RuntimeSchemaTable table, CancellationToken cancellationToken)
     {
-        var actual = new Dictionary<string, (string Type, string Nullable)>(StringComparer.Ordinal);
+        var actual = new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal);
         await using var command = new NpgsqlCommand(
-            "select column_name, data_type, is_nullable from information_schema.columns where table_schema=@schema and table_name=@table;",
+            "select column_name, data_type, is_nullable, collation_name from information_schema.columns where table_schema=@schema and table_name=@table;",
             connection);
         command.Parameters.AddWithValue("schema", _options.Schema);
         command.Parameters.AddWithValue("table", table.Name);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            actual.Add(reader.GetString(0), (reader.GetString(1), reader.GetString(2)));
+        {
+            var collation = reader.IsDBNull(3) ? null : reader.GetString(3);
+            actual.Add(reader.GetString(0), (reader.GetString(1), reader.GetString(2), collation));
+        }
 
-        if (actual.Count != table.Columns.Count || table.Columns.Any(pair => !actual.TryGetValue(pair.Key, out var value) || value != pair.Value))
-            throw new InvalidOperationException($"PostgreSQL runtime table '{table.Name}' has an incompatible column shape.");
+        if (actual.Count != table.Columns.Count
+            || table.Columns.Any(pair => !actual.TryGetValue(pair.Key, out var value) || value != pair.Value))
+        {
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table.Name}' has an incompatible column shape or collation.");
+        }
     }
 
     private async Task ValidatePrimaryKeyAsync(NpgsqlConnection connection, RuntimeSchemaTable table, CancellationToken cancellationToken)
@@ -298,6 +304,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         await using var command = new NpgsqlCommand("""
             select constraint_info.condeferrable,
                    constraint_info.condeferred,
+                   constraint_info.confdeltype,
                    referenced_schema.nspname,
                    referenced_relation.relname,
                    array(
@@ -321,21 +328,34 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         command.Parameters.AddWithValue("table", table);
         var expectedColumns = expected.Columns.Split(", ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         var expectedReferencedColumns = expected.ReferencedColumns.Split(", ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var expectedDeleteAction = MapDeleteAction(expected.DeleteAction);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             if (reader.GetBoolean(0) == expected.Deferrable
                 && reader.GetBoolean(1) == expected.InitiallyDeferred
-                && string.Equals(reader.GetString(2), _options.Schema, StringComparison.Ordinal)
-                && string.Equals(reader.GetString(3), expected.ReferencedTable, StringComparison.Ordinal)
-                && reader.GetFieldValue<string[]>(4).SequenceEqual(expectedColumns, StringComparer.Ordinal)
-                && reader.GetFieldValue<string[]>(5).SequenceEqual(expectedReferencedColumns, StringComparer.Ordinal))
+                && MapDeleteAction(reader.GetChar(2).ToString()) == expectedDeleteAction
+                && string.Equals(reader.GetString(3), _options.Schema, StringComparison.Ordinal)
+                && string.Equals(reader.GetString(4), expected.ReferencedTable, StringComparison.Ordinal)
+                && reader.GetFieldValue<string[]>(5).SequenceEqual(expectedColumns, StringComparer.Ordinal)
+                && reader.GetFieldValue<string[]>(6).SequenceEqual(expectedReferencedColumns, StringComparer.Ordinal))
             {
                 return;
             }
         }
         throw new InvalidOperationException($"PostgreSQL runtime table '{table}' has an incompatible required foreign key.");
     }
+
+    private static string MapDeleteAction(string value)
+        => value.ToUpperInvariant() switch
+        {
+            "A" => "NO ACTION",
+            "R" => "RESTRICT",
+            "C" => "CASCADE",
+            "N" => "SET NULL",
+            "D" => "SET DEFAULT",
+            _ => value
+        };
 
     private static string NormalizeSql(string value)
     {
@@ -460,10 +480,11 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         string ReferencedTable,
         string ReferencedColumns,
         bool Deferrable = true,
-        bool InitiallyDeferred = true);
+        bool InitiallyDeferred = true,
+        string DeleteAction = "NO ACTION");
     private sealed record RuntimeSchemaTable(
         string Name,
-        IReadOnlyDictionary<string, (string Type, string Nullable)> Columns,
+        IReadOnlyDictionary<string, (string Type, string Nullable, string? Collation)> Columns,
         IReadOnlyList<string> PrimaryKey,
         IReadOnlyList<RuntimeSchemaCheck> RequiredChecks,
         IReadOnlyList<RuntimeSchemaIndex> RequiredIndexes,
@@ -471,20 +492,22 @@ public sealed class PostgreSqlRuntimeMigrationRunner
 
     private static class RuntimeSchemaManifest
     {
-        private static readonly (string Type, string Nullable) Text = ("text", "NO");
-        private static readonly (string Type, string Nullable) NullableText = ("text", "YES");
-        private static readonly (string Type, string Nullable) BigInt = ("bigint", "NO");
-        private static readonly (string Type, string Nullable) Integer = ("integer", "NO");
-        private static readonly (string Type, string Nullable) Json = ("jsonb", "NO");
-        private static readonly (string Type, string Nullable) NullableJson = ("jsonb", "YES");
-        private static readonly (string Type, string Nullable) IntegerNullable = ("integer", "YES");
-        private static readonly (string Type, string Nullable) Boolean = ("boolean", "NO");
-        private static readonly (string Type, string Nullable) Timestamp = ("timestamp with time zone", "NO");
-        private static readonly (string Type, string Nullable) NullableTimestamp = ("timestamp with time zone", "YES");
+        private static readonly (string Type, string Nullable, string? Collation) Text = ("text", "NO", null);
+        private static readonly (string Type, string Nullable, string? Collation) NullableText = ("text", "YES", null);
+        private static readonly (string Type, string Nullable, string? Collation) BigInt = ("bigint", "NO", null);
+        private static readonly (string Type, string Nullable, string? Collation) Integer = ("integer", "NO", null);
+        private static readonly (string Type, string Nullable, string? Collation) Json = ("jsonb", "NO", null);
+        private static readonly (string Type, string Nullable, string? Collation) NullableJson = ("jsonb", "YES", null);
+        private static readonly (string Type, string Nullable, string? Collation) IntegerNullable = ("integer", "YES", null);
+        private static readonly (string Type, string Nullable, string? Collation) Boolean = ("boolean", "NO", null);
+        private static readonly (string Type, string Nullable, string? Collation) Timestamp = ("timestamp with time zone", "NO", null);
+        private static readonly (string Type, string Nullable, string? Collation) NullableTimestamp = ("timestamp with time zone", "YES", null);
+                private static readonly (string Type, string Nullable, string? Collation) TextC = ("text", "NO", "C");
+        private static readonly (string Type, string Nullable, string? Collation) NullableTextC = ("text", "YES", "C");
 
         public static readonly IReadOnlyList<RuntimeSchemaTable> Tables =
         [
-            new("runtime_workflow_instances", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("runtime_workflow_instances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = Text, ["tenant_id"] = Text, ["instance_id"] = Text,
                 ["revision"] = BigInt, ["status"] = Integer, ["workflow_pin_json"] = Json,
@@ -494,8 +517,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             [new("ck_runtime_workflow_revision", "check (revision > 0)"),
              new("ck_runtime_workflow_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))")],
             [new("ux_runtime_workflow_waiting", ["tenant_scope_kind", "tenant_id", "waiting_instance_id"], "waiting_instance_id is not null")],
-            [new("tenant_scope_kind, tenant_id, instance_id, waiting_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id")]),
-            new("runtime_human_task_instances", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            [new("tenant_scope_kind, tenant_id, instance_id, waiting_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT")]),
+            new("runtime_human_task_instances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = Text, ["tenant_id"] = Text, ["instance_id"] = Text,
                 ["revision"] = BigInt, ["status"] = Integer, ["human_task_pin_json"] = Json,
@@ -510,8 +533,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_runtime_human_task_lifecycle", "check ((status = any (array[0, 1]) and completed_at is null and cancelled_at is null) or (status = any (array[2, 4]) and completed_at is not null and cancelled_at is null) or (status = 3 and completed_at is null and cancelled_at is not null))")],
             [new("ux_runtime_human_task_active_step", ["tenant_scope_kind", "tenant_id", "workflow_instance_id", "workflow_step_id"], "workflow_instance_id is not null and workflow_step_id is not null and completed_at is null and cancelled_at is null"),
              new("uq_runtime_human_task_workflow_instance", ["tenant_scope_kind", "tenant_id", "workflow_instance_id", "instance_id"], "")],
-            [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id")]),
-            new("runtime_operation_receipts", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT")]),
+            new("runtime_operation_receipts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = Text, ["tenant_id"] = Text, ["operation_id"] = Text,
                 ["workflow_instance_id"] = Text, ["human_task_instance_id"] = Text,
@@ -520,24 +543,24 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             }, ["tenant_scope_kind", "tenant_id", "operation_id"],
             [new("ck_runtime_receipt_transition_revision", "check (workflow_to_revision = workflow_from_revision + 1)"),
              new("ck_runtime_receipt_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))")], [],
-            [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id"),
-             new("tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id")]),
-            new("descriptor_snapshots", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT"),
+             new("tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT")]),
+            new("descriptor_snapshots", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["snapshot_id"] = Text, ["content_hash"] = Text, ["snapshot_json"] = Json, ["created_at"] = Timestamp
             }, ["snapshot_id"], [], [], []),
-            new("descriptor_snapshot_entries", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("descriptor_snapshot_entries", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["snapshot_id"] = Text, ["descriptor_namespace"] = Text, ["descriptor_id"] = Text,
                 ["descriptor_version"] = Integer, ["contract_hash"] = Text, ["definition_hash"] = Text
             }, ["snapshot_id", "descriptor_namespace", "descriptor_id", "descriptor_version"], [], [],
-            [new("snapshot_id", "descriptor_snapshots", "snapshot_id", Deferrable: false, InitiallyDeferred: false)]),
-            new("runtime_audit_envelopes", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            [new("snapshot_id", "descriptor_snapshots", "snapshot_id", Deferrable: false, InitiallyDeferred: false, DeleteAction: "RESTRICT")]),
+            new("runtime_audit_envelopes", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["sink_id"] = Text, ["audit_id"] = Text, ["integrity_json"] = Json,
                 ["envelope_json"] = Json, ["accepted_at"] = Timestamp
             }, ["sink_id", "audit_id"], [], [], []),
-            new("agent_tool_pre_dispatch_checkpoints", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("agent_tool_pre_dispatch_checkpoints", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["audit_id"] = Text, ["attempt_id"] = Text,
                 ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
@@ -549,7 +572,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["approval_json"] = Json, ["budget_reservation_json"] = Json,
                 ["accepted_at"] = Timestamp, ["created_at"] = Timestamp
             }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], []),
-            new("agent_tool_budget_reservations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("agent_tool_budget_reservations", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["reservation_id"] = Text, ["attempt_id"] = Text,
                 ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
@@ -563,7 +586,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             [new("ux_agent_tool_budget_attempt", ["tenant_id", "attempt_id"], ""),
              new("ix_agent_tool_budget_capacity", ["tenant_id", "capacity_key"], "", Unique: false)],
             []),
-            new("agent_tool_invocation_pre_dispatch", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("agent_tool_invocation_pre_dispatch", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["lease_id"] = Text, ["attempt_id"] = Text,
                 ["logical_invocation_key"] = Json, ["invocation_fingerprint"] = Text,
@@ -596,7 +619,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ux_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "pre_dispatch_state = any (array[0, 1, 2, 3, 4, 6, 8, 10, 11])"),
              new("ix_agent_tool_invocation_pre_dispatch_logical", ["tenant_id", "logical_invocation_key"], "", Unique: false)],
             []),
-            new("agent_tool_governance_decisions", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("agent_tool_governance_decisions", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["audit_id"] = Text,
                 ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
@@ -606,7 +629,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             [new("ck_agent_tool_decision_state_range", "check ((decision_state >= 0) and (decision_state <= 2))")],
             [new("ux_agent_tool_decision_identity", ["tenant_id", "logical_invocation_key", "attempt_id"], "")],
             []),
-            new("agent_tool_governance_finalizations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("agent_tool_governance_finalizations", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["audit_id"] = Text,
                 ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
@@ -615,19 +638,87 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             }, ["tenant_id", "audit_id"],
             [new("ck_agent_tool_finalization_state_range", "check ((attempt_state >= 0) and (attempt_state <= 10))")],
             [], []),
-            new("agent_tool_reconciliation_observations", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("agent_tool_reconciliation_observations", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
                 ["revision"] = BigInt, ["status"] = Integer, ["reason_code"] = Text,
                 ["observed_at"] = Timestamp, ["observation_json"] = NullableJson
             }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], []),
-            new("agent_tool_reconciliation_receipts", new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+            new("agent_tool_reconciliation_receipts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
                 ["status"] = Integer, ["reason_code"] = Text,
                 ["terminal_at"] = Timestamp, ["integrity_value"] = Text,
                 ["receipt_json"] = Json, ["created_at"] = Timestamp
-            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], [])
+            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], []),
+            new("agent_memory_conversations", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["conversation_id"] = TextC,
+                ["revision"] = BigInt, ["state_contract_version"] = Integer,
+                ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["tenant_id", "conversation_id"],
+            [new("ck_agent_memory_conversations_revision", "check (revision > 0)"),
+             new("ck_agent_memory_conversations_contract_version", "check (state_contract_version = 1)")], [], []),
+            new("agent_memory_tasks", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["task_id"] = TextC,
+                ["revision"] = BigInt, ["state_contract_version"] = Integer,
+                ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["tenant_id", "task_id"],
+            [new("ck_agent_memory_tasks_revision", "check (revision > 0)"),
+             new("ck_agent_memory_tasks_contract_version", "check (state_contract_version = 1)")], [], []),
+            new("agent_memory_compressed_contexts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["context_id"] = TextC,
+                ["revision"] = BigInt, ["state_contract_version"] = Integer,
+                ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["tenant_id", "context_id"],
+            [new("ck_agent_memory_contexts_revision", "check (revision > 0)"),
+             new("ck_agent_memory_contexts_contract_version", "check (state_contract_version = 1)")], [], []),
+            new("agent_memory_compressed_blocks", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["block_id"] = TextC, ["context_id"] = TextC,
+                ["ordinal"] = Integer, ["state_contract_version"] = Integer,
+                ["block_json"] = Json
+            }, ["tenant_id", "block_id"],
+            [new("ck_agent_memory_compressed_blocks_ordinal_nonnegative", "check (ordinal >= 0)"),
+             new("ck_agent_memory_compressed_blocks_contract_version", "check (state_contract_version = 1)")],
+            [new("uq_agent_memory_blocks_context_ordinal", ["tenant_id", "context_id", "ordinal"], "")],
+            [new("tenant_id, context_id", "agent_memory_compressed_contexts", "tenant_id, context_id", Deferrable: false, InitiallyDeferred: false, DeleteAction: "CASCADE")]),
+            new("agent_memory_candidates", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["candidate_id"] = TextC,
+                ["revision"] = BigInt, ["status"] = Integer, ["kind"] = Integer,
+                ["canonical_content_hash"] = TextC, ["state_hash"] = TextC,
+                ["state_contract_version"] = Integer, ["state_json"] = Json,
+                ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["tenant_id", "candidate_id"],
+            [new("ck_agent_memory_candidates_status", "check ((status >= 0) and (status <= 4))"),
+             new("ck_agent_memory_candidates_kind", "check ((kind >= 0) and (kind <= 5))"),
+             new("ck_agent_memory_candidates_revision", "check (revision > 0)"),
+             new("ck_agent_memory_candidates_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_agent_memory_candidates_tenant_status", ["tenant_id", "status", "candidate_id"], "", Unique: false)], []),
+            new("agent_memories", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["memory_id"] = TextC,
+                ["revision"] = BigInt, ["status"] = Integer, ["kind"] = Integer, ["confidence"] = Integer,
+                ["promoted_at"] = Timestamp,
+                ["canonical_content_hash"] = TextC, ["state_hash"] = TextC,
+                ["supersedes_memory_id"] = NullableTextC, ["superseded_by_memory_id"] = NullableTextC,
+                ["state_contract_version"] = Integer, ["state_json"] = Json,
+                ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["tenant_id", "memory_id"],
+            [new("ck_agent_memories_status", "check ((status >= 0) and (status <= 4))"),
+             new("ck_agent_memories_kind", "check ((kind >= 0) and (kind <= 5))"),
+             new("ck_agent_memories_confidence", "check ((confidence >= 0) and (confidence <= 3))"),
+             new("ck_agent_memories_revision", "check (revision > 0)"),
+             new("ck_agent_memories_contract_version", "check (state_contract_version = 1)"),
+             new("ck_agent_memories_no_self_supersedes", "check ((supersedes_memory_id is null) or (supersedes_memory_id <> memory_id))"),
+             new("ck_agent_memories_no_self_superseded_by", "check ((superseded_by_memory_id is null) or (superseded_by_memory_id <> memory_id))")],
+            [new("uq_agent_memories_supersedes", ["tenant_id", "supersedes_memory_id"], "supersedes_memory_id is not null"),
+             new("ix_agent_memories_tenant_status_kind", ["tenant_id", "status", "kind", "memory_id"], "", Unique: false)],
+            [new("tenant_id, supersedes_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION"),
+             new("tenant_id, superseded_by_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION")])
         ];
     }
 
@@ -994,6 +1085,108 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             create unique index ux_agent_tool_invocation_pre_dispatch_logical
                 on {schema}.agent_tool_invocation_pre_dispatch (tenant_id, logical_invocation_key)
                 where pre_dispatch_state in (0, 1, 2, 3, 4, 6, 8, 10, 11);
+            """),
+        new RuntimeMigration("V010", "agent_memory_durable_store", """
+            create table {schema}.agent_memory_conversations (
+                tenant_id text collate "C" not null,
+                conversation_id text collate "C" not null,
+                revision bigint not null constraint ck_agent_memory_conversations_revision check (revision > 0),
+                state_contract_version integer not null default 1 constraint ck_agent_memory_conversations_contract_version check (state_contract_version = 1),
+                state_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                constraint pk_agent_memory_conversations primary key (tenant_id, conversation_id)
+            );
+
+            create table {schema}.agent_memory_tasks (
+                tenant_id text collate "C" not null,
+                task_id text collate "C" not null,
+                revision bigint not null constraint ck_agent_memory_tasks_revision check (revision > 0),
+                state_contract_version integer not null default 1 constraint ck_agent_memory_tasks_contract_version check (state_contract_version = 1),
+                state_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                constraint pk_agent_memory_tasks primary key (tenant_id, task_id)
+            );
+
+            create table {schema}.agent_memory_compressed_contexts (
+                tenant_id text collate "C" not null,
+                context_id text collate "C" not null,
+                revision bigint not null constraint ck_agent_memory_contexts_revision check (revision > 0),
+                state_contract_version integer not null default 1 constraint ck_agent_memory_contexts_contract_version check (state_contract_version = 1),
+                state_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                constraint pk_agent_memory_compressed_contexts primary key (tenant_id, context_id)
+            );
+
+            create table {schema}.agent_memory_compressed_blocks (
+                tenant_id text collate "C" not null,
+                block_id text collate "C" not null,
+                context_id text collate "C" not null,
+                ordinal integer not null constraint ck_agent_memory_compressed_blocks_ordinal_nonnegative check (ordinal >= 0),
+                state_contract_version integer not null default 1 constraint ck_agent_memory_compressed_blocks_contract_version check (state_contract_version = 1),
+                block_json jsonb not null,
+                constraint pk_agent_memory_compressed_blocks primary key (tenant_id, block_id),
+                constraint uq_agent_memory_blocks_context_ordinal unique (tenant_id, context_id, ordinal),
+                constraint fk_agent_memory_blocks_context
+                    foreign key (tenant_id, context_id)
+                    references {schema}.agent_memory_compressed_contexts (tenant_id, context_id)
+                    on delete cascade
+            );
+
+            create table {schema}.agent_memory_candidates (
+                tenant_id text collate "C" not null,
+                candidate_id text collate "C" not null,
+                revision bigint not null constraint ck_agent_memory_candidates_revision check (revision > 0),
+                status integer not null constraint ck_agent_memory_candidates_status check (status between 0 and 4),
+                kind integer not null constraint ck_agent_memory_candidates_kind check (kind between 0 and 5),
+                canonical_content_hash text collate "C" not null,
+                state_hash text collate "C" not null,
+                state_contract_version integer not null default 1 constraint ck_agent_memory_candidates_contract_version check (state_contract_version = 1),
+                state_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                constraint pk_agent_memory_candidates primary key (tenant_id, candidate_id)
+            );
+
+            create table {schema}.agent_memories (
+                tenant_id text collate "C" not null,
+                memory_id text collate "C" not null,
+                revision bigint not null constraint ck_agent_memories_revision check (revision > 0),
+                status integer not null constraint ck_agent_memories_status check (status between 0 and 4),
+                kind integer not null constraint ck_agent_memories_kind check (kind between 0 and 5),
+                confidence integer not null constraint ck_agent_memories_confidence check (confidence between 0 and 3),
+                promoted_at timestamptz not null,
+                canonical_content_hash text collate "C" not null,
+                state_hash text collate "C" not null,
+                supersedes_memory_id text collate "C" null,
+                superseded_by_memory_id text collate "C" null,
+                state_contract_version integer not null default 1 constraint ck_agent_memories_contract_version check (state_contract_version = 1),
+                state_json jsonb not null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                constraint pk_agent_memories primary key (tenant_id, memory_id),
+                constraint ck_agent_memories_no_self_supersedes check (supersedes_memory_id is null or supersedes_memory_id <> memory_id),
+                constraint ck_agent_memories_no_self_superseded_by check (superseded_by_memory_id is null or superseded_by_memory_id <> memory_id),
+                constraint fk_agent_memories_supersedes
+                    foreign key (tenant_id, supersedes_memory_id)
+                    references {schema}.agent_memories (tenant_id, memory_id)
+                    on delete no action
+                    deferrable initially deferred,
+                constraint fk_agent_memories_superseded_by
+                    foreign key (tenant_id, superseded_by_memory_id)
+                    references {schema}.agent_memories (tenant_id, memory_id)
+                    on delete no action
+                    deferrable initially deferred
+            );
+            create unique index uq_agent_memories_supersedes
+                on {schema}.agent_memories (tenant_id, supersedes_memory_id)
+                where supersedes_memory_id is not null;
+            create index ix_agent_memories_tenant_status_kind
+                on {schema}.agent_memories (tenant_id, status, kind, memory_id);
+            create index ix_agent_memory_candidates_tenant_status
+                on {schema}.agent_memory_candidates (tenant_id, status, candidate_id);
             """)
     ];
 }

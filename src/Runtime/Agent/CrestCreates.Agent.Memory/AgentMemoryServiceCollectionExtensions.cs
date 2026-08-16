@@ -1,12 +1,17 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Agent.Memory.Abstractions.CanonicalHashing;
+using CrestCreates.Agent.Memory.Abstractions.Curation;
+using CrestCreates.Agent.Memory.Abstractions.Persistence;
 using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Agent.Memory.Authoring;
 using CrestCreates.Agent.Memory.Bootstrap;
 using CrestCreates.Agent.Memory.CanonicalHashing;
 using CrestCreates.Agent.Memory.Compression;
+using CrestCreates.Agent.Memory.Curation;
 using CrestCreates.Agent.Memory.Extraction;
 using CrestCreates.Agent.Memory.Identity;
+using CrestCreates.Agent.Memory.Persistence;
 using CrestCreates.Agent.Memory.Promotion;
 using CrestCreates.Agent.Memory.Recall;
 using CrestCreates.Agent.Memory.Sanitization;
@@ -83,8 +88,17 @@ public static class AgentMemoryServiceCollectionExtensions
         // Authoring
         services.TryAddSingleton<IAgentAuthoringContextBuilder, DefaultAgentAuthoringContextBuilder>();
 
-        // Canonical Hashing
+        // Canonical Hashing — one singleton surfaced as both concrete type and
+        // provider-neutral state-hash interface. Store prerequisites are
+        // registered even in read-only composition.
         services.TryAddSingleton<AgentMemoryCanonicalHashProjector>();
+        services.TryAddSingleton<IAgentMemoryStateHashProjector>(sp =>
+            sp.GetRequiredService<AgentMemoryCanonicalHashProjector>());
+        services.TryAddSingleton<DefaultAgentMemoryCurationProjector>();
+        services.TryAddSingleton<IAgentMemoryCurationProjector>(sp =>
+            sp.GetRequiredService<DefaultAgentMemoryCurationProjector>());
+        services.TryAddSingleton<IAgentMemoryCurationStateMachine, DefaultAgentMemoryCurationStateMachine>();
+        services.TryAddSingleton<IAgentMemoryPersistenceComparer, DefaultAgentMemoryPersistenceComparer>();
 
         return services;
     }

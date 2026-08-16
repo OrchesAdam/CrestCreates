@@ -200,6 +200,7 @@
   <Folder Name="/tests/Shared/">
     <Project Path="../tests/Shared/CrestCreates.Accountability.Testing/CrestCreates.Accountability.Testing.csproj" />
     <Project Path="../tests/Shared/CrestCreates.Runtime.Persistence.Testing/CrestCreates.Runtime.Persistence.Testing.csproj" />
+    <Project Path="../tests/Shared/CrestCreates.Agent.Memory.Persistence.Testing/CrestCreates.Agent.Memory.Persistence.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/Core/">
     <Project Path="../tests/Core/CrestCreates.Core.Abstractions.Tests/CrestCreates.Core.Abstractions.Tests.csproj" />

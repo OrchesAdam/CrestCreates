@@ -1,7 +1,10 @@
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
+using CrestCreates.Agent.Memory.Abstractions.CanonicalHashing;
+using CrestCreates.Agent.Memory.Abstractions.Curation;
 using CrestCreates.Agent.Memory.Accountability;
 using CrestCreates.Agent.Memory.CanonicalHashing;
+using CrestCreates.Agent.Memory.Curation;
 using CrestCreates.Agent.Memory.Identity;
 
 namespace CrestCreates.Agent.Memory.Promotion;
@@ -14,19 +17,22 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
     private readonly IAgentMemoryArtifactIdGenerator _ids;
     private readonly IAgentMemoryAccountabilityProducer _producer;
     private readonly AgentMemoryCurationFactProjector _factProjector;
+    private readonly IAgentMemoryCurationProjector _curationProjector;
 
     public DefaultAgentMemoryPromotionService(
         IAgentMemoryStore store,
         AgentMemoryCanonicalHashProjector hashes,
         IAgentMemoryArtifactIdGenerator? ids = null,
         IAgentMemoryAccountabilityProducer? producer = null,
-        AgentMemoryCurationFactProjector? factProjector = null)
+        AgentMemoryCurationFactProjector? factProjector = null,
+        IAgentMemoryCurationProjector? curationProjector = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _hashes = hashes ?? throw new ArgumentNullException(nameof(hashes));
         _ids = ids ?? new DefaultAgentMemoryArtifactIdGenerator();
         _producer = producer ?? new NullAgentMemoryAccountabilityProducer();
         _factProjector = factProjector ?? new AgentMemoryCurationFactProjector();
+        _curationProjector = curationProjector ?? new DefaultAgentMemoryCurationProjector();
     }
 
     public AgentMemoryCurationOutcomeGuarantee OutcomeGuarantee
@@ -135,7 +141,7 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
                 AgentMemoryOperationFailureCode.ResourceUnavailable,
                 "Candidate is unavailable.");
         }
-        var memory = CreatePromotedMemory(candidate, newMemoryId, request);
+        var memory = _curationProjector.ProjectPromotedMemory(candidate, newMemoryId, request);
         return await PromoteAsync(tenantId, new AgentMemoryPromotionPlan
         {
             Candidate = new AgentMemoryCandidateExpectation { CandidateId = candidate.CandidateId, ExpectedStateHash = _hashes.ComputeCandidateStateHash(candidate) },
@@ -208,7 +214,8 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
                 AgentMemoryOperationFailureCode.ResourceUnavailable,
                 "Replacement Candidate is unavailable.");
         }
-        var newMemory = CreatePromotedMemory(replacement, newMemoryId, request) with { SupersedesMemoryId = existing.MemoryId };
+        var newMemory = _curationProjector.ProjectSupersedingMemory(
+            replacement, existing.MemoryId, newMemoryId, request);
         return await SupersedeAsync(tenantId, new AgentMemorySupersessionPlan
         {
             TargetMemory = new AgentMemoryItemExpectation { MemoryId = existing.MemoryId, ExpectedStateHash = _hashes.ComputeMemoryStateHash(existing) },
@@ -337,25 +344,6 @@ public sealed class DefaultAgentMemoryPromotionService : IAgentMemoryPromotionSe
             && !string.IsNullOrWhiteSpace(context.ActorKind)
             && !string.IsNullOrWhiteSpace(context.CorrelationId)
             && !string.IsNullOrWhiteSpace(context.InvocationSource);
-
-    private static AgentMemoryItem CreatePromotedMemory(AgentMemoryCandidate candidate, string memoryId, AgentMemoryOperationRequest operation)
-        => new()
-        {
-            MemoryId = memoryId,
-            TenantId = candidate.TenantId,
-            Kind = candidate.Kind,
-            Content = candidate.Content,
-            CanonicalContentHash = candidate.CanonicalContentHash,
-            PromotedAt = operation.Identity.OccurredAt,
-            Confidence = candidate.Confidence,
-            Status = AgentMemoryStatus.Active,
-            IsAuthoritative = false,
-            Tags = candidate.Tags,
-            DescriptorRefs = candidate.DescriptorRefs,
-            SourceRefs = candidate.SourceRefs,
-            RedactionKinds = candidate.RedactionKinds,
-            SanitizationDiagnostics = candidate.SanitizationDiagnostics
-        };
 
     private static void ValidateOperationRequest(string tenantId, AgentMemoryOperationRequest request, string operationName)
     {

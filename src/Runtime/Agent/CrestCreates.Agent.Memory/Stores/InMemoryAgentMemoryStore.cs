@@ -1,20 +1,34 @@
 using System.Collections.Concurrent;
 using CrestCreates.Agent.Memory.Abstractions;
-using CrestCreates.Agent.Memory.CanonicalHashing;
+using CrestCreates.Agent.Memory.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Agent.Memory.Abstractions.Curation;
+using CrestCreates.Agent.Memory.Abstractions.Persistence;
+using CrestCreates.Agent.Memory.CanonicalHashing;
+using CrestCreates.Agent.Memory.Curation;
+using CrestCreates.Agent.Memory.Persistence;
 
 namespace CrestCreates.Agent.Memory.Stores;
 
 public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemoryStoreCapabilities, IAgentMemoryConditionalCurationStore
 {
     private readonly object _gate = new();
-    private readonly AgentMemoryCanonicalHashProjector? _stateHashes;
+    private readonly IAgentMemoryStateHashProjector? _stateHashes;
+    private readonly IAgentMemoryCurationStateMachine _stateMachine;
+    private readonly IAgentMemoryPersistenceComparer _comparer;
     private readonly ConcurrentDictionary<(string TenantId, string CandidateId), AgentMemoryCandidate> _candidates = new();
     private readonly ConcurrentDictionary<(string TenantId, string MemoryId), AgentMemoryItem> _memories = new();
 
-    public InMemoryAgentMemoryStore(AgentMemoryCanonicalHashProjector? stateHashes = null)
+    public InMemoryAgentMemoryStore(
+        IAgentMemoryStateHashProjector? stateHashes = null,
+        IAgentMemoryCurationStateMachine? stateMachine = null,
+        IAgentMemoryPersistenceComparer? comparer = null)
     {
         _stateHashes = stateHashes;
+        _stateMachine = stateMachine ?? new DefaultAgentMemoryCurationStateMachine(
+            stateHashes ?? new UnavailableStateHashProjector(),
+            new DefaultAgentMemoryCurationProjector());
+        _comparer = comparer ?? new DefaultAgentMemoryPersistenceComparer();
     }
 
     public AgentMemoryCurationOutcomeGuarantee CurationOutcomeGuarantee
@@ -23,6 +37,7 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
     public ValueTask SaveCandidateAsync(AgentMemoryCandidate candidate, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(candidate);
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
             if (_candidates.ContainsKey((candidate.TenantId, candidate.CandidateId)))
@@ -38,6 +53,7 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
     public ValueTask CreateCandidatesAsync(IReadOnlyList<AgentMemoryCandidate> candidates, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(candidates);
+        cancellationToken.ThrowIfCancellationRequested();
         if (candidates.Count == 0 || candidates.Any(item => item is null))
             throw new ArgumentException("At least one Candidate is required.", nameof(candidates));
         lock (_gate)
@@ -84,11 +100,26 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
     public ValueTask SaveMemoryAsync(AgentMemoryItem memory, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(memory);
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            if (_memories.TryGetValue((memory.TenantId, memory.MemoryId), out var existing)
-                && !EquivalentMemoryPayload(existing, memory))
-                throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.StateConflict, "Memory payload is immutable after creation.");
+            if (_memories.TryGetValue((memory.TenantId, memory.MemoryId), out var existing))
+            {
+                if (!_comparer.Equals(existing, memory))
+                    throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.StateConflict, "Memory payload is immutable after creation.");
+                return ValueTask.CompletedTask;
+            }
+
+            if (memory.Status != AgentMemoryStatus.Active
+                || memory.IsAuthoritative
+                || memory.SupersedesMemoryId is not null
+                || memory.SupersededByMemoryId is not null)
+            {
+                throw new AgentMemoryOperationException(
+                    AgentMemoryOperationFailureCode.InvalidLifecycleState,
+                    "A new Memory must be Active, non-authoritative, and unlinked.");
+            }
+
             _memories[(memory.TenantId, memory.MemoryId)] = memory.Snapshot();
         }
         return ValueTask.CompletedTask;
@@ -128,23 +159,15 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var hashes = RequireHashes();
             var candidate = GetCandidateUnsafe(tenantId, plan.Candidate.CandidateId)
                 ?? throw Unavailable("Candidate is unavailable.");
-            EnsureTenant(candidate.TenantId, tenantId);
-            EnsureCandidateExpectation(candidate, plan.Candidate, hashes);
-            if (candidate.Status != AgentMemoryStatus.Candidate)
-                throw InvalidLifecycle("Candidate is not in Candidate state.");
-            if (string.IsNullOrWhiteSpace(plan.NewMemoryId) || _memories.ContainsKey((tenantId, plan.NewMemoryId)))
+            if (_memories.ContainsKey((tenantId, plan.NewMemoryId)))
                 throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Memory identity conflicts.");
-            if (!candidate.CanonicalContentHash.Equals(plan.ExpectedMemoryContentHash))
-                throw StateConflict("Prepared content hash does not match Candidate payload.");
 
-            var memory = CreatePromotedMemory(candidate, plan.NewMemoryId, plan.Operation);
-            EnsureExpectedMemory(memory, plan.ExpectedMemoryStateHash, hashes);
-            _memories[(tenantId, memory.MemoryId)] = memory.Snapshot();
-            _candidates[(tenantId, candidate.CandidateId)] = candidate with { Status = AgentMemoryStatus.Active };
-            return ValueTask.FromResult(memory.Snapshot());
+            var mutation = _stateMachine.PreparePromote(tenantId, candidate, plan);
+            _memories[(tenantId, mutation.Memory.MemoryId)] = mutation.Memory.Snapshot();
+            _candidates[(tenantId, mutation.Candidate.CandidateId)] = mutation.Candidate.Snapshot();
+            return ValueTask.FromResult(mutation.Memory.Snapshot());
         }
     }
 
@@ -154,14 +177,11 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var hashes = RequireHashes();
             var candidate = GetCandidateUnsafe(tenantId, expectation.CandidateId)
                 ?? throw Unavailable("Candidate is unavailable.");
-            EnsureTenant(candidate.TenantId, tenantId);
-            EnsureCandidateExpectation(candidate, expectation, hashes);
-            if (candidate.Status != AgentMemoryStatus.Candidate)
-                throw InvalidLifecycle("Candidate is not in Candidate state.");
-            _candidates[(tenantId, candidate.CandidateId)] = candidate with { Status = AgentMemoryStatus.Rejected };
+
+            var mutation = _stateMachine.PrepareReject(tenantId, candidate, expectation);
+            _candidates[(tenantId, mutation.Candidate.CandidateId)] = mutation.Candidate.Snapshot();
             return ValueTask.CompletedTask;
         }
     }
@@ -172,31 +192,18 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var hashes = RequireHashes();
             var existing = GetMemoryUnsafe(tenantId, plan.TargetMemory.MemoryId)
                 ?? throw Unavailable("Target Memory is unavailable.");
-            EnsureTenant(existing.TenantId, tenantId);
-            EnsureMemoryExpectation(existing, plan.TargetMemory, hashes);
-            if (existing.Status != AgentMemoryStatus.Active)
-                throw InvalidLifecycle("Target Memory is not Active.");
             var replacement = GetCandidateUnsafe(tenantId, plan.ReplacementCandidate.CandidateId)
                 ?? throw Unavailable("Replacement Candidate is unavailable.");
-            EnsureTenant(replacement.TenantId, tenantId);
-            EnsureCandidateExpectation(replacement, plan.ReplacementCandidate, hashes);
-            if (replacement.Status != AgentMemoryStatus.Candidate)
-                throw InvalidLifecycle("Replacement Candidate is not in Candidate state.");
-            if (string.IsNullOrWhiteSpace(plan.NewMemoryId) || _memories.ContainsKey((tenantId, plan.NewMemoryId)))
+            if (_memories.ContainsKey((tenantId, plan.NewMemoryId)))
                 throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.IdentityConflict, "Memory identity conflicts.");
-            if (!replacement.CanonicalContentHash.Equals(plan.ExpectedMemoryContentHash))
-                throw StateConflict("Prepared content hash does not match Candidate payload.");
 
-            var superseded = existing with { Status = AgentMemoryStatus.Superseded, SupersededByMemoryId = plan.NewMemoryId };
-            var memory = CreatePromotedMemory(replacement, plan.NewMemoryId, plan.Operation) with { SupersedesMemoryId = existing.MemoryId };
-            EnsureExpectedMemory(memory, plan.ExpectedMemoryStateHash, hashes);
-            _memories[(tenantId, existing.MemoryId)] = superseded.Snapshot();
-            _memories[(tenantId, memory.MemoryId)] = memory.Snapshot();
-            _candidates[(tenantId, replacement.CandidateId)] = replacement with { Status = AgentMemoryStatus.Active };
-            return ValueTask.FromResult(memory.Snapshot());
+            var mutation = _stateMachine.PrepareSupersede(tenantId, existing, replacement, plan);
+            _memories[(tenantId, mutation.SupersededMemory.MemoryId)] = mutation.SupersededMemory.Snapshot();
+            _memories[(tenantId, mutation.SupersedingMemory.MemoryId)] = mutation.SupersedingMemory.Snapshot();
+            _candidates[(tenantId, mutation.ReplacementCandidate.CandidateId)] = mutation.ReplacementCandidate.Snapshot();
+            return ValueTask.FromResult(mutation.SupersedingMemory.Snapshot());
         }
     }
 
@@ -206,22 +213,14 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var hashes = RequireHashes();
             var existing = GetMemoryUnsafe(tenantId, memory.MemoryId)
                 ?? throw Unavailable("Memory is unavailable.");
-            EnsureTenant(existing.TenantId, tenantId);
-            EnsureMemoryExpectation(existing, memory, hashes);
-            if (existing.Status is not (AgentMemoryStatus.Active or AgentMemoryStatus.Superseded))
-                throw InvalidLifecycle("Memory cannot be archived from its current state.");
 
-            var archived = existing with { Status = AgentMemoryStatus.Archived };
-            _memories[(tenantId, existing.MemoryId)] = archived.Snapshot();
-            return ValueTask.FromResult(archived.Snapshot());
+            var mutation = _stateMachine.PrepareArchive(tenantId, existing, memory);
+            _memories[(tenantId, mutation.Memory.MemoryId)] = mutation.Memory.Snapshot();
+            return ValueTask.FromResult(mutation.Memory.Snapshot());
         }
     }
-
-    private AgentMemoryCanonicalHashProjector RequireHashes()
-        => _stateHashes ?? throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.Unknown, "State hash projector is unavailable.");
 
     private AgentMemoryCandidate? GetCandidateUnsafe(string tenantId, string id)
         => _candidates.TryGetValue((tenantId, id), out var candidate) ? candidate : null;
@@ -229,91 +228,24 @@ public sealed class InMemoryAgentMemoryStore : IAgentMemoryStore, IAgentMemorySt
     private AgentMemoryItem? GetMemoryUnsafe(string tenantId, string id)
         => _memories.TryGetValue((tenantId, id), out var memory) ? memory : null;
 
-    private static AgentMemoryItem CreatePromotedMemory(AgentMemoryCandidate candidate, string memoryId, AgentMemoryOperationRequest operation)
-        => new()
-        {
-            MemoryId = memoryId,
-            TenantId = candidate.TenantId,
-            Kind = candidate.Kind,
-            Content = candidate.Content,
-            CanonicalContentHash = candidate.CanonicalContentHash,
-            PromotedAt = operation.Identity.OccurredAt,
-            Confidence = candidate.Confidence,
-            Status = AgentMemoryStatus.Active,
-            IsAuthoritative = false,
-            Tags = candidate.Tags,
-            DescriptorRefs = candidate.DescriptorRefs,
-            SourceRefs = candidate.SourceRefs,
-            RedactionKinds = candidate.RedactionKinds,
-            SanitizationDiagnostics = candidate.SanitizationDiagnostics
-        };
-
-    private static void EnsureCandidateExpectation(AgentMemoryCandidate candidate, AgentMemoryCandidateExpectation expectation, AgentMemoryCanonicalHashProjector hashes)
+    /// <summary>Fails closed when curation is attempted without a hash projector,
+    /// preserving the legacy constructor contract (base Store operations do not
+    /// require state hashes).</summary>
+    private sealed class UnavailableStateHashProjector : IAgentMemoryStateHashProjector
     {
-        if (!string.Equals(candidate.CandidateId, expectation.CandidateId, StringComparison.Ordinal)
-            || !hashes.ComputeCandidateStateHash(candidate).Equals(expectation.ExpectedStateHash))
-            throw StateConflict("Candidate state changed since preparation.");
-    }
+        public CanonicalHash ComputeCandidateStateHash(AgentMemoryCandidate candidate)
+            => throw new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.Unknown,
+                "State hash projector is unavailable.");
 
-    private static void EnsureMemoryExpectation(AgentMemoryItem memory, AgentMemoryItemExpectation expectation, AgentMemoryCanonicalHashProjector hashes)
-    {
-        if (!string.Equals(memory.MemoryId, expectation.MemoryId, StringComparison.Ordinal)
-            || !hashes.ComputeMemoryStateHash(memory).Equals(expectation.ExpectedStateHash))
-            throw StateConflict("Memory state changed since preparation.");
-    }
-
-    private static void EnsureExpectedMemory(AgentMemoryItem memory, CanonicalHash expected, AgentMemoryCanonicalHashProjector hashes)
-    {
-        if (!hashes.ComputeMemoryStateHash(memory).Equals(expected))
-            throw StateConflict("Prepared Memory state does not match the committed graph.");
-    }
-
-    private static void EnsureTenant(string actual, string expected)
-    {
-        if (!string.Equals(actual, expected, StringComparison.Ordinal))
-            throw new AgentMemoryOperationException(AgentMemoryOperationFailureCode.TenantMismatch, "Tenant mismatch.");
+        public CanonicalHash ComputeMemoryStateHash(AgentMemoryItem memory)
+            => throw new AgentMemoryOperationException(
+                AgentMemoryOperationFailureCode.Unknown,
+                "State hash projector is unavailable.");
     }
 
     private static AgentMemoryOperationException Unavailable(string message)
         => new(AgentMemoryOperationFailureCode.ResourceUnavailable, message);
-
-    private static AgentMemoryOperationException InvalidLifecycle(string message)
-        => new(AgentMemoryOperationFailureCode.InvalidLifecycleState, message);
-
-    private static AgentMemoryOperationException StateConflict(string message)
-        => new(AgentMemoryOperationFailureCode.StateConflict, message);
-
-    private static bool EquivalentPayload(AgentMemoryCandidate left, AgentMemoryCandidate right)
-        => left.TenantId == right.TenantId
-            && left.CandidateId == right.CandidateId
-            && left.Kind == right.Kind
-            && left.Content == right.Content
-            && left.CanonicalContentHash.Equals(right.CanonicalContentHash)
-            && left.Confidence == right.Confidence
-            && left.Tags.SequenceEqual(right.Tags)
-            && left.DescriptorRefs.SequenceEqual(right.DescriptorRefs)
-            && left.SourceRefs.SequenceEqual(right.SourceRefs)
-            && left.RedactionKinds.SequenceEqual(right.RedactionKinds)
-            && left.SanitizationDiagnostics.SequenceEqual(right.SanitizationDiagnostics)
-            && Equals(left.PromptInputEvidence, right.PromptInputEvidence)
-            && Equals(left.PromptOutputEvidence, right.PromptOutputEvidence)
-            && Equals(left.CanonicalOutputHash, right.CanonicalOutputHash);
-
-    private static bool EquivalentMemoryPayload(AgentMemoryItem left, AgentMemoryItem right)
-        => left.TenantId == right.TenantId
-            && left.MemoryId == right.MemoryId
-            && left.Kind == right.Kind
-            && left.Content == right.Content
-            && left.CanonicalContentHash.Equals(right.CanonicalContentHash)
-            && left.PromotedAt == right.PromotedAt
-            && left.Confidence == right.Confidence
-            && left.IsAuthoritative == right.IsAuthoritative
-            && left.Tags.SequenceEqual(right.Tags)
-            && left.DescriptorRefs.SequenceEqual(right.DescriptorRefs)
-            && left.SourceRefs.SequenceEqual(right.SourceRefs)
-            && left.RedactionKinds.SequenceEqual(right.RedactionKinds)
-            && left.SanitizationDiagnostics.SequenceEqual(right.SanitizationDiagnostics)
-            ;
 
     private static bool FilterByStatus(AgentMemoryItem memory, AgentMemoryQuery query)
         => memory.Status switch

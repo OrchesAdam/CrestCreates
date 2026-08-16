@@ -9,8 +9,10 @@ namespace CrestCreates.Agent.Memory.CanonicalHashing;
 /// <summary>
 /// Computes canonical hashes for agent memory artifacts using ICanonicalHashComputer.
 /// All hashes use the canonical JSON + SHA-256 pipeline for determinism and AOT safety.
+/// Implements <see cref="IAgentMemoryStateHashProjector"/> so Promotion Service and
+/// conditional curation Stores share one state-hash truth.
 /// </summary>
-public sealed class AgentMemoryCanonicalHashProjector
+public sealed class AgentMemoryCanonicalHashProjector : IAgentMemoryStateHashProjector
 {
     private readonly ICanonicalHashComputer _hashComputer;
     private const string AlgorithmVersion = "sha256-canonical-json-v1";

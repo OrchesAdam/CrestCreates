@@ -31,7 +31,10 @@ internal sealed class PostgreSqlRuntimeSession
         {
             var owner = Interlocked.Exchange(ref _owner, null);
             if (owner is not null)
+            {
                 Volatile.Write(ref owner._commandInFlight, 0);
+                PostgreSqlRuntimeTestHooks.NotifyCommandCompleted();
+            }
         }
     }
 }
