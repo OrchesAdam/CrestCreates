@@ -11,19 +11,18 @@ public sealed class DefaultOrganizationHierarchyService : IOrganizationHierarchy
         _store = store;
     }
 
-    private static string CompKey(string? tenantId, string id) => $"{tenantId ?? ""}:{id}";
-
     public async Task<IReadOnlyList<OrganizationUnit>> GetAncestorsAsync(string organizationUnitId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
         var allUnits = await _store.GetOrganizationUnitsAsync(tenantId, cancellationToken: cancellationToken);
-        var unitMap = allUnits.ToDictionary(u => CompKey(u.TenantId, u.Id));
+        var unitMap = allUnits.ToDictionary(
+            u => OrganizationScopedKey.FromTenantId(u.TenantId, u.Id));
         var result = new List<OrganizationUnit>();
         var visited = new HashSet<string> { organizationUnitId };
         var currentId = organizationUnitId;
 
         while (true)
         {
-            var lookupKey = CompKey(tenantId, currentId);
+            var lookupKey = OrganizationScopedKey.FromTenantId(tenantId, currentId);
             if (!unitMap.TryGetValue(lookupKey, out var current))
                 break;
 
@@ -35,7 +34,7 @@ public sealed class DefaultOrganizationHierarchyService : IOrganizationHierarchy
                 throw new OrganizationHierarchyException(
                     $"Circular hierarchy detected: organization unit '{parentId}' is already in the ancestor chain starting from '{organizationUnitId}'.");
 
-            var parentKey = CompKey(tenantId, parentId);
+            var parentKey = OrganizationScopedKey.FromTenantId(tenantId, parentId);
             if (!unitMap.TryGetValue(parentKey, out var parent))
                 break;
 
@@ -49,16 +48,18 @@ public sealed class DefaultOrganizationHierarchyService : IOrganizationHierarchy
     public async Task<IReadOnlyList<OrganizationUnit>> GetDescendantsAsync(string organizationUnitId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
         var allUnits = await _store.GetOrganizationUnitsAsync(tenantId, cancellationToken: cancellationToken);
-        var unitMap = allUnits.ToDictionary(u => CompKey(u.TenantId, u.Id));
+        var unitMap = allUnits.ToDictionary(
+            u => OrganizationScopedKey.FromTenantId(u.TenantId, u.Id));
         var childrenMap = allUnits
-            .GroupBy(u => CompKey(u.TenantId, u.ParentId!))
-            .ToDictionary(g => g.Key, g => g.Select(c => CompKey(c.TenantId, c.Id)).ToList());
+            .Where(u => u.ParentId is not null)
+            .GroupBy(u => OrganizationScopedKey.FromTenantId(u.TenantId, u.ParentId!))
+            .ToDictionary(g => g.Key, g => g.Select(c => OrganizationScopedKey.FromTenantId(c.TenantId, c.Id)).ToList());
 
         var result = new List<OrganizationUnit>();
-        var visited = new HashSet<string> { CompKey(tenantId, organizationUnitId) };
-        var queue = new Queue<string>();
+        var visited = new HashSet<OrganizationScopedKey> { OrganizationScopedKey.FromTenantId(tenantId, organizationUnitId) };
+        var queue = new Queue<OrganizationScopedKey>();
 
-        var startKey = CompKey(tenantId, organizationUnitId);
+        var startKey = OrganizationScopedKey.FromTenantId(tenantId, organizationUnitId);
         if (childrenMap.TryGetValue(startKey, out var directChildren))
         {
             foreach (var childKey in directChildren)

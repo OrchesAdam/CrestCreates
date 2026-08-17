@@ -1187,6 +1187,138 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 on {schema}.agent_memories (tenant_id, status, kind, memory_id);
             create index ix_agent_memory_candidates_tenant_status
                 on {schema}.agent_memory_candidates (tenant_id, status, candidate_id);
+            """),
+        new RuntimeMigration("V011", "control_plane_reference_data_stores", """
+            create table {schema}.control_plane_descriptor_drafts (
+                tenant_id text collate "C" not null,
+                draft_id text collate "C" not null,
+                payload_type integer not null,
+                descriptor_kind integer not null,
+                operation integer not null,
+                author_kind integer not null,
+                status integer not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, draft_id),
+                constraint ck_cp_draft_payload_type check (payload_type = any (array[1,2,3,4,5,6])),
+                constraint ck_cp_draft_descriptor_kind check (descriptor_kind = any (array[0,1,2,3,4,5,6,7,8,9])),
+                constraint ck_cp_draft_operation check (operation = any (array[0,1,2,3])),
+                constraint ck_cp_draft_author_kind check (author_kind = any (array[0,1,2,3,4])),
+                constraint ck_cp_draft_status check (status = any (array[0,1,2,3,4])),
+                constraint ck_cp_draft_contract_version check (state_contract_version = 1)
+            );
+            create index ix_cp_drafts_created on {schema}.control_plane_descriptor_drafts (tenant_id, created_at_utc_ticks, draft_id);
+            create index ix_cp_drafts_combined_filter on {schema}.control_plane_descriptor_drafts (tenant_id, descriptor_kind, operation, author_kind, status, created_at_utc_ticks, draft_id);
+
+            create table {schema}.organization_units (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                organization_unit_id text collate "C" not null,
+                parent_id text collate "C" null,
+                sort_order integer not null,
+                is_active boolean not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, organization_unit_id),
+                constraint ck_org_units_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_units_contract_version check (state_contract_version = 1)
+            );
+            create index ix_org_units_explicit_list on {schema}.organization_units (tenant_scope_kind, tenant_id, sort_order, organization_unit_id);
+            create index ix_org_units_unfiltered_list on {schema}.organization_units (sort_order, tenant_scope_kind, tenant_id, organization_unit_id);
+
+            create table {schema}.organization_positions (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                position_id text collate "C" not null,
+                is_active boolean not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, position_id),
+                constraint ck_org_positions_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_positions_contract_version check (state_contract_version = 1)
+            );
+
+            create table {schema}.organization_memberships (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                membership_id text collate "C" not null,
+                user_id text collate "C" not null,
+                organization_unit_id text collate "C" not null,
+                position_id text collate "C" null,
+                is_primary boolean not null,
+                is_active boolean not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, membership_id),
+                constraint ck_org_memberships_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_memberships_contract_version check (state_contract_version = 1)
+            );
+            create index ix_org_memberships_by_user on {schema}.organization_memberships (user_id, tenant_scope_kind, tenant_id, created_at_utc_ticks, membership_id);
+            create index ix_org_memberships_by_unit on {schema}.organization_memberships (organization_unit_id, tenant_scope_kind, tenant_id, created_at_utc_ticks, membership_id);
+
+            create table {schema}.organization_role_assignments (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                assignment_id text collate "C" not null,
+                user_id text collate "C" not null,
+                role_id text collate "C" not null,
+                organization_unit_id text collate "C" null,
+                is_active boolean not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, assignment_id),
+                constraint ck_org_roles_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_roles_contract_version check (state_contract_version = 1)
+            );
+            create index ix_org_roles_by_user on {schema}.organization_role_assignments (user_id, tenant_scope_kind, tenant_id, created_at_utc_ticks, assignment_id);
+
+            create table {schema}.data_permission_scope_rules (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                resource text collate "C" not null,
+                action_match_kind integer not null,
+                action_value text collate "C" not null,
+                permission_match_kind integer not null,
+                permission_value text collate "C" not null,
+                scope_kind integer not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, resource,
+                    action_match_kind, action_value,
+                    permission_match_kind, permission_value),
+                constraint ck_data_permission_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '' and tenant_id <> '*')),
+                constraint ck_data_permission_action_match check (
+                    (action_match_kind = 0 and action_value <> '*')
+                    or (action_match_kind = 1 and action_value = '')),
+                constraint ck_data_permission_permission_match check (
+                    (permission_match_kind = 0 and permission_value <> '*')
+                    or (permission_match_kind = 1 and permission_value = '')),
+                constraint ck_data_permission_scope_kind check (scope_kind = any (array[0,1,2,3,4,5]))
+            );
             """)
     ];
 }
