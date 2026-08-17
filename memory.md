@@ -1,10 +1,145 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-16 (Phase 9b+ durable Agent Memory store provider implemented — Issue #55 / PR #77: V010 schema, four PostgreSQL Stores, shared hash/curation/comparer semantics, atomic Promote/Reject/Supersede/Archive with top-level COMMIT boundary, restart/crash/concurrency evidence, NativeAOT mainline sentinel CRESTCREATES_DURABLE_AGENT_MEMORY_OK; review round 2 closure: PostgreSQL retains exact shared domain snapshots and hashes while normalizing only structured timestamptz parameters/comparisons, persisted null canonical hashes fail as PersistedInvariantViolation, C07/C08/F09/H09/B03 evidence is executable and semantic, and the normative spec is approved)
+Last Updated: 2026-08-17 (Issue #69 Durable Control Plane and Reference Data Stores Design Spec R3 remains APPROVED / FROZEN; Implementation Plan R4 is ready for implementation handoff, with implementation not started. Final consistency fixes make the shared runner contracts public, move D09 behind feature DI in Slice 9, give every F06 tuple one OwningSlice, and scope C13 PersistenceMappingManifest exactly to polymorphic durable Domain slots.)
 
 ## Purpose
 
 This file records the current platform status for CrestCreates so future threads can resume work quickly without re-deriving prior conclusions.
+
+---
+
+## Active Design Work
+
+### Issue #69 — Phase 9b+ Durable Control Plane and Reference Data Stores
+
+Status: Design Spec R3 APPROVED / FROZEN; Implementation Plan R4 ready for
+implementation handoff; implementation not started
+
+Normative draft:
+`docs/superpowers/specs/2026-08-17-phase-9bplus-durable-control-plane-reference-data-stores-design.md`
+
+Implementation plan:
+`docs/superpowers/plans/2026-08-17-phase-9bplus-durable-control-plane-reference-data-stores.md`
+
+The Plan executes eleven sequential Case-first TDD Slices: inactive evidence
+oracle; Draft, Organization, and Rule InMemory parity; recursive provider DTO
+codec; V011/schema/base marker; three PostgreSQL Stores with feature DI only
+after all implementations exist; durability/crash/failure
+closure; and final linux-x64 NativeAOT/evidence closure. Provider-neutral
+internal semantics stay in the owning abstraction assemblies with narrow friend
+access, preventing InMemory/PostgreSQL rule duplication without expanding the
+public Store APIs.
+
+Plan review R2 corrected execution mechanics without reopening the frozen Spec.
+P13 distinguishes seven intact-schema rejections from real-Store reachability:
+only invalid ScopeKind is a candidate-hit materialization failure; six corrupt
+key shapes must yield no authorization decision. F01/F02 use a new reusable
+after-snapshot/before-transaction barrier because the existing before-COMMIT
+hook is one-shot and occurs after conflicting SQL. Slice 2 fixes and tests the
+currently omitted SchemaField ObjectSchema snapshot. Process restart cases stay
+inactive until Slice 10; PostgreSQL V tuples and P08 are explicit; V011 validates
+index-key collation; CrashWorker is a same-Configuration build dependency; and
+feature DI requires a full base-registration marker rather than Options alone.
+
+Plan review R3 closes the remaining Slice and oracle gaps without changing the
+Spec: the three Provider ProjectReferences are a Slice 5 prerequisite; Slice 6
+owns only V011/schema/base neutrality while C09/C14/C15 and feature opt-in move
+to Slice 9 after all Store classes exist; the PostgreSQL six-arm payload check
+runs before virtual Snapshot and V04 proves a zero Snapshot call count. D01 now
+exact-compares a shared expected provider-neutral observation tree for every
+payload field (including Schema ObjectSchema), C13 separately inventories the
+Domain polymorphic graph against an explicit mapping manifest and closes the DTO
+graph, and `EvidenceVectorKey` makes D08/V01/F09 internal expansions
+machine-checkable. F07 `InvalidJson` fixtures are syntactically valid jsonb with
+an invalid generated persistence-root shape.
+
+Plan R4 closes the final self-consistency findings. Shared-kit driver interfaces
+and every signature type are public cross-assembly testing contracts rather
+than inaccessible internals. D09 moves from Slice 7 to Slice 9 so provider
+reconstruction can compose base plus the real feature extension; D10 remains
+the Slice 10 subprocess restart case. F06 Draft, Organization, and Rule tuples
+have unique ownership in Slices 7, 8, and 9 respectively, while Slice 10 only
+reruns all sixteen as regression. C13's `PersistenceMappingManifest` contains
+only abstract/interface/object durable Domain slots; D01 remains the sole
+complete scalar/collection/dictionary field-preservation oracle.
+
+Code-derived scope is exactly `IDescriptorDraftStore`, `IOrganizationStore`
+(OrganizationUnit, Position, Membership, RoleAssignment), and
+`IDataPermissionScopeRuleStore`. `DataPermissionScope` remains derived;
+`IDraftStore`, activation requests/auditors/gates/artifacts, Agent Memory,
+pre-dispatch, Outbox, and cache consistency remain outside #69.
+
+The original Issue stale-writer invariant is superseded by the actual Store
+contracts: there is no ExpectedVersion/Hash/ETag input, so concurrent Saves stay
+atomic blind replacement with a complete last-committed winner. InMemory and
+PostgreSQL must first share deterministic order, typed non-aliased identities,
+snapshot/cancellation/input semantics, rule priority, and Organization
+identity/hierarchy projection cases.
+
+Important actual-code correction: nullable Organization scope is asymmetric.
+Entity/point-read `TenantId == null` denotes global identity, while collection
+methods with a null tenant argument are explicitly unfiltered by current code
+and tests. #69 preserves and tests this rather than silently making PostgreSQL
+global-only; tenant-local callers must pass a non-null TenantId.
+
+The provider appends V011 to the existing checksummed schema catalog, stores
+complete source-generated JSON snapshots beside structured query columns,
+introduces no Organization relationship FKs, and uses the existing
+`PostgreSqlRuntimeTransactionCoordinator.ExecuteTopLevelAsync` mode for Saves.
+An ambient Runtime transaction fails before mutation, so Workflow/HumanTask
+recovery participants do not expand. Exit evidence includes a runner-free
+shared contract kit, InMemory/PostgreSQL parity, restart/crash/commit-unknown and
+migration drift cases, architecture guards, and a real linux-x64 PostgreSQL
+NativeAOT publish-link-run sentinel.
+
+First-review R2 closure adds three correctness gates. Descriptor Draft payload
+serialization is recursively closed through provider persistence DTOs, including
+all three `WorkflowStep.Target` variants; domain polymorphism contracts remain
+untouched. Exact Draft filtering and Organization CreatedAt ordering use
+`created_at_utc_ticks bigint`, because `.NET` has 100ns ticks while PostgreSQL
+timestamps are microsecond-resolution; JSON retains the exact original offset.
+Finally, the evidence manifest expands required outer
+`Case × Surface × Variant × Runner` tuples (with R3 Plan atomic
+`EvidenceVectorKey` refinement): all six Save surfaces, sixteen Store
+methods, four Organization entities, eight Descriptor payload/nested variants,
+and all applicable snapshot surfaces must have direct evidence.
+
+R2 also makes Primary membership order `CreatedAt -> normalized scope -> Id`,
+retires delimiter composite keys from both InMemory Store and Hierarchy,
+preserves empty non-null DataPermission Action/Permission as exact values, and
+freezes the existing request-relative behavior where WildcardAction plus
+ExactPermission does not match a non-null requested Action. Empty provider
+storage values remain allowed only behind explicit scope/match-kind
+discriminators and schema checks.
+
+Second-review R3 corrects the remaining ownership conflict: PostgreSQL text/JSON
+must preserve invalid-but-reviewable Draft values, and the Store rejects only
+conditions it cannot represent or dispatch. D08 now round-trips every current
+validator-owned diagnostic shape before invoking the existing
+`IDescriptorDraftValidator`; V01 excludes those semantic inputs. Draft row
+address fields remain non-null representation requirements, while blank DraftId
+and null/blank DescriptorId or AuthorId remain durable.
+
+R3 also expands Organization same-ID isolation across Unit, Position,
+Membership, and RoleAssignment; enumerates every duplicated structured field
+whose corruption must fail closed; gives Data Permission authority rows both
+schema CHECK and provider-materialization corruption coverage; lists every
+closed evidence dimension member directly in the Spec; and freezes base-first
+feature registration with clear missing-base failure plus repeated-registration
+idempotence. The R3 exit gate now contains 23 explicit criteria.
+
+Final freeze-blocker closure separates the two closed Descriptor sets:
+`payload_type` contains exactly the six provider DTO families, while
+`descriptor_kind` accepts every currently defined `DescriptorKind`, including
+Unknown, DynamicApiEndpoint, McpTool, and AgentTool. Equality between those
+facts is not a persistence invariant. D08 proves both payload-capable mismatch
+and every defined-non-payload mismatch remain validator-owned; V03 rejects only
+an underlying integer absent from the current enum.
+
+Final design review approved every Boundary, Invariant, Case Matrix,
+Acceptance Skeleton, provider/failure semantic, NativeAOT, and evidence closure
+dimension. The Spec is frozen: implementation planning may choose exact file
+placement and TDD slice mechanics but must not reopen or expand its semantics.
 
 ---
 
