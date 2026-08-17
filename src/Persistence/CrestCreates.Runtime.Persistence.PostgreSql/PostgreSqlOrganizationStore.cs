@@ -4,6 +4,8 @@ using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using Npgsql;
 
+#pragma warning disable IL2026, IL3050 // TODO: Replace with generated JsonTypeInfo for NativeAOT (Slice 5)
+
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
 internal sealed class PostgreSqlOrganizationStore : IOrganizationStore

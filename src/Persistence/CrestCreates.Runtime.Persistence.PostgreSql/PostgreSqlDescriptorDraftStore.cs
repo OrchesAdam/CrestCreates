@@ -6,6 +6,8 @@ using CrestCreates.Runtime.Persistence.PostgreSql;
 using Npgsql;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 
+#pragma warning disable IL2026, IL3050 // TODO: Replace with generated JsonTypeInfo for NativeAOT (Slice 5)
+
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
 internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
