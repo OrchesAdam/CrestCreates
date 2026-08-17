@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-17 (Issue #69 Durable Control Plane and Reference Data Stores Design Spec R3 remains APPROVED / FROZEN; Implementation Plan R4 is ready for implementation handoff, with implementation not started. Final consistency fixes make the shared runner contracts public, move D09 behind feature DI in Slice 9, give every F06 tuple one OwningSlice, and scope C13 PersistenceMappingManifest exactly to polymorphic durable Domain slots.)
+Last Updated: 2026-08-17 (Issue #69 Durable Control Plane and Reference Data Stores: Slices 1-9 implemented on PR #78. Shared contract kit, Draft/Organization/DataPermission InMemory parity with typed semantics, V011 migration, three PostgreSQL stores, and base-first feature DI composition. Slices 10-11 remaining: crash/restart/failure matrix and NativeAOT closure.)
 
 ## Purpose
 
