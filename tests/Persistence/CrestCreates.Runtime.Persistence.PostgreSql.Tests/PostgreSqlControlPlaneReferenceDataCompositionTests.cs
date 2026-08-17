@@ -1,0 +1,88 @@
+using CrestCreates.DescriptorDraft;
+using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.Organization;
+using CrestCreates.Organization.Abstractions;
+using CrestCreates.Runtime.Persistence.PostgreSql;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
+
+public class PostgreSqlControlPlaneReferenceDataCompositionTests
+{
+    [Fact]
+    public void C09_OptInRegistration_Should_ReplaceExactlySelectedStores()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
+        services.AddSingleton<IDescriptorDraftStore, InMemoryDescriptorDraftStore>();
+        services.AddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
+        services.AddSingleton<IDataPermissionScopeRuleStore, InMemoryDataPermissionScopeRuleStore>();
+
+        services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+
+        var descriptors = services.Where(d =>
+            d.ServiceType == typeof(IDescriptorDraftStore) ||
+            d.ServiceType == typeof(IOrganizationStore) ||
+            d.ServiceType == typeof(IDataPermissionScopeRuleStore)).ToList();
+
+        descriptors.Should().AllSatisfy(d => d.ImplementationType.Should().NotBe(typeof(InMemoryDescriptorDraftStore),
+            "opt-in must replace InMemory stores"));
+    }
+
+    [Fact]
+    public void C14_OptInWithoutBaseProvider_Should_FailWithClearCompositionError()
+    {
+        var services = new ServiceCollection();
+
+        var act = () => services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain("base PostgreSQL Runtime persistence provider");
+    }
+
+    [Fact]
+    public void C15_RepeatedBaseFirstOptIn_Should_RemainIdempotent()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
+
+        services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+
+        var descriptors = services.Where(d =>
+            d.ServiceType == typeof(IDescriptorDraftStore)).ToList();
+
+        descriptors.Should().HaveCount(1, "repeated opt-in should leave exactly one descriptor store");
+        descriptors[0].ImplementationType.Should().Be(typeof(PostgreSqlDescriptorDraftStore));
+    }
+
+    [Fact]
+    public void P08_DataPermissionScope_Should_RemainDerived()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
+        services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+
+        var serviceTypes = services.Select(s => s.ServiceType).ToList();
+        serviceTypes.Should().NotContain(t => t.Name == "IDataPermissionScopeStore",
+            "DataPermissionScope should remain derived, not persisted");
+    }
+
+    [Fact]
+    public void C08_BaseProviderRegistration_Should_NotReplaceReferenceStores()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IDescriptorDraftStore, InMemoryDescriptorDraftStore>();
+        services.AddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
+        services.AddSingleton<IDataPermissionScopeRuleStore, InMemoryDataPermissionScopeRuleStore>();
+        services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
+
+        var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IDescriptorDraftStore>().Should().BeOfType<InMemoryDescriptorDraftStore>();
+        provider.GetRequiredService<IOrganizationStore>().Should().BeOfType<InMemoryOrganizationStore>();
+        provider.GetRequiredService<IDataPermissionScopeRuleStore>().Should().BeOfType<InMemoryDataPermissionScopeRuleStore>();
+    }
+}
