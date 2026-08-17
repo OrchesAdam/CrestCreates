@@ -30,6 +30,7 @@
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Snapshot.Abstractions/CrestCreates.Snapshot.Abstractions.csproj" />
     <ProjectReference Include="../../../Framework/Testing/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
+    <ProjectReference Include="../../../Shared/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="CanonicalHashing/GoldenFiles/*.json">
