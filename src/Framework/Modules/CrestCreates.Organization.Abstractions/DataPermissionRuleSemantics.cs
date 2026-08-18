@@ -56,6 +56,12 @@ internal static class DataPermissionRuleSemantics
             throw new ArgumentException("Non-null Rule.TenantId must not be empty or whitespace.", nameof(rule));
     }
 
+    public static void ValidateResource(string resource)
+    {
+        if (string.IsNullOrEmpty(resource))
+            throw new ArgumentException("Rule.Resource must not be null or empty.", nameof(resource));
+    }
+
     public static IReadOnlyList<DataPermissionRuleKey> GenerateCandidates(
         string resource,
         string? action,

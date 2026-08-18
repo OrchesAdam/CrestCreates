@@ -60,7 +60,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             cmd.Parameters.AddWithValue("sortOrder", snapshot.SortOrder);
             cmd.Parameters.AddWithValue("isActive", snapshot.IsActive);
             cmd.Parameters.AddWithValue("createdAtUtcTicks", snapshot.CreatedAt.UtcTicks);
-            cmd.Parameters.AddWithValue("createdAt", snapshot.CreatedAt.UtcDateTime);
+            cmd.Parameters.AddWithValue(
+                "createdAt",
+                PostgreSqlControlPlaneReferenceDataStoreSupport.ReadableTimestamp(snapshot.CreatedAt));
             cmd.Parameters.AddWithValue("stateContractVersion", PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion);
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -74,12 +76,17 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         var (scope, tenant) = ScopeTenant(tenantId);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_units");
         var sql = $"""
-            select state_json from {table}
+            select organization_unit_id, tenant_scope_kind, tenant_id, parent_id,
+                   sort_order, is_active, created_at_utc_ticks, created_at,
+                   state_contract_version, state_json
+            from {table}
             where tenant_scope_kind=@scope and tenant_id=@tenant and organization_unit_id=@id
             """;
         return await ReadEntityAsync(
             sql,
             PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit,
+            ValidateOrganizationUnit,
+            9,
             cancellationToken,
             ("scope", scope), ("tenant", tenant), ("id", organizationUnitId)).ConfigureAwait(false);
     }
@@ -94,25 +101,37 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         {
             var (scope, tenant) = ScopeTenant(tenantId);
             sql = $"""
-                select state_json from {table}
+                select organization_unit_id, tenant_scope_kind, tenant_id, parent_id,
+                       sort_order, is_active, created_at_utc_ticks, created_at,
+                       state_contract_version, state_json
+                from {table}
                 where tenant_scope_kind=@scope and tenant_id=@tenant
                 order by sort_order, tenant_scope_kind, tenant_id, organization_unit_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit,
+                ValidateOrganizationUnit,
+                9,
+                OrganizationStoreSemantics.OrganizationUnitComparer,
                 cancellationToken,
                 ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
             sql = $"""
-                select state_json from {table}
+                select organization_unit_id, tenant_scope_kind, tenant_id, parent_id,
+                       sort_order, is_active, created_at_utc_ticks, created_at,
+                       state_contract_version, state_json
+                from {table}
                 order by sort_order, tenant_scope_kind, tenant_id, organization_unit_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit,
+                ValidateOrganizationUnit,
+                9,
+                OrganizationStoreSemantics.OrganizationUnitComparer,
                 cancellationToken).ConfigureAwait(false);
         }
     }
@@ -151,7 +170,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             cmd.Parameters.AddWithValue("positionId", snapshot.Id);
             cmd.Parameters.AddWithValue("isActive", snapshot.IsActive);
             cmd.Parameters.AddWithValue("createdAtUtcTicks", snapshot.CreatedAt.UtcTicks);
-            cmd.Parameters.AddWithValue("createdAt", snapshot.CreatedAt.UtcDateTime);
+            cmd.Parameters.AddWithValue(
+                "createdAt",
+                PostgreSqlControlPlaneReferenceDataStoreSupport.ReadableTimestamp(snapshot.CreatedAt));
             cmd.Parameters.AddWithValue("stateContractVersion", PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion);
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -165,12 +186,16 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         var (scope, tenant) = ScopeTenant(tenantId);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_positions");
         var sql = $"""
-            select state_json from {table}
+            select position_id, tenant_scope_kind, tenant_id, is_active,
+                   created_at_utc_ticks, created_at, state_contract_version, state_json
+            from {table}
             where tenant_scope_kind=@scope and tenant_id=@tenant and position_id=@id
             """;
         return await ReadEntityAsync(
             sql,
             PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.Position,
+            ValidatePosition,
+            7,
             cancellationToken,
             ("scope", scope), ("tenant", tenant), ("id", positionId)).ConfigureAwait(false);
     }
@@ -185,25 +210,35 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         {
             var (scope, tenant) = ScopeTenant(tenantId);
             sql = $"""
-                select state_json from {table}
+                select position_id, tenant_scope_kind, tenant_id, is_active,
+                       created_at_utc_ticks, created_at, state_contract_version, state_json
+                from {table}
                 where tenant_scope_kind=@scope and tenant_id=@tenant
                 order by tenant_scope_kind, tenant_id, position_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.Position,
+                ValidatePosition,
+                7,
+                OrganizationStoreSemantics.PositionComparer,
                 cancellationToken,
                 ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
             sql = $"""
-                select state_json from {table}
+                select position_id, tenant_scope_kind, tenant_id, is_active,
+                       created_at_utc_ticks, created_at, state_contract_version, state_json
+                from {table}
                 order by tenant_scope_kind, tenant_id, position_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.Position,
+                ValidatePosition,
+                7,
+                OrganizationStoreSemantics.PositionComparer,
                 cancellationToken).ConfigureAwait(false);
         }
     }
@@ -250,7 +285,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             cmd.Parameters.AddWithValue("isPrimary", snapshot.IsPrimary);
             cmd.Parameters.AddWithValue("isActive", snapshot.IsActive);
             cmd.Parameters.AddWithValue("createdAtUtcTicks", snapshot.CreatedAt.UtcTicks);
-            cmd.Parameters.AddWithValue("createdAt", snapshot.CreatedAt.UtcDateTime);
+            cmd.Parameters.AddWithValue(
+                "createdAt",
+                PostgreSqlControlPlaneReferenceDataStoreSupport.ReadableTimestamp(snapshot.CreatedAt));
             cmd.Parameters.AddWithValue("stateContractVersion", PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion);
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -267,26 +304,38 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         {
             var (scope, tenant) = ScopeTenant(tenantId);
             sql = $"""
-                select state_json from {table}
+                select membership_id, tenant_scope_kind, tenant_id, user_id,
+                       organization_unit_id, position_id, is_primary, is_active,
+                       created_at_utc_ticks, created_at, state_contract_version, state_json
+                from {table}
                 where user_id=@userId and tenant_scope_kind=@scope and tenant_id=@tenant
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, membership_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership,
+                ValidateMembership,
+                11,
+                OrganizationStoreSemantics.MembershipByUserComparer,
                 cancellationToken,
                 ("userId", userId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
             sql = $"""
-                select state_json from {table}
+                select membership_id, tenant_scope_kind, tenant_id, user_id,
+                       organization_unit_id, position_id, is_primary, is_active,
+                       created_at_utc_ticks, created_at, state_contract_version, state_json
+                from {table}
                 where user_id=@userId
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, membership_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership,
+                ValidateMembership,
+                11,
+                OrganizationStoreSemantics.MembershipByUserComparer,
                 cancellationToken,
                 ("userId", userId)).ConfigureAwait(false);
         }
@@ -302,26 +351,38 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         {
             var (scope, tenant) = ScopeTenant(tenantId);
             sql = $"""
-                select state_json from {table}
+                select membership_id, tenant_scope_kind, tenant_id, user_id,
+                       organization_unit_id, position_id, is_primary, is_active,
+                       created_at_utc_ticks, created_at, state_contract_version, state_json
+                from {table}
                 where organization_unit_id=@orgUnitId and tenant_scope_kind=@scope and tenant_id=@tenant
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, membership_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership,
+                ValidateMembership,
+                11,
+                OrganizationStoreSemantics.MembershipByUnitComparer,
                 cancellationToken,
                 ("orgUnitId", organizationUnitId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
             sql = $"""
-                select state_json from {table}
+                select membership_id, tenant_scope_kind, tenant_id, user_id,
+                       organization_unit_id, position_id, is_primary, is_active,
+                       created_at_utc_ticks, created_at, state_contract_version, state_json
+                from {table}
                 where organization_unit_id=@orgUnitId
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, membership_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership,
+                ValidateMembership,
+                11,
+                OrganizationStoreSemantics.MembershipByUnitComparer,
                 cancellationToken,
                 ("orgUnitId", organizationUnitId)).ConfigureAwait(false);
         }
@@ -367,7 +428,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             cmd.Parameters.AddWithValue("orgUnitId", (object?)snapshot.OrganizationUnitId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("isActive", snapshot.IsActive);
             cmd.Parameters.AddWithValue("createdAtUtcTicks", snapshot.CreatedAt.UtcTicks);
-            cmd.Parameters.AddWithValue("createdAt", snapshot.CreatedAt.UtcDateTime);
+            cmd.Parameters.AddWithValue(
+                "createdAt",
+                PostgreSqlControlPlaneReferenceDataStoreSupport.ReadableTimestamp(snapshot.CreatedAt));
             cmd.Parameters.AddWithValue("stateContractVersion", PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion);
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -384,26 +447,38 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         {
             var (scope, tenant) = ScopeTenant(tenantId);
             sql = $"""
-                select state_json from {table}
+                select assignment_id, tenant_scope_kind, tenant_id, user_id,
+                       role_id, organization_unit_id, is_active, created_at_utc_ticks,
+                       created_at, state_contract_version, state_json
+                from {table}
                 where user_id=@userId and tenant_scope_kind=@scope and tenant_id=@tenant
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, assignment_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationRoleAssignment,
+                ValidateRoleAssignment,
+                10,
+                OrganizationStoreSemantics.RoleAssignmentComparer,
                 cancellationToken,
                 ("userId", userId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
             sql = $"""
-                select state_json from {table}
+                select assignment_id, tenant_scope_kind, tenant_id, user_id,
+                       role_id, organization_unit_id, is_active, created_at_utc_ticks,
+                       created_at, state_contract_version, state_json
+                from {table}
                 where user_id=@userId
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, assignment_id
                 """;
             return await ReadListAsync(
                 sql,
                 PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationRoleAssignment,
+                ValidateRoleAssignment,
+                10,
+                OrganizationStoreSemantics.RoleAssignmentComparer,
                 cancellationToken,
                 ("userId", userId)).ConfigureAwait(false);
         }
@@ -415,6 +490,8 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
     private async Task<T?> ReadEntityAsync<T>(
         string sql,
         JsonTypeInfo<T> typeInfo,
+        Action<NpgsqlDataReader, T> validate,
+        int jsonOrdinal,
         CancellationToken ct,
         params (string name, object value)[] parameters) where T : class
     {
@@ -426,14 +503,18 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             await using var reader = await cmd.ExecuteReaderAsync(innerCt).ConfigureAwait(false);
             if (!await reader.ReadAsync(innerCt).ConfigureAwait(false))
                 return null;
-            var jsonStr = reader.GetString(0);
-            return PostgreSqlRuntimeStoreSupport.Deserialize(jsonStr, typeInfo);
+            var entity = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(jsonOrdinal), typeInfo);
+            validate(reader, entity);
+            return entity;
         }, ct).ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyList<T>> ReadListAsync<T>(
         string sql,
         JsonTypeInfo<T> typeInfo,
+        Action<NpgsqlDataReader, T> validate,
+        int jsonOrdinal,
+        IComparer<T> comparer,
         CancellationToken ct,
         params (string name, object value)[] parameters) where T : class
     {
@@ -447,9 +528,104 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             while (await reader.ReadAsync(innerCt).ConfigureAwait(false))
             {
                 var jsonStr = reader.GetString(0);
-                results.Add(PostgreSqlRuntimeStoreSupport.Deserialize(jsonStr, typeInfo));
+                var entity = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(jsonOrdinal), typeInfo);
+                validate(reader, entity);
+                results.Add(entity);
             }
-            return (IReadOnlyList<T>)results;
+            results.Sort(comparer);
+            return results.AsReadOnly();
         }, ct).ConfigureAwait(false);
+    }
+
+    private static void ValidateOrganizationUnit(NpgsqlDataReader reader, OrganizationUnit value)
+    {
+        var (scope, tenant) = ScopeTenant(value.TenantId);
+        if (!string.Equals(reader.GetString(0), value.Id, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(1), scope, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(2), tenant, StringComparison.Ordinal)
+            || !OptionalStringMatches(reader, 3, value.ParentId)
+            || reader.GetInt32(4) != value.SortOrder
+            || reader.GetBoolean(5) != value.IsActive
+            || reader.GetInt64(6) != value.CreatedAt.UtcTicks
+            || reader.GetInt32(8) != PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                "OrganizationUnit structured columns disagree with the JSON snapshot.");
+        }
+        ValidateReadableTimestamp(reader, 7, value.CreatedAt, "OrganizationUnit");
+    }
+
+    private static void ValidatePosition(NpgsqlDataReader reader, Position value)
+    {
+        var (scope, tenant) = ScopeTenant(value.TenantId);
+        if (!string.Equals(reader.GetString(0), value.Id, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(1), scope, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(2), tenant, StringComparison.Ordinal)
+            || reader.GetBoolean(3) != value.IsActive
+            || reader.GetInt64(4) != value.CreatedAt.UtcTicks
+            || reader.GetInt32(6) != PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                "Position structured columns disagree with the JSON snapshot.");
+        }
+        ValidateReadableTimestamp(reader, 5, value.CreatedAt, "Position");
+    }
+
+    private static void ValidateMembership(NpgsqlDataReader reader, UserOrganizationMembership value)
+    {
+        var (scope, tenant) = ScopeTenant(value.TenantId);
+        if (!string.Equals(reader.GetString(0), value.Id, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(1), scope, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(2), tenant, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(3), value.UserId, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(4), value.OrganizationUnitId, StringComparison.Ordinal)
+            || !OptionalStringMatches(reader, 5, value.PositionId)
+            || reader.GetBoolean(6) != value.IsPrimary
+            || reader.GetBoolean(7) != value.IsActive
+            || reader.GetInt64(8) != value.CreatedAt.UtcTicks
+            || reader.GetInt32(10) != PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                "Membership structured columns disagree with the JSON snapshot.");
+        }
+        ValidateReadableTimestamp(reader, 9, value.CreatedAt, "Membership");
+    }
+
+    private static void ValidateRoleAssignment(NpgsqlDataReader reader, UserOrganizationRoleAssignment value)
+    {
+        var (scope, tenant) = ScopeTenant(value.TenantId);
+        if (!string.Equals(reader.GetString(0), value.Id, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(1), scope, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(2), tenant, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(3), value.UserId, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(4), value.RoleId, StringComparison.Ordinal)
+            || !OptionalStringMatches(reader, 5, value.OrganizationUnitId)
+            || reader.GetBoolean(6) != value.IsActive
+            || reader.GetInt64(7) != value.CreatedAt.UtcTicks
+            || reader.GetInt32(9) != PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                "Role assignment structured columns disagree with the JSON snapshot.");
+        }
+        ValidateReadableTimestamp(reader, 8, value.CreatedAt, "Role assignment");
+    }
+
+    private static bool OptionalStringMatches(NpgsqlDataReader reader, int ordinal, string? expected)
+        => reader.IsDBNull(ordinal)
+            ? expected is null
+            : expected is not null && string.Equals(reader.GetString(ordinal), expected, StringComparison.Ordinal);
+
+    private static void ValidateReadableTimestamp(
+        NpgsqlDataReader reader,
+        int ordinal,
+        DateTimeOffset expected,
+        string entityName)
+    {
+        var expectedTicks = expected.UtcTicks - expected.UtcTicks % TimeSpan.TicksPerMicrosecond;
+        if (reader.GetDateTime(ordinal).Ticks != expectedTicks)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                $"{entityName} readable timestamp disagrees with the JSON snapshot.");
+        }
     }
 }

@@ -67,7 +67,9 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
             cmd.Parameters.AddWithValue("authorKind", (int)snapshot.AuthorKind);
             cmd.Parameters.AddWithValue("status", (int)snapshot.Status);
             cmd.Parameters.AddWithValue("createdAtUtcTicks", snapshot.CreatedAt.UtcTicks);
-            cmd.Parameters.AddWithValue("createdAt", snapshot.CreatedAt.UtcDateTime);
+            cmd.Parameters.AddWithValue(
+                "createdAt",
+                PostgreSqlControlPlaneReferenceDataStoreSupport.ReadableTimestamp(snapshot.CreatedAt));
             cmd.Parameters.AddWithValue("stateContractVersion", PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion);
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(innerCt).ConfigureAwait(false);
@@ -95,8 +97,7 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
             await using var reader = await cmd.ExecuteReaderAsync(innerCt).ConfigureAwait(false);
             if (!await reader.ReadAsync(innerCt).ConfigureAwait(false))
                 return null;
-            var jsonStr = reader.GetString(10);
-            return PostgreSqlControlPlaneReferenceDataJsonCodec.Deserialize(jsonStr);
+            return ReadPersistedDraft(reader, 10);
         }, ct).ConfigureAwait(false);
     }
 
@@ -106,25 +107,77 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
         DescriptorDraftStoreSemantics.ValidateListInput(tenantId, query);
 
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "control_plane_descriptor_drafts");
+        var predicates = new List<string> { "tenant_id=@tenant" };
+        if (query?.DescriptorKind is { } descriptorKind)
+            predicates.Add("descriptor_kind=@descriptorKind");
+        if (query?.Operation is { } operation)
+            predicates.Add("operation=@operation");
+        if (query?.AuthorKind is { } authorKind)
+            predicates.Add("author_kind=@authorKind");
+        if (query?.Status is { } status)
+            predicates.Add("status=@status");
+        if (query?.CreatedFrom is { } createdFrom)
+            predicates.Add("created_at_utc_ticks>=@createdFromTicks");
+        if (query?.CreatedTo is { } createdTo)
+            predicates.Add("created_at_utc_ticks<=@createdToTicks");
+
         var sql = $"""
             select tenant_id, draft_id, payload_type, descriptor_kind, operation, author_kind, status,
                    created_at_utc_ticks, created_at, state_contract_version, state_json
             from {table}
-            where tenant_id=@tenant
+            where {string.Join(" and ", predicates)}
             """;
 
         return await PostgreSqlControlPlaneReferenceDataStoreSupport.ExecuteReadAsync(_dataSource, async (connection, innerCt) =>
         {
             await using var cmd = PostgreSqlControlPlaneReferenceDataStoreSupport.CreateReadCommand(connection, _options, sql);
             cmd.Parameters.AddWithValue("tenant", tenantId);
+            if (query?.DescriptorKind is { } descriptorKind)
+                cmd.Parameters.AddWithValue("descriptorKind", (int)descriptorKind);
+            if (query?.Operation is { } operation)
+                cmd.Parameters.AddWithValue("operation", (int)operation);
+            if (query?.AuthorKind is { } authorKind)
+                cmd.Parameters.AddWithValue("authorKind", (int)authorKind);
+            if (query?.Status is { } status)
+                cmd.Parameters.AddWithValue("status", (int)status);
+            if (query?.CreatedFrom is { } createdFrom)
+                cmd.Parameters.AddWithValue("createdFromTicks", createdFrom.UtcTicks);
+            if (query?.CreatedTo is { } createdTo)
+                cmd.Parameters.AddWithValue("createdToTicks", createdTo.UtcTicks);
             await using var reader = await cmd.ExecuteReaderAsync(innerCt).ConfigureAwait(false);
             var results = new List<Draft>();
             while (await reader.ReadAsync(innerCt).ConfigureAwait(false))
-            {
-                var jsonStr = reader.GetString(10);
-                results.Add(PostgreSqlControlPlaneReferenceDataJsonCodec.Deserialize(jsonStr));
-            }
+                results.Add(ReadPersistedDraft(reader, 10));
             return DescriptorDraftStoreSemantics.OrderDrafts(results).ToList().AsReadOnly();
         }, ct).ConfigureAwait(false);
+    }
+
+    private static Draft ReadPersistedDraft(NpgsqlDataReader reader, int jsonOrdinal)
+    {
+        var draft = PostgreSqlControlPlaneReferenceDataJsonCodec.Deserialize(reader.GetString(jsonOrdinal));
+        if (!string.Equals(reader.GetString(0), draft.TenantId, StringComparison.Ordinal)
+            || !string.Equals(reader.GetString(1), draft.DraftId, StringComparison.Ordinal)
+            || reader.GetInt32(2) != DescriptorDraftPayloadSupport.GetPayloadType(draft.Payload)
+            || reader.GetInt32(3) != (int)draft.DescriptorKind
+            || reader.GetInt32(4) != (int)draft.Operation
+            || reader.GetInt32(5) != (int)draft.AuthorKind
+            || reader.GetInt32(6) != (int)draft.Status
+            || reader.GetInt64(7) != draft.CreatedAt.UtcTicks
+            || reader.GetInt32(9) != PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                "Descriptor Draft structured columns disagree with the JSON snapshot.");
+        }
+
+        var createdAt = reader.GetDateTime(8);
+        var expectedCreatedAtTicks = draft.CreatedAt.UtcTicks
+            - draft.CreatedAt.UtcTicks % TimeSpan.TicksPerMicrosecond;
+        if (createdAt.Ticks != expectedCreatedAtTicks)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                "Descriptor Draft readable timestamp disagrees with the JSON snapshot.");
+        }
+
+        return draft;
     }
 }

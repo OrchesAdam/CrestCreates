@@ -11,13 +11,13 @@ internal static class DescriptorDraftStoreSemantics
         ArgumentNullException.ThrowIfNull(draft.DraftId);
         ArgumentNullException.ThrowIfNull(draft.Payload);
 
-        if (!Enum.IsDefined(draft.DescriptorKind))
+        if (!IsDefined(draft.DescriptorKind))
             throw new ArgumentOutOfRangeException(nameof(draft), $"DescriptorKind value {(int)draft.DescriptorKind} is not defined.");
-        if (!Enum.IsDefined(draft.Operation))
+        if (!IsDefined(draft.Operation))
             throw new ArgumentOutOfRangeException(nameof(draft), $"Operation value {(int)draft.Operation} is not defined.");
-        if (!Enum.IsDefined(draft.AuthorKind))
+        if (!IsDefined(draft.AuthorKind))
             throw new ArgumentOutOfRangeException(nameof(draft), $"AuthorKind value {(int)draft.AuthorKind} is not defined.");
-        if (!Enum.IsDefined(draft.Status))
+        if (!IsDefined(draft.Status))
             throw new ArgumentOutOfRangeException(nameof(draft), $"Status value {(int)draft.Status} is not defined.");
     }
 
@@ -33,13 +33,13 @@ internal static class DescriptorDraftStoreSemantics
 
         if (query is not null)
         {
-            if (query.DescriptorKind.HasValue && !Enum.IsDefined(query.DescriptorKind.Value))
+            if (query.DescriptorKind.HasValue && !IsDefined(query.DescriptorKind.Value))
                 throw new ArgumentOutOfRangeException(nameof(query), $"DescriptorKind value {(int)query.DescriptorKind.Value} is not defined.");
-            if (query.Operation.HasValue && !Enum.IsDefined(query.Operation.Value))
+            if (query.Operation.HasValue && !IsDefined(query.Operation.Value))
                 throw new ArgumentOutOfRangeException(nameof(query), $"Operation value {(int)query.Operation.Value} is not defined.");
-            if (query.AuthorKind.HasValue && !Enum.IsDefined(query.AuthorKind.Value))
+            if (query.AuthorKind.HasValue && !IsDefined(query.AuthorKind.Value))
                 throw new ArgumentOutOfRangeException(nameof(query), $"AuthorKind value {(int)query.AuthorKind.Value} is not defined.");
-            if (query.Status.HasValue && !Enum.IsDefined(query.Status.Value))
+            if (query.Status.HasValue && !IsDefined(query.Status.Value))
                 throw new ArgumentOutOfRangeException(nameof(query), $"Status value {(int)query.Status.Value} is not defined.");
         }
     }
@@ -66,4 +66,36 @@ internal static class DescriptorDraftStoreSemantics
 
     public static IEnumerable<DescriptorDraft> OrderDrafts(IEnumerable<DescriptorDraft> drafts)
         => drafts.OrderBy(d => d.DraftId, StringComparer.Ordinal);
+
+    private static bool IsDefined(DescriptorKind value)
+        => value is DescriptorKind.Unknown
+            or DescriptorKind.Schema
+            or DescriptorKind.Capability
+            or DescriptorKind.Event
+            or DescriptorKind.Workflow
+            or DescriptorKind.Form
+            or DescriptorKind.HumanTask
+            or DescriptorKind.DynamicApiEndpoint
+            or DescriptorKind.McpTool
+            or DescriptorKind.AgentTool;
+
+    private static bool IsDefined(DescriptorDraftOperation value)
+        => value is DescriptorDraftOperation.Create
+            or DescriptorDraftOperation.Update
+            or DescriptorDraftOperation.Deprecate
+            or DescriptorDraftOperation.Remove;
+
+    private static bool IsDefined(DescriptorDraftAuthorKind value)
+        => value is DescriptorDraftAuthorKind.Human
+            or DescriptorDraftAuthorKind.Agent
+            or DescriptorDraftAuthorKind.System
+            or DescriptorDraftAuthorKind.Import
+            or DescriptorDraftAuthorKind.Generator;
+
+    private static bool IsDefined(DescriptorDraftStatus value)
+        => value is DescriptorDraftStatus.Created
+            or DescriptorDraftStatus.Invalid
+            or DescriptorDraftStatus.Materialized
+            or DescriptorDraftStatus.Reviewed
+            or DescriptorDraftStatus.Cancelled;
 }

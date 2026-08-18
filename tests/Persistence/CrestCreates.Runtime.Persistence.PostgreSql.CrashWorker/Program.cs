@@ -16,6 +16,7 @@ if (args.Length < 5)
     Console.Error.WriteLine("           | predispatch-cw04-budget-committed | predispatch-cw05-reservation-returned");
     Console.Error.WriteLine("           | predispatch-cw07-record-ambiguous | predispatch-cw08-checkpoint-committed");
     Console.Error.WriteLine("           | predispatch-cw09-receipt-obtained");
+    Console.Error.WriteLine("           | reference-{draft|organization-unit|position|membership|role-assignment|rule}-{before-commit|after-commit|commit-unknown}");
     return 2;
 }
 
@@ -36,6 +37,9 @@ if (scenario.StartsWith("agent-memory-", StringComparison.Ordinal))
 {
     return await AgentMemoryCrashScenarios.RunAsync(options, scenario, applicationName, operationId);
 }
+
+if (scenario.StartsWith("reference-", StringComparison.Ordinal))
+    return await ReferenceDataCrashScenarios.RunAsync(options, scenario, applicationName);
 
 using var provider = new ServiceCollection().AddCrestCreatesPostgreSqlRuntimePersistence(options).BuildServiceProvider();
 var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();

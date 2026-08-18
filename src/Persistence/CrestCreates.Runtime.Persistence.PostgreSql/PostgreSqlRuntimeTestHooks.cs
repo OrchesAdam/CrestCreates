@@ -8,6 +8,7 @@ internal static class PostgreSqlRuntimeTestHooks
     private static Action? _afterFirstCommandLeaseAcquired;
     private static Action? _afterFirstCommandCompleted;
     private static Func<CancellationToken, ValueTask>? _beforeCommitBlock;
+    private static Func<ValueTask>? _afterCommitBlock;
     private static Func<string, CancellationToken, ValueTask>? _afterWritePointBlock;
 
     internal static IDisposable BlockFirstCommand(Action afterLeaseAcquired)
@@ -52,6 +53,20 @@ internal static class PostgreSqlRuntimeTestHooks
         return block is null ? ValueTask.CompletedTask : block(cancellationToken);
     }
 
+    internal static IDisposable BlockAfterCommit(Func<ValueTask> block)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        if (Interlocked.CompareExchange(ref _afterCommitBlock, block, null) is not null)
+            throw new InvalidOperationException("A PostgreSQL Runtime after-COMMIT probe is already active.");
+        return new ResetAfterCommit();
+    }
+
+    internal static ValueTask NotifyAfterCommitAsync()
+    {
+        var block = Interlocked.Exchange(ref _afterCommitBlock, null);
+        return block is null ? ValueTask.CompletedTask : block();
+    }
+
     /// <summary>Installs a one-shot block invoked after each named curation SQL
     /// write point, so tests can inject a failure after any individual write
     /// and prove the top-level transaction rolls the whole graph back.</summary>
@@ -79,6 +94,11 @@ internal static class PostgreSqlRuntimeTestHooks
     private sealed class ResetBeforeCommit : IDisposable
     {
         public void Dispose() => Interlocked.Exchange(ref _beforeCommitBlock, null);
+    }
+
+    private sealed class ResetAfterCommit : IDisposable
+    {
+        public void Dispose() => Interlocked.Exchange(ref _afterCommitBlock, null);
     }
 
     private sealed class ResetAfterWritePoint : IDisposable

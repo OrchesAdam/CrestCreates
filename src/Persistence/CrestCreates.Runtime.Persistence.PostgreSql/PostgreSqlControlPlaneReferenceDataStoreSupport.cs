@@ -17,6 +17,13 @@ internal static class PostgreSqlControlPlaneReferenceDataStoreSupport
         return new DateTimeOffset(truncated, TimeSpan.Zero).ToString("O");
     }
 
+    internal static DateTime ReadableTimestamp(DateTimeOffset value)
+    {
+        var utcTicks = value.UtcTicks;
+        var truncated = utcTicks - (utcTicks % TimeSpan.TicksPerMicrosecond);
+        return new DateTime(truncated, DateTimeKind.Utc);
+    }
+
     internal static long UtcTicks(DateTimeOffset value) => value.UtcTicks;
 
     internal static string TenantScope(string? tenantId) => tenantId is null ? "global" : "tenant";

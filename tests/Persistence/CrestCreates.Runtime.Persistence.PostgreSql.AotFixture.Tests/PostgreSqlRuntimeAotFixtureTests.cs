@@ -58,7 +58,12 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_PIN_RECOVERY_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
-            execution.Output.Should().Contain("CRESTCREATES_CONTROL_PLANE_REFERENCE_DATA_AOT_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_CAPABILITY_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_HUMAN_TASK_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_SUBWORKFLOW_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_REFERENCE_ORGANIZATION_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_REFERENCE_DATA_PERMISSION_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_REFERENCE_DATA_OK");
             // Real CrashWorker-style subprocess commit → kill → fresh-process recovery
             // for each of the five pre-dispatch crash windows.
             execution.Output.Should().Contain("CRESTCREATES_AGENTTOOL_PREDISPATCH_CW04_OK");

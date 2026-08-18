@@ -11,6 +11,7 @@ public interface IDescriptorDraftStoreContractDriver
     Draft CreatePayloadVariant(DescriptorPayloadVariant variant);
     DescriptorPayloadObservation ObservePayload(Draft draft, DescriptorPayloadVariant variant);
     Draft CreateValidatorOwnedInvalid(DraftValidatorOwnedInvalidVariant variant);
+    Draft CreateValidatorOwnedInvalid(DraftValidatorOwnedInvalidVariant variant, EvidenceVectorKey key);
     ValueTask ResetAsync();
 }
 

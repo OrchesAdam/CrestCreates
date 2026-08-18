@@ -61,6 +61,7 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        DataPermissionRuleSemantics.ValidateResource(resource);
         DataPermissionMatch.ValidateNotSentinel(action, nameof(action));
         DataPermissionMatch.ValidateNotSentinel(permission, nameof(permission));
         DataPermissionMatch.ValidateNotSentinel(tenantId, nameof(tenantId));
@@ -80,7 +81,9 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
                             permission_match_kind, permission_value) as (
                 values {string.Join(", ", valuesClauses)}
             )
-            select r.scope_kind
+            select r.tenant_scope_kind, r.tenant_id, r.resource,
+                   r.action_match_kind, r.action_value,
+                   r.permission_match_kind, r.permission_value, r.scope_kind
             from candidates c
             join {table} r
               on r.tenant_scope_kind=c.tenant_scope_kind
@@ -111,7 +114,23 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
             await using var reader = await cmd.ExecuteReaderAsync(innerCt).ConfigureAwait(false);
             if (!await reader.ReadAsync(innerCt).ConfigureAwait(false))
                 return null;
-            var scopeKindInt = reader.GetInt32(0);
+            var tenantScope = reader.GetString(0);
+            var tenantValue = reader.GetString(1);
+            var actionMatchKind = reader.GetInt32(3);
+            var actionValue = reader.GetString(4);
+            var permissionMatchKind = reader.GetInt32(5);
+            var permissionValue = reader.GetString(6);
+            if ((tenantScope is not "global" and not "tenant")
+                || (tenantScope == "global" && tenantValue.Length != 0)
+                || (tenantScope == "tenant" && (tenantValue.Length == 0 || tenantValue == "*"))
+                || !IsValidMatch(actionMatchKind, actionValue)
+                || !IsValidMatch(permissionMatchKind, permissionValue))
+            {
+                throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                    "Persisted DataPermission rule key columns are inconsistent.");
+            }
+
+            var scopeKindInt = reader.GetInt32(7);
             if (scopeKindInt is < (int)DataPermissionScopeKind.None
                 or > (int)DataPermissionScopeKind.Custom)
                 throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
@@ -119,4 +138,12 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
             return (DataPermissionScopeKind)scopeKindInt;
         }, cancellationToken).ConfigureAwait(false);
     }
+
+    private static bool IsValidMatch(int kind, string value)
+        => kind switch
+        {
+            0 => value != "*",
+            1 => value.Length == 0,
+            _ => false
+        };
 }

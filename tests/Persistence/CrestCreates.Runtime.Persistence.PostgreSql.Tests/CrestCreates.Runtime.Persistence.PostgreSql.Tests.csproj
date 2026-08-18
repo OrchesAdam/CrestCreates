@@ -26,6 +26,8 @@
     <ProjectReference Include="../../../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
     <ProjectReference Include="../../../src/Framework/Modules/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Framework/Modules/CrestCreates.Organization/CrestCreates.Organization.csproj" />
+    <ProjectReference Include="../CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

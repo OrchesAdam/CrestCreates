@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-18 (Issue #69 Durable Control Plane and Reference Data Stores: Slices 1-9 implemented on PR #78. Shared contract kit, Draft/Organization/DataPermission InMemory parity with typed semantics, V011 migration, three PostgreSQL stores, base-first feature DI composition, and source-generated PostgreSQL reference-data JSON closure are implemented. Slices 10-11 remain: crash/restart/failure matrix and final evidence closure.)
+Last Updated: 2026-08-18 (Issue #69 Durable Control Plane and Reference Data Stores: Slices 1-10 implementation and the NativeAOT provider closure are now covered on PR #78. Shared contract kit, Draft/Organization/DataPermission InMemory parity with typed semantics, V011 migration/schema manifest, three PostgreSQL stores, base-first feature DI composition, source-generated reference-data JSON, structured-column fail-closed reads, six-surface crash windows, and AOT workflow/organization/rule scenarios are implemented. The full 77-tuple evidence ledger and remaining corruption/restart expansion still require closure.)
 
 ## Purpose
 
@@ -13,8 +13,9 @@ This file records the current platform status for CrestCreates so future threads
 ### Issue #69 — Phase 9b+ Durable Control Plane and Reference Data Stores
 
 Status: Design Spec R3 APPROVED / FROZEN; Implementation Plan R4 ready for
-implementation handoff; Slices 1-9 implemented, with source-generated
-reference-data JSON closure completed during PR #78 review remediation
+implementation handoff; Slices 1-10 and the NativeAOT provider closure are
+implemented during PR #78 review remediation; full evidence-ledger closure
+remains
 
 Normative draft:
 `docs/superpowers/specs/2026-08-17-phase-9bplus-durable-control-plane-reference-data-stores-design.md`

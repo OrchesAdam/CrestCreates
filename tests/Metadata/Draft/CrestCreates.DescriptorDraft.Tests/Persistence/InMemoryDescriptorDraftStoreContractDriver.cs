@@ -56,6 +56,49 @@ internal sealed class InMemoryDescriptorDraftStoreContractDriver : IDescriptorDr
         _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, "Unknown variant")
     };
 
+    public Draft CreateValidatorOwnedInvalid(DraftValidatorOwnedInvalidVariant variant, EvidenceVectorKey key)
+    {
+        return variant switch
+        {
+            DraftValidatorOwnedInvalidVariant.DescriptorIdBlank => CreateSchemaDraft() with
+            {
+                DescriptorId = key switch
+                {
+                    EvidenceVectorKey.Null => null!,
+                    EvidenceVectorKey.Empty => string.Empty,
+                    EvidenceVectorKey.Whitespace => "   ",
+                    _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unsupported DescriptorId vector")
+                }
+            },
+            DraftValidatorOwnedInvalidVariant.AuthorIdBlank => CreateSchemaDraft() with
+            {
+                AuthorId = key switch
+                {
+                    EvidenceVectorKey.Null => null!,
+                    EvidenceVectorKey.Empty => string.Empty,
+                    EvidenceVectorKey.Whitespace => "   ",
+                    _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unsupported AuthorId vector")
+                }
+            },
+            DraftValidatorOwnedInvalidVariant.DefinedNonPayloadKindMismatch => CreateSchemaDraft() with
+            {
+                DescriptorKind = key switch
+                {
+                    EvidenceVectorKey.Unknown => DescriptorKind.Unknown,
+                    EvidenceVectorKey.DynamicApiEndpoint => DescriptorKind.DynamicApiEndpoint,
+                    EvidenceVectorKey.McpTool => DescriptorKind.McpTool,
+                    EvidenceVectorKey.AgentTool => DescriptorKind.AgentTool,
+                    _ => throw new ArgumentOutOfRangeException(nameof(key), key, "Unsupported DescriptorKind vector")
+                }
+            },
+            DraftValidatorOwnedInvalidVariant.ProposedVersionMissing =>
+                CreateDraftWithOperation(key == EvidenceVectorKey.Create
+                    ? DescriptorDraftOperation.Create
+                    : DescriptorDraftOperation.Update),
+            _ => CreateValidatorOwnedInvalid(variant)
+        };
+    }
+
     public ValueTask ResetAsync() => ValueTask.CompletedTask;
 
     private static Draft CreateSchemaDraft() => new()

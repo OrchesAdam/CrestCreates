@@ -182,7 +182,13 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             "agent_tool_governance_decisions",
             "agent_tool_governance_finalizations",
             "agent_tool_reconciliation_observations",
-            "agent_tool_reconciliation_receipts"
+            "agent_tool_reconciliation_receipts",
+            "control_plane_descriptor_drafts",
+            "organization_units",
+            "organization_positions",
+            "organization_memberships",
+            "organization_role_assignments",
+            "data_permission_scope_rules"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -277,6 +283,11 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                        select attribute.attname
                        from unnest(index_data.indkey) with ordinality index_key(attnum, ordinal)
                        join pg_attribute attribute on attribute.attrelid = table_relation.oid and attribute.attnum = index_key.attnum
+                       order by index_key.ordinal),
+                   array(
+                       select case when index_key.collation_oid = 0 then '' else coll.collname end
+                       from unnest(index_data.indcollation) with ordinality index_key(collation_oid, ordinal)
+                       left join pg_collation coll on coll.oid = index_key.collation_oid
                        order by index_key.ordinal)
             from pg_indexes index_info
             join pg_class index_relation on index_relation.relname = index_info.indexname
@@ -293,7 +304,9 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
             || reader.GetBoolean(0) != expected.Unique
             || !string.Equals(NormalizeSql(reader.GetString(1)), NormalizeSql(expected.Predicate), StringComparison.Ordinal)
-            || !reader.GetFieldValue<string[]>(2).SequenceEqual(expectedColumns, StringComparer.Ordinal))
+            || !reader.GetFieldValue<string[]>(2).SequenceEqual(expectedColumns, StringComparer.Ordinal)
+            || (expected.KeyCollations is not null
+                && !reader.GetFieldValue<string[]>(3).SequenceEqual(expected.KeyCollations, StringComparer.Ordinal)))
         {
             throw new InvalidOperationException($"PostgreSQL runtime table '{table}' has an incompatible required index.");
         }
@@ -474,7 +487,12 @@ public sealed class PostgreSqlRuntimeMigrationRunner
 
     private sealed record AppliedMigration(string Version, string Name, string Checksum);
     private sealed record RuntimeSchemaCheck(string Name, string Definition);
-    private sealed record RuntimeSchemaIndex(string Name, IReadOnlyList<string> Columns, string Predicate, bool Unique = true);
+    private sealed record RuntimeSchemaIndex(
+        string Name,
+        IReadOnlyList<string> Columns,
+        string Predicate,
+        bool Unique = true,
+        IReadOnlyList<string>? KeyCollations = null);
     private sealed record RuntimeSchemaForeignKey(
         string Columns,
         string ReferencedTable,
@@ -502,7 +520,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         private static readonly (string Type, string Nullable, string? Collation) Boolean = ("boolean", "NO", null);
         private static readonly (string Type, string Nullable, string? Collation) Timestamp = ("timestamp with time zone", "NO", null);
         private static readonly (string Type, string Nullable, string? Collation) NullableTimestamp = ("timestamp with time zone", "YES", null);
-                private static readonly (string Type, string Nullable, string? Collation) TextC = ("text", "NO", "C");
+        private static readonly (string Type, string Nullable, string? Collation) TextC = ("text", "NO", "C");
         private static readonly (string Type, string Nullable, string? Collation) NullableTextC = ("text", "YES", "C");
 
         public static readonly IReadOnlyList<RuntimeSchemaTable> Tables =
@@ -717,8 +735,75 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_agent_memories_no_self_superseded_by", "check ((superseded_by_memory_id is null) or (superseded_by_memory_id <> memory_id))")],
             [new("uq_agent_memories_supersedes", ["tenant_id", "supersedes_memory_id"], "supersedes_memory_id is not null"),
              new("ix_agent_memories_tenant_status_kind", ["tenant_id", "status", "kind", "memory_id"], "", Unique: false)],
-            [new("tenant_id, supersedes_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION"),
-             new("tenant_id, superseded_by_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION")])
+             [new("tenant_id, supersedes_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION"),
+              new("tenant_id, superseded_by_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION")]),
+            new("control_plane_descriptor_drafts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["draft_id"] = TextC, ["payload_type"] = Integer,
+                ["descriptor_kind"] = Integer, ["operation"] = Integer, ["author_kind"] = Integer,
+                ["status"] = Integer, ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["state_contract_version"] = Integer, ["state_json"] = Json, ["updated_at"] = Timestamp
+            }, ["tenant_id", "draft_id"],
+            [new("ck_cp_draft_payload_type", "check (payload_type = any (array[1,2,3,4,5,6]))"),
+             new("ck_cp_draft_descriptor_kind", "check (descriptor_kind = any (array[0,1,2,3,4,5,6,7,8,9]))"),
+             new("ck_cp_draft_operation", "check (operation = any (array[0,1,2,3]))"),
+             new("ck_cp_draft_author_kind", "check (author_kind = any (array[0,1,2,3,4]))"),
+             new("ck_cp_draft_status", "check (status = any (array[0,1,2,3,4]))"),
+             new("ck_cp_draft_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_cp_drafts_created", ["tenant_id", "created_at_utc_ticks", "draft_id"], "", Unique: false, KeyCollations: ["C", "", "C"]),
+             new("ix_cp_drafts_combined_filter", ["tenant_id", "descriptor_kind", "operation", "author_kind", "status", "created_at_utc_ticks", "draft_id"], "", Unique: false, KeyCollations: ["C", "", "", "", "", "", "C"])], []),
+            new("organization_units", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["organization_unit_id"] = TextC,
+                ["parent_id"] = NullableTextC, ["sort_order"] = Integer, ["is_active"] = Boolean,
+                ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["state_contract_version"] = Integer, ["state_json"] = Json, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "organization_unit_id"],
+            [new("ck_org_units_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_org_units_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_org_units_explicit_list", ["tenant_scope_kind", "tenant_id", "sort_order", "organization_unit_id"], "", Unique: false, KeyCollations: ["C", "C", "", "C"]),
+             new("ix_org_units_unfiltered_list", ["sort_order", "tenant_scope_kind", "tenant_id", "organization_unit_id"], "", Unique: false, KeyCollations: ["", "C", "C", "C"])], []),
+            new("organization_positions", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["position_id"] = TextC,
+                ["is_active"] = Boolean, ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["state_contract_version"] = Integer, ["state_json"] = Json, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "position_id"],
+            [new("ck_org_positions_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_org_positions_contract_version", "check (state_contract_version = 1)")], [], []),
+            new("organization_memberships", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["membership_id"] = TextC,
+                ["user_id"] = TextC, ["organization_unit_id"] = TextC, ["position_id"] = NullableTextC,
+                ["is_primary"] = Boolean, ["is_active"] = Boolean, ["created_at_utc_ticks"] = BigInt,
+                ["created_at"] = Timestamp, ["state_contract_version"] = Integer, ["state_json"] = Json,
+                ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "membership_id"],
+            [new("ck_org_memberships_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_org_memberships_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_org_memberships_by_user", ["user_id", "tenant_scope_kind", "tenant_id", "created_at_utc_ticks", "membership_id"], "", Unique: false, KeyCollations: ["C", "C", "C", "", "C"]),
+             new("ix_org_memberships_by_unit", ["organization_unit_id", "tenant_scope_kind", "tenant_id", "created_at_utc_ticks", "membership_id"], "", Unique: false, KeyCollations: ["C", "C", "C", "", "C"])], []),
+            new("organization_role_assignments", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["assignment_id"] = TextC,
+                ["user_id"] = TextC, ["role_id"] = TextC, ["organization_unit_id"] = NullableTextC,
+                ["is_active"] = Boolean, ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["state_contract_version"] = Integer, ["state_json"] = Json, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "assignment_id"],
+            [new("ck_org_roles_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_org_roles_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_org_roles_by_user", ["user_id", "tenant_scope_kind", "tenant_id", "created_at_utc_ticks", "assignment_id"], "", Unique: false, KeyCollations: ["C", "C", "C", "", "C"])], []),
+            new("data_permission_scope_rules", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["resource"] = TextC,
+                ["action_match_kind"] = Integer, ["action_value"] = TextC,
+                ["permission_match_kind"] = Integer, ["permission_value"] = TextC,
+                ["scope_kind"] = Integer, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "resource", "action_match_kind", "action_value", "permission_match_kind", "permission_value"],
+            [new("ck_data_permission_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> '' and tenant_id <> '*'))"),
+             new("ck_data_permission_action_match", "check ((action_match_kind = 0 and action_value <> '*') or (action_match_kind = 1 and action_value = ''))"),
+             new("ck_data_permission_permission_match", "check ((permission_match_kind = 0 and permission_value <> '*') or (permission_match_kind = 1 and permission_value = ''))"),
+             new("ck_data_permission_scope_kind", "check (scope_kind = any (array[0,1,2,3,4,5]))")], [], [])
         ];
     }
 

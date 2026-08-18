@@ -68,6 +68,22 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
     }
 
     [Fact]
+    public void Draft_codec_preserves_validator_owned_null_identifiers()
+    {
+        var draft = CreateDraft(DescriptorKind.Schema) with
+        {
+            DescriptorId = null!,
+            AuthorId = null!
+        };
+
+        var restored = PostgreSqlControlPlaneReferenceDataJsonCodec.Deserialize(
+            PostgreSqlControlPlaneReferenceDataJsonCodec.Serialize(draft));
+
+        restored.DescriptorId.Should().BeNull();
+        restored.AuthorId.Should().BeNull();
+    }
+
+    [Fact]
     public void Organization_roots_use_generated_type_info()
     {
         var value = new OrganizationUnit

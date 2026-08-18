@@ -14,6 +14,8 @@ public sealed class InMemoryDataPermissionScopeRuleStore : IDataPermissionScopeR
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        DataPermissionRuleSemantics.ValidateResource(resource);
         DataPermissionMatch.ValidateNotSentinel(action, nameof(action));
         DataPermissionMatch.ValidateNotSentinel(permission, nameof(permission));
         DataPermissionMatch.ValidateNotSentinel(tenantId, nameof(tenantId));
@@ -33,6 +35,7 @@ public sealed class InMemoryDataPermissionScopeRuleStore : IDataPermissionScopeR
         DataPermissionScopeRule rule,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         DataPermissionRuleSemantics.ValidateSaveRule(rule);
         var key = DataPermissionRuleKey.FromRule(rule);
         _rules[key] = rule.ScopeKind;
