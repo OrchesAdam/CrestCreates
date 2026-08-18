@@ -1,3 +1,4 @@
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.Organization;
 using CrestCreates.Organization.Abstractions;
 using FluentAssertions;
@@ -214,6 +215,134 @@ public sealed class OrganizationStoreContractTests
         var result = await driver.Store.GetMembershipsByUserAsync("user", "tenant-a");
         result.Select(value => value.Id).Should().Equal("first", "second");
         result[0].CreatedAt.Should().Be(first);
+    }
+
+    [Theory]
+    [InlineData(IdentityValidationVector.UnitNullInstance)]
+    [InlineData(IdentityValidationVector.UnitInvalidId)]
+    [InlineData(IdentityValidationVector.UnitInvalidNonNullTenant)]
+    [InlineData(IdentityValidationVector.PositionNullInstance)]
+    [InlineData(IdentityValidationVector.PositionInvalidId)]
+    [InlineData(IdentityValidationVector.PositionInvalidNonNullTenant)]
+    [InlineData(IdentityValidationVector.MembershipNullInstance)]
+    [InlineData(IdentityValidationVector.MembershipInvalidId)]
+    [InlineData(IdentityValidationVector.MembershipInvalidNonNullTenant)]
+    [InlineData(IdentityValidationVector.MembershipInvalidUserId)]
+    [InlineData(IdentityValidationVector.MembershipInvalidOrganizationUnitId)]
+    [InlineData(IdentityValidationVector.MembershipInvalidPositionId)]
+    [InlineData(IdentityValidationVector.RoleAssignmentNullInstance)]
+    [InlineData(IdentityValidationVector.RoleAssignmentInvalidId)]
+    [InlineData(IdentityValidationVector.RoleAssignmentInvalidNonNullTenant)]
+    [InlineData(IdentityValidationVector.RoleAssignmentInvalidUserId)]
+    [InlineData(IdentityValidationVector.RoleAssignmentInvalidRoleId)]
+    [InlineData(IdentityValidationVector.RoleAssignmentInvalidOrganizationUnitId)]
+    [InlineData(IdentityValidationVector.UnitPointReadInvalidId)]
+    [InlineData(IdentityValidationVector.PositionPointReadInvalidId)]
+    [InlineData(IdentityValidationVector.MembershipByUserInvalidUserId)]
+    [InlineData(IdentityValidationVector.MembershipByUnitInvalidOrganizationUnitId)]
+    [InlineData(IdentityValidationVector.RoleByUserInvalidUserId)]
+    [InlineData(IdentityValidationVector.OrganizationQueryInvalidNonNullTenant)]
+    public async Task IdentityValidationVector_Should_FailBeforeMutation(IdentityValidationVector variant)
+    {
+        var driver = NewDriver();
+        Func<Task> act = variant switch
+        {
+            IdentityValidationVector.UnitNullInstance =>
+                () => driver.Store.SaveOrganizationUnitAsync(null!),
+            IdentityValidationVector.UnitInvalidId =>
+                () => driver.Store.SaveOrganizationUnitAsync(Unit("", "tenant-a")),
+            IdentityValidationVector.UnitInvalidNonNullTenant =>
+                () => driver.Store.SaveOrganizationUnitAsync(Unit("unit", "  ")),
+            IdentityValidationVector.PositionNullInstance =>
+                () => driver.Store.SavePositionAsync(null!),
+            IdentityValidationVector.PositionInvalidId =>
+                () => driver.Store.SavePositionAsync(Position("", "tenant-a")),
+            IdentityValidationVector.PositionInvalidNonNullTenant =>
+                () => driver.Store.SavePositionAsync(Position("pos", "  ")),
+            IdentityValidationVector.MembershipNullInstance =>
+                () => driver.Store.SaveMembershipAsync(null!),
+            IdentityValidationVector.MembershipInvalidId =>
+                () => driver.Store.SaveMembershipAsync(Membership("", "user", "tenant-a", DateTimeOffset.UnixEpoch)),
+            IdentityValidationVector.MembershipInvalidNonNullTenant =>
+                () => driver.Store.SaveMembershipAsync(Membership("m", "user", "  ", DateTimeOffset.UnixEpoch)),
+            IdentityValidationVector.MembershipInvalidUserId =>
+                () => driver.Store.SaveMembershipAsync(Membership("m", "", "tenant-a", DateTimeOffset.UnixEpoch)),
+            IdentityValidationVector.MembershipInvalidOrganizationUnitId =>
+                () => driver.Store.SaveMembershipAsync(Membership("m", "user", "tenant-a", DateTimeOffset.UnixEpoch, unitId: "")),
+            IdentityValidationVector.MembershipInvalidPositionId =>
+                () => driver.Store.SaveMembershipAsync(Membership("m", "user", "tenant-a", DateTimeOffset.UnixEpoch, positionId: "")),
+            IdentityValidationVector.RoleAssignmentNullInstance =>
+                () => driver.Store.SaveRoleAssignmentAsync(null!),
+            IdentityValidationVector.RoleAssignmentInvalidId =>
+                () => driver.Store.SaveRoleAssignmentAsync(Role("", "user", "tenant-a", DateTimeOffset.UnixEpoch)),
+            IdentityValidationVector.RoleAssignmentInvalidNonNullTenant =>
+                () => driver.Store.SaveRoleAssignmentAsync(Role("r", "user", "  ", DateTimeOffset.UnixEpoch)),
+            IdentityValidationVector.RoleAssignmentInvalidUserId =>
+                () => driver.Store.SaveRoleAssignmentAsync(Role("r", "", "tenant-a", DateTimeOffset.UnixEpoch)),
+            IdentityValidationVector.RoleAssignmentInvalidRoleId =>
+                () => driver.Store.SaveRoleAssignmentAsync(Role("r", "user", "tenant-a", DateTimeOffset.UnixEpoch, roleId: "")),
+            IdentityValidationVector.RoleAssignmentInvalidOrganizationUnitId =>
+                () => driver.Store.SaveRoleAssignmentAsync(Role("r", "user", "tenant-a", DateTimeOffset.UnixEpoch, organizationUnitId: "")),
+            IdentityValidationVector.UnitPointReadInvalidId =>
+                async () => await driver.Store.GetOrganizationUnitByIdAsync(""),
+            IdentityValidationVector.PositionPointReadInvalidId =>
+                async () => await driver.Store.GetPositionByIdAsync(""),
+            IdentityValidationVector.MembershipByUserInvalidUserId =>
+                async () => await driver.Store.GetMembershipsByUserAsync(""),
+            IdentityValidationVector.MembershipByUnitInvalidOrganizationUnitId =>
+                async () => await driver.Store.GetMembershipsByOrganizationUnitAsync(""),
+            IdentityValidationVector.RoleByUserInvalidUserId =>
+                async () => await driver.Store.GetRoleAssignmentsByUserAsync(""),
+            IdentityValidationVector.OrganizationQueryInvalidNonNullTenant =>
+                async () => await driver.Store.GetOrganizationUnitsAsync("  "),
+            _ => throw new ArgumentOutOfRangeException(nameof(variant))
+        };
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData(StoreMethodSurface.UnitSave)]
+    [InlineData(StoreMethodSurface.UnitGet)]
+    [InlineData(StoreMethodSurface.UnitList)]
+    [InlineData(StoreMethodSurface.PositionSave)]
+    [InlineData(StoreMethodSurface.PositionGet)]
+    [InlineData(StoreMethodSurface.PositionList)]
+    [InlineData(StoreMethodSurface.MembershipSave)]
+    [InlineData(StoreMethodSurface.MembershipsByUser)]
+    [InlineData(StoreMethodSurface.MembershipsByUnit)]
+    [InlineData(StoreMethodSurface.RoleSave)]
+    [InlineData(StoreMethodSurface.RolesByUser)]
+    public async Task PreCancelledStoreMethod_Should_ExitBeforeQueryOrMutation(StoreMethodSurface surface)
+    {
+        var driver = NewDriver();
+        var ct = new CancellationToken(canceled: true);
+        Func<Task> act = surface switch
+        {
+            StoreMethodSurface.UnitSave =>
+                () => driver.Store.SaveOrganizationUnitAsync(Unit("u", "t"), ct),
+            StoreMethodSurface.UnitGet =>
+                async () => await driver.Store.GetOrganizationUnitByIdAsync("u", cancellationToken: ct),
+            StoreMethodSurface.UnitList =>
+                async () => await driver.Store.GetOrganizationUnitsAsync(cancellationToken: ct),
+            StoreMethodSurface.PositionSave =>
+                () => driver.Store.SavePositionAsync(Position("p", "t"), ct),
+            StoreMethodSurface.PositionGet =>
+                async () => await driver.Store.GetPositionByIdAsync("p", cancellationToken: ct),
+            StoreMethodSurface.PositionList =>
+                async () => await driver.Store.GetPositionsAsync(cancellationToken: ct),
+            StoreMethodSurface.MembershipSave =>
+                () => driver.Store.SaveMembershipAsync(Membership("m", "u", "t", DateTimeOffset.UnixEpoch), ct),
+            StoreMethodSurface.MembershipsByUser =>
+                async () => await driver.Store.GetMembershipsByUserAsync("u", cancellationToken: ct),
+            StoreMethodSurface.MembershipsByUnit =>
+                async () => await driver.Store.GetMembershipsByOrganizationUnitAsync("u", cancellationToken: ct),
+            StoreMethodSurface.RoleSave =>
+                () => driver.Store.SaveRoleAssignmentAsync(Role("r", "u", "t", DateTimeOffset.UnixEpoch), ct),
+            StoreMethodSurface.RolesByUser =>
+                async () => await driver.Store.GetRoleAssignmentsByUserAsync("u", cancellationToken: ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(surface))
+        };
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     private static InMemoryOrganizationStoreContractDriver NewDriver() => new();

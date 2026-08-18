@@ -221,6 +221,97 @@ public sealed class DescriptorDraftStoreContractTests
             .Should().Be(draft.CreatedAt);
     }
 
+    [Theory]
+    [InlineData(IdentityValidationVector.DraftNullInstance)]
+    [InlineData(IdentityValidationVector.DraftNullTenantId)]
+    [InlineData(IdentityValidationVector.DraftNullDraftId)]
+    [InlineData(IdentityValidationVector.DraftNullPayload)]
+    [InlineData(IdentityValidationVector.DraftGetNullTenantId)]
+    [InlineData(IdentityValidationVector.DraftGetNullDraftId)]
+    [InlineData(IdentityValidationVector.DraftListNullTenantId)]
+    public async Task IdentityValidationVector_Should_FailBeforeMutation(IdentityValidationVector variant)
+    {
+        var driver = NewDriver();
+        Func<Task> act = variant switch
+        {
+            IdentityValidationVector.DraftNullInstance =>
+                () => driver.Store.SaveAsync(null!),
+            IdentityValidationVector.DraftNullTenantId =>
+                () => driver.Store.SaveAsync(driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with { TenantId = null! }),
+            IdentityValidationVector.DraftNullDraftId =>
+                () => driver.Store.SaveAsync(driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with { DraftId = null! }),
+            IdentityValidationVector.DraftNullPayload =>
+                () => driver.Store.SaveAsync(driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with { Payload = null! }),
+            IdentityValidationVector.DraftGetNullTenantId =>
+                async () => await driver.Store.GetAsync(null!, "draft-id"),
+            IdentityValidationVector.DraftGetNullDraftId =>
+                async () => await driver.Store.GetAsync("tenant-1", null!),
+            IdentityValidationVector.DraftListNullTenantId =>
+                async () => await driver.Store.ListAsync(null!),
+            _ => throw new ArgumentOutOfRangeException(nameof(variant))
+        };
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData(PersistedEnumSurface.DraftDescriptorKind)]
+    [InlineData(PersistedEnumSurface.DraftOperation)]
+    [InlineData(PersistedEnumSurface.DraftAuthorKind)]
+    [InlineData(PersistedEnumSurface.DraftStatus)]
+    public async Task PersistedEnumSurface_Should_FailBeforeMutation(PersistedEnumSurface surface)
+    {
+        var driver = NewDriver();
+        var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema);
+        var invalid = surface switch
+        {
+            PersistedEnumSurface.DraftDescriptorKind => draft with { DescriptorKind = (DescriptorKind)999 },
+            PersistedEnumSurface.DraftOperation => draft with { Operation = (DescriptorDraftOperation)999 },
+            PersistedEnumSurface.DraftAuthorKind => draft with { AuthorKind = (DescriptorDraftAuthorKind)999 },
+            PersistedEnumSurface.DraftStatus => draft with { Status = (DescriptorDraftStatus)999 },
+            _ => throw new ArgumentOutOfRangeException(nameof(surface))
+        };
+        await ((Func<Task>)(() => driver.Store.SaveAsync(invalid))).Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public async Task UnsupportedDraftPayload_Should_FailBeforeMutation()
+    {
+        var driver = NewDriver();
+        var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with
+        {
+            Payload = new UnsupportedTestPayload()
+        };
+        await ((Func<Task>)(() => driver.Store.SaveAsync(draft))).Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(StoreMethodSurface.DraftSave)]
+    [InlineData(StoreMethodSurface.DraftGet)]
+    [InlineData(StoreMethodSurface.DraftList)]
+    public async Task PreCancelledStoreMethod_Should_ExitBeforeQueryOrMutation(StoreMethodSurface surface)
+    {
+        var driver = NewDriver();
+        var ct = new CancellationToken(canceled: true);
+        Func<Task> act = surface switch
+        {
+            StoreMethodSurface.DraftSave =>
+                () => driver.Store.SaveAsync(driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema), ct),
+            StoreMethodSurface.DraftGet =>
+                async () => await driver.Store.GetAsync("tenant-1", "draft-id", ct),
+            StoreMethodSurface.DraftList =>
+                async () => await driver.Store.ListAsync("tenant-1", ct: ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(surface))
+        };
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     private static InMemoryDescriptorDraftStoreContractDriver NewDriver()
         => new();
+
+    private sealed record UnsupportedTestPayload : DescriptorDraftPayload
+    {
+        public override DescriptorKind DescriptorKind => DescriptorKind.Unknown;
+        public override IDescriptor GetDescriptor() => throw new NotImplementedException();
+        public override DescriptorDraftPayload Snapshot() => this;
+    }
 }

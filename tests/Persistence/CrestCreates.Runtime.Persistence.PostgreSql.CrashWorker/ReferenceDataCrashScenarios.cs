@@ -22,16 +22,15 @@ internal static class ReferenceDataCrashScenarios
         if (parts.Length < 4 || parts[0] != "reference")
             throw new ArgumentException($"Invalid reference-data crash scenario '{scenario}'.", nameof(scenario));
 
-        var surface = string.Join('-', parts[1..^2]);
-        var window = $"{parts[^2]}-{parts[^1]}";
-        if (window == "before-commit" || window == "after-commit" || window == "commit-unknown")
-        {
-            // handled below
-        }
-        else
-        {
+        // Find the window token(s) after the surface.
+        // Two-token windows: before-commit, after-commit, commit-unknown
+        // Three-token window: save-and-exit
+        int windowTokenCount = scenario.EndsWith("-save-and-exit") ? 3 : 2;
+        var window = string.Join('-', parts[^windowTokenCount..]);
+        var surface = string.Join('-', parts[1..^windowTokenCount]);
+
+        if (window is not ("before-commit" or "after-commit" or "commit-unknown" or "save-and-exit"))
             throw new ArgumentException($"Invalid reference-data crash window '{window}'.", nameof(scenario));
-        }
 
         await using var provider = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(options)
@@ -39,6 +38,15 @@ internal static class ReferenceDataCrashScenarios
             .BuildServiceProvider();
 
         var marker = $"REFERENCE_{surface.ToUpperInvariant().Replace('-', '_')}_{window.ToUpperInvariant().Replace('-', '_')}";
+
+        if (window == "save-and-exit")
+        {
+            await SaveAsync(provider, surface);
+            Console.WriteLine(marker);
+            Console.Out.Flush();
+            return 0;
+        }
+
         IDisposable? beforeCommit = null;
         IDisposable? afterCommit = null;
         if (window == "before-commit")
@@ -143,6 +151,64 @@ internal static class ReferenceDataCrashScenarios
                     Permission = "view",
                     TenantId = "crash",
                     ScopeKind = DataPermissionScopeKind.Self
+                });
+                break;
+            case "hierarchy":
+                var orgStore = provider.GetRequiredService<IOrganizationStore>();
+                await orgStore.SaveOrganizationUnitAsync(new OrganizationUnit
+                {
+                    Id = "restart-parent-unit",
+                    TenantId = "restart",
+                    Name = "Restart Parent",
+                    Code = "R-P",
+                    ParentId = null,
+                    SortOrder = 1,
+                    CreatedAt = DateTimeOffset.UnixEpoch
+                });
+                await orgStore.SaveOrganizationUnitAsync(new OrganizationUnit
+                {
+                    Id = "restart-child-unit",
+                    TenantId = "restart",
+                    Name = "Restart Child",
+                    Code = "R-C",
+                    ParentId = "restart-parent-unit",
+                    SortOrder = 2,
+                    CreatedAt = DateTimeOffset.UnixEpoch
+                });
+                break;
+            case "all-org-surfaces":
+                var store = provider.GetRequiredService<IOrganizationStore>();
+                await store.SaveOrganizationUnitAsync(new OrganizationUnit
+                {
+                    Id = "restart-unit",
+                    TenantId = "restart",
+                    Name = "Restart Unit",
+                    Code = "R-U",
+                    SortOrder = 1,
+                    CreatedAt = DateTimeOffset.UnixEpoch
+                });
+                await store.SavePositionAsync(new Position
+                {
+                    Id = "restart-position",
+                    TenantId = "restart",
+                    Name = "Restart Position"
+                });
+                await store.SaveMembershipAsync(new UserOrganizationMembership
+                {
+                    Id = "restart-membership",
+                    TenantId = "restart",
+                    UserId = "restart-user",
+                    OrganizationUnitId = "restart-unit",
+                    PositionId = "restart-position",
+                    IsPrimary = true,
+                    CreatedAt = DateTimeOffset.UnixEpoch
+                });
+                await store.SaveRoleAssignmentAsync(new UserOrganizationRoleAssignment
+                {
+                    Id = "restart-role-assignment",
+                    TenantId = "restart",
+                    UserId = "restart-user",
+                    RoleId = "restart-role"
                 });
                 break;
             default:

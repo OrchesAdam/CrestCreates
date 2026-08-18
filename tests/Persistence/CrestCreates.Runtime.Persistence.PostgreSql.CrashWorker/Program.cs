@@ -17,6 +17,7 @@ if (args.Length < 5)
     Console.Error.WriteLine("           | predispatch-cw07-record-ambiguous | predispatch-cw08-checkpoint-committed");
     Console.Error.WriteLine("           | predispatch-cw09-receipt-obtained");
     Console.Error.WriteLine("           | reference-{draft|organization-unit|position|membership|role-assignment|rule}-{before-commit|after-commit|commit-unknown}");
+    Console.Error.WriteLine("           | reference-{draft|organization-unit|position|membership|role-assignment|rule|hierarchy|all-org-surfaces}-save-and-exit");
     return 2;
 }
 

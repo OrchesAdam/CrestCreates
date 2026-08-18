@@ -1,11 +1,20 @@
 using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using FluentAssertions;
+using System.Text.RegularExpressions;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace CrestCreates.DependencyBoundaries.Tests;
 
 public class ControlPlaneReferenceDataSpecTestSkeletonTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public ControlPlaneReferenceDataSpecTestSkeletonTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     [Fact]
     public void AllCaseIds_Should_BeUnique()
     {
@@ -110,5 +119,86 @@ public class ControlPlaneReferenceDataSpecTestSkeletonTests
     {
         ControlPlaneReferenceDataCaseManifest.AllCases.Should().HaveCount(77,
             "Spec §14 defines exactly 77 Case IDs");
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Evidence Ledger Guard
+    // ─────────────────────────────────────────────────────────────
+
+    private static string LoadReferenceDataTestSource()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null && !File.Exists(Path.Combine(current.FullName, "Directory.Build.props")))
+            current = current.Parent;
+
+        current.Should().NotBeNull("the evidence guard must run from a repository checkout");
+        var sourceRoot = Path.Combine(current!.FullName, "tests");
+        var sourceFiles = Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}Shared{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                && !path.EndsWith("ControlPlaneReferenceDataSpecTestSkeletonTests.cs", StringComparison.Ordinal))
+            .ToArray();
+        return string.Join("\n", sourceFiles.Select(File.ReadAllText));
+    }
+
+    private static HashSet<string> DiscoverNormativeTestNames()
+    {
+        var source = LoadReferenceDataTestSource();
+        var implemented = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in ControlPlaneReferenceDataCaseManifest.AllCases)
+        {
+            var method = Regex.Escape(entry.NormativeTestName);
+            if (Regex.IsMatch(source,
+                $@"\b(?:public|private|internal)\s+(?:async\s+)?(?:Task(?:<[^>]+>)?|void)\s+\w*{method}\s*\(",
+                RegexOptions.CultureInvariant))
+            {
+                implemented.Add(entry.NormativeTestName);
+            }
+        }
+
+        return implemented;
+    }
+
+    [Fact]
+    public void EvidenceLedgerGuard_EveryCaseMustBeImplementedOrPendingWithReason()
+    {
+        var allCases = ControlPlaneReferenceDataCaseManifest.AllCases;
+        var implemented = DiscoverNormativeTestNames();
+        var missing = allCases
+            .Where(entry => !implemented.Contains(entry.NormativeTestName))
+            .Select(entry => $"{entry.CaseId}: {entry.NormativeTestName}")
+            .ToArray();
+
+        missing.Should().BeEmpty(
+            "every manifest case must have a discoverable normative test method; missing evidence must not be hidden by an empty registry");
+    }
+
+    [Fact]
+    public void EvidenceLedgerSummary_Report()
+    {
+        var allCases = ControlPlaneReferenceDataCaseManifest.AllCases;
+        var totalTuples = allCases.Count;
+
+        var implemented = DiscoverNormativeTestNames();
+        var missingEntries = allCases
+            .Where(c => !implemented.Contains(c.NormativeTestName))
+            .ToList();
+        var implementedCount = totalTuples - missingEntries.Count;
+
+        _output.WriteLine("═══════════════════════════════════════════════════════════");
+        _output.WriteLine("  Evidence Ledger Summary");
+        _output.WriteLine("═══════════════════════════════════════════════════════════");
+        _output.WriteLine($"  Total tuples required : {totalTuples}");
+        _output.WriteLine($"  Tuples with evidence  : {implementedCount}");
+        _output.WriteLine($"  Tuples pending        : {missingEntries.Count}");
+        _output.WriteLine($"  Completion            : {(double)implementedCount / totalTuples * 100.0:F1}%");
+        _output.WriteLine("═══════════════════════════════════════════════════════════");
+
+        // Governance assertions are based on discovered test methods, not a hand-maintained count.
+        totalTuples.Should().Be(77, "Spec §14 defines exactly 77 case tuples");
+        missingEntries.Should().BeEmpty("all 77 cases must have discoverable test evidence");
+        implementedCount.Should().Be(77, "all cases have evidence");
+        var actualPct = (double)implementedCount / totalTuples * 100.0;
+        actualPct.Should().Be(100.0, "evidence ledger must reach 100% coverage");
+        _output.WriteLine($"  Assertion: {implementedCount}/{totalTuples} = {actualPct:F1}% complete");
     }
 }

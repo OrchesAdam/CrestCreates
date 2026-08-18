@@ -247,6 +247,48 @@ public enum PersistedStructuredFieldRowSurface
     RoleAssignment
 }
 
+public enum PersistedStructuredFieldVariant
+{
+    DraftTenantId,
+    DraftDraftId,
+    DraftPayloadDiscriminator,
+    DraftDescriptorKind,
+    DraftOperation,
+    DraftAuthorKind,
+    DraftStatus,
+    DraftCreatedAtUtcTicks,
+    DraftCreatedAtReadableProjection,
+    OrganizationUnitTenantScope,
+    OrganizationUnitId,
+    OrganizationUnitParentId,
+    OrganizationUnitSortOrder,
+    OrganizationUnitIsActive,
+    OrganizationUnitCreatedAtUtcTicks,
+    OrganizationUnitCreatedAtReadableProjection,
+    PositionTenantScope,
+    PositionId,
+    PositionIsActive,
+    PositionCreatedAtUtcTicks,
+    PositionCreatedAtReadableProjection,
+    MembershipTenantScope,
+    MembershipId,
+    MembershipUserId,
+    MembershipOrganizationUnitId,
+    MembershipPositionId,
+    MembershipIsPrimary,
+    MembershipIsActive,
+    MembershipCreatedAtUtcTicks,
+    MembershipCreatedAtReadableProjection,
+    RoleAssignmentTenantScope,
+    RoleAssignmentId,
+    RoleAssignmentUserId,
+    RoleAssignmentRoleId,
+    RoleAssignmentOrganizationUnitId,
+    RoleAssignmentIsActive,
+    RoleAssignmentCreatedAtUtcTicks,
+    RoleAssignmentCreatedAtReadableProjection
+}
+
 public enum EvidenceVectorKey
 {
     Default,

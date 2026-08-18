@@ -54,6 +54,8 @@ internal static class DataPermissionRuleSemantics
         DataPermissionMatch.ValidateNotSentinel(rule.TenantId, nameof(rule));
         if (rule.TenantId is not null && string.IsNullOrWhiteSpace(rule.TenantId))
             throw new ArgumentException("Non-null Rule.TenantId must not be empty or whitespace.", nameof(rule));
+        if (!IsDefined(rule.ScopeKind))
+            throw new ArgumentOutOfRangeException(nameof(rule), $"ScopeKind value {(int)rule.ScopeKind} is not defined.");
     }
 
     public static void ValidateResource(string resource)
@@ -61,6 +63,14 @@ internal static class DataPermissionRuleSemantics
         if (string.IsNullOrEmpty(resource))
             throw new ArgumentException("Rule.Resource must not be null or empty.", nameof(resource));
     }
+
+    private static bool IsDefined(DataPermissionScopeKind value)
+        => value is DataPermissionScopeKind.None
+            or DataPermissionScopeKind.Self
+            or DataPermissionScopeKind.OwnOrganization
+            or DataPermissionScopeKind.OwnOrganizationAndDescendants
+            or DataPermissionScopeKind.All
+            or DataPermissionScopeKind.Custom;
 
     public static IReadOnlyList<DataPermissionRuleKey> GenerateCandidates(
         string resource,

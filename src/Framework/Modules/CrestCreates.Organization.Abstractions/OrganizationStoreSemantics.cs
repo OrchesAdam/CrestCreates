@@ -31,6 +31,8 @@ internal static class OrganizationStoreSemantics
             throw new ArgumentException("Membership.UserId must not be null or empty.", nameof(membership));
         if (string.IsNullOrEmpty(membership.OrganizationUnitId))
             throw new ArgumentException("Membership.OrganizationUnitId must not be null or empty.", nameof(membership));
+        if (membership.PositionId is not null && string.IsNullOrEmpty(membership.PositionId))
+            throw new ArgumentException("Non-null Membership.PositionId must not be empty.", nameof(membership));
     }
 
     public static void ValidateSaveRoleAssignment(UserOrganizationRoleAssignment assignment)
@@ -44,6 +46,8 @@ internal static class OrganizationStoreSemantics
             throw new ArgumentException("RoleAssignment.UserId must not be null or empty.", nameof(assignment));
         if (string.IsNullOrEmpty(assignment.RoleId))
             throw new ArgumentException("RoleAssignment.RoleId must not be null or empty.", nameof(assignment));
+        if (assignment.OrganizationUnitId is not null && string.IsNullOrEmpty(assignment.OrganizationUnitId))
+            throw new ArgumentException("Non-null RoleAssignment.OrganizationUnitId must not be empty.", nameof(assignment));
     }
 
     public static void ValidatePointReadId(string id, string paramName)

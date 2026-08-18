@@ -1,3 +1,4 @@
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.Organization.Abstractions;
 using FluentAssertions;
 using Xunit;
@@ -100,6 +101,77 @@ public sealed class DataPermissionScopeRuleStoreContractTests
         await Save(driver, null, "view", "tenant-a", DataPermissionScopeKind.Self);
         (await driver.Store.GetScopeKindAsync("resource", null, "view", "tenant-a"))
             .Should().Be(DataPermissionScopeKind.Self);
+    }
+
+    [Theory]
+    [InlineData(IdentityValidationVector.RuleNullInstance)]
+    [InlineData(IdentityValidationVector.RuleInvalidResource)]
+    [InlineData(IdentityValidationVector.RuleInvalidNonNullTenant)]
+    public async Task IdentityValidationVector_Should_FailBeforeMutation(IdentityValidationVector variant)
+    {
+        var driver = NewDriver();
+        Func<Task> act = variant switch
+        {
+            IdentityValidationVector.RuleNullInstance =>
+                () => driver.Store.SaveRuleAsync(null!),
+            IdentityValidationVector.RuleInvalidResource =>
+                () => driver.Store.SaveRuleAsync(new DataPermissionScopeRule { Resource = "", ScopeKind = DataPermissionScopeKind.Self }),
+            IdentityValidationVector.RuleInvalidNonNullTenant =>
+                () => driver.Store.SaveRuleAsync(new DataPermissionScopeRule { Resource = "resource", TenantId = "  ", ScopeKind = DataPermissionScopeKind.Self }),
+            _ => throw new ArgumentOutOfRangeException(nameof(variant))
+        };
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData(RuleSentinelField.Action)]
+    [InlineData(RuleSentinelField.Permission)]
+    [InlineData(RuleSentinelField.TenantId)]
+    public async Task RuleSentinelField_Should_FailBeforeMutation(RuleSentinelField field)
+    {
+        var driver = NewDriver();
+        var rule = field switch
+        {
+            RuleSentinelField.Action => new DataPermissionScopeRule
+                { Resource = "resource", Action = "*", ScopeKind = DataPermissionScopeKind.Self },
+            RuleSentinelField.Permission => new DataPermissionScopeRule
+                { Resource = "resource", Permission = "*", ScopeKind = DataPermissionScopeKind.Self },
+            RuleSentinelField.TenantId => new DataPermissionScopeRule
+                { Resource = "resource", TenantId = "*", ScopeKind = DataPermissionScopeKind.Self },
+            _ => throw new ArgumentOutOfRangeException(nameof(field))
+        };
+        await ((Func<Task>)(() => driver.Store.SaveRuleAsync(rule))).Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData(PersistedEnumSurface.RuleScopeKind)]
+    public async Task PersistedEnumSurface_Should_FailBeforeMutation(PersistedEnumSurface surface)
+    {
+        var driver = NewDriver();
+        var rule = new DataPermissionScopeRule
+        {
+            Resource = "resource",
+            ScopeKind = (DataPermissionScopeKind)999
+        };
+        await ((Func<Task>)(() => driver.Store.SaveRuleAsync(rule))).Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(StoreMethodSurface.RuleSave)]
+    [InlineData(StoreMethodSurface.RuleGet)]
+    public async Task PreCancelledStoreMethod_Should_ExitBeforeQueryOrMutation(StoreMethodSurface surface)
+    {
+        var driver = NewDriver();
+        var ct = new CancellationToken(canceled: true);
+        Func<Task> act = surface switch
+        {
+            StoreMethodSurface.RuleSave =>
+                () => driver.Store.SaveRuleAsync(new DataPermissionScopeRule { Resource = "r", ScopeKind = DataPermissionScopeKind.Self }, ct),
+            StoreMethodSurface.RuleGet =>
+                async () => await driver.Store.GetScopeKindAsync("resource", null, null, cancellationToken: ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(surface))
+        };
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     private static InMemoryDataPermissionScopeRuleStoreContractDriver NewDriver() => new();

@@ -9,7 +9,7 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests;
 public sealed class PostgreSqlRuntimeAotFixtureTests
 {
     [Fact]
-    public async Task Publish_native_aot_postgresql_runtime_links_and_executes_real_database_operations()
+    public async Task DurableControlPlaneReferenceDataAotFixture_Should_PublishLinkAndRun()
     {
         if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
             throw Xunit.Sdk.SkipException.ForSkip("The PostgreSQL Runtime NativeAOT gate is pinned to linux-x64.");
