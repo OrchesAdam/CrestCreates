@@ -4,6 +4,7 @@ using Xunit;
 
 namespace CrestCreates.DynamicApi.Tests;
 
+[Collection("DynamicApiStaticState")]
 public sealed class CapabilityEndpointBindingRegistryTests : IDisposable
 {
     public CapabilityEndpointBindingRegistryTests()
