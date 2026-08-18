@@ -1,12 +1,9 @@
-using System.Text.Json;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using Npgsql;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
-
-#pragma warning disable IL2026, IL3050 // TODO: Replace with generated JsonTypeInfo for NativeAOT (Slice 5)
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
@@ -34,7 +31,7 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
 
         var snapshot = draft.Snapshot();
         var payloadType = DescriptorDraftPayloadSupport.GetPayloadType(snapshot.Payload);
-        var json = JsonSerializer.Serialize(snapshot);
+        var json = PostgreSqlControlPlaneReferenceDataJsonCodec.Serialize(snapshot);
 
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "control_plane_descriptor_drafts");
 
@@ -99,8 +96,7 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
             if (!await reader.ReadAsync(innerCt).ConfigureAwait(false))
                 return null;
             var jsonStr = reader.GetString(10);
-            return JsonSerializer.Deserialize<Draft>(jsonStr)
-                ?? throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant("Descriptor Draft JSON deserialization returned null.");
+            return PostgreSqlControlPlaneReferenceDataJsonCodec.Deserialize(jsonStr);
         }, ct).ConfigureAwait(false);
     }
 
@@ -126,9 +122,7 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
             while (await reader.ReadAsync(innerCt).ConfigureAwait(false))
             {
                 var jsonStr = reader.GetString(10);
-                var draft = JsonSerializer.Deserialize<Draft>(jsonStr)
-                    ?? throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant("Descriptor Draft JSON deserialization returned null.");
-                results.Add(draft);
+                results.Add(PostgreSqlControlPlaneReferenceDataJsonCodec.Deserialize(jsonStr));
             }
             return DescriptorDraftStoreSemantics.OrderDrafts(results).ToList().AsReadOnly();
         }, ct).ConfigureAwait(false);

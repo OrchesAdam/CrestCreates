@@ -1,10 +1,8 @@
-using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Organization.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using Npgsql;
-
-#pragma warning disable IL2026, IL3050 // TODO: Replace with generated JsonTypeInfo for NativeAOT (Slice 5)
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
@@ -29,7 +27,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveOrganizationUnit(organizationUnit);
         var snapshot = organizationUnit.Snapshot();
-        var json = JsonSerializer.Serialize(snapshot);
+        var json = PostgreSqlRuntimeStoreSupport.Serialize(
+            snapshot,
+            PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_units");
         var (scope, tenant) = ScopeTenant(snapshot.TenantId);
 
@@ -77,7 +77,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             select state_json from {table}
             where tenant_scope_kind=@scope and tenant_id=@tenant and organization_unit_id=@id
             """;
-        return await ReadEntityAsync<OrganizationUnit>(sql, cancellationToken, ("scope", scope), ("tenant", tenant), ("id", organizationUnitId)).ConfigureAwait(false);
+        return await ReadEntityAsync(
+            sql,
+            PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit,
+            cancellationToken,
+            ("scope", scope), ("tenant", tenant), ("id", organizationUnitId)).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<OrganizationUnit>> GetOrganizationUnitsAsync(string? tenantId = null, CancellationToken cancellationToken = default)
@@ -94,7 +98,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 where tenant_scope_kind=@scope and tenant_id=@tenant
                 order by sort_order, tenant_scope_kind, tenant_id, organization_unit_id
                 """;
-            return await ReadListAsync<OrganizationUnit>(sql, cancellationToken, ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit,
+                cancellationToken,
+                ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
@@ -102,7 +110,10 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 select state_json from {table}
                 order by sort_order, tenant_scope_kind, tenant_id, organization_unit_id
                 """;
-            return await ReadListAsync<OrganizationUnit>(sql, cancellationToken).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit,
+                cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -111,7 +122,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSavePosition(position);
         var snapshot = position.Snapshot();
-        var json = JsonSerializer.Serialize(snapshot);
+        var json = PostgreSqlRuntimeStoreSupport.Serialize(
+            snapshot,
+            PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.Position);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_positions");
         var (scope, tenant) = ScopeTenant(snapshot.TenantId);
 
@@ -155,7 +168,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             select state_json from {table}
             where tenant_scope_kind=@scope and tenant_id=@tenant and position_id=@id
             """;
-        return await ReadEntityAsync<Position>(sql, cancellationToken, ("scope", scope), ("tenant", tenant), ("id", positionId)).ConfigureAwait(false);
+        return await ReadEntityAsync(
+            sql,
+            PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.Position,
+            cancellationToken,
+            ("scope", scope), ("tenant", tenant), ("id", positionId)).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<Position>> GetPositionsAsync(string? tenantId = null, CancellationToken cancellationToken = default)
@@ -172,7 +189,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 where tenant_scope_kind=@scope and tenant_id=@tenant
                 order by tenant_scope_kind, tenant_id, position_id
                 """;
-            return await ReadListAsync<Position>(sql, cancellationToken, ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.Position,
+                cancellationToken,
+                ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
@@ -180,7 +201,10 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 select state_json from {table}
                 order by tenant_scope_kind, tenant_id, position_id
                 """;
-            return await ReadListAsync<Position>(sql, cancellationToken).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.Position,
+                cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -189,7 +213,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveMembership(membership);
         var snapshot = membership.Snapshot();
-        var json = JsonSerializer.Serialize(snapshot);
+        var json = PostgreSqlRuntimeStoreSupport.Serialize(
+            snapshot,
+            PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_memberships");
         var (scope, tenant) = ScopeTenant(snapshot.TenantId);
 
@@ -245,7 +271,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 where user_id=@userId and tenant_scope_kind=@scope and tenant_id=@tenant
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, membership_id
                 """;
-            return await ReadListAsync<UserOrganizationMembership>(sql, cancellationToken, ("userId", userId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership,
+                cancellationToken,
+                ("userId", userId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
@@ -254,7 +284,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 where user_id=@userId
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, membership_id
                 """;
-            return await ReadListAsync<UserOrganizationMembership>(sql, cancellationToken, ("userId", userId)).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership,
+                cancellationToken,
+                ("userId", userId)).ConfigureAwait(false);
         }
     }
 
@@ -272,7 +306,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 where organization_unit_id=@orgUnitId and tenant_scope_kind=@scope and tenant_id=@tenant
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, membership_id
                 """;
-            return await ReadListAsync<UserOrganizationMembership>(sql, cancellationToken, ("orgUnitId", organizationUnitId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership,
+                cancellationToken,
+                ("orgUnitId", organizationUnitId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
@@ -281,7 +319,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 where organization_unit_id=@orgUnitId
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, membership_id
                 """;
-            return await ReadListAsync<UserOrganizationMembership>(sql, cancellationToken, ("orgUnitId", organizationUnitId)).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership,
+                cancellationToken,
+                ("orgUnitId", organizationUnitId)).ConfigureAwait(false);
         }
     }
 
@@ -290,7 +332,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveRoleAssignment(assignment);
         var snapshot = assignment.Snapshot();
-        var json = JsonSerializer.Serialize(snapshot);
+        var json = PostgreSqlRuntimeStoreSupport.Serialize(
+            snapshot,
+            PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationRoleAssignment);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_role_assignments");
         var (scope, tenant) = ScopeTenant(snapshot.TenantId);
 
@@ -344,7 +388,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 where user_id=@userId and tenant_scope_kind=@scope and tenant_id=@tenant
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, assignment_id
                 """;
-            return await ReadListAsync<UserOrganizationRoleAssignment>(sql, cancellationToken, ("userId", userId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationRoleAssignment,
+                cancellationToken,
+                ("userId", userId), ("scope", scope), ("tenant", tenant)).ConfigureAwait(false);
         }
         else
         {
@@ -353,14 +401,22 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
                 where user_id=@userId
                 order by created_at_utc_ticks, tenant_scope_kind, tenant_id, assignment_id
                 """;
-            return await ReadListAsync<UserOrganizationRoleAssignment>(sql, cancellationToken, ("userId", userId)).ConfigureAwait(false);
+            return await ReadListAsync(
+                sql,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationRoleAssignment,
+                cancellationToken,
+                ("userId", userId)).ConfigureAwait(false);
         }
     }
 
     private static (string Scope, string Tenant) ScopeTenant(string? tenantId)
         => tenantId is null ? ("global", "") : ("tenant", tenantId);
 
-    private async Task<T?> ReadEntityAsync<T>(string sql, CancellationToken ct, params (string name, object value)[] parameters) where T : class
+    private async Task<T?> ReadEntityAsync<T>(
+        string sql,
+        JsonTypeInfo<T> typeInfo,
+        CancellationToken ct,
+        params (string name, object value)[] parameters) where T : class
     {
         return await PostgreSqlControlPlaneReferenceDataStoreSupport.ExecuteReadAsync(_dataSource, async (connection, innerCt) =>
         {
@@ -371,12 +427,15 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             if (!await reader.ReadAsync(innerCt).ConfigureAwait(false))
                 return null;
             var jsonStr = reader.GetString(0);
-            return JsonSerializer.Deserialize<T>(jsonStr)
-                ?? throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant($"{typeof(T).Name} JSON deserialization returned null.");
+            return PostgreSqlRuntimeStoreSupport.Deserialize(jsonStr, typeInfo);
         }, ct).ConfigureAwait(false);
     }
 
-    private async Task<IReadOnlyList<T>> ReadListAsync<T>(string sql, CancellationToken ct, params (string name, object value)[] parameters) where T : class
+    private async Task<IReadOnlyList<T>> ReadListAsync<T>(
+        string sql,
+        JsonTypeInfo<T> typeInfo,
+        CancellationToken ct,
+        params (string name, object value)[] parameters) where T : class
     {
         return await PostgreSqlControlPlaneReferenceDataStoreSupport.ExecuteReadAsync(_dataSource, async (connection, innerCt) =>
         {
@@ -388,9 +447,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             while (await reader.ReadAsync(innerCt).ConfigureAwait(false))
             {
                 var jsonStr = reader.GetString(0);
-                var entity = JsonSerializer.Deserialize<T>(jsonStr)
-                    ?? throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant($"{typeof(T).Name} JSON deserialization returned null.");
-                results.Add(entity);
+                results.Add(PostgreSqlRuntimeStoreSupport.Deserialize(jsonStr, typeInfo));
             }
             return (IReadOnlyList<T>)results;
         }, ct).ConfigureAwait(false);

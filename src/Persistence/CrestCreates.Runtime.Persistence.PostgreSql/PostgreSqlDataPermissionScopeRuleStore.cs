@@ -71,7 +71,7 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
         var valuesClauses = new List<string>();
         for (int i = 0; i < candidates.Count; i++)
         {
-            valuesClauses.Add($"(@p{i}_scope, @p{i}_tenant, @resource, @p{i}_ak, @p{i}_av, @p{i}_pk, @p{i}_pv)");
+            valuesClauses.Add($"(@p{i}_priority, @p{i}_scope, @p{i}_tenant, @resource, @p{i}_ak, @p{i}_av, @p{i}_pk, @p{i}_pv)");
         }
 
         var sql = $"""
@@ -100,6 +100,7 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
             cmd.Parameters.AddWithValue("resource", resource);
             for (int i = 0; i < candidates.Count; i++)
             {
+                cmd.Parameters.AddWithValue($"p{i}_priority", i);
                 cmd.Parameters.AddWithValue($"p{i}_scope", candidates[i].TenantScope);
                 cmd.Parameters.AddWithValue($"p{i}_tenant", candidates[i].TenantId);
                 cmd.Parameters.AddWithValue($"p{i}_ak", (int)candidates[i].ActionMatch.Kind);
@@ -111,7 +112,8 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
             if (!await reader.ReadAsync(innerCt).ConfigureAwait(false))
                 return null;
             var scopeKindInt = reader.GetInt32(0);
-            if (!Enum.IsDefined(typeof(DataPermissionScopeKind), scopeKindInt))
+            if (scopeKindInt is < (int)DataPermissionScopeKind.None
+                or > (int)DataPermissionScopeKind.Custom)
                 throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
                     $"Invalid DataPermissionScopeKind value {scopeKindInt} in persisted rule.");
             return (DataPermissionScopeKind)scopeKindInt;

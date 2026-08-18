@@ -12,6 +12,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task SaveOrganizationUnitAsync(OrganizationUnit organizationUnit, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveOrganizationUnit(organizationUnit);
         var key = OrganizationScopedKey.FromTenantId(organizationUnit.TenantId, organizationUnit.Id);
         _orgUnits[key] = organizationUnit.Snapshot();
@@ -20,6 +21,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task<OrganizationUnit?> GetOrganizationUnitByIdAsync(string organizationUnitId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidatePointReadId(organizationUnitId, nameof(organizationUnitId));
         var key = OrganizationScopedKey.FromTenantId(tenantId, organizationUnitId);
         if (_orgUnits.TryGetValue(key, out var existing))
@@ -29,6 +31,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task<IReadOnlyList<OrganizationUnit>> GetOrganizationUnitsAsync(string? tenantId = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         IEnumerable<OrganizationUnit> query = _orgUnits.Values;
         if (tenantId is not null)
@@ -43,6 +46,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task SavePositionAsync(Position position, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSavePosition(position);
         var key = OrganizationScopedKey.FromTenantId(position.TenantId, position.Id);
         _positions[key] = position.Snapshot();
@@ -51,6 +55,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task<Position?> GetPositionByIdAsync(string positionId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidatePointReadId(positionId, nameof(positionId));
         var key = OrganizationScopedKey.FromTenantId(tenantId, positionId);
         if (_positions.TryGetValue(key, out var existing))
@@ -60,6 +65,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task<IReadOnlyList<Position>> GetPositionsAsync(string? tenantId = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         IEnumerable<Position> query = _positions.Values;
         if (tenantId is not null)
@@ -74,6 +80,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task SaveMembershipAsync(UserOrganizationMembership membership, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveMembership(membership);
         var key = OrganizationScopedKey.FromTenantId(membership.TenantId, membership.Id);
         _memberships[key] = membership.Snapshot();
@@ -82,6 +89,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task<IReadOnlyList<UserOrganizationMembership>> GetMembershipsByUserAsync(string userId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateUserId(userId, nameof(userId));
         OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         IEnumerable<UserOrganizationMembership> query = _memberships.Values.Where(m => m.UserId == userId);
@@ -97,6 +105,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task<IReadOnlyList<UserOrganizationMembership>> GetMembershipsByOrganizationUnitAsync(string organizationUnitId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateOrganizationUnitId(organizationUnitId, nameof(organizationUnitId));
         OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         IEnumerable<UserOrganizationMembership> query = _memberships.Values.Where(m => m.OrganizationUnitId == organizationUnitId);
@@ -112,6 +121,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task SaveRoleAssignmentAsync(UserOrganizationRoleAssignment assignment, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveRoleAssignment(assignment);
         var key = OrganizationScopedKey.FromTenantId(assignment.TenantId, assignment.Id);
         _roleAssignments[key] = assignment.Snapshot();
@@ -120,6 +130,7 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
 
     public Task<IReadOnlyList<UserOrganizationRoleAssignment>> GetRoleAssignmentsByUserAsync(string userId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateUserId(userId, nameof(userId));
         OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         IEnumerable<UserOrganizationRoleAssignment> query = _roleAssignments.Values.Where(a => a.UserId == userId);

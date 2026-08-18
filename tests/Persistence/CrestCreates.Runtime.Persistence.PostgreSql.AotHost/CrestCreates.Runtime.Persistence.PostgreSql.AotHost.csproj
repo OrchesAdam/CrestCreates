@@ -29,6 +29,10 @@
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory.Accountability/CrestCreates.Agent.Memory.Accountability.csproj" />
+    <ProjectReference Include="../../../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
+    <ProjectReference Include="../../../src/Framework/Modules/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Framework/Modules/CrestCreates.Organization/CrestCreates.Organization.csproj" />
   </ItemGroup>
   <Import Project="../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.props" />
   <Import Project="../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.targets" />
