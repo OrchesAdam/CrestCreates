@@ -149,9 +149,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
 
     private async Task RunSaveAndExitAsync(string scenario, string schema)
     {
-        var root = FindRepositoryRoot();
-        var worker = Path.Combine(root,
-            "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.dll");
+        var worker = PostgreSqlCrashWorkerPath.Resolve();
         File.Exists(worker).Should().BeTrue("the CrashWorker must be built by the test project reference");
 
         var applicationName = $"phase9b-restart-{Guid.NewGuid():N}";

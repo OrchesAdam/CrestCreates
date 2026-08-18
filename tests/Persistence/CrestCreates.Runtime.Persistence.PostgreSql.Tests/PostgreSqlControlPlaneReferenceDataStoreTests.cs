@@ -193,10 +193,11 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             ScopeKind = DataPermissionScopeKind.Self
         });
 
-        await DropAllCheckConstraintsAsync(
+        await DropConstraintAsync(
             lease.Options.ConnectionString,
             lease.Options.Schema,
-            "data_permission_scope_rules");
+            "data_permission_scope_rules",
+            RuleConstraintForVariant(variant));
         await using (var connection = new NpgsqlConnection(lease.Options.ConnectionString))
         {
             await connection.OpenAsync();
@@ -237,6 +238,19 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, null)
         };
 
+    private static string RuleConstraintForVariant(PersistedRuleCorruptionVariant variant)
+        => variant switch
+        {
+            PersistedRuleCorruptionVariant.InvalidTenantScopeKind
+                or PersistedRuleCorruptionVariant.TenantScopeTupleMismatch => "ck_data_permission_tenant_scope",
+            PersistedRuleCorruptionVariant.InvalidActionMatchKind
+                or PersistedRuleCorruptionVariant.ActionWildcardValueMismatch => "ck_data_permission_action_match",
+            PersistedRuleCorruptionVariant.InvalidPermissionMatchKind
+                or PersistedRuleCorruptionVariant.PermissionWildcardValueMismatch => "ck_data_permission_permission_match",
+            PersistedRuleCorruptionVariant.InvalidScopeKind => "ck_data_permission_scope_kind",
+            _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, null)
+        };
+
     [Fact]
     public async Task Draft_read_rejects_invalid_payload_discriminator()
     {
@@ -255,6 +269,44 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             await connection.OpenAsync();
             await using var command = new NpgsqlCommand(
                 $"update \"{lease.Options.Schema}\".control_plane_descriptor_drafts set state_json = jsonb_set(state_json, '{{payloadType}}', '999'::jsonb) where tenant_id = @tenant and draft_id = @draft",
+                connection);
+            command.Parameters.AddWithValue("tenant", draft.TenantId);
+            command.Parameters.AddWithValue("draft", draft.DraftId);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var act = () => store.GetAsync(draft.TenantId, draft.DraftId);
+        (await act.Should().ThrowAsync<RuntimePersistenceContractException>())
+            .Which.Code.Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
+    [Theory]
+    [InlineData("descriptor_kind", "ck_cp_draft_descriptor_kind", "descriptorKind")]
+    [InlineData("operation", "ck_cp_draft_operation", "operation")]
+    [InlineData("author_kind", "ck_cp_draft_author_kind", "authorKind")]
+    [InlineData("status", "ck_cp_draft_status", "status")]
+    public async Task Draft_read_rejects_doubly_corrupt_undefined_enum(
+        string column,
+        string constraint,
+        string jsonProperty)
+    {
+        await using var lease = await _fixture.CreateSchemaLeaseAsync();
+        var services = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IDescriptorDraftStore>();
+        var draft = CreateDraft($"draft-double-corrupt-{column}", DescriptorDraftOperation.Create, DescriptorDraftStatus.Created,
+            DateTimeOffset.UnixEpoch);
+        await store.SaveAsync(draft);
+        await DropConstraintAsync(lease.Options.ConnectionString, lease.Options.Schema,
+            "control_plane_descriptor_drafts", constraint);
+
+        await using (var connection = new NpgsqlConnection(lease.Options.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(
+                $"update \"{lease.Options.Schema}\".control_plane_descriptor_drafts set {column} = 999, state_json = jsonb_set(state_json, '{{{jsonProperty}}}', '999'::jsonb) where tenant_id = @tenant and draft_id = @draft",
                 connection);
             command.Parameters.AddWithValue("tenant", draft.TenantId);
             command.Parameters.AddWithValue("draft", draft.DraftId);
@@ -326,6 +378,65 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             .Which.Code.Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
     }
 
+    [Theory]
+    [InlineData("organization-unit")]
+    [InlineData("membership")]
+    [InlineData("role-assignment")]
+    public async Task OptionalStructuredField_NonNullJsonNullColumn_Should_FailClosed(string surface)
+    {
+        await using var lease = await _fixture.CreateSchemaLeaseAsync();
+        var services = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IOrganizationStore>();
+        var table = surface switch
+        {
+            "organization-unit" => "organization_units",
+            "membership" => "organization_memberships",
+            "role-assignment" => "organization_role_assignments",
+            _ => throw new ArgumentOutOfRangeException(nameof(surface), surface, null)
+        };
+        var idColumn = surface switch
+        {
+            "organization-unit" => "organization_unit_id",
+            "membership" => "membership_id",
+            "role-assignment" => "assignment_id",
+            _ => throw new ArgumentOutOfRangeException(nameof(surface), surface, null)
+        };
+        var id = $"null-column-{surface}";
+        string column;
+        switch (surface)
+        {
+            case "organization-unit":
+                await store.SaveOrganizationUnitAsync(new OrganizationUnit { Id = id, TenantId = "tenant-1", Name = id, ParentId = "parent" });
+                column = "parent_id";
+                break;
+            case "membership":
+                await store.SaveMembershipAsync(new UserOrganizationMembership { Id = id, TenantId = "tenant-1", UserId = id, OrganizationUnitId = "unit", PositionId = "position" });
+                column = "position_id";
+                break;
+            default:
+                await store.SaveRoleAssignmentAsync(new UserOrganizationRoleAssignment { Id = id, TenantId = "tenant-1", UserId = id, RoleId = "role", OrganizationUnitId = "unit" });
+                column = "organization_unit_id";
+                break;
+        }
+
+        await CorruptAsync(lease.Options.ConnectionString, lease.Options.Schema,
+            $"update \"{lease.Options.Schema}\".{table} set {column}=null where tenant_scope_kind='tenant' and tenant_id='tenant-1' and {idColumn}=@id",
+            ("id", id));
+
+        Func<Task> act = surface switch
+        {
+            "organization-unit" => async () => await store.GetOrganizationUnitByIdAsync(id, "tenant-1"),
+            "membership" => async () => await store.GetMembershipsByUserAsync(id, "tenant-1"),
+            "role-assignment" => async () => await store.GetRoleAssignmentsByUserAsync(id, "tenant-1"),
+            _ => throw new ArgumentOutOfRangeException(nameof(surface), surface, null)
+        };
+        (await act.Should().ThrowAsync<RuntimePersistenceContractException>())
+            .Which.Code.Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+    }
+
     // ── F01: ConcurrentBlindSave — one complete snapshot ──
 
     public static IEnumerable<object[]> SaveSurfaces()
@@ -343,14 +454,13 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
             .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
         await using var provider = services.BuildServiceProvider();
+        using var snapshotBarrier = PostgreSqlRuntimeTestHooks.BlockAfterReferenceSnapshotCaptured(2);
 
         switch (surface)
         {
             case "draft":
             {
                 var drafts = provider.GetRequiredService<IDescriptorDraftStore>();
-                var a = CreateDraft("concurrent", DescriptorDraftOperation.Create, DescriptorDraftStatus.Created, DateTimeOffset.UnixEpoch);
-                var b = CreateDraft("concurrent", DescriptorDraftOperation.Create, DescriptorDraftStatus.Created, DateTimeOffset.UnixEpoch);
                 // AuthorId is init-only; use two separate draft instances with different AuthorId via CreateDraft variants
                 var draftA = new Draft
                 {
@@ -358,52 +468,63 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
                     DescriptorKind = Metadata.Abstractions.DescriptorKind.Schema, DescriptorId = "schema-1",
                     Operation = DescriptorDraftOperation.Create, AuthorKind = DescriptorDraftAuthorKind.System,
                     AuthorId = "author-a", CreatedAt = DateTimeOffset.UnixEpoch, Status = DescriptorDraftStatus.Created,
-                    Payload = new SchemaDescriptorDraftPayload(new SchemaDescriptor { Id = "schema-1", Name = "Schema" })
+                    Intent = "intent-a",
+                    Payload = new SchemaDescriptorDraftPayload(new SchemaDescriptor { Id = "schema-1", Name = "Schema A" })
                 };
                 var draftB = new Draft
                 {
                     TenantId = "tenant-1", DraftId = "concurrent",
                     DescriptorKind = Metadata.Abstractions.DescriptorKind.Schema, DescriptorId = "schema-1",
                     Operation = DescriptorDraftOperation.Create, AuthorKind = DescriptorDraftAuthorKind.System,
-                    AuthorId = "author-b", CreatedAt = DateTimeOffset.UnixEpoch, Status = DescriptorDraftStatus.Created,
-                    Payload = new SchemaDescriptorDraftPayload(new SchemaDescriptor { Id = "schema-1", Name = "Schema" })
+                    AuthorId = "author-b", CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(1), Status = DescriptorDraftStatus.Reviewed,
+                    Intent = "intent-b",
+                    Payload = new SchemaDescriptorDraftPayload(new SchemaDescriptor { Id = "schema-1", Name = "Schema B" })
                 };
                 await Task.WhenAll(drafts.SaveAsync(draftA), drafts.SaveAsync(draftB));
                 var result = await drafts.GetAsync("tenant-1", "concurrent");
                 result.Should().NotBeNull();
-                result!.AuthorId.Should().BeOneOf("author-a", "author-b");
+                var schema = (SchemaDescriptorDraftPayload)result!.Payload;
+                var matchesA = result.AuthorId == "author-a" && result.Intent == "intent-a" && result.Status == DescriptorDraftStatus.Created && schema.Descriptor.Name == "Schema A";
+                var matchesB = result.AuthorId == "author-b" && result.Intent == "intent-b" && result.Status == DescriptorDraftStatus.Reviewed && schema.Descriptor.Name == "Schema B";
+                (matchesA || matchesB).Should().BeTrue("the row must be one complete submitted snapshot");
                 break;
             }
             case "organization-unit":
             {
                 var orgs = provider.GetRequiredService<IOrganizationStore>();
-                var a = new OrganizationUnit { Id = "unit-c", TenantId = "tenant-1", Name = "A", SortOrder = 1 };
-                var b = new OrganizationUnit { Id = "unit-c", TenantId = "tenant-1", Name = "B", SortOrder = 2 };
+                var a = new OrganizationUnit { Id = "unit-c", TenantId = "tenant-1", Name = "A", SortOrder = 1, IsActive = true };
+                var b = new OrganizationUnit { Id = "unit-c", TenantId = "tenant-1", Name = "B", SortOrder = 2, IsActive = false };
                 await Task.WhenAll(orgs.SaveOrganizationUnitAsync(a), orgs.SaveOrganizationUnitAsync(b));
                 var r = await orgs.GetOrganizationUnitByIdAsync("unit-c", "tenant-1");
                 r.Should().NotBeNull();
-                r!.Name.Should().Match(m => m == "A" || m == "B");
+                var matchesA = r!.Name == "A" && r.SortOrder == 1 && r.IsActive;
+                var matchesB = r.Name == "B" && r.SortOrder == 2 && !r.IsActive;
+                (matchesA || matchesB).Should().BeTrue("the row must be one complete submitted snapshot");
                 break;
             }
             case "position":
             {
                 var orgs = provider.GetRequiredService<IOrganizationStore>();
-                var a = new Position { Id = "pos-c", TenantId = "tenant-1", Name = "PA" };
-                var b = new Position { Id = "pos-c", TenantId = "tenant-1", Name = "PB" };
+                var a = new Position { Id = "pos-c", TenantId = "tenant-1", Name = "PA", IsActive = true };
+                var b = new Position { Id = "pos-c", TenantId = "tenant-1", Name = "PB", IsActive = false };
                 await Task.WhenAll(orgs.SavePositionAsync(a), orgs.SavePositionAsync(b));
                 var r = await orgs.GetPositionByIdAsync("pos-c", "tenant-1");
                 r.Should().NotBeNull();
-                r!.Name.Should().Match(m => m == "PA" || m == "PB");
+                var matchesA = r!.Name == "PA" && r.IsActive;
+                var matchesB = r.Name == "PB" && !r.IsActive;
+                (matchesA || matchesB).Should().BeTrue("the row must be one complete submitted snapshot");
                 break;
             }
             case "membership":
             {
                 var orgs = provider.GetRequiredService<IOrganizationStore>();
-                var a = new UserOrganizationMembership { Id = "mem-c", TenantId = "tenant-1", UserId = "u1", OrganizationUnitId = "o1", IsPrimary = true };
-                var b = new UserOrganizationMembership { Id = "mem-c", TenantId = "tenant-1", UserId = "u1", OrganizationUnitId = "o1", IsPrimary = false };
+                var a = new UserOrganizationMembership { Id = "mem-c", TenantId = "tenant-1", UserId = "u1", OrganizationUnitId = "o1", PositionId = "p1", IsPrimary = true, IsActive = true };
+                var b = new UserOrganizationMembership { Id = "mem-c", TenantId = "tenant-1", UserId = "u1", OrganizationUnitId = "o2", PositionId = "p2", IsPrimary = false, IsActive = false };
                 await Task.WhenAll(orgs.SaveMembershipAsync(a), orgs.SaveMembershipAsync(b));
                 var r = (await orgs.GetMembershipsByUserAsync("u1", "tenant-1")).Single();
-                // Both values are valid — last writer wins atomically
+                var matchesA = r.OrganizationUnitId == "o1" && r.PositionId == "p1" && r.IsPrimary && r.IsActive;
+                var matchesB = r.OrganizationUnitId == "o2" && r.PositionId == "p2" && !r.IsPrimary && !r.IsActive;
+                (matchesA || matchesB).Should().BeTrue("the row must be one complete submitted snapshot");
                 break;
             }
             case "role-assignment":
@@ -742,11 +863,13 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             // ── Draft fields ──
             case PersistedStructuredFieldVariant.DraftTenantId:
                 await SaveDraftCorruptAndAssert(provider, lease, "f09-d-tid",
-                    $"update \"{schema}\".control_plane_descriptor_drafts set tenant_id='tampered' where tenant_id='tenant-1' and draft_id='f09-d-tid'", isUndiscoverable: true);
+                    $"update \"{schema}\".control_plane_descriptor_drafts set tenant_id='tampered' where tenant_id='tenant-1' and draft_id='f09-d-tid'",
+                    DraftTamperedTenantRead);
                 break;
             case PersistedStructuredFieldVariant.DraftDraftId:
                 await SaveDraftCorruptAndAssert(provider, lease, "f09-d-did",
-                    $"update \"{schema}\".control_plane_descriptor_drafts set draft_id='tampered' where tenant_id='tenant-1' and draft_id='f09-d-did'", isUndiscoverable: true);
+                    $"update \"{schema}\".control_plane_descriptor_drafts set draft_id='tampered' where tenant_id='tenant-1' and draft_id='f09-d-did'",
+                    DraftListRead);
                 break;
             case PersistedStructuredFieldVariant.DraftPayloadDiscriminator:
                 await SaveDraftCorruptAndAssert(provider, lease, "f09-d-pt",
@@ -781,12 +904,12 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             case PersistedStructuredFieldVariant.OrganizationUnitTenantScope:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-scope",
                     $"update \"{schema}\".organization_units set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-scope'",
-                    OrgRead, PersistedStructuredFieldVariant.OrganizationUnitTenantScope);
+                    UnitUnfilteredRead, PersistedStructuredFieldVariant.OrganizationUnitTenantScope);
                 break;
             case PersistedStructuredFieldVariant.OrganizationUnitId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-id",
                     $"update \"{schema}\".organization_units set organization_unit_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-id'",
-                    OrgRead, PersistedStructuredFieldVariant.OrganizationUnitId);
+                    UnitListRead, PersistedStructuredFieldVariant.OrganizationUnitId);
                 break;
             case PersistedStructuredFieldVariant.OrganizationUnitParentId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-pid",
@@ -818,12 +941,12 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             case PersistedStructuredFieldVariant.PositionTenantScope:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-scope",
                     $"update \"{schema}\".organization_positions set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and position_id='f09-pos-scope'",
-                    PosRead, PersistedStructuredFieldVariant.PositionTenantScope);
+                    PositionUnfilteredRead, PersistedStructuredFieldVariant.PositionTenantScope);
                 break;
             case PersistedStructuredFieldVariant.PositionId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-id",
                     $"update \"{schema}\".organization_positions set position_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and position_id='f09-pos-id'",
-                    PosRead, PersistedStructuredFieldVariant.PositionId);
+                    PositionListRead, PersistedStructuredFieldVariant.PositionId);
                 break;
             case PersistedStructuredFieldVariant.PositionIsActive:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-ia",
@@ -845,7 +968,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             case PersistedStructuredFieldVariant.MembershipTenantScope:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-scope",
                     $"update \"{schema}\".organization_memberships set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-scope'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipTenantScope);
+                    MembershipUnfilteredRead, PersistedStructuredFieldVariant.MembershipTenantScope);
                 break;
             case PersistedStructuredFieldVariant.MembershipId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-id",
@@ -855,7 +978,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             case PersistedStructuredFieldVariant.MembershipUserId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-uid",
                     $"update \"{schema}\".organization_memberships set user_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-uid'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipUserId);
+                    MembershipUnitRead, PersistedStructuredFieldVariant.MembershipUserId);
                 break;
             case PersistedStructuredFieldVariant.MembershipOrganizationUnitId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-oid",
@@ -892,7 +1015,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             case PersistedStructuredFieldVariant.RoleAssignmentTenantScope:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-scope",
                     $"update \"{schema}\".organization_role_assignments set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-scope'",
-                    RaRead, PersistedStructuredFieldVariant.RoleAssignmentTenantScope);
+                    RoleUnfilteredRead, PersistedStructuredFieldVariant.RoleAssignmentTenantScope);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-id",
@@ -902,7 +1025,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             case PersistedStructuredFieldVariant.RoleAssignmentUserId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-uid",
                     $"update \"{schema}\".organization_role_assignments set user_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-uid'",
-                    RaRead, PersistedStructuredFieldVariant.RoleAssignmentUserId);
+                    RoleTamperedUserRead, PersistedStructuredFieldVariant.RoleAssignmentUserId);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentRoleId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-rid",
@@ -973,18 +1096,34 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
         }
     }
 
-    private async Task SaveDraftCorruptAndAssert(ServiceProvider provider, PostgreSqlRuntimeSchemaLease lease, string draftId, string corruptSql, bool isUndiscoverable = false)
+    private static async Task DropConstraintAsync(
+        string connectionString,
+        string schema,
+        string table,
+        string constraint)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(
+            $"alter table \"{schema}\".\"{table}\" drop constraint \"{constraint}\"",
+            connection);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task SaveDraftCorruptAndAssert(
+        ServiceProvider provider,
+        PostgreSqlRuntimeSchemaLease lease,
+        string draftId,
+        string corruptSql,
+        Func<IDescriptorDraftStore, string, Task>? readAsync = null)
     {
         var store = provider.GetRequiredService<IDescriptorDraftStore>();
         await store.SaveAsync(CreateDraft(draftId, DescriptorDraftOperation.Create, DescriptorDraftStatus.Created, DateTimeOffset.UnixEpoch));
         await DropAllCheckConstraintsAsync(lease.Options.ConnectionString, lease.Options.Schema, "control_plane_descriptor_drafts");
         await CorruptAsync(lease.Options.ConnectionString, lease.Options.Schema, corruptSql);
-        if (isUndiscoverable)
-        {
-            await store.GetAsync("tenant-1", draftId);
-            return;
-        }
-        var act = () => store.GetAsync("tenant-1", draftId);
+        Func<Task> act = readAsync is null
+            ? () => store.GetAsync("tenant-1", draftId)
+            : () => readAsync(store, draftId);
         (await act.Should().ThrowAsync<RuntimePersistenceContractException>())
             .Which.Code.Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
     }
@@ -1012,22 +1151,6 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
         }
         await DropAllCheckConstraintsAsync(lease.Options.ConnectionString, lease.Options.Schema, table);
         await CorruptAsync(lease.Options.ConnectionString, lease.Options.Schema, corruptSql);
-        // Some variants corrupt a PK/WHERE-clause column, making the row undiscoverable.
-        // The store returns null/empty — no mismatch is detectable through the normal read path.
-        // These are structurally self-protecting: the DB key prevents the row from being read.
-        var isUndiscoverable = variant is
-            PersistedStructuredFieldVariant.DraftTenantId or PersistedStructuredFieldVariant.DraftDraftId or
-            PersistedStructuredFieldVariant.OrganizationUnitTenantScope or PersistedStructuredFieldVariant.OrganizationUnitId or
-            PersistedStructuredFieldVariant.PositionTenantScope or PersistedStructuredFieldVariant.PositionId or
-            PersistedStructuredFieldVariant.MembershipTenantScope or PersistedStructuredFieldVariant.MembershipUserId or
-            PersistedStructuredFieldVariant.RoleAssignmentTenantScope or PersistedStructuredFieldVariant.RoleAssignmentUserId;
-        if (isUndiscoverable)
-        {
-            // Verify the row is no longer readable (self-protecting via DB key)
-            await readAsync(orgs, id);
-            // No corrupted data was returned — the row is simply not found
-            return;
-        }
         try
         {
             await readAsync(orgs, id);
@@ -1043,18 +1166,40 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
         await p.GetRequiredService<IOrganizationStore>().SaveOrganizationUnitAsync(new OrganizationUnit { Id = id, TenantId = "tenant-1", Name = id });
     private static async Task OrgRead(IOrganizationStore orgs, string id) =>
         await orgs.GetOrganizationUnitByIdAsync(id, "tenant-1");
+    private static async Task UnitListRead(IOrganizationStore orgs, string _) =>
+        await orgs.GetOrganizationUnitsAsync("tenant-1");
+    private static async Task UnitUnfilteredRead(IOrganizationStore orgs, string _) =>
+        await orgs.GetOrganizationUnitsAsync();
     private static Func<Task> PosSave(ServiceProvider p, string id) => async () =>
         await p.GetRequiredService<IOrganizationStore>().SavePositionAsync(new Position { Id = id, TenantId = "tenant-1", Name = id });
     private static async Task PosRead(IOrganizationStore orgs, string id) =>
         await orgs.GetPositionByIdAsync(id, "tenant-1");
+    private static async Task PositionListRead(IOrganizationStore orgs, string _) =>
+        await orgs.GetPositionsAsync("tenant-1");
+    private static async Task PositionUnfilteredRead(IOrganizationStore orgs, string _) =>
+        await orgs.GetPositionsAsync();
     private static Func<Task> MemSave(ServiceProvider p, string id) => async () =>
         await p.GetRequiredService<IOrganizationStore>().SaveMembershipAsync(new UserOrganizationMembership { Id = id, TenantId = "tenant-1", UserId = "u-" + id, OrganizationUnitId = "o-" + id });
     private static async Task MemRead(IOrganizationStore orgs, string id) =>
         await orgs.GetMembershipsByUserAsync("u-" + id, "tenant-1");
+    private static async Task MembershipUnitRead(IOrganizationStore orgs, string id) =>
+        await orgs.GetMembershipsByOrganizationUnitAsync("o-" + id, "tenant-1");
+    private static async Task MembershipUnfilteredRead(IOrganizationStore orgs, string id) =>
+        await orgs.GetMembershipsByUserAsync("u-" + id);
     private static Func<Task> RaSave(ServiceProvider p, string id) => async () =>
         await p.GetRequiredService<IOrganizationStore>().SaveRoleAssignmentAsync(new UserOrganizationRoleAssignment { Id = id, TenantId = "tenant-1", UserId = "u-" + id, RoleId = "r-" + id });
     private static async Task RaRead(IOrganizationStore orgs, string id) =>
         await orgs.GetRoleAssignmentsByUserAsync("u-" + id, "tenant-1");
+    private static async Task RoleTamperedUserRead(IOrganizationStore orgs, string _) =>
+        await orgs.GetRoleAssignmentsByUserAsync("tampered", "tenant-1");
+    private static async Task RoleUnfilteredRead(IOrganizationStore orgs, string id) =>
+        await orgs.GetRoleAssignmentsByUserAsync("u-" + id);
+
+    private static async Task DraftListRead(IDescriptorDraftStore store, string _) =>
+        await store.ListAsync("tenant-1");
+
+    private static async Task DraftTamperedTenantRead(IDescriptorDraftStore store, string _) =>
+        await store.ListAsync("tampered");
 
     private static Draft CreateDraft(
         string draftId,

@@ -9,6 +9,8 @@ public static class ControlPlaneReferenceDataCaseManifest
     public static IReadOnlyDictionary<(string CaseId, string Variant), ImmutableArray<EvidenceVectorKey>> EvidenceVectorExpansion { get; }
         = BuildEvidenceVectorExpansion();
 
+    public static IReadOnlyList<EvidenceTuple> EvidenceTuples { get; } = BuildEvidenceTuples();
+
     private static IReadOnlyList<CaseManifestEntry> BuildAllCases()
     {
         var entries = new List<CaseManifestEntry>();
@@ -181,6 +183,75 @@ public static class ControlPlaneReferenceDataCaseManifest
 
         return entries.AsReadOnly();
     }
+
+    private static IReadOnlyList<EvidenceTuple> BuildEvidenceTuples()
+    {
+        var tuples = new List<EvidenceTuple>();
+        foreach (var entry in AllCases)
+        {
+            foreach (var variant in ExpandVariants(entry))
+            {
+                var evidenceKey = EvidenceVectorExpansion
+                    .Where(pair => pair.Key.CaseId == entry.CaseId
+                        && string.Equals(pair.Key.Variant, EvidenceVariantAlias(entry.CaseId, variant), StringComparison.Ordinal))
+                    .SelectMany(pair => pair.Value)
+                    .DefaultIfEmpty(EvidenceVectorKey.Default);
+                foreach (var key in evidenceKey)
+                {
+                    tuples.Add(new EvidenceTuple(
+                        entry.CaseId,
+                        entry.Surface,
+                        variant,
+                        key,
+                        entry.Runner,
+                        entry.NormativeTestName));
+                }
+            }
+        }
+
+        return tuples.AsReadOnly();
+    }
+
+    private static IReadOnlyList<string> ExpandVariants(CaseManifestEntry entry)
+        => entry.Variant switch
+        {
+            "DescriptorPayloadVariant" => Enum.GetNames<DescriptorPayloadVariant>(),
+            "DraftQueryVariant" => Enum.GetNames<DraftQueryVariant>(),
+            "DraftValidatorOwnedInvalidVariant" => Enum.GetNames<DraftValidatorOwnedInvalidVariant>(),
+            "OrganizationIdentitySurface" => Enum.GetNames<OrganizationIdentitySurface>(),
+            "OrganizationQuerySurface" => Enum.GetNames<OrganizationQuerySurface>(),
+            "OrganizationEntitySurface" => Enum.GetNames<OrganizationEntitySurface>(),
+            "OrganizationReadSurface" => Enum.GetNames<OrganizationReadSurface>(),
+            "MissingReferenceVariant" => Enum.GetNames<MissingReferenceVariant>(),
+            "ScopedKeyCollisionVariant" => Enum.GetNames<ScopedKeyCollisionVariant>(),
+            "OrganizationCreatedAtVariant" => Enum.GetNames<OrganizationCreatedAtVariant>(),
+            "RuleExactEmptyVariant" => Enum.GetNames<RuleExactEmptyVariant>(),
+            "PersistedRuleCorruptionVariant" => Enum.GetNames<PersistedRuleCorruptionVariant>(),
+            "IdentityValidationVector" => Enum.GetNames<IdentityValidationVector>(),
+            "RuleSentinelField" => Enum.GetNames<RuleSentinelField>(),
+            "PersistedEnumSurface" => Enum.GetNames<PersistedEnumSurface>(),
+            "StoreMethodSurface" => Enum.GetNames<StoreMethodSurface>(),
+            "SaveSurface" => Enum.GetNames<SaveSurface>(),
+            "PersistedSnapshotCorruptionVariant" => Enum.GetNames<PersistedSnapshotCorruptionVariant>(),
+            "PersistedStructuredFieldVariant" => Enum.GetNames<PersistedStructuredFieldVariant>(),
+            "AotScenarioVariant" => Enum.GetNames<AotScenarioVariant>(),
+            _ => [entry.Variant]
+        };
+
+    private static string EvidenceVariantAlias(string caseId, string variant)
+        => caseId == CaseId.F09
+            ? variant switch
+            {
+                "OrganizationUnitTenantScope" => "OrganizationUnit.TenantScope",
+                "PositionTenantScope" => "Position.TenantScope",
+                "MembershipTenantScope" => "Membership.TenantScope",
+                "RoleAssignmentTenantScope" => "RoleAssignment.TenantScope",
+                "OrganizationUnitParentId" => "OrganizationUnit.ParentId",
+                "MembershipPositionId" => "Membership.PositionId",
+                "RoleAssignmentOrganizationUnitId" => "RoleAssignment.OrganizationUnitId",
+                _ => variant
+            }
+            : variant;
 
     private static IReadOnlyDictionary<(string CaseId, string Variant), ImmutableArray<EvidenceVectorKey>> BuildEvidenceVectorExpansion()
     {

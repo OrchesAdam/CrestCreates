@@ -83,6 +83,54 @@ public sealed class PostgreSqlPendingEvidenceMigrationTests(PostgreSqlRuntimeCol
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
+    [Fact]
+    public async Task C03_MigrationValidation_Should_DetectUnexpectedOrganizationForeignKey()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteAsync(lease.Options, $"""
+            alter table "{lease.Options.Schema}".organization_memberships
+            add constraint ck_unexpected_org_fk
+            foreign key (tenant_scope_kind, tenant_id, organization_unit_id)
+            references "{lease.Options.Schema}".organization_units (tenant_scope_kind, tenant_id, organization_unit_id);
+            """);
+
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options)
+            .ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task C03_MigrationValidation_Should_DetectUnexpectedCheck()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteAsync(lease.Options,
+            $"alter table \"{lease.Options.Schema}\".data_permission_scope_rules add constraint ck_unexpected_check check (1 = 1);");
+
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options)
+            .ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task C03_MigrationValidation_Should_DetectUnexpectedIndex()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await ExecuteAsync(lease.Options,
+            $"create index ix_unexpected_rule_resource on \"{lease.Options.Schema}\".data_permission_scope_rules (resource);");
+
+        var act = () => new PostgreSqlRuntimeMigrationRunner(lease.Options)
+            .ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    private static async Task ExecuteAsync(PostgreSqlRuntimePersistenceOptions options, string sql)
+    {
+        await using var connection = new NpgsqlConnection(options.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
+    }
+
     private static async Task<(string Version, string Name, string Checksum)[]> ReadHistoryAsync(
         PostgreSqlRuntimePersistenceOptions options)
     {

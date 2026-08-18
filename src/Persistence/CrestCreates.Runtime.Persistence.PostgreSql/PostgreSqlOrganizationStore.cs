@@ -27,6 +27,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveOrganizationUnit(organizationUnit);
         var snapshot = organizationUnit.Snapshot();
+        await PostgreSqlRuntimeTestHooks.NotifyAfterReferenceSnapshotCapturedAsync(cancellationToken).ConfigureAwait(false);
         var json = PostgreSqlRuntimeStoreSupport.Serialize(
             snapshot,
             PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit);
@@ -141,6 +142,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSavePosition(position);
         var snapshot = position.Snapshot();
+        await PostgreSqlRuntimeTestHooks.NotifyAfterReferenceSnapshotCapturedAsync(cancellationToken).ConfigureAwait(false);
         var json = PostgreSqlRuntimeStoreSupport.Serialize(
             snapshot,
             PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.Position);
@@ -248,6 +250,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveMembership(membership);
         var snapshot = membership.Snapshot();
+        await PostgreSqlRuntimeTestHooks.NotifyAfterReferenceSnapshotCapturedAsync(cancellationToken).ConfigureAwait(false);
         var json = PostgreSqlRuntimeStoreSupport.Serialize(
             snapshot,
             PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationMembership);
@@ -393,6 +396,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateSaveRoleAssignment(assignment);
         var snapshot = assignment.Snapshot();
+        await PostgreSqlRuntimeTestHooks.NotifyAfterReferenceSnapshotCapturedAsync(cancellationToken).ConfigureAwait(false);
         var json = PostgreSqlRuntimeStoreSupport.Serialize(
             snapshot,
             PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.UserOrganizationRoleAssignment);

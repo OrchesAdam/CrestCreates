@@ -15,9 +15,6 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 [Collection(PostgreSqlRuntimeCollection.Name)]
 public sealed class PostgreSqlAgentMemoryCrashTests : IAsyncLifetime
 {
-    private const string WorkerDll =
-        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.dll";
-
     private readonly PostgreSqlRuntimeCollectionFixture _fixture;
     private PostgreSqlRuntimeSchemaLease _lease = null!;
 
@@ -66,8 +63,7 @@ public sealed class PostgreSqlAgentMemoryCrashTests : IAsyncLifetime
 
     private async Task RunWorkerAsync(string scenario, string applicationName, string operationId)
     {
-        var repoRoot = FindRepoRoot();
-        var worker = Path.Combine(repoRoot.FullName, WorkerDll);
+        var worker = PostgreSqlCrashWorkerPath.Resolve();
         File.Exists(worker).Should().BeTrue("the CrashWorker is a CI-built test artifact");
 
         var connectionBuilder = new NpgsqlConnectionStringBuilder(_lease.Options.ConnectionString)
@@ -120,18 +116,4 @@ public sealed class PostgreSqlAgentMemoryCrashTests : IAsyncLifetime
         }
     }
 
-    private static DirectoryInfo FindRepoRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            if (File.Exists(Path.Combine(current.FullName, "Directory.Build.props")) &&
-                Directory.Exists(Path.Combine(current.FullName, "solutions")))
-            {
-                return current;
-            }
-            current = current.Parent;
-        }
-        throw new InvalidOperationException("Repository root could not be found.");
-    }
 }

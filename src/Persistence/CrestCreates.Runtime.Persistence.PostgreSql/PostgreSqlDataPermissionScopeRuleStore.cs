@@ -27,6 +27,7 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
         cancellationToken.ThrowIfCancellationRequested();
         DataPermissionRuleSemantics.ValidateSaveRule(rule);
         var key = DataPermissionRuleKey.FromRule(rule);
+        await PostgreSqlRuntimeTestHooks.NotifyAfterReferenceSnapshotCapturedAsync(cancellationToken).ConfigureAwait(false);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "data_permission_scope_rules");
 
         await _coordinator.ExecuteTopLevelAsync(async ct =>

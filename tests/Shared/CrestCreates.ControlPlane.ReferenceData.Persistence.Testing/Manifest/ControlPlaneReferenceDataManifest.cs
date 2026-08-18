@@ -25,9 +25,11 @@ public sealed record CaseManifestEntry(
 
 public sealed record EvidenceTuple(
     string CaseId,
-    DescriptorPayloadVariant Variant,
+    string Surface,
+    string Variant,
     EvidenceVectorKey Key,
-    RequiredRunner Runner);
+    RequiredRunner Runner,
+    string NormativeTestName);
 
 public static class CaseId
 {

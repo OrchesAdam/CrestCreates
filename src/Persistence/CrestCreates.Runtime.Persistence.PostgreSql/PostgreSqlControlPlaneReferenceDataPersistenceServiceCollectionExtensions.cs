@@ -2,6 +2,7 @@ using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Organization.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
@@ -12,17 +13,17 @@ public static class PostgreSqlControlPlaneReferenceDataPersistenceServiceCollect
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var hasBaseProvider = false;
-        foreach (var descriptor in services)
-        {
-            if (descriptor.ServiceType == typeof(PostgreSqlRuntimeProviderRegistrationMarker))
-                hasBaseProvider = true;
-        }
+        var hasBaseProvider = services.Any(descriptor =>
+            descriptor.ServiceType == typeof(PostgreSqlRuntimeProviderRegistrationMarker));
+        var hasProviderKernel = services.Any(descriptor => descriptor.ServiceType == typeof(PostgreSqlRuntimePersistenceOptions))
+            && services.Any(descriptor => descriptor.ServiceType == typeof(NpgsqlDataSource))
+            && services.Any(descriptor => descriptor.ServiceType == typeof(PostgreSqlRuntimeMigrationRunner))
+            && services.Any(descriptor => descriptor.ServiceType == typeof(PostgreSqlRuntimeTransactionCoordinator));
 
-        if (!hasBaseProvider)
+        if (!hasBaseProvider || !hasProviderKernel)
         {
             throw new InvalidOperationException(
-                "Control Plane and Reference Data persistence requires the base PostgreSQL Runtime persistence provider. " +
+                "Control Plane and Reference Data persistence requires the complete base PostgreSQL Runtime persistence provider kernel. " +
                 "Call AddCrestCreatesPostgreSqlRuntimePersistence(options) before adding the Control Plane and Reference Data stores.");
         }
 

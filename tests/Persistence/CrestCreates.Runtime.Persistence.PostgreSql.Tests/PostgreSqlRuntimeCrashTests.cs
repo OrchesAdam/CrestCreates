@@ -17,9 +17,7 @@ public sealed class PostgreSqlRuntimeCrashTests(PostgreSqlRuntimeCollectionFixtu
     public async Task CommitResponseLoss_ShouldPreserveCommittedStateForFreshProviderReconciliation()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
-        var root = FindRepositoryRoot();
-        var worker = Path.Combine(root,
-            "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.dll");
+        var worker = PostgreSqlCrashWorkerPath.Resolve();
         File.Exists(worker).Should().BeTrue("the CrashWorker is a CI-built test artifact");
 
         var operationId = "crash-" + Guid.NewGuid().ToString("N");
@@ -75,9 +73,7 @@ public sealed class PostgreSqlRuntimeCrashTests(PostgreSqlRuntimeCollectionFixtu
     public async Task CrashBetweenHumanTaskAndWorkflowWrite_ShouldExposeNoPartialSuspension()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
-        var root = FindRepositoryRoot();
-        var worker = Path.Combine(root,
-            "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.dll");
+        var worker = PostgreSqlCrashWorkerPath.Resolve();
         File.Exists(worker).Should().BeTrue("the CrashWorker is a CI-built test artifact");
 
         var operationId = "crash-f01-" + Guid.NewGuid().ToString("N");

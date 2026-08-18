@@ -19,6 +19,7 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
         services.AddSingleton<IDescriptorDraftStore, InMemoryDescriptorDraftStore>();
         services.AddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
         services.AddSingleton<IDataPermissionScopeRuleStore, InMemoryDataPermissionScopeRuleStore>();
+        services.AddCrestCreatesPostgreSqlRuntimePersistence(TestOptions());
 
         services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
 
@@ -43,10 +44,34 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
     }
 
     [Fact]
-    public void C15_RepeatedBaseFirstOptIn_Should_RemainIdempotent()
+    public void C14_OptInWithMarkerOnly_Should_RejectIncompleteProviderKernel()
     {
         var services = new ServiceCollection();
         services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
+
+        var act = () => services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain("complete base PostgreSQL Runtime persistence provider kernel");
+    }
+
+    [Fact]
+    public void C14_OptInWithOptionsOnly_Should_RejectIncompleteProviderKernel()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(TestOptions());
+
+        var act = () => services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain("complete base PostgreSQL Runtime persistence provider kernel");
+    }
+
+    [Fact]
+    public void C15_RepeatedBaseFirstOptIn_Should_RemainIdempotent()
+    {
+        var services = new ServiceCollection();
+        services.AddCrestCreatesPostgreSqlRuntimePersistence(TestOptions());
 
         services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
         services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
@@ -62,7 +87,7 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
     public void P08_DataPermissionScope_Should_RemainDerived()
     {
         var services = new ServiceCollection();
-        services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
+        services.AddCrestCreatesPostgreSqlRuntimePersistence(TestOptions());
         services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
 
         var serviceTypes = services.Select(s => s.ServiceType).ToList();
@@ -77,7 +102,7 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
         services.AddSingleton<IDescriptorDraftStore, InMemoryDescriptorDraftStore>();
         services.AddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
         services.AddSingleton<IDataPermissionScopeRuleStore, InMemoryDataPermissionScopeRuleStore>();
-        services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
+        services.AddCrestCreatesPostgreSqlRuntimePersistence(TestOptions());
 
         var provider = services.BuildServiceProvider();
 
@@ -85,4 +110,11 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
         provider.GetRequiredService<IOrganizationStore>().Should().BeOfType<InMemoryOrganizationStore>();
         provider.GetRequiredService<IDataPermissionScopeRuleStore>().Should().BeOfType<InMemoryDataPermissionScopeRuleStore>();
     }
+
+    private static PostgreSqlRuntimePersistenceOptions TestOptions()
+        => new()
+        {
+            ConnectionString = "Host=localhost;Database=crestcreates;Username=crest;Password=crest",
+            Schema = "composition_test"
+        };
 }

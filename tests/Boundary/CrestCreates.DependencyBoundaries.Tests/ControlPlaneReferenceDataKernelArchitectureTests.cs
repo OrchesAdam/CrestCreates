@@ -2,8 +2,10 @@ using System.Reflection;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.DescriptorDraft;
 using CrestCreates.Organization.Abstractions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
+using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -23,7 +25,11 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
     private static IServiceCollection BuildControlPlaneServices()
     {
         var services = new ServiceCollection();
-        services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
+        services.AddCrestCreatesPostgreSqlRuntimePersistence(new PostgreSqlRuntimePersistenceOptions
+        {
+            ConnectionString = "Host=localhost;Database=crestcreates;Username=crest;Password=crest",
+            Schema = "architecture_test"
+        });
         services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
         return services;
     }
@@ -185,6 +191,37 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
             typeInfo.Should().NotBeNull(
                 $"type {durableType.Name} must have a JsonTypeInfo entry in the serializer context");
         }
+
+        // Domain graph inventory is a separate guard from the provider DTO scan.
+        // Adding a new polymorphic domain arm must force an explicit mapping update.
+        var payloadTypes = typeof(SchemaDescriptorDraftPayload).Assembly.GetTypes()
+            .Where(type => typeof(DescriptorDraftPayload).IsAssignableFrom(type) && !type.IsAbstract)
+            .Select(type => type.FullName!)
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedPayloadTypes = new HashSet<string>
+        {
+            "CrestCreates.DescriptorDraft.SchemaDescriptorDraftPayload",
+            "CrestCreates.DescriptorDraft.FormDescriptorDraftPayload",
+            "CrestCreates.DescriptorDraft.CapabilityDescriptorDraftPayload",
+            "CrestCreates.DescriptorDraft.HumanTaskDescriptorDraftPayload",
+            "CrestCreates.DescriptorDraft.EventDescriptorDraftPayload",
+            "CrestCreates.DescriptorDraft.WorkflowDescriptorDraftPayload"
+        };
+        payloadTypes.SetEquals(expectedPayloadTypes).Should().BeTrue(
+            "every domain Draft payload arm must be explicitly represented by the persistence mapping");
+
+        var targetTypes = typeof(InteractionTarget).Assembly.GetTypes()
+            .Where(type => typeof(InteractionTarget).IsAssignableFrom(type) && !type.IsAbstract)
+            .Select(type => type.FullName!)
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedTargetTypes = new HashSet<string>
+        {
+            "CrestCreates.Workflow.Abstractions.CapabilityTarget",
+            "CrestCreates.Workflow.Abstractions.HumanTaskTarget",
+            "CrestCreates.Workflow.Abstractions.SubWorkflowTarget"
+        };
+        targetTypes.SetEquals(expectedTargetTypes).Should().BeTrue(
+            "every domain Workflow target arm must be explicitly represented by the persistence mapping");
 
         // Verify no abstract/interface-typed members leak from the durable payload DTO types.
         // Only scan types reachable from the serializer context root types (the 6 durable graphs).

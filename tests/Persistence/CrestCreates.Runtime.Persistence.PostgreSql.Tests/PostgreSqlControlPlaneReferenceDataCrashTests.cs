@@ -44,9 +44,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataCrashTests(PostgreSqlRunt
     private async Task RunCrashScenarioAsync(string surface, string window, bool shouldExist)
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
-        var root = FindRepositoryRoot();
-        var worker = Path.Combine(root,
-            "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.dll");
+        var worker = PostgreSqlCrashWorkerPath.Resolve();
         File.Exists(worker).Should().BeTrue("the CrashWorker must be built by the test project reference");
 
         var applicationName = $"phase9b-reference-{Guid.NewGuid():N}";

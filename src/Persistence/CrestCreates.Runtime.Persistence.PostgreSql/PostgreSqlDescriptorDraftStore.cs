@@ -1,5 +1,6 @@
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using Npgsql;
@@ -30,6 +31,7 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
         DescriptorDraftPayloadSupport.EnsureSupported(draft.Payload);
 
         var snapshot = draft.Snapshot();
+        await PostgreSqlRuntimeTestHooks.NotifyAfterReferenceSnapshotCapturedAsync(ct).ConfigureAwait(false);
         var payloadType = DescriptorDraftPayloadSupport.GetPayloadType(snapshot.Payload);
         var json = PostgreSqlControlPlaneReferenceDataJsonCodec.Serialize(snapshot);
 
@@ -155,13 +157,21 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
     private static Draft ReadPersistedDraft(NpgsqlDataReader reader, int jsonOrdinal)
     {
         var draft = PostgreSqlControlPlaneReferenceDataJsonCodec.Deserialize(reader.GetString(jsonOrdinal));
-        if (!string.Equals(reader.GetString(0), draft.TenantId, StringComparison.Ordinal)
+        var descriptorKind = (DescriptorKind)reader.GetInt32(3);
+        var operation = (DescriptorDraftOperation)reader.GetInt32(4);
+        var authorKind = (DescriptorDraftAuthorKind)reader.GetInt32(5);
+        var status = (DescriptorDraftStatus)reader.GetInt32(6);
+        if (!IsDefined(descriptorKind)
+            || !IsDefined(operation)
+            || !IsDefined(authorKind)
+            || !IsDefined(status)
+            || !string.Equals(reader.GetString(0), draft.TenantId, StringComparison.Ordinal)
             || !string.Equals(reader.GetString(1), draft.DraftId, StringComparison.Ordinal)
             || reader.GetInt32(2) != DescriptorDraftPayloadSupport.GetPayloadType(draft.Payload)
-            || reader.GetInt32(3) != (int)draft.DescriptorKind
-            || reader.GetInt32(4) != (int)draft.Operation
-            || reader.GetInt32(5) != (int)draft.AuthorKind
-            || reader.GetInt32(6) != (int)draft.Status
+            || descriptorKind != draft.DescriptorKind
+            || operation != draft.Operation
+            || authorKind != draft.AuthorKind
+            || status != draft.Status
             || reader.GetInt64(7) != draft.CreatedAt.UtcTicks
             || reader.GetInt32(9) != PostgreSqlControlPlaneReferenceDataStoreSupport.StateContractVersion)
         {
@@ -180,4 +190,36 @@ internal sealed class PostgreSqlDescriptorDraftStore : IDescriptorDraftStore
 
         return draft;
     }
+
+    private static bool IsDefined(DescriptorKind value)
+        => value is DescriptorKind.Unknown
+            or DescriptorKind.Schema
+            or DescriptorKind.Capability
+            or DescriptorKind.Event
+            or DescriptorKind.Workflow
+            or DescriptorKind.Form
+            or DescriptorKind.HumanTask
+            or DescriptorKind.DynamicApiEndpoint
+            or DescriptorKind.McpTool
+            or DescriptorKind.AgentTool;
+
+    private static bool IsDefined(DescriptorDraftOperation value)
+        => value is DescriptorDraftOperation.Create
+            or DescriptorDraftOperation.Update
+            or DescriptorDraftOperation.Deprecate
+            or DescriptorDraftOperation.Remove;
+
+    private static bool IsDefined(DescriptorDraftAuthorKind value)
+        => value is DescriptorDraftAuthorKind.Human
+            or DescriptorDraftAuthorKind.Agent
+            or DescriptorDraftAuthorKind.System
+            or DescriptorDraftAuthorKind.Import
+            or DescriptorDraftAuthorKind.Generator;
+
+    private static bool IsDefined(DescriptorDraftStatus value)
+        => value is DescriptorDraftStatus.Created
+            or DescriptorDraftStatus.Invalid
+            or DescriptorDraftStatus.Materialized
+            or DescriptorDraftStatus.Reviewed
+            or DescriptorDraftStatus.Cancelled;
 }

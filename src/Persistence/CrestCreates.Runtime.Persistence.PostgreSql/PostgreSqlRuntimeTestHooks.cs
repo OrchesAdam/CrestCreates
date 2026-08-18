@@ -9,6 +9,7 @@ internal static class PostgreSqlRuntimeTestHooks
     private static Action? _afterFirstCommandCompleted;
     private static Func<CancellationToken, ValueTask>? _beforeCommitBlock;
     private static Func<ValueTask>? _afterCommitBlock;
+    private static SnapshotBarrier? _afterReferenceSnapshotBarrier;
     private static Func<string, CancellationToken, ValueTask>? _afterWritePointBlock;
 
     internal static IDisposable BlockFirstCommand(Action afterLeaseAcquired)
@@ -67,6 +68,27 @@ internal static class PostgreSqlRuntimeTestHooks
         return block is null ? ValueTask.CompletedTask : block();
     }
 
+    internal static IDisposable BlockAfterReferenceSnapshotCaptured(int expectedArrivals)
+    {
+        if (expectedArrivals < 1)
+            throw new ArgumentOutOfRangeException(nameof(expectedArrivals));
+        if (Interlocked.CompareExchange(
+                ref _afterReferenceSnapshotBarrier,
+                new SnapshotBarrier(expectedArrivals),
+                null) is not null)
+        {
+            throw new InvalidOperationException("A reference snapshot barrier is already active.");
+        }
+
+        return new ResetAfterReferenceSnapshotBarrier();
+    }
+
+    internal static ValueTask NotifyAfterReferenceSnapshotCapturedAsync(CancellationToken cancellationToken)
+    {
+        var barrier = Volatile.Read(ref _afterReferenceSnapshotBarrier);
+        return barrier is null ? ValueTask.CompletedTask : barrier.ArriveAndWaitAsync(cancellationToken);
+    }
+
     /// <summary>Installs a one-shot block invoked after each named curation SQL
     /// write point, so tests can inject a failure after any individual write
     /// and prove the top-level transaction rolls the whole graph back.</summary>
@@ -99,6 +121,26 @@ internal static class PostgreSqlRuntimeTestHooks
     private sealed class ResetAfterCommit : IDisposable
     {
         public void Dispose() => Interlocked.Exchange(ref _afterCommitBlock, null);
+    }
+
+    private sealed class ResetAfterReferenceSnapshotBarrier : IDisposable
+    {
+        public void Dispose() => Interlocked.Exchange(ref _afterReferenceSnapshotBarrier, null);
+    }
+
+    private sealed class SnapshotBarrier
+    {
+        private int _remaining;
+        private readonly TaskCompletionSource<bool> _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public SnapshotBarrier(int expectedArrivals) => _remaining = expectedArrivals;
+
+        public ValueTask ArriveAndWaitAsync(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Decrement(ref _remaining) == 0)
+                _released.TrySetResult(true);
+            return new ValueTask(_released.Task.WaitAsync(cancellationToken));
+        }
     }
 
     private sealed class ResetAfterWritePoint : IDisposable

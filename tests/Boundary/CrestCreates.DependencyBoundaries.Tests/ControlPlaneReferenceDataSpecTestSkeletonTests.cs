@@ -161,42 +161,48 @@ public class ControlPlaneReferenceDataSpecTestSkeletonTests
     [Fact]
     public void EvidenceLedgerGuard_EveryCaseMustBeImplementedOrPendingWithReason()
     {
-        var allCases = ControlPlaneReferenceDataCaseManifest.AllCases;
+        var allTuples = ControlPlaneReferenceDataCaseManifest.EvidenceTuples;
         var implemented = DiscoverNormativeTestNames();
-        var missing = allCases
-            .Where(entry => !implemented.Contains(entry.NormativeTestName))
-            .Select(entry => $"{entry.CaseId}: {entry.NormativeTestName}")
+        var missing = allTuples
+            .Where(tuple => !implemented.Contains(tuple.NormativeTestName))
+            .Select(tuple => $"{tuple.CaseId}/{tuple.Surface}/{tuple.Variant}/{tuple.Key}/{tuple.Runner}: {tuple.NormativeTestName}")
             .ToArray();
 
         missing.Should().BeEmpty(
-            "every manifest case must have a discoverable normative test method; missing evidence must not be hidden by an empty registry");
+            "every expanded evidence tuple must have a discoverable normative test method; missing evidence must not be hidden by an empty registry");
+        allTuples.Should().OnlyHaveUniqueItems(
+            tuple => $"{tuple.CaseId}|{tuple.Surface}|{tuple.Variant}|{tuple.Key}|{tuple.Runner}",
+            "the required tuple set must not collapse distinct evidence dimensions");
     }
 
     [Fact]
     public void EvidenceLedgerSummary_Report()
     {
         var allCases = ControlPlaneReferenceDataCaseManifest.AllCases;
-        var totalTuples = allCases.Count;
+        var totalCases = ControlPlaneReferenceDataCaseManifest.AllCases.Count;
+        var allTuples = ControlPlaneReferenceDataCaseManifest.EvidenceTuples;
+        var totalTuples = allTuples.Count;
 
         var implemented = DiscoverNormativeTestNames();
-        var missingEntries = allCases
-            .Where(c => !implemented.Contains(c.NormativeTestName))
+        var missingEntries = allTuples
+            .Where(tuple => !implemented.Contains(tuple.NormativeTestName))
             .ToList();
         var implementedCount = totalTuples - missingEntries.Count;
 
         _output.WriteLine("═══════════════════════════════════════════════════════════");
         _output.WriteLine("  Evidence Ledger Summary");
         _output.WriteLine("═══════════════════════════════════════════════════════════");
-        _output.WriteLine($"  Total tuples required : {totalTuples}");
+        _output.WriteLine($"  Case IDs required      : {totalCases}");
+        _output.WriteLine($"  Expanded tuples required: {totalTuples}");
         _output.WriteLine($"  Tuples with evidence  : {implementedCount}");
         _output.WriteLine($"  Tuples pending        : {missingEntries.Count}");
         _output.WriteLine($"  Completion            : {(double)implementedCount / totalTuples * 100.0:F1}%");
         _output.WriteLine("═══════════════════════════════════════════════════════════");
 
         // Governance assertions are based on discovered test methods, not a hand-maintained count.
-        totalTuples.Should().Be(77, "Spec §14 defines exactly 77 case tuples");
-        missingEntries.Should().BeEmpty("all 77 cases must have discoverable test evidence");
-        implementedCount.Should().Be(77, "all cases have evidence");
+        totalCases.Should().Be(77, "Spec §14 defines exactly 77 Case IDs");
+        totalTuples.Should().BeGreaterThan(totalCases, "the ledger must expand the case dimensions");
+        missingEntries.Should().BeEmpty("all expanded tuples must have discoverable test evidence");
         var actualPct = (double)implementedCount / totalTuples * 100.0;
         actualPct.Should().Be(100.0, "evidence ledger must reach 100% coverage");
         _output.WriteLine($"  Assertion: {implementedCount}/{totalTuples} = {actualPct:F1}% complete");
