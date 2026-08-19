@@ -19,16 +19,17 @@ namespace CrestCreates.DependencyBoundaries.Tests;
 /// (ControlPlaneReferenceDataKernelArchitectureTests and
 /// ControlPlaneReferenceDataOrganizationSchemaTests). All three classes share
 /// <see cref="ControlPlaneReferenceDataEvidenceCollection"/>, whose
-/// DisableParallelization guarantees sequential class execution in discovery
-/// order (Kernel, OrganizationSchema, then this gate). If that ordering ever
-/// changes, this gate fails loudly instead of silently passing.
+/// DisableParallelization guarantees sequential execution. The leading Z in
+/// this class name keeps the gate after the two producer classes in xUnit's
+/// collection class order; if that ordering changes, this gate fails loudly
+/// instead of silently passing.
 /// </summary>
 [Collection(ControlPlaneReferenceDataEvidenceCollection.Name)]
-public class ControlPlaneReferenceDataSpecTestSkeletonTests
+public class ZControlPlaneReferenceDataSpecTestSkeletonTests
 {
     private readonly ITestOutputHelper _output;
 
-    public ControlPlaneReferenceDataSpecTestSkeletonTests(ITestOutputHelper output)
+    public ZControlPlaneReferenceDataSpecTestSkeletonTests(ITestOutputHelper output)
     {
         _output = output;
     }
