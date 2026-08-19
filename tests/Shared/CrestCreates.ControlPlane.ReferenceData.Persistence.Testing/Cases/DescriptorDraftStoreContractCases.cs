@@ -22,10 +22,9 @@ public static class DescriptorDraftStoreContractCases
             await driver.Store.SaveAsync(draft);
             var stored = await driver.Store.GetAsync(draft.TenantId, draft.DraftId)
                 ?? throw new InvalidOperationException("The saved draft was not readable.");
-            if (stored.Payload.GetType() != draft.Payload.GetType()
-                || stored.DescriptorKind != draft.DescriptorKind
-                || stored.CreatedAt != draft.CreatedAt)
-                throw new InvalidOperationException($"Draft payload variant {tuple.Variant} was not round-tripped completely.");
+            DescriptorPayloadObservationFixture.AssertEqual(
+                DescriptorPayloadObservationFixture.Expected(Enum.Parse<DescriptorPayloadVariant>(tuple.Variant)),
+                driver.ObservePayload(stored, Enum.Parse<DescriptorPayloadVariant>(tuple.Variant)));
         }
 
         var schema = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema);

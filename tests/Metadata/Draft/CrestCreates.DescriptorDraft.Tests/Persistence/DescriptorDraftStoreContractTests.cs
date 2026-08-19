@@ -20,6 +20,16 @@ public sealed class DescriptorDraftStoreContractTests
             ControlPlaneReferenceDataEvidenceLedger.Record);
     }
 
+    [Fact]
+    public void DescriptorPayloadObservationFixture_Should_Cover_Each_Nested_Payload()
+    {
+        foreach (var variant in Enum.GetValues<DescriptorPayloadVariant>())
+        {
+            DescriptorPayloadObservationFixture.Expected(variant).Leaves
+                .Should().HaveCountGreaterThan(4, $"{variant} must observe payload leaves in addition to draft headers");
+        }
+    }
+
     [Theory]
     [InlineData(DescriptorPayloadVariant.Schema)]
     [InlineData(DescriptorPayloadVariant.Form)]

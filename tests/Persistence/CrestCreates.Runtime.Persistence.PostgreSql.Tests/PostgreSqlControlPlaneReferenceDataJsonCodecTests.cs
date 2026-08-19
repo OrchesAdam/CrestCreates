@@ -156,7 +156,6 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
             {
                 Id = "capability-1",
                 Name = "Capability",
-                Namespace = "custom-capability",
                 Categories = new[] { "read" },
                 Produces = new[] { new EventRef("event", "changed", 3) },
                 Consumes = new[] { new EventRef("event", "created") },
@@ -248,7 +247,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
             Operation = DescriptorDraftOperation.Create,
             AuthorKind = DescriptorDraftAuthorKind.Human,
             AuthorId = "author-1",
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = new DateTimeOffset(2026, 2, 3, 4, 5, 6, TimeSpan.FromHours(5)),
             Payload = new WorkflowDescriptorDraftPayload(new WorkflowDescriptor
             {
                 Id = "workflow-1",
