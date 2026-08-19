@@ -15,7 +15,7 @@ public sealed class OrganizationStoreContractTests
         foreach (var surface in Enum.GetValues<OrganizationIdentitySurface>())
         {
             ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O01, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
-            await OrganizationStoreContractCases.RunIdentityAsync(driver.Store, surface, $"o01-{surface}");
+            await OrganizationStoreContractCases.RunGlobalAndTenantIdentityAsync(driver.Store, surface, $"o01-{surface}");
         }
     }
 
@@ -26,7 +26,7 @@ public sealed class OrganizationStoreContractTests
         foreach (var surface in Enum.GetValues<OrganizationIdentitySurface>())
         {
             ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O02, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
-            await OrganizationStoreContractCases.RunIdentityAsync(driver.Store, surface, $"o02-{surface}");
+            await OrganizationStoreContractCases.RunTwoTenantIdentityAsync(driver.Store, surface, $"o02-{surface}");
         }
     }
 

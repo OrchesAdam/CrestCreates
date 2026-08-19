@@ -22,6 +22,17 @@ public static class ControlPlaneReferenceDataCaseManifest
     public static IReadOnlyDictionary<string, ImmutableArray<RequiredRunner>> RunnerExpansion { get; } =
         new Dictionary<string, ImmutableArray<RequiredRunner>>
         {
+            [CaseId.D01] = SharedRunners,
+            [CaseId.D02] = SharedRunners,
+            [CaseId.D03] = SharedRunners,
+            [CaseId.D04] = SharedRunners,
+            [CaseId.D05] = SharedRunners,
+            [CaseId.D06] = SharedRunners,
+            [CaseId.D07] = SharedRunners,
+            [CaseId.D08] = SharedRunners,
+            [CaseId.D11] = SharedRunners,
+            [CaseId.D12] = SharedRunners,
+            [CaseId.D13] = SharedRunners,
             [CaseId.O01] = SharedRunners,
             [CaseId.O02] = SharedRunners,
             [CaseId.O03] = SharedRunners,
@@ -32,6 +43,8 @@ public static class ControlPlaneReferenceDataCaseManifest
             [CaseId.O08] = SharedRunners,
             [CaseId.O09] = SharedRunners,
             [CaseId.O10] = SharedRunners,
+            [CaseId.O11] = SharedRunners,
+            [CaseId.O12] = SharedRunners,
             [CaseId.O13] = SharedRunners,
             [CaseId.O14] = SharedRunners,
             [CaseId.O19] = SharedRunners,
@@ -48,8 +61,13 @@ public static class ControlPlaneReferenceDataCaseManifest
             [CaseId.P10] = SharedRunners,
             [CaseId.P11] = SharedRunners,
             [CaseId.P12] = SharedRunners,
-            [CaseId.F01] = ImmutableArray.Create(RequiredRunner.InMemory, RequiredRunner.PostgreSql),
-            [CaseId.F02] = ImmutableArray.Create(RequiredRunner.InMemory, RequiredRunner.PostgreSql),
+            [CaseId.V01] = SharedRunners,
+            [CaseId.V02] = SharedRunners,
+            [CaseId.V03] = SharedRunners,
+            [CaseId.V04] = SharedRunners,
+            [CaseId.V05] = SharedRunners,
+            [CaseId.F01] = SharedRunners,
+            [CaseId.F02] = SharedRunners,
         };
 
     public static IReadOnlyList<EvidenceTuple> EvidenceTuples { get; } = BuildEvidenceTuples();

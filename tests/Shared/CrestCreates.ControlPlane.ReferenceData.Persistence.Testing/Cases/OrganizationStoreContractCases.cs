@@ -9,7 +9,7 @@ namespace CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 /// </summary>
 public static class OrganizationStoreContractCases
 {
-    public static async Task RunIdentityAsync(
+    public static async Task RunGlobalAndTenantIdentityAsync(
         IOrganizationStore store,
         OrganizationIdentitySurface surface,
         string prefix)
@@ -39,6 +39,44 @@ public static class OrganizationStoreContractCases
                 await store.SaveRoleAssignmentAsync(Role($"{prefix}-role", $"{prefix}-user", $"{prefix}-tenant"));
                 (await store.GetRoleAssignmentsByUserAsync($"{prefix}-user")).Single(x => x.TenantId is null).TenantId.ShouldBe(null);
                 (await store.GetRoleAssignmentsByUserAsync($"{prefix}-user", $"{prefix}-tenant"))!.Single().TenantId.ShouldBe($"{prefix}-tenant");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(surface), surface, null);
+        }
+    }
+
+    public static async Task RunTwoTenantIdentityAsync(
+        IOrganizationStore store,
+        OrganizationIdentitySurface surface,
+        string prefix)
+    {
+        const string tenantA = "tenant-a";
+        const string tenantB = "tenant-b";
+        switch (surface)
+        {
+            case OrganizationIdentitySurface.OrganizationUnit:
+                await store.SaveOrganizationUnitAsync(Unit($"{prefix}-unit", tenantA));
+                await store.SaveOrganizationUnitAsync(Unit($"{prefix}-unit", tenantB));
+                (await store.GetOrganizationUnitByIdAsync($"{prefix}-unit", tenantA))!.TenantId.ShouldBe(tenantA);
+                (await store.GetOrganizationUnitByIdAsync($"{prefix}-unit", tenantB))!.TenantId.ShouldBe(tenantB);
+                break;
+            case OrganizationIdentitySurface.Position:
+                await store.SavePositionAsync(Position($"{prefix}-position", tenantA));
+                await store.SavePositionAsync(Position($"{prefix}-position", tenantB));
+                (await store.GetPositionByIdAsync($"{prefix}-position", tenantA))!.TenantId.ShouldBe(tenantA);
+                (await store.GetPositionByIdAsync($"{prefix}-position", tenantB))!.TenantId.ShouldBe(tenantB);
+                break;
+            case OrganizationIdentitySurface.Membership:
+                await store.SaveMembershipAsync(Membership($"{prefix}-membership", $"{prefix}-user", tenantA));
+                await store.SaveMembershipAsync(Membership($"{prefix}-membership", $"{prefix}-user", tenantB));
+                (await store.GetMembershipsByUserAsync($"{prefix}-user", tenantA)).Single().TenantId.ShouldBe(tenantA);
+                (await store.GetMembershipsByUserAsync($"{prefix}-user", tenantB)).Single().TenantId.ShouldBe(tenantB);
+                break;
+            case OrganizationIdentitySurface.RoleAssignment:
+                await store.SaveRoleAssignmentAsync(Role($"{prefix}-role", $"{prefix}-user", tenantA));
+                await store.SaveRoleAssignmentAsync(Role($"{prefix}-role", $"{prefix}-user", tenantB));
+                (await store.GetRoleAssignmentsByUserAsync($"{prefix}-user", tenantA)).Single().TenantId.ShouldBe(tenantA);
+                (await store.GetRoleAssignmentsByUserAsync($"{prefix}-user", tenantB)).Single().TenantId.ShouldBe(tenantB);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(surface), surface, null);
@@ -227,13 +265,19 @@ public static class OrganizationStoreContractCases
             case OrganizationCreatedAtVariant.MembershipHundredNanosecondOrder:
                 await store.SaveMembershipAsync(Membership($"{prefix}-first", $"{prefix}-user", $"{prefix}-tenant", createdAt: first));
                 await store.SaveMembershipAsync(Membership($"{prefix}-second", $"{prefix}-user", $"{prefix}-tenant", createdAt: first.AddTicks(1)));
-                (await store.GetMembershipsByUserAsync($"{prefix}-user", $"{prefix}-tenant")).Select(x => x.Id).ShouldEqual($"{prefix}-first", $"{prefix}-second");
+                var memberships = (await store.GetMembershipsByUserAsync($"{prefix}-user", $"{prefix}-tenant"));
+                memberships.Select(x => x.Id).ShouldEqual($"{prefix}-first", $"{prefix}-second");
+                memberships[0].CreatedAt.ShouldBe(first);
+                memberships[1].CreatedAt.ShouldBe(first.AddTicks(1));
                 break;
             case OrganizationCreatedAtVariant.RoleAssignmentNonZeroOffset:
             case OrganizationCreatedAtVariant.RoleAssignmentHundredNanosecondOrder:
                 await store.SaveRoleAssignmentAsync(Role($"{prefix}-first", $"{prefix}-user", $"{prefix}-tenant", first));
                 await store.SaveRoleAssignmentAsync(Role($"{prefix}-second", $"{prefix}-user", $"{prefix}-tenant", first.AddTicks(1)));
-                (await store.GetRoleAssignmentsByUserAsync($"{prefix}-user", $"{prefix}-tenant")).Select(x => x.Id).ShouldEqual($"{prefix}-first", $"{prefix}-second");
+                var roles = (await store.GetRoleAssignmentsByUserAsync($"{prefix}-user", $"{prefix}-tenant"));
+                roles.Select(x => x.Id).ShouldEqual($"{prefix}-first", $"{prefix}-second");
+                roles[0].CreatedAt.ShouldBe(first);
+                roles[1].CreatedAt.ShouldBe(first.AddTicks(1));
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(variant), variant, null);

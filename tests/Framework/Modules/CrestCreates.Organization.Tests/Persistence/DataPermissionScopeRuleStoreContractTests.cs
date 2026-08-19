@@ -8,6 +8,25 @@ namespace CrestCreates.Organization.Tests.Persistence;
 public sealed class DataPermissionScopeRuleStoreContractTests
 {
     [Fact]
+    public async Task DataPermissionRule_shared_contract_cases_Should_Run_All_Frozen_Surfaces()
+    {
+        var driver = NewDriver();
+        foreach (var tuple in ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P01, RequiredRunner.InMemory)
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P02, RequiredRunner.InMemory))
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P03, RequiredRunner.InMemory))
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P04, RequiredRunner.InMemory))
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P05, RequiredRunner.InMemory))
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P06, RequiredRunner.InMemory))
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P07, RequiredRunner.InMemory))
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P10, RequiredRunner.InMemory))
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P11, RequiredRunner.InMemory))
+                     .Concat(ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.P12, RequiredRunner.InMemory)))
+            ControlPlaneReferenceDataEvidenceLedger.Record(tuple);
+
+        await DataPermissionScopeRuleStoreContractCases.RunFrozenSemanticsAsync(driver.Store, "shared");
+    }
+
+    [Fact]
     public async Task DataPermissionRule_Should_MatchTenantExact()
     {
         ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P01, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.InMemory);

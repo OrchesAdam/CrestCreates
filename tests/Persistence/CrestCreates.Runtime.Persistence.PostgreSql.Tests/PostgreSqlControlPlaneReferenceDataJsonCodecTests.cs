@@ -108,7 +108,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
         restored.Should().BeEquivalentTo(value);
     }
 
-    private static Draft CreateDraft(DescriptorKind kind)
+    internal static Draft CreateDraft(DescriptorKind kind)
     {
         DescriptorDraftPayload payload = kind switch
         {
@@ -220,7 +220,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
         };
     }
 
-    private static Draft CreateWorkflowDraft(PostgreSqlWorkflowTargetType targetType)
+    internal static Draft CreateWorkflowDraft(PostgreSqlWorkflowTargetType targetType)
     {
         InteractionTarget target = targetType switch
         {

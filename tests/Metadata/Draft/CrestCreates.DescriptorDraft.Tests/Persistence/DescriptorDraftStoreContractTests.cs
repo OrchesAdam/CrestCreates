@@ -11,6 +11,15 @@ namespace CrestCreates.DescriptorDraft.Tests.Persistence;
 
 public sealed class DescriptorDraftStoreContractTests
 {
+    [Fact]
+    public async Task Draft_shared_contract_cases_Should_Run_All_Frozen_Surfaces()
+    {
+        await DescriptorDraftStoreContractCases.RunFrozenSemanticsAsync(
+            NewDriver(),
+            RequiredRunner.InMemory,
+            ControlPlaneReferenceDataEvidenceLedger.Record);
+    }
+
     [Theory]
     [InlineData(DescriptorPayloadVariant.Schema)]
     [InlineData(DescriptorPayloadVariant.Form)]

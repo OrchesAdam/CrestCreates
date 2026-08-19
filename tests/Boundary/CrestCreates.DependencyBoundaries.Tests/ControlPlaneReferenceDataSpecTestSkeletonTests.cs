@@ -193,6 +193,33 @@ public class ControlPlaneReferenceDataSpecTestSkeletonTests
     }
 
     [Fact]
+    public void FrozenSharedCases_Should_RequireBothRunners()
+    {
+        var frozenSharedCases = new[]
+        {
+            CaseId.D01, CaseId.D02, CaseId.D03, CaseId.D04, CaseId.D05, CaseId.D06,
+            CaseId.D07, CaseId.D08, CaseId.D11, CaseId.D12, CaseId.D13,
+            CaseId.O01, CaseId.O02, CaseId.O03, CaseId.O04, CaseId.O05, CaseId.O06,
+            CaseId.O07, CaseId.O08, CaseId.O09, CaseId.O10, CaseId.O11, CaseId.O12,
+            CaseId.O13, CaseId.O14, CaseId.O19, CaseId.O20, CaseId.O21, CaseId.O22,
+            CaseId.P01, CaseId.P02, CaseId.P03, CaseId.P04, CaseId.P05, CaseId.P06,
+            CaseId.P07, CaseId.P10, CaseId.P11, CaseId.P12,
+            CaseId.V01, CaseId.V02, CaseId.V03, CaseId.V04, CaseId.V05,
+            CaseId.F01, CaseId.F02
+        };
+
+        foreach (var caseId in frozenSharedCases)
+        {
+            ControlPlaneReferenceDataCaseManifest.RunnerExpansion[caseId]
+                .Should().BeEquivalentTo(new[] { RequiredRunner.InMemory, RequiredRunner.PostgreSql },
+                    $"frozen shared case {caseId} must run through both provider drivers");
+        }
+
+        ControlPlaneReferenceDataCaseManifest.RunnerExpansion.Keys
+            .Should().Contain(frozenSharedCases);
+    }
+
+    [Fact]
     public void FrozenSaveSurface_Should_CoverAllSixSurfaces()
     {
         ControlPlaneReferenceDataManifestVariants(CaseId.C09)
