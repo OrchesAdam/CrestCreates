@@ -1,3 +1,4 @@
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using FluentAssertions;
@@ -16,6 +17,7 @@ public sealed class PostgreSqlPendingEvidenceMigrationTests(PostgreSqlRuntimeCol
     [Fact]
     public async Task C01_ReapplyingMigration_Should_NotDriftSchema()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C01, "Composition", "Migration", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
 
         // Schema already fully migrated by fixture. Re-apply should be a no-op.
@@ -39,6 +41,7 @@ public sealed class PostgreSqlPendingEvidenceMigrationTests(PostgreSqlRuntimeCol
     [Fact]
     public async Task C02_MigrationValidation_Should_DetectChecksumDrift()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C02, "Composition", "Migration", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         var runner = new PostgreSqlRuntimeMigrationRunner(lease.Options);
 
@@ -65,6 +68,7 @@ public sealed class PostgreSqlPendingEvidenceMigrationTests(PostgreSqlRuntimeCol
     [Fact]
     public async Task C03_MigrationValidation_Should_DetectSchemaDrift()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C03, "Composition", "Migration", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         var runner = new PostgreSqlRuntimeMigrationRunner(lease.Options);
 

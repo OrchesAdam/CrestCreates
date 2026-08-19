@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Organization.Abstractions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
@@ -24,6 +25,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataCrashTests(PostgreSqlRunt
     [MemberData(nameof(Surfaces))]
     public async Task SaveSurface_CrashBeforeCommit_Should_NotExposePartialSnapshot(string surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F03, "Failure", SurfaceName(surface), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await RunCrashScenarioAsync(surface, "before-commit", shouldExist: false);
     }
 
@@ -31,6 +33,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataCrashTests(PostgreSqlRunt
     [MemberData(nameof(Surfaces))]
     public async Task SaveSurface_CrashAfterCommit_Should_ExposeCompleteSnapshot(string surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F04, "Failure", SurfaceName(surface), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await RunCrashScenarioAsync(surface, "after-commit", shouldExist: true);
     }
 
@@ -38,8 +41,20 @@ public sealed class PostgreSqlControlPlaneReferenceDataCrashTests(PostgreSqlRunt
     [MemberData(nameof(Surfaces))]
     public async Task SaveSurface_CommitUnknown_Should_NotBeReportedAsDeterministicFailure(string surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F05, "Failure", SurfaceName(surface), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await RunCrashScenarioAsync(surface, "commit-unknown", shouldExist: true);
     }
+
+    private static string SurfaceName(string surface) => surface switch
+    {
+        "draft" => "Draft",
+        "organization-unit" => "OrganizationUnit",
+        "position" => "Position",
+        "membership" => "Membership",
+        "role-assignment" => "RoleAssignment",
+        "rule" => "Rule",
+        _ => throw new ArgumentOutOfRangeException(nameof(surface))
+    };
 
     private async Task RunCrashScenarioAsync(string surface, string window, bool shouldExist)
     {

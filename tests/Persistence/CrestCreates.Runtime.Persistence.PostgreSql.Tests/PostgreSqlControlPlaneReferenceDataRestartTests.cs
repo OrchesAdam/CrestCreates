@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Organization;
@@ -26,6 +27,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
     [Fact]
     public async Task DescriptorDraft_Should_SurviveProviderRestart()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D09, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         var services = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
@@ -54,6 +56,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
     [Fact]
     public async Task DescriptorDraft_Should_SurviveProcessRestart()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D10, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         await RunSaveAndExitAsync("reference-draft-save-and-exit", lease.Options.Schema);
 
@@ -73,6 +76,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
     [Fact]
     public async Task OrganizationEntitySurface_Should_SurviveProcessRestart()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O16, "Organization", "OrganizationEntitySurface", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         await RunSaveAndExitAsync("reference-all-org-surfaces-save-and-exit", lease.Options.Schema);
 
@@ -92,6 +96,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
     [Fact]
     public async Task OrganizationHierarchy_Should_RemainStableAfterRestart()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O17, "Organization", "HierarchyService", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         await RunSaveAndExitAsync("reference-hierarchy-save-and-exit", lease.Options.Schema);
 
@@ -112,6 +117,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
     [Fact]
     public async Task OrganizationIdentity_Should_RemainStableAfterRestart()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O18, "Organization", "IdentityService", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         await RunSaveAndExitAsync("reference-all-org-surfaces-save-and-exit", lease.Options.Schema);
 
@@ -134,6 +140,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
     [Fact]
     public async Task DataPermissionRule_Should_SurviveProcessRestart()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P09, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         await RunSaveAndExitAsync("reference-rule-save-and-exit", lease.Options.Schema);
 

@@ -39,6 +39,12 @@ jobs:
       - name: Build
         run: dotnet build CrestCreates.slnx --no-restore
 
+      # The Control Plane reference-data evidence ledger is written by test
+      # runs into tests/artifacts/control-plane-evidence/. Clear any stale files
+      # first so the executed-tuple gate can only be satisfied by this run.
+      - name: Reset Control Plane reference-data evidence ledger
+        run: rm -rf tests/artifacts/control-plane-evidence
+
       # ── Core ──
       - name: Test — Core
         run: dotnet test tests/Core/CrestCreates.Core.Abstractions.Tests --no-build

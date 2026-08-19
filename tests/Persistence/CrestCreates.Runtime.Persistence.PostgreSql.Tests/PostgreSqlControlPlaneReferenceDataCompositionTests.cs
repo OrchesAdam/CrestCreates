@@ -1,3 +1,4 @@
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Organization;
@@ -14,6 +15,7 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
     [Fact]
     public void C09_OptInRegistration_Should_ReplaceExactlySelectedStores()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C09, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         var services = new ServiceCollection();
         services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
         services.AddSingleton<IDescriptorDraftStore, InMemoryDescriptorDraftStore>();
@@ -35,6 +37,7 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
     [Fact]
     public void C14_OptInWithoutBaseProvider_Should_FailWithClearCompositionError()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C14, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var services = new ServiceCollection();
 
         var act = () => services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
@@ -70,6 +73,7 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
     [Fact]
     public void C15_RepeatedBaseFirstOptIn_Should_RemainIdempotent()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C15, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var services = new ServiceCollection();
         services.AddCrestCreatesPostgreSqlRuntimePersistence(TestOptions());
 
@@ -86,6 +90,7 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
     [Fact]
     public void P08_DataPermissionScope_Should_RemainDerived()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P08, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.Architecture);
         var services = new ServiceCollection();
         services.AddCrestCreatesPostgreSqlRuntimePersistence(TestOptions());
         services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
@@ -98,6 +103,7 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
     [Fact]
     public void C08_BaseProviderRegistration_Should_NotReplaceReferenceStores()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C08, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var services = new ServiceCollection();
         services.AddSingleton<IDescriptorDraftStore, InMemoryDescriptorDraftStore>();
         services.AddSingleton<IOrganizationStore, InMemoryOrganizationStore>();

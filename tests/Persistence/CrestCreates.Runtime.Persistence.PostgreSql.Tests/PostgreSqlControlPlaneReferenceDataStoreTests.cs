@@ -178,6 +178,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
     [MemberData(nameof(PersistedRuleCorruptionData))]
     public async Task PersistedRuleCorruptionVariant_Should_FailClosed(PersistedRuleCorruptionVariant variant)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P13, "Rule", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await _fixture.CreateSchemaLeaseAsync();
         var services = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
@@ -445,10 +446,23 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             yield return new object[] { s };
     }
 
+    private static string SaveSurfaceName(string surface)
+        => surface switch
+        {
+            "draft" => nameof(SaveSurface.Draft),
+            "organization-unit" => nameof(SaveSurface.OrganizationUnit),
+            "position" => nameof(SaveSurface.Position),
+            "membership" => nameof(SaveSurface.Membership),
+            "role-assignment" => nameof(SaveSurface.RoleAssignment),
+            "rule" => nameof(SaveSurface.Rule),
+            _ => throw new ArgumentOutOfRangeException(nameof(surface), surface, null)
+        };
+
     [Theory]
     [MemberData(nameof(SaveSurfaces))]
     public async Task SaveSurface_ConcurrentBlindSave_Should_ExposeOneCompleteSnapshot(string surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F01, "Failure", SaveSurfaceName(surface), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await _fixture.CreateSchemaLeaseAsync();
         var services = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
@@ -556,6 +570,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
     [MemberData(nameof(SaveSurfaces))]
     public async Task SaveSurface_ConcurrentBlindSave_Should_NotInventStaleWriterConflict(string surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F02, "Failure", SaveSurfaceName(surface), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await _fixture.CreateSchemaLeaseAsync();
         var services = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
@@ -633,6 +648,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
     [MemberData(nameof(StoreMethodSurfaces))]
     public async Task StoreMethodSurface_UnavailableProvider_Should_UseSharedFailureTaxonomy(StoreMethodSurface surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F06, "Failure", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         var unavailable = new PostgreSqlRuntimePersistenceOptions
         {
             ConnectionString = "Host=127.0.0.1;Port=1;Timeout=1",
@@ -674,6 +690,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
     [MemberData(nameof(CorruptionVariantData))]
     public async Task PersistedSnapshotCorruptionVariant_Should_FailClosed(PersistedSnapshotCorruptionVariant variant)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F07, "Failure", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await _fixture.CreateSchemaLeaseAsync();
         var services = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
@@ -812,6 +829,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
     [MemberData(nameof(SaveSurfaces))]
     public async Task SaveSurface_Should_RejectAmbientRuntimeTransactionBeforeMutation(string surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F08, "Failure", SaveSurfaceName(surface), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await _fixture.CreateSchemaLeaseAsync();
         var services = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
@@ -845,12 +863,15 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
         }
     }
 
-    // ── F09: PersistedStructuredFieldVariant — fail closed ──
+    // ── F09: PersistedStructuredFieldVariant — fail closed, both EvidenceVectorKey directions ──
 
     [Theory]
     [MemberData(nameof(StructuredFieldData))]
-    public async Task PersistedStructuredFieldVariant_Mismatch_Should_FailClosed(PersistedStructuredFieldVariant variant)
+    public async Task PersistedStructuredFieldVariant_Mismatch_Should_FailClosed(
+        PersistedStructuredFieldVariant variant,
+        EvidenceVectorKey key)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.F09, "Failure", variant.ToString(), key, RequiredRunner.PostgreSql);
         await using var lease = await _fixture.CreateSchemaLeaseAsync();
         var services = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
@@ -902,155 +923,178 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
 
             // ── OrganizationUnit fields ──
             case PersistedStructuredFieldVariant.OrganizationUnitTenantScope:
-                await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-scope",
-                    $"update \"{schema}\".organization_units set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-scope'",
-                    UnitUnfilteredRead, PersistedStructuredFieldVariant.OrganizationUnitTenantScope);
+                if (key == EvidenceVectorKey.JsonGlobalColumnsExact)
+                    await SaveGlobalOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-scope-global",
+                        $"update \"{schema}\".organization_units set tenant_scope_kind='tenant', tenant_id='tenant-1' where tenant_scope_kind='global' and tenant_id = '' and organization_unit_id='f09-ou-scope-global'",
+                        UnitUnfilteredRead, variant);
+                else
+                    await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-scope",
+                        $"update \"{schema}\".organization_units set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-scope'",
+                        UnitUnfilteredRead, variant);
                 break;
             case PersistedStructuredFieldVariant.OrganizationUnitId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-id",
                     $"update \"{schema}\".organization_units set organization_unit_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-id'",
-                    UnitListRead, PersistedStructuredFieldVariant.OrganizationUnitId);
+                    UnitListRead, variant);
                 break;
             case PersistedStructuredFieldVariant.OrganizationUnitParentId:
-                await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-pid",
-                    $"update \"{schema}\".organization_units set parent_id='unexpected' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-pid'",
-                    OrgRead, PersistedStructuredFieldVariant.OrganizationUnitParentId);
+                if (key == EvidenceVectorKey.JsonNonNullColumnNull)
+                    await SaveNullableOrgCorruptAndAssert(provider, lease, "organization-unit", "f09-ou-pid-null", key, OrgRead, variant);
+                else
+                    await SaveNullableOrgCorruptAndAssert(provider, lease, "organization-unit", "f09-ou-pid", key, OrgRead, variant);
                 break;
             case PersistedStructuredFieldVariant.OrganizationUnitSortOrder:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-so",
                     $"update \"{schema}\".organization_units set sort_order=999 where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-so'",
-                    OrgRead, PersistedStructuredFieldVariant.OrganizationUnitSortOrder);
+                    OrgRead, variant);
                 break;
             case PersistedStructuredFieldVariant.OrganizationUnitIsActive:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-ia",
                     $"update \"{schema}\".organization_units set is_active=not is_active where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-ia'",
-                    OrgRead, PersistedStructuredFieldVariant.OrganizationUnitIsActive);
+                    OrgRead, variant);
                 break;
             case PersistedStructuredFieldVariant.OrganizationUnitCreatedAtUtcTicks:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-ticks",
                     $"update \"{schema}\".organization_units set created_at_utc_ticks=created_at_utc_ticks+1 where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-ticks'",
-                    OrgRead, PersistedStructuredFieldVariant.OrganizationUnitCreatedAtUtcTicks);
+                    OrgRead, variant);
                 break;
             case PersistedStructuredFieldVariant.OrganizationUnitCreatedAtReadableProjection:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_units", "organization_unit_id", "f09-ou-readable",
                     $"update \"{schema}\".organization_units set created_at=created_at+interval '1 microsecond' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and organization_unit_id='f09-ou-readable'",
-                    OrgRead, PersistedStructuredFieldVariant.OrganizationUnitCreatedAtReadableProjection);
+                    OrgRead, variant);
                 break;
 
             // ── Position fields ──
             case PersistedStructuredFieldVariant.PositionTenantScope:
-                await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-scope",
-                    $"update \"{schema}\".organization_positions set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and position_id='f09-pos-scope'",
-                    PositionUnfilteredRead, PersistedStructuredFieldVariant.PositionTenantScope);
+                if (key == EvidenceVectorKey.JsonGlobalColumnsExact)
+                    await SaveGlobalOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-scope-global",
+                        $"update \"{schema}\".organization_positions set tenant_scope_kind='tenant', tenant_id='tenant-1' where tenant_scope_kind='global' and tenant_id = '' and position_id='f09-pos-scope-global'",
+                        PositionUnfilteredRead, variant);
+                else
+                    await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-scope",
+                        $"update \"{schema}\".organization_positions set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and position_id='f09-pos-scope'",
+                        PositionUnfilteredRead, variant);
                 break;
             case PersistedStructuredFieldVariant.PositionId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-id",
                     $"update \"{schema}\".organization_positions set position_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and position_id='f09-pos-id'",
-                    PositionListRead, PersistedStructuredFieldVariant.PositionId);
+                    PositionListRead, variant);
                 break;
             case PersistedStructuredFieldVariant.PositionIsActive:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-ia",
                     $"update \"{schema}\".organization_positions set is_active=not is_active where tenant_scope_kind='tenant' and tenant_id='tenant-1' and position_id='f09-pos-ia'",
-                    PosRead, PersistedStructuredFieldVariant.PositionIsActive);
+                    PosRead, variant);
                 break;
             case PersistedStructuredFieldVariant.PositionCreatedAtUtcTicks:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-ticks",
                     $"update \"{schema}\".organization_positions set created_at_utc_ticks=created_at_utc_ticks+1 where tenant_scope_kind='tenant' and tenant_id='tenant-1' and position_id='f09-pos-ticks'",
-                    PosRead, PersistedStructuredFieldVariant.PositionCreatedAtUtcTicks);
+                    PosRead, variant);
                 break;
             case PersistedStructuredFieldVariant.PositionCreatedAtReadableProjection:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_positions", "position_id", "f09-pos-readable",
                     $"update \"{schema}\".organization_positions set created_at=created_at+interval '1 microsecond' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and position_id='f09-pos-readable'",
-                    PosRead, PersistedStructuredFieldVariant.PositionCreatedAtReadableProjection);
+                    PosRead, variant);
                 break;
 
             // ── Membership fields ──
             case PersistedStructuredFieldVariant.MembershipTenantScope:
-                await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-scope",
-                    $"update \"{schema}\".organization_memberships set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-scope'",
-                    MembershipUnfilteredRead, PersistedStructuredFieldVariant.MembershipTenantScope);
+                if (key == EvidenceVectorKey.JsonGlobalColumnsExact)
+                    await SaveGlobalOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-scope-global",
+                        $"update \"{schema}\".organization_memberships set tenant_scope_kind='tenant', tenant_id='tenant-1' where tenant_scope_kind='global' and tenant_id = '' and membership_id='f09-mem-scope-global'",
+                        MembershipUnfilteredRead, variant);
+                else
+                    await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-scope",
+                        $"update \"{schema}\".organization_memberships set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-scope'",
+                        MembershipUnfilteredRead, variant);
                 break;
             case PersistedStructuredFieldVariant.MembershipId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-id",
                     $"update \"{schema}\".organization_memberships set membership_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-id'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipId);
+                    MemRead, variant);
                 break;
             case PersistedStructuredFieldVariant.MembershipUserId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-uid",
                     $"update \"{schema}\".organization_memberships set user_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-uid'",
-                    MembershipUnitRead, PersistedStructuredFieldVariant.MembershipUserId);
+                    MembershipUnitRead, variant);
                 break;
             case PersistedStructuredFieldVariant.MembershipOrganizationUnitId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-oid",
                     $"update \"{schema}\".organization_memberships set organization_unit_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-oid'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipOrganizationUnitId);
+                    MemRead, variant);
                 break;
             case PersistedStructuredFieldVariant.MembershipPositionId:
-                await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-pid",
-                    $"update \"{schema}\".organization_memberships set position_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-pid'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipPositionId);
+                if (key == EvidenceVectorKey.JsonNonNullColumnNull)
+                    await SaveNullableOrgCorruptAndAssert(provider, lease, "membership", "f09-mem-pid-null", key, MemRead, variant);
+                else
+                    await SaveNullableOrgCorruptAndAssert(provider, lease, "membership", "f09-mem-pid", key, MemRead, variant);
                 break;
             case PersistedStructuredFieldVariant.MembershipIsPrimary:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-ip",
                     $"update \"{schema}\".organization_memberships set is_primary=not is_primary where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-ip'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipIsPrimary);
+                    MemRead, variant);
                 break;
             case PersistedStructuredFieldVariant.MembershipIsActive:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-ia",
                     $"update \"{schema}\".organization_memberships set is_active=not is_active where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-ia'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipIsActive);
+                    MemRead, variant);
                 break;
             case PersistedStructuredFieldVariant.MembershipCreatedAtUtcTicks:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-ticks",
                     $"update \"{schema}\".organization_memberships set created_at_utc_ticks=created_at_utc_ticks+1 where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-ticks'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipCreatedAtUtcTicks);
+                    MemRead, variant);
                 break;
             case PersistedStructuredFieldVariant.MembershipCreatedAtReadableProjection:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_memberships", "membership_id", "f09-mem-readable",
                     $"update \"{schema}\".organization_memberships set created_at=created_at+interval '1 microsecond' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and membership_id='f09-mem-readable'",
-                    MemRead, PersistedStructuredFieldVariant.MembershipCreatedAtReadableProjection);
+                    MemRead, variant);
                 break;
 
             // ── RoleAssignment fields ──
             case PersistedStructuredFieldVariant.RoleAssignmentTenantScope:
-                await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-scope",
-                    $"update \"{schema}\".organization_role_assignments set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-scope'",
-                    RoleUnfilteredRead, PersistedStructuredFieldVariant.RoleAssignmentTenantScope);
+                if (key == EvidenceVectorKey.JsonGlobalColumnsExact)
+                    await SaveGlobalOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-scope-global",
+                        $"update \"{schema}\".organization_role_assignments set tenant_scope_kind='tenant', tenant_id='tenant-1' where tenant_scope_kind='global' and tenant_id = '' and assignment_id='f09-ra-scope-global'",
+                        RoleUnfilteredRead, variant);
+                else
+                    await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-scope",
+                        $"update \"{schema}\".organization_role_assignments set tenant_scope_kind='global' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-scope'",
+                        RoleUnfilteredRead, variant);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-id",
                     $"update \"{schema}\".organization_role_assignments set assignment_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-id'",
-                    RaRead, PersistedStructuredFieldVariant.RoleAssignmentId);
+                    RaRead, variant);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentUserId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-uid",
                     $"update \"{schema}\".organization_role_assignments set user_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-uid'",
-                    RoleTamperedUserRead, PersistedStructuredFieldVariant.RoleAssignmentUserId);
+                    RoleTamperedUserRead, variant);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentRoleId:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-rid",
                     $"update \"{schema}\".organization_role_assignments set role_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-rid'",
-                    RaRead, PersistedStructuredFieldVariant.RoleAssignmentRoleId);
+                    RaRead, variant);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentOrganizationUnitId:
-                await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-oid",
-                    $"update \"{schema}\".organization_role_assignments set organization_unit_id='tampered' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-oid'",
-                    RaRead, PersistedStructuredFieldVariant.RoleAssignmentOrganizationUnitId);
+                if (key == EvidenceVectorKey.JsonNonNullColumnNull)
+                    await SaveNullableOrgCorruptAndAssert(provider, lease, "role-assignment", "f09-ra-oid-null", key, RaRead, variant);
+                else
+                    await SaveNullableOrgCorruptAndAssert(provider, lease, "role-assignment", "f09-ra-oid", key, RaRead, variant);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentIsActive:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-ia",
                     $"update \"{schema}\".organization_role_assignments set is_active=not is_active where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-ia'",
-                    RaRead, PersistedStructuredFieldVariant.RoleAssignmentIsActive);
+                    RaRead, variant);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentCreatedAtUtcTicks:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-ticks",
                     $"update \"{schema}\".organization_role_assignments set created_at_utc_ticks=created_at_utc_ticks+1 where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-ticks'",
-                    RaRead, PersistedStructuredFieldVariant.RoleAssignmentCreatedAtUtcTicks);
+                    RaRead, variant);
                 break;
             case PersistedStructuredFieldVariant.RoleAssignmentCreatedAtReadableProjection:
                 await SaveOrgCorruptAndAssert(provider, lease, "organization_role_assignments", "assignment_id", "f09-ra-readable",
                     $"update \"{schema}\".organization_role_assignments set created_at=created_at+interval '1 microsecond' where tenant_scope_kind='tenant' and tenant_id='tenant-1' and assignment_id='f09-ra-readable'",
-                    RaRead, PersistedStructuredFieldVariant.RoleAssignmentCreatedAtReadableProjection);
+                    RaRead, variant);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(variant));
@@ -1059,8 +1103,12 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
 
     public static IEnumerable<object[]> StructuredFieldData()
     {
-        foreach (var v in Enum.GetValues<PersistedStructuredFieldVariant>())
-            yield return new object[] { v };
+        foreach (var tuple in ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.F09, RequiredRunner.PostgreSql))
+            yield return new object[]
+            {
+                Enum.Parse<PersistedStructuredFieldVariant>(tuple.Variant),
+                tuple.Key
+            };
     }
 
     // ── Helpers ──
@@ -1159,6 +1207,100 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
         catch (RuntimePersistenceContractException ex) when (ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation)
         {
             // Expected — structured column mismatch detected
+        }
+    }
+
+    private async Task SaveGlobalOrgCorruptAndAssert(ServiceProvider provider, PostgreSqlRuntimeSchemaLease lease,
+        string table, string idCol, string id, string corruptSql,
+        Func<IOrganizationStore, string, Task> readAsync,
+        PersistedStructuredFieldVariant variant)
+    {
+        var orgs = provider.GetRequiredService<IOrganizationStore>();
+        switch (table)
+        {
+            case "organization_units":
+                await orgs.SaveOrganizationUnitAsync(new OrganizationUnit { Id = id, TenantId = null, Name = id });
+                break;
+            case "organization_positions":
+                await orgs.SavePositionAsync(new Position { Id = id, TenantId = null, Name = id });
+                break;
+            case "organization_memberships":
+                await orgs.SaveMembershipAsync(new UserOrganizationMembership { Id = id, TenantId = null, UserId = "u-" + id, OrganizationUnitId = "o-" + id });
+                break;
+            case "organization_role_assignments":
+                await orgs.SaveRoleAssignmentAsync(new UserOrganizationRoleAssignment { Id = id, TenantId = null, UserId = "u-" + id, RoleId = "r-" + id });
+                break;
+        }
+        await CorruptAsync(lease.Options.ConnectionString, lease.Options.Schema, corruptSql);
+        try
+        {
+            await readAsync(orgs, id);
+            Assert.Fail($"Expected PersistedInvariantViolation for variant {variant} but no exception was thrown.");
+        }
+        catch (RuntimePersistenceContractException ex) when (ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation)
+        {
+            // Expected — structured column scope disagrees with the JSON snapshot
+        }
+    }
+
+    private async Task SaveNullableOrgCorruptAndAssert(ServiceProvider provider, PostgreSqlRuntimeSchemaLease lease,
+        string surface, string id, EvidenceVectorKey key,
+        Func<IOrganizationStore, string, Task> readAsync,
+        PersistedStructuredFieldVariant variant)
+    {
+        var orgs = provider.GetRequiredService<IOrganizationStore>();
+        string table;
+        string idCol;
+        string column;
+        switch (surface)
+        {
+            case "organization-unit":
+                table = "organization_units";
+                idCol = "organization_unit_id";
+                column = "parent_id";
+                await orgs.SaveOrganizationUnitAsync(new OrganizationUnit
+                {
+                    Id = id, TenantId = "tenant-1", Name = id,
+                    ParentId = key == EvidenceVectorKey.JsonNonNullColumnNull ? "parent" : null
+                });
+                break;
+            case "membership":
+                table = "organization_memberships";
+                idCol = "membership_id";
+                column = "position_id";
+                await orgs.SaveMembershipAsync(new UserOrganizationMembership
+                {
+                    Id = id, TenantId = "tenant-1", UserId = "u-" + id, OrganizationUnitId = "o-" + id,
+                    PositionId = key == EvidenceVectorKey.JsonNonNullColumnNull ? "position" : null
+                });
+                break;
+            default:
+                table = "organization_role_assignments";
+                idCol = "assignment_id";
+                column = "organization_unit_id";
+                await orgs.SaveRoleAssignmentAsync(new UserOrganizationRoleAssignment
+                {
+                    Id = id, TenantId = "tenant-1", UserId = "u-" + id, RoleId = "r-" + id,
+                    OrganizationUnitId = key == EvidenceVectorKey.JsonNonNullColumnNull ? "unit" : null
+                });
+                break;
+        }
+
+        await DropAllCheckConstraintsAsync(lease.Options.ConnectionString, lease.Options.Schema, table);
+        var columnValue = key == EvidenceVectorKey.JsonNullColumnNonNull
+            ? "'unexpected'"
+            : "null";
+        await CorruptAsync(lease.Options.ConnectionString, lease.Options.Schema,
+            $"update \"{lease.Options.Schema}\".{table} set {column}={columnValue} where tenant_scope_kind='tenant' and tenant_id='tenant-1' and {idCol}=@id",
+            ("id", id));
+        try
+        {
+            await readAsync(orgs, id);
+            Assert.Fail($"Expected PersistedInvariantViolation for variant {variant} but no exception was thrown.");
+        }
+        catch (RuntimePersistenceContractException ex) when (ex.Code == RuntimePersistenceContractErrorCode.PersistedInvariantViolation)
+        {
+            // Expected — structured column disagrees with the JSON snapshot
         }
     }
 

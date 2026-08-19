@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using FluentAssertions;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -13,6 +14,9 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
     {
         if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
             throw Xunit.Sdk.SkipException.ForSkip("The PostgreSQL Runtime NativeAOT gate is pinned to linux-x64.");
+
+        foreach (var scenario in Enum.GetNames<AotScenarioVariant>())
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C12, "Composition", scenario, EvidenceVectorKey.Default, RequiredRunner.Aot);
 
         var root = FindRepositoryRoot();
         var output = Path.Combine(Path.GetTempPath(), "crest-runtime-postgresql-aot-" + Guid.NewGuid().ToString("N"));

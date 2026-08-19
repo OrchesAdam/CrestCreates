@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.Organization.Abstractions;
@@ -14,6 +15,7 @@ using Xunit;
 
 namespace CrestCreates.DependencyBoundaries.Tests;
 
+[Collection(ControlPlaneReferenceDataSpecTestSkeletonTests.ControlPlaneReferenceDataEvidenceCollection.Name)]
 public class ControlPlaneReferenceDataKernelArchitectureTests
 {
     private static readonly Assembly PgAssembly = typeof(PostgreSqlDescriptorDraftStore).Assembly;
@@ -39,6 +41,8 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
     [Fact]
     public void C04_Provider_Should_ReuseRuntimePersistenceKernel()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C04, "Composition", "Kernel", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+
         // All three stores are registered as singletons and each constructor
         // takes NpgsqlDataSource (itself a singleton from the base provider).
         // This proves they share the same resistance kernel instance.
@@ -69,6 +73,8 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
     [Fact]
     public void C05_Provider_Should_NotExpandRuntimeRecoveryTransactionBoundary()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C05, "Composition", "Kernel", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+
         var storeTypes = new[]
         {
             StoreType("PostgreSqlDescriptorDraftStore"),
@@ -105,6 +111,8 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
     [Fact]
     public void C06_StoreContracts_Should_NotExposeProviderTypes()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C06, "Composition", "Contracts", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+
         var contractTypes = new[]
         {
             typeof(IDescriptorDraftStore),
@@ -138,6 +146,8 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
     [Fact]
     public void C10_Provider_Should_NotImplementLegacyDraftStore()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C10, "Composition", "Draft", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+
         var services = BuildControlPlaneServices();
         var serviceTypes = services.Select(d => d.ServiceType).ToList();
 
@@ -151,6 +161,8 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
     [Fact]
     public void C11_Provider_Should_NotDefineDataPermissionScopeStore()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C11, "Composition", "Rule", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+
         var services = BuildControlPlaneServices();
         var serviceTypes = services.Select(d => d.ServiceType).ToList();
 
@@ -164,6 +176,9 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
     [Fact]
     public void C13_DescriptorPayloadGraph_Should_HaveClosedAotPersistenceMapping()
     {
+        foreach (var variant in Enum.GetNames<DescriptorPayloadVariant>())
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C13, "Composition", variant, EvidenceVectorKey.Default, RequiredRunner.Architecture);
+
         var contextType = typeof(PostgreSqlControlPlaneReferenceDataJsonSerializerContext);
 
         var durableTypes = new[]
@@ -271,11 +286,9 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
     }
 }
 
-// ── C07 ──────────────────────────────────────────────────────────────────
+// ── C07 / O15 ──────────────────────────────────────────────────
 // Requires PostgreSQL (Testcontainers or CREST_RUNTIME_PG_CONNECTION).
-
-[CollectionDefinition("ControlPlaneReferenceDataOrganizationSchema")]
-public class OrganizationSchemaCollection : ICollectionFixture<OrganizationSchemaFixture> { }
+// Kept inside the evidence collection so the ledger gate observes its tuples.
 
 public class OrganizationSchemaFixture : IAsyncLifetime
 {
@@ -329,21 +342,34 @@ public class OrganizationSchemaFixture : IAsyncLifetime
     }
 }
 
-[Collection("ControlPlaneReferenceDataOrganizationSchema")]
-public class ControlPlaneReferenceDataOrganizationSchemaTests
+[Collection(ControlPlaneReferenceDataSpecTestSkeletonTests.ControlPlaneReferenceDataEvidenceCollection.Name)]
+public class ControlPlaneReferenceDataOrganizationSchemaTests : IAsyncLifetime
 {
-    private readonly OrganizationSchemaFixture _fixture;
+    private readonly OrganizationSchemaFixture _fixture = new();
+    private bool _initialized;
 
-    public ControlPlaneReferenceDataOrganizationSchemaTests(OrganizationSchemaFixture fixture)
-        => _fixture = fixture;
+    public Task InitializeAsync()
+    {
+        _initialized = true;
+        return _fixture.InitializeAsync();
+    }
+
+    public Task DisposeAsync()
+        => _initialized ? _fixture.DisposeAsync() : Task.CompletedTask;
 
     [Fact]
     public async Task C07_OrganizationSchema_Should_NotContainCrossEntityForeignKeys()
-        => await VerifyOrganizationSchemaHasNoCrossEntityForeignKeysAsync();
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C07, "Composition", "OrganizationEntitySurface", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+        await VerifyOrganizationSchemaHasNoCrossEntityForeignKeysAsync();
+    }
 
     [Fact]
     public async Task O15_OrganizationProvider_Should_NotIntroduceReferentialSemantics()
-        => await VerifyOrganizationSchemaHasNoCrossEntityForeignKeysAsync();
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O15, "Organization", "OrganizationEntitySurface", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+        await VerifyOrganizationSchemaHasNoCrossEntityForeignKeysAsync();
+    }
 
     private async Task VerifyOrganizationSchemaHasNoCrossEntityForeignKeysAsync()
     {

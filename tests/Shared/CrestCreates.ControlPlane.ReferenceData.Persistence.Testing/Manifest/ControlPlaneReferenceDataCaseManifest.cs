@@ -9,7 +9,33 @@ public static class ControlPlaneReferenceDataCaseManifest
     public static IReadOnlyDictionary<(string CaseId, string Variant), ImmutableArray<EvidenceVectorKey>> EvidenceVectorExpansion { get; }
         = BuildEvidenceVectorExpansion();
 
+    /// <summary>
+    /// Cases whose acceptance evidence is required on more than one runner.
+    /// F01/F02 are runner-neutral concurrency contracts: the InMemory contract
+    /// tests and the PostgreSQL snapshot-barrier tests must both produce evidence.
+    /// NOTE: must be declared before <see cref="EvidenceTuples"/>, which reads it.
+    /// </summary>
+    public static IReadOnlyDictionary<string, ImmutableArray<RequiredRunner>> RunnerExpansion { get; } =
+        new Dictionary<string, ImmutableArray<RequiredRunner>>
+        {
+            [CaseId.F01] = ImmutableArray.Create(RequiredRunner.InMemory, RequiredRunner.PostgreSql),
+            [CaseId.F02] = ImmutableArray.Create(RequiredRunner.InMemory, RequiredRunner.PostgreSql),
+        };
+
     public static IReadOnlyList<EvidenceTuple> EvidenceTuples { get; } = BuildEvidenceTuples();
+
+    public static IReadOnlySet<string> RequiredTupleKeys { get; } = BuildRequiredTupleKeys();
+
+    public static IEnumerable<EvidenceTuple> EvidenceTuplesFor(string caseId, RequiredRunner runner)
+        => EvidenceTuples.Where(tuple => tuple.CaseId == caseId && tuple.Runner == runner);
+
+    private static IReadOnlySet<string> BuildRequiredTupleKeys()
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tuple in EvidenceTuples)
+            keys.Add(ControlPlaneReferenceDataEvidenceLedger.EvidenceTupleKey(tuple));
+        return keys;
+    }
 
     private static IReadOnlyList<CaseManifestEntry> BuildAllCases()
     {
@@ -44,13 +70,13 @@ public static class ControlPlaneReferenceDataCaseManifest
             "DescriptorDraft_CreatedAt_Should_PreserveOriginalOffsetAndTicks"));
 
         // ── Organization ──
-        entries.Add(new(CaseId.O01, "Organization", "OrganizationIdentitySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O01, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationIdentitySurface_GlobalAndTenant_Should_NotCollide"));
-        entries.Add(new(CaseId.O02, "Organization", "OrganizationIdentitySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O02, "Organization", "Position", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationIdentitySurface_SameIdInTwoTenants_Should_NotCollide"));
-        entries.Add(new(CaseId.O03, "Organization", "OrganizationQuerySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O03, "Organization", "Units", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationQuerySurface_Should_PreserveExplicitTenantIsolation"));
-        entries.Add(new(CaseId.O04, "Organization", "OrganizationQuerySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O04, "Organization", "Units", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationQuerySurface_NullTenant_Should_RemainUnfiltered"));
         entries.Add(new(CaseId.O05, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationUnits_Should_OrderBySortOrderScopeThenId"));
@@ -82,9 +108,9 @@ public static class ControlPlaneReferenceDataCaseManifest
             "OrganizationIdentity_Should_RemainStableAfterRestart"));
         entries.Add(new(CaseId.O19, "Organization", "ScopedKeyCollisionVariant", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationScopedKey_Should_NotAliasDelimiterValues"));
-        entries.Add(new(CaseId.O20, "Organization", "OrganizationEntitySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O20, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationEntitySurface_Save_Should_CaptureSnapshot"));
-        entries.Add(new(CaseId.O21, "Organization", "OrganizationReadSurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O21, "Organization", "UnitById", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationReadSurface_Should_ReturnDetachedSnapshot"));
         entries.Add(new(CaseId.O22, "Organization", "OrganizationCreatedAtVariant", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationCreatedAtVariant_Should_PreserveExactOrderAndSnapshot"));
@@ -166,7 +192,7 @@ public static class ControlPlaneReferenceDataCaseManifest
             "OrganizationSchema_Should_NotContainCrossEntityForeignKeys"));
         entries.Add(new(CaseId.C08, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice6,
             "BaseProviderRegistration_Should_NotReplaceReferenceStores"));
-        entries.Add(new(CaseId.C09, "Composition", "SaveSurface", EvidenceVectorKey.Default, RequiredRunner.PostgreSql, OwningSlice.Slice9,
+        entries.Add(new(CaseId.C09, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.PostgreSql, OwningSlice.Slice9,
             "OptInRegistration_Should_ReplaceExactlySelectedStores"));
         entries.Add(new(CaseId.C10, "Composition", "Draft", EvidenceVectorKey.Default, RequiredRunner.Architecture, OwningSlice.Slice6,
             "Provider_Should_NotImplementLegacyDraftStore"));
@@ -196,15 +222,21 @@ public static class ControlPlaneReferenceDataCaseManifest
                         && string.Equals(pair.Key.Variant, EvidenceVariantAlias(entry.CaseId, variant), StringComparison.Ordinal))
                     .SelectMany(pair => pair.Value)
                     .DefaultIfEmpty(EvidenceVectorKey.Default);
+                var runners = RunnerExpansion.TryGetValue(entry.CaseId, out var expanded)
+                    ? expanded
+                    : ImmutableArray.Create(entry.Runner);
                 foreach (var key in evidenceKey)
                 {
-                    tuples.Add(new EvidenceTuple(
-                        entry.CaseId,
-                        entry.Surface,
-                        variant,
-                        key,
-                        entry.Runner,
-                        entry.NormativeTestName));
+                    foreach (var runner in runners)
+                    {
+                        tuples.Add(new EvidenceTuple(
+                            entry.CaseId,
+                            entry.Surface,
+                            variant,
+                            key,
+                            runner,
+                            entry.NormativeTestName));
+                    }
                 }
             }
         }
@@ -213,14 +245,18 @@ public static class ControlPlaneReferenceDataCaseManifest
     }
 
     private static IReadOnlyList<string> ExpandVariants(CaseManifestEntry entry)
-        => entry.Variant switch
+        => (entry.CaseId, entry.Variant) switch
         {
+            (CaseId.O19, "ScopedKeyCollisionVariant") => ["StoreTenantDelimiter", "StoreIdDelimiter"],
+            (CaseId.O22, "OrganizationCreatedAtVariant") => ["MembershipNonZeroOffset", "MembershipHundredNanosecondOrder"],
+            _ => entry.Variant switch
+            {
             "DescriptorPayloadVariant" => Enum.GetNames<DescriptorPayloadVariant>(),
             "DraftQueryVariant" => Enum.GetNames<DraftQueryVariant>(),
             "DraftValidatorOwnedInvalidVariant" => Enum.GetNames<DraftValidatorOwnedInvalidVariant>(),
             "OrganizationIdentitySurface" => Enum.GetNames<OrganizationIdentitySurface>(),
             "OrganizationQuerySurface" => Enum.GetNames<OrganizationQuerySurface>(),
-            "OrganizationEntitySurface" => Enum.GetNames<OrganizationEntitySurface>(),
+            "OrganizationEntitySurfaceSchema" => Enum.GetNames<OrganizationEntitySurface>(),
             "OrganizationReadSurface" => Enum.GetNames<OrganizationReadSurface>(),
             "MissingReferenceVariant" => Enum.GetNames<MissingReferenceVariant>(),
             "ScopedKeyCollisionVariant" => Enum.GetNames<ScopedKeyCollisionVariant>(),
@@ -236,6 +272,7 @@ public static class ControlPlaneReferenceDataCaseManifest
             "PersistedStructuredFieldVariant" => Enum.GetNames<PersistedStructuredFieldVariant>(),
             "AotScenarioVariant" => Enum.GetNames<AotScenarioVariant>(),
             _ => [entry.Variant]
+            }
         };
 
     private static string EvidenceVariantAlias(string caseId, string variant)
@@ -262,7 +299,14 @@ public static class ControlPlaneReferenceDataCaseManifest
         dict[(CaseId.D08, "AuthorIdBlank")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
         dict[(CaseId.D08, "SupportedPayloadKindMismatch")] = ImmutableArray.Create(EvidenceVectorKey.WorkflowHeaderSchemaPayload);
         dict[(CaseId.D08, "DefinedNonPayloadKindMismatch")] = ImmutableArray.Create(EvidenceVectorKey.Unknown, EvidenceVectorKey.DynamicApiEndpoint, EvidenceVectorKey.McpTool, EvidenceVectorKey.AgentTool);
+        dict[(CaseId.D08, "PayloadIdMismatch")] = ImmutableArray.Create(EvidenceVectorKey.Default);
         dict[(CaseId.D08, "ProposedVersionMissing")] = ImmutableArray.Create(EvidenceVectorKey.Create, EvidenceVectorKey.Update);
+        dict[(CaseId.D08, "ProposedVersionNotInteger")] = ImmutableArray.Create(EvidenceVectorKey.Default);
+        dict[(CaseId.D08, "ProposedVersionMismatch")] = ImmutableArray.Create(EvidenceVectorKey.Default);
+        dict[(CaseId.D08, "CreateBaseVersionPresent")] = ImmutableArray.Create(EvidenceVectorKey.Default);
+        dict[(CaseId.D08, "UpdateBaseVersionMissing")] = ImmutableArray.Create(EvidenceVectorKey.Default);
+        dict[(CaseId.D08, "DeprecateBaseVersionMissing")] = ImmutableArray.Create(EvidenceVectorKey.Default);
+        dict[(CaseId.D08, "RemoveBaseVersionMissing")] = ImmutableArray.Create(EvidenceVectorKey.Default);
 
         dict[(CaseId.V01, "DraftNullInstance")] = ImmutableArray.Create(EvidenceVectorKey.Null);
         dict[(CaseId.V01, "DraftNullTenantId")] = ImmutableArray.Create(EvidenceVectorKey.Null);
@@ -277,20 +321,20 @@ public static class ControlPlaneReferenceDataCaseManifest
         dict[(CaseId.V01, "RoleAssignmentNullInstance")] = ImmutableArray.Create(EvidenceVectorKey.Null);
         dict[(CaseId.V01, "RuleNullInstance")] = ImmutableArray.Create(EvidenceVectorKey.Null);
 
-        dict[(CaseId.V01, "UnitInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "PositionInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "MembershipInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "MembershipInvalidUserId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "MembershipInvalidOrganizationUnitId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "RoleAssignmentInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "RoleAssignmentInvalidUserId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "RoleAssignmentInvalidRoleId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "UnitPointReadInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "PositionPointReadInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "MembershipByUserInvalidUserId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "MembershipByUnitInvalidOrganizationUnitId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "RoleByUserInvalidUserId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "RuleInvalidResource")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
+        dict[(CaseId.V01, "UnitInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "PositionInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "MembershipInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "MembershipInvalidUserId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "MembershipInvalidOrganizationUnitId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "RoleAssignmentInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "RoleAssignmentInvalidUserId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "RoleAssignmentInvalidRoleId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "UnitPointReadInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "PositionPointReadInvalidId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "MembershipByUserInvalidUserId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "MembershipByUnitInvalidOrganizationUnitId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "RoleByUserInvalidUserId")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "RuleInvalidResource")] = ImmutableArray.Create(EvidenceVectorKey.Null, EvidenceVectorKey.Empty);
 
         dict[(CaseId.V01, "UnitInvalidNonNullTenant")] = ImmutableArray.Create(EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
         dict[(CaseId.V01, "PositionInvalidNonNullTenant")] = ImmutableArray.Create(EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
@@ -299,8 +343,15 @@ public static class ControlPlaneReferenceDataCaseManifest
         dict[(CaseId.V01, "OrganizationQueryInvalidNonNullTenant")] = ImmutableArray.Create(EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
         dict[(CaseId.V01, "RuleInvalidNonNullTenant")] = ImmutableArray.Create(EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
 
-        dict[(CaseId.V01, "MembershipInvalidPositionId")] = ImmutableArray.Create(EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
-        dict[(CaseId.V01, "RoleAssignmentInvalidOrganizationUnitId")] = ImmutableArray.Create(EvidenceVectorKey.Empty, EvidenceVectorKey.Whitespace);
+        // Optional fields: the store rejects only empty (IsNullOrEmpty) and only
+        // when the value is non-null, so null and whitespace are not invalid vectors.
+        dict[(CaseId.V01, "MembershipInvalidPositionId")] = ImmutableArray.Create(EvidenceVectorKey.Empty);
+        dict[(CaseId.V01, "RoleAssignmentInvalidOrganizationUnitId")] = ImmutableArray.Create(EvidenceVectorKey.Empty);
+
+        dict[(CaseId.O19, "StoreTenantDelimiter")] = ImmutableArray.Create(EvidenceVectorKey.Default);
+        dict[(CaseId.O19, "StoreIdDelimiter")] = ImmutableArray.Create(EvidenceVectorKey.Default);
+        dict[(CaseId.O22, "MembershipNonZeroOffset")] = ImmutableArray.Create(EvidenceVectorKey.Default);
+        dict[(CaseId.O22, "MembershipHundredNanosecondOrder")] = ImmutableArray.Create(EvidenceVectorKey.Default);
 
         dict[(CaseId.F09, "OrganizationUnit.TenantScope")] = ImmutableArray.Create(EvidenceVectorKey.JsonGlobalColumnsExact, EvidenceVectorKey.JsonExactColumnsGlobal);
         dict[(CaseId.F09, "Position.TenantScope")] = ImmutableArray.Create(EvidenceVectorKey.JsonGlobalColumnsExact, EvidenceVectorKey.JsonExactColumnsGlobal);

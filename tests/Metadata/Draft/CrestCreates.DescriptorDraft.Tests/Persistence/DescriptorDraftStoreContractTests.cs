@@ -1,6 +1,8 @@
 using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
+using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Xunit;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
@@ -20,6 +22,7 @@ public sealed class DescriptorDraftStoreContractTests
     [InlineData(DescriptorPayloadVariant.WorkflowSubWorkflowTarget)]
     public async Task DescriptorDraftPayloadVariant_Should_RoundTripCompleteSnapshot(DescriptorPayloadVariant variant)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D01, "Draft", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var draft = driver.CreatePayloadVariant(variant);
 
@@ -32,6 +35,7 @@ public sealed class DescriptorDraftStoreContractTests
     [Fact]
     public async Task DescriptorDraft_Save_Should_CaptureSnapshot()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D02, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var metadata = new Dictionary<string, string> { ["state"] = "before" };
         var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with { Metadata = metadata };
@@ -47,6 +51,7 @@ public sealed class DescriptorDraftStoreContractTests
     [Fact]
     public async Task DescriptorDraft_Read_Should_ReturnDetachedSnapshot()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D03, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Form) with
         {
@@ -64,6 +69,7 @@ public sealed class DescriptorDraftStoreContractTests
     [Fact]
     public async Task DescriptorDraft_SameIdInTwoTenants_Should_NotCollide()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D04, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var first = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with { TenantId = "tenant-a", DraftId = "same" };
         var second = first with { TenantId = "tenant-b" };
@@ -84,6 +90,7 @@ public sealed class DescriptorDraftStoreContractTests
     [InlineData(DraftQueryVariant.Combined)]
     public async Task DescriptorDraftQueryVariant_Should_PreserveSemantics(DraftQueryVariant variant)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D05, "Draft", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var first = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with
         {
@@ -130,6 +137,7 @@ public sealed class DescriptorDraftStoreContractTests
     [Fact]
     public async Task DescriptorDraft_List_Should_OrderByDraftIdOrdinal()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D06, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         foreach (var id in new[] { "z", "a", "A" })
             await driver.Store.SaveAsync(driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with { DraftId = id });
@@ -141,6 +149,7 @@ public sealed class DescriptorDraftStoreContractTests
     [Fact]
     public async Task DescriptorDraft_Save_Should_ReplaceCompleteSnapshot()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D07, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var first = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema);
         await driver.Store.SaveAsync(first);
@@ -152,22 +161,14 @@ public sealed class DescriptorDraftStoreContractTests
     }
 
     [Theory]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DraftIdBlank, EvidenceVectorKey.Empty)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DraftIdBlank, EvidenceVectorKey.Whitespace)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DescriptorIdBlank, EvidenceVectorKey.Null)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DescriptorIdBlank, EvidenceVectorKey.Empty)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DescriptorIdBlank, EvidenceVectorKey.Whitespace)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.AuthorIdBlank, EvidenceVectorKey.Null)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.AuthorIdBlank, EvidenceVectorKey.Empty)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.AuthorIdBlank, EvidenceVectorKey.Whitespace)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DefinedNonPayloadKindMismatch, EvidenceVectorKey.Unknown)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DefinedNonPayloadKindMismatch, EvidenceVectorKey.DynamicApiEndpoint)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DefinedNonPayloadKindMismatch, EvidenceVectorKey.McpTool)]
-    [InlineData(DraftValidatorOwnedInvalidVariant.DefinedNonPayloadKindMismatch, EvidenceVectorKey.AgentTool)]
+    [MemberData(nameof(ValidatorOwnedInvalidData))]
     public async Task DraftValidatorOwnedInvalidVariant_Should_RemainDurableAndDiagnosable(
         DraftValidatorOwnedInvalidVariant variant,
         EvidenceVectorKey key)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(
+            CaseId.D08, "Draft", variant.ToString(), key, RequiredRunner.InMemory);
+
         var driver = NewDriver();
         var draft = variant == DraftValidatorOwnedInvalidVariant.DraftIdBlank
             ? driver.CreateValidatorOwnedInvalid(variant) with
@@ -182,9 +183,69 @@ public sealed class DescriptorDraftStoreContractTests
         driver.Validator.Validate(stored!).IsValid.Should().BeFalse();
     }
 
+    public static IEnumerable<object[]> ValidatorOwnedInvalidData()
+    {
+        foreach (var tuple in ControlPlaneReferenceDataCaseManifest.EvidenceTuplesFor(CaseId.D08, RequiredRunner.InMemory))
+            yield return new object[] { Enum.Parse<DraftValidatorOwnedInvalidVariant>(tuple.Variant), tuple.Key };
+    }
+
+    // ── F01 / F02 (Draft surface): concurrent blind save on the InMemory store ──
+
+    [Fact]
+    public async Task SaveSurface_ConcurrentBlindSave_Should_ExposeOneCompleteSnapshot()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(
+            CaseId.F01, "Failure", nameof(SaveSurface.Draft), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+
+        var driver = NewDriver();
+        var draftA = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with
+        {
+            DraftId = "concurrent",
+            DescriptorId = "schema-1",
+            AuthorId = "author-a",
+            Intent = "intent-a",
+            Status = DescriptorDraftStatus.Created,
+            Payload = new SchemaDescriptorDraftPayload(new SchemaDescriptor { Id = "schema-1", Name = "Schema A" })
+        };
+        var draftB = draftA with
+        {
+            AuthorId = "author-b",
+            Intent = "intent-b",
+            Status = DescriptorDraftStatus.Reviewed,
+            Payload = new SchemaDescriptorDraftPayload(new SchemaDescriptor { Id = "schema-1", Name = "Schema B" })
+        };
+
+        await Task.WhenAll(driver.Store.SaveAsync(draftA), driver.Store.SaveAsync(draftB));
+
+        var result = await driver.Store.GetAsync(draftA.TenantId, draftA.DraftId);
+        result.Should().NotBeNull();
+        var schema = (SchemaDescriptorDraftPayload)result!.Payload;
+        var matchesA = result.AuthorId == "author-a" && result.Intent == "intent-a"
+            && result.Status == DescriptorDraftStatus.Created && schema.Descriptor.Name == "Schema A";
+        var matchesB = result.AuthorId == "author-b" && result.Intent == "intent-b"
+            && result.Status == DescriptorDraftStatus.Reviewed && schema.Descriptor.Name == "Schema B";
+        (matchesA || matchesB).Should().BeTrue("the row must be one complete submitted snapshot");
+    }
+
+    [Fact]
+    public async Task SaveSurface_ConcurrentBlindSave_Should_NotInventStaleWriterConflict()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(
+            CaseId.F02, "Failure", nameof(SaveSurface.Draft), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+
+        var driver = NewDriver();
+        var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with { DraftId = "concurrent-no-occ" };
+        var duplicate = draft with { };
+
+        var ex = await Record.ExceptionAsync(() => Task.WhenAll(driver.Store.SaveAsync(draft), driver.Store.SaveAsync(duplicate)));
+        ex.Should().BeNull();
+        (await driver.Store.GetAsync(draft.TenantId, draft.DraftId)).Should().NotBeNull();
+    }
+
     [Fact]
     public async Task DescriptorDraft_TimeFilter_Should_PreserveHundredNanosecondBoundaries()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D11, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var at = DateTimeOffset.UnixEpoch.AddTicks(1);
         var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with { CreatedAt = at };
@@ -197,6 +258,7 @@ public sealed class DescriptorDraftStoreContractTests
     [Fact]
     public async Task DescriptorDraft_TimeFilter_Should_CompareUtcTicksNotOffset()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D12, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var value = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
         var equivalent = value.ToOffset(TimeSpan.FromHours(5));
@@ -210,6 +272,7 @@ public sealed class DescriptorDraftStoreContractTests
     [Fact]
     public async Task DescriptorDraft_CreatedAt_Should_PreserveOriginalOffsetAndTicks()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.D13, "Draft", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with
         {
@@ -222,15 +285,16 @@ public sealed class DescriptorDraftStoreContractTests
     }
 
     [Theory]
-    [InlineData(IdentityValidationVector.DraftNullInstance)]
-    [InlineData(IdentityValidationVector.DraftNullTenantId)]
-    [InlineData(IdentityValidationVector.DraftNullDraftId)]
-    [InlineData(IdentityValidationVector.DraftNullPayload)]
-    [InlineData(IdentityValidationVector.DraftGetNullTenantId)]
-    [InlineData(IdentityValidationVector.DraftGetNullDraftId)]
-    [InlineData(IdentityValidationVector.DraftListNullTenantId)]
-    public async Task IdentityValidationVector_Should_FailBeforeMutation(IdentityValidationVector variant)
+    [InlineData(IdentityValidationVector.DraftNullInstance, EvidenceVectorKey.Null)]
+    [InlineData(IdentityValidationVector.DraftNullTenantId, EvidenceVectorKey.Null)]
+    [InlineData(IdentityValidationVector.DraftNullDraftId, EvidenceVectorKey.Null)]
+    [InlineData(IdentityValidationVector.DraftNullPayload, EvidenceVectorKey.Null)]
+    [InlineData(IdentityValidationVector.DraftGetNullTenantId, EvidenceVectorKey.Null)]
+    [InlineData(IdentityValidationVector.DraftGetNullDraftId, EvidenceVectorKey.Null)]
+    [InlineData(IdentityValidationVector.DraftListNullTenantId, EvidenceVectorKey.Null)]
+    public async Task IdentityValidationVector_Should_FailBeforeMutation(IdentityValidationVector variant, EvidenceVectorKey key)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.V01, "Validation", variant.ToString(), key, RequiredRunner.InMemory);
         var driver = NewDriver();
         Func<Task> act = variant switch
         {
@@ -260,6 +324,7 @@ public sealed class DescriptorDraftStoreContractTests
     [InlineData(PersistedEnumSurface.DraftStatus)]
     public async Task PersistedEnumSurface_Should_FailBeforeMutation(PersistedEnumSurface surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.V03, "Validation", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema);
         var invalid = surface switch
@@ -276,6 +341,7 @@ public sealed class DescriptorDraftStoreContractTests
     [Fact]
     public async Task UnsupportedDraftPayload_Should_FailBeforeMutation()
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.V04, "Validation", "Draft", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var draft = driver.CreatePayloadVariant(DescriptorPayloadVariant.Schema) with
         {
@@ -290,6 +356,7 @@ public sealed class DescriptorDraftStoreContractTests
     [InlineData(StoreMethodSurface.DraftList)]
     public async Task PreCancelledStoreMethod_Should_ExitBeforeQueryOrMutation(StoreMethodSurface surface)
     {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.V05, "Validation", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         var ct = new CancellationToken(canceled: true);
         Func<Task> act = surface switch
