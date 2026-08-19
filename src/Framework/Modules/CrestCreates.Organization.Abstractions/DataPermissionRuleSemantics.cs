@@ -64,6 +64,20 @@ internal static class DataPermissionRuleSemantics
             throw new ArgumentException("Rule.Resource must not be null or empty.", nameof(resource));
     }
 
+    public static void ValidateLookup(
+        string resource,
+        string? action,
+        string? permission,
+        string? tenantId)
+    {
+        ValidateResource(resource);
+        DataPermissionMatch.ValidateNotSentinel(action, nameof(action));
+        DataPermissionMatch.ValidateNotSentinel(permission, nameof(permission));
+        DataPermissionMatch.ValidateNotSentinel(tenantId, nameof(tenantId));
+        if (tenantId is not null && string.IsNullOrWhiteSpace(tenantId))
+            throw new ArgumentException("Non-null tenantId must not be empty or whitespace.", nameof(tenantId));
+    }
+
     private static bool IsDefined(DataPermissionScopeKind value)
         => value is DataPermissionScopeKind.None
             or DataPermissionScopeKind.Self

@@ -74,6 +74,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidatePointReadId(organizationUnitId, nameof(organizationUnitId));
+        OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         var (scope, tenant) = ScopeTenant(tenantId);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_units");
         var sql = $"""
@@ -185,6 +186,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidatePointReadId(positionId, nameof(positionId));
+        OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         var (scope, tenant) = ScopeTenant(tenantId);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_positions");
         var sql = $"""
@@ -301,6 +303,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateUserId(userId, nameof(userId));
+        OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_memberships");
         string sql;
         if (tenantId is not null)
@@ -348,6 +351,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateOrganizationUnitId(organizationUnitId, nameof(organizationUnitId));
+        OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_memberships");
         string sql;
         if (tenantId is not null)
@@ -445,6 +449,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         OrganizationStoreSemantics.ValidateUserId(userId, nameof(userId));
+        OrganizationStoreSemantics.ValidateQueryTenantId(tenantId);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_role_assignments");
         string sql;
         if (tenantId is not null)
@@ -543,6 +548,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
 
     private static void ValidateOrganizationUnit(NpgsqlDataReader reader, OrganizationUnit value)
     {
+        ValidatePersistedRepresentation(value, OrganizationStoreSemantics.ValidateSaveOrganizationUnit, "OrganizationUnit");
         var (scope, tenant) = ScopeTenant(value.TenantId);
         if (!string.Equals(reader.GetString(0), value.Id, StringComparison.Ordinal)
             || !string.Equals(reader.GetString(1), scope, StringComparison.Ordinal)
@@ -561,6 +567,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
 
     private static void ValidatePosition(NpgsqlDataReader reader, Position value)
     {
+        ValidatePersistedRepresentation(value, OrganizationStoreSemantics.ValidateSavePosition, "Position");
         var (scope, tenant) = ScopeTenant(value.TenantId);
         if (!string.Equals(reader.GetString(0), value.Id, StringComparison.Ordinal)
             || !string.Equals(reader.GetString(1), scope, StringComparison.Ordinal)
@@ -577,6 +584,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
 
     private static void ValidateMembership(NpgsqlDataReader reader, UserOrganizationMembership value)
     {
+        ValidatePersistedRepresentation(value, OrganizationStoreSemantics.ValidateSaveMembership, "Membership");
         var (scope, tenant) = ScopeTenant(value.TenantId);
         if (!string.Equals(reader.GetString(0), value.Id, StringComparison.Ordinal)
             || !string.Equals(reader.GetString(1), scope, StringComparison.Ordinal)
@@ -597,6 +605,7 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
 
     private static void ValidateRoleAssignment(NpgsqlDataReader reader, UserOrganizationRoleAssignment value)
     {
+        ValidatePersistedRepresentation(value, OrganizationStoreSemantics.ValidateSaveRoleAssignment, "Role assignment");
         var (scope, tenant) = ScopeTenant(value.TenantId);
         if (!string.Equals(reader.GetString(0), value.Id, StringComparison.Ordinal)
             || !string.Equals(reader.GetString(1), scope, StringComparison.Ordinal)
@@ -618,6 +627,22 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         => reader.IsDBNull(ordinal)
             ? expected is null
             : expected is not null && string.Equals(reader.GetString(ordinal), expected, StringComparison.Ordinal);
+
+    private static void ValidatePersistedRepresentation<T>(
+        T value,
+        Action<T> validator,
+        string entityName)
+    {
+        try
+        {
+            validator(value);
+        }
+        catch (ArgumentException exception)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                $"Persisted {entityName} JSON contains an unrepresentable identity: {exception.Message}");
+        }
+    }
 
     private static void ValidateReadableTimestamp(
         NpgsqlDataReader reader,

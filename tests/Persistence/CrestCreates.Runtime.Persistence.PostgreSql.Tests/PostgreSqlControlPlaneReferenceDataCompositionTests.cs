@@ -12,10 +12,11 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 
 public class PostgreSqlControlPlaneReferenceDataCompositionTests
 {
-    [Fact]
-    public void C09_OptInRegistration_Should_ReplaceExactlySelectedStores()
+    [Theory]
+    [MemberData(nameof(SaveSurfaceData))]
+    public void C09_OptInRegistration_Should_ReplaceExactlySelectedStores(string surface)
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C09, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C09, "Composition", surface, EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         var services = new ServiceCollection();
         services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
         services.AddSingleton<IDescriptorDraftStore, InMemoryDescriptorDraftStore>();
@@ -25,14 +26,24 @@ public class PostgreSqlControlPlaneReferenceDataCompositionTests
 
         services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
 
-        var descriptors = services.Where(d =>
-            d.ServiceType == typeof(IDescriptorDraftStore) ||
-            d.ServiceType == typeof(IOrganizationStore) ||
-            d.ServiceType == typeof(IDataPermissionScopeRuleStore)).ToList();
+        var (serviceType, expectedImplementation) = surface switch
+        {
+            nameof(SaveSurface.Draft) => (typeof(IDescriptorDraftStore), typeof(PostgreSqlDescriptorDraftStore)),
+            nameof(SaveSurface.OrganizationUnit)
+                or nameof(SaveSurface.Position)
+                or nameof(SaveSurface.Membership)
+                or nameof(SaveSurface.RoleAssignment)
+                => (typeof(IOrganizationStore), typeof(PostgreSqlOrganizationStore)),
+            nameof(SaveSurface.Rule) => (typeof(IDataPermissionScopeRuleStore), typeof(PostgreSqlDataPermissionScopeRuleStore)),
+            _ => throw new ArgumentOutOfRangeException(nameof(surface), surface, null)
+        };
 
-        descriptors.Should().AllSatisfy(d => d.ImplementationType.Should().NotBe(typeof(InMemoryDescriptorDraftStore),
-            "opt-in must replace InMemory stores"));
+        services.Single(d => d.ServiceType == serviceType).ImplementationType.Should().Be(expectedImplementation,
+            $"opt-in must replace the exact {surface} implementation");
     }
+
+    public static IEnumerable<object[]> SaveSurfaceData()
+        => Enum.GetNames<SaveSurface>().Select(value => new object[] { value });
 
     [Fact]
     public void C14_OptInWithoutBaseProvider_Should_FailWithClearCompositionError()

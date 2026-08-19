@@ -76,7 +76,8 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
     [Fact]
     public async Task OrganizationEntitySurface_Should_SurviveProcessRestart()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O16, "Organization", "OrganizationEntitySurface", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        foreach (var surface in Enum.GetValues<OrganizationEntitySurface>())
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O16, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         await RunSaveAndExitAsync("reference-all-org-surfaces-save-and-exit", lease.Options.Schema);
 

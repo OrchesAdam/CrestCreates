@@ -62,10 +62,7 @@ internal sealed class PostgreSqlDataPermissionScopeRuleStore : IDataPermissionSc
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        DataPermissionRuleSemantics.ValidateResource(resource);
-        DataPermissionMatch.ValidateNotSentinel(action, nameof(action));
-        DataPermissionMatch.ValidateNotSentinel(permission, nameof(permission));
-        DataPermissionMatch.ValidateNotSentinel(tenantId, nameof(tenantId));
+        DataPermissionRuleSemantics.ValidateLookup(resource, action, permission, tenantId);
 
         var candidates = DataPermissionRuleSemantics.GenerateCandidates(resource, action, permission, tenantId);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "data_permission_scope_rules");

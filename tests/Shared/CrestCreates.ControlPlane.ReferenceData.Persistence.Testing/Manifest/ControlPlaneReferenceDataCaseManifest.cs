@@ -4,6 +4,9 @@ namespace CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 
 public static class ControlPlaneReferenceDataCaseManifest
 {
+    private static readonly ImmutableArray<RequiredRunner> SharedRunners =
+        ImmutableArray.Create(RequiredRunner.InMemory, RequiredRunner.PostgreSql);
+
     public static IReadOnlyList<CaseManifestEntry> AllCases { get; } = BuildAllCases();
 
     public static IReadOnlyDictionary<(string CaseId, string Variant), ImmutableArray<EvidenceVectorKey>> EvidenceVectorExpansion { get; }
@@ -11,13 +14,40 @@ public static class ControlPlaneReferenceDataCaseManifest
 
     /// <summary>
     /// Cases whose acceptance evidence is required on more than one runner.
-    /// F01/F02 are runner-neutral concurrency contracts: the InMemory contract
-    /// tests and the PostgreSQL snapshot-barrier tests must both produce evidence.
+    /// These are the shared contract cases from the frozen specification. The
+    /// manifest is an acceptance oracle, not a summary of whichever provider
+    /// tests happen to exist today.
     /// NOTE: must be declared before <see cref="EvidenceTuples"/>, which reads it.
     /// </summary>
     public static IReadOnlyDictionary<string, ImmutableArray<RequiredRunner>> RunnerExpansion { get; } =
         new Dictionary<string, ImmutableArray<RequiredRunner>>
         {
+            [CaseId.O01] = SharedRunners,
+            [CaseId.O02] = SharedRunners,
+            [CaseId.O03] = SharedRunners,
+            [CaseId.O04] = SharedRunners,
+            [CaseId.O05] = SharedRunners,
+            [CaseId.O06] = SharedRunners,
+            [CaseId.O07] = SharedRunners,
+            [CaseId.O08] = SharedRunners,
+            [CaseId.O09] = SharedRunners,
+            [CaseId.O10] = SharedRunners,
+            [CaseId.O13] = SharedRunners,
+            [CaseId.O14] = SharedRunners,
+            [CaseId.O19] = SharedRunners,
+            [CaseId.O20] = SharedRunners,
+            [CaseId.O21] = SharedRunners,
+            [CaseId.O22] = SharedRunners,
+            [CaseId.P01] = SharedRunners,
+            [CaseId.P02] = SharedRunners,
+            [CaseId.P03] = SharedRunners,
+            [CaseId.P04] = SharedRunners,
+            [CaseId.P05] = SharedRunners,
+            [CaseId.P06] = SharedRunners,
+            [CaseId.P07] = SharedRunners,
+            [CaseId.P10] = SharedRunners,
+            [CaseId.P11] = SharedRunners,
+            [CaseId.P12] = SharedRunners,
             [CaseId.F01] = ImmutableArray.Create(RequiredRunner.InMemory, RequiredRunner.PostgreSql),
             [CaseId.F02] = ImmutableArray.Create(RequiredRunner.InMemory, RequiredRunner.PostgreSql),
         };
@@ -70,13 +100,13 @@ public static class ControlPlaneReferenceDataCaseManifest
             "DescriptorDraft_CreatedAt_Should_PreserveOriginalOffsetAndTicks"));
 
         // ── Organization ──
-        entries.Add(new(CaseId.O01, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O01, "Organization", "OrganizationIdentitySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationIdentitySurface_GlobalAndTenant_Should_NotCollide"));
-        entries.Add(new(CaseId.O02, "Organization", "Position", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O02, "Organization", "OrganizationIdentitySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationIdentitySurface_SameIdInTwoTenants_Should_NotCollide"));
-        entries.Add(new(CaseId.O03, "Organization", "Units", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O03, "Organization", "OrganizationQuerySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationQuerySurface_Should_PreserveExplicitTenantIsolation"));
-        entries.Add(new(CaseId.O04, "Organization", "Units", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O04, "Organization", "OrganizationQuerySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationQuerySurface_NullTenant_Should_RemainUnfiltered"));
         entries.Add(new(CaseId.O05, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationUnits_Should_OrderBySortOrderScopeThenId"));
@@ -108,9 +138,9 @@ public static class ControlPlaneReferenceDataCaseManifest
             "OrganizationIdentity_Should_RemainStableAfterRestart"));
         entries.Add(new(CaseId.O19, "Organization", "ScopedKeyCollisionVariant", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationScopedKey_Should_NotAliasDelimiterValues"));
-        entries.Add(new(CaseId.O20, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O20, "Organization", "OrganizationEntitySurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationEntitySurface_Save_Should_CaptureSnapshot"));
-        entries.Add(new(CaseId.O21, "Organization", "UnitById", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+        entries.Add(new(CaseId.O21, "Organization", "OrganizationReadSurface", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationReadSurface_Should_ReturnDetachedSnapshot"));
         entries.Add(new(CaseId.O22, "Organization", "OrganizationCreatedAtVariant", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationCreatedAtVariant_Should_PreserveExactOrderAndSnapshot"));
@@ -192,7 +222,7 @@ public static class ControlPlaneReferenceDataCaseManifest
             "OrganizationSchema_Should_NotContainCrossEntityForeignKeys"));
         entries.Add(new(CaseId.C08, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice6,
             "BaseProviderRegistration_Should_NotReplaceReferenceStores"));
-        entries.Add(new(CaseId.C09, "Composition", "Composition", EvidenceVectorKey.Default, RequiredRunner.PostgreSql, OwningSlice.Slice9,
+        entries.Add(new(CaseId.C09, "Composition", "SaveSurface", EvidenceVectorKey.Default, RequiredRunner.PostgreSql, OwningSlice.Slice9,
             "OptInRegistration_Should_ReplaceExactlySelectedStores"));
         entries.Add(new(CaseId.C10, "Composition", "Draft", EvidenceVectorKey.Default, RequiredRunner.Architecture, OwningSlice.Slice6,
             "Provider_Should_NotImplementLegacyDraftStore"));
@@ -247,8 +277,8 @@ public static class ControlPlaneReferenceDataCaseManifest
     private static IReadOnlyList<string> ExpandVariants(CaseManifestEntry entry)
         => (entry.CaseId, entry.Variant) switch
         {
-            (CaseId.O19, "ScopedKeyCollisionVariant") => ["StoreTenantDelimiter", "StoreIdDelimiter"],
-            (CaseId.O22, "OrganizationCreatedAtVariant") => ["MembershipNonZeroOffset", "MembershipHundredNanosecondOrder"],
+            (CaseId.O19, "ScopedKeyCollisionVariant") => Enum.GetNames<ScopedKeyCollisionVariant>(),
+            (CaseId.O22, "OrganizationCreatedAtVariant") => Enum.GetNames<OrganizationCreatedAtVariant>(),
             _ => entry.Variant switch
             {
             "DescriptorPayloadVariant" => Enum.GetNames<DescriptorPayloadVariant>(),
@@ -256,7 +286,7 @@ public static class ControlPlaneReferenceDataCaseManifest
             "DraftValidatorOwnedInvalidVariant" => Enum.GetNames<DraftValidatorOwnedInvalidVariant>(),
             "OrganizationIdentitySurface" => Enum.GetNames<OrganizationIdentitySurface>(),
             "OrganizationQuerySurface" => Enum.GetNames<OrganizationQuerySurface>(),
-            "OrganizationEntitySurfaceSchema" => Enum.GetNames<OrganizationEntitySurface>(),
+            "OrganizationEntitySurface" => Enum.GetNames<OrganizationEntitySurface>(),
             "OrganizationReadSurface" => Enum.GetNames<OrganizationReadSurface>(),
             "MissingReferenceVariant" => Enum.GetNames<MissingReferenceVariant>(),
             "ScopedKeyCollisionVariant" => Enum.GetNames<ScopedKeyCollisionVariant>(),
@@ -360,6 +390,11 @@ public static class ControlPlaneReferenceDataCaseManifest
         dict[(CaseId.F09, "OrganizationUnit.ParentId")] = ImmutableArray.Create(EvidenceVectorKey.JsonNullColumnNonNull, EvidenceVectorKey.JsonNonNullColumnNull);
         dict[(CaseId.F09, "Membership.PositionId")] = ImmutableArray.Create(EvidenceVectorKey.JsonNullColumnNonNull, EvidenceVectorKey.JsonNonNullColumnNull);
         dict[(CaseId.F09, "RoleAssignment.OrganizationUnitId")] = ImmutableArray.Create(EvidenceVectorKey.JsonNullColumnNonNull, EvidenceVectorKey.JsonNonNullColumnNull);
+
+        foreach (var variant in Enum.GetNames<PersistedRuleCorruptionVariant>())
+            dict[(CaseId.P13, variant)] = ImmutableArray.Create(
+                EvidenceVectorKey.SchemaReject,
+                EvidenceVectorKey.ProviderFailClosed);
 
         return dict;
     }

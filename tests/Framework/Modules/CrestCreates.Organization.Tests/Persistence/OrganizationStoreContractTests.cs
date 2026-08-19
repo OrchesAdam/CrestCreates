@@ -11,48 +11,45 @@ public sealed class OrganizationStoreContractTests
     [Fact]
     public async Task OrganizationIdentitySurface_GlobalAndTenant_Should_NotCollide()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O01, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        await driver.Store.SaveOrganizationUnitAsync(Unit("same", null));
-        await driver.Store.SaveOrganizationUnitAsync(Unit("same", "tenant-a"));
-
-        (await driver.Store.GetOrganizationUnitByIdAsync("same"))!.TenantId.Should().BeNull();
-        (await driver.Store.GetOrganizationUnitByIdAsync("same", "tenant-a"))!.TenantId.Should().Be("tenant-a");
+        foreach (var surface in Enum.GetValues<OrganizationIdentitySurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O01, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+            await OrganizationStoreContractCases.RunIdentityAsync(driver.Store, surface, $"o01-{surface}");
+        }
     }
 
     [Fact]
     public async Task OrganizationIdentitySurface_SameIdInTwoTenants_Should_NotCollide()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O02, "Organization", "Position", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        await driver.Store.SavePositionAsync(Position("same", "tenant-a"));
-        await driver.Store.SavePositionAsync(Position("same", "tenant-b"));
-
-        (await driver.Store.GetPositionByIdAsync("same", "tenant-a"))!.TenantId.Should().Be("tenant-a");
-        (await driver.Store.GetPositionByIdAsync("same", "tenant-b"))!.TenantId.Should().Be("tenant-b");
+        foreach (var surface in Enum.GetValues<OrganizationIdentitySurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O02, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+            await OrganizationStoreContractCases.RunIdentityAsync(driver.Store, surface, $"o02-{surface}");
+        }
     }
 
     [Fact]
     public async Task OrganizationQuerySurface_Should_PreserveExplicitTenantIsolation()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O03, "Organization", "Units", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        await driver.Store.SaveOrganizationUnitAsync(Unit("a", "tenant-a"));
-        await driver.Store.SaveOrganizationUnitAsync(Unit("b", "tenant-b"));
-
-        (await driver.Store.GetOrganizationUnitsAsync("tenant-a"))
-            .Select(value => value.Id).Should().Equal("a");
+        foreach (var surface in Enum.GetValues<OrganizationQuerySurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O03, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+            await OrganizationStoreContractCases.RunExplicitQueryAsync(driver.Store, surface, $"o03-{surface}");
+        }
     }
 
     [Fact]
     public async Task OrganizationQuerySurface_NullTenant_Should_RemainUnfiltered()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O04, "Organization", "Units", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        await driver.Store.SaveOrganizationUnitAsync(Unit("global", null));
-        await driver.Store.SaveOrganizationUnitAsync(Unit("tenant", "tenant-a"));
-
-        (await driver.Store.GetOrganizationUnitsAsync()).Should().HaveCount(2);
+        foreach (var surface in Enum.GetValues<OrganizationQuerySurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O04, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+            await OrganizationStoreContractCases.RunUnfilteredQueryAsync(driver.Store, surface, $"o04-{surface}");
+        }
     }
 
     [Fact]
@@ -195,54 +192,48 @@ public sealed class OrganizationStoreContractTests
     [Fact]
     public async Task OrganizationScopedKey_Should_NotAliasDelimiterValues()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O19, "Organization", nameof(ScopedKeyCollisionVariant.StoreTenantDelimiter), EvidenceVectorKey.Default, RequiredRunner.InMemory);
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O19, "Organization", nameof(ScopedKeyCollisionVariant.StoreIdDelimiter), EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        await driver.Store.SaveOrganizationUnitAsync(Unit("c", "a:b"));
-        await driver.Store.SaveOrganizationUnitAsync(Unit("b:c", "a"));
-
-        (await driver.Store.GetOrganizationUnitByIdAsync("c", "a:b"))!.TenantId.Should().Be("a:b");
-        (await driver.Store.GetOrganizationUnitByIdAsync("b:c", "a"))!.TenantId.Should().Be("a");
+        foreach (var variant in Enum.GetValues<ScopedKeyCollisionVariant>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O19, "Organization", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+            await OrganizationStoreContractCases.RunScopedKeyAsync(
+                driver.Store,
+                new DefaultOrganizationHierarchyService(driver.Store),
+                $"o19-{variant}");
+        }
     }
 
     [Fact]
     public async Task OrganizationEntitySurface_Save_Should_CaptureSnapshot()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O20, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        var unit = Unit("unit", "tenant-a", sortOrder: 7);
-        await driver.Store.SaveOrganizationUnitAsync(unit);
-
-        (await driver.Store.GetOrganizationUnitByIdAsync(unit.Id, unit.TenantId))
-            .Should().BeEquivalentTo(unit);
+        foreach (var surface in Enum.GetValues<OrganizationEntitySurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O20, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+            await OrganizationStoreContractCases.RunEntitySnapshotAsync(driver.Store, surface, $"o20-{surface}");
+        }
     }
 
     [Fact]
     public async Task OrganizationReadSurface_Should_ReturnDetachedSnapshot()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O21, "Organization", "UnitById", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        await driver.Store.SaveOrganizationUnitAsync(Unit("unit", "tenant-a"));
-
-        var first = await driver.Store.GetOrganizationUnitByIdAsync("unit", "tenant-a");
-        var second = await driver.Store.GetOrganizationUnitByIdAsync("unit", "tenant-a");
-        first.Should().NotBeSameAs(second);
+        foreach (var surface in Enum.GetValues<OrganizationReadSurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O21, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+            await OrganizationStoreContractCases.RunDetachedReadAsync(driver.Store, surface, $"o21-{surface}");
+        }
     }
 
     [Fact]
     public async Task OrganizationCreatedAtVariant_Should_PreserveExactOrderAndSnapshot()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O22, "Organization", nameof(OrganizationCreatedAtVariant.MembershipNonZeroOffset), EvidenceVectorKey.Default, RequiredRunner.InMemory);
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O22, "Organization", nameof(OrganizationCreatedAtVariant.MembershipHundredNanosecondOrder), EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        var first = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.FromHours(5));
-        var second = first.AddTicks(1);
-        await driver.Store.SaveMembershipAsync(Membership("first", "user", "tenant-a", first));
-        await driver.Store.SaveMembershipAsync(Membership("second", "user", "tenant-a", second));
-
-        var result = await driver.Store.GetMembershipsByUserAsync("user", "tenant-a");
-        result.Select(value => value.Id).Should().Equal("first", "second");
-        result[0].CreatedAt.Should().Be(first);
+        foreach (var variant in Enum.GetValues<OrganizationCreatedAtVariant>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O22, "Organization", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.InMemory);
+            await OrganizationStoreContractCases.RunCreatedAtAsync(driver.Store, variant, $"o22-{variant}");
+        }
     }
 
     [Theory]

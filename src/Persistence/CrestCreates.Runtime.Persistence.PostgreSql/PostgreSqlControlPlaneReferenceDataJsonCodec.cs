@@ -673,6 +673,12 @@ internal static class PostgreSqlControlPlaneReferenceDataJsonCodec
     private static InteractionTarget ToWorkflowTarget(PostgreSqlWorkflowTarget? target)
     {
         var value = Require(target, "workflow target");
+        var populatedArmCount = (value.Capability is null ? 0 : 1)
+            + (value.HumanTask is null ? 0 : 1)
+            + (value.SubWorkflow is null ? 0 : 1);
+        if (populatedArmCount != 1)
+            throw Invariant("workflow.target must contain exactly one reference arm.");
+
         return value.Type switch
         {
             PostgreSqlWorkflowTargetType.Capability => new CapabilityTarget

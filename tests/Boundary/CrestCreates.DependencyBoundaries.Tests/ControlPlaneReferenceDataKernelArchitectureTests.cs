@@ -208,7 +208,9 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
         }
 
         // Domain graph inventory is a separate guard from the provider DTO scan.
-        // Adding a new polymorphic domain arm must force an explicit mapping update.
+        // Walk every durable payload root recursively. A new interface/abstract/
+        // object slot anywhere below a payload must be added to the explicit
+        // persistence mapping manifest; a DTO-only walk cannot detect that drift.
         var payloadTypes = typeof(SchemaDescriptorDraftPayload).Assembly.GetTypes()
             .Where(type => typeof(DescriptorDraftPayload).IsAssignableFrom(type) && !type.IsAbstract)
             .Select(type => type.FullName!)
@@ -237,6 +239,51 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
         };
         targetTypes.SetEquals(expectedTargetTypes).Should().BeTrue(
             "every domain Workflow target arm must be explicitly represented by the persistence mapping");
+
+        var domainMappingManifest = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["CrestCreates.Workflow.Abstractions.WorkflowStep.Target:CrestCreates.Workflow.Abstractions.InteractionTarget"] =
+                "CrestCreates.Runtime.Persistence.PostgreSql.PostgreSqlWorkflowTarget",
+            ["CrestCreates.HumanTask.Abstractions.HumanTaskDescriptor.Interaction:CrestCreates.Metadata.Abstractions.IInteractionDescriptor"] =
+                "CrestCreates.Runtime.Persistence.PostgreSql.PostgreSqlDescriptorReference",
+            ["CrestCreates.HumanTask.Abstractions.CompletionOutcome.Capability:CrestCreates.Metadata.Abstractions.IVersionedDescriptor"] =
+                "CrestCreates.Runtime.Persistence.PostgreSql.PostgreSqlDescriptorReference"
+        };
+        var discoveredDomainSlots = new HashSet<string>(StringComparer.Ordinal);
+        var domainVisited = new HashSet<Type>();
+        var payloadAssembly = typeof(SchemaDescriptorDraftPayload).Assembly;
+        var domainQueue = new Queue<Type>(payloadTypes
+            .Select(typeName => payloadAssembly.GetType(typeName)!).Where(type => type is not null));
+        while (domainQueue.Count > 0)
+        {
+            var current = domainQueue.Dequeue();
+            if (!domainVisited.Add(current))
+                continue;
+
+            foreach (var property in current.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            {
+                var propertyType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+                var graphTypes = ExpandGraphTypes(propertyType).ToArray();
+                foreach (var graphType in graphTypes)
+                {
+                    if (graphType.IsInterface || graphType.IsAbstract || graphType == typeof(object))
+                    {
+                        var slot = $"{current.FullName}.{property.Name}:{graphType.FullName}";
+                        discoveredDomainSlots.Add(slot);
+                    }
+                    else if (graphType.IsClass && graphType.Namespace is not null
+                        && (graphType.Namespace.StartsWith("CrestCreates.", StringComparison.Ordinal)))
+                    {
+                        domainQueue.Enqueue(graphType);
+                    }
+                }
+            }
+        }
+
+        discoveredDomainSlots.Should().BeEquivalentTo(domainMappingManifest.Keys,
+            "every abstract/interface/object slot reachable from a durable Domain payload must have an explicit provider mapping");
+        domainMappingManifest.Values.Should().OnlyContain(value =>
+            value.StartsWith("CrestCreates.Runtime.Persistence.PostgreSql.", StringComparison.Ordinal));
 
         // Verify no abstract/interface-typed members leak from the durable payload DTO types.
         // Only scan types reachable from the serializer context root types (the 6 durable graphs).
@@ -283,6 +330,28 @@ public class ControlPlaneReferenceDataKernelArchitectureTests
                     $"DTO {current.Name}.{prop.Name} must not expose abstract type {underlying.Name}");
             }
         }
+    }
+
+    private static IEnumerable<Type> ExpandGraphTypes(Type type)
+    {
+        if (type.IsArray)
+        {
+            yield return type.GetElementType()!;
+            yield break;
+        }
+
+        if (type.IsGenericType)
+        {
+            foreach (var argument in type.GetGenericArguments())
+            {
+                foreach (var nested in ExpandGraphTypes(argument))
+                    yield return nested;
+            }
+
+            yield break;
+        }
+
+        yield return type;
     }
 }
 
@@ -360,14 +429,16 @@ public class ControlPlaneReferenceDataOrganizationSchemaTests : IAsyncLifetime
     [Fact]
     public async Task C07_OrganizationSchema_Should_NotContainCrossEntityForeignKeys()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C07, "Composition", "OrganizationEntitySurface", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+        foreach (var surface in Enum.GetNames<OrganizationEntitySurface>())
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C07, "Composition", surface, EvidenceVectorKey.Default, RequiredRunner.Architecture);
         await VerifyOrganizationSchemaHasNoCrossEntityForeignKeysAsync();
     }
 
     [Fact]
     public async Task O15_OrganizationProvider_Should_NotIntroduceReferentialSemantics()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O15, "Organization", "OrganizationEntitySurface", EvidenceVectorKey.Default, RequiredRunner.Architecture);
+        foreach (var surface in Enum.GetNames<OrganizationEntitySurface>())
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O15, "Organization", surface, EvidenceVectorKey.Default, RequiredRunner.Architecture);
         await VerifyOrganizationSchemaHasNoCrossEntityForeignKeysAsync();
     }
 

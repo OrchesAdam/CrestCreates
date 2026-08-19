@@ -109,6 +109,97 @@ public class ControlPlaneReferenceDataSpecTestSkeletonTests
     }
 
     [Fact]
+    public void FrozenOrganizationDimensions_Should_NotBeWeakened()
+    {
+        var expected = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [CaseId.O01] = "OrganizationIdentitySurface",
+            [CaseId.O02] = "OrganizationIdentitySurface",
+            [CaseId.O03] = "OrganizationQuerySurface",
+            [CaseId.O04] = "OrganizationQuerySurface",
+            [CaseId.O15] = "OrganizationEntitySurface",
+            [CaseId.O16] = "OrganizationEntitySurface",
+            [CaseId.O19] = "ScopedKeyCollisionVariant",
+            [CaseId.O20] = "OrganizationEntitySurface",
+            [CaseId.O21] = "OrganizationReadSurface",
+            [CaseId.O22] = "OrganizationCreatedAtVariant",
+            [CaseId.C07] = "OrganizationEntitySurface",
+            [CaseId.C09] = "SaveSurface"
+        };
+
+        foreach (var pair in expected)
+        {
+            var entry = ControlPlaneReferenceDataCaseManifest.AllCases.Single(c => c.CaseId == pair.Key);
+            entry.Variant.Should().Be(pair.Value,
+                $"Frozen Spec dimension for {pair.Key} must not be narrowed to an implementation-specific literal");
+        }
+
+        Enum.GetNames<OrganizationIdentitySurface>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataCaseManifest.EvidenceTuples
+                .Where(tuple => (tuple.CaseId is CaseId.O01 or CaseId.O02)
+                    && tuple.Runner == RequiredRunner.InMemory)
+                .Select(tuple => tuple.Variant)
+                .Distinct());
+        Enum.GetNames<OrganizationEntitySurface>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataManifestVariants(CaseId.O15));
+        Enum.GetNames<OrganizationEntitySurface>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataManifestVariants(CaseId.O16));
+        Enum.GetNames<OrganizationQuerySurface>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataManifestVariants(CaseId.O03));
+        Enum.GetNames<OrganizationQuerySurface>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataManifestVariants(CaseId.O04));
+        Enum.GetNames<OrganizationEntitySurface>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataManifestVariants(CaseId.O20));
+        Enum.GetNames<OrganizationReadSurface>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataManifestVariants(CaseId.O21));
+        Enum.GetNames<ScopedKeyCollisionVariant>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataManifestVariants(CaseId.O19));
+        Enum.GetNames<OrganizationCreatedAtVariant>().Should().BeEquivalentTo(
+            ControlPlaneReferenceDataManifestVariants(CaseId.O22));
+    }
+
+    [Fact]
+    public void SharedOrganizationCases_Should_RequireBothRunners()
+    {
+        var sharedCases = new[]
+        {
+            CaseId.O01, CaseId.O02, CaseId.O03, CaseId.O04, CaseId.O05,
+            CaseId.O06, CaseId.O07, CaseId.O08, CaseId.O09, CaseId.O10,
+            CaseId.O13, CaseId.O14, CaseId.O19, CaseId.O20, CaseId.O21, CaseId.O22
+        };
+
+        foreach (var caseId in sharedCases)
+        {
+            var runners = ControlPlaneReferenceDataCaseManifest.RunnerExpansion[caseId];
+            runners.Should().BeEquivalentTo(new[] { RequiredRunner.InMemory, RequiredRunner.PostgreSql },
+                $"shared Organization case {caseId} must run through both provider drivers");
+        }
+    }
+
+    [Fact]
+    public void SharedRuleCases_Should_RequireBothRunners()
+    {
+        var sharedCases = new[]
+        {
+            CaseId.P01, CaseId.P02, CaseId.P03, CaseId.P04, CaseId.P05,
+            CaseId.P06, CaseId.P07, CaseId.P10, CaseId.P11, CaseId.P12
+        };
+
+        foreach (var caseId in sharedCases)
+        {
+            ControlPlaneReferenceDataCaseManifest.RunnerExpansion[caseId]
+                .Should().BeEquivalentTo(new[] { RequiredRunner.InMemory, RequiredRunner.PostgreSql });
+        }
+    }
+
+    [Fact]
+    public void FrozenSaveSurface_Should_CoverAllSixSurfaces()
+    {
+        ControlPlaneReferenceDataManifestVariants(CaseId.C09)
+            .Should().BeEquivalentTo(Enum.GetNames<SaveSurface>());
+    }
+
+    [Fact]
     public void PgOnlyCases_Should_HavePostgreSqlOrArchitectureOrAotRunner()
     {
         var pgOnlyIds = new HashSet<string>
@@ -130,6 +221,12 @@ public class ControlPlaneReferenceDataSpecTestSkeletonTests
                 $"PG-only Case {entry.CaseId} must have PostgreSql, Architecture, or Aot runner, got {entry.Runner}");
         }
     }
+
+    private static IReadOnlySet<string> ControlPlaneReferenceDataManifestVariants(string caseId)
+        => ControlPlaneReferenceDataCaseManifest.EvidenceTuples
+            .Where(tuple => tuple.CaseId == caseId)
+            .Select(tuple => tuple.Variant)
+            .ToHashSet(StringComparer.Ordinal);
 
     [Fact]
     public void ManifestEntryCount_Should_Be77()

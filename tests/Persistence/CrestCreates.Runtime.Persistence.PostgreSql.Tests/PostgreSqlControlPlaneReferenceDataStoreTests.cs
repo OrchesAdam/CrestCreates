@@ -1,5 +1,6 @@
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.Organization;
 using CrestCreates.Organization.Abstractions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
@@ -175,10 +176,249 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
     }
 
     [Theory]
+    [InlineData("unit")]
+    [InlineData("position")]
+    [InlineData("membership-by-user")]
+    [InlineData("membership-by-unit")]
+    [InlineData("role-by-user")]
+    public async Task Organization_queries_Should_RejectWhitespaceTenantBeforeDatabaseAccess(string surface)
+    {
+        await using var lease = await _fixture.CreateSchemaLeaseAsync();
+        var services = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IOrganizationStore>();
+
+        Func<Task> act = surface switch
+        {
+            "unit" => () => store.GetOrganizationUnitByIdAsync("unit", "   "),
+            "position" => () => store.GetPositionByIdAsync("position", "   "),
+            "membership-by-user" => () => store.GetMembershipsByUserAsync("user", "   "),
+            "membership-by-unit" => () => store.GetMembershipsByOrganizationUnitAsync("unit", "   "),
+            "role-by-user" => () => store.GetRoleAssignmentsByUserAsync("user", "   "),
+            _ => throw new ArgumentOutOfRangeException(nameof(surface), surface, null)
+        };
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Rule_lookup_Should_RejectWhitespaceTenantBeforeDatabaseAccess(string tenantId)
+    {
+        await using var lease = await _fixture.CreateSchemaLeaseAsync();
+        var services = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IDataPermissionScopeRuleStore>();
+
+        await ((Func<Task>)(() => store.GetScopeKindAsync("resource", "read", "view", tenantId)))
+            .Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Organization_unfiltered_read_Should_RejectCorruptedPersistedIdentity()
+    {
+        await using var lease = await _fixture.CreateSchemaLeaseAsync();
+        var services = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IOrganizationStore>();
+        await store.SaveOrganizationUnitAsync(new OrganizationUnit { Id = "corrupt-identity", TenantId = "tenant-1", Name = "Unit" });
+
+        await DropAllCheckConstraintsAsync(lease.Options.ConnectionString, lease.Options.Schema, "organization_units");
+        await CorruptAsync(lease.Options.ConnectionString, lease.Options.Schema,
+            $"update \"{lease.Options.Schema}\".organization_units set tenant_id='   ', state_json=jsonb_set(state_json, '{{tenantId}}', '\"   \"'::jsonb) where organization_unit_id='corrupt-identity'");
+
+        Func<Task> read = () => store.GetOrganizationUnitsAsync();
+        await read.Should().ThrowAsync<RuntimePersistenceContractException>();
+    }
+
+    [Fact]
+    public async Task Organization_shared_contract_cases_Should_Run_All_Frozen_Surfaces()
+    {
+        await using var lease = await _fixture.CreateSchemaLeaseAsync();
+        var services = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IOrganizationStore>();
+
+        foreach (var surface in Enum.GetValues<OrganizationIdentitySurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O01, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await OrganizationStoreContractCases.RunIdentityAsync(store, surface, $"pg-o01-{surface}");
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O02, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await OrganizationStoreContractCases.RunIdentityAsync(store, surface, $"pg-o02-{surface}");
+        }
+
+        foreach (var surface in Enum.GetValues<OrganizationQuerySurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O03, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await OrganizationStoreContractCases.RunExplicitQueryAsync(store, surface, $"pg-o03-{surface}");
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O04, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await OrganizationStoreContractCases.RunUnfilteredQueryAsync(store, surface, $"pg-o04-{surface}");
+        }
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O05, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await store.SaveOrganizationUnitAsync(new OrganizationUnit { Id = "pg-o05-z", TenantId = "tenant", SortOrder = 2 });
+        await store.SaveOrganizationUnitAsync(new OrganizationUnit { Id = "pg-o05-a", TenantId = "tenant", SortOrder = 1 });
+        (await store.GetOrganizationUnitsAsync("tenant")).Select(x => x.Id).Should().Equal("pg-o05-a", "pg-o05-z");
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O06, "Organization", "Position", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await store.SavePositionAsync(new Position { Id = "pg-o06-z", TenantId = "tenant" });
+        await store.SavePositionAsync(new Position { Id = "pg-o06-a", TenantId = "tenant" });
+        (await store.GetPositionsAsync("tenant")).Select(x => x.Id).Should().Equal("pg-o06-a", "pg-o06-z");
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O07, "Organization", "MembershipByUser", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await store.SaveMembershipAsync(new UserOrganizationMembership { Id = "pg-o07-z", TenantId = "tenant", UserId = "user", OrganizationUnitId = "unit", CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(2) });
+        await store.SaveMembershipAsync(new UserOrganizationMembership { Id = "pg-o07-a", TenantId = "tenant", UserId = "user", OrganizationUnitId = "unit", CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(1) });
+        (await store.GetMembershipsByUserAsync("user", "tenant")).Select(x => x.Id).Should().Equal("pg-o07-a", "pg-o07-z");
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O08, "Organization", "MembershipByUnit", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await store.SaveMembershipAsync(new UserOrganizationMembership { Id = "pg-o08-z", TenantId = "tenant", UserId = "user-o08", OrganizationUnitId = "unit-o08", CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(2) });
+        await store.SaveMembershipAsync(new UserOrganizationMembership { Id = "pg-o08-a", TenantId = "tenant", UserId = "user-o08", OrganizationUnitId = "unit-o08", CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(1) });
+        (await store.GetMembershipsByOrganizationUnitAsync("unit-o08", "tenant")).Select(x => x.Id).Should().Equal("pg-o08-a", "pg-o08-z");
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O09, "Organization", "RoleAssignment", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await store.SaveRoleAssignmentAsync(new UserOrganizationRoleAssignment { Id = "pg-o09-z", TenantId = "tenant", UserId = "user", RoleId = "role", CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(2) });
+        await store.SaveRoleAssignmentAsync(new UserOrganizationRoleAssignment { Id = "pg-o09-a", TenantId = "tenant", UserId = "user", RoleId = "role", CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(1) });
+        (await store.GetRoleAssignmentsByUserAsync("user", "tenant")).Select(x => x.Id).Should().Equal("pg-o09-a", "pg-o09-z");
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O10, "Organization", "Membership", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await store.SaveMembershipAsync(new UserOrganizationMembership { Id = "same", TenantId = null, UserId = "primary", OrganizationUnitId = "global", IsPrimary = true });
+        await store.SaveMembershipAsync(new UserOrganizationMembership { Id = "same", TenantId = "tenant", UserId = "primary", OrganizationUnitId = "tenant", IsPrimary = true });
+        (await new DefaultOrganizationIdentityService(store).GetContextAsync("primary"))!.PrimaryOrganizationUnitId.Should().Be("global");
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O13, "Organization", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await store.SaveOrganizationUnitAsync(new OrganizationUnit { Id = "pg-o13", TenantId = "tenant", ParentId = "missing" });
+        (await store.GetOrganizationUnitByIdAsync("pg-o13", "tenant")).Should().NotBeNull();
+
+        foreach (var variant in Enum.GetValues<MissingReferenceVariant>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O14, "Organization", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await store.SaveMembershipAsync(new UserOrganizationMembership
+            {
+                Id = $"pg-o14-m-{variant}", TenantId = "tenant", UserId = "user", OrganizationUnitId = variant == MissingReferenceVariant.MembershipOrganizationUnit ? "missing" : "unit",
+                PositionId = variant == MissingReferenceVariant.MembershipPosition ? "missing-position" : null
+            });
+            await store.SaveRoleAssignmentAsync(new UserOrganizationRoleAssignment
+            {
+                Id = $"pg-o14-r-{variant}", TenantId = "tenant", UserId = "user", RoleId = variant == MissingReferenceVariant.RoleAssignmentRole ? "missing-role" : "role",
+                OrganizationUnitId = variant == MissingReferenceVariant.RoleAssignmentOrganizationUnit ? "missing-unit" : null
+            });
+        }
+
+        foreach (var variant in Enum.GetValues<ScopedKeyCollisionVariant>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O19, "Organization", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await OrganizationStoreContractCases.RunScopedKeyAsync(store, new DefaultOrganizationHierarchyService(store), $"pg-o19-{variant}");
+        }
+        foreach (var surface in Enum.GetValues<OrganizationEntitySurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O20, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await OrganizationStoreContractCases.RunEntitySnapshotAsync(store, surface, $"pg-o20-{surface}");
+        }
+        foreach (var surface in Enum.GetValues<OrganizationReadSurface>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O21, "Organization", surface.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await OrganizationStoreContractCases.RunDetachedReadAsync(store, surface, $"pg-o21-{surface}");
+        }
+        foreach (var variant in Enum.GetValues<OrganizationCreatedAtVariant>())
+        {
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.O22, "Organization", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            await OrganizationStoreContractCases.RunCreatedAtAsync(store, variant, $"pg-o22-{variant}");
+        }
+    }
+
+    [Fact]
+    public async Task Rule_shared_contract_cases_Should_Run_All_Frozen_Surfaces()
+    {
+        await using var lease = await _fixture.CreateSchemaLeaseAsync();
+        var services = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        await using var provider = services.BuildServiceProvider();
+        var store = provider.GetRequiredService<IDataPermissionScopeRuleStore>();
+
+        async Task Save(string resource, string? action, string? permission, string? tenant, DataPermissionScopeKind scope)
+            => await store.SaveRuleAsync(new DataPermissionScopeRule
+            {
+                Resource = resource, Action = action, Permission = permission, TenantId = tenant, ScopeKind = scope
+            });
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P01, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await DataPermissionScopeRuleStoreContractCases.ExactTenantAsync(
+            store, "p01", "tenant", DataPermissionScopeKind.Self);
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P02, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await Save("p02", "read", null, "tenant", DataPermissionScopeKind.OwnOrganization);
+        (await store.GetScopeKindAsync("p02", "read", "other", "tenant")).Should().Be(DataPermissionScopeKind.OwnOrganization);
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P03, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await Save("p03", null, null, "tenant", DataPermissionScopeKind.All);
+        (await store.GetScopeKindAsync("p03", "write", "view", "tenant")).Should().Be(DataPermissionScopeKind.All);
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P04, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await Save("p04", "read", "view", null, DataPermissionScopeKind.All);
+        (await store.GetScopeKindAsync("p04", "read", "view", "tenant")).Should().Be(DataPermissionScopeKind.All);
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P05, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await Save("p05", "read", "view", null, DataPermissionScopeKind.All);
+        await Save("p05", "read", null, "tenant", DataPermissionScopeKind.Self);
+        (await store.GetScopeKindAsync("p05", "read", "view", "tenant")).Should().Be(DataPermissionScopeKind.Self);
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P06, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await Save("p06", "read", "view", "other-tenant", DataPermissionScopeKind.All);
+        (await store.GetScopeKindAsync("p06", "read", "view", "tenant")).Should().BeNull();
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P07, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await Save("p07", "read", "view", "tenant", DataPermissionScopeKind.Self);
+        await Save("p07", "read", "view", "tenant", DataPermissionScopeKind.All);
+        (await store.GetScopeKindAsync("p07", "read", "view", "tenant")).Should().Be(DataPermissionScopeKind.All);
+
+        foreach (var variant in Enum.GetValues<RuleExactEmptyVariant>())
+        {
+            var resource = $"p10-{variant}";
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P10, "Rule", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+            switch (variant)
+            {
+                case RuleExactEmptyVariant.ActionEmpty:
+                    await Save(resource, string.Empty, "view", "tenant", DataPermissionScopeKind.Self);
+                    await Save(resource, null, null, "tenant", DataPermissionScopeKind.All);
+                    (await store.GetScopeKindAsync(resource, string.Empty, "view", "tenant")).Should().Be(DataPermissionScopeKind.Self);
+                    break;
+                case RuleExactEmptyVariant.PermissionEmpty:
+                    await Save(resource, "read", string.Empty, "tenant", DataPermissionScopeKind.Self);
+                    await Save(resource, null, null, "tenant", DataPermissionScopeKind.All);
+                    (await store.GetScopeKindAsync(resource, "read", string.Empty, "tenant")).Should().Be(DataPermissionScopeKind.Self);
+                    break;
+                default:
+                    await Save(resource, string.Empty, string.Empty, "tenant", DataPermissionScopeKind.Self);
+                    await Save(resource, null, null, "tenant", DataPermissionScopeKind.All);
+                    (await store.GetScopeKindAsync(resource, string.Empty, string.Empty, "tenant")).Should().Be(DataPermissionScopeKind.Self);
+                    break;
+            }
+        }
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P11, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await Save("p11", null, "view", "tenant", DataPermissionScopeKind.Self);
+        (await store.GetScopeKindAsync("p11", "read", "view", "tenant")).Should().BeNull();
+
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P12, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await Save("p12", null, "view", "tenant", DataPermissionScopeKind.Self);
+        (await store.GetScopeKindAsync("p12", null, "view", "tenant")).Should().Be(DataPermissionScopeKind.Self);
+    }
+
+    [Theory]
     [MemberData(nameof(PersistedRuleCorruptionData))]
     public async Task PersistedRuleCorruptionVariant_Should_FailClosed(PersistedRuleCorruptionVariant variant)
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P13, "Rule", variant.ToString(), EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P13, "Rule", variant.ToString(), EvidenceVectorKey.ProviderFailClosed, RequiredRunner.PostgreSql);
         await using var lease = await _fixture.CreateSchemaLeaseAsync();
         var services = new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
@@ -218,6 +458,38 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
         {
             (await act()).Should().BeNull("a corrupted rule key must not become an authorization decision");
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(PersistedRuleCorruptionData))]
+    public async Task PersistedRuleCorruptionVariant_IntactSchema_Should_RejectRawDml(PersistedRuleCorruptionVariant variant)
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P13, "Rule", variant.ToString(), EvidenceVectorKey.SchemaReject, RequiredRunner.PostgreSql);
+        await using var lease = await _fixture.CreateSchemaLeaseAsync();
+        var services = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+        await using var provider = services.BuildServiceProvider();
+        await provider.GetRequiredService<IDataPermissionScopeRuleStore>().SaveRuleAsync(new DataPermissionScopeRule
+        {
+            Resource = "schema-rule",
+            Action = "read",
+            Permission = "view",
+            TenantId = "tenant-1",
+            ScopeKind = DataPermissionScopeKind.Self
+        });
+
+        Func<Task> act = async () =>
+        {
+            await using var connection = new NpgsqlConnection(lease.Options.ConnectionString);
+            await connection.OpenAsync();
+            await using var update = new NpgsqlCommand(
+                $"update \"{lease.Options.Schema}\".data_permission_scope_rules set {CorruptionSql(variant)} where tenant_scope_kind='tenant' and tenant_id='tenant-1' and resource='schema-rule'",
+                connection);
+            await update.ExecuteNonQueryAsync();
+        };
+
+        await act.Should().ThrowAsync<PostgresException>();
     }
 
     public static IEnumerable<object[]> PersistedRuleCorruptionData()
@@ -755,6 +1027,10 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
                 await CorruptAsync(lease.Options.ConnectionString, schema,
                     $"update \"{schema}\".control_plane_descriptor_drafts set state_json = jsonb_set(state_json, '{{workflow,steps,0,target,type}}', '99'::jsonb) where tenant_id='tenant-1' and draft_id='f07-draft-wf'");
                 var act = () => store.GetAsync("tenant-1", "f07-draft-wf");
+                (await act.Should().ThrowAsync<RuntimePersistenceContractException>()).Which.Code.Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
+
+                await CorruptAsync(lease.Options.ConnectionString, schema,
+                    $"update \"{schema}\".control_plane_descriptor_drafts set state_json = jsonb_set(jsonb_set(state_json, '{{workflow,steps,0,target,type}}', '0'::jsonb), '{{workflow,steps,0,target,humanTask}}', '{{\"id\":\"task-1\",\"version\":1}}'::jsonb) where tenant_id='tenant-1' and draft_id='f07-draft-wf'");
                 (await act.Should().ThrowAsync<RuntimePersistenceContractException>()).Which.Code.Should().Be(RuntimePersistenceContractErrorCode.PersistedInvariantViolation);
                 break;
             }

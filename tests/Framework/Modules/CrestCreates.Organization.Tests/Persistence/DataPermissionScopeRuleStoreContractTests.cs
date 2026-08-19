@@ -12,9 +12,8 @@ public sealed class DataPermissionScopeRuleStoreContractTests
     {
         ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.P01, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
-        await Save(driver, "read", "view", "tenant-a", DataPermissionScopeKind.Self);
-        (await driver.Store.GetScopeKindAsync("resource", "read", "view", "tenant-a"))
-            .Should().Be(DataPermissionScopeKind.Self);
+        await DataPermissionScopeRuleStoreContractCases.ExactTenantAsync(
+            driver.Store, "resource", "tenant-a", DataPermissionScopeKind.Self);
     }
 
     [Fact]
@@ -167,6 +166,19 @@ public sealed class DataPermissionScopeRuleStoreContractTests
             _ => throw new ArgumentOutOfRangeException(nameof(variant))
         };
         await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData(EvidenceVectorKey.Empty)]
+    [InlineData(EvidenceVectorKey.Whitespace)]
+    public async Task RuleLookup_InvalidNonNullTenant_Should_FailBeforeQuery(EvidenceVectorKey key)
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(
+            CaseId.V01, "Validation", IdentityValidationVector.RuleInvalidNonNullTenant.ToString(), key, RequiredRunner.InMemory);
+        var driver = NewDriver();
+
+        await ((Func<Task>)(() => driver.Store.GetScopeKindAsync(
+            "resource", "read", "view", InvalidText(key)))).Should().ThrowAsync<ArgumentException>();
     }
 
     private static string? InvalidText(EvidenceVectorKey key)

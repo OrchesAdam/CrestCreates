@@ -307,7 +307,9 @@ public enum EvidenceVectorKey
     JsonGlobalColumnsExact,
     JsonExactColumnsGlobal,
     JsonNullColumnNonNull,
-    JsonNonNullColumnNull
+    JsonNonNullColumnNull,
+    SchemaReject,
+    ProviderFailClosed
 }
 
 public enum RequiredRunner
