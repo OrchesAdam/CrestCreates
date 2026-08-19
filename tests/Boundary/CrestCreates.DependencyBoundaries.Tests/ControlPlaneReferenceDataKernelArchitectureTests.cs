@@ -15,7 +15,7 @@ using Xunit;
 
 namespace CrestCreates.DependencyBoundaries.Tests;
 
-[Collection(ZControlPlaneReferenceDataSpecTestSkeletonTests.ControlPlaneReferenceDataEvidenceCollection.Name)]
+[Collection(ControlPlaneReferenceDataSpecTestSkeletonTests.ControlPlaneReferenceDataEvidenceCollection.Name)]
 public class ControlPlaneReferenceDataKernelArchitectureTests
 {
     private static readonly Assembly PgAssembly = typeof(PostgreSqlDescriptorDraftStore).Assembly;
@@ -342,7 +342,7 @@ public class OrganizationSchemaFixture : IAsyncLifetime
     }
 }
 
-[Collection(ZControlPlaneReferenceDataSpecTestSkeletonTests.ControlPlaneReferenceDataEvidenceCollection.Name)]
+[Collection(ControlPlaneReferenceDataSpecTestSkeletonTests.ControlPlaneReferenceDataEvidenceCollection.Name)]
 public class ControlPlaneReferenceDataOrganizationSchemaTests : IAsyncLifetime
 {
     private readonly OrganizationSchemaFixture _fixture = new();

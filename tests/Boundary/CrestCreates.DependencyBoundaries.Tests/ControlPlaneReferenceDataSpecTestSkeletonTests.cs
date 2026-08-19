@@ -17,19 +17,17 @@ namespace CrestCreates.DependencyBoundaries.Tests;
 ///
 /// The gate must run after the Control Plane evidence tests in this project
 /// (ControlPlaneReferenceDataKernelArchitectureTests and
-/// ControlPlaneReferenceDataOrganizationSchemaTests). All three classes share
-/// <see cref="ControlPlaneReferenceDataEvidenceCollection"/>, whose
-/// DisableParallelization guarantees sequential execution. The leading Z in
-/// this class name keeps the gate after the two producer classes in xUnit's
-/// collection class order; if that ordering changes, this gate fails loudly
-/// instead of silently passing.
+/// ControlPlaneReferenceDataOrganizationSchemaTests) and after the other
+/// evidence-producing test projects. The CI workflow invokes the producer
+/// suite and this gate as separate test commands; xUnit collection
+/// DisableParallelization alone does not define a cross-class execution order.
 /// </summary>
 [Collection(ControlPlaneReferenceDataEvidenceCollection.Name)]
-public class ZControlPlaneReferenceDataSpecTestSkeletonTests
+public class ControlPlaneReferenceDataSpecTestSkeletonTests
 {
     private readonly ITestOutputHelper _output;
 
-    public ZControlPlaneReferenceDataSpecTestSkeletonTests(ITestOutputHelper output)
+    public ControlPlaneReferenceDataSpecTestSkeletonTests(ITestOutputHelper output)
     {
         _output = output;
     }

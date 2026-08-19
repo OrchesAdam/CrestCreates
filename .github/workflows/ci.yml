@@ -181,8 +181,15 @@ jobs:
           dotnet test tests/Integrations/CrestCreates.Mcp.Memory.Tests --no-build
 
       # ── Boundary ──
+      # The reference-data evidence gate consumes files produced by all prior
+      # evidence suites. xUnit does not guarantee cross-class ordering inside a
+      # collection, so run the producer suite and the final exact-set gate as
+      # separate commands.
       - name: Test — Dependency Boundaries
-        run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build
+        run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build --filter "FullyQualifiedName!~ControlPlaneReferenceDataSpecTestSkeletonTests"
+
+      - name: Test — Control Plane reference-data evidence ledger gate
+        run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build --filter "FullyQualifiedName~ControlPlaneReferenceDataSpecTestSkeletonTests"
 
       # ── AOT fixture publish — validates Tier 2 NativeAOT-verified mainline ──
       - name: Publish — CapabilityEndpoint AotFixture (NativeAOT)
