@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using FluentAssertions;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -9,10 +10,13 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests;
 public sealed class PostgreSqlRuntimeAotFixtureTests
 {
     [Fact]
-    public async Task Publish_native_aot_postgresql_runtime_links_and_executes_real_database_operations()
+    public async Task DurableControlPlaneReferenceDataAotFixture_Should_PublishLinkAndRun()
     {
         if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
             throw Xunit.Sdk.SkipException.ForSkip("The PostgreSQL Runtime NativeAOT gate is pinned to linux-x64.");
+
+        foreach (var scenario in Enum.GetNames<AotScenarioVariant>())
+            ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C12, "Composition", scenario, EvidenceVectorKey.Default, RequiredRunner.Aot);
 
         var root = FindRepositoryRoot();
         var output = Path.Combine(Path.GetTempPath(), "crest-runtime-postgresql-aot-" + Guid.NewGuid().ToString("N"));
@@ -58,6 +62,12 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_PIN_RECOVERY_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_CAPABILITY_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_HUMAN_TASK_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_SUBWORKFLOW_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_REFERENCE_ORGANIZATION_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_REFERENCE_DATA_PERMISSION_OK");
+            execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_REFERENCE_DATA_OK");
             // Real CrashWorker-style subprocess commit → kill → fresh-process recovery
             // for each of the five pre-dispatch crash windows.
             execution.Output.Should().Contain("CRESTCREATES_AGENTTOOL_PREDISPATCH_CW04_OK");

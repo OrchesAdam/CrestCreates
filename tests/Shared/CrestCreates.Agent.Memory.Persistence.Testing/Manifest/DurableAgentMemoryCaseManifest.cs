@@ -71,7 +71,7 @@ public static class DurableAgentMemoryCaseManifest
     private const string BoundaryClass = "CrestCreates.DependencyBoundaries.Tests.DurableAgentMemoryPersistenceArchitectureTests";
     private const string AotFixtureClass = "CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests.PostgreSqlRuntimeAotFixtureTests";
 
-    private const string AotMethodName = "Publish_native_aot_postgresql_runtime_links_and_executes_real_database_operations";
+    private const string AotMethodName = "DurableControlPlaneReferenceDataAotFixture_Should_PublishLinkAndRun";
 
     private static DurableAgentMemoryEvidenceTuple T(
         DurableAgentMemoryEvidenceKind kind,

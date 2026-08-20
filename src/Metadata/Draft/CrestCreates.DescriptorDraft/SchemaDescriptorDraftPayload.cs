@@ -30,6 +30,7 @@ public sealed record SchemaDescriptorDraftPayload(
     {
         Name = field.Name,
         FieldType = field.FieldType,
+        ObjectSchema = field.ObjectSchema,
         IsRequired = field.IsRequired,
         IsNullable = field.IsNullable,
         MaxLength = field.MaxLength,

@@ -49,10 +49,21 @@ internal static class PostgreSqlRuntimeStoreSupport
         => JsonSerializer.Serialize(value, typeInfo);
 
     public static T Deserialize<T>(string payload, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
-        => JsonSerializer.Deserialize(payload, typeInfo)
-           ?? throw new RuntimePersistenceContractException(
-               RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
-               "PostgreSQL Runtime persistence returned an invalid JSON payload.");
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(payload, typeInfo)
+                ?? throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                    "PostgreSQL Runtime persistence returned an invalid JSON payload.");
+        }
+        catch (JsonException)
+        {
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "PostgreSQL Runtime persistence returned malformed JSON.");
+        }
+    }
 
     public static RuntimePersistenceContractException Correlation(string message)
         => new(RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict, message);

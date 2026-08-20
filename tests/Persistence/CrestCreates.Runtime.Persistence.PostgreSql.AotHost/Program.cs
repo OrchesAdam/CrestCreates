@@ -5,6 +5,8 @@ using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
+using CrestCreates.DescriptorDraft;
+using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Core.Abstractions.Serialization;
 using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
@@ -14,6 +16,8 @@ using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.Metadata.AgentTool;
+using CrestCreates.Organization;
+using CrestCreates.Organization.Abstractions;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
@@ -22,9 +26,8 @@ using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
 using CrestCreates.Agent.Memory.Accountability.Bootstrap;
 using CrestCreates.Agent.Memory.CanonicalHashing;
-using CrestCreates.Metadata.Abstractions;
-using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Runtime.Persistence.PostgreSql;
+using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -45,6 +48,7 @@ if (args.Length == 3)
     return await RunPreDispatchCrashChildAsync(options, args[2]);
 
 await new PostgreSqlRuntimeMigrationRunner(options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
+await RunControlPlaneReferenceDataMainlineAsync(options);
 
 var workflowDescriptor = new WorkflowDescriptor { Id = "approval", Name = "Approval", Version = 1 };
 var humanTaskDescriptor = new HumanTaskDescriptor
@@ -470,10 +474,191 @@ static ServiceProvider BuildProvider(
     services.AddHumanTaskRuntime();
     services.AddSingleton<IRuntimeStateContractContributor, AotRuntimeStateContractContributor>();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
+    services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
     var provider = services.BuildServiceProvider();
     provider.GetRequiredService<IWorkflowRegistry>().Build([new SingleDescriptorProvider<WorkflowDescriptor>(workflow)]);
     provider.GetRequiredService<IHumanTaskRegistry>().Build([new SingleDescriptorProvider<HumanTaskDescriptor>(humanTask)]);
     return provider;
+}
+
+static async Task RunControlPlaneReferenceDataMainlineAsync(PostgreSqlRuntimePersistenceOptions options)
+{
+    await using var provider = BuildProvider(options, new WorkflowDescriptor(), new HumanTaskDescriptor());
+    using var scope = provider.CreateScope();
+    var services = scope.ServiceProvider;
+
+    var draft = new DescriptorDraft
+    {
+        TenantId = "aot",
+        DraftId = "reference-data-draft",
+        DescriptorKind = DescriptorKind.Schema,
+        DescriptorId = "reference-data-schema",
+        Operation = DescriptorDraftOperation.Create,
+        AuthorKind = DescriptorDraftAuthorKind.System,
+        AuthorId = "aot",
+        CreatedAt = DateTimeOffset.UnixEpoch,
+        Payload = new SchemaDescriptorDraftPayload(new SchemaDescriptor
+        {
+            Id = "reference-data-schema",
+            Name = "Reference Data Schema",
+            Fields = new[] { new SchemaFieldDescriptor { Name = "Name", FieldType = "string" } }
+        })
+    };
+    var drafts = services.GetRequiredService<IDescriptorDraftStore>();
+    await drafts.SaveAsync(draft);
+    if ((await drafts.GetAsync(draft.TenantId, draft.DraftId))?.DescriptorId != draft.DescriptorId)
+        throw new InvalidOperationException("Reference Data Draft AOT round-trip failed.");
+
+    var workflowTargets = new (string Name, InteractionTarget Target)[]
+    {
+        ("capability", new CapabilityTarget
+        {
+            Capability = new VersionedDescriptorRef<IVersionedDescriptor> { Id = "reference-data-capability", Version = 1 }
+        }),
+        ("human-task", new HumanTaskTarget
+        {
+            HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor> { Id = "reference-data-task", Version = 1 }
+        }),
+        ("sub-workflow", new SubWorkflowTarget
+        {
+            SubWorkflow = new VersionedDescriptorRef<WorkflowDescriptor> { Id = "reference-data-child-workflow", Version = 1 }
+        })
+    };
+    foreach (var (name, target) in workflowTargets)
+    {
+        var workflowDraft = new DescriptorDraft
+        {
+            TenantId = "aot",
+            DraftId = $"reference-data-workflow-{name}",
+            DescriptorKind = DescriptorKind.Workflow,
+            DescriptorId = $"reference-data-workflow-{name}",
+            Operation = DescriptorDraftOperation.Create,
+            AuthorKind = DescriptorDraftAuthorKind.System,
+            AuthorId = "aot",
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            Payload = new WorkflowDescriptorDraftPayload(new WorkflowDescriptor
+            {
+                Id = $"reference-data-workflow-{name}",
+                Name = "Reference Data Workflow",
+                Steps = new[] { new WorkflowStep { Id = "step", Name = name, Target = target } }
+            })
+        };
+        await drafts.SaveAsync(workflowDraft);
+        if ((await drafts.GetAsync(workflowDraft.TenantId, workflowDraft.DraftId))?.Payload is not WorkflowDescriptorDraftPayload)
+            throw new InvalidOperationException($"Reference Data Workflow {name} AOT round-trip failed.");
+        Console.WriteLine(name switch
+        {
+            "capability" => "CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_CAPABILITY_OK",
+            "human-task" => "CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_HUMAN_TASK_OK",
+            "sub-workflow" => "CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_SUBWORKFLOW_OK",
+            _ => throw new InvalidOperationException($"Unknown workflow target marker '{name}'.")
+        });
+    }
+
+    var unit = new OrganizationUnit
+    {
+        Id = "reference-data-unit",
+        TenantId = "aot",
+        Name = "Reference Data Unit",
+        CreatedAt = DateTimeOffset.UnixEpoch
+    };
+    var organizations = services.GetRequiredService<IOrganizationStore>();
+    await organizations.SaveOrganizationUnitAsync(unit);
+    if ((await organizations.GetOrganizationUnitByIdAsync(unit.Id, unit.TenantId))?.Name != unit.Name)
+        throw new InvalidOperationException("Reference Data Organization AOT round-trip failed.");
+
+    var child = new OrganizationUnit
+    {
+        Id = "reference-data-child-unit",
+        TenantId = "aot",
+        Name = "Reference Data Child Unit",
+        ParentId = unit.Id,
+        CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(1)
+    };
+    var position = new Position
+    {
+        Id = "reference-data-position",
+        TenantId = "aot",
+        Name = "Reference Data Position",
+        CreatedAt = DateTimeOffset.UnixEpoch
+    };
+    var membership = new UserOrganizationMembership
+    {
+        Id = "reference-data-membership",
+        TenantId = "aot",
+        UserId = "reference-data-user",
+        OrganizationUnitId = child.Id,
+        PositionId = position.Id,
+        IsPrimary = true,
+        CreatedAt = DateTimeOffset.UnixEpoch
+    };
+    var role = new UserOrganizationRoleAssignment
+    {
+        Id = "reference-data-role-assignment",
+        TenantId = "aot",
+        UserId = membership.UserId,
+        RoleId = "reference-data-role",
+        OrganizationUnitId = child.Id,
+        CreatedAt = DateTimeOffset.UnixEpoch
+    };
+    await organizations.SaveOrganizationUnitAsync(child);
+    await organizations.SavePositionAsync(position);
+    await organizations.SaveMembershipAsync(membership);
+    await organizations.SaveRoleAssignmentAsync(role);
+    if ((await organizations.GetPositionByIdAsync(position.Id, position.TenantId))?.Id != position.Id
+        || !(await organizations.GetMembershipsByUserAsync(membership.UserId, membership.TenantId)).Any()
+        || !(await organizations.GetRoleAssignmentsByUserAsync(role.UserId, role.TenantId)).Any())
+        throw new InvalidOperationException("Reference Data Organization entity AOT round-trip failed.");
+
+    var hierarchy = new DefaultOrganizationHierarchyService(organizations);
+    if (!(await hierarchy.GetDescendantsAsync(unit.Id, unit.TenantId)).Any(value => value.Id == child.Id))
+        throw new InvalidOperationException("Reference Data Organization hierarchy AOT projection failed.");
+    var identity = await new DefaultOrganizationIdentityService(organizations)
+        .GetContextAsync(membership.UserId, membership.TenantId);
+    if (identity.PrimaryOrganizationUnitId != child.Id
+        || !identity.PositionIds.Contains(position.Id, StringComparer.Ordinal)
+        || !identity.RoleIds.Contains(role.RoleId, StringComparer.Ordinal))
+        throw new InvalidOperationException("Reference Data Organization identity AOT projection failed.");
+    Console.WriteLine("CRESTCREATES_DURABLE_REFERENCE_ORGANIZATION_OK");
+
+    var rules = services.GetRequiredService<IDataPermissionScopeRuleStore>();
+    await rules.SaveRuleAsync(new DataPermissionScopeRule
+    {
+        Resource = "reference-data",
+        Action = "read",
+        Permission = "view",
+        TenantId = "aot",
+        ScopeKind = DataPermissionScopeKind.Self
+    });
+    if (await rules.GetScopeKindAsync("reference-data", "read", "view", "aot") != DataPermissionScopeKind.Self)
+        throw new InvalidOperationException("Reference Data Rule AOT round-trip failed.");
+
+    await rules.SaveRuleAsync(new DataPermissionScopeRule
+    {
+        Resource = "reference-data-fallback",
+        Action = "read",
+        Permission = "view",
+        ScopeKind = DataPermissionScopeKind.All
+    });
+    if (await rules.GetScopeKindAsync("reference-data-fallback", "read", "view", "aot") != DataPermissionScopeKind.All)
+        throw new InvalidOperationException("Reference Data Rule global fallback AOT projection failed.");
+    Console.WriteLine("CRESTCREATES_DURABLE_REFERENCE_DATA_PERMISSION_OK");
+
+    await using var freshProvider = BuildProvider(
+        options,
+        new WorkflowDescriptor { Id = "reference-data-restart-workflow", Name = "Restart", Version = 1 },
+        new HumanTaskDescriptor { Id = "reference-data-restart-task", Name = "Restart", Version = 1 });
+    using var freshScope = freshProvider.CreateScope();
+    var freshServices = freshScope.ServiceProvider;
+    if ((await freshServices.GetRequiredService<IDescriptorDraftStore>()
+            .GetAsync(draft.TenantId, draft.DraftId))?.DescriptorId != draft.DescriptorId
+        || (await freshServices.GetRequiredService<IOrganizationStore>()
+            .GetOrganizationUnitByIdAsync(unit.Id, unit.TenantId))?.Name != unit.Name
+        || await freshServices.GetRequiredService<IDataPermissionScopeRuleStore>()
+            .GetScopeKindAsync("reference-data-fallback", "read", "view", "aot") != DataPermissionScopeKind.All)
+        throw new InvalidOperationException("Reference Data provider reconstruction failed.");
+
+    Console.WriteLine("CRESTCREATES_DURABLE_CONTROL_PLANE_REFERENCE_DATA_OK");
 }
 
 static CanonicalHash RuntimeHash(string value, string purpose) => new()

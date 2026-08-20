@@ -182,7 +182,13 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             "agent_tool_governance_decisions",
             "agent_tool_governance_finalizations",
             "agent_tool_reconciliation_observations",
-            "agent_tool_reconciliation_receipts"
+            "agent_tool_reconciliation_receipts",
+            "control_plane_descriptor_drafts",
+            "organization_units",
+            "organization_positions",
+            "organization_memberships",
+            "organization_role_assignments",
+            "data_permission_scope_rules"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -195,14 +201,141 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         {
             await ValidateTableColumnsAsync(connection, table, cancellationToken).ConfigureAwait(false);
             await ValidatePrimaryKeyAsync(connection, table, cancellationToken).ConfigureAwait(false);
-            foreach (var check in table.RequiredChecks)
-                await ValidateCheckAsync(connection, table.Name, check, cancellationToken).ConfigureAwait(false);
-            foreach (var index in table.RequiredIndexes)
-                await ValidateIndexAsync(connection, table.Name, index, cancellationToken).ConfigureAwait(false);
-            foreach (var foreignKey in table.RequiredForeignKeys)
-                await ValidateForeignKeyAsync(connection, table.Name, foreignKey, cancellationToken).ConfigureAwait(false);
+            await ValidateChecksExactAsync(connection, table, cancellationToken).ConfigureAwait(false);
+            await ValidateIndexesExactAsync(connection, table, cancellationToken).ConfigureAwait(false);
+            await ValidateForeignKeysExactAsync(connection, table, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    private async Task ValidateChecksExactAsync(
+        NpgsqlConnection connection,
+        RuntimeSchemaTable table,
+        CancellationToken cancellationToken)
+    {
+        var actual = new Dictionary<string, string>(StringComparer.Ordinal);
+        await using var command = new NpgsqlCommand(
+            "select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = @relation::regclass and contype = 'c';",
+            connection);
+        command.Parameters.AddWithValue("relation", $"{_options.Schema}.{table.Name}");
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            actual.Add(reader.GetString(0), NormalizeSql(reader.GetString(1)));
+
+        var expected = table.RequiredChecks.ToDictionary(
+            check => check.Name,
+            check => NormalizeSql(check.Definition),
+            StringComparer.Ordinal);
+        if (actual.Count != expected.Count
+            || actual.Any(pair => !expected.TryGetValue(pair.Key, out var definition)
+                || !string.Equals(definition, pair.Value, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table.Name}' has an unexpected CHECK constraint set.");
+        }
+    }
+
+    private async Task ValidateIndexesExactAsync(
+        NpgsqlConnection connection,
+        RuntimeSchemaTable table,
+        CancellationToken cancellationToken)
+    {
+        var actualNames = new HashSet<string>(StringComparer.Ordinal);
+        await using (var command = new NpgsqlCommand("""
+            select index_info.indexname
+            from pg_indexes index_info
+            join pg_class index_relation on index_relation.relname = index_info.indexname
+            join pg_namespace index_schema on index_schema.oid = index_relation.relnamespace
+                and index_schema.nspname = index_info.schemaname
+            where index_info.schemaname=@schema
+              and index_info.tablename=@table
+              and not exists (
+                  select 1 from pg_constraint primary_key
+                  where primary_key.conindid = index_relation.oid
+                    and primary_key.contype = 'p')
+            """, connection))
+        {
+            command.Parameters.AddWithValue("schema", _options.Schema);
+            command.Parameters.AddWithValue("table", table.Name);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                actualNames.Add(reader.GetString(0));
+        }
+
+        var expectedNames = table.RequiredIndexes.Select(index => index.Name).ToHashSet(StringComparer.Ordinal);
+        if (!actualNames.SetEquals(expectedNames))
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table.Name}' has an unexpected non-primary index set.");
+
+        foreach (var index in table.RequiredIndexes)
+            await ValidateIndexAsync(connection, table.Name, index, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ValidateForeignKeysExactAsync(
+        NpgsqlConnection connection,
+        RuntimeSchemaTable table,
+        CancellationToken cancellationToken)
+    {
+        var actual = new HashSet<string>(StringComparer.Ordinal);
+        await using var command = new NpgsqlCommand("""
+            select constraint_info.condeferrable,
+                   constraint_info.condeferred,
+                   constraint_info.confdeltype,
+                   referenced_schema.nspname,
+                   referenced_relation.relname,
+                   array(
+                       select source_attribute.attname
+                       from unnest(constraint_info.conkey) with ordinality source_key(attnum, ordinal)
+                       join pg_attribute source_attribute on source_attribute.attrelid = relation.oid and source_attribute.attnum = source_key.attnum
+                       order by source_key.ordinal),
+                   array(
+                       select referenced_attribute.attname
+                       from unnest(constraint_info.confkey) with ordinality referenced_key(attnum, ordinal)
+                       join pg_attribute referenced_attribute on referenced_attribute.attrelid = referenced_relation.oid and referenced_attribute.attnum = referenced_key.attnum
+                       order by referenced_key.ordinal)
+            from pg_constraint constraint_info
+            join pg_class relation on relation.oid = constraint_info.conrelid
+            join pg_namespace schema_info on schema_info.oid = relation.relnamespace
+            join pg_class referenced_relation on referenced_relation.oid = constraint_info.confrelid
+            join pg_namespace referenced_schema on referenced_schema.oid = referenced_relation.relnamespace
+            where schema_info.nspname=@schema and relation.relname=@table and constraint_info.contype='f';
+            """, connection);
+        command.Parameters.AddWithValue("schema", _options.Schema);
+        command.Parameters.AddWithValue("table", table.Name);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            actual.Add(ForeignKeySignature(
+                reader.GetBoolean(0),
+                reader.GetBoolean(1),
+                MapDeleteAction(reader.GetChar(2).ToString()),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetFieldValue<string[]>(5),
+                reader.GetFieldValue<string[]>(6)));
+        }
+
+        var expected = table.RequiredForeignKeys
+            .Select(foreignKey => ForeignKeySignature(
+                foreignKey.Deferrable,
+                foreignKey.InitiallyDeferred,
+                foreignKey.DeleteAction,
+                _options.Schema,
+                foreignKey.ReferencedTable,
+                foreignKey.Columns.Split(", ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
+                foreignKey.ReferencedColumns.Split(", ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)))
+            .ToHashSet(StringComparer.Ordinal);
+        if (!actual.SetEquals(expected))
+            throw new InvalidOperationException($"PostgreSQL runtime table '{table.Name}' has an unexpected foreign-key set.");
+    }
+
+    private static string ForeignKeySignature(
+        bool deferrable,
+        bool initiallyDeferred,
+        string deleteAction,
+        string schema,
+        string table,
+        IReadOnlyList<string> columns,
+        IReadOnlyList<string> referencedColumns)
+        => string.Join("|", deferrable, initiallyDeferred, deleteAction, schema, table,
+            string.Join(",", columns), string.Join(",", referencedColumns));
 
     private async Task ValidateTableColumnsAsync(NpgsqlConnection connection, RuntimeSchemaTable table, CancellationToken cancellationToken)
     {
@@ -277,6 +410,11 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                        select attribute.attname
                        from unnest(index_data.indkey) with ordinality index_key(attnum, ordinal)
                        join pg_attribute attribute on attribute.attrelid = table_relation.oid and attribute.attnum = index_key.attnum
+                       order by index_key.ordinal),
+                   array(
+                       select case when index_key.collation_oid = 0 then '' else coll.collname end
+                       from unnest(index_data.indcollation) with ordinality index_key(collation_oid, ordinal)
+                       left join pg_collation coll on coll.oid = index_key.collation_oid
                        order by index_key.ordinal)
             from pg_indexes index_info
             join pg_class index_relation on index_relation.relname = index_info.indexname
@@ -293,7 +431,9 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
             || reader.GetBoolean(0) != expected.Unique
             || !string.Equals(NormalizeSql(reader.GetString(1)), NormalizeSql(expected.Predicate), StringComparison.Ordinal)
-            || !reader.GetFieldValue<string[]>(2).SequenceEqual(expectedColumns, StringComparer.Ordinal))
+            || !reader.GetFieldValue<string[]>(2).SequenceEqual(expectedColumns, StringComparer.Ordinal)
+            || (expected.KeyCollations is not null
+                && !reader.GetFieldValue<string[]>(3).SequenceEqual(expected.KeyCollations, StringComparer.Ordinal)))
         {
             throw new InvalidOperationException($"PostgreSQL runtime table '{table}' has an incompatible required index.");
         }
@@ -474,7 +614,12 @@ public sealed class PostgreSqlRuntimeMigrationRunner
 
     private sealed record AppliedMigration(string Version, string Name, string Checksum);
     private sealed record RuntimeSchemaCheck(string Name, string Definition);
-    private sealed record RuntimeSchemaIndex(string Name, IReadOnlyList<string> Columns, string Predicate, bool Unique = true);
+    private sealed record RuntimeSchemaIndex(
+        string Name,
+        IReadOnlyList<string> Columns,
+        string Predicate,
+        bool Unique = true,
+        IReadOnlyList<string>? KeyCollations = null);
     private sealed record RuntimeSchemaForeignKey(
         string Columns,
         string ReferencedTable,
@@ -502,7 +647,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
         private static readonly (string Type, string Nullable, string? Collation) Boolean = ("boolean", "NO", null);
         private static readonly (string Type, string Nullable, string? Collation) Timestamp = ("timestamp with time zone", "NO", null);
         private static readonly (string Type, string Nullable, string? Collation) NullableTimestamp = ("timestamp with time zone", "YES", null);
-                private static readonly (string Type, string Nullable, string? Collation) TextC = ("text", "NO", "C");
+        private static readonly (string Type, string Nullable, string? Collation) TextC = ("text", "NO", "C");
         private static readonly (string Type, string Nullable, string? Collation) NullableTextC = ("text", "YES", "C");
 
         public static readonly IReadOnlyList<RuntimeSchemaTable> Tables =
@@ -514,8 +659,10 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["waiting_instance_id"] = NullableText, ["suspension_operation_id"] = NullableText,
                 ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
             }, ["tenant_scope_kind", "tenant_id", "instance_id"],
-            [new("ck_runtime_workflow_revision", "check (revision > 0)"),
-             new("ck_runtime_workflow_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))")],
+             [new("ck_runtime_workflow_revision", "check (revision > 0)"),
+              new("ck_runtime_workflow_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+              new("runtime_workflow_instances_check", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+              new("runtime_workflow_instances_revision_check", "check (revision > 0)")],
             [new("ux_runtime_workflow_waiting", ["tenant_scope_kind", "tenant_id", "waiting_instance_id"], "waiting_instance_id is not null")],
             [new("tenant_scope_kind, tenant_id, instance_id, waiting_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT")]),
             new("runtime_human_task_instances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
@@ -527,10 +674,13 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp,
                 ["completed_at"] = NullableTimestamp, ["cancelled_at"] = NullableTimestamp
             }, ["tenant_scope_kind", "tenant_id", "instance_id"],
-            [new("ck_runtime_human_task_revision", "check (revision > 0)"),
-             new("ck_runtime_human_task_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
-             new("ck_runtime_human_task_workflow_step_pair", "check ((workflow_instance_id is null and workflow_step_id is null) or (workflow_instance_id is not null and workflow_step_id is not null))"),
-             new("ck_runtime_human_task_lifecycle", "check ((status = any (array[0, 1]) and completed_at is null and cancelled_at is null) or (status = any (array[2, 4]) and completed_at is not null and cancelled_at is null) or (status = 3 and completed_at is null and cancelled_at is not null))")],
+             [new("ck_runtime_human_task_revision", "check (revision > 0)"),
+              new("ck_runtime_human_task_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+              new("ck_runtime_human_task_workflow_step_pair", "check ((workflow_instance_id is null and workflow_step_id is null) or (workflow_instance_id is not null and workflow_step_id is not null))"),
+              new("ck_runtime_human_task_lifecycle", "check ((status = any (array[0, 1]) and completed_at is null and cancelled_at is null) or (status = any (array[2, 4]) and completed_at is not null and cancelled_at is null) or (status = 3 and completed_at is null and cancelled_at is not null))"),
+              new("runtime_human_task_instances_check", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+              new("runtime_human_task_instances_check1", "check ((workflow_instance_id is null and workflow_step_id is null) or (workflow_instance_id is not null and workflow_step_id is not null))"),
+              new("runtime_human_task_instances_revision_check", "check (revision > 0)")],
             [new("ux_runtime_human_task_active_step", ["tenant_scope_kind", "tenant_id", "workflow_instance_id", "workflow_step_id"], "workflow_instance_id is not null and workflow_step_id is not null and completed_at is null and cancelled_at is null"),
              new("uq_runtime_human_task_workflow_instance", ["tenant_scope_kind", "tenant_id", "workflow_instance_id", "instance_id"], "")],
             [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT")]),
@@ -541,8 +691,10 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["workflow_from_revision"] = BigInt, ["workflow_to_revision"] = BigInt,
                 ["integrity_json"] = Json, ["receipt_json"] = Json, ["committed_at"] = Timestamp
             }, ["tenant_scope_kind", "tenant_id", "operation_id"],
-            [new("ck_runtime_receipt_transition_revision", "check (workflow_to_revision = workflow_from_revision + 1)"),
-             new("ck_runtime_receipt_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))")], [],
+             [new("ck_runtime_receipt_transition_revision", "check (workflow_to_revision = workflow_from_revision + 1)"),
+              new("ck_runtime_receipt_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+              new("runtime_operation_receipts_check", "check (workflow_to_revision = workflow_from_revision + 1)"),
+              new("runtime_operation_receipts_check1", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))")], [],
             [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT"),
              new("tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT")]),
             new("descriptor_snapshots", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
@@ -643,7 +795,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
                 ["revision"] = BigInt, ["status"] = Integer, ["reason_code"] = Text,
                 ["observed_at"] = Timestamp, ["observation_json"] = NullableJson
-            }, ["tenant_id", "logical_invocation_key", "attempt_id"], [], [], []),
+             }, ["tenant_id", "logical_invocation_key", "attempt_id"],
+             [new("agent_tool_reconciliation_observations_revision_check", "check (revision > 0)")], [], []),
             new("agent_tool_reconciliation_receipts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["logical_invocation_key"] = Json, ["attempt_id"] = Text,
@@ -717,8 +870,75 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_agent_memories_no_self_superseded_by", "check ((superseded_by_memory_id is null) or (superseded_by_memory_id <> memory_id))")],
             [new("uq_agent_memories_supersedes", ["tenant_id", "supersedes_memory_id"], "supersedes_memory_id is not null"),
              new("ix_agent_memories_tenant_status_kind", ["tenant_id", "status", "kind", "memory_id"], "", Unique: false)],
-            [new("tenant_id, supersedes_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION"),
-             new("tenant_id, superseded_by_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION")])
+             [new("tenant_id, supersedes_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION"),
+              new("tenant_id, superseded_by_memory_id", "agent_memories", "tenant_id, memory_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "NO ACTION")]),
+            new("control_plane_descriptor_drafts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["draft_id"] = TextC, ["payload_type"] = Integer,
+                ["descriptor_kind"] = Integer, ["operation"] = Integer, ["author_kind"] = Integer,
+                ["status"] = Integer, ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["state_contract_version"] = Integer, ["state_json"] = Json, ["updated_at"] = Timestamp
+            }, ["tenant_id", "draft_id"],
+            [new("ck_cp_draft_payload_type", "check (payload_type = any (array[1,2,3,4,5,6]))"),
+             new("ck_cp_draft_descriptor_kind", "check (descriptor_kind = any (array[0,1,2,3,4,5,6,7,8,9]))"),
+             new("ck_cp_draft_operation", "check (operation = any (array[0,1,2,3]))"),
+             new("ck_cp_draft_author_kind", "check (author_kind = any (array[0,1,2,3,4]))"),
+             new("ck_cp_draft_status", "check (status = any (array[0,1,2,3,4]))"),
+             new("ck_cp_draft_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_cp_drafts_created", ["tenant_id", "created_at_utc_ticks", "draft_id"], "", Unique: false, KeyCollations: ["C", "", "C"]),
+             new("ix_cp_drafts_combined_filter", ["tenant_id", "descriptor_kind", "operation", "author_kind", "status", "created_at_utc_ticks", "draft_id"], "", Unique: false, KeyCollations: ["C", "", "", "", "", "", "C"])], []),
+            new("organization_units", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["organization_unit_id"] = TextC,
+                ["parent_id"] = NullableTextC, ["sort_order"] = Integer, ["is_active"] = Boolean,
+                ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["state_contract_version"] = Integer, ["state_json"] = Json, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "organization_unit_id"],
+            [new("ck_org_units_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_org_units_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_org_units_explicit_list", ["tenant_scope_kind", "tenant_id", "sort_order", "organization_unit_id"], "", Unique: false, KeyCollations: ["C", "C", "", "C"]),
+             new("ix_org_units_unfiltered_list", ["sort_order", "tenant_scope_kind", "tenant_id", "organization_unit_id"], "", Unique: false, KeyCollations: ["", "C", "C", "C"])], []),
+            new("organization_positions", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["position_id"] = TextC,
+                ["is_active"] = Boolean, ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["state_contract_version"] = Integer, ["state_json"] = Json, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "position_id"],
+            [new("ck_org_positions_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_org_positions_contract_version", "check (state_contract_version = 1)")], [], []),
+            new("organization_memberships", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["membership_id"] = TextC,
+                ["user_id"] = TextC, ["organization_unit_id"] = TextC, ["position_id"] = NullableTextC,
+                ["is_primary"] = Boolean, ["is_active"] = Boolean, ["created_at_utc_ticks"] = BigInt,
+                ["created_at"] = Timestamp, ["state_contract_version"] = Integer, ["state_json"] = Json,
+                ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "membership_id"],
+            [new("ck_org_memberships_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_org_memberships_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_org_memberships_by_user", ["user_id", "tenant_scope_kind", "tenant_id", "created_at_utc_ticks", "membership_id"], "", Unique: false, KeyCollations: ["C", "C", "C", "", "C"]),
+             new("ix_org_memberships_by_unit", ["organization_unit_id", "tenant_scope_kind", "tenant_id", "created_at_utc_ticks", "membership_id"], "", Unique: false, KeyCollations: ["C", "C", "C", "", "C"])], []),
+            new("organization_role_assignments", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["assignment_id"] = TextC,
+                ["user_id"] = TextC, ["role_id"] = TextC, ["organization_unit_id"] = NullableTextC,
+                ["is_active"] = Boolean, ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["state_contract_version"] = Integer, ["state_json"] = Json, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "assignment_id"],
+            [new("ck_org_roles_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_org_roles_contract_version", "check (state_contract_version = 1)")],
+            [new("ix_org_roles_by_user", ["user_id", "tenant_scope_kind", "tenant_id", "created_at_utc_ticks", "assignment_id"], "", Unique: false, KeyCollations: ["C", "C", "C", "", "C"])], []),
+            new("data_permission_scope_rules", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["resource"] = TextC,
+                ["action_match_kind"] = Integer, ["action_value"] = TextC,
+                ["permission_match_kind"] = Integer, ["permission_value"] = TextC,
+                ["scope_kind"] = Integer, ["updated_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "resource", "action_match_kind", "action_value", "permission_match_kind", "permission_value"],
+            [new("ck_data_permission_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> '' and tenant_id <> '*'))"),
+             new("ck_data_permission_action_match", "check ((action_match_kind = 0 and action_value <> '*') or (action_match_kind = 1 and action_value = ''))"),
+             new("ck_data_permission_permission_match", "check ((permission_match_kind = 0 and permission_value <> '*') or (permission_match_kind = 1 and permission_value = ''))"),
+             new("ck_data_permission_scope_kind", "check (scope_kind = any (array[0,1,2,3,4,5]))")], [], [])
         ];
     }
 
@@ -1187,6 +1407,138 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 on {schema}.agent_memories (tenant_id, status, kind, memory_id);
             create index ix_agent_memory_candidates_tenant_status
                 on {schema}.agent_memory_candidates (tenant_id, status, candidate_id);
+            """),
+        new RuntimeMigration("V011", "control_plane_reference_data_stores", """
+            create table {schema}.control_plane_descriptor_drafts (
+                tenant_id text collate "C" not null,
+                draft_id text collate "C" not null,
+                payload_type integer not null,
+                descriptor_kind integer not null,
+                operation integer not null,
+                author_kind integer not null,
+                status integer not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_id, draft_id),
+                constraint ck_cp_draft_payload_type check (payload_type = any (array[1,2,3,4,5,6])),
+                constraint ck_cp_draft_descriptor_kind check (descriptor_kind = any (array[0,1,2,3,4,5,6,7,8,9])),
+                constraint ck_cp_draft_operation check (operation = any (array[0,1,2,3])),
+                constraint ck_cp_draft_author_kind check (author_kind = any (array[0,1,2,3,4])),
+                constraint ck_cp_draft_status check (status = any (array[0,1,2,3,4])),
+                constraint ck_cp_draft_contract_version check (state_contract_version = 1)
+            );
+            create index ix_cp_drafts_created on {schema}.control_plane_descriptor_drafts (tenant_id, created_at_utc_ticks, draft_id);
+            create index ix_cp_drafts_combined_filter on {schema}.control_plane_descriptor_drafts (tenant_id, descriptor_kind, operation, author_kind, status, created_at_utc_ticks, draft_id);
+
+            create table {schema}.organization_units (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                organization_unit_id text collate "C" not null,
+                parent_id text collate "C" null,
+                sort_order integer not null,
+                is_active boolean not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, organization_unit_id),
+                constraint ck_org_units_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_units_contract_version check (state_contract_version = 1)
+            );
+            create index ix_org_units_explicit_list on {schema}.organization_units (tenant_scope_kind, tenant_id, sort_order, organization_unit_id);
+            create index ix_org_units_unfiltered_list on {schema}.organization_units (sort_order, tenant_scope_kind, tenant_id, organization_unit_id);
+
+            create table {schema}.organization_positions (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                position_id text collate "C" not null,
+                is_active boolean not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, position_id),
+                constraint ck_org_positions_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_positions_contract_version check (state_contract_version = 1)
+            );
+
+            create table {schema}.organization_memberships (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                membership_id text collate "C" not null,
+                user_id text collate "C" not null,
+                organization_unit_id text collate "C" not null,
+                position_id text collate "C" null,
+                is_primary boolean not null,
+                is_active boolean not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, membership_id),
+                constraint ck_org_memberships_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_memberships_contract_version check (state_contract_version = 1)
+            );
+            create index ix_org_memberships_by_user on {schema}.organization_memberships (user_id, tenant_scope_kind, tenant_id, created_at_utc_ticks, membership_id);
+            create index ix_org_memberships_by_unit on {schema}.organization_memberships (organization_unit_id, tenant_scope_kind, tenant_id, created_at_utc_ticks, membership_id);
+
+            create table {schema}.organization_role_assignments (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                assignment_id text collate "C" not null,
+                user_id text collate "C" not null,
+                role_id text collate "C" not null,
+                organization_unit_id text collate "C" null,
+                is_active boolean not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                state_contract_version integer not null,
+                state_json jsonb not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, assignment_id),
+                constraint ck_org_roles_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_roles_contract_version check (state_contract_version = 1)
+            );
+            create index ix_org_roles_by_user on {schema}.organization_role_assignments (user_id, tenant_scope_kind, tenant_id, created_at_utc_ticks, assignment_id);
+
+            create table {schema}.data_permission_scope_rules (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                resource text collate "C" not null,
+                action_match_kind integer not null,
+                action_value text collate "C" not null,
+                permission_match_kind integer not null,
+                permission_value text collate "C" not null,
+                scope_kind integer not null,
+                updated_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, resource,
+                    action_match_kind, action_value,
+                    permission_match_kind, permission_value),
+                constraint ck_data_permission_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '' and tenant_id <> '*')),
+                constraint ck_data_permission_action_match check (
+                    (action_match_kind = 0 and action_value <> '*')
+                    or (action_match_kind = 1 and action_value = '')),
+                constraint ck_data_permission_permission_match check (
+                    (permission_match_kind = 0 and permission_value <> '*')
+                    or (permission_match_kind = 1 and permission_value = '')),
+                constraint ck_data_permission_scope_kind check (scope_kind = any (array[0,1,2,3,4,5]))
+            );
             """)
     ];
 }

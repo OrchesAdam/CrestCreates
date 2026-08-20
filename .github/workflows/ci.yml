@@ -19,6 +19,8 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
         with:
           dotnet-version: |
             10.0.x
@@ -36,6 +38,12 @@ jobs:
 
       - name: Build
         run: dotnet build CrestCreates.slnx --no-restore
+
+      # The Control Plane reference-data evidence ledger is written by test
+      # runs into tests/artifacts/control-plane-evidence/. Clear any stale files
+      # first so the executed-tuple gate can only be satisfied by this run.
+      - name: Reset Control Plane reference-data evidence ledger
+        run: rm -rf tests/artifacts/control-plane-evidence
 
       # ── Core ──
       - name: Test — Core
@@ -173,8 +181,15 @@ jobs:
           dotnet test tests/Integrations/CrestCreates.Mcp.Memory.Tests --no-build
 
       # ── Boundary ──
+      # The reference-data evidence gate consumes files produced by all prior
+      # evidence suites. xUnit does not guarantee cross-class ordering inside a
+      # collection, so run the producer suite and the final exact-set gate as
+      # separate commands.
       - name: Test — Dependency Boundaries
-        run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build
+        run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build --filter "FullyQualifiedName!~ControlPlaneReferenceDataSpecTestSkeletonTests"
+
+      - name: Test — Control Plane reference-data evidence ledger gate
+        run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build --filter "FullyQualifiedName~ControlPlaneReferenceDataSpecTestSkeletonTests"
 
       # ── AOT fixture publish — validates Tier 2 NativeAOT-verified mainline ──
       - name: Publish — CapabilityEndpoint AotFixture (NativeAOT)

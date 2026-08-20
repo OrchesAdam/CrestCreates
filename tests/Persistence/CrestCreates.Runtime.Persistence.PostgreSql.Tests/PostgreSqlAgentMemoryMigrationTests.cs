@@ -31,7 +31,7 @@ public sealed class PostgreSqlAgentMemoryMigrationTests(PostgreSqlRuntimeCollect
 
         var history = await ReadHistoryAsync(lease.Options);
         history.Should().ContainSingle(migration => migration.Version == "V010");
-        history.Where(migration => migration.Version != "V010").Should().HaveCount(9, "V001-V009 must remain unchanged.");
+        history.Where(migration => migration.Version != "V010").Should().HaveCount(10, "V001-V009 and V011 must remain unchanged.");
 
         // C collation on identity/order columns.
         await AssertCollationAsync(lease.Options, "agent_memory_conversations", "tenant_id", "C");

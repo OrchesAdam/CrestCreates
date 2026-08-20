@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="CrestCreates.DescriptorDraft.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>

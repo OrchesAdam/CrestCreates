@@ -18,20 +18,44 @@ public sealed class DefaultOrganizationIdentityService : IOrganizationIdentitySe
 
         var primary = activeMemberships
             .Where(m => m.IsPrimary)
-            .OrderBy(m => m.CreatedAt)
+            .OrderBy(m => m.CreatedAt.UtcTicks)
+            .ThenBy(m => OrganizationScopedKey.FromTenantId(m.TenantId, m.Id))
             .FirstOrDefault();
 
         var roleAssignments = await _store.GetRoleAssignmentsByUserAsync(userId, tenantId, cancellationToken);
         var activeRoles = roleAssignments.Where(r => r.IsActive).ToList();
+
+        var orgUnitIds = activeMemberships
+            .OrderBy(m => m, OrganizationStoreSemantics.MembershipByUserComparer)
+            .Select(m => m.OrganizationUnitId)
+            .Distinct()
+            .ToList()
+            .AsReadOnly();
+
+        var roleIds = activeRoles
+            .OrderBy(r => r.CreatedAt.UtcTicks)
+            .ThenBy(r => OrganizationScopedKey.FromTenantId(r.TenantId, r.Id))
+            .Select(r => r.RoleId)
+            .Distinct()
+            .ToList()
+            .AsReadOnly();
+
+        var positionIds = activeMemberships
+            .Where(m => m.PositionId is not null)
+            .OrderBy(m => m, OrganizationStoreSemantics.MembershipByUserComparer)
+            .Select(m => m.PositionId!)
+            .Distinct()
+            .ToList()
+            .AsReadOnly();
 
         return new OrganizationContext
         {
             TenantId = tenantId,
             UserId = userId,
             PrimaryOrganizationUnitId = primary?.OrganizationUnitId,
-            OrganizationUnitIds = activeMemberships.Select(m => m.OrganizationUnitId).Distinct().ToList().AsReadOnly(),
-            RoleIds = activeRoles.Select(r => r.RoleId).Distinct().ToList().AsReadOnly(),
-            PositionIds = activeMemberships.Where(m => m.PositionId is not null).Select(m => m.PositionId!).Distinct().ToList().AsReadOnly()
+            OrganizationUnitIds = orgUnitIds,
+            RoleIds = roleIds,
+            PositionIds = positionIds
         };
     }
 
@@ -50,18 +74,34 @@ public sealed class DefaultOrganizationIdentityService : IOrganizationIdentitySe
     public async Task<IReadOnlyList<string>> GetUserOrganizationUnitIdsAsync(string userId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
         var memberships = await _store.GetMembershipsByUserAsync(userId, tenantId, cancellationToken);
-        return memberships.Where(m => m.IsActive).Select(m => m.OrganizationUnitId).Distinct().ToList().AsReadOnly();
+        return memberships.Where(m => m.IsActive)
+            .OrderBy(m => m, OrganizationStoreSemantics.MembershipByUserComparer)
+            .Select(m => m.OrganizationUnitId)
+            .Distinct()
+            .ToList()
+            .AsReadOnly();
     }
 
     public async Task<IReadOnlyList<string>> GetUserRoleIdsAsync(string userId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
         var assignments = await _store.GetRoleAssignmentsByUserAsync(userId, tenantId, cancellationToken);
-        return assignments.Where(a => a.IsActive).Select(a => a.RoleId).Distinct().ToList().AsReadOnly();
+        return assignments.Where(a => a.IsActive)
+            .OrderBy(a => a.CreatedAt.UtcTicks)
+            .ThenBy(a => OrganizationScopedKey.FromTenantId(a.TenantId, a.Id))
+            .Select(a => a.RoleId)
+            .Distinct()
+            .ToList()
+            .AsReadOnly();
     }
 
     public async Task<IReadOnlyList<string>> GetUserPositionIdsAsync(string userId, string? tenantId = null, CancellationToken cancellationToken = default)
     {
         var memberships = await _store.GetMembershipsByUserAsync(userId, tenantId, cancellationToken);
-        return memberships.Where(m => m.IsActive && m.PositionId is not null).Select(m => m.PositionId!).Distinct().ToList().AsReadOnly();
+        return memberships.Where(m => m.IsActive && m.PositionId is not null)
+            .OrderBy(m => m, OrganizationStoreSemantics.MembershipByUserComparer)
+            .Select(m => m.PositionId!)
+            .Distinct()
+            .ToList()
+            .AsReadOnly();
     }
 }

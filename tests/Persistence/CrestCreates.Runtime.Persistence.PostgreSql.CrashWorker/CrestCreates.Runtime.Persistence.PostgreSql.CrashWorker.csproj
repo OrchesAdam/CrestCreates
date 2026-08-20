@@ -12,5 +12,10 @@
     <ProjectReference Include="../../../src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
+    <ProjectReference Include="../../../src/Framework/Modules/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Framework/Modules/CrestCreates.Organization/CrestCreates.Organization.csproj" />
+    <ProjectReference Include="../../Shared/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing.csproj" />
   </ItemGroup>
 </Project>

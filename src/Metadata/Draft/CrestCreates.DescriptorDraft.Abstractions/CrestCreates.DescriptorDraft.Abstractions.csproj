@@ -8,6 +8,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CrestCreates.DescriptorDraft" />
     <InternalsVisibleTo Include="CrestCreates.DescriptorDraft.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql" />
     <ProjectReference Include="../../CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="..\..\CrestCreates.Snapshot.Abstractions\CrestCreates.Snapshot.Abstractions.csproj" />
   </ItemGroup>
