@@ -1,5 +1,6 @@
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.Testing.Sinks;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -11,6 +12,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Runtime.Persistence.Testing.Cases;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -345,6 +347,31 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         (await restartedSink.WriteAsync(envelope)).Status.Should().Be(AuditSinkWriteStatus.Duplicate);
         (await restartedSink.WriteAsync(NewEnvelope("audit-1", Hash("audit-b", "AuditIntegrity")))).Status
             .Should().Be(AuditSinkWriteStatus.Conflict);
+    }
+
+    [Fact]
+    public async Task SharedRuntimeContractKit_ShouldPass()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var driver = new PostgreSqlRuntimePersistenceContractDriver(lease.Options, $"shared-{Guid.NewGuid():N}");
+        await RuntimePersistenceContractCases.DescriptorSnapshot_IdentityAndOrderingAsync(driver);
+        await RuntimePersistenceContractCases.HumanTask_QueryOrderAsync(driver);
+        await RuntimePersistenceContractCases.Workflow_RevisionAndTransactionAsync(driver);
+    }
+
+    [Fact]
+    public async Task SharedAuditSinkContractKit_ShouldPass()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var driver = new PostgreSqlAuditSinkContractDriver(
+            provider.GetRequiredService<NpgsqlDataSource>(), lease.Options);
+        await AuditSinkContractCases.AcceptsNewRecordAsync(driver);
+        await AuditSinkContractCases.AcceptedThenDuplicateAsync(driver);
+        await AuditSinkContractCases.DifferentIntegrityIsConflictAsync(driver);
+        await AuditSinkContractCases.SnapshotsOnWriteAndReadAsync(driver);
+        await AuditSinkContractCases.ConcurrentIdenticalWriteAsync(driver);
+        await AuditSinkContractCases.DeterministicReadOrderAsync(driver);
     }
 
     [Fact]

@@ -7,14 +7,20 @@ namespace CrestCreates.Runtime.Persistence.InMemory.Stores;
 internal sealed class InMemoryDescriptorSnapshotStore : IDescriptorSnapshotStore
 {
     private readonly InMemoryRuntimeTransactionCoordinator _coordinator;
+    private readonly IDescriptorSnapshotPersistenceHasher _hasher;
 
-    public InMemoryDescriptorSnapshotStore(InMemoryRuntimeTransactionCoordinator coordinator)
-        => _coordinator = coordinator;
+    public InMemoryDescriptorSnapshotStore(
+        InMemoryRuntimeTransactionCoordinator coordinator,
+        IDescriptorSnapshotPersistenceHasher hasher)
+    {
+        _coordinator = coordinator;
+        _hasher = hasher;
+    }
     public Task<DescriptorSnapshotWriteResult> WriteAsync(DescriptorSnapshot snapshot, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var copy = snapshot.Snapshot();
-        var fingerprint = Fingerprint(copy);
+        var fingerprint = _hasher.Compute(copy).Digest;
         return _coordinator.ExecuteAsync(_ => { using var guard = _coordinator.EnterStoreOperation(); return ValueTask.FromResult(WriteCore(copy, fingerprint)); }, cancellationToken).AsTask();
     }
 
@@ -35,5 +41,4 @@ internal sealed class InMemoryDescriptorSnapshotStore : IDescriptorSnapshotStore
         _coordinator.CurrentState.Snapshots.Add(copy.SnapshotId, (copy, fingerprint));
         return new DescriptorSnapshotWriteResult(DescriptorSnapshotWriteStatus.Accepted, copy.SnapshotId);
     }
-    private static string Fingerprint(DescriptorSnapshot snapshot) => string.Join("|", snapshot.SnapshotId, snapshot.PackageId, snapshot.PackageVersion, string.Join(";", snapshot.Descriptors.Select(e => $"{e.Ref.Namespace}:{e.Ref.Id}:{e.Ref.Version}:{e.ContractHash}:{e.DefinitionHash}")), string.Join(";", snapshot.Relationships));
 }

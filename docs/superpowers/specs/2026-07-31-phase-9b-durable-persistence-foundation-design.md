@@ -763,6 +763,18 @@ canonical writer. It includes Contract/Definition digest values and normalized
 collection order. It does not reuse Phase 6f package identity and does not use
 ordinary JSON text equality as the immutable-content decision.
 
+The Phase 9b identity contract is frozen as follows. The canonical projection
+includes `SnapshotId`, `PackageId`, `PackageVersion`, `CreatedAt`, every
+`SnapshotEntry` field (`Ref.Namespace`, `Ref.Id`, `Ref.Version`,
+`DescriptorName`, `Kind`, `State`, `ContractHash`, `DefinitionHash`,
+`SupersededById`), and every relationship field (`From`, `To`, `Kind`, `Role`,
+`SourcePath`, `Strength`, `IsRuntimeBinding`). Descriptor and relationship
+collections are sorted by their complete value projection before writing;
+reordering either collection is therefore a `Duplicate`, while changing any
+persisted field is a `Conflict`. The writer emits one fixed field order and a
+versioned profile (`descriptor-snapshot-persistence-v1`); provider code only
+stores and compares the resulting digest.
+
 ### 7.2 Authority boundary
 
 The Store can answer:

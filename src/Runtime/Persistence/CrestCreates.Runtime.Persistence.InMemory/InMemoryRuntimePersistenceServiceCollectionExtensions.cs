@@ -19,12 +19,15 @@ public static class InMemoryRuntimePersistenceServiceCollectionExtensions
         services.TryAddSingleton<InMemoryRuntimeTransactionCoordinator>();
         services.TryAddSingleton<IRuntimeTransactionCoordinator>(sp => sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>());
         services.TryAddSingleton<IRuntimePersistenceProviderCapabilities, InMemoryRuntimeProviderCapabilities>();
+        services.TryAddSingleton<IDescriptorSnapshotPersistenceHasher, DescriptorSnapshotPersistenceHasher>();
         services.TryAddSingleton<IWorkflowInstanceStore>(sp =>
             new InMemoryWorkflowInstanceStore(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
         services.TryAddSingleton<IHumanTaskInstanceStore>(sp =>
             new InMemoryHumanTaskInstanceStore(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
         services.TryAddSingleton<IDescriptorSnapshotStore>(sp =>
-            new InMemoryDescriptorSnapshotStore(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
+            new InMemoryDescriptorSnapshotStore(
+                sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>(),
+                sp.GetRequiredService<IDescriptorSnapshotPersistenceHasher>()));
         services.TryAddSingleton<IWorkflowSuspensionReceiptStore>(sp =>
             new InMemoryWorkflowSuspensionReceiptStore(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
         return services;

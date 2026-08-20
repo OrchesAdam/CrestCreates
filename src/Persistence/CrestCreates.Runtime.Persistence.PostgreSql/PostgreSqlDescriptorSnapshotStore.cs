@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Persistence;
 using Npgsql;
@@ -10,15 +8,18 @@ internal sealed class PostgreSqlDescriptorSnapshotStore : IDescriptorSnapshotSto
 {
     private readonly PostgreSqlRuntimePersistenceOptions _options;
     private readonly PostgreSqlRuntimeTransactionCoordinator _coordinator;
+    private readonly IDescriptorSnapshotPersistenceHasher _hasher;
     private readonly string _snapshots;
     private readonly string _entries;
 
     public PostgreSqlDescriptorSnapshotStore(
         PostgreSqlRuntimePersistenceOptions options,
-        PostgreSqlRuntimeTransactionCoordinator coordinator)
+        PostgreSqlRuntimeTransactionCoordinator coordinator,
+        IDescriptorSnapshotPersistenceHasher hasher)
     {
         _options = options;
         _coordinator = coordinator;
+        _hasher = hasher;
         _snapshots = PostgreSqlRuntimeStoreSupport.Table(options, "descriptor_snapshots");
         _entries = PostgreSqlRuntimeStoreSupport.Table(options, "descriptor_snapshot_entries");
     }
@@ -38,7 +39,7 @@ internal sealed class PostgreSqlDescriptorSnapshotStore : IDescriptorSnapshotSto
         var copy = snapshot.Snapshot();
         ArgumentException.ThrowIfNullOrWhiteSpace(copy.SnapshotId);
         var json = PostgreSqlRuntimeStoreSupport.Serialize(copy, PostgreSqlRuntimeJsonSerializerContext.Default.DescriptorSnapshot);
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+        var hash = _hasher.Compute(copy).Digest;
         bool accepted;
         {
             var session = _coordinator.RequireSession();
