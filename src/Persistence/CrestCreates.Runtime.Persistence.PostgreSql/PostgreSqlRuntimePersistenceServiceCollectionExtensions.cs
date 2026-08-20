@@ -29,6 +29,7 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         services.AddSingleton<PostgreSqlRuntimeTransactionCoordinator>();
         services.AddSingleton<IRuntimeTransactionCoordinator>(sp => sp.GetRequiredService<PostgreSqlRuntimeTransactionCoordinator>());
         services.AddSingleton<IRuntimePersistenceProviderCapabilities, PostgreSqlRuntimeProviderCapabilities>();
+        services.AddSingleton<IDescriptorSnapshotPersistenceHasher, DescriptorSnapshotPersistenceHasher>();
         services.AddSingleton<PostgreSqlRuntimeProviderRegistrationMarker>();
         services.AddSingleton<IWorkflowInstanceStore, PostgreSqlWorkflowInstanceStore>();
         services.AddSingleton<IHumanTaskInstanceStore, PostgreSqlHumanTaskInstanceStore>();

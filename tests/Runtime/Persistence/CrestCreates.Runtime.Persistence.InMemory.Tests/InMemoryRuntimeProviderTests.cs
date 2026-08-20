@@ -1,5 +1,7 @@
 using CrestCreates.HumanTask.Abstractions;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.Providers;
@@ -11,6 +13,7 @@ using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Runtime.Persistence.Testing.Cases;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using System.Threading.Tasks;
@@ -20,6 +23,14 @@ namespace CrestCreates.Runtime.Persistence.InMemory.Tests;
 
 public sealed class InMemoryRuntimeProviderTests
 {
+    [Fact]
+    public async Task SharedRuntimeContractKit_ShouldPass()
+    {
+        using var driver = new InMemoryRuntimePersistenceContractDriver($"shared-{Guid.NewGuid():N}");
+        await RuntimePersistenceContractCases.DescriptorSnapshot_IdentityAndOrderingAsync(driver);
+        await RuntimePersistenceContractCases.HumanTask_QueryOrderAsync(driver);
+        await RuntimePersistenceContractCases.Workflow_RevisionAndTransactionAsync(driver);
+    }
     [Fact]
     public void Provider_ShouldDeclareFullSemanticWithoutDurability()
     {
@@ -80,6 +91,122 @@ public sealed class InMemoryRuntimeProviderTests
         (await snapshots.WriteAsync(snapshot)).Status.Should().Be(DescriptorSnapshotWriteStatus.Duplicate);
         snapshot.Descriptors[0].DefinitionHash.Should().Be("d");
     }
+
+    [Fact]
+    public async Task DescriptorSnapshotIdentity_ShouldIncludeEveryPersistedField()
+    {
+        using var provider = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence().BuildServiceProvider();
+        var store = provider.GetRequiredService<IDescriptorSnapshotStore>();
+        var baseline = CompleteSnapshot();
+        (await store.WriteAsync(baseline)).Status.Should().Be(DescriptorSnapshotWriteStatus.Accepted);
+
+        var descriptorName = CopyWith(baseline, descriptors: [CopyEntry(baseline.Descriptors[0], descriptorName: "Renamed")]);
+        var kind = CopyWith(baseline, descriptors: [CopyEntry(baseline.Descriptors[0], kind: DescriptorKind.HumanTask)]);
+        var state = CopyWith(baseline, descriptors: [CopyEntry(baseline.Descriptors[0], state: DescriptorState.Deprecated)]);
+        var superseded = CopyWith(baseline, descriptors: [CopyEntry(baseline.Descriptors[0], supersededById: "next")]);
+        var created = CopyWith(baseline, createdAt: baseline.CreatedAt.AddSeconds(1));
+        var relationship = CopyWith(baseline, relationships: [baseline.Relationships[0] with { Role = "changed" }]);
+
+        foreach (var changed in new[] { descriptorName, kind, state, superseded, created, relationship })
+        {
+            (await store.WriteAsync(changed)).Status.Should().Be(DescriptorSnapshotWriteStatus.Conflict);
+        }
+    }
+
+    [Fact]
+    public async Task DescriptorSnapshotIdentity_ShouldNormalizeCollectionOrder()
+    {
+        using var provider = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence().BuildServiceProvider();
+        var store = provider.GetRequiredService<IDescriptorSnapshotStore>();
+        var baseline = CompleteSnapshot();
+        (await store.WriteAsync(baseline)).Status.Should().Be(DescriptorSnapshotWriteStatus.Accepted);
+
+        var reordered = CopyWith(baseline,
+            descriptors: baseline.Descriptors.Reverse().ToArray(),
+            relationships: baseline.Relationships.Reverse().ToArray());
+        (await store.WriteAsync(reordered)).Status.Should().Be(DescriptorSnapshotWriteStatus.Duplicate);
+    }
+
+    [Fact]
+    public async Task HumanTaskQueries_ShouldOrderByCreatedAtThenInstanceId()
+    {
+        using var provider = new ServiceCollection().AddCrestCreatesInMemoryRuntimePersistence().BuildServiceProvider();
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var workflow = NewWorkflow("tenant-a", "workflow-order");
+        await workflows.AddAsync(workflow);
+        var later = NewTask("tenant-a", "task-z", workflow.Key, stepId: "review-z", createdAt: DateTimeOffset.UnixEpoch.AddMinutes(2));
+        var earlier = NewTask("tenant-a", "task-a", workflow.Key, stepId: "review-a", createdAt: DateTimeOffset.UnixEpoch.AddMinutes(1));
+        await tasks.AddAsync(later);
+        await tasks.AddAsync(earlier);
+
+        var result = await tasks.GetPendingByWorkflowAsync(workflow.Key);
+        result.Select(x => x.Key.InstanceId).Should().Equal("task-a", "task-z");
+    }
+
+    private static DescriptorSnapshot CompleteSnapshot() => new()
+    {
+        SnapshotId = "snapshot-contract",
+        PackageId = "package",
+        PackageVersion = "1.0.0",
+        CreatedAt = DateTimeOffset.UnixEpoch,
+        Descriptors =
+        [
+            new SnapshotEntry
+            {
+                Ref = new DescriptorRef("workflow", "approval", 1),
+                DescriptorName = "Approval",
+                Kind = DescriptorKind.Workflow,
+                State = DescriptorState.Active,
+                ContractHash = "contract",
+                DefinitionHash = "definition",
+                SupersededById = null
+            }
+        ],
+        Relationships =
+        [
+            new CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackageRelationshipEntry
+            {
+                From = new DescriptorRef("workflow", "approval", 1),
+                To = new DescriptorRef("humantask", "review", 1),
+                Kind = RelationshipKind.Uses,
+                Role = "review",
+                SourcePath = "steps.review",
+                Strength = RelationshipStrength.Strong,
+                IsRuntimeBinding = true
+            }
+        ]
+    };
+
+    private static DescriptorSnapshot CopyWith(
+        DescriptorSnapshot source,
+        IReadOnlyList<SnapshotEntry>? descriptors = null,
+        IReadOnlyList<CrestCreates.Metadata.Abstractions.DescriptorPackage.DescriptorPackageRelationshipEntry>? relationships = null,
+        DateTimeOffset? createdAt = null) => new()
+    {
+        SnapshotId = source.SnapshotId,
+        PackageId = source.PackageId,
+        PackageVersion = source.PackageVersion,
+        CreatedAt = createdAt ?? source.CreatedAt,
+        Descriptors = descriptors ?? source.Descriptors,
+        Relationships = relationships ?? source.Relationships
+    };
+
+    private static SnapshotEntry CopyEntry(
+        SnapshotEntry source,
+        string? descriptorName = null,
+        DescriptorKind? kind = null,
+        DescriptorState? state = null,
+        string? supersededById = null) => new()
+    {
+        Ref = source.Ref,
+        DescriptorName = descriptorName ?? source.DescriptorName,
+        Kind = kind ?? source.Kind,
+        State = state ?? source.State,
+        ContractHash = source.ContractHash,
+        DefinitionHash = source.DefinitionHash,
+        SupersededById = supersededById ?? source.SupersededById
+    };
 
     [Fact]
     public async Task ConcurrentUseOfAmbientSession_ShouldFailClosed()
@@ -321,12 +448,13 @@ public sealed class InMemoryRuntimeProviderTests
         WorkflowPin = Pin("workflow", "workflow", "Workflow")
     };
 
-    private static HumanTaskInstance NewTask(string? tenantId, string id, RuntimeInstanceKey workflowKey, string? stepId = "step-1") => new()
+    private static HumanTaskInstance NewTask(string? tenantId, string id, RuntimeInstanceKey workflowKey, string? stepId = "step-1", DateTimeOffset? createdAt = null) => new()
     {
         Key = new RuntimeInstanceKey(tenantId, id),
         WorkflowKey = workflowKey,
         WorkflowStepId = stepId,
-        HumanTaskPin = Pin("humantask", "task", "HumanTask")
+        HumanTaskPin = Pin("humantask", "task", "HumanTask"),
+        CreatedAt = createdAt ?? DateTimeOffset.UnixEpoch
     };
 
     private static RuntimeDescriptorPin Pin(string @namespace, string id, string kind) => new()
