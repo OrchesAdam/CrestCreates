@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-18 (Issue #69 Durable Control Plane and Reference Data Stores: Slices 1-10 implementation, NativeAOT provider closure, and source-discovered 77-case evidence governance are covered on PR #78. Shared contract kit, Draft/Organization/DataPermission InMemory parity with typed semantics, V011 migration/schema manifest, three PostgreSQL stores, base-first feature DI composition, source-generated reference-data JSON, structured-column fail-closed reads, six-surface crash windows, restart/corruption coverage, and AOT workflow/organization/rule scenarios are implemented.)
+Last Updated: 2026-08-21 (Issue #25 Phase 9c Transactional Outbox & Reliable Event Delivery Design Spec R4 is approved and frozen. It treats Outbox as the reliable side-effect boundary of the Phase 9b Runtime commit kernel, not a generic EventBus rewrite; closes HumanTask completion and Workflow Accountability golden paths; and requires prepared safe AuditEnvelope persistence, shared InMemory/PostgreSQL semantics, V012, fencing/recovery/crash evidence, and real NativeAOT publish-and-run. Implementation awaits an approved plan.)
 
 ## Purpose
 
@@ -9,6 +9,82 @@ This file records the current platform status for CrestCreates so future threads
 ---
 
 ## Active Design Work
+
+### Issue #25 — Phase 9c Transactional Outbox & Reliable Event Delivery
+
+Status: Design Spec R4 APPROVED / FROZEN;
+implementation awaits an approved implementation plan
+
+Normative draft:
+`docs/superpowers/specs/2026-08-20-phase-9c-transactional-outbox-reliable-event-delivery-design.md`
+
+The design makes Transactional Outbox an explicit participant in the existing
+`IRuntimeTransactionCoordinator` commit kernel. It does not add a second UoW,
+expose provider transactions, or turn broker/Local Event compatibility code
+into persistence authority. Transactional append is separate from dispatch
+claim/Ack/Retry/DeadLetter ownership. Producer MessageIds are stable;
+PostgreSQL lease time is provider-authoritative; monotonically increasing fences
+reject expired or stale owners; delivery is at-least-once without ordering or
+exactly-once claims.
+
+The two golden paths are HumanTask Completed + completion-event Outbox append
+to the required Workflow continuation consumer (with typed Local Event only as
+a compatibility lane), and every committed Workflow lifecycle transition +
+prepared safe AuditEnvelope append to Accountability-internal prepared
+recording. HumanTask delivery failure leaves business state Completed;
+`CompletionDispatchFailed` becomes compatibility-only and legacy rows require
+explicit upgrade reconciliation. Workflow Accountability leaves the
+best-effort observer lane and persists the prepared envelope, including
+Sanitization and Integrity, so retry across a sanitizer upgrade cannot change
+the fact hash. Immediate recording and Outbox production must share one
+Accountability preparation implementation; sinks remain hidden behind the
+Accountability recording boundary.
+
+Provider closure requires V012 in the one checksummed Runtime migration/schema
+catalog, a runner-free semantic kit executed by InMemory and PostgreSQL,
+commit-unknown both-or-neither observation, restart/ack-loss/crash-worker
+coverage, Outbox-owned terminal dead-letter state, generated JSON with explicit
+ContractId handlers, and a real linux-x64 NativeAOT publish-link-run executing
+both persisted payload paths. Control Plane/reference-data Saves remain
+top-level and never implicitly append.
+
+R2 closes the first design review's four P1 and five P2 blockers without
+reopening the architecture. Claim generation now consumes attempt budget and
+over-budget claims cannot invoke handlers. Missing required handler/sink
+composition fails health/startup without terminalizing messages. HumanTask
+commit unknown requires fresh state observation before another command, and
+conflicting append throws a transaction-aborting provider-neutral exception.
+Accountability owns its delivery handler; sink membership is delivery-time
+composition; V012/provider preflight owns legacy failure-row detection; initial
+delivery eligibility uses provider insertion time; and handler registration
+caches metadata rather than scoped instances.
+
+R3 closes the second review's cross-module composition and trusted-entry gaps.
+Workflow-correlated HumanTask messages now persist the stable Workflow
+continuation required-consumer ID; the generic LocalEvent zero-handler behavior
+cannot authorize Ack, while standalone tasks require no Workflow consumer.
+Pending/Leased ContractIds and RequiredConsumerIds are checked by readiness and
+again atomically by Claim, so unsupported active facts make the Host unhealthy
+without lease/attempt mutation; terminal facts impose no current registration
+obligation. Public `IAuditRecorder` remains candidate-only, and prepared Audit
+validation/fan-out is Accountability-internal. Commit-unknown reconciliation
+now distinguishes a matching durable result from a different concurrent winner
+without claiming caller ownership. Exact final-fence Ack/DeadLetter replay is
+provider-parity `AlreadyApplied` behavior.
+
+R4 closes the final correctness pass. Workflow continuation Ack now ends at an
+atomic durable Suspended-to-Running acceptance plus exact applied
+CompletionEventId discriminator; waiting-key absence alone is not duplicate
+proof, while post-resume `RunAsync` crash liveness remains a Workflow Runtime
+concern outside #25. Outbox delivery authority is exactly the ContractId handler
+plus persisted RequiredConsumerIds. Generic LocalEvent handlers are bounded
+best-effort, and every business-critical first-party handler must migrate to a
+stable consumer ID captured on the HumanTask. Atomic Claim composition mismatch
+now throws only provider-neutral `OutboxCompositionException`, distinct from
+infrastructure failure. Reliable Accountability generically requires at least
+one configured sink; only FullDurable evidence composed with
+`PostgreSqlAuditSink` claims final sink persistence, without expanding
+`IAuditSink`.
 
 ### Issue #69 — Phase 9b+ Durable Control Plane and Reference Data Stores
 
