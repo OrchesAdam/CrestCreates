@@ -438,6 +438,30 @@ public sealed class ProcurementApprovalTaskService(
             Outcome = outcome,
             Result = stateRegistry.Capture(comment)
         }, cancellationToken).ConfigureAwait(false);
+
+        // Completion is durably handed to the transactional outbox.  The runtime
+        // worker may therefore resume the workflow just after CompleteAsync returns;
+        // this application facade keeps its existing contract of returning only once
+        // the decision is observable by the caller while still using the outbox as the
+        // authoritative delivery path.
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var currentTask = await tasks.GetAsync(task.Key, cancellationToken).ConfigureAwait(false);
+            var currentWorkflow = task.WorkflowKey is { } workflowKey
+                ? await workflows.GetAsync(workflowKey, cancellationToken).ConfigureAwait(false)
+                : null;
+            if (currentTask?.Status == HumanTaskInstanceStatus.Completed
+                && currentWorkflow?.Status is WorkflowInstanceStatus.Completed
+                    or WorkflowInstanceStatus.Failed
+                    or WorkflowInstanceStatus.Compensated)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20), cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static Dictionary<string, object?> RestoreVariables(RuntimeStateValue? input, IRuntimeStateContractRegistry registry)
