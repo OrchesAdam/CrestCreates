@@ -21,6 +21,7 @@ using CrestCreates.Organization.Abstractions;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Delivery;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
@@ -458,6 +459,7 @@ static ServiceProvider BuildPreDispatchProvider(PostgreSqlRuntimePersistenceOpti
     services.AddAccountability();
     services.AddCrestAgentTools();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
+    services.AddRuntimeDelivery();
     var provider = services.BuildServiceProvider();
     return provider;
 }
@@ -472,6 +474,7 @@ static ServiceProvider BuildProvider(
     services.AddDescriptorStableHash();
     services.AddWorkflowEngine();
     services.AddHumanTaskRuntime();
+    services.AddRuntimeDelivery();
     services.AddSingleton<IRuntimeStateContractContributor, AotRuntimeStateContractContributor>();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
     services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();

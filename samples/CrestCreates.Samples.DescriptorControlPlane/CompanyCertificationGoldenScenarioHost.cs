@@ -20,6 +20,7 @@ using CrestCreates.Metadata.ContextPack;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.InMemory;
+using CrestCreates.Runtime.Delivery;
 using CrestCreates.Samples.DescriptorControlPlane.Authoring;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
@@ -106,6 +107,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         services.AddRuntimePersistence();
         services.AddSingleton<IRuntimeStateContractContributor, CompanyCertificationRuntimeStateContributor>();
         services.AddCrestCreatesInMemoryRuntimePersistence();
+        services.AddRuntimeDelivery();
         RegisterRuntimeServices(services);
         RegisterControlPlaneServices(services);
 

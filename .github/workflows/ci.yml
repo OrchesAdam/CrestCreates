@@ -153,6 +153,7 @@ jobs:
 
       - name: Test — Runtime / Eventing
         run: |
+          dotnet test tests/Runtime/Eventing/CrestCreates.Runtime.Delivery.Tests --no-build
           dotnet test tests/Runtime/Eventing/CrestCreates.Event.Tests --no-build
           dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.Tests --no-build
 

@@ -18,6 +18,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.State;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using CrestCreates.Runtime.Delivery;
 
 namespace CrestCreates.Workflow;
 
@@ -79,7 +80,12 @@ public static class WorkflowServiceCollectionExtensions
             sp.GetRequiredService<WorkflowLifecycleEventFactory>(),
             sp.GetRequiredService<IRuntimeStateContractRegistry>(),
             sp.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>(),
-            sp.GetService<IDescriptorSnapshotStore>()));
+            sp.GetService<IDescriptorSnapshotStore>(),
+            sp.GetService<IWorkflowContinuationAcceptanceStore>(),
+            sp.GetService<IRuntimeTransactionCoordinator>(),
+            sp.GetService<CrestCreates.Accountability.Abstractions.Preparation.IAuditEnvelopePreparer>(),
+            sp.GetService<CrestCreates.Runtime.Delivery.Abstractions.Stores.ITransactionalOutboxWriter>(),
+            sp.GetService<CrestCreates.Runtime.Delivery.Abstractions.Messages.IOutboxMessageFactory>()));
 
         services.TryAddScoped<IWorkflowEngine>(sp =>
             new WorkflowEngine(
@@ -92,9 +98,7 @@ public static class WorkflowServiceCollectionExtensions
                 sp.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>(),
                 sp.GetRequiredService<IRuntimeStateContractRegistry>()));
 
-        services.TryAddEnumerable(ServiceDescriptor.Scoped<
-            ILocalEventHandler<HumanTaskCompletedEvent>,
-            HumanTaskCompletedWorkflowSubscriber>());
+        services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, WorkflowContinuationOutboxConsumer>(HumanTaskDeliveryConstants.WorkflowContinuationConsumerId);
 
         return services;
     }

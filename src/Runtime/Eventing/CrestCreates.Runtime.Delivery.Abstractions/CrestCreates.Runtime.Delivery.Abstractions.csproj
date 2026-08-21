@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.Runtime.Delivery.Abstractions</RootNamespace>
+    <AssemblyName>CrestCreates.Runtime.Delivery.Abstractions</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
+    <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Delivery" />
+    <InternalsVisibleTo Include="CrestCreates.HumanTask" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.InMemory" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Delivery.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.InMemory.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql.Tests" />
+  </ItemGroup>
+</Project>

@@ -29,6 +29,8 @@ public sealed class PostgreSqlPendingEvidenceMigrationTests(PostgreSqlRuntimeCol
             "each migration version must appear exactly once after reapplication");
         history.Should().Contain(m => m.Version == "V011",
             "V011 control_plane_reference_data_stores must be present");
+        history.Should().Contain(m => m.Version == "V012",
+            "V012 transactional outbox must be present");
 
         // Validation-only after re-apply must succeed without error.
         await runner.ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = false });

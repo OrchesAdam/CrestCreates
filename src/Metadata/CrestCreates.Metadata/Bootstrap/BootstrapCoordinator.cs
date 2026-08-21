@@ -22,7 +22,14 @@ public sealed class BootstrapCoordinator : IHostedService
 
     public async Task StartAsync(CancellationToken ct)
     {
-        var taskMap = _tasks.ToDictionary(t => t.TaskId);
+        var taskList = _tasks.ToArray();
+        var duplicate = taskList
+            .GroupBy(t => t.TaskId, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            throw BootstrapDependencyException.ForDuplicate(duplicate.Key);
+
+        var taskMap = taskList.ToDictionary(t => t.TaskId, StringComparer.Ordinal);
         var sorted = TopologicalSort(taskMap);
 
         foreach (var task in sorted)
@@ -78,12 +85,14 @@ public sealed class BootstrapCoordinator : IHostedService
         visiting.Add(taskId);
         path.Add(taskId);
 
-        if (taskMap.TryGetValue(taskId, out var task))
+        if (!taskMap.TryGetValue(taskId, out var task))
+            throw new BootstrapDependencyException(path[^2], taskId);
+
+        if (task is not null)
         {
             foreach (var dep in task.Dependencies)
             {
-                if (taskMap.ContainsKey(dep))
-                    Visit(dep, taskMap, visited, visiting, path, result);
+                Visit(dep, taskMap, visited, visiting, path, result);
             }
             result.Add(task);
         }

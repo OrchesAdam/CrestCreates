@@ -155,6 +155,8 @@
     <Project Path="src/Runtime/Agent/CrestCreates.Agent.Memory.Accountability/CrestCreates.Agent.Memory.Accountability.csproj" />
   </Folder>
   <Folder Name="/src/Runtime/Eventing/">
+    <Project Path="src/Runtime/Eventing/CrestCreates.Runtime.Delivery.Abstractions/CrestCreates.Runtime.Delivery.Abstractions.csproj" />
+    <Project Path="src/Runtime/Eventing/CrestCreates.Runtime.Delivery/CrestCreates.Runtime.Delivery.csproj" />
     <Project Path="src/Runtime/Eventing/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
     <Project Path="src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />
     <Project Path="src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
@@ -315,6 +317,7 @@
     <Project Path="tests/Shared/CrestCreates.Agent.Tools.Persistence.Testing/CrestCreates.Agent.Tools.Persistence.Testing.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Eventing/">
+    <Project Path="tests/Runtime/Eventing/CrestCreates.Runtime.Delivery.Tests/CrestCreates.Runtime.Delivery.Tests.csproj" />
     <Project Path="tests/Runtime/Eventing/CrestCreates.Event.Tests/CrestCreates.Event.Tests.csproj" />
     <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.Tests/CrestCreates.EventBus.Tests.csproj" />
     <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.Kafka.Tests/CrestCreates.EventBus.Kafka.Tests.csproj" />

@@ -7,6 +7,11 @@ using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Delivery.Abstractions.Messages;
+using CrestCreates.Runtime.Delivery.Abstractions.Registration;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
+using System.Text.Json;
 
 namespace CrestCreates.HumanTask;
 
@@ -20,6 +25,11 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
     private readonly IRuntimeDescriptorPinResolver<HumanTaskDescriptor> _pinResolver;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
     private readonly IDescriptorSnapshotStore? _snapshots;
+    private readonly IRuntimeTransactionCoordinator? _transactions;
+    private readonly IOutboxMessageFactory? _messageFactory;
+    private readonly ITransactionalOutboxWriter? _outbox;
+    private readonly IReadOnlyList<OutboxRequiredConsumerMetadata> _consumerMetadata;
+    private readonly IReadOnlyList<HumanTaskCompletionObligationPolicyRegistration> _obligationPolicies;
 
     public DefaultHumanTaskRuntime(
         IHumanTaskRegistry registry,
@@ -28,6 +38,11 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         IHumanTaskAssigneeResolver resolver,
         IRuntimeDescriptorPinResolver<HumanTaskDescriptor> pinResolver,
         IRuntimeStateContractRegistry stateRegistry,
+        IRuntimeTransactionCoordinator? transactions = null,
+        IOutboxMessageFactory? messageFactory = null,
+        ITransactionalOutboxWriter? outbox = null,
+        IEnumerable<OutboxRequiredConsumerMetadata>? consumerMetadata = null,
+        IEnumerable<HumanTaskCompletionObligationPolicyRegistration>? obligationPolicies = null,
         IHumanTaskCompletionFailurePolicy? completionFailurePolicy = null,
         IDescriptorSnapshotStore? snapshots = null)
     {
@@ -40,6 +55,11 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
         _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
         _snapshots = snapshots;
+        _transactions = transactions;
+        _messageFactory = messageFactory;
+        _outbox = outbox;
+        _consumerMetadata = (consumerMetadata ?? Array.Empty<OutboxRequiredConsumerMetadata>()).ToArray();
+        _obligationPolicies = (obligationPolicies ?? Array.Empty<HumanTaskCompletionObligationPolicyRegistration>()).ToArray();
     }
 
     public async Task<HumanTaskInstance> PrepareAsync(
@@ -55,6 +75,8 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         if (request.Input is not null)
             _stateRegistry.Validate(request.Input);
         var resolved = _pinResolver.Capture(descriptor);
+        var requiredConsumers = ResolveRequiredConsumers(request, descriptor);
+        ValidateRequiredConsumers(requiredConsumers);
         var resolution = await _resolver.ResolveAsync(descriptor, request, ct).ConfigureAwait(false);
         var instance = new HumanTaskInstance
         {
@@ -78,6 +100,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             Input = request.Input,
             CreatedAt = DateTimeOffset.UtcNow
         };
+        instance.RequiredCompletionConsumerIds = requiredConsumers;
 
         return instance;
     }
@@ -126,23 +149,52 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
 
         var candidate = loaded.Snapshot();
         candidate.Status = HumanTaskInstanceStatus.Completed;
-        candidate.Outcome = request.Outcome;
+        candidate.Outcome = CompletionOutcomeMatcher.Resolve(descriptor, request.Outcome).Condition.ToString();
         candidate.Output = request.Result;
         candidate.CompletedAt = DateTimeOffset.UtcNow;
         candidate.CompletionEventId ??= Guid.NewGuid().ToString("N");
-        await PersistUpdateAsync(candidate, loaded.Revision, ct).ConfigureAwait(false);
-
-        try
+        var completedEvent = CreateCompletedEvent(candidate, candidate.Outcome, request.Result);
+        if (_transactions is null || _messageFactory is null || _outbox is null)
         {
-            await _eventBus.PublishAsync(CreateCompletedEvent(candidate, request.Outcome, request.Result), CancellationToken.None)
-                .ConfigureAwait(false);
+            await PersistUpdateAsync(candidate, loaded.Revision, ct).ConfigureAwait(false);
+            try { await _eventBus.PublishAsync(completedEvent, CancellationToken.None).ConfigureAwait(false); } catch { }
+            return candidate;
         }
-        catch (Exception dispatchException)
+        var payload = JsonSerializer.SerializeToUtf8Bytes(
+            completedEvent,
+            HumanTaskJsonSerializerContext.Default.HumanTaskCompletedEvent);
+        var message = _messageFactory.Create(
+            candidate.CompletionEventId,
+            candidate.TenantId,
+            HumanTaskDeliveryConstants.CompletedContractId,
+            HumanTaskDeliveryConstants.CompletedPayloadTypeId,
+            payload,
+            candidate.RequiredCompletionConsumerIds);
+        await _transactions.ExecuteAsync(async transactionCt =>
         {
-            await RecordDispatchFailureAsync(candidate, dispatchException).ConfigureAwait(false);
-            throw;
-        }
+            await PersistUpdateAsync(candidate, loaded.Revision, transactionCt).ConfigureAwait(false);
+            await _outbox.AppendAsync(message, transactionCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+        try { await _eventBus.PublishAsync(completedEvent, CancellationToken.None).ConfigureAwait(false); }
+        catch { /* LocalEvent is optional compatibility only; it has no Ack authority. */ }
         return candidate;
+    }
+
+    private string[] ResolveRequiredConsumers(HumanTaskCreationRequest request, HumanTaskDescriptor descriptor)
+    {
+        var values = request.RequiredCompletionConsumerIds
+            .Concat(_obligationPolicies.Where(policy => string.Equals(policy.HumanTaskDescriptorId, descriptor.Id, StringComparison.Ordinal)
+                && policy.HumanTaskDescriptorVersion == descriptor.Version).Select(policy => policy.RequiredConsumerId));
+        if (request.WorkflowKey is not null) values = values.Append(HumanTaskDeliveryConstants.WorkflowContinuationConsumerId);
+        return values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    }
+
+    private void ValidateRequiredConsumers(IReadOnlyList<string> requiredConsumers)
+    {
+        var active = _consumerMetadata.Select(item => item.ConsumerId).ToHashSet(StringComparer.Ordinal);
+        var missing = requiredConsumers.Where(id => !active.Contains(id)).ToArray();
+        if (_consumerMetadata.Count != 0 && missing.Length != 0)
+            throw new InvalidOperationException($"HumanTask completion obligation(s) are not registered: {string.Join(", ", missing)}.");
     }
 
     public async Task<HumanTaskInstance> CancelAsync(

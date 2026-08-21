@@ -9,6 +9,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using CrestCreates.Runtime.Delivery.Abstractions.Composition;
+using CrestCreates.Metadata.Abstractions.Bootstrap;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
@@ -24,7 +27,9 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
             .EnableArrays()
             .Build());
         services.AddSingleton<PostgreSqlRuntimeMigrationRunner>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PostgreSqlRuntimeSchemaCompatibilityHostedService>());
+        services.AddSingleton<PostgreSqlRuntimeSchemaCompatibilityHostedService>();
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<PostgreSqlRuntimeSchemaCompatibilityHostedService>());
+        services.AddSingleton<IBootstrapTask>(sp => sp.GetRequiredService<PostgreSqlRuntimeSchemaCompatibilityHostedService>());
         services.AddSingleton<PostgreSqlRuntimeTransactionAccessor>();
         services.AddSingleton<PostgreSqlRuntimeTransactionCoordinator>();
         services.AddSingleton<IRuntimeTransactionCoordinator>(sp => sp.GetRequiredService<PostgreSqlRuntimeTransactionCoordinator>());
@@ -34,6 +39,11 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         services.AddSingleton<IWorkflowInstanceStore, PostgreSqlWorkflowInstanceStore>();
         services.AddSingleton<IHumanTaskInstanceStore, PostgreSqlHumanTaskInstanceStore>();
         services.AddSingleton<IWorkflowSuspensionReceiptStore, PostgreSqlWorkflowSuspensionReceiptStore>();
+        services.AddSingleton<ITransactionalOutboxWriter, PostgreSqlTransactionalOutboxWriter>();
+        services.AddSingleton<IOutboxDispatchStore, PostgreSqlOutboxDispatchStore>();
+        services.AddSingleton<IWorkflowContinuationAcceptanceStore, PostgreSqlWorkflowContinuationAcceptanceStore>();
+        services.AddSingleton<IOutboxCompositionProbe, PostgreSqlOutboxCompositionProbe>();
+        services.AddSingleton<IHumanTaskCompletionObligationPreflight, PostgreSqlHumanTaskCompletionObligationPreflight>();
         services.AddSingleton<IDescriptorSnapshotStore, PostgreSqlDescriptorSnapshotStore>();
         services.AddSingleton<IAuditSink, PostgreSqlAuditSink>();
 

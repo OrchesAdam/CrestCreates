@@ -17,6 +17,14 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
     internal InMemoryRuntimePersistenceState CurrentState
         => _accessor.Current?.StagedState ?? _committed;
 
+    internal bool HasAmbientTransaction => _accessor.Current is not null;
+
+    internal InMemoryRuntimePersistenceState RequireAmbientState()
+        => _accessor.Current?.StagedState
+            ?? throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "This Runtime operation requires an ambient transaction.");
+
     internal IDisposable EnterStoreOperation()
     {
         var context = _accessor.Current
@@ -51,10 +59,14 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
             _committed.HumanTasks.Clear();
             _committed.Snapshots.Clear();
             _committed.Receipts.Clear();
+            _committed.Outbox.Clear();
+            _committed.ContinuationAcceptances.Clear();
             foreach (var (key, value) in context.StagedState.Workflows) _committed.Workflows[key] = value.Snapshot();
             foreach (var (key, value) in context.StagedState.HumanTasks) _committed.HumanTasks[key] = value.Snapshot();
             foreach (var (key, value) in context.StagedState.Snapshots) _committed.Snapshots[key] = (value.Snapshot.Snapshot(), value.Fingerprint);
             foreach (var (key, value) in context.StagedState.Receipts) _committed.Receipts[key] = value;
+            foreach (var (key, value) in context.StagedState.Outbox) _committed.Outbox[key] = value.Clone();
+            foreach (var (key, value) in context.StagedState.ContinuationAcceptances) _committed.ContinuationAcceptances[key] = value;
             return result;
         }
         finally

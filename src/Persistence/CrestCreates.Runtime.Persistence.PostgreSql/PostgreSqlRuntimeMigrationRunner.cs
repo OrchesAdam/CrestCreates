@@ -189,6 +189,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             "organization_memberships",
             "organization_role_assignments",
             "data_permission_scope_rules"
+            ,"runtime_outbox_messages"
+            ,"runtime_workflow_continuation_acceptances"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -672,7 +674,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["workflow_instance_id"] = NullableText, ["workflow_step_id"] = NullableText,
                 ["suspension_operation_id"] = NullableText, ["assignee_user_id"] = NullableText,
                 ["state_json"] = Json, ["created_at"] = Timestamp, ["updated_at"] = Timestamp,
-                ["completed_at"] = NullableTimestamp, ["cancelled_at"] = NullableTimestamp
+                ["completed_at"] = NullableTimestamp, ["cancelled_at"] = NullableTimestamp,
+                ["required_consumer_ids_json"] = Json
             }, ["tenant_scope_kind", "tenant_id", "instance_id"],
              [new("ck_runtime_human_task_revision", "check (revision > 0)"),
               new("ck_runtime_human_task_tenant_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
@@ -680,7 +683,8 @@ public sealed class PostgreSqlRuntimeMigrationRunner
               new("ck_runtime_human_task_lifecycle", "check ((status = any (array[0, 1]) and completed_at is null and cancelled_at is null) or (status = any (array[2, 4]) and completed_at is not null and cancelled_at is null) or (status = 3 and completed_at is null and cancelled_at is not null))"),
               new("runtime_human_task_instances_check", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
               new("runtime_human_task_instances_check1", "check ((workflow_instance_id is null and workflow_step_id is null) or (workflow_instance_id is not null and workflow_step_id is not null))"),
-              new("runtime_human_task_instances_revision_check", "check (revision > 0)")],
+              new("runtime_human_task_instances_revision_check", "check (revision > 0)"),
+              new("ck_runtime_human_task_required_consumers", "check (jsonb_typeof(required_consumer_ids_json) = 'array')")],
             [new("ux_runtime_human_task_active_step", ["tenant_scope_kind", "tenant_id", "workflow_instance_id", "workflow_step_id"], "workflow_instance_id is not null and workflow_step_id is not null and completed_at is null and cancelled_at is null"),
              new("uq_runtime_human_task_workflow_instance", ["tenant_scope_kind", "tenant_id", "workflow_instance_id", "instance_id"], "")],
             [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", Deferrable: true, InitiallyDeferred: true, DeleteAction: "RESTRICT")]),
@@ -939,6 +943,29 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_data_permission_action_match", "check ((action_match_kind = 0 and action_value <> '*') or (action_match_kind = 1 and action_value = ''))"),
              new("ck_data_permission_permission_match", "check ((permission_match_kind = 0 and permission_value <> '*') or (permission_match_kind = 1 and permission_value = ''))"),
              new("ck_data_permission_scope_kind", "check (scope_kind = any (array[0,1,2,3,4,5]))")], [], [])
+            ,new("runtime_outbox_messages", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["message_id"] = TextC, ["tenant_id"] = NullableTextC, ["contract_id"] = TextC,
+                ["payload_type_id"] = TextC, ["payload"] = ("bytea", "NO", null),
+                ["required_consumer_ids_json"] = Json, ["integrity"] = ("bytea", "NO", null),
+                ["created_at"] = Timestamp, ["status"] = Integer, ["attempt"] = Integer,
+                ["fence"] = BigInt, ["lease_owner"] = NullableTextC, ["lease_expires_at"] = NullableTimestamp,
+                ["next_attempt_at"] = NullableTimestamp, ["last_failure_code"] = NullableTextC
+            }, ["message_id"],
+            [new("ck_runtime_outbox_status", "check (status >= 0 and status <= 4)"),
+             new("ck_runtime_outbox_attempt", "check (attempt >= 0)"),
+             new("ck_runtime_outbox_required_consumers", "check (jsonb_typeof(required_consumer_ids_json) = 'array')")],
+            [new("ix_runtime_outbox_claim", ["status", "next_attempt_at", "created_at", "message_id"], "", Unique: false)], [])
+            ,new("runtime_workflow_continuation_acceptances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["completion_event_id"] = TextC,
+                ["human_task_instance_id"] = TextC, ["workflow_instance_id"] = TextC, ["outcome"] = TextC,
+                ["result_json"] = NullableJson, ["workflow_from_revision"] = BigInt, ["workflow_to_revision"] = BigInt,
+                ["integrity_json"] = Json, ["accepted_at"] = Timestamp
+            }, ["tenant_scope_kind", "tenant_id", "completion_event_id"],
+            [new("ck_runtime_continuation_acceptance_revision", "check (workflow_to_revision = workflow_from_revision + 1)"),
+             new("ck_runtime_continuation_acceptance_tenant", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))")],
+            [new("uq_runtime_continuation_acceptance_task", ["tenant_scope_kind", "tenant_id", "human_task_instance_id"], "", Unique: true)], [])
         ];
     }
 
@@ -1539,6 +1566,57 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                     or (permission_match_kind = 1 and permission_value = '')),
                 constraint ck_data_permission_scope_kind check (scope_kind = any (array[0,1,2,3,4,5]))
             );
+            """),
+        new RuntimeMigration("V012", "transactional_outbox", """
+            alter table {schema}.runtime_human_task_instances
+                add column required_consumer_ids_json jsonb not null default '[]'::jsonb;
+            update {schema}.runtime_human_task_instances
+               set required_consumer_ids_json = '["crest.workflow.humantask-continuation/v1"]'::jsonb
+             where workflow_instance_id is not null;
+            alter table {schema}.runtime_human_task_instances
+                add constraint ck_runtime_human_task_required_consumers check (jsonb_typeof(required_consumer_ids_json) = 'array');
+            alter table {schema}.runtime_human_task_instances alter column required_consumer_ids_json drop default;
+
+            create table {schema}.runtime_outbox_messages (
+                message_id text collate "C" not null,
+                tenant_id text collate "C" null,
+                contract_id text collate "C" not null,
+                payload_type_id text collate "C" not null,
+                payload bytea not null,
+                required_consumer_ids_json jsonb not null,
+                integrity bytea not null,
+                created_at timestamptz not null,
+                status integer not null default 0,
+                attempt integer not null default 0,
+                fence bigint not null default 0,
+                lease_owner text collate "C" null,
+                lease_expires_at timestamptz null,
+                next_attempt_at timestamptz null,
+                last_failure_code text collate "C" null,
+                primary key (message_id),
+                constraint ck_runtime_outbox_status check (status between 0 and 4),
+                constraint ck_runtime_outbox_attempt check (attempt >= 0),
+                constraint ck_runtime_outbox_required_consumers check (jsonb_typeof(required_consumer_ids_json) = 'array')
+            );
+            create index ix_runtime_outbox_claim on {schema}.runtime_outbox_messages (status, next_attempt_at, created_at, message_id);
+
+            create table {schema}.runtime_workflow_continuation_acceptances (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                completion_event_id text collate "C" not null,
+                human_task_instance_id text collate "C" not null,
+                workflow_instance_id text collate "C" not null,
+                outcome text collate "C" not null,
+                result_json jsonb null,
+                workflow_from_revision bigint not null,
+                workflow_to_revision bigint not null,
+                integrity_json jsonb not null,
+                accepted_at timestamptz not null default clock_timestamp(),
+                primary key (tenant_scope_kind, tenant_id, completion_event_id),
+                constraint ck_runtime_continuation_acceptance_revision check (workflow_to_revision = workflow_from_revision + 1),
+                constraint ck_runtime_continuation_acceptance_tenant check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))
+            );
+            create unique index uq_runtime_continuation_acceptance_task on {schema}.runtime_workflow_continuation_acceptances (tenant_scope_kind, tenant_id, human_task_instance_id);
             """)
     ];
 }

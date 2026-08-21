@@ -5,7 +5,16 @@ using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
+using CrestCreates.Workflow.Abstractions.Delivery;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Workflow.Accountability;
+using CrestCreates.Accountability.Abstractions.Preparation;
+using CrestCreates.Accountability.Abstractions.Json;
+using CrestCreates.Runtime.Delivery.Abstractions.Messages;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using System.Text.Json;
 
 namespace CrestCreates.Workflow;
 
@@ -20,6 +29,11 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
     private readonly IRuntimeStateContractRegistry _stateRegistry;
     private readonly IRuntimeDescriptorPinResolver<WorkflowDescriptor> _pinResolver;
     private readonly IDescriptorSnapshotStore? _snapshots;
+    private readonly IWorkflowContinuationAcceptanceStore? _acceptances;
+    private readonly IRuntimeTransactionCoordinator? _transactions;
+    private readonly IAuditEnvelopePreparer? _auditPreparer;
+    private readonly ITransactionalOutboxWriter? _outboxWriter;
+    private readonly IOutboxMessageFactory? _outboxFactory;
 
     public WorkflowContinuationService(
         IWorkflowInstanceStore store,
@@ -30,7 +44,12 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         WorkflowLifecycleEventFactory events,
         IRuntimeStateContractRegistry stateRegistry,
         IRuntimeDescriptorPinResolver<WorkflowDescriptor> pinResolver,
-        IDescriptorSnapshotStore? snapshots)
+        IDescriptorSnapshotStore? snapshots,
+        IWorkflowContinuationAcceptanceStore? acceptances = null,
+        IRuntimeTransactionCoordinator? transactions = null,
+        IAuditEnvelopePreparer? auditPreparer = null,
+        ITransactionalOutboxWriter? outboxWriter = null,
+        IOutboxMessageFactory? outboxFactory = null)
     {
         _store = store;
         _stateMachine = stateMachine;
@@ -41,6 +60,11 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
         _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
         _snapshots = snapshots;
+        _acceptances = acceptances;
+        _transactions = transactions;
+        _auditPreparer = auditPreparer;
+        _outboxWriter = outboxWriter;
+        _outboxFactory = outboxFactory;
     }
 
     public async Task ContinueAsync(
@@ -51,6 +75,30 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             .ConfigureAwait(false);
         if (instance == null)
             return;
+
+        // A durable acceptance is the idempotency record for the completion event.  Check it
+        // before rebuilding a candidate so a replay cannot append another step result or move
+        // the workflow a second time.  A reused event id with different facts is a hard conflict.
+        if (_acceptances is not null && !string.IsNullOrWhiteSpace(request.CompletionEventId))
+        {
+            var existing = await _acceptances.GetAsync(
+                new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(instance.TenantId),
+                request.CompletionEventId!, ct).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                if (existing.HumanTaskKey != request.HumanTaskKey ||
+                    existing.WorkflowKey != request.WorkflowKey ||
+                    !string.Equals(existing.Outcome, request.Outcome, StringComparison.Ordinal) ||
+                    !ResultsEqual(existing.Result, request.Result))
+                {
+                    throw new RuntimePersistenceContractException(
+                        RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                        "Workflow continuation event id is already bound to different durable facts.");
+                }
+
+                return;
+            }
+        }
 
         if (instance.Status != WorkflowInstanceStatus.Suspended)
             throw new InvalidOperationException(
@@ -109,11 +157,76 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         var resumedIdentity = _events.AllocateLifecycleIdentity();
         candidate.LastLifecycleAuditId = resumedIdentity.AuditId;
 
+        var resumedEvent = _events.Create(
+            "workflow.resumed", candidate, descriptor, resumedIdentity, runOperationId,
+            resumedFromStatus, request.TriggerOperationId ?? request.CompletionEventId,
+            request.TriggerAuditId, resumedPreviousId,
+            humanTaskInstanceId: request.HumanTaskKey.InstanceId,
+            humanTaskCompletionEventId: request.CompletionEventId);
+        OutboxMessage? accountabilityMessage = null;
+        if (_auditPreparer is not null && _outboxWriter is not null && _outboxFactory is not null)
+        {
+            var prepared = await _auditPreparer.PrepareAsync(WorkflowAccountabilityEnvelopeFactory.Create(resumedEvent), ct).ConfigureAwait(false);
+            if (!prepared.IsAccepted || prepared.Envelope is null)
+                throw new RuntimePersistenceContractException(RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict, "Workflow Accountability envelope preparation was rejected.");
+            var payload = JsonSerializer.SerializeToUtf8Bytes(prepared.Envelope, AccountabilityJsonSerializerContext.Default.AuditEnvelope);
+            accountabilityMessage = _outboxFactory.Create(
+                prepared.Envelope.AuditId,
+                prepared.Envelope.TenantId,
+                "crest.accountability.audit-envelope/v1",
+                "CrestCreates.Accountability.AuditEnvelope/v1",
+                payload,
+                createdAt: prepared.Envelope.OccurredAt);
+        }
+
+        var expectedRevision = instance.Revision;
+        var acceptance = _acceptances is null ? null : new WorkflowContinuationAcceptance
+        {
+            TenantScope = new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(instance.TenantId),
+            CompletionEventId = request.CompletionEventId ?? request.HumanTaskKey.InstanceId,
+            HumanTaskKey = request.HumanTaskKey,
+            WorkflowKey = instance.Key,
+            Outcome = request.Outcome,
+            Result = request.Result,
+            WorkflowFromRevision = expectedRevision,
+            WorkflowToRevision = expectedRevision + 1,
+            Integrity = WorkflowContinuationAcceptanceCanonicalWriter.Compute(new WorkflowContinuationAcceptance
+            {
+                TenantScope = new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(instance.TenantId),
+                CompletionEventId = request.CompletionEventId ?? request.HumanTaskKey.InstanceId,
+                HumanTaskKey = request.HumanTaskKey,
+                WorkflowKey = instance.Key,
+                Outcome = request.Outcome,
+                Result = request.Result,
+                WorkflowFromRevision = expectedRevision,
+                WorkflowToRevision = expectedRevision + 1,
+                Integrity = new CanonicalHash
+                {
+                    Value = string.Empty, Algorithm = "", AlgorithmVersion = "", ArtifactKind = "", Scope = "", Purpose = "", ContractVersion = "", CanonicalShapeVersion = ""
+                }
+            })
+        };
         try
         {
-            var expectedRevision = instance.Revision;
-            await _store.UpdateAsync(candidate, expectedRevision, ct).ConfigureAwait(false);
-            candidate.Revision = expectedRevision + 1;
+            async ValueTask PersistAsync(CancellationToken token)
+            {
+                await _store.UpdateAsync(candidate, expectedRevision, token).ConfigureAwait(false);
+                candidate.Revision = expectedRevision + 1;
+                if (acceptance is not null)
+                {
+                    var result = await _acceptances!.AddAsync(acceptance, token).ConfigureAwait(false);
+                    if (result == WorkflowContinuationAcceptanceWriteResult.Conflict)
+                        throw new RuntimePersistenceContractException(RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict, "Workflow continuation acceptance conflicts with a durable decision.");
+                }
+                if (accountabilityMessage is not null)
+                {
+                    var append = await _outboxWriter!.AppendAsync(accountabilityMessage, token).ConfigureAwait(false);
+                    if (append is not (OutboxAppendResult.Appended or OutboxAppendResult.Duplicate))
+                        throw new InvalidOperationException("Workflow Accountability Outbox append was not accepted.");
+                }
+            }
+            if (_transactions is null) await PersistAsync(ct).ConfigureAwait(false);
+            else await _transactions.ExecuteAsync(PersistAsync, ct).ConfigureAwait(false);
         }
         catch (RuntimeConcurrencyException)
         {
@@ -128,19 +241,16 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             throw;
         }
 
-        await _eventPublisher.PublishAsync(_events.Create(
-            "workflow.resumed",
-            candidate,
-            descriptor,
-            resumedIdentity,
-            runOperationId,
-            resumedFromStatus,
-            request.TriggerOperationId ?? request.CompletionEventId,
-            request.TriggerAuditId,
-            resumedPreviousId,
-            humanTaskInstanceId: request.HumanTaskKey.InstanceId,
-            humanTaskCompletionEventId: request.CompletionEventId), CancellationToken.None).ConfigureAwait(false);
+        await _eventPublisher.PublishAsync(resumedEvent, CancellationToken.None).ConfigureAwait(false);
 
-        await _executionRunner.RunAsync(candidate, runOperationId, parent?.EnclosingAuditId, ct).ConfigureAwait(false);
+        try { await _executionRunner.RunAsync(candidate, runOperationId, parent?.EnclosingAuditId, ct).ConfigureAwait(false); }
+        catch (Exception) { /* acceptance is durable; post-resume execution is not an Ack condition */ }
     }
+
+    private static bool ResultsEqual(RuntimeStateValue? left, RuntimeStateValue? right)
+        => left is null && right is null ||
+           left is not null && right is not null &&
+           string.Equals(left.TypeId, right.TypeId, StringComparison.Ordinal) &&
+           string.Equals(left.SchemaRef?.ToString(), right.SchemaRef?.ToString(), StringComparison.Ordinal) &&
+           string.Equals(left.JsonPayload, right.JsonPayload, StringComparison.Ordinal);
 }
