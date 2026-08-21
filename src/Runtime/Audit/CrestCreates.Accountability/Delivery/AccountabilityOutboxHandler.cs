@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Accountability.Recording;
@@ -9,6 +10,9 @@ namespace CrestCreates.Accountability.Delivery;
 
 internal sealed class AccountabilityOutboxHandler : IOutboxDeliveryHandler
 {
+    private delegate AuditEnvelope? SourceGeneratedReader(string json, JsonTypeInfo<AuditEnvelope> typeInfo);
+    private static readonly SourceGeneratedReader ReadEnvelope = JsonSerializer.Deserialize;
+
     private readonly PreparedAuditRecorder _recorder;
     public AccountabilityOutboxHandler(PreparedAuditRecorder recorder) => _recorder = recorder;
     public string ContractId => AccountabilityDeliveryConstants.ContractId;
@@ -18,7 +22,7 @@ internal sealed class AccountabilityOutboxHandler : IOutboxDeliveryHandler
         if (!string.Equals(context.Message.Metadata.ContractId, ContractId, StringComparison.Ordinal))
             return OutboxDeliveryOutcome.Conflict;
         AuditEnvelope? envelope;
-        try { envelope = JsonSerializer.Deserialize(context.Message.Payload, AccountabilityJsonSerializerContext.Default.AuditEnvelope); }
+        try { envelope = ReadEnvelope(context.Message.Payload, AccountabilityJsonSerializerContext.Default.AuditEnvelope); }
         catch (JsonException) { return OutboxDeliveryOutcome.Conflict; }
         if (envelope is null || !string.Equals(envelope.AuditId, context.Message.Metadata.MessageId, StringComparison.Ordinal) ||
             !string.Equals(context.Message.Metadata.PayloadTypeId, AccountabilityDeliveryConstants.PayloadTypeId, StringComparison.Ordinal))
