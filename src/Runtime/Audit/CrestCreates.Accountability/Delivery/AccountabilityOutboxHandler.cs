@@ -10,7 +10,7 @@ namespace CrestCreates.Accountability.Delivery;
 
 internal sealed class AccountabilityOutboxHandler : IOutboxDeliveryHandler
 {
-    private delegate AuditEnvelope? SourceGeneratedReader(string json, JsonTypeInfo<AuditEnvelope> typeInfo);
+    private delegate AuditEnvelope? SourceGeneratedReader(ReadOnlySpan<byte> json, JsonTypeInfo<AuditEnvelope> typeInfo);
     private static readonly SourceGeneratedReader ReadEnvelope = JsonSerializer.Deserialize;
 
     private readonly PreparedAuditRecorder _recorder;
