@@ -159,6 +159,12 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             await PersistUpdateAsync(candidate, loaded.Revision, transactionCt).ConfigureAwait(false);
             await _outbox.AppendAsync(message, transactionCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+        // The transactional outbox is the sole completion acknowledgement and
+        // recovery authority.  A typed Local Event notification remains an
+        // optional compatibility lane for in-process business adapters; it is
+        // emitted only after the durable commit and never changes delivery state.
+        try { await _eventBus.PublishAsync(completedEvent, CancellationToken.None).ConfigureAwait(false); }
+        catch { /* LocalEvent is optional compatibility only; it has no Ack authority. */ }
         return candidate;
     }
 

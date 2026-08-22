@@ -91,7 +91,8 @@ public static class WorkflowServiceCollectionExtensions
             sp.GetService<IRuntimeTransactionCoordinator>(),
             sp.GetService<CrestCreates.Accountability.Abstractions.Preparation.IAuditEnvelopePreparer>(),
             sp.GetService<CrestCreates.Runtime.Delivery.Abstractions.Stores.ITransactionalOutboxWriter>(),
-            sp.GetService<CrestCreates.Runtime.Delivery.Abstractions.Messages.IOutboxMessageFactory>()));
+            sp.GetService<CrestCreates.Runtime.Delivery.Abstractions.Messages.IOutboxMessageFactory>(),
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<WorkflowContinuationService>>()));
 
         services.TryAddScoped<IWorkflowEngine>(sp =>
             new WorkflowEngine(

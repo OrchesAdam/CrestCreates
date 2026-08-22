@@ -14,6 +14,7 @@ using CrestCreates.Accountability.Abstractions.Preparation;
 using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
 using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
 namespace CrestCreates.Workflow;
@@ -34,6 +35,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
     private readonly IAuditEnvelopePreparer? _auditPreparer;
     private readonly ITransactionalOutboxWriter? _outboxWriter;
     private readonly IOutboxMessageFactory? _outboxFactory;
+    private readonly ILogger<WorkflowContinuationService>? _logger;
 
     public WorkflowContinuationService(
         IWorkflowInstanceStore store,
@@ -49,7 +51,8 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         IRuntimeTransactionCoordinator? transactions = null,
         IAuditEnvelopePreparer? auditPreparer = null,
         ITransactionalOutboxWriter? outboxWriter = null,
-        IOutboxMessageFactory? outboxFactory = null)
+        IOutboxMessageFactory? outboxFactory = null,
+        ILogger<WorkflowContinuationService>? logger = null)
     {
         _store = store;
         _stateMachine = stateMachine;
@@ -65,6 +68,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         _auditPreparer = auditPreparer;
         _outboxWriter = outboxWriter;
         _outboxFactory = outboxFactory;
+        _logger = logger;
     }
 
     public async Task ContinueAsync(
@@ -245,8 +249,19 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
 
         await _eventPublisher.PublishAsync(resumedEvent, CancellationToken.None).ConfigureAwait(false);
 
-        try { await _executionRunner.RunAsync(candidate, runOperationId, parent?.EnclosingAuditId, ct).ConfigureAwait(false); }
-        catch (Exception) { /* acceptance is durable; post-resume execution is not an Ack condition */ }
+        try
+        {
+            await _executionRunner.RunAsync(candidate, runOperationId, parent?.EnclosingAuditId, ct).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // The acceptance is the durable Ack boundary.  Post-resume execution
+            // is intentionally not retried by the completion message, but the
+            // failure must remain observable for operational reconciliation.
+            _logger?.LogError(exception,
+                "Workflow continuation accepted but post-resume execution failed for {WorkflowInstanceId}.",
+                candidate.InstanceId);
+        }
     }
 
     private static bool ResultsEqual(RuntimeStateValue? left, RuntimeStateValue? right)

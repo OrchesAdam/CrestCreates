@@ -157,9 +157,18 @@ public sealed class ProjectionCompositionAcceptanceTests
 
         await SubmitHttpAsync(client, "Authenticated workflow origin", 25_000m);
 
-        var workflow = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Single(record =>
-            record.Action.Kind == "workflow.lifecycle"
-            && record.Action.Name == "workflow.started");
+        var sink = factory.Services.GetRequiredService<InMemoryAuditSink>();
+        AuditEnvelope? workflow = null;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (DateTimeOffset.UtcNow < deadline && workflow is null)
+        {
+            workflow = sink.GetRecords().SingleOrDefault(record =>
+                record.Action.Kind == "workflow.lifecycle"
+                && record.Action.Name == "workflow.started");
+            if (workflow is null)
+                await Task.Delay(TimeSpan.FromMilliseconds(20));
+        }
+        workflow.Should().NotBeNull();
         workflow.Actor.Kind.Should().Be("workflow");
         workflow.Actor.InitiatedBy.Should().Be(new AuditActorReference("user", "requester-a"));
     }

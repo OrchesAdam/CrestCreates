@@ -424,6 +424,10 @@ public sealed class ProcurementApprovalTaskService(
             ?? throw new InvalidOperationException("HumanTask is unavailable.");
         var variables = RestoreVariables(task.Input, stateRegistry);
         var requesterId = variables["requesterId"]?.ToString();
+        var requestId = variables.TryGetValue("requestId", out var requestIdValue)
+            && requestIdValue is Guid parsedRequestId
+            ? parsedRequestId
+            : (Guid?)null;
         if (string.IsNullOrWhiteSpace(task.TenantId)
             || !string.Equals(task.TenantId, tenant.CurrentTenantId, StringComparison.Ordinal))
             throw Forbidden("The HumanTask belongs to another tenant.");
@@ -452,10 +456,19 @@ public sealed class ProcurementApprovalTaskService(
             var currentWorkflow = task.WorkflowKey is { } workflowKey
                 ? await workflows.GetAsync(workflowKey, cancellationToken).ConfigureAwait(false)
                 : null;
+            var currentRequest = requestId is { } id
+                ? requests.GetById(task.TenantId, id)
+                : null;
+            var expectedRequestStatus = string.Equals(outcome, "Approve", StringComparison.OrdinalIgnoreCase)
+                ? ProcurementRequestStatus.Approved
+                : string.Equals(outcome, "Reject", StringComparison.OrdinalIgnoreCase)
+                    ? ProcurementRequestStatus.Rejected
+                    : (ProcurementRequestStatus?)null;
             if (currentTask?.Status == HumanTaskInstanceStatus.Completed
                 && currentWorkflow?.Status is WorkflowInstanceStatus.Completed
                     or WorkflowInstanceStatus.Failed
-                    or WorkflowInstanceStatus.Compensated)
+                    or WorkflowInstanceStatus.Compensated
+                && (expectedRequestStatus is null || currentRequest?.Status == expectedRequestStatus))
             {
                 return;
             }
