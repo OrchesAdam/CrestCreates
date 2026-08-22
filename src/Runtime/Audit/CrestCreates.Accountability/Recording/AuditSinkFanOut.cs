@@ -45,7 +45,7 @@ internal sealed class AuditSinkFanOut
                     failures.Add(new(_sinks[i].Id, "AUDIT_SINK_CONFLICT"));
                 continue;
             }
-            if (attempt.ExistingIntegrity is null)
+            if (attempt.Status is not (AuditSinkWriteStatus.Accepted or AuditSinkWriteStatus.Duplicate))
             { failures.Add(new(_sinks[i].Id, "AUDIT_SINK_RESULT_CONTRACT_MISMATCH")); continue; }
             results.Add(attempt);
         }
