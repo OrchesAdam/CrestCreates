@@ -71,34 +71,27 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         WorkflowContinuationRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // The acceptance receipt is the authority for an already accepted
+        // completion.  It must be checked before the waiting-key lookup because
+        // a successful continuation clears that key; absence is not evidence of
+        // a duplicate and must never be treated as one.
+        if (_acceptances is not null && !string.IsNullOrWhiteSpace(request.CompletionEventId))
+        {
+            var existing = await _acceptances.GetAsync(
+                new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(request.WorkflowKey.TenantId),
+                request.CompletionEventId!, ct).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                EnsureAcceptanceMatches(existing, request);
+                return;
+            }
+        }
+
         var instance = await _store.GetByWaitingHumanTaskAsync(request.HumanTaskKey, ct)
             .ConfigureAwait(false);
         if (instance == null)
             return;
-
-        // A durable acceptance is the idempotency record for the completion event.  Check it
-        // before rebuilding a candidate so a replay cannot append another step result or move
-        // the workflow a second time.  A reused event id with different facts is a hard conflict.
-        if (_acceptances is not null && !string.IsNullOrWhiteSpace(request.CompletionEventId))
-        {
-            var existing = await _acceptances.GetAsync(
-                new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(instance.TenantId),
-                request.CompletionEventId!, ct).ConfigureAwait(false);
-            if (existing is not null)
-            {
-                if (existing.HumanTaskKey != request.HumanTaskKey ||
-                    existing.WorkflowKey != request.WorkflowKey ||
-                    !string.Equals(existing.Outcome, request.Outcome, StringComparison.Ordinal) ||
-                    !ResultsEqual(existing.Result, request.Result))
-                {
-                    throw new RuntimePersistenceContractException(
-                        RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
-                        "Workflow continuation event id is already bound to different durable facts.");
-                }
-
-                return;
-            }
-        }
 
         if (instance.Status != WorkflowInstanceStatus.Suspended)
             throw new InvalidOperationException(
@@ -169,14 +162,23 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             var prepared = await _auditPreparer.PrepareAsync(WorkflowAccountabilityEnvelopeFactory.Create(resumedEvent), ct).ConfigureAwait(false);
             if (!prepared.IsAccepted || prepared.Envelope is null)
                 throw new RuntimePersistenceContractException(RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict, "Workflow Accountability envelope preparation was rejected.");
-            var payload = JsonSerializer.SerializeToUtf8Bytes(prepared.Envelope, AccountabilityJsonSerializerContext.Default.AuditEnvelope);
             accountabilityMessage = _outboxFactory.Create(
-                prepared.Envelope.AuditId,
-                prepared.Envelope.TenantId,
-                "crest.accountability.audit-envelope/v1",
-                "CrestCreates.Accountability.AuditEnvelope/v1",
-                payload,
-                createdAt: prepared.Envelope.OccurredAt);
+                new OutboxMessageMetadata
+                {
+                    MessageId = prepared.Envelope.AuditId,
+                    TenantId = prepared.Envelope.TenantId,
+                    ContractId = "crest.accountability.audit-envelope/v1",
+                    PayloadTypeId = "CrestCreates.Accountability.AuditEnvelope/v1",
+                    EventName = resumedEvent.EventType,
+                    EventVersion = 1,
+                    CorrelationId = prepared.Envelope.CorrelationId,
+                    CausationId = prepared.Envelope.CausationId,
+                    OccurredAt = prepared.Envelope.OccurredAt,
+                    RequiredConsumerIds = [],
+                    CreatedAt = prepared.Envelope.OccurredAt
+                },
+                prepared.Envelope,
+                AccountabilityJsonSerializerContext.Default.AuditEnvelope);
         }
 
         var expectedRevision = instance.Revision;
@@ -253,4 +255,19 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
            string.Equals(left.TypeId, right.TypeId, StringComparison.Ordinal) &&
            string.Equals(left.SchemaRef?.ToString(), right.SchemaRef?.ToString(), StringComparison.Ordinal) &&
            string.Equals(left.JsonPayload, right.JsonPayload, StringComparison.Ordinal);
+
+    private static void EnsureAcceptanceMatches(
+        WorkflowContinuationAcceptance existing,
+        WorkflowContinuationRequest request)
+    {
+        if (existing.HumanTaskKey != request.HumanTaskKey
+            || existing.WorkflowKey != request.WorkflowKey
+            || !string.Equals(existing.Outcome, request.Outcome, StringComparison.Ordinal)
+            || !ResultsEqual(existing.Result, request.Result))
+        {
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                "Workflow continuation event id is already bound to different durable facts.");
+        }
+    }
 }

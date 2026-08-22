@@ -60,6 +60,7 @@ public static class AccountabilityServiceCollectionExtensions
         services.TryAddScoped<AccountabilityOutboxHandler>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, AccountabilityCompositionValidator>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AccountabilityCompositionValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<CrestCreates.Runtime.Delivery.Abstractions.Composition.IOutboxDurableCompositionCheck, AccountabilityOutboxSinkCompositionCheck>());
         return services;
     }
 

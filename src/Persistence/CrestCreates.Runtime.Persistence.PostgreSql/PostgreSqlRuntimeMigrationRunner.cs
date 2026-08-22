@@ -945,17 +945,26 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_data_permission_scope_kind", "check (scope_kind = any (array[0,1,2,3,4,5]))")], [], [])
             ,new("runtime_outbox_messages", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
-                ["message_id"] = TextC, ["tenant_id"] = NullableTextC, ["contract_id"] = TextC,
-                ["payload_type_id"] = TextC, ["payload"] = ("bytea", "NO", null),
-                ["required_consumer_ids_json"] = Json, ["integrity"] = ("bytea", "NO", null),
-                ["created_at"] = Timestamp, ["status"] = Integer, ["attempt"] = Integer,
-                ["fence"] = BigInt, ["lease_owner"] = NullableTextC, ["lease_expires_at"] = NullableTimestamp,
-                ["next_attempt_at"] = NullableTimestamp, ["last_failure_code"] = NullableTextC
+                ["message_id"] = TextC, ["contract_id"] = TextC, ["event_name"] = TextC, ["event_version"] = Integer,
+                ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["correlation_id"] = NullableTextC, ["causation_id"] = NullableTextC,
+                ["occurred_at"] = Timestamp, ["required_consumer_ids_json"] = Json, ["payload_utf8"] = ("bytea", "NO", null),
+                ["integrity_json"] = Json, ["created_at"] = Timestamp, ["status"] = Integer, ["attempt_count"] = Integer,
+                ["available_at"] = Timestamp, ["lease_owner_id"] = NullableTextC, ["fencing_token"] = BigInt, ["lease_expires_at"] = NullableTimestamp,
+                ["last_failure_code"] = NullableTextC, ["last_failure_at"] = NullableTimestamp, ["delivered_at"] = NullableTimestamp,
+                ["dead_lettered_at"] = NullableTimestamp, ["updated_at"] = Timestamp
             }, ["message_id"],
             [new("ck_runtime_outbox_status", "check (status >= 0 and status <= 4)"),
-             new("ck_runtime_outbox_attempt", "check (attempt >= 0)"),
-             new("ck_runtime_outbox_required_consumers", "check (jsonb_typeof(required_consumer_ids_json) = 'array')")],
-            [new("ix_runtime_outbox_claim", ["status", "next_attempt_at", "created_at", "message_id"], "", Unique: false)], [])
+             new("ck_runtime_outbox_event_version", "check (event_version > 0)"),
+             new("ck_runtime_outbox_attempt", "check (attempt_count >= 0)"),
+             new("ck_runtime_outbox_fencing_token", "check (fencing_token >= 0)"),
+             new("ck_runtime_outbox_scope", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+             new("ck_runtime_outbox_required_consumers", "check (jsonb_typeof(required_consumer_ids_json) = 'array')"),
+             new("ck_runtime_outbox_payload", "check (octet_length(payload_utf8) > 0)"),
+             new("ck_runtime_outbox_pending_state", "check (status <> 0 or (lease_owner_id is null and lease_expires_at is null and delivered_at is null and dead_lettered_at is null))"),
+             new("ck_runtime_outbox_leased_state", "check (status <> 1 or (lease_owner_id is not null and lease_expires_at is not null and delivered_at is null and dead_lettered_at is null))"),
+             new("ck_runtime_outbox_delivered_state", "check (status <> 3 or (delivered_at is not null and dead_lettered_at is null and lease_owner_id is null and lease_expires_at is null))"),
+             new("ck_runtime_outbox_dead_letter_state", "check (status <> 4 or (dead_lettered_at is not null and delivered_at is null and lease_owner_id is null and lease_expires_at is null))")],
+            [new("ix_runtime_outbox_claim", ["status", "available_at", "created_at", "message_id"], "status in (0, 1, 2)", Unique: false)], [])
             ,new("runtime_workflow_continuation_acceptances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["completion_event_id"] = TextC,
@@ -1579,26 +1588,44 @@ public sealed class PostgreSqlRuntimeMigrationRunner
 
             create table {schema}.runtime_outbox_messages (
                 message_id text collate "C" not null,
-                tenant_id text collate "C" null,
                 contract_id text collate "C" not null,
-                payload_type_id text collate "C" not null,
-                payload bytea not null,
+                event_name text collate "C" not null,
+                event_version integer not null,
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                correlation_id text collate "C" null,
+                causation_id text collate "C" null,
+                occurred_at timestamptz not null,
                 required_consumer_ids_json jsonb not null,
-                integrity bytea not null,
+                payload_utf8 bytea not null,
+                integrity_json jsonb not null,
                 created_at timestamptz not null,
+                available_at timestamptz not null,
+                updated_at timestamptz not null,
                 status integer not null default 0,
-                attempt integer not null default 0,
-                fence bigint not null default 0,
-                lease_owner text collate "C" null,
+                attempt_count integer not null default 0,
+                fencing_token bigint not null default 0,
+                lease_owner_id text collate "C" null,
                 lease_expires_at timestamptz null,
-                next_attempt_at timestamptz null,
                 last_failure_code text collate "C" null,
+                last_failure_at timestamptz null,
+                delivered_at timestamptz null,
+                dead_lettered_at timestamptz null,
                 primary key (message_id),
                 constraint ck_runtime_outbox_status check (status between 0 and 4),
-                constraint ck_runtime_outbox_attempt check (attempt >= 0),
-                constraint ck_runtime_outbox_required_consumers check (jsonb_typeof(required_consumer_ids_json) = 'array')
+                constraint ck_runtime_outbox_event_version check (event_version > 0),
+                constraint ck_runtime_outbox_attempt check (attempt_count >= 0),
+                constraint ck_runtime_outbox_fencing_token check (fencing_token >= 0),
+                constraint ck_runtime_outbox_scope check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_runtime_outbox_required_consumers check (jsonb_typeof(required_consumer_ids_json) = 'array'),
+                constraint ck_runtime_outbox_payload check (octet_length(payload_utf8) > 0),
+                constraint ck_runtime_outbox_pending_state check (status <> 0 or (lease_owner_id is null and lease_expires_at is null and delivered_at is null and dead_lettered_at is null)),
+                constraint ck_runtime_outbox_leased_state check (status <> 1 or (lease_owner_id is not null and lease_expires_at is not null and delivered_at is null and dead_lettered_at is null)),
+                constraint ck_runtime_outbox_delivered_state check (status <> 3 or (delivered_at is not null and dead_lettered_at is null and lease_owner_id is null and lease_expires_at is null)),
+                constraint ck_runtime_outbox_dead_letter_state check (status <> 4 or (dead_lettered_at is not null and delivered_at is null and lease_owner_id is null and lease_expires_at is null))
             );
-            create index ix_runtime_outbox_claim on {schema}.runtime_outbox_messages (status, next_attempt_at, created_at, message_id);
+            create index ix_runtime_outbox_claim on {schema}.runtime_outbox_messages (status, available_at, created_at, message_id)
+                where status in (0, 1, 2);
 
             create table {schema}.runtime_workflow_continuation_acceptances (
                 tenant_scope_kind text collate "C" not null,

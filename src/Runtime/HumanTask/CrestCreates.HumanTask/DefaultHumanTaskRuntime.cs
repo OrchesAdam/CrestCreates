@@ -10,6 +10,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
 using CrestCreates.Runtime.Delivery.Abstractions.Registration;
 using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using CrestCreates.Runtime.Delivery.Abstractions.Composition;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using System.Text.Json;
 
@@ -21,7 +22,6 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
     private readonly IHumanTaskInstanceStore _store;
     private readonly ILocalEventBus _eventBus;
     private readonly IHumanTaskAssigneeResolver _resolver;
-    private readonly IHumanTaskCompletionFailurePolicy _completionFailurePolicy;
     private readonly IRuntimeDescriptorPinResolver<HumanTaskDescriptor> _pinResolver;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
     private readonly IDescriptorSnapshotStore? _snapshots;
@@ -50,8 +50,6 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         _store = store;
         _eventBus = eventBus;
         _resolver = resolver;
-        _completionFailurePolicy = completionFailurePolicy
-            ?? RejectingHumanTaskCompletionFailurePolicy.Instance;
         _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
         _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
         _snapshots = snapshots;
@@ -120,9 +118,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         request.HumanTaskKey.EnsureValid();
         var loaded = await _store.GetAsync(request.HumanTaskKey, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"HumanTask instance '{request.HumanTaskKey.InstanceId}' not found.");
-        var isRecovery = loaded.Status == HumanTaskInstanceStatus.CompletionDispatchFailed;
-        if (!isRecovery
-            && loaded.Status != HumanTaskInstanceStatus.Created
+        if (loaded.Status != HumanTaskInstanceStatus.Created
             && loaded.Status != HumanTaskInstanceStatus.Assigned)
             throw new InvalidOperationException($"HumanTask instance '{loaded.Id}' is in status '{loaded.Status}' and cannot be completed.");
 
@@ -132,21 +128,6 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             _stateRegistry.Validate(request.Result);
         CompletionOutcomeMatcher.Resolve(descriptor, request.Outcome);
 
-        if (isRecovery)
-        {
-            if (!string.Equals(loaded.Outcome, request.Outcome, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"HumanTask instance '{loaded.Id}' cannot recover with a different outcome.");
-            var recovery = loaded.Snapshot();
-            recovery.CompletionEventId ??= Guid.NewGuid().ToString("N");
-            var persistedCompletion = CreateCompletedEvent(recovery, recovery.Outcome!, recovery.Output);
-            await _completionFailurePolicy.RecoverAsync(recovery, persistedCompletion, CancellationToken.None).ConfigureAwait(false);
-            recovery.Status = HumanTaskInstanceStatus.Completed;
-            recovery.CompletionDispatchError = null;
-            recovery.CompletionDispatchFailedAt = null;
-            await PersistUpdateAsync(recovery, loaded.Revision, ct).ConfigureAwait(false);
-            return recovery;
-        }
-
         var candidate = loaded.Snapshot();
         candidate.Status = HumanTaskInstanceStatus.Completed;
         candidate.Outcome = CompletionOutcomeMatcher.Resolve(descriptor, request.Outcome).Condition.ToString();
@@ -155,28 +136,29 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         candidate.CompletionEventId ??= Guid.NewGuid().ToString("N");
         var completedEvent = CreateCompletedEvent(candidate, candidate.Outcome, request.Result);
         if (_transactions is null || _messageFactory is null || _outbox is null)
-        {
-            await PersistUpdateAsync(candidate, loaded.Revision, ct).ConfigureAwait(false);
-            try { await _eventBus.PublishAsync(completedEvent, CancellationToken.None).ConfigureAwait(false); } catch { }
-            return candidate;
-        }
-        var payload = JsonSerializer.SerializeToUtf8Bytes(
+            throw new OutboxCompositionException("HumanTask completion requires the transactional outbox runtime composition.");
+        var message = _messageFactory.Create(
+            new OutboxMessageMetadata
+            {
+                MessageId = candidate.CompletionEventId,
+                TenantId = candidate.TenantId,
+                ContractId = HumanTaskDeliveryConstants.CompletedContractId,
+                PayloadTypeId = HumanTaskDeliveryConstants.CompletedPayloadTypeId,
+                EventName = "humantask.completed",
+                EventVersion = 1,
+                CorrelationId = candidate.WorkflowKey?.InstanceId,
+                CausationId = candidate.CompletionEventId,
+                OccurredAt = candidate.CompletedAt ?? DateTimeOffset.UtcNow,
+                RequiredConsumerIds = candidate.RequiredCompletionConsumerIds,
+                CreatedAt = candidate.CompletedAt ?? DateTimeOffset.UtcNow
+            },
             completedEvent,
             HumanTaskJsonSerializerContext.Default.HumanTaskCompletedEvent);
-        var message = _messageFactory.Create(
-            candidate.CompletionEventId,
-            candidate.TenantId,
-            HumanTaskDeliveryConstants.CompletedContractId,
-            HumanTaskDeliveryConstants.CompletedPayloadTypeId,
-            payload,
-            candidate.RequiredCompletionConsumerIds);
         await _transactions.ExecuteAsync(async transactionCt =>
         {
             await PersistUpdateAsync(candidate, loaded.Revision, transactionCt).ConfigureAwait(false);
             await _outbox.AppendAsync(message, transactionCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
-        try { await _eventBus.PublishAsync(completedEvent, CancellationToken.None).ConfigureAwait(false); }
-        catch { /* LocalEvent is optional compatibility only; it has no Ack authority. */ }
         return candidate;
     }
 
@@ -193,7 +175,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
     {
         var active = _consumerMetadata.Select(item => item.ConsumerId).ToHashSet(StringComparer.Ordinal);
         var missing = requiredConsumers.Where(id => !active.Contains(id)).ToArray();
-        if (_consumerMetadata.Count != 0 && missing.Length != 0)
+        if (missing.Length != 0)
             throw new InvalidOperationException($"HumanTask completion obligation(s) are not registered: {string.Join(", ", missing)}.");
     }
 
@@ -204,8 +186,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         var loaded = await _store.GetAsync(humanTaskKey, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"HumanTask instance '{humanTaskKey.InstanceId}' not found.");
         if (loaded.Status == HumanTaskInstanceStatus.Completed
-            || loaded.Status == HumanTaskInstanceStatus.Cancelled
-            || loaded.Status == HumanTaskInstanceStatus.CompletionDispatchFailed)
+            || loaded.Status == HumanTaskInstanceStatus.Cancelled)
             throw new InvalidOperationException($"HumanTask instance '{loaded.Id}' is already '{loaded.Status}' and cannot be cancelled.");
 
         var candidate = loaded.Snapshot();
@@ -222,25 +203,6 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         candidate.Revision = expectedRevision + 1;
     }
 
-    private async Task RecordDispatchFailureAsync(HumanTaskInstance instance, Exception exception)
-    {
-        var candidate = instance.Snapshot();
-        candidate.Status = HumanTaskInstanceStatus.CompletionDispatchFailed;
-        candidate.CompletionDispatchError = $"{exception.GetType().Name}: {exception.Message}";
-        candidate.CompletionDispatchFailedAt = DateTimeOffset.UtcNow;
-        candidate.CompletionDispatchAttemptCount++;
-        try
-        {
-            await PersistUpdateAsync(candidate, instance.Revision, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception stateException)
-        {
-            throw new AggregateException(
-                $"HumanTask '{instance.Id}' completion dispatch failed and its explicit failure state could not be persisted.",
-                exception,
-                stateException);
-        }
-    }
 
     private static HumanTaskCompletedEvent CreateCompletedEvent(
         HumanTaskInstance instance,
@@ -256,11 +218,4 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             Result = result
         };
 
-    private sealed class RejectingHumanTaskCompletionFailurePolicy : IHumanTaskCompletionFailurePolicy
-    {
-        public static RejectingHumanTaskCompletionFailurePolicy Instance { get; } = new();
-
-        public Task RecoverAsync(HumanTaskInstance instance, HumanTaskCompletedEvent completion, CancellationToken cancellationToken = default)
-            => Task.FromException(new HumanTaskCompletionRecoveryRequiredException(instance.Id));
-    }
 }

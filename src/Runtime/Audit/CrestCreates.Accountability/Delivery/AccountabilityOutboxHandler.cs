@@ -5,6 +5,7 @@ using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Accountability.Recording;
 using CrestCreates.Accountability.Abstractions.Recording;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
+using CrestCreates.Runtime.Delivery.Abstractions.Composition;
 
 namespace CrestCreates.Accountability.Delivery;
 
@@ -24,8 +25,7 @@ internal sealed class AccountabilityOutboxHandler : IOutboxDeliveryHandler
         AuditEnvelope? envelope;
         try { envelope = ReadEnvelope(context.Message.Payload, AccountabilityJsonSerializerContext.Default.AuditEnvelope); }
         catch (JsonException) { return OutboxDeliveryOutcome.Conflict; }
-        if (envelope is null || !string.Equals(envelope.AuditId, context.Message.Metadata.MessageId, StringComparison.Ordinal) ||
-            !string.Equals(context.Message.Metadata.PayloadTypeId, AccountabilityDeliveryConstants.PayloadTypeId, StringComparison.Ordinal))
+        if (envelope is null || !string.Equals(envelope.AuditId, context.Message.Metadata.MessageId, StringComparison.Ordinal))
             return OutboxDeliveryOutcome.Conflict;
         var result = await _recorder.RecordPreparedAsync(envelope, cancellationToken).ConfigureAwait(false);
         return result.Status switch
@@ -33,7 +33,7 @@ internal sealed class AccountabilityOutboxHandler : IOutboxDeliveryHandler
             AuditRecordStatus.Recorded => OutboxDeliveryOutcome.Accepted,
             AuditRecordStatus.PartiallyRecorded or AuditRecordStatus.Failed =>
                 result.SinkFailures.Any(x => x.Code == "AUDIT_SINK_CONFLICT") ? OutboxDeliveryOutcome.Conflict : OutboxDeliveryOutcome.Retry,
-            AuditRecordStatus.NoSinkConfigured => OutboxDeliveryOutcome.Retry,
+            AuditRecordStatus.NoSinkConfigured => throw new OutboxCompositionException("Accountability has no configured sink for a reliable outbox delivery."),
             _ => OutboxDeliveryOutcome.Conflict
         };
     }

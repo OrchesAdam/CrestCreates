@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="CrestCreates.Runtime.Delivery" />
+    <InternalsVisibleTo Include="CrestCreates.Accountability" />
     <InternalsVisibleTo Include="CrestCreates.HumanTask" />
     <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.InMemory" />
     <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql" />

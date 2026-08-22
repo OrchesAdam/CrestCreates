@@ -71,6 +71,11 @@ public static class DeliveryServiceCollectionExtensions
             while (!stoppingToken.IsCancellationRequested)
             {
                 try { await dispatcher.DispatchBatchAsync(ownerId, stoppingToken).ConfigureAwait(false); }
+                catch (OutboxCompositionException ex)
+                {
+                    readiness.Fail(ex);
+                    throw;
+                }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
                 catch (Exception ex) { logger.LogError(ex, "Outbox worker iteration failed."); }
                 await Task.Delay(options.PollingInterval, stoppingToken).ConfigureAwait(false);

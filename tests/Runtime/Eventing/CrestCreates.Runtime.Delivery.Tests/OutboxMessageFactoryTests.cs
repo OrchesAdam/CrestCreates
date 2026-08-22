@@ -18,6 +18,9 @@ public sealed class OutboxMessageFactoryTests
 
         message.Payload.Should().Equal(1, 2, 3);
         message.Metadata.RequiredConsumerIds.Should().Equal("a", "z");
+        message.Metadata.EventName.Should().Be("contract/v1");
+        message.Metadata.EventVersion.Should().Be(1);
+        message.Integrity.ArtifactKind.Should().Be("RuntimeOutboxMessage");
         OutboxMessageIntegrity.Matches(message).Should().BeTrue();
     }
 

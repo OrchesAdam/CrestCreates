@@ -56,6 +56,10 @@ public static class WorkflowServiceCollectionExtensions
         services.TryAddSingleton(new WorkflowPostCommitNotificationOptions());
         services.TryAddSingleton<IWorkflowPostCommitNotificationBudget, DefaultWorkflowPostCommitNotificationBudget>();
         services.TryAddScoped<WorkflowLifecycleEventFactory>();
+        services.TryAddScoped<WorkflowAccountabilityOutboxAppender>(sp => new WorkflowAccountabilityOutboxAppender(
+            sp.GetService<CrestCreates.Accountability.Abstractions.Preparation.IAuditEnvelopePreparer>(),
+            sp.GetService<CrestCreates.Runtime.Delivery.Abstractions.Stores.ITransactionalOutboxWriter>(),
+            sp.GetService<CrestCreates.Runtime.Delivery.Abstractions.Messages.IOutboxMessageFactory>()));
         services.TryAddScoped<IWorkflowLifecycleEventPublisher, WorkflowLifecycleEventPublisher>();
         services.TryAddScoped<IWorkflowLifecycleObserver, WorkflowAccountabilityObserver>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IBootstrapValidator, WorkflowAccountabilityCompositionValidator>());
@@ -70,7 +74,9 @@ public static class WorkflowServiceCollectionExtensions
             sp.GetRequiredService<IRuntimeStateContractRegistry>(),
             sp.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>(),
             sp.GetRequiredService<WorkflowSuspensionCommitter>(),
-            sp.GetService<IDescriptorSnapshotStore>()));
+            sp.GetService<IDescriptorSnapshotStore>(),
+            sp.GetRequiredService<WorkflowAccountabilityOutboxAppender>(),
+            sp.GetService<IRuntimeTransactionCoordinator>()));
         services.TryAddScoped<IWorkflowContinuationService>(sp => new WorkflowContinuationService(
             sp.GetRequiredService<IWorkflowInstanceStore>(),
             sp.GetRequiredService<IWorkflowStateMachine>(),
@@ -96,7 +102,9 @@ public static class WorkflowServiceCollectionExtensions
                 sp.GetRequiredService<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(),
                 sp.GetRequiredService<WorkflowLifecycleEventFactory>(),
                 sp.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>(),
-                sp.GetRequiredService<IRuntimeStateContractRegistry>()));
+                sp.GetRequiredService<IRuntimeStateContractRegistry>(),
+                sp.GetService<IRuntimeTransactionCoordinator>(),
+                sp.GetRequiredService<WorkflowAccountabilityOutboxAppender>()));
 
         services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, WorkflowContinuationOutboxConsumer>(HumanTaskDeliveryConstants.WorkflowContinuationConsumerId);
 

@@ -24,6 +24,7 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
     private readonly ImmutableArray<IAuditSink> _sinks;
     private readonly AccountabilityOptions _options;
     private readonly TimeProvider _timeProvider;
+    private readonly AuditSinkFanOut _fanOut;
     private readonly ILogger<DefaultAuditRecorder> _logger;
 
     public DefaultAuditRecorder(
@@ -43,6 +44,7 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
         _sinks = sinks.OrderBy(x => x.Id, StringComparer.Ordinal).ToImmutableArray();
         _options = options;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _fanOut = new AuditSinkFanOut(_sinks, _options, _timeProvider);
         _logger = logger ?? NullLogger<DefaultAuditRecorder>.Instance;
     }
 
@@ -140,106 +142,11 @@ public sealed class DefaultAuditRecorder : IAuditRecorder
         }
     }
 
-    private async ValueTask<AuditRecordResult> FanOutAsync(
+    private ValueTask<AuditRecordResult> FanOutAsync(
         AuditEnvelope envelope,
         CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHash hash,
         CancellationToken callerCancellation)
-    {
-        if (_sinks.IsDefaultOrEmpty)
-        {
-            return new AuditRecordResult
-            {
-                AuditId = envelope.AuditId,
-                Status = AuditRecordStatus.NoSinkConfigured,
-                ProcessedAt = _timeProvider.GetUtcNow(),
-                RecordHash = hash,
-                Issues = _options.RequireAtLeastOneSink ? [new("AUDIT_NO_SINK_CONFIGURED")] : []
-            };
-        }
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(callerCancellation);
-        timeout.CancelAfter(_options.WriteTimeout);
-        var attempts = new List<Task<WriteAttempt>>(_sinks.Length);
-        foreach (var sink in _sinks)
-        {
-            try
-            {
-                var valueTask = sink.WriteAsync(envelope, timeout.Token);
-                attempts.Add(CaptureAsync(sink, valueTask));
-            }
-            catch (Exception ex)
-            {
-                attempts.Add(Task.FromResult(WriteAttempt.Failure(sink.Id, ex)));
-            }
-        }
-
-        var all = Task.WhenAll(attempts);
-        try
-        {
-            await all.WaitAsync(_options.WriteTimeout, callerCancellation).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            timeout.Cancel();
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-
-        callerCancellation.ThrowIfCancellationRequested();
-
-        var results = ImmutableArray.CreateBuilder<AuditSinkWriteResult>();
-        var failures = ImmutableArray.CreateBuilder<AuditSinkFailure>();
-        for (var index = 0; index < attempts.Count; index++)
-        {
-            var sinkId = _sinks[index].Id;
-            var attempt = attempts[index].IsCompletedSuccessfully
-                ? await attempts[index].ConfigureAwait(false)
-                : WriteAttempt.Failure(sinkId, new TimeoutException());
-            if (attempt.Result is { } result)
-            {
-                if (!string.Equals(result.SinkId, attempt.SinkId, StringComparison.Ordinal)
-                    || !string.Equals(result.AuditId, envelope.AuditId, StringComparison.Ordinal)
-                    || result.Integrity != hash)
-                {
-                    failures.Add(new(attempt.SinkId, "AUDIT_SINK_RESULT_IDENTITY_MISMATCH"));
-                }
-                else if (result.Status == AuditSinkWriteStatus.Conflict
-                    ? result.ExistingIntegrity is null || result.ExistingIntegrity == hash
-                    : result.Status is AuditSinkWriteStatus.Accepted or AuditSinkWriteStatus.Duplicate
-                        ? result.ExistingIntegrity is not null
-                        : true)
-                {
-                    failures.Add(new(attempt.SinkId, "AUDIT_SINK_RESULT_CONTRACT_MISMATCH"));
-                }
-                else results.Add(result);
-            }
-            else failures.Add(new(attempt.SinkId, attempt.FailureCode));
-        }
-
-        var accepted = results.Any(x => x.Status is AuditSinkWriteStatus.Accepted or AuditSinkWriteStatus.Duplicate);
-        var conflicts = results.Any(x => x.Status == AuditSinkWriteStatus.Conflict);
-        var status = accepted
-            ? (failures.Count == 0 && !conflicts ? AuditRecordStatus.Recorded : AuditRecordStatus.PartiallyRecorded)
-            : conflicts ? AuditRecordStatus.Failed : AuditRecordStatus.Failed;
-
-        return new AuditRecordResult
-        {
-            AuditId = envelope.AuditId,
-            Status = status,
-            ProcessedAt = _timeProvider.GetUtcNow(),
-            RecordHash = hash,
-            SinkResults = results.ToImmutable(),
-            SinkFailures = failures.ToImmutable()
-        };
-    }
-
-    private static async Task<WriteAttempt> CaptureAsync(IAuditSink sink, ValueTask<AuditSinkWriteResult> operation)
-    {
-        try { return WriteAttempt.Success(sink.Id, await operation.ConfigureAwait(false)); }
-        catch (Exception ex) { return WriteAttempt.Failure(sink.Id, ex); }
-    }
+        => _fanOut.WriteAsync(envelope, callerCancellation);
 
     private AuditRecordResult Rejected(string? auditId, ImmutableArray<AuditRecordIssue> issues)
         => new()

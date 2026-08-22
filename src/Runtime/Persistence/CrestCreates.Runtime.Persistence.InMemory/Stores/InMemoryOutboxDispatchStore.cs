@@ -1,4 +1,5 @@
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
+using CrestCreates.Runtime.Delivery.Abstractions.Composition;
 using CrestCreates.Runtime.Delivery.Abstractions.Stores;
 using CrestCreates.Runtime.Persistence.InMemory.Transactions;
 using CrestCreates.Runtime.Persistence.InMemory.Kernel;
@@ -15,8 +16,19 @@ internal sealed class InMemoryOutboxDispatchStore : IOutboxDispatchStore
     public ValueTask<IReadOnlyList<OutboxDeliveryClaim>> ClaimAsync(OutboxClaimRequest request, CancellationToken cancellationToken = default)
         => _coordinator.ExecuteAsync<IReadOnlyList<OutboxDeliveryClaim>>(_ =>
         {
-            var now = request.Now ?? _timeProvider.GetUtcNow();
+            var now = _timeProvider.GetUtcNow();
             var state = _coordinator.RequireAmbientState();
+            if (request.SupportedContractIds is not null && request.SupportedRequiredConsumerIds is not null)
+            {
+                foreach (var record in state.Outbox.Values.Where(record => record.Status is not (OutboxDeliveryStatus.Delivered or OutboxDeliveryStatus.DeadLettered)))
+                {
+                    if (!request.SupportedContractIds.Contains(record.Message.Metadata.ContractId))
+                        throw new OutboxCompositionException($"Outbox contract '{record.Message.Metadata.ContractId}' is not registered.");
+                    foreach (var consumerId in record.Message.Metadata.RequiredConsumerIds)
+                        if (!request.SupportedRequiredConsumerIds.Contains(consumerId))
+                            throw new OutboxCompositionException($"Outbox required consumer '{consumerId}' is not registered.");
+                }
+            }
             var result = new List<OutboxDeliveryClaim>();
             foreach (var record in state.Outbox.Values.OrderBy(r => r.Message.Metadata.CreatedAt).ThenBy(r => r.Message.Metadata.MessageId, StringComparer.Ordinal))
             {
@@ -48,7 +60,11 @@ internal sealed class InMemoryOutboxDispatchStore : IOutboxDispatchStore
         {
             var state = _coordinator.RequireAmbientState();
             if (!state.Outbox.TryGetValue(messageId, out var record)) return ValueTask.FromResult(OutboxDeliveryMutationResult.NotFound);
-            if (!string.Equals(record.LeaseOwner, lease.OwnerId, StringComparison.Ordinal) || record.Fence != lease.Fence || record.Status != OutboxDeliveryStatus.InFlight)
+            if (!string.Equals(record.LeaseOwner, lease.OwnerId, StringComparison.Ordinal)
+                || record.Fence != lease.Fence
+                || record.Status != OutboxDeliveryStatus.InFlight
+                || record.LeaseExpiresAt is null
+                || record.LeaseExpiresAt <= _timeProvider.GetUtcNow())
                 return ValueTask.FromResult(OutboxDeliveryMutationResult.StaleLease);
             return ValueTask.FromResult(mutate(record));
         }, ct);

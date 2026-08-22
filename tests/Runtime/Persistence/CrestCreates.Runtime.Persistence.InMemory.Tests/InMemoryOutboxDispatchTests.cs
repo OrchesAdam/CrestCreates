@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
+using CrestCreates.Runtime.Delivery.Abstractions.Composition;
 using CrestCreates.Runtime.Delivery.Abstractions.Stores;
 using CrestCreates.Runtime.Delivery.Message;
 using CrestCreates.Runtime.Persistence.InMemory;
@@ -43,5 +45,35 @@ public sealed class InMemoryOutboxDispatchTests
 
         (await dispatch.AckAsync(message.Metadata.MessageId, first.Lease))
             .Should().Be(OutboxDeliveryMutationResult.Applied);
+    }
+
+    [Fact]
+    public async Task Claim_rejects_unsupported_active_composition_without_mutating_the_row()
+    {
+        var services = new ServiceCollection();
+        services.AddCrestCreatesInMemoryRuntimePersistence();
+        using var provider = services.BuildServiceProvider();
+        var coordinator = provider.GetRequiredService<InMemoryRuntimeTransactionCoordinator>();
+        var writer = provider.GetRequiredService<ITransactionalOutboxWriter>();
+        var dispatch = provider.GetRequiredService<IOutboxDispatchStore>();
+        var message = new DefaultOutboxMessageFactory().Create("evt-composition", "tenant-a", "contract/v1", "payload/v1", [1, 2, 3]);
+
+        await coordinator.ExecuteAsync(async ct => await writer.AppendAsync(message, ct));
+
+        var action = () => dispatch.ClaimAsync(new OutboxClaimRequest
+        {
+            OwnerId = "worker-a",
+            SupportedContractIds = new HashSet<string>(StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        }).AsTask();
+        await action.Should().ThrowAsync<OutboxCompositionException>();
+
+        var claim = (await dispatch.ClaimAsync(new OutboxClaimRequest
+        {
+            OwnerId = "worker-a",
+            SupportedContractIds = new HashSet<string>(["contract/v1"], StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        })).Single();
+        claim.Lease.Attempt.Should().Be(1);
     }
 }

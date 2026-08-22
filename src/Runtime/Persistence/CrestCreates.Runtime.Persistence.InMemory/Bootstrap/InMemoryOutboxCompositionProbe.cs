@@ -1,4 +1,5 @@
 using CrestCreates.Runtime.Delivery.Abstractions.Composition;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
 using CrestCreates.Runtime.Persistence.InMemory.Transactions;
 
 namespace CrestCreates.Runtime.Persistence.InMemory.Bootstrap;
@@ -9,7 +10,7 @@ internal sealed class InMemoryOutboxCompositionProbe(InMemoryRuntimeTransactionC
     {
         cancellationToken.ThrowIfCancellationRequested();
         var state = coordinator.CurrentState;
-        foreach (var record in state.Outbox.Values)
+        foreach (var record in state.Outbox.Values.Where(record => record.Status is not (OutboxDeliveryStatus.Delivered or OutboxDeliveryStatus.DeadLettered)))
         {
             if (!requirements.ContractIds.Contains(record.Message.Metadata.ContractId))
                 throw new OutboxCompositionException($"Outbox contract '{record.Message.Metadata.ContractId}' is not registered.");
