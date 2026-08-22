@@ -33,8 +33,18 @@ internal sealed class AuditSinkFanOut
         var failures = ImmutableArray.CreateBuilder<AuditSinkFailure>();
         for (var i = 0; i < attempts.Length; i++)
         {
-            var attempt = attempts[i].IsCompletedSuccessfully ? await attempts[i].ConfigureAwait(false) : null;
-            if (attempt is null) { failures.Add(new(_sinks[i].Id, "AUDIT_SINK_TIMEOUT")); continue; }
+            var capture = attempts[i].IsCompletedSuccessfully ? await attempts[i].ConfigureAwait(false) : null;
+            if (capture is null)
+            {
+                failures.Add(new(_sinks[i].Id, "AUDIT_SINK_TIMEOUT"));
+                continue;
+            }
+            if (capture.Result is null)
+            {
+                failures.Add(new(_sinks[i].Id, capture.FailureCode ?? "AUDIT_SINK_FAILURE"));
+                continue;
+            }
+            var attempt = capture.Result;
             if (!string.Equals(attempt.SinkId, _sinks[i].Id, StringComparison.Ordinal) || !string.Equals(attempt.AuditId, envelope.AuditId, StringComparison.Ordinal) || attempt.Integrity != hash)
             { failures.Add(new(_sinks[i].Id, "AUDIT_SINK_RESULT_IDENTITY_MISMATCH")); continue; }
             if (attempt.Status == AuditSinkWriteStatus.Conflict)
@@ -42,16 +52,37 @@ internal sealed class AuditSinkFanOut
                 if (attempt.ExistingIntegrity is null || attempt.ExistingIntegrity == hash)
                     failures.Add(new(_sinks[i].Id, "AUDIT_SINK_RESULT_CONTRACT_MISMATCH"));
                 else
-                    failures.Add(new(_sinks[i].Id, "AUDIT_SINK_CONFLICT"));
+                    results.Add(attempt);
                 continue;
             }
             if (attempt.Status is not (AuditSinkWriteStatus.Accepted or AuditSinkWriteStatus.Duplicate))
             { failures.Add(new(_sinks[i].Id, "AUDIT_SINK_RESULT_CONTRACT_MISMATCH")); continue; }
             results.Add(attempt);
         }
-        return new() { AuditId = envelope.AuditId, Status = failures.Count == 0 ? AuditRecordStatus.Recorded : results.Count > 0 ? AuditRecordStatus.PartiallyRecorded : AuditRecordStatus.Failed, ProcessedAt = _time.GetUtcNow(), RecordHash = hash, SinkResults = results.ToImmutable(), SinkFailures = failures.ToImmutable() };
+        var completedResults = results.ToImmutable();
+        var hasAcceptedSink = completedResults.Any(x => x.Status is AuditSinkWriteStatus.Accepted or AuditSinkWriteStatus.Duplicate);
+        var hasNonAcceptedOutcome = completedResults.Any(x => x.Status == AuditSinkWriteStatus.Conflict) || failures.Count > 0;
+        var status = hasAcceptedSink
+            ? hasNonAcceptedOutcome ? AuditRecordStatus.PartiallyRecorded : AuditRecordStatus.Recorded
+            : AuditRecordStatus.Failed;
+        return new() { AuditId = envelope.AuditId, Status = status, ProcessedAt = _time.GetUtcNow(), RecordHash = hash, SinkResults = completedResults, SinkFailures = failures.ToImmutable() };
     }
 
-    private static async Task<AuditSinkWriteResult?> CaptureAsync(IAuditSink sink, AuditEnvelope envelope, CancellationToken cancellationToken)
-    { try { return await sink.WriteAsync(envelope, cancellationToken).ConfigureAwait(false); } catch { return null; } }
+    private static async Task<SinkCapture> CaptureAsync(IAuditSink sink, AuditEnvelope envelope, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return new(await sink.WriteAsync(envelope, cancellationToken).ConfigureAwait(false), null);
+        }
+        catch (OperationCanceledException)
+        {
+            return new(null, "AUDIT_SINK_TIMEOUT");
+        }
+        catch
+        {
+            return new(null, "AUDIT_SINK_FAILURE");
+        }
+    }
+
+    private sealed record SinkCapture(AuditSinkWriteResult? Result, string? FailureCode);
 }

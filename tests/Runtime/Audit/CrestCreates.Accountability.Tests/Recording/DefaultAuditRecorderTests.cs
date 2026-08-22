@@ -277,6 +277,7 @@ public sealed class DefaultAuditRecorderTests
         var second = await CreateRecorder([sink], hasher: new DifferentHasher()).RecordAsync(conflicting);
 
         first.IsAccepted.Should().BeTrue();
+        second.Status.Should().Be(AuditRecordStatus.Failed);
         second.SinkResults.Should().ContainSingle(x => x.Status == AuditSinkWriteStatus.Conflict);
         second.SinkFailures.Should().BeEmpty();
     }
