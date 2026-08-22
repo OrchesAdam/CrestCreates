@@ -5,6 +5,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
@@ -198,6 +199,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         });
         services.AddCapabilityRuntime();
         services.AddAccountability();
+        services.AddAuditSink<InMemoryAuditSink>();
 
         // ── HumanTask Runtime ──────────────────────────────────────────
         services.AddHumanTaskRuntime();
