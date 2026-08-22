@@ -964,7 +964,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_runtime_outbox_leased_state", "check (status <> 1 or (lease_owner_id is not null and lease_expires_at is not null and delivered_at is null and dead_lettered_at is null))"),
              new("ck_runtime_outbox_delivered_state", "check (status <> 3 or (delivered_at is not null and dead_lettered_at is null and lease_owner_id is null and lease_expires_at is null))"),
              new("ck_runtime_outbox_dead_letter_state", "check (status <> 4 or (dead_lettered_at is not null and delivered_at is null and lease_owner_id is null and lease_expires_at is null))")],
-            [new("ix_runtime_outbox_claim", ["status", "available_at", "created_at", "message_id"], "status in (0, 1, 2)", Unique: false)], [])
+            [new("ix_runtime_outbox_claim", ["status", "available_at", "created_at", "message_id"], "status = any (array[0, 1, 2])", Unique: false)], [])
             ,new("runtime_workflow_continuation_acceptances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["completion_event_id"] = TextC,
