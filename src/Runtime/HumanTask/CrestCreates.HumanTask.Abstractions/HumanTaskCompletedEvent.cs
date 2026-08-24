@@ -12,5 +12,7 @@ public sealed class HumanTaskCompletedEvent : ILocalEvent
     public RuntimeInstanceKey? WorkflowKey { get; init; }
     public RuntimeDescriptorPin HumanTaskPin { get; init; } = default!;
     public string Outcome { get; init; } = string.Empty;
+    public string? ActorId { get; init; }
+    public string[] ActorRoles { get; init; } = [];
     public RuntimeStateValue? Result { get; init; }
 }

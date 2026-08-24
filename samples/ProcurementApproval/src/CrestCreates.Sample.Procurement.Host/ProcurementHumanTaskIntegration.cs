@@ -16,6 +16,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using System.Collections.Concurrent;
+using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -226,9 +227,15 @@ public sealed class ProcurementHumanTaskDecisionHandler(
                 ProcurementContractIds.ApplyApprovalDecisionCapability,
                 InvocationSource.HumanTask,
                 input,
-                context => context.InputJson = JsonSerializer.SerializeToElement(
-                    input,
-                    ProcurementJsonContext.Default.ApproveProcurementRequestInput),
+                context =>
+                {
+                    context.InputJson = JsonSerializer.SerializeToElement(
+                        input,
+                        ProcurementJsonContext.Default.ApproveProcurementRequestInput);
+                    context.TenantId = task.TenantId;
+                    context.UserId = @event.ActorId;
+                    context.Principal = CreateActorPrincipal(@event);
+                },
                 ct: cancellationToken).ConfigureAwait(false);
         }
         else if (string.Equals(@event.Outcome, "Reject", StringComparison.OrdinalIgnoreCase))
@@ -242,9 +249,15 @@ public sealed class ProcurementHumanTaskDecisionHandler(
                 ProcurementContractIds.ApplyRejectionDecisionCapability,
                 InvocationSource.HumanTask,
                 input,
-                context => context.InputJson = JsonSerializer.SerializeToElement(
-                    input,
-                    ProcurementJsonContext.Default.RejectProcurementRequestInput),
+                context =>
+                {
+                    context.InputJson = JsonSerializer.SerializeToElement(
+                        input,
+                        ProcurementJsonContext.Default.RejectProcurementRequestInput);
+                    context.TenantId = task.TenantId;
+                    context.UserId = @event.ActorId;
+                    context.Principal = CreateActorPrincipal(@event);
+                },
                 ct: cancellationToken).ConfigureAwait(false);
         }
         else
@@ -263,6 +276,16 @@ public sealed class ProcurementHumanTaskDecisionHandler(
         if (input is null || registry.Restore(input) is not RuntimeStateBag bag)
             throw new InvalidOperationException("Procurement workflow variables are unavailable.");
         return bag.Values.ToDictionary(pair => pair.Key, pair => registry.Restore(pair.Value));
+    }
+
+    private static ClaimsPrincipal CreateActorPrincipal(HumanTaskCompletedEvent @event)
+    {
+        var identity = new ClaimsIdentity("transactional-outbox");
+        if (!string.IsNullOrWhiteSpace(@event.ActorId))
+            identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, @event.ActorId));
+        foreach (var role in @event.ActorRoles.Where(role => !string.IsNullOrWhiteSpace(role)))
+            identity.AddClaim(new Claim(ClaimTypes.Role, role));
+        return new ClaimsPrincipal(identity);
     }
 
     private static string RequiredString(Dictionary<string, object?> variables, string key)
@@ -438,6 +461,8 @@ public sealed class ProcurementApprovalTaskService(
         {
             HumanTaskKey = task.Key,
             Outcome = outcome,
+            ActorId = currentUser.Id,
+            ActorRoles = currentUser.Roles,
             Result = stateRegistry.Capture(comment)
         }, cancellationToken).ConfigureAwait(false);
 

@@ -133,7 +133,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
         candidate.Output = request.Result;
         candidate.CompletedAt = DateTimeOffset.UtcNow;
         candidate.CompletionEventId ??= Guid.NewGuid().ToString("N");
-        var completedEvent = CreateCompletedEvent(candidate, candidate.Outcome, request.Result);
+        var completedEvent = CreateCompletedEvent(candidate, candidate.Outcome, request.ActorId, request.ActorRoles, request.Result);
         if (_transactions is null || _messageFactory is null || _outbox is null)
             throw new OutboxCompositionException("HumanTask completion requires the transactional outbox runtime composition.");
         var message = _messageFactory.Create(
@@ -210,6 +210,8 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
     private static HumanTaskCompletedEvent CreateCompletedEvent(
         HumanTaskInstance instance,
         string outcome,
+        string? actorId,
+        string[] actorRoles,
         RuntimeStateValue? result)
         => new()
         {
@@ -218,6 +220,8 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             WorkflowKey = instance.WorkflowKey,
             HumanTaskPin = instance.HumanTaskPin,
             Outcome = outcome,
+            ActorId = actorId,
+            ActorRoles = actorRoles,
             Result = result
         };
 

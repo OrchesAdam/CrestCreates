@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Collections.Immutable;
+using System.Security.Claims;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 
@@ -22,6 +23,7 @@ public sealed class CapabilityExecutionContext
     public string? ExecutionId { get; internal set; }
     public string? TenantId { get; set; }
     public string? UserId { get; set; }
+    public ClaimsPrincipal? Principal { get; set; }
     public string IdempotencyKey { get; set; } = Guid.NewGuid().ToString("N");
     public object? Input { get; set; }
     public JsonElement? InputJson { get; set; }
