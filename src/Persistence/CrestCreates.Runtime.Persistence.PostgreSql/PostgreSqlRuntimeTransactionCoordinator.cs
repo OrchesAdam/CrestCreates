@@ -117,6 +117,15 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
         {
             throw PostgreSqlRuntimeStoreSupport.TranslateForeignKeyViolation(ex);
         }
+        catch (PostgresException)
+        {
+            // Preserve provider contract errors (check violations, unique
+            // conflicts, and schema failures) for the store-specific mapping
+            // and integration tests. PostgresException derives from
+            // NpgsqlException, so this guard must precede the availability
+            // translation below.
+            throw;
+        }
         catch (NpgsqlException ex)
         {
             throw new RuntimePersistenceUnavailableException(
