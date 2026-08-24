@@ -70,6 +70,64 @@ public sealed class OptionalLocalEventCompatibilityTests
         result.Should().Be(OutboxDeliveryOutcome.Accepted);
     }
 
+    [Fact]
+    public async Task OptionalTrackerCapacity_ShouldReserveBeforeStartingWork()
+    {
+        CountingNonCooperativeLocalEventBus.Started = 0;
+        var services = new ServiceCollection();
+        services.AddSingleton(new HumanTaskDeliveryOptions { MaximumDetachedOptionalExecutions = 1 });
+        services.AddHumanTaskRuntime();
+        services.AddScoped<ILocalEventBus, CountingNonCooperativeLocalEventBus>();
+        await using var provider = services.BuildServiceProvider();
+
+        for (var index = 0; index < 2; index++)
+        {
+            using var scope = provider.CreateScope();
+            var registration = scope.ServiceProvider
+                .GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+                .Single(item => item.ContractId == HumanTaskDeliveryConstants.CompletedContractId);
+            var result = await registration.Resolve(scope.ServiceProvider).HandleAsync(new OutboxDeliveryContext
+            {
+                Message = CreateMessage($"capacity-{index}"),
+                Lease = new OutboxDeliveryLease { OwnerId = "owner", Fence = 1, Attempt = 1, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1) },
+                AttemptDeadline = DateTimeOffset.UtcNow.AddMilliseconds(50),
+                Services = scope.ServiceProvider
+            });
+            result.Should().Be(OutboxDeliveryOutcome.Accepted);
+        }
+
+        CountingNonCooperativeLocalEventBus.Started.Should().Be(1);
+    }
+
+    private static OutboxMessage CreateMessage(string id)
+    {
+        var payload = new HumanTaskCompletedEvent
+        {
+            EventId = id,
+            HumanTaskKey = new RuntimeInstanceKey("tenant", "task"),
+            HumanTaskPin = new RuntimeDescriptorPin
+            {
+                Ref = new DescriptorRef("humantask", "review", 1),
+                ContractHash = Hash("contract", "Contract"),
+                DefinitionHash = Hash("definition", "Definition")
+            },
+            Outcome = "Approved"
+        };
+        return new OutboxMessage
+        {
+            Metadata = new OutboxMessageMetadata
+            {
+                MessageId = id,
+                ContractId = HumanTaskDeliveryConstants.CompletedContractId,
+                RequiredConsumerIds = [],
+                OccurredAt = DateTimeOffset.UtcNow,
+                CreatedAt = DateTimeOffset.UtcNow
+            },
+            Payload = JsonSerializer.SerializeToUtf8Bytes(payload),
+            Integrity = Hash("integrity", "Integrity")
+        };
+    }
+
     private static CanonicalHash Hash(string value, string purpose) => new()
     {
         Value = value,
@@ -92,5 +150,24 @@ public sealed class OptionalLocalEventCompatibilityTests
         public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
             where TEvent : ILocalEvent
             => _never.Task;
+    }
+
+    private sealed class CountingNonCooperativeLocalEventBus : ILocalEventBus
+    {
+        public static int Started;
+        private readonly TaskCompletionSource _never = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref Started);
+            return _never.Task;
+        }
+
+        public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+            where TEvent : ILocalEvent
+        {
+            Interlocked.Increment(ref Started);
+            return _never.Task;
+        }
     }
 }

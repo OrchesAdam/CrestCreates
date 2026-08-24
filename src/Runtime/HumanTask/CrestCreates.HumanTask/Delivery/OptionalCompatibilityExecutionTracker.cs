@@ -7,7 +7,7 @@ internal sealed class OptionalCompatibilityExecutionTracker
 {
     private readonly object _gate = new();
     private readonly int _maximum;
-    private readonly HashSet<Task> _running = [];
+    private int _reserved;
     private readonly ILogger<OptionalCompatibilityExecutionTracker>? _logger;
 
     public OptionalCompatibilityExecutionTracker(HumanTaskDeliveryOptions options, ILogger<OptionalCompatibilityExecutionTracker>? logger = null)
@@ -17,16 +17,27 @@ internal sealed class OptionalCompatibilityExecutionTracker
         _logger = logger;
     }
 
-    public bool TryTrack(Task execution, IDisposable scope, IDisposable cancellation)
+    public bool TryReserve()
     {
         lock (_gate)
         {
-            if (_running.Count >= _maximum)
+            if (_reserved >= _maximum)
                 return false;
-            _running.Add(execution);
+            _reserved++;
         }
-        _ = ObserveAsync(execution, scope, cancellation);
         return true;
+    }
+
+    public void TrackReserved(Task execution, IDisposable scope, IDisposable cancellation)
+        => _ = ObserveAsync(execution, scope, cancellation);
+
+    public void ReleaseReservation()
+    {
+        lock (_gate)
+        {
+            if (_reserved > 0)
+                _reserved--;
+        }
     }
 
     private async Task ObserveAsync(Task execution, IDisposable scope, IDisposable cancellation)
@@ -37,7 +48,7 @@ internal sealed class OptionalCompatibilityExecutionTracker
         {
             cancellation.Dispose();
             scope.Dispose();
-            lock (_gate) _running.Remove(execution);
+            ReleaseReservation();
         }
     }
 }

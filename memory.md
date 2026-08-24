@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-24 (Issue #25 Phase 9c R4 remediation is implemented on PR #80's feature branch. Local PostgreSQL contract tests, HumanTask/Agent/Procurement tests, and the NativeAOT publish-link-run fixture are green; GitHub CI remains the final merge gate.)
+Last Updated: 2026-08-24 (Issue #25 Phase 9c R4 follow-up corrections are implemented on PR #80's feature branch. Local PostgreSQL migration/contract checks and targeted runtime tests are being re-run; GitHub CI remains the final merge gate.)
 
 ## Purpose
 
@@ -105,6 +105,19 @@ infrastructure failure. Reliable Accountability generically requires at least
 one configured sink; only FullDurable evidence composed with
 `PostgreSqlAuditSink` claims final sink persistence, without expanding
 `IAuditSink`.
+
+The current follow-up closes the remaining review findings: V012 now persists
+the complete continuation receipt with a completion-event primary key and
+deferred RESTRICT foreign keys to Workflow/HumanTask rows; persisted receipt
+reads validate scalar consistency and canonical integrity. Missing Workflow
+correlation and malformed Activation/Procurement durable facts fail closed as
+explicit conflicts. Optional compatibility work reserves bounded tracker
+capacity before starting detached execution. The PostgreSQL AOT fixture now
+uses a correlated Workflow/HumanTask pair, durable continuation acceptance, and
+the Accountability outbox handler; its fixed reliable-delivery sentinels are
+asserted by the fixture test. Evidence tooling validates the frozen 145
+normative/25 supplemental manifest cardinality and supports runner-backed
+recording rather than manual passed flags.
 
 ### Issue #69 — Phase 9b+ Durable Control Plane and Reference Data Stores
 

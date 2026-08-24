@@ -14,7 +14,9 @@ internal sealed class WorkflowContinuationOutboxConsumer : IOutboxRequiredConsum
     public async ValueTask<OutboxRequiredConsumerResult> ConsumeAsync(HumanTaskCompletedEvent payload, OutboxDeliveryContext context, CancellationToken cancellationToken = default)
     {
         if (payload.WorkflowKey is null)
-            return OutboxRequiredConsumerResult.Duplicate();
+            return OutboxRequiredConsumerResult.Conflict(
+                "WORKFLOW_CONTINUATION_CORRELATION_MISSING",
+                "A required workflow continuation completion must carry its persisted WorkflowKey.");
         try
         {
             await _continuation.ContinueAsync(new WorkflowContinuationRequest

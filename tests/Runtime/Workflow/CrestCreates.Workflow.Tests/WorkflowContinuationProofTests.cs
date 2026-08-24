@@ -1,6 +1,10 @@
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
+using CrestCreates.Metadata.Abstractions.Runtime;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using FluentAssertions;
 using Moq;
 using Xunit;
@@ -9,6 +13,29 @@ namespace CrestCreates.Workflow.Tests;
 
 public sealed class WorkflowContinuationProofTests
 {
+    [Fact]
+    public async Task WorkflowContinuationConsumer_WithoutWorkflowKey_ShouldNotProveDuplicate()
+    {
+        var continuation = new Mock<IWorkflowContinuationService>();
+        var consumer = new WorkflowContinuationOutboxConsumer(continuation.Object);
+        var result = await consumer.ConsumeAsync(new HumanTaskCompletedEvent
+        {
+            EventId = "completion-without-workflow",
+            HumanTaskKey = new RuntimeInstanceKey("tenant-1", "task-1"),
+            HumanTaskPin = new RuntimeDescriptorPin
+            {
+                Ref = new CrestCreates.Metadata.Abstractions.DescriptorRef("humantask", "review", 1),
+                ContractHash = new CanonicalHash { Value = "c", Algorithm = "a", AlgorithmVersion = "1", ArtifactKind = "r", Scope = "s", Purpose = "p", ContractVersion = "v", CanonicalShapeVersion = "v" },
+                DefinitionHash = new CanonicalHash { Value = "d", Algorithm = "a", AlgorithmVersion = "1", ArtifactKind = "r", Scope = "s", Purpose = "p", ContractVersion = "v", CanonicalShapeVersion = "v" }
+            },
+            Outcome = "Approve"
+        }, null!, CancellationToken.None);
+
+        result.Outcome.Should().Be(OutboxDeliveryOutcome.Conflict);
+        result.FailureCode.Should().Be("WORKFLOW_CONTINUATION_CORRELATION_MISSING");
+        continuation.Verify(value => value.ContinueAsync(It.IsAny<WorkflowContinuationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task MissingWaitingCorrelationAndAcceptanceFailsClosed()
     {

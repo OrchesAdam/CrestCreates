@@ -41,15 +41,34 @@ internal sealed class HumanTaskCompletedOutboxHandler : IOutboxDeliveryHandler
             scope.Dispose();
             return OutboxDeliveryOutcome.Accepted;
         }
+        if (!_tracker.TryReserve())
+        {
+            _logger?.LogWarning("Optional HumanTask compatibility tracker is full; skipping optional work for {MessageId}.", context.Message.Metadata.MessageId);
+            scope.Dispose();
+            return OutboxDeliveryOutcome.Accepted;
+        }
         var remaining = context.AttemptDeadline - DateTimeOffset.UtcNow;
         if (remaining <= TimeSpan.Zero)
         {
+            _tracker.ReleaseReservation();
             scope.Dispose();
             return OutboxDeliveryOutcome.Accepted;
         }
         var compatibility = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         compatibility.CancelAfter(remaining);
-        var execution = eventBus.PublishAsync(payload, compatibility.Token);
+        Task execution;
+        try
+        {
+            execution = eventBus.PublishAsync(payload, compatibility.Token);
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(exception, "Optional HumanTask completion LocalEvent compatibility lane failed before execution for {MessageId}.", context.Message.Metadata.MessageId);
+            compatibility.Dispose();
+            scope.Dispose();
+            _tracker.ReleaseReservation();
+            return OutboxDeliveryOutcome.Accepted;
+        }
         var completed = await Task.WhenAny(execution, Task.Delay(remaining, cancellationToken)).ConfigureAwait(false);
         if (completed == execution)
         {
@@ -57,13 +76,10 @@ internal sealed class HumanTaskCompletedOutboxHandler : IOutboxDeliveryHandler
             catch (Exception exception) { _logger?.LogWarning(exception, "Optional HumanTask completion LocalEvent compatibility lane failed for {MessageId}.", context.Message.Metadata.MessageId); }
             compatibility.Dispose();
             scope.Dispose();
+            _tracker.ReleaseReservation();
         }
-        else if (!_tracker.TryTrack(execution, scope, compatibility))
-        {
-            _logger?.LogWarning("Optional HumanTask compatibility tracker is full; skipping detached work for {MessageId}.", context.Message.Metadata.MessageId);
-            compatibility.Dispose();
-            scope.Dispose();
-        }
+        else
+            _tracker.TrackReserved(execution, scope, compatibility);
         return OutboxDeliveryOutcome.Accepted;
     }
 }

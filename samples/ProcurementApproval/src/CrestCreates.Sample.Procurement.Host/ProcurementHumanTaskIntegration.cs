@@ -210,29 +210,36 @@ public sealed class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsume
         OutboxDeliveryContext context,
         CancellationToken cancellationToken = default)
     {
-        var task = await _tasks.GetAsync(payload.HumanTaskKey, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
-        var fact = RestoreDecision(payload.Result);
-        var request = _requests.GetById(task.TenantId ?? string.Empty, fact.RequestId)
-            ?? throw new ProcurementDecisionDispatchException("PROCUREMENT_RESOURCE_NOT_FOUND", "The admitted procurement request is unavailable.");
-        var approval = string.Equals(payload.Outcome, "Approve", StringComparison.Ordinal);
-        var rejection = string.Equals(payload.Outcome, "Reject", StringComparison.Ordinal);
-        if (!approval && !rejection)
-            throw new ProcurementDecisionDispatchException("PROCUREMENT_DECISION_INVALID", "Unsupported procurement completion outcome.");
-        if (request.Status is ProcurementRequestStatus.Approved or ProcurementRequestStatus.Rejected)
+        try
         {
-            var same = approval && request.Status == ProcurementRequestStatus.Approved
-                && string.Equals(request.ApproverId, fact.ApproverId, StringComparison.Ordinal)
-                && string.Equals(request.ApprovalComment, fact.Comment, StringComparison.Ordinal)
-                || rejection && request.Status == ProcurementRequestStatus.Rejected
-                && string.Equals(request.ApproverId, fact.ApproverId, StringComparison.Ordinal)
-                && string.Equals(request.RejectionReason, fact.Comment, StringComparison.Ordinal);
-            if (same)
-                return OutboxRequiredConsumerResult.Duplicate();
-            throw new ProcurementDecisionDispatchException("PROCUREMENT_DECISION_CONFLICT", "The procurement request has a different durable decision identity.");
+            var task = await _tasks.GetAsync(payload.HumanTaskKey, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
+            var fact = RestoreDecision(payload.Result);
+            var request = _requests.GetById(task.TenantId ?? string.Empty, fact.RequestId)
+                ?? throw new ProcurementDecisionDispatchException("PROCUREMENT_RESOURCE_NOT_FOUND", "The admitted procurement request is unavailable.");
+            var approval = string.Equals(payload.Outcome, "Approve", StringComparison.Ordinal);
+            var rejection = string.Equals(payload.Outcome, "Reject", StringComparison.Ordinal);
+            if (!approval && !rejection)
+                throw new ProcurementDecisionDispatchException("PROCUREMENT_DECISION_INVALID", "Unsupported procurement completion outcome.");
+            if (request.Status is ProcurementRequestStatus.Approved or ProcurementRequestStatus.Rejected)
+            {
+                var same = approval && request.Status == ProcurementRequestStatus.Approved
+                    && string.Equals(request.ApproverId, fact.ApproverId, StringComparison.Ordinal)
+                    && string.Equals(request.ApprovalComment, fact.Comment, StringComparison.Ordinal)
+                    || rejection && request.Status == ProcurementRequestStatus.Rejected
+                    && string.Equals(request.ApproverId, fact.ApproverId, StringComparison.Ordinal)
+                    && string.Equals(request.RejectionReason, fact.Comment, StringComparison.Ordinal);
+                if (same)
+                    return OutboxRequiredConsumerResult.Duplicate();
+                return OutboxRequiredConsumerResult.Conflict("PROCUREMENT_DECISION_CONFLICT", "The procurement request has a different durable decision identity.");
+            }
+            await HandleAsync(payload, fact, cancellationToken).ConfigureAwait(false);
+            return OutboxRequiredConsumerResult.Accepted();
         }
-        await HandleAsync(payload, fact, cancellationToken).ConfigureAwait(false);
-        return OutboxRequiredConsumerResult.Accepted();
+        catch (ProcurementDecisionDispatchException exception)
+        {
+            return OutboxRequiredConsumerResult.Conflict(exception.ErrorCode, exception.Message);
+        }
     }
 
     public async Task HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)

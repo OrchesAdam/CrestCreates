@@ -2,6 +2,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using Microsoft.Extensions.Logging;
 
@@ -48,7 +49,15 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
             @event.HumanTaskKey.InstanceId, @event.Outcome);
 
         // Parse the review decision from the event result
-        var result = @event.Result is null ? null : _stateRegistry.Restore(@event.Result);
+        object? result;
+        try
+        {
+            result = @event.Result is null ? null : _stateRegistry.Restore(@event.Result);
+        }
+        catch (RuntimeStateContractException exception)
+        {
+            throw new InvalidOperationException("The persisted activation review result is not a valid runtime state contract.", exception);
+        }
         if (!DescriptorActivationReviewDecisionParser.TryParseReviewDecision(
             result, out var parsedDecision, out var error))
         {
@@ -75,13 +84,31 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         OutboxDeliveryContext context,
         CancellationToken cancellationToken = default)
     {
-        var outcome = await HandleAsync(payload, cancellationToken).ConfigureAwait(false);
-        return outcome switch
+        try
         {
-            ActivationReviewDispatchOutcome.Accepted => OutboxRequiredConsumerResult.Accepted(),
-            ActivationReviewDispatchOutcome.Duplicate => OutboxRequiredConsumerResult.Duplicate(),
-            _ => OutboxRequiredConsumerResult.Conflict(DescriptorActivationDiagnosticCodes.ReviewConflict.RequireValue(), "The activation review decision conflicts with the durable request state.")
-        };
+            var outcome = await HandleAsync(payload, cancellationToken).ConfigureAwait(false);
+            return outcome switch
+            {
+                ActivationReviewDispatchOutcome.Accepted => OutboxRequiredConsumerResult.Accepted(),
+                ActivationReviewDispatchOutcome.Duplicate => OutboxRequiredConsumerResult.Duplicate(),
+                _ => OutboxRequiredConsumerResult.Conflict(DescriptorActivationDiagnosticCodes.ReviewConflict.RequireValue(), "The activation review decision conflicts with the durable request state.")
+            };
+        }
+        catch (InvalidOperationException exception)
+        {
+            // A persisted review fact or its HumanTask authority is malformed.
+            // Retrying cannot repair it; keep the outbox fail-closed and let the
+            // durable conflict/dead-letter path retain the evidence.
+            return OutboxRequiredConsumerResult.Conflict(
+                DescriptorActivationDiagnosticCodes.ReviewPayloadInvalid.RequireValue(),
+                exception.Message);
+        }
+        catch (RuntimeStateContractException exception)
+        {
+            return OutboxRequiredConsumerResult.Conflict(
+                DescriptorActivationDiagnosticCodes.ReviewPayloadInvalid.RequireValue(),
+                exception.Message);
+        }
     }
 
     private async Task<DescriptorActivationReviewDecision?> EnrichDecisionAsync(

@@ -974,11 +974,13 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["completion_event_id"] = TextC,
                 ["human_task_instance_id"] = TextC, ["workflow_instance_id"] = TextC, ["outcome"] = TextC,
                 ["result_json"] = NullableJson, ["workflow_from_revision"] = BigInt, ["workflow_to_revision"] = BigInt,
-                ["integrity_json"] = Json, ["accepted_at"] = Timestamp
-            }, ["tenant_scope_kind", "tenant_id", "completion_event_id"],
+                ["integrity_json"] = Json, ["receipt_json"] = Json, ["accepted_at"] = Timestamp
+            }, ["completion_event_id"],
             [new("ck_runtime_continuation_acceptance_revision", "check (workflow_to_revision = workflow_from_revision + 1)"),
              new("ck_runtime_continuation_acceptance_tenant", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))")],
-            [new("uq_runtime_continuation_acceptance_task", ["tenant_scope_kind", "tenant_id", "human_task_instance_id"], "", Unique: true)], [])
+            [new("uq_runtime_continuation_acceptance_task", ["tenant_scope_kind", "tenant_id", "human_task_instance_id"], "", Unique: true)],
+            [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", DeleteAction: "RESTRICT"),
+             new("tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", DeleteAction: "RESTRICT")])
         ];
     }
 
@@ -1648,10 +1650,17 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 workflow_from_revision bigint not null,
                 workflow_to_revision bigint not null,
                 integrity_json jsonb not null,
+                receipt_json jsonb not null,
                 accepted_at timestamptz not null default clock_timestamp(),
-                primary key (tenant_scope_kind, tenant_id, completion_event_id),
+                primary key (completion_event_id),
                 constraint ck_runtime_continuation_acceptance_revision check (workflow_to_revision = workflow_from_revision + 1),
-                constraint ck_runtime_continuation_acceptance_tenant check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))
+                constraint ck_runtime_continuation_acceptance_tenant check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint fk_continuation_acceptance_workflow foreign key (tenant_scope_kind, tenant_id, workflow_instance_id)
+                    references {schema}.runtime_workflow_instances (tenant_scope_kind, tenant_id, instance_id)
+                    on delete restrict deferrable initially deferred,
+                constraint fk_continuation_acceptance_human_task foreign key (tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id)
+                    references {schema}.runtime_human_task_instances (tenant_scope_kind, tenant_id, workflow_instance_id, instance_id)
+                    on delete restrict deferrable initially deferred
             );
             create unique index uq_runtime_continuation_acceptance_task on {schema}.runtime_workflow_continuation_acceptances (tenant_scope_kind, tenant_id, human_task_instance_id);
             """),

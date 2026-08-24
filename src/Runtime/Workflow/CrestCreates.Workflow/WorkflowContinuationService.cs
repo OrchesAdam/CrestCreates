@@ -160,7 +160,9 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         {
             var prepared = await _auditPreparer.PrepareAsync(WorkflowAccountabilityEnvelopeFactory.Create(resumedEvent), ct).ConfigureAwait(false);
             if (!prepared.IsAccepted || prepared.Envelope is null)
-                throw new RuntimePersistenceContractException(RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict, "Workflow Accountability envelope preparation was rejected.");
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                    $"Workflow Accountability envelope preparation was rejected: {string.Join(", ", prepared.Issues.Select(issue => $"{issue.Code}|{issue.Path ?? "<none>"}"))}.");
             accountabilityMessage = _outboxFactory.Create(
                 new OutboxMessageMetadata
                 {
@@ -301,6 +303,11 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         WorkflowContinuationAcceptance existing,
         WorkflowContinuationRequest request)
     {
+        var recomputed = WorkflowContinuationAcceptanceCanonicalWriter.Compute(existing);
+        if (!string.Equals(existing.Integrity.Value, recomputed.Value, StringComparison.Ordinal))
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "Workflow continuation acceptance integrity does not match its durable receipt.");
         if (existing.HumanTaskKey != request.HumanTaskKey
             || existing.WorkflowKey != request.WorkflowKey
             || !string.Equals(existing.Outcome, request.Outcome, StringComparison.Ordinal)

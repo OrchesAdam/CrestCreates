@@ -26,6 +26,35 @@ public sealed class Phase9cEvidenceLedger
         _entries.Add(entry);
     }
 
+    /// <summary>
+    /// Records evidence only after the named runner has executed its assertion.
+    /// This keeps the ledger from being used as a list of manually asserted
+    /// <c>Passed: true</c> claims.
+    /// </summary>
+    public void RecordExecutable(
+        string acceptanceName,
+        string runner,
+        string evidenceVector,
+        string source,
+        Func<bool> run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        var passed = run();
+        Record(new Phase9cEvidenceEntry(acceptanceName, runner, evidenceVector, passed, source));
+    }
+
+    public static void ValidateFrozenManifest()
+    {
+        var normative = Phase9cAcceptanceManifest.NormativeNames;
+        var supplemental = Phase9cSupplementalAcceptanceManifest.Names;
+        if (normative.Count != 145 || supplemental.Count != 25)
+            throw new InvalidOperationException($"Phase 9c frozen manifest cardinality drifted (normative={normative.Count}, supplemental={supplemental.Count}).");
+        if (normative.Count != normative.Distinct(StringComparer.Ordinal).Count()
+            || supplemental.Count != supplemental.Distinct(StringComparer.Ordinal).Count()
+            || normative.Intersect(supplemental, StringComparer.Ordinal).Any())
+            throw new InvalidOperationException("Phase 9c frozen manifest contains duplicate or overlapping acceptance names.");
+    }
+
     public void ValidateNormativeCompleteness()
     {
         var missing = Phase9cAcceptanceManifest.NormativeNames
@@ -55,5 +84,17 @@ public sealed class Phase9cEvidenceLedger
         if (missing.Length != 0)
             throw new InvalidOperationException(
                 $"Phase 9c executable evidence is incomplete; missing {missing.Length} bound acceptance entries: {string.Join(", ", missing)}.");
+    }
+
+    public void ValidateFrozenClosure()
+    {
+        ValidateFrozenManifest();
+        var expected = Phase9cAcceptanceManifest.NormativeNames
+            .Concat(Phase9cSupplementalAcceptanceManifest.Names)
+            .ToHashSet(StringComparer.Ordinal);
+        var actual = _entries.Select(entry => entry.AcceptanceName).ToHashSet(StringComparer.Ordinal);
+        if (!actual.SetEquals(expected) || _entries.Count != expected.Count)
+            throw new InvalidOperationException($"Phase 9c evidence closure is incomplete; expected exactly {expected.Count} normative/supplemental tuples but recorded {_entries.Count}.");
+        ValidateExecutableEvidence(expected);
     }
 }

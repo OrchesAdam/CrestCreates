@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Agent.Abstractions;
@@ -57,7 +58,24 @@ if (args.Length == 3)
 await new PostgreSqlRuntimeMigrationRunner(options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
 await RunControlPlaneReferenceDataMainlineAsync(options);
 
-var workflowDescriptor = new WorkflowDescriptor { Id = "approval", Name = "Approval", Version = 1 };
+var workflowDescriptor = new WorkflowDescriptor
+{
+    Id = "approval",
+    Name = "Approval",
+    Version = 1,
+    Steps =
+    [
+        new WorkflowStep
+        {
+            Id = "review",
+            Name = "Review",
+            Target = new HumanTaskTarget
+            {
+                HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor> { Id = "review", Version = 1 }
+            }
+        }
+    ]
+};
 var humanTaskDescriptor = new HumanTaskDescriptor
 {
     Id = "review",
@@ -95,6 +113,12 @@ await using (var first = BuildProvider(options, workflowDescriptor, humanTaskDes
         Key = workflowKey,
         WorkflowPin = workflowPins.Capture(workflowDescriptor).Pin,
         StartedAt = DateTimeOffset.UnixEpoch,
+        AuditOrigin = new AuditOrigin
+        {
+            CorrelationId = "aot-workflow",
+            InitiatingActor = new AuditActor { Kind = "system", Id = "aot" },
+            InvocationSource = "aot-fixture"
+        },
         Variables = new Dictionary<string, RuntimeStateValue>(StringComparer.Ordinal)
         {
             ["mutable"] = states.Capture(mutable)
@@ -183,20 +207,14 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
         return 7;
     Console.WriteLine("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
 
-    // Complete a persisted HumanTask and invoke the production outbox handler
-    // against a fresh provider. This is the AOT golden path for generated
-    // payload deserialization, required-consumer execution and terminal ack.
+    // Complete the correlated persisted HumanTask and invoke the production
+    // outbox handler against a fresh provider. This is the AOT golden path for
+    // generated payload deserialization, required continuation execution,
+    // durable acceptance, accountability delivery and terminal ack.
     var runtime = services.GetRequiredService<IHumanTaskRuntime>();
-    var dispatchTask = await runtime.CreateAsync(new HumanTaskCreationRequest
-    {
-        HumanTaskId = humanTaskDescriptor.Id,
-        TenantId = "aot",
-        InstanceId = "aot-dispatch-task",
-        RequiredCompletionConsumerIds = [HumanTaskDeliveryConstants.WorkflowContinuationConsumerId]
-    });
     var completed = await runtime.CompleteAsync(new HumanTaskCompletionRequest
     {
-        HumanTaskKey = dispatchTask.Key,
+        HumanTaskKey = humanTaskKey,
         Outcome = "Approve",
         ActorId = "aot"
     });
@@ -219,10 +237,44 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
         AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
         Services = services
     });
+    var acceptance = await services.GetRequiredService<IWorkflowContinuationAcceptanceStore>()
+        .GetAsync(new RuntimeTenantScope("aot"), completed.CompletionEventId!);
+    var humanTaskAck = await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease);
     if (deliveryOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
-        || await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease) is not OutboxDeliveryMutationResult.Applied)
+        || acceptance is null
+        || humanTaskAck is not OutboxDeliveryMutationResult.Applied)
+    {
         return 9;
+    }
     Console.WriteLine("PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK");
+    Console.WriteLine("CRESTCREATES_RUNTIME_OUTBOX_OK");
+    Console.WriteLine("CRESTCREATES_HUMANTASK_RELIABLE_DELIVERY_OK");
+
+    var accountabilityClaims = await dispatchStore.ClaimAsync(new OutboxClaimRequest
+    {
+        OwnerId = "aot-accountability-dispatch",
+        BatchSize = 1,
+        LeaseDuration = TimeSpan.FromMinutes(1),
+        SupportedContractIds = new HashSet<string>(["crest.accountability.audit-envelope/v1"], StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+    });
+    var accountabilityClaim = accountabilityClaims.Single();
+    var accountabilityRegistration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+        .Single(item => item.ContractId == "crest.accountability.audit-envelope/v1");
+    var accountabilityOutcome = await accountabilityRegistration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    {
+        Message = accountabilityClaim.Message,
+        Lease = accountabilityClaim.Lease,
+        AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+        Services = services
+    });
+    if (accountabilityOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
+        || await dispatchStore.AckAsync(accountabilityClaim.Message.Metadata.MessageId, accountabilityClaim.Lease) is not OutboxDeliveryMutationResult.Applied)
+        return 10;
+    var terminalReplay = await dispatchStore.AckAsync(accountabilityClaim.Message.Metadata.MessageId, accountabilityClaim.Lease);
+    if (terminalReplay is not (OutboxDeliveryMutationResult.AlreadyApplied or OutboxDeliveryMutationResult.StaleFence))
+        return 11;
+    Console.WriteLine("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_DELIVERY_OK");
 }
 
 // Phase 9b+ Durable Agent Tool Pre-Dispatch Reconciliation crash scenarios:
