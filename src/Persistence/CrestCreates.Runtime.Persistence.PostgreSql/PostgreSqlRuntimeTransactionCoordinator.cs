@@ -22,6 +22,12 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
             RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
             "A PostgreSQL Runtime Store operation requires an ambient Runtime transaction.");
 
+    internal bool TryGetSession(out PostgreSqlRuntimeSession? session)
+    {
+        session = _accessor.Current;
+        return session is not null;
+    }
+
     public async ValueTask ExecuteAsync(Func<CancellationToken, ValueTask> work, CancellationToken cancellationToken = default)
         => await ExecuteAsync<object?>(async ct => { await work(ct).ConfigureAwait(false); return null; }, cancellationToken).ConfigureAwait(false);
 

@@ -1,8 +1,8 @@
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
-using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
@@ -14,8 +14,10 @@ namespace CrestCreates.Agent.ControlPlane.Activation;
 /// from the HumanTask instance, and routes it to the activation review orchestrator.
 /// </summary>
 public sealed class DescriptorActivationReviewHumanTaskEventHandler
-    : ILocalEventHandler<HumanTaskCompletedEvent>
+    : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
+    public const string ConsumerIdValue = "crest.agent-control-plane.activation-review/v1";
+    public string ConsumerId => ConsumerIdValue;
     private readonly IActivationReviewOrchestrator _orchestrator;
     private readonly IHumanTaskInstanceStore _humanTaskInstanceStore;
     private readonly ILogger<DescriptorActivationReviewHumanTaskEventHandler> _logger;
@@ -50,10 +52,8 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         if (!DescriptorActivationReviewDecisionParser.TryParseReviewDecision(
             result, out var parsedDecision, out var error))
         {
-            _logger.LogError(
-                "Failed to parse activation review decision from HumanTask {TaskInstanceId}: {Error}",
-                @event.HumanTaskKey.InstanceId, error);
-            return;
+            throw new InvalidOperationException(
+                $"Failed to parse activation review decision from HumanTask '{@event.HumanTaskKey.InstanceId}': {error}");
         }
 
         // Enrich the decision with TenantId/CorrelationId from the HumanTask instance
@@ -62,11 +62,20 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
 
         if (enrichedDecision is null)
         {
-            return;
+            throw new InvalidOperationException($"HumanTask '{@event.HumanTaskKey.InstanceId}' is unavailable for activation review enrichment.");
         }
 
         // Route the enriched decision to the orchestrator
         await _orchestrator.ProcessReviewDecisionAsync(enrichedDecision, cancellationToken);
+    }
+
+    public async ValueTask<OutboxRequiredConsumerResult> ConsumeAsync(
+        HumanTaskCompletedEvent payload,
+        OutboxDeliveryContext context,
+        CancellationToken cancellationToken = default)
+    {
+        await HandleAsync(payload, cancellationToken).ConfigureAwait(false);
+        return OutboxRequiredConsumerResult.Accepted();
     }
 
     private async Task<DescriptorActivationReviewDecision?> EnrichDecisionAsync(

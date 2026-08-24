@@ -86,7 +86,8 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
             TenantId = activationRequest.TenantId,
             Input = _stateRegistry.Capture(taskInput),
             WorkflowKey = null,
-            WorkflowStepId = null
+            WorkflowStepId = null,
+            RequiredCompletionConsumerIds = [DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue]
         };
 
         var instance = await _humanTaskRuntime.CreateAsync(creationRequest, ct);

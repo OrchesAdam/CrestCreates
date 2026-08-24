@@ -99,12 +99,15 @@ builder.Services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
 builder.Services.AddSingleton<IFormRegistry>(formRegistry);
 builder.Services.AddFormKernel();
 builder.Services.AddHumanTaskRuntime();
-builder.Services.AddScoped<ILocalEventHandler<HumanTaskCompletedEvent>, ProcurementHumanTaskDecisionHandler>();
+builder.Services.AddHumanTaskCompletionObligation(
+    ProcurementContractIds.ApprovalHumanTask,
+    1,
+    ProcurementHumanTaskDecisionHandler.ConsumerIdValue);
+builder.Services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, ProcurementHumanTaskDecisionHandler>(ProcurementHumanTaskDecisionHandler.ConsumerIdValue);
 builder.Services.AddWorkflowEngine();
 builder.Services.AddScoped<ProcurementLocalEventBus>();
 builder.Services.AddScoped<ILocalEventBus>(sp =>
     sp.GetRequiredService<ProcurementLocalEventBus>());
-builder.Services.AddScoped<IHumanTaskCompletionFailurePolicy, ProcurementHumanTaskCompletionFailurePolicy>();
 
 builder.Services.AddSingleton<ICapabilityHandlerRegistry, ProcurementHandlerRegistry>();
 builder.Services.AddSingleton<IDescriptorLookup>(new ProcurementDescriptorLookup(

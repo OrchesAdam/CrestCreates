@@ -92,6 +92,12 @@ public sealed class BootstrapCoordinator : IHostedService
         {
             foreach (var dep in task.Dependencies)
             {
+                if (!taskMap.ContainsKey(dep))
+                {
+                    if (task.IsRequired)
+                        throw new BootstrapDependencyException(taskId, dep);
+                    continue;
+                }
                 Visit(dep, taskMap, visited, visiting, path, result);
             }
             result.Add(task);

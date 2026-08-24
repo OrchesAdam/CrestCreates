@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-24 (Issue #25 Phase 9c Transactional Outbox & Reliable Event Delivery R4 remains approved and frozen. The implementation and review remediation are complete on the Phase 9c branch/PR: Workflow continuation is fail-closed on missing durable proof, PostgreSQL V013 closes retry-state and claim-order invariants, provider-clock retry scheduling is explicit, legacy CompletionDispatchFailed rows block cutover, PostgreSQL outbox contract tests and the NativeAOT 9c sentinel are wired into CI. Preparation-pipeline unification and commit-unknown observation UX remain explicitly deferred follow-up slices.)
+Last Updated: 2026-08-24 (Issue #25 Phase 9c Transactional Outbox & Reliable Event Delivery R4 remains approved and frozen. PR #80 is under review remediation; durable protocol and provider semantics are being aligned to the frozen V012 contract. Closure evidence, first-party consumer migration, and commit-unknown observation remain open until the closure review passes.)
 
 ## Purpose
 
@@ -12,7 +12,7 @@ This file records the current platform status for CrestCreates so future threads
 
 ### Issue #25 — Phase 9c Transactional Outbox & Reliable Event Delivery
 
-Status: Design Spec R4 APPROVED / FROZEN; implementation complete in PR #80
+Status: Design Spec R4 APPROVED / FROZEN; implementation remediation in progress in PR #80
 
 Normative draft:
 `docs/superpowers/specs/2026-08-20-phase-9c-transactional-outbox-reliable-event-delivery-design.md`
@@ -36,12 +36,11 @@ explicit upgrade reconciliation. Workflow Accountability leaves the
 best-effort observer lane and persists the prepared envelope, including
 Sanitization and Integrity, so retry across a sanitizer upgrade cannot change
 the fact hash. The intended invariant is one Accountability preparation
-implementation; the remaining recorder-inline entry point is explicitly
-tracked as a follow-up convergence slice. Sinks remain hidden behind the
+implementation. Sinks remain hidden behind the
 Accountability recording boundary.
 
-Provider closure requires V012 plus the additive V013 invariant migration in the one checksummed Runtime migration/schema
-catalog, a runner-free semantic kit executed by InMemory and PostgreSQL,
+Provider closure requires the frozen V012 Runtime migration/schema catalog,
+a runner-free semantic kit executed by InMemory and PostgreSQL,
 commit-unknown both-or-neither observation, restart/ack-loss/crash-worker
 coverage, Outbox-owned terminal dead-letter state, generated JSON with explicit
 ContractId handlers, and a real linux-x64 NativeAOT publish-link-run executing
@@ -52,13 +51,12 @@ R2 closes the first design review's four P1 and five P2 blockers without
 reopening the architecture. Claim generation now consumes attempt budget and
 over-budget claims cannot invoke handlers. Missing required handler/sink
 composition fails health/startup without terminalizing messages. The Runtime
-transaction layer classifies commit-unknown and forbids blind replay; a
-first-class HumanTask caller observation contract is still a follow-up, and
-conflicting append throws a transaction-aborting provider-neutral exception;
-the first-class HumanTask caller observation protocol remains a documented
-follow-up rather than an implicit replay path.
+transaction layer classifies commit-unknown and forbids blind replay; the
+first-class HumanTask caller observation contract remains open closure work,
+and conflicting append throws a transaction-aborting provider-neutral
+exception.
 Accountability owns its delivery handler; sink membership is delivery-time
-composition; V012/V013 provider preflight owns legacy failure-row detection; initial
+composition; V012 provider preflight owns legacy failure-row detection; initial
 delivery eligibility uses provider insertion time; and handler registration
 caches metadata rather than scoped instances.
 

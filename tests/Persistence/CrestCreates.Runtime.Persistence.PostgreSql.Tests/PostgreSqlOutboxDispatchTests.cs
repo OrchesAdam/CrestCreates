@@ -22,7 +22,7 @@ public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFix
     }
 
     [Fact]
-    public async Task RetryStateCheckRejectsALeasedRetryRow()
+    public async Task DeliveredStateCheckRejectsAnActiveLease()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
@@ -44,7 +44,7 @@ public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFix
         };
 
         await action.Should().ThrowAsync<PostgresException>()
-            .Where(exception => exception.ConstraintName == "ck_runtime_outbox_retry_state");
+            .Where(exception => exception.ConstraintName == "ck_runtime_outbox_delivered_state");
     }
 
     [Fact]

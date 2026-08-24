@@ -27,7 +27,7 @@ Workflow Accountability delivery, and real linux-x64 NativeAOT execution.
 
 **Spec status:** R4 APPROVED / FROZEN
 
-**Plan status:** R4 / IMPLEMENTED; review remediation in progress on PR #80
+**Plan status:** R4 / APPROVED; implementation remediation in progress on PR #80
 
 ```text
 Delivery contracts:      new Runtime.Delivery.Abstractions project
@@ -1996,22 +1996,14 @@ once, but does not upgrade the existing in-memory ActivationRequest authority
 to FullDurable persistence. FullDurable golden evidence remains
 HumanTask-to-Workflow and Workflow-to-Accountability.
 
-Implementation closure update (2026-08-24): the B2 fail-closed proof path,
-PostgreSQL V013 retry-state/index invariants, provider-clock retry scheduling,
-legacy `CompletionDispatchFailed` cutover preflight, PostgreSQL outbox behavior
-tests, and the PostgreSQL NativeAOT 9c sentinel are implemented and wired into
-the existing CI jobs. Local PostgreSQL execution remains dependent on the
-configured `CREST_RUNTIME_PG_CONNECTION` or Docker; compilation and the
-non-database regression tests were run locally.
+Implementation review update (2026-08-24): B2 fail-closed proof and provider
+clock work are present, but the review identified remaining protocol,
+first-party consumer, migration, and evidence gaps. Phase 9c must not be
+described as closed until the frozen V012 contract and closure ledger pass.
 
-Explicit follow-up slices (not silent deviations from R4):
-
-- unify the remaining recorder-inline and preparer entry points behind one
-  preparation pipeline;
-- add a first-class HumanTask commit-unknown observation protocol and its
-  durable Completed/Created/Assigned evidence contract;
-- amend the frozen wording around the post-commit LocalEvent compatibility
-  lane if the project elects to retain that notification.
+The remaining closure work is evidence execution: the first-class commit-
+unknown caller observation API and CrashWorker/native golden-path runs must be
+recorded before the implementation can be marked closed.
 
 ---
 

@@ -20,7 +20,6 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
 {
     private readonly IHumanTaskRegistry _registry;
     private readonly IHumanTaskInstanceStore _store;
-    private readonly ILocalEventBus _eventBus;
     private readonly IHumanTaskAssigneeResolver _resolver;
     private readonly IRuntimeDescriptorPinResolver<HumanTaskDescriptor> _pinResolver;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
@@ -48,7 +47,7 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
     {
         _registry = registry;
         _store = store;
-        _eventBus = eventBus;
+        _ = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
         _resolver = resolver;
         _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
         _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
@@ -159,12 +158,10 @@ public sealed class DefaultHumanTaskRuntime : IHumanTaskRuntime
             await PersistUpdateAsync(candidate, loaded.Revision, transactionCt).ConfigureAwait(false);
             await _outbox.AppendAsync(message, transactionCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
-        // The transactional outbox is the sole completion acknowledgement and
-        // recovery authority.  A typed Local Event notification remains an
-        // optional compatibility lane for in-process business adapters; it is
-        // emitted only after the durable commit and never changes delivery state.
-        try { await _eventBus.PublishAsync(completedEvent, CancellationToken.None).ConfigureAwait(false); }
-        catch { /* LocalEvent is optional compatibility only; it has no Ack authority. */ }
+        // Completion is acknowledged by the durable outbox only.  In-process
+        // LocalEvent publication is deliberately not part of this request path:
+        // an unbounded or non-cooperative compatibility handler must never delay
+        // the caller after the Runtime transaction has committed.
         return candidate;
     }
 

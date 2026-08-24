@@ -4,7 +4,6 @@ public enum OutboxDeliveryStatus
 {
     Pending,
     InFlight,
-    RetryDue,
     Delivered,
     DeadLettered
 }

@@ -32,6 +32,10 @@ internal sealed class WorkflowContinuationOutboxConsumer : IOutboxRequiredConsum
         {
             return OutboxRequiredConsumerResult.Retry("WORKFLOW_CONCURRENCY", ex.Message);
         }
+        catch (RuntimePersistenceContractException ex)
+        {
+            return OutboxRequiredConsumerResult.Conflict("WORKFLOW_CONTINUATION_CONFLICT", ex.Message);
+        }
         catch (Exception ex)
         {
             return OutboxRequiredConsumerResult.Retry("WORKFLOW_CONTINUATION_FAILED", ex.Message);

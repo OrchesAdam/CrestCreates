@@ -23,7 +23,7 @@ internal sealed class PostgreSqlOutboxDispatchStore : IOutboxDispatchStore
         var rows = new List<OutboxDeliveryClaim>();
         if (request.SupportedContractIds is not null && request.SupportedRequiredConsumerIds is not null)
         {
-            await using var active = new NpgsqlCommand($"select contract_id, required_consumer_ids_json::text from {_table} where status in (0,1,2);", connection, transaction);
+            await using var active = new NpgsqlCommand($"select contract_id, required_consumer_ids_json::text from {_table} where status in (0,1);", connection, transaction);
             await using var reader = await active.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
@@ -36,16 +36,25 @@ internal sealed class PostgreSqlOutboxDispatchStore : IOutboxDispatchStore
                         throw new OutboxCompositionException($"Outbox required consumer '{consumer}' is not registered.");
             }
         }
+        var supportedPredicate = string.Empty;
+        if (request.SupportedContractIds is not null && request.SupportedRequiredConsumerIds is not null)
+            supportedPredicate = " and contract_id = any(@supported_contracts) and not exists (select 1 from jsonb_array_elements_text(required_consumer_ids_json) as required_consumer where required_consumer <> all(@supported_consumers))";
         await using (var command = new NpgsqlCommand($"""
             select message_id, tenant_id, contract_id, event_name, event_version, correlation_id, causation_id, occurred_at, payload_utf8, required_consumer_ids_json::text, integrity_json::text, created_at, status, attempt_count, fencing_token
               from {_table}
-             where (status in (0,2) and available_at <= @now)
-                or (status = 1 and lease_expires_at <= @now)
+             where ((status = 0 and available_at <= @now)
+                or (status = 1 and lease_expires_at <= @now))
+             {supportedPredicate}
              order by available_at, occurred_at, message_id collate "C"
              limit @limit for update skip locked;
             """, connection, transaction))
         {
             command.Parameters.AddWithValue("now", now); command.Parameters.AddWithValue("limit", request.BatchSize);
+            if (request.SupportedContractIds is not null && request.SupportedRequiredConsumerIds is not null)
+            {
+                command.Parameters.Add("supported_contracts", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = request.SupportedContractIds.ToArray();
+                command.Parameters.Add("supported_consumers", NpgsqlDbType.Array | NpgsqlDbType.Text).Value = request.SupportedRequiredConsumerIds.ToArray();
+            }
             await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             var pending = new List<(string Id, string? Tenant, string Contract, string EventName, int EventVersion, string? Correlation, string? Causation, DateTimeOffset Occurred, byte[] Payload, string Consumers, string Integrity, DateTimeOffset Created, int Attempt, long Fence)>();
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -72,13 +81,13 @@ internal sealed class PostgreSqlOutboxDispatchStore : IOutboxDispatchStore
     }
 
     public ValueTask<OutboxDeliveryMutationResult> AckAsync(string messageId, OutboxDeliveryLease lease, CancellationToken cancellationToken = default)
-        => MutateAsync(messageId, lease, "status=3, lease_owner_id=null, lease_expires_at=null, available_at=clock_timestamp(), delivered_at=clock_timestamp(), updated_at=clock_timestamp()", null, cancellationToken);
+        => MutateAsync(messageId, lease, "status=2, terminal_lease_owner_id=@owner, terminal_fencing_token=@fence, terminal_failure_code=null, lease_owner_id=null, lease_expires_at=null, available_at=clock_timestamp(), delivered_at=clock_timestamp(), updated_at=clock_timestamp()", null, cancellationToken);
 
     public ValueTask<OutboxDeliveryMutationResult> RetryAsync(string messageId, OutboxDeliveryLease lease, OutboxDeliveryFailure failure, DateTimeOffset nextAttemptAt, CancellationToken cancellationToken = default)
-        => MutateAsync(messageId, lease, "status=2, last_failure_code=@code, last_failure_at=clock_timestamp(), lease_owner_id=null, lease_expires_at=null, available_at=@next, updated_at=clock_timestamp()", (failure.Code, nextAttemptAt), cancellationToken);
+        => MutateAsync(messageId, lease, "status=0, last_failure_code=@code, last_failure_at=clock_timestamp(), lease_owner_id=null, lease_expires_at=null, available_at=@next, updated_at=clock_timestamp()", (failure.Code, nextAttemptAt), cancellationToken);
 
     public ValueTask<OutboxDeliveryMutationResult> DeadLetterAsync(string messageId, OutboxDeliveryLease lease, OutboxDeliveryFailure failure, CancellationToken cancellationToken = default)
-        => MutateAsync(messageId, lease, "status=4, last_failure_code=@code, last_failure_at=clock_timestamp(), lease_owner_id=null, lease_expires_at=null, available_at=clock_timestamp(), dead_lettered_at=clock_timestamp(), updated_at=clock_timestamp()", (failure.Code, (DateTimeOffset?)null), cancellationToken);
+        => MutateAsync(messageId, lease, "status=3, last_failure_code=@code, last_failure_at=clock_timestamp(), terminal_lease_owner_id=@owner, terminal_fencing_token=@fence, terminal_failure_code=@code, lease_owner_id=null, lease_expires_at=null, available_at=clock_timestamp(), dead_lettered_at=clock_timestamp(), updated_at=clock_timestamp()", (failure.Code, (DateTimeOffset?)null), cancellationToken);
 
     private async ValueTask<OutboxDeliveryMutationResult> MutateAsync(string id, OutboxDeliveryLease lease, string set, (string Code, DateTimeOffset? Next)? extra, CancellationToken ct)
     {
@@ -87,7 +96,37 @@ internal sealed class PostgreSqlOutboxDispatchStore : IOutboxDispatchStore
         await using var command = new NpgsqlCommand($"update {_table} set {set} where message_id=@id and status=1 and lease_owner_id=@owner and fencing_token=@fence and lease_expires_at > clock_timestamp();", connection, transaction);
         command.Parameters.AddWithValue("id", id); command.Parameters.AddWithValue("owner", lease.OwnerId); command.Parameters.AddWithValue("fence", lease.Fence);
         if (extra is { } value) { command.Parameters.AddWithValue("code", value.Code); command.Parameters.AddWithValue("next", (object?)value.Next ?? DBNull.Value); }
-        var count = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false); await transaction.CommitAsync(ct).ConfigureAwait(false);
+        var count = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        if (count == 0)
+        {
+            await using var terminal = new NpgsqlCommand($"select status, fencing_token, terminal_lease_owner_id, terminal_fencing_token from {_table} where message_id=@id;", connection, transaction);
+            terminal.Parameters.AddWithValue("id", id);
+            await using var reader = await terminal.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var status = reader.GetInt32(0);
+                var currentFence = reader.GetInt64(1);
+                var owner = reader.IsDBNull(2) ? null : reader.GetString(2);
+                var fence = reader.IsDBNull(3) ? (long?)null : reader.GetInt64(3);
+                await reader.DisposeAsync();
+                if (status is 2 or 3 && string.Equals(owner, lease.OwnerId, StringComparison.Ordinal) && fence == lease.Fence)
+                {
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+                    return OutboxDeliveryMutationResult.AlreadyApplied;
+                }
+                if (status is 2 or 3 && fence is not null)
+                {
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+                    return OutboxDeliveryMutationResult.StaleFence;
+                }
+                if (currentFence != lease.Fence)
+                {
+                    await transaction.CommitAsync(ct).ConfigureAwait(false);
+                    return OutboxDeliveryMutationResult.StaleFence;
+                }
+            }
+        }
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
         return count == 1 ? OutboxDeliveryMutationResult.Applied : OutboxDeliveryMutationResult.StaleLease;
     }
 

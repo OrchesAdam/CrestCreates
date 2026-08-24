@@ -14,6 +14,7 @@ using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -181,24 +182,24 @@ public sealed class ProcurementLocalEventBus(
     }
 }
 
-public sealed class ProcurementHumanTaskCompletionFailurePolicy(
-    ProcurementLocalEventBus eventBus) : IHumanTaskCompletionFailurePolicy
-{
-    public Task RecoverAsync(
-        HumanTaskInstance instance,
-        HumanTaskCompletedEvent completion,
-        CancellationToken cancellationToken = default)
-        => eventBus.PublishAsync(completion, cancellationToken);
-}
-
 public sealed class ProcurementHumanTaskDecisionHandler(
     IHumanTaskInstanceStore tasks,
     ICapabilityDispatcher dispatcher,
-    ITenantContext tenant,
-    ICurrentUser currentUser,
     IRuntimeStateContractRegistry stateRegistry)
-    : ILocalEventHandler<HumanTaskCompletedEvent>
+    : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
+    public const string ConsumerIdValue = "crest.sample.procurement.decision/v1";
+    public string ConsumerId => ConsumerIdValue;
+
+    public async ValueTask<OutboxRequiredConsumerResult> ConsumeAsync(
+        HumanTaskCompletedEvent payload,
+        OutboxDeliveryContext context,
+        CancellationToken cancellationToken = default)
+    {
+        await HandleAsync(payload, cancellationToken).ConfigureAwait(false);
+        return OutboxRequiredConsumerResult.Accepted();
+    }
+
     public async Task HandleAsync(
         HumanTaskCompletedEvent @event,
         CancellationToken cancellationToken = default)
@@ -207,11 +208,8 @@ public sealed class ProcurementHumanTaskDecisionHandler(
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
         var variables = RestoreVariables(task.Input, stateRegistry);
-        if (string.IsNullOrWhiteSpace(task.TenantId)
-            || !string.Equals(task.TenantId, tenant.CurrentTenantId, StringComparison.Ordinal))
-            throw new UnauthorizedAccessException("The HumanTask belongs to another tenant.");
-        if (!currentUser.IsInRole("procurement-manager"))
-            throw new UnauthorizedAccessException("The procurement-manager role is required.");
+        if (string.IsNullOrWhiteSpace(task.TenantId))
+            throw new UnauthorizedAccessException("The completed procurement HumanTask has no persisted tenant.");
 
         var requestId = variables["requestId"] is Guid value
             ? value

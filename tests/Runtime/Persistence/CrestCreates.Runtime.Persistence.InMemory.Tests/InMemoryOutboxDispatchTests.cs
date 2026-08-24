@@ -87,4 +87,24 @@ public sealed class InMemoryOutboxDispatchTests
         })).Single();
         claim.Lease.Attempt.Should().Be(1);
     }
+
+    [Fact]
+    public async Task Terminal_mutation_replay_is_exact_fence_idempotent_and_stale_fenced()
+    {
+        var services = new ServiceCollection();
+        services.AddCrestCreatesInMemoryRuntimePersistence();
+        using var provider = services.BuildServiceProvider();
+        var coordinator = provider.GetRequiredService<InMemoryRuntimeTransactionCoordinator>();
+        var writer = provider.GetRequiredService<ITransactionalOutboxWriter>();
+        var dispatch = provider.GetRequiredService<IOutboxDispatchStore>();
+        var message = new DefaultOutboxMessageFactory().Create("evt-terminal", "tenant-a", "contract/v1", "payload/v1", [1]);
+        await coordinator.ExecuteAsync(async ct => await writer.AppendAsync(message, ct));
+        var claim = (await dispatch.ClaimAsync(new OutboxClaimRequest { OwnerId = "worker-a", BatchSize = 1 })).Single();
+
+        (await dispatch.AckAsync(message.Metadata.MessageId, claim.Lease)).Should().Be(OutboxDeliveryMutationResult.Applied);
+        (await dispatch.AckAsync(message.Metadata.MessageId, claim.Lease)).Should().Be(OutboxDeliveryMutationResult.AlreadyApplied);
+        (await dispatch.DeadLetterAsync(message.Metadata.MessageId,
+            claim.Lease with { Fence = claim.Lease.Fence + 1 },
+            new OutboxDeliveryFailure { Code = "different" })).Should().Be(OutboxDeliveryMutationResult.StaleFence);
+    }
 }

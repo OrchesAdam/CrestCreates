@@ -75,6 +75,10 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         WorkflowContinuationRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.CompletionEventId))
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                "Workflow continuation requires the persisted HumanTask CompletionEventId.");
 
         // The acceptance receipt is the authority for an already accepted
         // completion.  It must be checked before the waiting-key lookup because
@@ -180,7 +184,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         var acceptance = _acceptances is null ? null : new WorkflowContinuationAcceptance
         {
             TenantScope = new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(instance.TenantId),
-            CompletionEventId = request.CompletionEventId ?? request.HumanTaskKey.InstanceId,
+            CompletionEventId = request.CompletionEventId!,
             HumanTaskKey = request.HumanTaskKey,
             WorkflowKey = instance.Key,
             Outcome = request.Outcome,
@@ -190,7 +194,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
             Integrity = WorkflowContinuationAcceptanceCanonicalWriter.Compute(new WorkflowContinuationAcceptance
             {
                 TenantScope = new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(instance.TenantId),
-                CompletionEventId = request.CompletionEventId ?? request.HumanTaskKey.InstanceId,
+                CompletionEventId = request.CompletionEventId!,
                 HumanTaskKey = request.HumanTaskKey,
                 WorkflowKey = instance.Key,
                 Outcome = request.Outcome,
@@ -284,7 +288,7 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         WorkflowContinuationRequest request)
         => new(
             RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
-            $"Workflow continuation has neither a waiting correlation nor an exact durable acceptance for '{request.CompletionEventId ?? request.HumanTaskKey.InstanceId}'.");
+            $"Workflow continuation has neither a waiting correlation nor an exact durable acceptance for '{request.CompletionEventId}'.");
 
     private static bool ResultsEqual(RuntimeStateValue? left, RuntimeStateValue? right)
         => left is null && right is null ||

@@ -4,7 +4,9 @@ public enum OutboxDeliveryMutationResult
 {
     Applied,
     Duplicate,
+    AlreadyApplied,
     StaleLease,
+    StaleFence,
     NotFound,
     Conflict
 }

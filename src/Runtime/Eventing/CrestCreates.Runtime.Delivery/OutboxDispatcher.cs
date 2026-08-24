@@ -146,7 +146,7 @@ internal sealed class OutboxDispatcher
     private async ValueTask ApplyAsync(ValueTask<OutboxDeliveryMutationResult> mutation, string operation, OutboxDeliveryClaim claim)
     {
         var result = await mutation.ConfigureAwait(false);
-        if (result is OutboxDeliveryMutationResult.StaleLease or OutboxDeliveryMutationResult.NotFound)
+        if (result is OutboxDeliveryMutationResult.StaleLease or OutboxDeliveryMutationResult.StaleFence or OutboxDeliveryMutationResult.AlreadyApplied or OutboxDeliveryMutationResult.NotFound)
         {
             _logger.LogDebug("Outbox {Operation} did not apply for {MessageId}: {Result}", operation, claim.Message.Metadata.MessageId, result);
             return;

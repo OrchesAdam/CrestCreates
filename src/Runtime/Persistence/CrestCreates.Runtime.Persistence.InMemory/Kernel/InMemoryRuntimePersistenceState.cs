@@ -46,10 +46,14 @@ internal sealed class InMemoryOutboxRecord
     public DateTimeOffset? LeaseExpiresAt { get; set; }
     public DateTimeOffset? NextAttemptAt { get; set; }
     public string? LastFailureCode { get; set; }
+    public string? TerminalLeaseOwner { get; set; }
+    public long? TerminalFence { get; set; }
+    public string? TerminalFailureCode { get; set; }
     public InMemoryOutboxRecord Clone() => new()
     {
         Message = Message.Snapshot(), Status = Status, Attempt = Attempt, Fence = Fence,
         LeaseOwner = LeaseOwner, LeaseExpiresAt = LeaseExpiresAt, NextAttemptAt = NextAttemptAt,
-        LastFailureCode = LastFailureCode
+        LastFailureCode = LastFailureCode, TerminalLeaseOwner = TerminalLeaseOwner,
+        TerminalFence = TerminalFence, TerminalFailureCode = TerminalFailureCode
     };
 }

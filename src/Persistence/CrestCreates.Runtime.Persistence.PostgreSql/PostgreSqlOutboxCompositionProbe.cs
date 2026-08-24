@@ -9,7 +9,7 @@ internal sealed class PostgreSqlOutboxCompositionProbe(PostgreSqlRuntimePersiste
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         var table = PostgreSqlRuntimeStoreSupport.Table(options, "runtime_outbox_messages");
-        await using var command = new NpgsqlCommand($"select contract_id, required_consumer_ids_json::text from {table} where status in (0, 1, 2);", connection);
+        await using var command = new NpgsqlCommand($"select contract_id, required_consumer_ids_json::text from {table} where status in (0, 1);", connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {

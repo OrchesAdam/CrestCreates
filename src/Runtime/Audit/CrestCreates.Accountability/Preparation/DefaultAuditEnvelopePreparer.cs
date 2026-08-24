@@ -25,13 +25,13 @@ public sealed class DefaultAuditEnvelopePreparer : IAuditEnvelopePreparer
         IAuditSanitizer sanitizer,
         IAuditIntegrityHasher hasher,
         AccountabilityCanonicalProjectionWriter projectionWriter,
-        ILogger<DefaultAuditEnvelopePreparer> logger)
+        ILogger<DefaultAuditEnvelopePreparer>? logger = null)
     {
         _validator = validator;
         _sanitizer = sanitizer;
         _hasher = hasher;
         _projectionWriter = projectionWriter;
-        _logger = logger;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<DefaultAuditEnvelopePreparer>.Instance;
     }
 
     public async ValueTask<AuditEnvelopePreparationResult> PrepareAsync(AuditEnvelope candidate, CancellationToken cancellationToken = default)
@@ -58,6 +58,10 @@ public sealed class DefaultAuditEnvelopePreparer : IAuditEnvelopePreparer
             return Rejected(new AuditRecordIssue(ex.Code, ex.Path));
         }
 
+        if (sanitizedResult?.Envelope is null)
+            return Rejected(new AuditRecordIssue("AUDIT_SANITIZED_OUTPUT_INVALID"));
+        var sanitizedStructural = _validator.ValidateStructure(sanitizedResult.Envelope);
+        if (!sanitizedStructural.IsValid) return Rejected(sanitizedStructural.Issues);
         var sanitized = Snapshot(sanitizedResult.Envelope);
         var safeValidation = _validator.ValidateSafeSnapshot(sanitized);
         if (!safeValidation.IsValid) return Rejected(safeValidation.Issues);

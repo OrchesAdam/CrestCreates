@@ -5,7 +5,7 @@
 - **Depends on:** [#39 — Phase 9a Accountability Runtime Foundation](https://github.com/OrchesAdam/CrestCreates/issues/39), [#24 — Phase 9b Durable Persistence Foundation](https://github.com/OrchesAdam/CrestCreates/issues/24)
 - **Current-master baseline:** `d20341f0`
 - **Status:** R4 APPROVED / FROZEN; implementation is tracked by Plan R4 and PR #80
-- **Provider baseline:** InMemory `FullSemantic`; PostgreSQL 16 direct-Npgsql `FullDurable`; implementation migration catalog ends at V013 (V012 remains immutable)
+- **Provider baseline:** InMemory `FullSemantic`; PostgreSQL 16 direct-Npgsql `FullDurable`; implementation migration catalog ends at frozen V012
 
 ---
 
