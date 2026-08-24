@@ -105,6 +105,6 @@ public sealed class InMemoryOutboxDispatchTests
         (await dispatch.AckAsync(message.Metadata.MessageId, claim.Lease)).Should().Be(OutboxDeliveryMutationResult.AlreadyApplied);
         (await dispatch.DeadLetterAsync(message.Metadata.MessageId,
             claim.Lease with { Fence = claim.Lease.Fence + 1 },
-            new OutboxDeliveryFailure { Code = "different" })).Should().Be(OutboxDeliveryMutationResult.StaleFence);
+            new OutboxDeliveryFailure { Code = "different", Message = "different terminal outcome" })).Should().Be(OutboxDeliveryMutationResult.StaleFence);
     }
 }
