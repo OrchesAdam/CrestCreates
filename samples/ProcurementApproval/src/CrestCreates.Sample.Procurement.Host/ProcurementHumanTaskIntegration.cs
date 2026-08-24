@@ -183,12 +183,22 @@ public sealed class ProcurementLocalEventBus(
     }
 }
 
-public sealed class ProcurementHumanTaskDecisionHandler(
-    IHumanTaskInstanceStore tasks,
-    ICapabilityDispatcher dispatcher,
-    IRuntimeStateContractRegistry stateRegistry)
-    : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
+public sealed class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
+    private readonly IHumanTaskInstanceStore _tasks;
+    private readonly ICapabilityDispatcher _dispatcher;
+    private readonly IRuntimeStateContractRegistry _stateRegistry;
+
+    public ProcurementHumanTaskDecisionHandler(
+        IHumanTaskInstanceStore tasks,
+        ICapabilityDispatcher dispatcher,
+        IRuntimeStateContractRegistry stateRegistry)
+    {
+        _tasks = tasks;
+        _dispatcher = dispatcher;
+        _stateRegistry = stateRegistry;
+    }
+
     public const string ConsumerIdValue = "crest.sample.procurement.decision/v1";
     public string ConsumerId => ConsumerIdValue;
 
@@ -205,10 +215,10 @@ public sealed class ProcurementHumanTaskDecisionHandler(
         HumanTaskCompletedEvent @event,
         CancellationToken cancellationToken = default)
     {
-        var task = await tasks.GetAsync(@event.HumanTaskKey, cancellationToken)
+        var task = await _tasks.GetAsync(@event.HumanTaskKey, cancellationToken)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
-        var variables = RestoreVariables(task.Input, stateRegistry);
+        var variables = RestoreVariables(task.Input, _stateRegistry);
         if (string.IsNullOrWhiteSpace(task.TenantId))
             throw new UnauthorizedAccessException("The completed procurement HumanTask has no persisted tenant.");
 
@@ -221,9 +231,9 @@ public sealed class ProcurementHumanTaskDecisionHandler(
             var input = new ApproveProcurementRequestInput
             {
                 RequestId = requestId,
-                Comment = @event.Result is null ? "Approved through HumanTask" : stateRegistry.Restore(@event.Result) as string ?? "Approved through HumanTask"
+                Comment = @event.Result is null ? "Approved through HumanTask" : _stateRegistry.Restore(@event.Result) as string ?? "Approved through HumanTask"
             };
-            result = await dispatcher.DispatchAsync(
+            result = await _dispatcher.DispatchAsync(
                 ProcurementContractIds.ApplyApprovalDecisionCapability,
                 InvocationSource.HumanTask,
                 input,
@@ -243,9 +253,9 @@ public sealed class ProcurementHumanTaskDecisionHandler(
             var input = new RejectProcurementRequestInput
             {
                 RequestId = requestId,
-                Reason = @event.Result is null ? "Rejected through HumanTask" : stateRegistry.Restore(@event.Result) as string ?? "Rejected through HumanTask"
+                Reason = @event.Result is null ? "Rejected through HumanTask" : _stateRegistry.Restore(@event.Result) as string ?? "Rejected through HumanTask"
             };
-            result = await dispatcher.DispatchAsync(
+            result = await _dispatcher.DispatchAsync(
                 ProcurementContractIds.ApplyRejectionDecisionCapability,
                 InvocationSource.HumanTask,
                 input,

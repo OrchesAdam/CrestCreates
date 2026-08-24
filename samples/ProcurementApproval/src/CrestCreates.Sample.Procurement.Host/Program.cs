@@ -29,6 +29,7 @@ using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.MultiTenancy;
 using CrestCreates.OpenApi;
 using CrestCreates.Runtime.Persistence;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.InMemory;
 using CrestCreates.Runtime.Delivery;
 using CrestCreates.Sample.Procurement.Application;
@@ -104,6 +105,15 @@ builder.Services.AddHumanTaskCompletionObligation(
     1,
     ProcurementHumanTaskDecisionHandler.ConsumerIdValue);
 builder.Services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, ProcurementHumanTaskDecisionHandler>(ProcurementHumanTaskDecisionHandler.ConsumerIdValue);
+// Keep the required consumer activation explicit for the NativeAOT host. The
+// generic registration above owns the delivery metadata/resolver; this
+// factory owns the concrete composition so the AOT DI graph does not have to
+// infer a constructor through the open generic registration path.
+builder.Services.Replace(ServiceDescriptor.Scoped<ProcurementHumanTaskDecisionHandler>(sp =>
+    new ProcurementHumanTaskDecisionHandler(
+        sp.GetRequiredService<IHumanTaskInstanceStore>(),
+        sp.GetRequiredService<ICapabilityDispatcher>(),
+        sp.GetRequiredService<IRuntimeStateContractRegistry>())));
 builder.Services.AddWorkflowEngine();
 builder.Services.AddScoped<ProcurementLocalEventBus>();
 builder.Services.AddScoped<ILocalEventBus>(sp =>
