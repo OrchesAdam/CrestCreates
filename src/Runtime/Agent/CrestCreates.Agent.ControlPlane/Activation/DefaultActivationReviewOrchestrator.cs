@@ -157,7 +157,7 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
         if (result.Status == AgentToolResultStatus.Success)
             return ActivationReviewDispatchOutcome.Accepted;
         if (result.Status == AgentToolResultStatus.SucceededWithDiagnostics
-            && result.Diagnostics.Any(d => string.Equals(d.Code.Value, "ACTIVATION_REVIEW_DUPLICATE", StringComparison.Ordinal)))
+            && result.Diagnostics.Any(d => string.Equals(d.Code.Value, DescriptorActivationDiagnosticCodes.ReviewDuplicate.Value, StringComparison.Ordinal)))
             return ActivationReviewDispatchOutcome.Duplicate;
         return ActivationReviewDispatchOutcome.Conflict;
     }

@@ -650,7 +650,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
                 snapshot.Request,
                 [new AgentToolDiagnostic
                 {
-                    Code = new DiagnosticCode("ACTIVATION_REVIEW_DUPLICATE"),
+                    Code = DescriptorActivationDiagnosticCodes.ReviewDuplicate,
                     Severity = SeverityLevel.Info,
                     Message = "The exact activation review completion was already applied."
                 }]);
@@ -659,7 +659,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         return AgentToolResult<ActivationRequest>.InvalidRequest(
             [new AgentToolDiagnostic
             {
-                Code = new DiagnosticCode("ACTIVATION_REVIEW_CONFLICT"),
+                Code = DescriptorActivationDiagnosticCodes.ReviewConflict,
                 Severity = SeverityLevel.Error,
                 Message = "The activation request already has a different durable review decision."
             }]);

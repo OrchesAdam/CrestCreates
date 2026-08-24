@@ -80,7 +80,7 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         {
             ActivationReviewDispatchOutcome.Accepted => OutboxRequiredConsumerResult.Accepted(),
             ActivationReviewDispatchOutcome.Duplicate => OutboxRequiredConsumerResult.Duplicate(),
-            _ => OutboxRequiredConsumerResult.Conflict("ACTIVATION_REVIEW_CONFLICT", "The activation review decision conflicts with the durable request state.")
+            _ => OutboxRequiredConsumerResult.Conflict(DescriptorActivationDiagnosticCodes.ReviewConflict.RequireValue(), "The activation review decision conflicts with the durable request state.")
         };
     }
 
