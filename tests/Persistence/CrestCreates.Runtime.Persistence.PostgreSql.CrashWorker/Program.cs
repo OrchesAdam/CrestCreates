@@ -64,6 +64,7 @@ var task = new HumanTaskInstance
     Status = HumanTaskInstanceStatus.Created,
     WorkflowKey = before.Key,
     WorkflowStepId = "review",
+    RequiredCompletionConsumerIds = ["crest.workflow.humantask-continuation/v1"],
     CreatedAt = DateTimeOffset.UnixEpoch
 };
 

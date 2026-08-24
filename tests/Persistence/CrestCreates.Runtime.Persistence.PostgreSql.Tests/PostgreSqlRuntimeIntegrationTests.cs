@@ -631,6 +631,7 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         Status = HumanTaskInstanceStatus.Assigned,
         WorkflowKey = workflowKey,
         WorkflowStepId = stepId,
+        RequiredCompletionConsumerIds = ["crest.workflow.humantask-continuation/v1"],
         AssigneeUserId = "reviewer",
         CandidateUserIds = ["reviewer", "backup"],
         CandidateRoleIds = ["approver"],
