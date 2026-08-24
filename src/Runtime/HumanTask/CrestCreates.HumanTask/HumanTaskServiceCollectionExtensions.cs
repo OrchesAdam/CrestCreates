@@ -20,6 +20,8 @@ public static class HumanTaskServiceCollectionExtensions
 {
     public static IServiceCollection AddHumanTaskRuntime(this IServiceCollection services)
     {
+        services.TryAddSingleton(new HumanTaskDeliveryOptions());
+        services.TryAddSingleton<OptionalCompatibilityExecutionTracker>();
         services.TryAddScoped<IHumanTaskRuntime, DefaultHumanTaskRuntime>();
         services.TryAddScoped<IHumanTaskAssigneeResolver, DefaultHumanTaskAssigneeResolver>();
         services.AddOutboxDeliveryHandler<HumanTaskCompletedOutboxHandler>(HumanTaskDeliveryConstants.CompletedContractId);

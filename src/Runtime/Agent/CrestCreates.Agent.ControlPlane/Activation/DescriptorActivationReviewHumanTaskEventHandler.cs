@@ -35,12 +35,12 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         _stateRegistry = stateRegistry;
     }
 
-    public async Task HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)
+    public async Task<ActivationReviewDispatchOutcome> HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)
     {
         // Only process activation review HumanTasks
         if (@event.HumanTaskPin.Ref.Id != DescriptorActivationHumanTaskIds.ActivationReview)
         {
-            return;
+            return ActivationReviewDispatchOutcome.Accepted;
         }
 
         _logger.LogInformation(
@@ -66,7 +66,8 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         }
 
         // Route the enriched decision to the orchestrator
-        await _orchestrator.ProcessReviewDecisionAsync(enrichedDecision, cancellationToken);
+        return await _orchestrator.ProcessReviewDecisionAsync(enrichedDecision, @event.EventId, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async ValueTask<OutboxRequiredConsumerResult> ConsumeAsync(
@@ -74,8 +75,13 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         OutboxDeliveryContext context,
         CancellationToken cancellationToken = default)
     {
-        await HandleAsync(payload, cancellationToken).ConfigureAwait(false);
-        return OutboxRequiredConsumerResult.Accepted();
+        var outcome = await HandleAsync(payload, cancellationToken).ConfigureAwait(false);
+        return outcome switch
+        {
+            ActivationReviewDispatchOutcome.Accepted => OutboxRequiredConsumerResult.Accepted(),
+            ActivationReviewDispatchOutcome.Duplicate => OutboxRequiredConsumerResult.Duplicate(),
+            _ => OutboxRequiredConsumerResult.Conflict("ACTIVATION_REVIEW_CONFLICT", "The activation review decision conflicts with the durable request state.")
+        };
     }
 
     private async Task<DescriptorActivationReviewDecision?> EnrichDecisionAsync(

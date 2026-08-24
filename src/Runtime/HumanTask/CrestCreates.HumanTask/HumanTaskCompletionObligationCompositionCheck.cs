@@ -18,7 +18,8 @@ internal sealed class HumanTaskCompletionObligationCompositionCheck(
         // cutover detection, which must run even when no new obligation policy
         // is registered.
         if (preflight is null)
-            return ValueTask.CompletedTask;
+            throw new OutboxCompositionException(
+                "HumanTask completion obligation preflight is not registered for the selected persistence provider.");
         return preflight.ValidateAsync(policyList, consumers.Select(consumer => consumer.ConsumerId).ToHashSet(StringComparer.Ordinal), cancellationToken);
     }
 }

@@ -128,6 +128,7 @@ jobs:
           # an unrelated provider test aggregate.
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build --filter "FullyQualifiedName~PostgreSqlOutboxDispatchTests"
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests --no-build --filter "FullyQualifiedName~PostgreSqlRuntimeAotFixtureTests"
+          dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build --filter "FullyQualifiedName~Phase9cExecutableEvidenceTests"
 
       # Phase 9b+ durable Agent Memory evidence gates: the frozen Spec §18 skeleton
       # (44 names) and the 59-case / 98-tuple evidence ledger are enforced by the

@@ -28,7 +28,15 @@ public interface IActivationReviewOrchestrator
     /// Routes the decision to the activation request service
     /// (approve or reject) based on the review outcome.
     /// </summary>
-    Task ProcessReviewDecisionAsync(
+    Task<ActivationReviewDispatchOutcome> ProcessReviewDecisionAsync(
         DescriptorActivationReviewDecision reviewDecision,
+        string completionEventId,
         CancellationToken ct = default);
+}
+
+public enum ActivationReviewDispatchOutcome
+{
+    Accepted,
+    Duplicate,
+    Conflict
 }

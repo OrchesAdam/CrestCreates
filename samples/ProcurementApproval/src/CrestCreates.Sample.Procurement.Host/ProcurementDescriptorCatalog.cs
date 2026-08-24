@@ -90,16 +90,14 @@ public static class ProcurementDescriptorCatalog
             CapabilityKind.Command,
             CapabilityRiskLevel.High,
             ProcurementContractIds.ApproveInputSchema,
-            ProcurementContractIds.RequestOutputSchema,
-            ["procurement.approve"]),
+            ProcurementContractIds.RequestOutputSchema),
         Capability(
             ProcurementContractIds.ApplyRejectionDecisionCapability,
             "apply-rejection-decision",
             CapabilityKind.Command,
             CapabilityRiskLevel.High,
             ProcurementContractIds.RejectInputSchema,
-            ProcurementContractIds.RequestOutputSchema,
-            ["procurement.approve"])
+            ProcurementContractIds.RequestOutputSchema)
     ];
 
     public static FormDescriptor ApprovalForm { get; } = new()

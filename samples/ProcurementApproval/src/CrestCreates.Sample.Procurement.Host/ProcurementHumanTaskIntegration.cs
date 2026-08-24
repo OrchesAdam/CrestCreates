@@ -188,15 +188,18 @@ public sealed class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsume
     private readonly IHumanTaskInstanceStore _tasks;
     private readonly ICapabilityDispatcher _dispatcher;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
+    private readonly InMemoryProcurementRequestStore _requests;
 
     public ProcurementHumanTaskDecisionHandler(
         IHumanTaskInstanceStore tasks,
         ICapabilityDispatcher dispatcher,
-        IRuntimeStateContractRegistry stateRegistry)
+        IRuntimeStateContractRegistry stateRegistry,
+        InMemoryProcurementRequestStore requests)
     {
         _tasks = tasks;
         _dispatcher = dispatcher;
         _stateRegistry = stateRegistry;
+        _requests = requests;
     }
 
     public const string ConsumerIdValue = "crest.sample.procurement.decision/v1";
@@ -207,31 +210,53 @@ public sealed class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsume
         OutboxDeliveryContext context,
         CancellationToken cancellationToken = default)
     {
-        await HandleAsync(payload, cancellationToken).ConfigureAwait(false);
+        var task = await _tasks.GetAsync(payload.HumanTaskKey, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
+        var fact = RestoreDecision(payload.Result);
+        var request = _requests.GetById(task.TenantId ?? string.Empty, fact.RequestId)
+            ?? throw new ProcurementDecisionDispatchException("PROCUREMENT_RESOURCE_NOT_FOUND", "The admitted procurement request is unavailable.");
+        var approval = string.Equals(payload.Outcome, "Approve", StringComparison.Ordinal);
+        var rejection = string.Equals(payload.Outcome, "Reject", StringComparison.Ordinal);
+        if (!approval && !rejection)
+            throw new ProcurementDecisionDispatchException("PROCUREMENT_DECISION_INVALID", "Unsupported procurement completion outcome.");
+        if (request.Status is ProcurementRequestStatus.Approved or ProcurementRequestStatus.Rejected)
+        {
+            var same = approval && request.Status == ProcurementRequestStatus.Approved
+                && string.Equals(request.ApproverId, fact.ApproverId, StringComparison.Ordinal)
+                && string.Equals(request.ApprovalComment, fact.Comment, StringComparison.Ordinal)
+                || rejection && request.Status == ProcurementRequestStatus.Rejected
+                && string.Equals(request.ApproverId, fact.ApproverId, StringComparison.Ordinal)
+                && string.Equals(request.RejectionReason, fact.Comment, StringComparison.Ordinal);
+            if (same)
+                return OutboxRequiredConsumerResult.Duplicate();
+            throw new ProcurementDecisionDispatchException("PROCUREMENT_DECISION_CONFLICT", "The procurement request has a different durable decision identity.");
+        }
+        await HandleAsync(payload, fact, cancellationToken).ConfigureAwait(false);
         return OutboxRequiredConsumerResult.Accepted();
     }
 
-    public async Task HandleAsync(
-        HumanTaskCompletedEvent @event,
-        CancellationToken cancellationToken = default)
+    public async Task HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)
     {
         var task = await _tasks.GetAsync(@event.HumanTaskKey, cancellationToken)
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
-        var variables = RestoreVariables(task.Input, _stateRegistry);
+        var fact = RestoreDecision(@event.Result);
+        await HandleAsync(@event, fact, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task HandleAsync(HumanTaskCompletedEvent @event, ProcurementHumanTaskDecisionFact fact, CancellationToken cancellationToken)
+    {
+        var task = await _tasks.GetAsync(@event.HumanTaskKey, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Completed HumanTask instance is unavailable.");
         if (string.IsNullOrWhiteSpace(task.TenantId))
             throw new UnauthorizedAccessException("The completed procurement HumanTask has no persisted tenant.");
-
-        var requestId = variables["requestId"] is Guid value
-            ? value
-            : Guid.Parse(RequiredString(variables, "requestId"));
         CapabilityExecutionResult result;
-        if (string.Equals(@event.Outcome, "Approve", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(@event.Outcome, "Approve", StringComparison.Ordinal))
         {
             var input = new ApproveProcurementRequestInput
             {
-                RequestId = requestId,
-                Comment = @event.Result is null ? "Approved through HumanTask" : _stateRegistry.Restore(@event.Result) as string ?? "Approved through HumanTask"
+                RequestId = fact.RequestId,
+                Comment = fact.Comment
             };
             result = await _dispatcher.DispatchAsync(
                 ProcurementContractIds.ApplyApprovalDecisionCapability,
@@ -243,17 +268,17 @@ public sealed class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsume
                         input,
                         ProcurementJsonContext.Default.ApproveProcurementRequestInput);
                     context.TenantId = task.TenantId;
-                    context.UserId = @event.ActorId;
-                    context.Principal = CreateActorPrincipal(@event);
+                    context.UserId = fact.ApproverId;
+                    context.Principal = CreateActorPrincipal(fact.ApproverId);
                 },
                 ct: cancellationToken).ConfigureAwait(false);
         }
-        else if (string.Equals(@event.Outcome, "Reject", StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(@event.Outcome, "Reject", StringComparison.Ordinal))
         {
             var input = new RejectProcurementRequestInput
             {
-                RequestId = requestId,
-                Reason = @event.Result is null ? "Rejected through HumanTask" : _stateRegistry.Restore(@event.Result) as string ?? "Rejected through HumanTask"
+                RequestId = fact.RequestId,
+                Reason = fact.Comment
             };
             result = await _dispatcher.DispatchAsync(
                 ProcurementContractIds.ApplyRejectionDecisionCapability,
@@ -265,8 +290,8 @@ public sealed class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsume
                         input,
                         ProcurementJsonContext.Default.RejectProcurementRequestInput);
                     context.TenantId = task.TenantId;
-                    context.UserId = @event.ActorId;
-                    context.Principal = CreateActorPrincipal(@event);
+                    context.UserId = fact.ApproverId;
+                    context.Principal = CreateActorPrincipal(fact.ApproverId);
                 },
                 ct: cancellationToken).ConfigureAwait(false);
         }
@@ -281,27 +306,19 @@ public sealed class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsume
                 $"HumanTask decision dispatch failed with '{result.ErrorCode}'.");
     }
 
-    private static Dictionary<string, object?> RestoreVariables(RuntimeStateValue? input, IRuntimeStateContractRegistry registry)
-    {
-        if (input is null || registry.Restore(input) is not RuntimeStateBag bag)
-            throw new InvalidOperationException("Procurement workflow variables are unavailable.");
-        return bag.Values.ToDictionary(pair => pair.Key, pair => registry.Restore(pair.Value));
-    }
-
-    private static ClaimsPrincipal CreateActorPrincipal(HumanTaskCompletedEvent @event)
+    private static ClaimsPrincipal CreateActorPrincipal(string actorId)
     {
         var identity = new ClaimsIdentity("transactional-outbox");
-        if (!string.IsNullOrWhiteSpace(@event.ActorId))
-            identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, @event.ActorId));
-        foreach (var role in @event.ActorRoles.Where(role => !string.IsNullOrWhiteSpace(role)))
-            identity.AddClaim(new Claim(ClaimTypes.Role, role));
+        if (!string.IsNullOrWhiteSpace(actorId))
+            identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, actorId));
         return new ClaimsPrincipal(identity);
     }
 
-    private static string RequiredString(Dictionary<string, object?> variables, string key)
-        => variables.TryGetValue(key, out var value) && value is not null
-            ? value.ToString()!
-            : throw new InvalidOperationException($"Workflow variable '{key}' is required.");
+    private ProcurementHumanTaskDecisionFact RestoreDecision(RuntimeStateValue? result)
+        => result is not null && _stateRegistry.Restore(result) is ProcurementHumanTaskDecisionFact fact
+            ? fact
+            : throw new ProcurementDecisionDispatchException("PROCUREMENT_DECISION_PAYLOAD_INVALID", "HumanTask completion does not contain the admitted procurement decision fact.");
+
 }
 
 public sealed class ProcurementApprovalTaskService(
@@ -473,7 +490,12 @@ public sealed class ProcurementApprovalTaskService(
             Outcome = outcome,
             ActorId = currentUser.Id,
             ActorRoles = currentUser.Roles,
-            Result = stateRegistry.Capture(comment)
+            Result = stateRegistry.Capture(new ProcurementHumanTaskDecisionFact
+            {
+                RequestId = requestId ?? throw new CapabilityFailureException("CAPABILITY_DECISION_STATE_INVALID", "The approval workflow has no request identity."),
+                ApproverId = currentUser.Id,
+                Comment = comment
+            })
         }, cancellationToken).ConfigureAwait(false);
 
         // Completion is durably handed to the transactional outbox.  The runtime

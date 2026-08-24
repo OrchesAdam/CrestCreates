@@ -130,6 +130,10 @@ public static class AgentControlPlaneServiceCollectionExtensions
 
     private static void AddActivationReviewConsumer(IServiceCollection services)
     {
+        services.AddSingleton(new HumanTaskCompletionObligationPolicyRegistration(
+            DescriptorActivationHumanTaskIds.ActivationReview.Value!,
+            1,
+            DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue));
         services.TryAddSingleton<DescriptorActivationReviewHumanTaskEventHandler>();
         services.AddSingleton(new OutboxRequiredConsumerRegistration<HumanTaskCompletedEvent>(
             DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue,

@@ -107,8 +107,10 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
         return AgentToolResult<string>.Success(instance.Id);
     }
 
-    public async Task ProcessReviewDecisionAsync(
-        DescriptorActivationReviewDecision reviewDecision, CancellationToken ct = default)
+    public async Task<ActivationReviewDispatchOutcome> ProcessReviewDecisionAsync(
+        DescriptorActivationReviewDecision reviewDecision,
+        string completionEventId,
+        CancellationToken ct = default)
     {
         var context = new AgentToolInvocationContext
         {
@@ -132,8 +134,9 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
                 reviewDecision.ActivationRequestId, reviewDecision.ActorId);
 
             // ApproveActivationRequestAsync now internally executes evidence recheck + gate
-            await _activationRequestService.ApproveActivationRequestAsync(
-                context, reviewDecision.ActivationRequestId, reviewDecision, ct);
+            var result = await _activationRequestService.ApproveActivationRequestAsync(
+                context, reviewDecision.ActivationRequestId, reviewDecision, ct, completionEventId);
+            return Classify(result);
         }
         else if (reviewDecision.Decision == DescriptorActivationReviewOutcome.Rejected)
         {
@@ -141,8 +144,21 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
                 "Processing rejection for activation request {RequestId} by actor {ActorId}",
                 reviewDecision.ActivationRequestId, reviewDecision.ActorId);
 
-            await _activationRequestService.RejectActivationRequestAsync(
-                context, reviewDecision.ActivationRequestId, reviewDecision, ct);
+            var result = await _activationRequestService.RejectActivationRequestAsync(
+                context, reviewDecision.ActivationRequestId, reviewDecision, ct, completionEventId);
+            return Classify(result);
         }
+
+        return ActivationReviewDispatchOutcome.Conflict;
+    }
+
+    private static ActivationReviewDispatchOutcome Classify(AgentToolResult<ActivationRequest> result)
+    {
+        if (result.Status == AgentToolResultStatus.Success)
+            return ActivationReviewDispatchOutcome.Accepted;
+        if (result.Status == AgentToolResultStatus.SucceededWithDiagnostics
+            && result.Diagnostics.Any(d => string.Equals(d.Code.Value, "ACTIVATION_REVIEW_DUPLICATE", StringComparison.Ordinal)))
+            return ActivationReviewDispatchOutcome.Duplicate;
+        return ActivationReviewDispatchOutcome.Conflict;
     }
 }

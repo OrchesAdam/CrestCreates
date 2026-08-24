@@ -10,6 +10,8 @@ using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Core.Abstractions.Serialization;
 using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.EventBus.Abstractions;
+using CrestCreates.Capability;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -23,6 +25,8 @@ using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Delivery;
 using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
+using CrestCreates.Runtime.Delivery.Abstractions.Registration;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
@@ -34,6 +38,7 @@ using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using Microsoft.Extensions.Logging;
 
 if (args.Length is not (2 or 3))
 {
@@ -59,7 +64,8 @@ var humanTaskDescriptor = new HumanTaskDescriptor
     Name = "Review",
     Version = 1,
     Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("review-form", 1),
-    AssigneeStrategy = AssigneeStrategy.SingleUser
+    AssigneeStrategy = AssigneeStrategy.SingleUser,
+    Outcomes = [new CompletionOutcome { Condition = CompletionCondition.Approve }]
 };
 var workflowKey = new RuntimeInstanceKey("aot", "workflow");
 var humanTaskKey = new RuntimeInstanceKey("aot", "task");
@@ -176,6 +182,47 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
     if (duplicate.Status != AuditSinkWriteStatus.Duplicate)
         return 7;
     Console.WriteLine("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
+
+    // Complete a persisted HumanTask and invoke the production outbox handler
+    // against a fresh provider. This is the AOT golden path for generated
+    // payload deserialization, required-consumer execution and terminal ack.
+    var runtime = services.GetRequiredService<IHumanTaskRuntime>();
+    var dispatchTask = await runtime.CreateAsync(new HumanTaskCreationRequest
+    {
+        HumanTaskId = humanTaskDescriptor.Id,
+        TenantId = "aot",
+        InstanceId = "aot-dispatch-task",
+        RequiredCompletionConsumerIds = [HumanTaskDeliveryConstants.WorkflowContinuationConsumerId]
+    });
+    var completed = await runtime.CompleteAsync(new HumanTaskCompletionRequest
+    {
+        HumanTaskKey = dispatchTask.Key,
+        Outcome = "Approve",
+        ActorId = "aot"
+    });
+    var dispatchStore = services.GetRequiredService<IOutboxDispatchStore>();
+    var claims = await dispatchStore.ClaimAsync(new OutboxClaimRequest
+    {
+        OwnerId = "aot-human-task-dispatch",
+        BatchSize = 1,
+        LeaseDuration = TimeSpan.FromMinutes(1),
+        SupportedContractIds = new HashSet<string>([HumanTaskDeliveryConstants.CompletedContractId], StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>([HumanTaskDeliveryConstants.WorkflowContinuationConsumerId], StringComparer.Ordinal)
+    });
+    var claim = claims.Single(item => item.Message.Metadata.MessageId == completed.CompletionEventId);
+    var registration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+        .Single(item => item.ContractId == HumanTaskDeliveryConstants.CompletedContractId);
+    var deliveryOutcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    {
+        Message = claim.Message,
+        Lease = claim.Lease,
+        AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+        Services = services
+    });
+    if (deliveryOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
+        || await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease) is not OutboxDeliveryMutationResult.Applied)
+        return 9;
+    Console.WriteLine("PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK");
 }
 
 // Phase 9b+ Durable Agent Tool Pre-Dispatch Reconciliation crash scenarios:
@@ -484,10 +531,14 @@ static ServiceProvider BuildProvider(
     HumanTaskDescriptor humanTask)
 {
     var services = new ServiceCollection();
+    services.AddLogging();
     services.AddRuntimePersistence();
     services.AddDescriptorStableHash();
+    services.AddAccountability();
+    services.AddCapabilityRuntime();
     services.AddWorkflowEngine();
     services.AddHumanTaskRuntime();
+    services.AddScoped<ILocalEventBus, AotNoopLocalEventBus>();
     services.AddRuntimeDelivery();
     services.AddSingleton<IRuntimeStateContractContributor, AotRuntimeStateContractContributor>();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
@@ -986,4 +1037,14 @@ sealed class AotHashComputer : ICanonicalHashComputer
             ContractVersion = "memory-hash-v1",
             CanonicalShapeVersion = "aot-v1"
         };
+}
+
+internal sealed class AotNoopLocalEventBus : ILocalEventBus
+{
+    public Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+        where TEvent : ILocalEvent
+        => Task.CompletedTask;
 }

@@ -27,29 +27,21 @@ internal sealed class PostgreSqlWorkflowContinuationAcceptanceStore : IWorkflowC
             inserted = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         if (inserted == 1) return WorkflowContinuationAcceptanceWriteResult.Accepted;
 
-        await using var existing = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
-            $"select human_task_instance_id, workflow_instance_id, integrity_json::text from {_table} where tenant_scope_kind=@scope and tenant_id=@tenant and completion_event_id=@event;");
-        PostgreSqlRuntimeStoreSupport.AddScope(existing, acceptance.TenantScope);
-        existing.Parameters.AddWithValue("event", acceptance.CompletionEventId);
-        using (session.EnterCommand())
+        var existingAcceptance = await GetAsync(acceptance.TenantScope, acceptance.CompletionEventId, cancellationToken).ConfigureAwait(false);
+        if (existingAcceptance is not null)
         {
-            await using var reader = await existing.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                var same = string.Equals(reader.GetString(0), acceptance.HumanTaskKey.InstanceId, StringComparison.Ordinal)
-                    && string.Equals(reader.GetString(1), acceptance.WorkflowKey.InstanceId, StringComparison.Ordinal)
-                    && string.Equals(PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(2), PostgreSqlRuntimeJsonSerializerContext.Default.CanonicalHash).Value, acceptance.Integrity.Value, StringComparison.Ordinal);
-                return same ? WorkflowContinuationAcceptanceWriteResult.Duplicate : WorkflowContinuationAcceptanceWriteResult.Conflict;
-            }
+            var persistedIntegrity = WorkflowContinuationAcceptanceCanonicalWriter.Compute(existingAcceptance);
+            var same = existingAcceptance.HumanTaskKey == acceptance.HumanTaskKey
+                && existingAcceptance.WorkflowKey == acceptance.WorkflowKey
+                && string.Equals(existingAcceptance.Outcome, acceptance.Outcome, StringComparison.Ordinal)
+                && string.Equals(persistedIntegrity.Value, acceptance.Integrity.Value, StringComparison.Ordinal)
+                && string.Equals(existingAcceptance.Integrity.Value, persistedIntegrity.Value, StringComparison.Ordinal);
+            return same ? WorkflowContinuationAcceptanceWriteResult.Duplicate : WorkflowContinuationAcceptanceWriteResult.Conflict;
         }
-        await using var byTask = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
-            $"select completion_event_id from {_table} where tenant_scope_kind=@scope and tenant_id=@tenant and human_task_instance_id=@task;");
-        PostgreSqlRuntimeStoreSupport.AddScope(byTask, acceptance.TenantScope);
-        byTask.Parameters.AddWithValue("task", acceptance.HumanTaskKey.InstanceId);
-        object? otherEvent;
-        using (session.EnterCommand())
-            otherEvent = await byTask.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return otherEvent is not null ? WorkflowContinuationAcceptanceWriteResult.Conflict : WorkflowContinuationAcceptanceWriteResult.Duplicate;
+        // Absence of both durable proofs is not evidence of an exact replay.
+        // Fail closed so callers cannot acknowledge a completion without a
+        // receipt or the conflicting waiting correlation.
+        return WorkflowContinuationAcceptanceWriteResult.Conflict;
     }
 
     public async Task<WorkflowContinuationAcceptance?> GetAsync(RuntimeTenantScope scope, string completionEventId, CancellationToken cancellationToken = default)

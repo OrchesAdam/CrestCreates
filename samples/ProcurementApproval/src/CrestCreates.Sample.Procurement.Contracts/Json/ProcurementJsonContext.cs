@@ -10,4 +10,5 @@ namespace CrestCreates.Sample.Procurement.Contracts.Json;
 [JsonSerializable(typeof(RejectProcurementRequestInput))]
 [JsonSerializable(typeof(ProcurementRequestResult))]
 [JsonSerializable(typeof(GetProcurementRequestInput))]
+[JsonSerializable(typeof(ProcurementHumanTaskDecisionFact))]
 public sealed partial class ProcurementJsonContext : JsonSerializerContext;

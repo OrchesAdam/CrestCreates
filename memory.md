@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-24 (Issue #25 Phase 9c Transactional Outbox & Reliable Event Delivery R4 remains approved and frozen. PR #80 is under review remediation; durable protocol and provider semantics are being aligned to the frozen V012 contract. Closure evidence, first-party consumer migration, and commit-unknown observation remain open until the closure review passes.)
+Last Updated: 2026-08-24 (Issue #25 Phase 9c R4 remediation is implemented on PR #80's feature branch. Local PostgreSQL contract tests, HumanTask/Agent/Procurement tests, and the NativeAOT publish-link-run fixture are green; GitHub CI remains the final merge gate.)
 
 ## Purpose
 
@@ -72,6 +72,25 @@ validation/fan-out is Accountability-internal. Commit-unknown reconciliation
 now distinguishes a matching durable result from a different concurrent winner
 without claiming caller ownership. Exact final-fence Ack/DeadLetter replay is
 provider-parity `AlreadyApplied` behavior.
+
+R4 remediation closes the remaining delivery-boundary findings. Optional
+LocalEvent compatibility execution is deadline-bounded and retained by a
+bounded detached-execution tracker, so a non-cooperative handler cannot hold
+the reliable outbox Ack path open. Procurement completion now carries a
+generated-json durable `ProcurementHumanTaskDecisionFact`; its internal Apply
+capabilities are not permission-gated and exact decision replay is Duplicate,
+while changed identity is Conflict. Activation Review retains the completion
+event identity and detached decision snapshot for exact replay classification,
+and its human-task consumer maps AgentTool outcomes to Ack/Duplicate/Conflict.
+PostgreSQL obligation preflight uses provider-side bounded count/sample queries,
+and continuation acceptance requires persisted canonical-integrity proof before
+Duplicate. Missing preflight registration is fail-closed.
+
+The PostgreSQL NativeAOT host now executes the persisted HumanTask completion
+payload through the production outbox handler, required Workflow consumer, and
+terminal Ack, emitting `PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK`. The Phase
+9c evidence ledger has an executable critical-binding gate, and CI runs that
+gate explicitly alongside the PostgreSQL outbox and NativeAOT fixture tests.
 
 R4 closes the final correctness pass. Workflow continuation Ack now ends at an
 atomic durable Suspended-to-Running acceptance plus exact applied

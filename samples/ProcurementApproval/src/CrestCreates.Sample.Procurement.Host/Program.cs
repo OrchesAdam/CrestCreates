@@ -71,6 +71,7 @@ builder.Services.AddDescriptorStableHash();
 builder.Services.AddMultiTenancy();
 builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
 builder.Services.AddRuntimePersistence();
+builder.Services.AddSingleton<IRuntimeStateContractContributor, ProcurementRuntimeStateContractContributor>();
 builder.Services.AddCrestCreatesInMemoryRuntimePersistence();
 builder.Services.AddRuntimeDelivery();
 builder.Services.AddTransient<AccountabilityHttpTerminalObserverMiddleware>();
@@ -113,7 +114,8 @@ builder.Services.Replace(ServiceDescriptor.Scoped<ProcurementHumanTaskDecisionHa
     new ProcurementHumanTaskDecisionHandler(
         sp.GetRequiredService<IHumanTaskInstanceStore>(),
         sp.GetRequiredService<ICapabilityDispatcher>(),
-        sp.GetRequiredService<IRuntimeStateContractRegistry>())));
+        sp.GetRequiredService<IRuntimeStateContractRegistry>(),
+        sp.GetRequiredService<InMemoryProcurementRequestStore>())));
 builder.Services.AddWorkflowEngine();
 builder.Services.AddScoped<ProcurementLocalEventBus>();
 builder.Services.AddScoped<ILocalEventBus>(sp =>
