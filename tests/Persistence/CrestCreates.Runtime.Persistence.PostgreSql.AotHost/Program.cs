@@ -100,6 +100,7 @@ await using (var first = BuildProvider(options, workflowDescriptor, humanTaskDes
         HumanTaskPin = taskPins.Capture(humanTaskDescriptor).Pin,
         WorkflowKey = workflowKey,
         WorkflowStepId = "review",
+        RequiredCompletionConsumerIds = ["crest.workflow.humantask-continuation/v1"],
         Status = HumanTaskInstanceStatus.Assigned,
         Input = states.Capture(new MutableNestedAotState { Name = "input", Values = ["typed"] }),
         CreatedAt = DateTimeOffset.UnixEpoch

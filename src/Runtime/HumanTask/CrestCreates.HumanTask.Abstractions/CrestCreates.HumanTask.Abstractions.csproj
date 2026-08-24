@@ -14,6 +14,7 @@
     <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql.Tests" />
     <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.Testing" />
     <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql.AotHost" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
