@@ -41,7 +41,7 @@ internal sealed class PostgreSqlOutboxDispatchStore : IOutboxDispatchStore
               from {_table}
              where (status in (0,2) and available_at <= @now)
                 or (status = 1 and lease_expires_at <= @now)
-             order by created_at, message_id collate "C"
+             order by available_at, occurred_at, message_id collate "C"
              limit @limit for update skip locked;
             """, connection, transaction))
         {
@@ -65,6 +65,12 @@ internal sealed class PostgreSqlOutboxDispatchStore : IOutboxDispatchStore
         return rows;
     }
 
+    public async ValueTask<DateTimeOffset> GetProviderUtcNowAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadProviderNowAsync(connection, transaction: null, cancellationToken).ConfigureAwait(false);
+    }
+
     public ValueTask<OutboxDeliveryMutationResult> AckAsync(string messageId, OutboxDeliveryLease lease, CancellationToken cancellationToken = default)
         => MutateAsync(messageId, lease, "status=3, lease_owner_id=null, lease_expires_at=null, available_at=clock_timestamp(), delivered_at=clock_timestamp(), updated_at=clock_timestamp()", null, cancellationToken);
 
@@ -85,7 +91,7 @@ internal sealed class PostgreSqlOutboxDispatchStore : IOutboxDispatchStore
         return count == 1 ? OutboxDeliveryMutationResult.Applied : OutboxDeliveryMutationResult.StaleLease;
     }
 
-    private static async Task<DateTimeOffset> ReadProviderNowAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    private static async Task<DateTimeOffset> ReadProviderNowAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction, CancellationToken cancellationToken)
     {
         await using var command = new NpgsqlCommand("select clock_timestamp();", connection, transaction);
         var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);

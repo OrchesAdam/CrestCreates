@@ -130,13 +130,15 @@ internal sealed class OutboxDispatcher
                 break;
             default:
                 var delay = _options.GetRetryDelay(claim.Lease.Attempt);
-                var next = DateTimeOffset.UtcNow + delay;
                 if (claim.Lease.Attempt >= _options.MaximumHandlerAttempts)
                     await ApplyAsync(_store.DeadLetterAsync(claim.Message.Metadata.MessageId, claim.Lease,
                         new OutboxDeliveryFailure { Code = "ATTEMPT_BUDGET_EXHAUSTED", Message = "Maximum delivery attempts exhausted.", Retryable = false }, cancellationToken), "DeadLetter", claim);
                 else
+                {
+                    var next = await _store.GetProviderUtcNowAsync(cancellationToken).ConfigureAwait(false) + delay;
                     await ApplyAsync(_store.RetryAsync(claim.Message.Metadata.MessageId, claim.Lease,
                         new OutboxDeliveryFailure { Code = "HANDLER_RETRY", Message = "Handler requested retry.", Retryable = true }, next, cancellationToken), "Retry", claim);
+                }
                 break;
         }
     }

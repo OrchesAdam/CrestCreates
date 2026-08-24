@@ -962,9 +962,10 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_runtime_outbox_payload", "check (octet_length(payload_utf8) > 0)"),
              new("ck_runtime_outbox_pending_state", "check (status <> 0 or (lease_owner_id is null and lease_expires_at is null and delivered_at is null and dead_lettered_at is null))"),
              new("ck_runtime_outbox_leased_state", "check (status <> 1 or (lease_owner_id is not null and lease_expires_at is not null and delivered_at is null and dead_lettered_at is null))"),
+             new("ck_runtime_outbox_retry_state", "check (status <> 2 or (lease_owner_id is null and lease_expires_at is null and delivered_at is null and dead_lettered_at is null))"),
              new("ck_runtime_outbox_delivered_state", "check (status <> 3 or (delivered_at is not null and dead_lettered_at is null and lease_owner_id is null and lease_expires_at is null))"),
              new("ck_runtime_outbox_dead_letter_state", "check (status <> 4 or (dead_lettered_at is not null and delivered_at is null and lease_owner_id is null and lease_expires_at is null))")],
-            [new("ix_runtime_outbox_claim", ["status", "available_at", "created_at", "message_id"], "status = any (array[0, 1, 2])", Unique: false)], [])
+            [new("ix_runtime_outbox_claim", ["status", "available_at", "lease_expires_at", "occurred_at", "message_id"], "status = any (array[0, 1, 2])", Unique: false)], [])
             ,new("runtime_workflow_continuation_acceptances", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["completion_event_id"] = TextC,
@@ -1644,6 +1645,13 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                 constraint ck_runtime_continuation_acceptance_tenant check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))
             );
             create unique index uq_runtime_continuation_acceptance_task on {schema}.runtime_workflow_continuation_acceptances (tenant_scope_kind, tenant_id, human_task_instance_id);
+            """),
+        new RuntimeMigration("V013", "transactional_outbox_retry_state_and_claim_order", """
+            alter table {schema}.runtime_outbox_messages
+                add constraint ck_runtime_outbox_retry_state check (status <> 2 or (lease_owner_id is null and lease_expires_at is null and delivered_at is null and dead_lettered_at is null));
+            drop index {schema}.ix_runtime_outbox_claim;
+            create index ix_runtime_outbox_claim on {schema}.runtime_outbox_messages (status, available_at, lease_expires_at, occurred_at, message_id)
+                where status in (0, 1, 2);
             """)
     ];
 }

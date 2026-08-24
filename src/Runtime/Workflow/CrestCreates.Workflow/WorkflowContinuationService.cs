@@ -80,22 +80,13 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         // completion.  It must be checked before the waiting-key lookup because
         // a successful continuation clears that key; absence is not evidence of
         // a duplicate and must never be treated as one.
-        if (_acceptances is not null && !string.IsNullOrWhiteSpace(request.CompletionEventId))
-        {
-            var existing = await _acceptances.GetAsync(
-                new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(request.WorkflowKey.TenantId),
-                request.CompletionEventId!, ct).ConfigureAwait(false);
-            if (existing is not null)
-            {
-                EnsureAcceptanceMatches(existing, request);
-                return;
-            }
-        }
+        if (await TryReturnForExistingAcceptanceAsync(request, ct).ConfigureAwait(false))
+            return;
 
         var instance = await _store.GetByWaitingHumanTaskAsync(request.HumanTaskKey, ct)
             .ConfigureAwait(false);
         if (instance == null)
-            return;
+            throw MissingContinuationProof(request);
 
         if (instance.Status != WorkflowInstanceStatus.Suspended)
             throw new InvalidOperationException(
@@ -236,15 +227,23 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
         }
         catch (RuntimeConcurrencyException)
         {
-            // Another duplicate continuation already saved — re-query to check.
-            // If WaitingHumanTaskId is already cleared (duplicate) → idempotent no-op.
+            // Another continuation may have committed before the response was
+            // observed. Reconcile only through the durable acceptance
+            // discriminator; waiting-key absence alone is not proof.
+            if (await TryReturnForExistingAcceptanceAsync(request, ct).ConfigureAwait(false))
+                return;
+
+            // A still-present waiting correlation proves that this was an
+            // unrelated concurrent write, so preserve the original conflict.
             var recheck = await _store.GetByWaitingHumanTaskAsync(request.HumanTaskKey, ct)
                 .ConfigureAwait(false);
-            if (recheck == null)
-                return; // Duplicate: another continuation already cleared it
+            if (recheck is not null)
+                throw;
 
-            // Genuine concurrent conflict on unrelated save — rethrow
-            throw;
+            // The durable winner is not this CompletionEventId (or the
+            // acceptance store is unavailable), therefore fail closed instead
+            // of acknowledging a message without proof of acceptance.
+            throw MissingContinuationProof(request);
         }
 
         await _eventPublisher.PublishAsync(resumedEvent, CancellationToken.None).ConfigureAwait(false);
@@ -263,6 +262,29 @@ internal sealed class WorkflowContinuationService : IWorkflowContinuationService
                 candidate.InstanceId);
         }
     }
+
+    private async Task<bool> TryReturnForExistingAcceptanceAsync(
+        WorkflowContinuationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_acceptances is null || string.IsNullOrWhiteSpace(request.CompletionEventId))
+            return false;
+
+        var existing = await _acceptances.GetAsync(
+            new CrestCreates.Runtime.Persistence.Abstractions.Keys.RuntimeTenantScope(request.WorkflowKey.TenantId),
+            request.CompletionEventId!, cancellationToken).ConfigureAwait(false);
+        if (existing is null)
+            return false;
+
+        EnsureAcceptanceMatches(existing, request);
+        return true;
+    }
+
+    private static RuntimePersistenceContractException MissingContinuationProof(
+        WorkflowContinuationRequest request)
+        => new(
+            RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+            $"Workflow continuation has neither a waiting correlation nor an exact durable acceptance for '{request.CompletionEventId ?? request.HumanTaskKey.InstanceId}'.");
 
     private static bool ResultsEqual(RuntimeStateValue? left, RuntimeStateValue? right)
         => left is null && right is null ||

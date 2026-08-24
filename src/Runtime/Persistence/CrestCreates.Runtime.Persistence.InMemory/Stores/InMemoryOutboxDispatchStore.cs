@@ -30,7 +30,10 @@ internal sealed class InMemoryOutboxDispatchStore : IOutboxDispatchStore
                 }
             }
             var result = new List<OutboxDeliveryClaim>();
-            foreach (var record in state.Outbox.Values.OrderBy(r => r.Message.Metadata.CreatedAt).ThenBy(r => r.Message.Metadata.MessageId, StringComparer.Ordinal))
+            foreach (var record in state.Outbox.Values
+                .OrderBy(r => r.NextAttemptAt ?? r.LeaseExpiresAt ?? DateTimeOffset.MinValue)
+                .ThenBy(r => r.Message.Metadata.OccurredAt)
+                .ThenBy(r => r.Message.Metadata.MessageId, StringComparer.Ordinal))
             {
                 if (result.Count >= request.BatchSize) break;
                 if (record.Status is OutboxDeliveryStatus.Delivered or OutboxDeliveryStatus.DeadLettered) continue;
@@ -45,6 +48,9 @@ internal sealed class InMemoryOutboxDispatchStore : IOutboxDispatchStore
             }
             return ValueTask.FromResult<IReadOnlyList<OutboxDeliveryClaim>>(result);
         }, cancellationToken);
+
+    public ValueTask<DateTimeOffset> GetProviderUtcNowAsync(CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(_timeProvider.GetUtcNow());
 
     public ValueTask<OutboxDeliveryMutationResult> AckAsync(string messageId, OutboxDeliveryLease lease, CancellationToken cancellationToken = default)
         => MutateAsync(messageId, lease, record => { record.Status = OutboxDeliveryStatus.Delivered; record.LeaseOwner = null; record.LeaseExpiresAt = null; record.NextAttemptAt = null; return OutboxDeliveryMutationResult.Applied; }, cancellationToken);

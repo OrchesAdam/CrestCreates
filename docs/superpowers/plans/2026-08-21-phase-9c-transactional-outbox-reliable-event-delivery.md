@@ -27,7 +27,7 @@ Workflow Accountability delivery, and real linux-x64 NativeAOT execution.
 
 **Spec status:** R4 APPROVED / FROZEN
 
-**Plan status:** R4 / READY FOR IMPLEMENTATION
+**Plan status:** R4 / IMPLEMENTED; review remediation in progress on PR #80
 
 ```text
 Delivery contracts:      new Runtime.Delivery.Abstractions project
@@ -1996,8 +1996,22 @@ once, but does not upgrade the existing in-memory ActivationRequest authority
 to FullDurable persistence. FullDurable golden evidence remains
 HumanTask-to-Workflow and Workflow-to-Accountability.
 
-Only after the closure review has zero unresolved findings update `memory.md`
-from approved design to implemented/verified claims that were actually run.
+Implementation closure update (2026-08-24): the B2 fail-closed proof path,
+PostgreSQL V013 retry-state/index invariants, provider-clock retry scheduling,
+legacy `CompletionDispatchFailed` cutover preflight, PostgreSQL outbox behavior
+tests, and the PostgreSQL NativeAOT 9c sentinel are implemented and wired into
+the existing CI jobs. Local PostgreSQL execution remains dependent on the
+configured `CREST_RUNTIME_PG_CONNECTION` or Docker; compilation and the
+non-database regression tests were run locally.
+
+Explicit follow-up slices (not silent deviations from R4):
+
+- unify the remaining recorder-inline and preparer entry points behind one
+  preparation pipeline;
+- add a first-class HumanTask commit-unknown observation protocol and its
+  durable Completed/Created/Assigned evidence contract;
+- amend the frozen wording around the post-commit LocalEvent compatibility
+  lane if the project elects to retain that notification.
 
 ---
 

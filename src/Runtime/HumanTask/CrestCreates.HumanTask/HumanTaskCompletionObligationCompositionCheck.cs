@@ -14,7 +14,10 @@ internal sealed class HumanTaskCompletionObligationCompositionCheck(
     public ValueTask ValidateAsync(CancellationToken cancellationToken)
     {
         var policyList = policies.ToArray();
-        if (policyList.Length == 0 || preflight is null)
+        // The provider preflight also owns legacy CompletionDispatchFailed
+        // cutover detection, which must run even when no new obligation policy
+        // is registered.
+        if (preflight is null)
             return ValueTask.CompletedTask;
         return preflight.ValidateAsync(policyList, consumers.Select(consumer => consumer.ConsumerId).ToHashSet(StringComparer.Ordinal), cancellationToken);
     }

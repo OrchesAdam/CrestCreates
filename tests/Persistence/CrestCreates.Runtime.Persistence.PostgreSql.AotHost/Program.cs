@@ -22,6 +22,7 @@ using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Delivery;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
@@ -68,6 +69,18 @@ await using (var first = BuildProvider(options, workflowDescriptor, humanTaskDes
 {
     using var scope = first.CreateScope();
     var services = scope.ServiceProvider;
+    var outbox = services.GetRequiredService<IOutboxDispatchStore>();
+    var outboxClaims = await outbox.ClaimAsync(new OutboxClaimRequest
+    {
+        OwnerId = "aot-outbox-sentinel",
+        BatchSize = 1,
+        LeaseDuration = TimeSpan.FromMinutes(1),
+        SupportedContractIds = new HashSet<string>(StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+    });
+    if (outboxClaims.Count != 0 || await outbox.GetProviderUtcNowAsync() == default)
+        return 8;
+    Console.WriteLine("PHASE9C_POSTGRES_OUTBOX_AOT_OK");
     var states = services.GetRequiredService<IRuntimeStateContractRegistry>();
     var workflowPins = services.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>();
     var taskPins = services.GetRequiredService<IRuntimeDescriptorPinResolver<HumanTaskDescriptor>>();

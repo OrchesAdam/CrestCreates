@@ -8,6 +8,7 @@ using CrestCreates.Runtime.Delivery.Abstractions.Stores;
 using CrestCreates.Runtime.Delivery.Message;
 using CrestCreates.Runtime.Persistence.InMemory;
 using CrestCreates.Runtime.Persistence.InMemory.Transactions;
+using CrestCreates.Runtime.Persistence.Testing.Cases;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -16,6 +17,16 @@ namespace CrestCreates.Runtime.Persistence.InMemory.Tests;
 
 public sealed class InMemoryOutboxDispatchTests
 {
+    [Fact]
+    public async Task SharedOutboxContract_UsesProviderClockAndEmptyClaim()
+    {
+        var services = new ServiceCollection();
+        services.AddCrestCreatesInMemoryRuntimePersistence();
+        using var provider = services.BuildServiceProvider();
+        await OutboxDispatchContractCases.EmptyClaimUsesProviderClockAsync(
+            provider.GetRequiredService<IOutboxDispatchStore>());
+    }
+
     [Fact]
     public async Task Append_claim_and_stale_lease_are_fenced()
     {

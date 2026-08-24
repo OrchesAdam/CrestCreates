@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-21 (Issue #25 Phase 9c Transactional Outbox & Reliable Event Delivery Design Spec R4 is approved and frozen. It treats Outbox as the reliable side-effect boundary of the Phase 9b Runtime commit kernel, not a generic EventBus rewrite; closes HumanTask completion and Workflow Accountability golden paths; and requires prepared safe AuditEnvelope persistence, shared InMemory/PostgreSQL semantics, V012, fencing/recovery/crash evidence, and real NativeAOT publish-and-run. Implementation awaits an approved plan.)
+Last Updated: 2026-08-24 (Issue #25 Phase 9c Transactional Outbox & Reliable Event Delivery R4 remains approved and frozen. The implementation and review remediation are complete on the Phase 9c branch/PR: Workflow continuation is fail-closed on missing durable proof, PostgreSQL V013 closes retry-state and claim-order invariants, provider-clock retry scheduling is explicit, legacy CompletionDispatchFailed rows block cutover, PostgreSQL outbox contract tests and the NativeAOT 9c sentinel are wired into CI. Preparation-pipeline unification and commit-unknown observation UX remain explicitly deferred follow-up slices.)
 
 ## Purpose
 
@@ -12,8 +12,7 @@ This file records the current platform status for CrestCreates so future threads
 
 ### Issue #25 — Phase 9c Transactional Outbox & Reliable Event Delivery
 
-Status: Design Spec R4 APPROVED / FROZEN;
-implementation awaits an approved implementation plan
+Status: Design Spec R4 APPROVED / FROZEN; implementation complete in PR #80
 
 Normative draft:
 `docs/superpowers/specs/2026-08-20-phase-9c-transactional-outbox-reliable-event-delivery-design.md`
@@ -36,11 +35,12 @@ recording. HumanTask delivery failure leaves business state Completed;
 explicit upgrade reconciliation. Workflow Accountability leaves the
 best-effort observer lane and persists the prepared envelope, including
 Sanitization and Integrity, so retry across a sanitizer upgrade cannot change
-the fact hash. Immediate recording and Outbox production must share one
-Accountability preparation implementation; sinks remain hidden behind the
+the fact hash. The intended invariant is one Accountability preparation
+implementation; the remaining recorder-inline entry point is explicitly
+tracked as a follow-up convergence slice. Sinks remain hidden behind the
 Accountability recording boundary.
 
-Provider closure requires V012 in the one checksummed Runtime migration/schema
+Provider closure requires V012 plus the additive V013 invariant migration in the one checksummed Runtime migration/schema
 catalog, a runner-free semantic kit executed by InMemory and PostgreSQL,
 commit-unknown both-or-neither observation, restart/ack-loss/crash-worker
 coverage, Outbox-owned terminal dead-letter state, generated JSON with explicit
@@ -51,11 +51,14 @@ top-level and never implicitly append.
 R2 closes the first design review's four P1 and five P2 blockers without
 reopening the architecture. Claim generation now consumes attempt budget and
 over-budget claims cannot invoke handlers. Missing required handler/sink
-composition fails health/startup without terminalizing messages. HumanTask
-commit unknown requires fresh state observation before another command, and
-conflicting append throws a transaction-aborting provider-neutral exception.
+composition fails health/startup without terminalizing messages. The Runtime
+transaction layer classifies commit-unknown and forbids blind replay; a
+first-class HumanTask caller observation contract is still a follow-up, and
+conflicting append throws a transaction-aborting provider-neutral exception;
+the first-class HumanTask caller observation protocol remains a documented
+follow-up rather than an implicit replay path.
 Accountability owns its delivery handler; sink membership is delivery-time
-composition; V012/provider preflight owns legacy failure-row detection; initial
+composition; V012/V013 provider preflight owns legacy failure-row detection; initial
 delivery eligibility uses provider insertion time; and handler registration
 caches metadata rather than scoped instances.
 
