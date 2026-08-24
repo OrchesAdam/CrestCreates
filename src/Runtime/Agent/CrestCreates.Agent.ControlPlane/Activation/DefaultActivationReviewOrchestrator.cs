@@ -2,6 +2,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
@@ -13,18 +14,18 @@ namespace CrestCreates.Agent.ControlPlane.Activation;
 /// </summary>
 public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrchestrator
 {
-    private readonly IHumanTaskRuntime _humanTaskRuntime;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDescriptorActivationRequestService _activationRequestService;
     private readonly ILogger<DefaultActivationReviewOrchestrator> _logger;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
 
     public DefaultActivationReviewOrchestrator(
-        IHumanTaskRuntime humanTaskRuntime,
+        IServiceScopeFactory scopeFactory,
         IDescriptorActivationRequestService activationRequestService,
         ILogger<DefaultActivationReviewOrchestrator> logger,
         IRuntimeStateContractRegistry stateRegistry)
     {
-        _humanTaskRuntime = humanTaskRuntime;
+        _scopeFactory = scopeFactory;
         _activationRequestService = activationRequestService;
         _logger = logger;
         _stateRegistry = stateRegistry;
@@ -90,7 +91,14 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
             RequiredCompletionConsumerIds = [DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue]
         };
 
-        var instance = await _humanTaskRuntime.CreateAsync(creationRequest, ct);
+        // HumanTask runtime is scoped because it owns the scoped local-event/transaction
+        // collaborators. The control-plane orchestrator remains singleton, so acquire the
+        // runtime only for the operation that creates the task and dispose that scope after
+        // the transactional call completes.
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var instance = await scope.ServiceProvider
+            .GetRequiredService<IHumanTaskRuntime>()
+            .CreateAsync(creationRequest, ct);
 
         _logger.LogInformation(
             "Created activation review HumanTask {TaskInstanceId} for activation request {RequestId}",

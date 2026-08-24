@@ -131,19 +131,13 @@ public static class AgentControlPlaneServiceCollectionExtensions
     private static void AddActivationReviewConsumer(IServiceCollection services)
     {
         services.TryAddSingleton<DescriptorActivationReviewHumanTaskEventHandler>();
+        services.AddSingleton(new OutboxRequiredConsumerRegistration<HumanTaskCompletedEvent>(
+            DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue,
+            sp => sp.GetRequiredService<DescriptorActivationReviewHumanTaskEventHandler>()));
         services.AddSingleton(new OutboxRequiredConsumerMetadata(DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue));
         services.AddSingleton(new OutboxRequiredConsumerValidationRegistration(
             DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue,
             sp => _ = sp.GetRequiredService<DescriptorActivationReviewHumanTaskEventHandler>()));
-        services.AddSingleton<IOutboxRequiredConsumerResolver<HumanTaskCompletedEvent>, ActivationReviewConsumerResolver>();
-    }
-
-    private sealed class ActivationReviewConsumerResolver : IOutboxRequiredConsumerResolver<HumanTaskCompletedEvent>
-    {
-        public IOutboxRequiredConsumer<HumanTaskCompletedEvent> Resolve(IServiceProvider services, string consumerId)
-            => string.Equals(consumerId, DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue, StringComparison.Ordinal)
-                ? services.GetRequiredService<DescriptorActivationReviewHumanTaskEventHandler>()
-                : throw new InvalidOperationException($"Outbox required consumer '{consumerId}' is not registered.");
     }
 
     /// <summary>
