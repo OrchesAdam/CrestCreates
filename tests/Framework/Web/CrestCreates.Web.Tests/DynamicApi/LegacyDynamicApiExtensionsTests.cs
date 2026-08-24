@@ -14,6 +14,7 @@ using Xunit;
 
 namespace CrestCreates.Web.Tests.DynamicApi;
 
+[Collection(DynamicApiRegistryCollection.Name)]
 public class LegacyDynamicApiExtensionsTests
 {
     [Fact]

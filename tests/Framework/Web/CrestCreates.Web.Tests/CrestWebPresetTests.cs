@@ -21,6 +21,7 @@ using Xunit;
 
 namespace CrestCreates.Web.Tests;
 
+[Collection("Dynamic API generated registry")]
 public class CrestWebPresetTests
 {
     [Fact]
