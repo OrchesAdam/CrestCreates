@@ -6,4 +6,9 @@ public sealed class RuntimePersistenceUnavailableException : RuntimePersistenceE
         : base(message)
     {
     }
+
+    public RuntimePersistenceUnavailableException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }

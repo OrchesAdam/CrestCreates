@@ -16,7 +16,9 @@ public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFix
     public async Task SharedOutboxContract_UsesProviderClockAndEmptyClaim()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
-        await using var dataSource = new NpgsqlSlimDataSourceBuilder(fixture.ConnectionString).Build();
+        await using var dataSource = new NpgsqlSlimDataSourceBuilder(fixture.ConnectionString)
+            .EnableArrays()
+            .Build();
         await OutboxDispatchContractCases.EmptyClaimUsesProviderClockAsync(
             new PostgreSqlOutboxDispatchStore(lease.Options, dataSource));
     }
@@ -64,7 +66,9 @@ public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFix
             await InsertMessageAsync(connection, lease.Options.Schema, row.Item1, row.Item2, row.Item3);
         }
 
-        await using var dataSource = new NpgsqlSlimDataSourceBuilder(fixture.ConnectionString).Build();
+        await using var dataSource = new NpgsqlSlimDataSourceBuilder(fixture.ConnectionString)
+            .EnableArrays()
+            .Build();
         var store = new PostgreSqlOutboxDispatchStore(lease.Options, dataSource);
         var claims = await store.ClaimAsync(new OutboxClaimRequest
         {
@@ -95,7 +99,9 @@ public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFix
             await command.ExecuteNonQueryAsync();
         }
 
-        await using var dataSource = new NpgsqlSlimDataSourceBuilder(fixture.ConnectionString).Build();
+        await using var dataSource = new NpgsqlSlimDataSourceBuilder(fixture.ConnectionString)
+            .EnableArrays()
+            .Build();
         var preflight = new PostgreSqlHumanTaskCompletionObligationPreflight(lease.Options, dataSource);
         var action = () => preflight.ValidateAsync([], new HashSet<string>(StringComparer.Ordinal)).AsTask();
 

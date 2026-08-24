@@ -117,9 +117,11 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
         {
             throw PostgreSqlRuntimeStoreSupport.TranslateForeignKeyViolation(ex);
         }
-        catch (NpgsqlException)
+        catch (NpgsqlException ex)
         {
-            throw new RuntimePersistenceUnavailableException("PostgreSQL Runtime persistence is unavailable.");
+            throw new RuntimePersistenceUnavailableException(
+                "PostgreSQL Runtime persistence is unavailable.",
+                ex);
         }
     }
 }
