@@ -231,6 +231,8 @@ public static class Phase9cEvidenceRunnerCatalog
             throw new InvalidOperationException("Phase 9c acceptance/case authority does not cover exactly the frozen 145+25 names.");
         var knownCases = Phase9cCaseManifest.Cases.Select(item => item.CaseId).ToHashSet(StringComparer.Ordinal);
         var knownVectors = Phase9cCaseManifest.Cases.ToDictionary(item => item.CaseId, item => item.EvidenceVector, StringComparer.Ordinal);
+        if (AcceptanceCaseBindings.GroupBy(binding => $"{binding.CaseId}/{binding.AcceptanceName}", StringComparer.Ordinal).Any(group => group.Count() != 1))
+            throw new InvalidOperationException("Phase 9c authority contains a duplicate CaseId/acceptance binding.");
         foreach (var binding in AcceptanceCaseBindings)
         {
             if (!knownCases.Contains(binding.CaseId))
