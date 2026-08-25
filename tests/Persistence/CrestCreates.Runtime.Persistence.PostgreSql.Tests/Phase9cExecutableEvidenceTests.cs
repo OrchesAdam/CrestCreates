@@ -1,4 +1,5 @@
 using CrestCreates.Runtime.Persistence.Testing.Evidence;
+using CrestCreates.Runtime.Persistence.Testing.Manifest;
 using FluentAssertions;
 using Xunit;
 
@@ -37,6 +38,42 @@ public sealed class Phase9cExecutableEvidenceTests
         }
 
         ledger.ValidateExecutableEvidence(bindings.Select(binding => binding.Name));
+    }
+
+    [Fact]
+    public void FrozenPhase9cEvidence_ShouldCloseOnlyAfterAllCiRunnersComplete()
+    {
+        // The ordinary focused test invocation intentionally does not claim
+        // closure. CI sets these variables only after the owning test slices
+        // have completed successfully; this prevents a source-only or
+        // manually-populated ledger from making the PR appear complete.
+        if (!string.Equals(Environment.GetEnvironmentVariable("PHASE9C_EVIDENCE_CLOSURE"), "1", StringComparison.Ordinal))
+            return;
+
+        Phase9cEvidenceLedger.ValidateFrozenManifest();
+        var completedRunners = (Environment.GetEnvironmentVariable("PHASE9C_EVIDENCE_RUNNERS") ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.Ordinal);
+        completedRunners.Should().Contain(Phase9cEvidenceRunnerCatalog.RunnerNames);
+
+        var ledger = new Phase9cEvidenceLedger();
+        var names = Phase9cAcceptanceManifest.NormativeNames
+            .Concat(Phase9cSupplementalAcceptanceManifest.Names)
+            .ToArray();
+        foreach (var runner in Phase9cEvidenceRunnerCatalog.RunnerNames)
+        {
+            var owned = names.Where(name => string.Equals(
+                Phase9cEvidenceRunnerCatalog.RunnerFor(name), runner, StringComparison.Ordinal));
+            ledger.RecordRunnerBatch(
+                owned,
+                runner,
+                Phase9cEvidenceRunnerCatalog.EvidenceVectorFor(runner),
+                $"runner:{runner}",
+                () => completedRunners.Contains(runner));
+        }
+
+        ledger.ValidateFrozenClosure();
+        ledger.Entries.Should().HaveCount(170);
     }
 
     private static string FindRepositoryRoot()

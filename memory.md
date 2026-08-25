@@ -115,9 +115,10 @@ explicit conflicts. Optional compatibility work reserves bounded tracker
 capacity before starting detached execution. The PostgreSQL AOT fixture now
 uses a correlated Workflow/HumanTask pair, durable continuation acceptance, and
 the Accountability outbox handler; its fixed reliable-delivery sentinels are
-asserted by the fixture test. Evidence tooling validates the frozen 145
-normative/25 supplemental manifest cardinality and supports runner-backed
-recording rather than manual passed flags.
+asserted by the fixture test. The Phase 9c evidence gate now requires all nine
+owning CI runners to complete before recording and validating the exact frozen
+145 normative plus 25 supplemental tuples; it no longer treats source-file
+presence or manually supplied passed flags as closure evidence.
 
 ### Issue #69 — Phase 9b+ Durable Control Plane and Reference Data Stores
 

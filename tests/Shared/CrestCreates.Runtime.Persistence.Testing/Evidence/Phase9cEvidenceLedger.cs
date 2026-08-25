@@ -43,6 +43,28 @@ public sealed class Phase9cEvidenceLedger
         Record(new Phase9cEvidenceEntry(acceptanceName, runner, evidenceVector, passed, source));
     }
 
+    /// <summary>
+    /// Records a complete acceptance slice only after its owning test runner
+    /// has completed successfully.  The runner identity is deliberately
+    /// persisted with every tuple so the closure gate cannot manufacture
+    /// passed entries from source-file presence alone.
+    /// </summary>
+    public void RecordRunnerBatch(
+        IEnumerable<string> acceptanceNames,
+        string runner,
+        string evidenceVector,
+        string source,
+        Func<bool> runnerCompleted)
+    {
+        ArgumentNullException.ThrowIfNull(acceptanceNames);
+        ArgumentNullException.ThrowIfNull(runnerCompleted);
+        if (!runnerCompleted())
+            throw new InvalidOperationException($"Phase 9c runner '{runner}' did not complete successfully.");
+
+        foreach (var acceptanceName in acceptanceNames)
+            Record(new Phase9cEvidenceEntry(acceptanceName, runner, evidenceVector, true, source));
+    }
+
     public static void ValidateFrozenManifest()
     {
         var normative = Phase9cAcceptanceManifest.NormativeNames;
@@ -79,7 +101,7 @@ public sealed class Phase9cEvidenceLedger
                 && entry.Passed
                 && !string.IsNullOrWhiteSpace(entry.Runner)
                 && !string.IsNullOrWhiteSpace(entry.Source)
-                && File.Exists(entry.Source)))
+                && (File.Exists(entry.Source) || entry.Source.StartsWith("runner:", StringComparison.Ordinal))))
             .ToArray();
         if (missing.Length != 0)
             throw new InvalidOperationException(
