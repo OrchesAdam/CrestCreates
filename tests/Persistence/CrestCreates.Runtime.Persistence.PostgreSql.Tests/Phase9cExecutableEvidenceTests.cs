@@ -17,7 +17,7 @@ public sealed class Phase9cExecutableEvidenceTests
         Phase9cEvidenceRunnerCatalog.AcceptanceCaseBindings
             .Select(binding => $"{binding.CaseId}/{binding.AcceptanceName}")
             .Should().OnlyHaveUniqueItems();
-        Phase9cEvidenceRunnerCatalog.RequiredTuples.Count.Should().Be(423);
+        Phase9cEvidenceRunnerCatalog.RequiredTuples.Count.Should().Be(444);
 
         var rca01 = Phase9cEvidenceRunnerCatalog.ForAcceptance("WorkflowContinuationAcceptance_Integrity_Should_Use_FrozenV1Projection");
         rca01.Select(tuple => tuple.Runner).Should().BeEquivalentTo(["WF", "SH", "IM", "PG", "BND"]);

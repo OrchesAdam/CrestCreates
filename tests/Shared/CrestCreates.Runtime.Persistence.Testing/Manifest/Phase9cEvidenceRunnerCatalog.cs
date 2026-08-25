@@ -38,7 +38,7 @@ public static class Phase9cEvidenceRunnerCatalog
         new(["ARCH06", "N06"], "OutboxMainline_Should_Not_UseRuntimeTypeNamesOrReflectionSerialization", ["DEL", "BND", "AOT"], "native"),
         new(["ARCH07"], "OutboxHandlerRegistry_Should_RejectDuplicateContractId", ["DEL"], "composition"),
         new(["ARCH08"], "OutboxHandlerRegistry_Should_CacheMetadata_NotScopedInstances", ["DEL"], "composition"),
-        new(["ARCH09"], "ScopedOutboxHandler_Should_BeResolved_FromDeliveryScope", ["DEL"], "composition"),
+        new(["ARCH09", "C07"], "ScopedOutboxHandler_Should_BeResolved_FromDeliveryScope", ["DEL"], "composition"),
         new(["ARCH10"], "RequiredConsumerRegistry_Should_CacheMetadata_NotScopedInstances", ["DEL"], "composition"),
         new(["ARCH11"], "OutboxPayload_Should_RequireGeneratedJsonTypeInfo", ["DEL", "AOT"], "native"),
         new(["ARCH12"], "ExistingEventBusAndDlq_Should_Not_BeOutboxAuthority", ["BND"], "composition"),
@@ -51,7 +51,7 @@ public static class Phase9cEvidenceRunnerCatalog
         new(["ARCH14"], "IAuditSink_Should_Not_GainDurabilityCapability", ["ACCT", "BND"], "composition"),
         new(["ARCH15"], "IAuditRecorder_Should_Not_Expose_PreparedEnvelopeBypass", ["ACCT", "BND"], "composition"),
         new(["ARCH16"], "PreparedAuditRecording_Should_Be_AccountabilityInternal", ["ACCT", "BND"], "composition"),
-        new(["A01"], "State_Commit_Should_Atomically_Create_Outbox_Message", ["SH", "IM", "PG"], "semantic"),
+        new(["A01", "A05"], "State_Commit_Should_Atomically_Create_Outbox_Message", ["SH", "IM", "PG"], "semantic"),
         new(["A06"], "Rolled_Back_State_Should_Not_Create_Outbox_Message", ["SH", "IM", "PG"], "semantic"),
         new(["A07"], "CommitUnknown_Should_Never_Expose_Split_State_And_Outbox", ["PG", "CW"], "process-crash"),
         new(["A08"], "OutboxAppendFailure_Should_Rollback_RuntimeMutation", ["SH", "IM", "PG"], "semantic"),
@@ -68,27 +68,27 @@ public static class Phase9cEvidenceRunnerCatalog
         new(["L01"], "Pending_Message_Should_Be_Claimed_With_FirstFence", ["SH", "IM", "PG"], "semantic"),
         new(["L02", "R08"], "NotYetDue_Message_Should_Not_Be_Claimed", ["SH", "IM", "PG"], "semantic"),
         new(["L03"], "Concurrent_Dispatchers_Should_Respect_FencingToken", ["SH", "IM", "PG"], "semantic"),
-        new(["L04"], "ExpiredLease_Should_Allow_NewerGeneration", ["SH", "IM", "PG"], "semantic"),
+        new(["L04", "R10"], "ExpiredLease_Should_Allow_NewerGeneration", ["SH", "IM", "PG"], "semantic"),
         new(["L05", "L08"], "Expired_Owner_Should_Not_Acknowledge_NewerLease", ["SH", "IM", "PG"], "semantic"),
         new(["L06"], "Stale_Owner_Should_Not_Schedule_Retry", ["SH", "IM", "PG"], "semantic"),
         new(["L07"], "Stale_Owner_Should_Not_DeadLetter", ["SH", "IM", "PG"], "semantic"),
         new(["L09"], "Valid_Owner_Should_Acknowledge_To_Delivered", ["SH", "IM", "PG"], "semantic"),
         new(["L10"], "Retry_Should_Use_ProviderClock_And_Preserve_MessageId", ["SH", "IM", "PG"], "semantic"),
-        new(["L11", "R06"], "Poison_Message_Should_Move_To_DeadLetter", ["DEL", "SH", "IM", "PG"], "semantic"),
+        new(["L11", "R06", "R07"], "Poison_Message_Should_Move_To_DeadLetter", ["DEL", "SH", "IM", "PG"], "semantic"),
         new(["L12"], "Delivered_Message_Should_Not_Be_Claimed", ["SH", "IM", "PG"], "semantic"),
         new(["L12"], "DeadLettered_Message_Should_Not_Be_Claimed", ["SH", "IM", "PG"], "semantic"),
         new(["L11"], "DeadLetter_Should_Be_One_OutboxTerminalTransition", ["SH", "IM", "PG"], "semantic"),
         new(["L13"], "UnregisteredContract_Should_Not_BeClaimed_OrConsumeAttemptBudget", ["SH", "IM", "PG"], "semantic"),
-        new(["R11"], "Repeated_ClaimCrash_Should_Consume_AttemptBudget", ["SH", "PG", "CW"], "process-crash"),
+        new(["R11", "CW04B"], "Repeated_ClaimCrash_Should_Consume_AttemptBudget", ["SH", "PG", "CW"], "process-crash"),
         new(["R12"], "AttemptBudgetExhausted_Should_DeadLetter_Without_HandlerInvocation", ["DEL", "SH", "PG", "CW"], "process-crash"),
         new(["L14"], "Ack_Replay_With_ExactTerminalFence_Should_Be_AlreadyApplied", ["SH", "IM", "PG"], "semantic"),
         new(["L15"], "DeadLetter_Replay_With_ExactTerminalFence_Should_Be_AlreadyApplied", ["SH", "IM", "PG"], "semantic"),
-        new(["L16"], "TerminalReplay_With_DifferentFence_Should_Be_StaleOrConflict", ["SH", "IM", "PG"], "semantic"),
+        new(["L16", "L17"], "TerminalReplay_With_DifferentFence_Should_Be_StaleOrConflict", ["SH", "IM", "PG"], "semantic"),
         new(["L14", "L15"], "AlreadyApplied_Should_Not_Reopen_TerminalState", ["SH", "IM", "PG"], "semantic"),
         new(["C13"], "UnsupportedActiveRequirement_Should_Throw_ProviderNeutralCompositionFailure", ["SH", "IM", "PG"], "composition"),
         new(["C13", "C14"], "CompositionFailure_Should_Not_Be_Classified_As_TransientStoreFailure", ["DEL", "PG"], "composition"),
-        new(["R01"], "Pending_Message_Should_Be_Recovered_After_Restart", ["PG", "CW"], "process-crash"),
-        new(["R09"], "RetryDue_Message_Should_Be_Recovered_After_Restart", ["PG", "CW"], "process-crash"),
+        new(["R01", "CW03"], "Pending_Message_Should_Be_Recovered_After_Restart", ["PG", "CW"], "process-crash"),
+        new(["R09", "CW06"], "RetryDue_Message_Should_Be_Recovered_After_Restart", ["PG", "CW"], "process-crash"),
         new(["R02"], "ExpiredLease_Should_Recover_After_Restart", ["PG", "CW"], "process-crash"),
         new(["R04"], "Publish_ResponseLoss_Should_Redeliver_SameMessageId", ["SH", "PG", "CW"], "process-crash"),
         new(["R05"], "Ack_ResponseLoss_AfterCommit_Should_Remain_Delivered", ["SH", "PG"], "semantic"),
@@ -231,6 +231,13 @@ public static class Phase9cEvidenceRunnerCatalog
             throw new InvalidOperationException("Phase 9c acceptance/case authority does not cover exactly the frozen 145+25 names.");
         var knownCases = Phase9cCaseManifest.Cases.Select(item => item.CaseId).ToHashSet(StringComparer.Ordinal);
         var knownVectors = Phase9cCaseManifest.Cases.ToDictionary(item => item.CaseId, item => item.EvidenceVector, StringComparer.Ordinal);
+        var boundCaseIds = AcceptanceCaseBindings.Select(binding => binding.CaseId).ToHashSet(StringComparer.Ordinal);
+        if (!boundCaseIds.SetEquals(knownCases))
+        {
+            var missing = knownCases.Except(boundCaseIds, StringComparer.Ordinal).OrderBy(caseId => caseId, StringComparer.Ordinal);
+            var unexpected = boundCaseIds.Except(knownCases, StringComparer.Ordinal).OrderBy(caseId => caseId, StringComparer.Ordinal);
+            throw new InvalidOperationException($"Phase 9c authority CaseId coverage drifted. Missing: {string.Join(", ", missing)}. Unexpected: {string.Join(", ", unexpected)}.");
+        }
         if (AcceptanceCaseBindings.GroupBy(binding => $"{binding.CaseId}/{binding.AcceptanceName}", StringComparer.Ordinal).Any(group => group.Count() != 1))
             throw new InvalidOperationException("Phase 9c authority contains a duplicate CaseId/acceptance binding.");
         foreach (var binding in AcceptanceCaseBindings)
