@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
@@ -250,30 +252,101 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
     Console.WriteLine("CRESTCREATES_RUNTIME_OUTBOX_OK");
     Console.WriteLine("CRESTCREATES_HUMANTASK_RELIABLE_DELIVERY_OK");
 
-    var accountabilityClaims = await dispatchStore.ClaimAsync(new OutboxClaimRequest
+}
+
+// The accountability delivery proof deliberately crosses provider lifetimes.
+// Provider A commits the sink fact and then disappears before Ack (the response
+// loss/crash window). Provider B recovers the expired lease, observes the same
+// durable fact as Duplicate, and only then acknowledges the outbox message.
+var accountabilityMessageId = string.Empty;
+OutboxDeliveryLease accountabilityStaleLease;
+await using (var providerA = BuildProvider(options, workflowDescriptor, humanTaskDescriptor))
+{
+    using var scope = providerA.CreateScope();
+    var services = scope.ServiceProvider;
+    var dispatchStore = services.GetRequiredService<IOutboxDispatchStore>();
+    var claims = await dispatchStore.ClaimAsync(new OutboxClaimRequest
     {
-        OwnerId = "aot-accountability-dispatch",
-        BatchSize = 1,
-        LeaseDuration = TimeSpan.FromMinutes(1),
+        OwnerId = "aot-accountability-provider-a",
+        BatchSize = 32,
+        // Keep the crash window short so the recovery claim is deterministic.
+        LeaseDuration = TimeSpan.FromMilliseconds(250),
         SupportedContractIds = new HashSet<string>(["crest.accountability.audit-envelope/v1"], StringComparer.Ordinal),
         SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
     });
-    var accountabilityClaim = accountabilityClaims.Single();
-    var accountabilityRegistration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+    var claim = claims.First();
+    var registration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
         .Single(item => item.ContractId == "crest.accountability.audit-envelope/v1");
-    var accountabilityOutcome = await accountabilityRegistration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    var outcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
     {
-        Message = accountabilityClaim.Message,
-        Lease = accountabilityClaim.Lease,
+        Message = claim.Message,
+        Lease = claim.Lease,
         AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
         Services = services
     });
-    if (accountabilityOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
-        || await dispatchStore.AckAsync(accountabilityClaim.Message.Metadata.MessageId, accountabilityClaim.Lease) is not OutboxDeliveryMutationResult.Applied)
+    if (outcome != OutboxDeliveryOutcome.Accepted)
         return 10;
-    var terminalReplay = await dispatchStore.AckAsync(accountabilityClaim.Message.Metadata.MessageId, accountabilityClaim.Lease);
-    if (terminalReplay is not (OutboxDeliveryMutationResult.AlreadyApplied or OutboxDeliveryMutationResult.StaleFence))
+    accountabilityMessageId = claim.Message.Metadata.MessageId;
+    accountabilityStaleLease = claim.Lease;
+    Console.WriteLine("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_ACCEPTED_BEFORE_RESTART_OK");
+}
+
+await Task.Delay(TimeSpan.FromMilliseconds(500));
+
+await using (var providerB = BuildProvider(options, workflowDescriptor, humanTaskDescriptor))
+{
+    using var scope = providerB.CreateScope();
+    var services = scope.ServiceProvider;
+    var dispatchStore = services.GetRequiredService<IOutboxDispatchStore>();
+    var claimRequest = new OutboxClaimRequest
+    {
+        OwnerId = "aot-accountability-provider-b",
+        BatchSize = 32,
+        LeaseDuration = TimeSpan.FromMinutes(1),
+        SupportedContractIds = new HashSet<string>(["crest.accountability.audit-envelope/v1"], StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+    };
+    OutboxDeliveryClaim? claim = null;
+    for (var attempt = 0; attempt < 50 && claim is null; attempt++)
+    {
+        var recovered = await dispatchStore.ClaimAsync(claimRequest);
+        claim = recovered.SingleOrDefault(item => item.Message.Metadata.MessageId == accountabilityMessageId);
+        if (claim is null) await Task.Delay(TimeSpan.FromMilliseconds(100));
+    }
+    if (claim is null)
+        return 15;
+    var registration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+        .Single(item => item.ContractId == "crest.accountability.audit-envelope/v1");
+    var envelope = JsonSerializer.Deserialize(
+        claim.Message.Payload,
+        AccountabilityJsonSerializerContext.Default.AuditEnvelope)
+        ?? throw new InvalidOperationException("Accountability outbox payload could not be restored after provider restart.");
+    var sinkReplay = await services.GetRequiredService<IAuditSink>().WriteAsync(envelope);
+    if (sinkReplay.Status != AuditSinkWriteStatus.Duplicate)
+        return 16;
+    Console.WriteLine("CRESTCREATES_POSTGRES_AUDIT_SINK_DUPLICATE_AFTER_RESTART_OK");
+    var outcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    {
+        Message = claim.Message,
+        Lease = claim.Lease,
+        AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+        Services = services
+    });
+    if (outcome != OutboxDeliveryOutcome.Accepted)
         return 11;
+    if (await dispatchStore.AckAsync(accountabilityMessageId, claim.Lease) != OutboxDeliveryMutationResult.Applied)
+        return 12;
+    Console.WriteLine("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_RESTART_DUPLICATE_OK");
+
+    var terminalReplay = await dispatchStore.AckAsync(accountabilityMessageId, claim.Lease);
+    if (terminalReplay != OutboxDeliveryMutationResult.AlreadyApplied)
+        return 13;
+    Console.WriteLine("CRESTCREATES_OUTBOX_TERMINAL_ALREADY_APPLIED_OK");
+
+    var staleReplay = await dispatchStore.AckAsync(accountabilityMessageId, accountabilityStaleLease);
+    if (staleReplay != OutboxDeliveryMutationResult.StaleFence)
+        return 14;
+    Console.WriteLine("CRESTCREATES_OUTBOX_TERMINAL_STALE_FENCE_OK");
     Console.WriteLine("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_DELIVERY_OK");
 }
 

@@ -1,68 +1,65 @@
-namespace CrestCreates.Runtime.Persistence.Testing.Evidence;
-
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using CrestCreates.Runtime.Persistence.Testing.Manifest;
 
+namespace CrestCreates.Runtime.Persistence.Testing.Evidence;
+
 public sealed record Phase9cEvidenceEntry(
+    string CaseId,
     string AcceptanceName,
     string Runner,
     string EvidenceVector,
     bool Passed,
     string Source);
 
+/// <summary>
+/// Records evidence tuples produced by the assertion that executed a case.
+/// There is deliberately no runner-batch API: project completion is not case
+/// completion.  CI may merge the JSONL artifacts emitted by each test process
+/// and compare the exact tuple set with <see cref="RequiredTuples"/>.
+/// </summary>
 public sealed class Phase9cEvidenceLedger
 {
     private readonly List<Phase9cEvidenceEntry> _entries = [];
     public IReadOnlyList<Phase9cEvidenceEntry> Entries => _entries;
 
-    public void Record(Phase9cEvidenceEntry entry)
+    public void Record(Phase9cEvidenceTuple tuple, bool passed, string source)
     {
-        ArgumentNullException.ThrowIfNull(entry);
-        if (!Phase9cAcceptanceManifest.NormativeNames.Contains(entry.AcceptanceName, StringComparer.Ordinal)
-            && !Phase9cSupplementalAcceptanceManifest.Names.Contains(entry.AcceptanceName, StringComparer.Ordinal))
-            throw new ArgumentException($"Unknown Phase 9c acceptance '{entry.AcceptanceName}'.", nameof(entry));
-        if (_entries.Any(existing => string.Equals(existing.AcceptanceName, entry.AcceptanceName, StringComparison.Ordinal)
-            && string.Equals(existing.Runner, entry.Runner, StringComparison.Ordinal)))
-            throw new InvalidOperationException($"Duplicate Phase 9c evidence ownership for '{entry.AcceptanceName}' and runner '{entry.Runner}'.");
-        _entries.Add(entry);
+        ArgumentNullException.ThrowIfNull(tuple);
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+        if (!Phase9cEvidenceRunnerCatalog.RequiredTuples.Contains(tuple))
+            throw new ArgumentException($"Unknown Phase 9c evidence tuple '{tuple.CaseId}/{tuple.AcceptanceName}/{tuple.Runner}'.", nameof(tuple));
+        if (_entries.Any(existing => SameTuple(existing, tuple)))
+            throw new InvalidOperationException($"Duplicate Phase 9c evidence tuple '{tuple.CaseId}/{tuple.AcceptanceName}/{tuple.Runner}'.");
+        _entries.Add(new Phase9cEvidenceEntry(tuple.CaseId, tuple.AcceptanceName, tuple.Runner, tuple.EvidenceVector, passed, source));
     }
 
-    /// <summary>
-    /// Records evidence only after the named runner has executed its assertion.
-    /// This keeps the ledger from being used as a list of manually asserted
-    /// <c>Passed: true</c> claims.
-    /// </summary>
-    public void RecordExecutable(
-        string acceptanceName,
-        string runner,
-        string evidenceVector,
-        string source,
-        Func<bool> run)
+    public void RecordExecutable(Phase9cEvidenceTuple tuple, string source, Func<bool> run)
     {
         ArgumentNullException.ThrowIfNull(run);
-        var passed = run();
-        Record(new Phase9cEvidenceEntry(acceptanceName, runner, evidenceVector, passed, source));
+        Record(tuple, run(), source);
     }
 
-    /// <summary>
-    /// Records a complete acceptance slice only after its owning test runner
-    /// has completed successfully.  The runner identity is deliberately
-    /// persisted with every tuple so the closure gate cannot manufacture
-    /// passed entries from source-file presence alone.
-    /// </summary>
-    public void RecordRunnerBatch(
-        IEnumerable<string> acceptanceNames,
-        string runner,
-        string evidenceVector,
-        string source,
-        Func<bool> runnerCompleted)
+    public void WriteJsonLines(string path)
     {
-        ArgumentNullException.ThrowIfNull(acceptanceNames);
-        ArgumentNullException.ThrowIfNull(runnerCompleted);
-        if (!runnerCompleted())
-            throw new InvalidOperationException($"Phase 9c runner '{runner}' did not complete successfully.");
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+        File.AppendAllLines(path, _entries.Select(entry => JsonSerializer.Serialize(entry, Phase9cEvidenceJsonContext.Default.Phase9cEvidenceEntry)));
+    }
 
-        foreach (var acceptanceName in acceptanceNames)
-            Record(new Phase9cEvidenceEntry(acceptanceName, runner, evidenceVector, true, source));
+    public static Phase9cEvidenceLedger ReadJsonLines(IEnumerable<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        var ledger = new Phase9cEvidenceLedger();
+        foreach (var path in paths.Where(File.Exists))
+            foreach (var line in File.ReadLines(path).Where(line => !string.IsNullOrWhiteSpace(line)))
+            {
+                var entry = JsonSerializer.Deserialize(line, Phase9cEvidenceJsonContext.Default.Phase9cEvidenceEntry)
+                    ?? throw new InvalidOperationException($"Invalid Phase 9c evidence record in '{path}'.");
+                ledger.Record(new Phase9cEvidenceTuple(entry.CaseId, entry.AcceptanceName, entry.Runner, entry.EvidenceVector), entry.Passed, entry.Source);
+            }
+        return ledger;
     }
 
     public static void ValidateFrozenManifest()
@@ -77,46 +74,29 @@ public sealed class Phase9cEvidenceLedger
             throw new InvalidOperationException("Phase 9c frozen manifest contains duplicate or overlapping acceptance names.");
     }
 
-    public void ValidateNormativeCompleteness()
-    {
-        var missing = Phase9cAcceptanceManifest.NormativeNames
-            .Where(name => !_entries.Any(entry => string.Equals(entry.AcceptanceName, name, StringComparison.Ordinal)))
-            .ToArray();
-        if (missing.Length != 0)
-            throw new InvalidOperationException($"Phase 9c evidence is incomplete; missing {missing.Length} normative acceptance entries.");
-    }
-
-    /// <summary>
-    /// Validates the executable evidence subset used by CI.  A ledger entry is
-    /// not documentation unless it points at a real test/fixture source and is
-    /// marked passed by that runner.
-    /// </summary>
-    public void ValidateExecutableEvidence(IEnumerable<string> requiredAcceptanceNames)
-    {
-        ArgumentNullException.ThrowIfNull(requiredAcceptanceNames);
-        var missing = requiredAcceptanceNames
-            .Distinct(StringComparer.Ordinal)
-            .Where(name => !_entries.Any(entry =>
-                string.Equals(entry.AcceptanceName, name, StringComparison.Ordinal)
-                && entry.Passed
-                && !string.IsNullOrWhiteSpace(entry.Runner)
-                && !string.IsNullOrWhiteSpace(entry.Source)
-                && (File.Exists(entry.Source) || entry.Source.StartsWith("runner:", StringComparison.Ordinal))))
-            .ToArray();
-        if (missing.Length != 0)
-            throw new InvalidOperationException(
-                $"Phase 9c executable evidence is incomplete; missing {missing.Length} bound acceptance entries: {string.Join(", ", missing)}.");
-    }
-
     public void ValidateFrozenClosure()
     {
         ValidateFrozenManifest();
-        var expected = Phase9cAcceptanceManifest.NormativeNames
-            .Concat(Phase9cSupplementalAcceptanceManifest.Names)
-            .ToHashSet(StringComparer.Ordinal);
-        var actual = _entries.Select(entry => entry.AcceptanceName).ToHashSet(StringComparer.Ordinal);
+        var expected = Phase9cEvidenceRunnerCatalog.RequiredTuples.ToHashSet();
+        var actual = _entries.Select(entry => new Phase9cEvidenceTuple(entry.CaseId, entry.AcceptanceName, entry.Runner, entry.EvidenceVector)).ToHashSet();
         if (!actual.SetEquals(expected) || _entries.Count != expected.Count)
-            throw new InvalidOperationException($"Phase 9c evidence closure is incomplete; expected exactly {expected.Count} normative/supplemental tuples but recorded {_entries.Count}.");
-        ValidateExecutableEvidence(expected);
+        {
+            var missing = expected.Except(actual).Select(Format).Take(12);
+            var unexpected = actual.Except(expected).Select(Format).Take(12);
+            throw new InvalidOperationException($"Phase 9c evidence closure is incomplete; expected {expected.Count} exact tuples, recorded {_entries.Count}. Missing: {string.Join(", ", missing)}. Unexpected: {string.Join(", ", unexpected)}.");
+        }
+        var failed = _entries.Where(entry => !entry.Passed).Select(entry => Format(new Phase9cEvidenceTuple(entry.CaseId, entry.AcceptanceName, entry.Runner, entry.EvidenceVector))).ToArray();
+        if (failed.Length != 0) throw new InvalidOperationException($"Phase 9c evidence contains failed tuples: {string.Join(", ", failed)}.");
     }
+
+    private static bool SameTuple(Phase9cEvidenceEntry entry, Phase9cEvidenceTuple tuple)
+        => string.Equals(entry.CaseId, tuple.CaseId, StringComparison.Ordinal)
+            && string.Equals(entry.AcceptanceName, tuple.AcceptanceName, StringComparison.Ordinal)
+            && string.Equals(entry.Runner, tuple.Runner, StringComparison.Ordinal)
+            && string.Equals(entry.EvidenceVector, tuple.EvidenceVector, StringComparison.Ordinal);
+
+    private static string Format(Phase9cEvidenceTuple tuple) => $"{tuple.CaseId}/{tuple.AcceptanceName}/{tuple.Runner}/{tuple.EvidenceVector}";
 }
+
+[JsonSerializable(typeof(Phase9cEvidenceEntry))]
+internal partial class Phase9cEvidenceJsonContext : JsonSerializerContext;

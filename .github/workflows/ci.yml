@@ -45,6 +45,13 @@ jobs:
       - name: Reset Control Plane reference-data evidence ledger
         run: rm -rf tests/artifacts/control-plane-evidence
 
+      - name: Reset Phase 9c executable tuple ledger
+        run: |
+          rm -rf tests/artifacts/phase9c-evidence
+          mkdir -p tests/artifacts/phase9c-evidence
+          echo PHASE9C_EVIDENCE_ARTIFACT_DIR=$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence >> "$GITHUB_ENV"
+          echo PHASE9C_EVIDENCE_ARTIFACT=$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence/postgresql.jsonl >> "$GITHUB_ENV"
+
       # ── Core ──
       - name: Test — Core
         run: dotnet test tests/Core/CrestCreates.Core.Abstractions.Tests --no-build
@@ -90,7 +97,6 @@ jobs:
           dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.Tests --no-build
           dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.E2E.Tests --no-build
           dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.AotFixture.Tests --no-build
-          echo PHASE9C_EVIDENCE_PROCUREMENT=1 >> "$GITHUB_ENV"
 
       # ── Metadata ──
       - name: Test — Metadata / Core
@@ -116,7 +122,6 @@ jobs:
           dotnet test tests/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory.Tests --no-build
           dotnet test tests/Runtime/Workflow/CrestCreates.Workflow.Tests --no-build
           dotnet test tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests --no-build
-          echo PHASE9C_EVIDENCE_WORKFLOW=1 >> "$GITHUB_ENV"
 
       # PostgreSQL contract, crash-window, retention and NativeAOT fixture tests use
       # Testcontainers (PostgreSQL 16) and are required evidence for the direct Npgsql
@@ -131,9 +136,6 @@ jobs:
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build --filter "FullyQualifiedName~PostgreSqlOutboxDispatchTests"
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests --no-build --filter "FullyQualifiedName~PostgreSqlRuntimeAotFixtureTests"
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build --filter "FullyQualifiedName~Phase9cExecutableEvidenceTests"
-          echo PHASE9C_EVIDENCE_DISPATCH=1 >> "$GITHUB_ENV"
-          echo PHASE9C_EVIDENCE_RECOVERY=1 >> "$GITHUB_ENV"
-          echo PHASE9C_EVIDENCE_AOT=1 >> "$GITHUB_ENV"
 
       # Phase 9b+ durable Agent Memory evidence gates: the frozen Spec §18 skeleton
       # (44 names) and the 59-case / 98-tuple evidence ledger are enforced by the
@@ -161,14 +163,12 @@ jobs:
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.E2E.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.Projection.Tests --no-build
           dotnet test tests/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore.Tests --no-build
-          echo PHASE9C_EVIDENCE_ACTIVATION=1 >> "$GITHUB_ENV"
 
       - name: Test — Runtime / Eventing
         run: |
           dotnet test tests/Runtime/Eventing/CrestCreates.Runtime.Delivery.Tests --no-build
           dotnet test tests/Runtime/Eventing/CrestCreates.Event.Tests --no-build
           dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.Tests --no-build
-          echo PHASE9C_EVIDENCE_DELIVERY=1 >> "$GITHUB_ENV"
 
       - name: Test — Runtime / Audit & DistributedTransaction
         run: |
@@ -176,7 +176,6 @@ jobs:
           dotnet test tests/Runtime/Audit/CrestCreates.Accountability.Tests --no-build
           dotnet test tests/Runtime/Audit/CrestCreates.AuditLogging.Tests --no-build
           dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests --no-build
-          echo PHASE9C_EVIDENCE_ACCOUNTABILITY=1 >> "$GITHUB_ENV"
 
       # ── Tooling ──
       - name: Test — Tooling (CodeGenerator + BuildTasks)
@@ -203,9 +202,6 @@ jobs:
       - name: Test — Dependency Boundaries
         run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build --filter "FullyQualifiedName!~ControlPlaneReferenceDataSpecTestSkeletonTests"
 
-      - name: Mark Phase 9c boundary evidence runner
-        run: echo PHASE9C_EVIDENCE_BOUNDARY=1 >> "$GITHUB_ENV"
-
       - name: Test — Control Plane reference-data evidence ledger gate
         run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build --filter "FullyQualifiedName~ControlPlaneReferenceDataSpecTestSkeletonTests"
 
@@ -225,19 +221,12 @@ jobs:
       - name: Test — ControlPlane JsonContracts AotFixture (NativeAOT publish/link/run)
         run: dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests --no-build
 
-      # This is the final Phase 9c acceptance gate. Every runner above must
-      # have completed before the frozen 145+25 closure can be recorded.
-      - name: Test — Phase 9c frozen evidence closure
+      # The old runner-green closure was intentionally removed: it could mark
+      # every acceptance in a project as Passed without the case assertion ever
+      # executing. Keep the executable tuple-shape checks in CI until all test
+      # suites emit their assertion-produced JSONL tuples into the shared gate.
+      - name: Test — Phase 9c executable evidence tuple guards
         run: |
-          runners=""
-          for runner in delivery dispatch recovery workflow accountability procurement activation boundary aot; do
-            variable="PHASE9C_EVIDENCE_${runner^^}"
-            if [[ "${!variable:-}" != "1" ]]; then
-              echo "Missing completed Phase 9c evidence runner: ${runner}" >&2
-              exit 1
-            fi
-            if [[ -n "$runners" ]]; then runners+=","; fi
-            runners+="$runner"
-          done
-          PHASE9C_EVIDENCE_CLOSURE=1 PHASE9C_EVIDENCE_RUNNERS="$runners" \
-            dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build --filter "FullyQualifiedName~FrozenPhase9cEvidence_ShouldCloseOnlyAfterAllCiRunnersComplete"
+          dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build \
+            --filter "FullyQualifiedName~FrozenCaseMatrix_ShouldRetainAllRcaEvidenceSurfaces|FullyQualifiedName~CriticalPhase9cEvidence_ShouldBeBoundToExecutableSources"
+          test -s "$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence/postgresql.jsonl"

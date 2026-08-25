@@ -66,6 +66,10 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.Output.Should().Contain("PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK");
             execution.Output.Should().Contain("CRESTCREATES_RUNTIME_OUTBOX_OK");
             execution.Output.Should().Contain("CRESTCREATES_HUMANTASK_RELIABLE_DELIVERY_OK");
+            execution.Output.Should().Contain("CRESTCREATES_POSTGRES_AUDIT_SINK_DUPLICATE_AFTER_RESTART_OK");
+            execution.Output.Should().Contain("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_RESTART_DUPLICATE_OK");
+            execution.Output.Should().Contain("CRESTCREATES_OUTBOX_TERMINAL_ALREADY_APPLIED_OK");
+            execution.Output.Should().Contain("CRESTCREATES_OUTBOX_TERMINAL_STALE_FENCE_OK");
             execution.Output.Should().Contain("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_DELIVERY_OK");
             execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_CAPABILITY_OK");
             execution.Output.Should().Contain("CRESTCREATES_DURABLE_CONTROL_PLANE_WORKFLOW_HUMAN_TASK_OK");
