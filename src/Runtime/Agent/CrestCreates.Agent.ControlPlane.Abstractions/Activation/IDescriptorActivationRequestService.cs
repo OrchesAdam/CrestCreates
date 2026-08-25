@@ -46,7 +46,8 @@ public interface IDescriptorActivationRequestService
         AgentToolInvocationContext context,
         string requestId,
         DescriptorActivationReviewDecision reviewDecision,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string? completionEventId = null);
 
     /// <summary>
     /// Rejects an activation request.
@@ -56,7 +57,8 @@ public interface IDescriptorActivationRequestService
         AgentToolInvocationContext context,
         string requestId,
         DescriptorActivationReviewDecision reviewDecision,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string? completionEventId = null);
 
     /// <summary>
     /// Rechecks evidence hashes against current state.

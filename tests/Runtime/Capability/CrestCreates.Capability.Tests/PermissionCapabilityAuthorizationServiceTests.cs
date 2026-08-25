@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.Security.Claims;
 using Xunit;
 
 namespace CrestCreates.Capability.Tests;
@@ -92,6 +93,24 @@ public class PermissionCapabilityAuthorizationServiceTests
             "test.cap", "user1", new[] { "perm.read", "perm.write" }, CancellationToken.None);
 
         result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Authorize_ExplicitPrincipal_UsesPrincipalPermissionOverload()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Role, "approver")], "outbox"));
+        var checker = new Mock<IPermissionChecker>();
+        checker.Setup(c => c.IsGrantedAsync(principal, It.IsAny<string[]>()))
+            .ReturnsAsync(new MultiplePermissionGrantResult(
+                new Dictionary<string, bool> { ["perm.approve"] = true }));
+
+        var result = await new PermissionCapabilityAuthorizationService(checker.Object)
+            .AuthorizeAsync("test.cap", "approver-1", ["perm.approve"], CancellationToken.None, principal);
+
+        result.Should().BeTrue();
+        checker.Verify(c => c.IsGrantedAsync(principal, It.IsAny<string[]>()), Times.Once);
+        checker.Verify(c => c.IsGrantedAsync(It.IsAny<string[]>()), Times.Never);
     }
 
     // === T4: AuthorizationMiddleware passes RequiredPermissions (not capability name) ===

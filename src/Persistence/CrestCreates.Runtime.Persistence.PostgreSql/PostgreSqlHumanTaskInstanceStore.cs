@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
@@ -56,7 +57,7 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
         var session = _coordinator.RequireSession();
         using var commandLease = session.EnterCommand();
         await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
-            $"insert into {_table} (tenant_scope_kind, tenant_id, instance_id, revision, status, human_task_pin_json, workflow_instance_id, workflow_step_id, suspension_operation_id, assignee_user_id, state_json, completed_at, cancelled_at, created_at, updated_at) values (@scope, @tenant, @id, 1, @status, @pin, @workflow, @step, @operation, @assignee, @state, @completedAt, @cancelledAt, @created, @updated);");
+            $"insert into {_table} (tenant_scope_kind, tenant_id, instance_id, revision, status, human_task_pin_json, workflow_instance_id, workflow_step_id, suspension_operation_id, assignee_user_id, state_json, required_consumer_ids_json, completed_at, cancelled_at, created_at, updated_at) values (@scope, @tenant, @id, 1, @status, @pin, @workflow, @step, @operation, @assignee, @state, @consumers, @completedAt, @cancelledAt, @created, @updated);");
         AddWriteParameters(command, Persisted(instance, 1), null);
         try
         {
@@ -80,7 +81,7 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
         var session = _coordinator.RequireSession();
         using var commandLease = session.EnterCommand();
         await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
-            $"update {_table} set revision=@next, status=@status, human_task_pin_json=@pin, workflow_instance_id=@workflow, workflow_step_id=@step, suspension_operation_id=@operation, assignee_user_id=@assignee, state_json=@state, completed_at=@completedAt, cancelled_at=@cancelledAt, updated_at=@updated where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id and revision=@expected;");
+            $"update {_table} set revision=@next, status=@status, human_task_pin_json=@pin, workflow_instance_id=@workflow, workflow_step_id=@step, suspension_operation_id=@operation, assignee_user_id=@assignee, state_json=@state, required_consumer_ids_json=@consumers, completed_at=@completedAt, cancelled_at=@cancelledAt, updated_at=@updated where tenant_scope_kind=@scope and tenant_id=@tenant and instance_id=@id and revision=@expected;");
         AddWriteParameters(command, Persisted(instance, expectedRevision + 1), null);
         command.Parameters.AddWithValue("next", expectedRevision + 1);
         command.Parameters.AddWithValue("expected", expectedRevision);
@@ -135,7 +136,7 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
         var session = _coordinator.RequireSession();
         using var commandLease = session.EnterCommand();
         await using var command = PostgreSqlRuntimeStoreSupport.CreateCommand(session, _options,
-            $"select revision, state_json::text from {_table} {predicate};");
+            $"select revision, state_json::text, required_consumer_ids_json::text from {_table} {predicate};");
         addParameters(command);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var values = new List<HumanTaskInstance>();
@@ -143,6 +144,7 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
         {
             var revision = reader.GetInt64(0);
             var value = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(1), PostgreSqlRuntimeJsonSerializerContext.Default.HumanTaskInstance);
+            value.RequiredCompletionConsumerIds = PostgreSqlRuntimeStoreSupport.Deserialize(reader.GetString(2), PostgreSqlRuntimeJsonSerializerContext.Default.StringArray);
             value.Key.EnsureValid();
             value.HumanTaskPin.EnsureValid();
             if (value.Revision != revision)
@@ -193,6 +195,7 @@ internal sealed class PostgreSqlHumanTaskInstanceStore : IHumanTaskInstanceStore
         command.Parameters.AddWithValue("operation", (object?)operationId ?? DBNull.Value);
         command.Parameters.AddWithValue("assignee", (object?)instance.AssigneeUserId ?? DBNull.Value);
         PostgreSqlRuntimeStoreSupport.AddJson(command, "state", PostgreSqlRuntimeStoreSupport.Serialize(instance, PostgreSqlRuntimeJsonSerializerContext.Default.HumanTaskInstance));
+        PostgreSqlRuntimeStoreSupport.AddJson(command, "consumers", PostgreSqlRuntimeStoreSupport.Serialize(instance.RequiredCompletionConsumerIds.ToArray(), PostgreSqlRuntimeJsonSerializerContext.Default.StringArray));
         command.Parameters.AddWithValue("completedAt", (object?)instance.CompletedAt ?? DBNull.Value);
         command.Parameters.AddWithValue("cancelledAt", (object?)instance.CancelledAt ?? DBNull.Value);
         command.Parameters.AddWithValue("created", instance.CreatedAt);

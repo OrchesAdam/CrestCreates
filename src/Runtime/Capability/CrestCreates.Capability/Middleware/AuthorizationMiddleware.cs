@@ -15,9 +15,13 @@ public sealed class AuthorizationMiddleware : ICapabilityPipelineMiddleware
         CapabilityExecutionContext context,
         CapabilityPipelineDelegate next)
     {
-        var authorized = await _authService.AuthorizeAsync(
-            context.CapabilityName, context.UserId, context.RequiredPermissions, context.CancellationToken)
-            .ConfigureAwait(false);
+        var authorized = context.Principal is null
+            ? await _authService.AuthorizeAsync(
+                context.CapabilityName, context.UserId, context.RequiredPermissions, context.CancellationToken)
+                .ConfigureAwait(false)
+            : await _authService.AuthorizeAsync(
+                context.CapabilityName, context.UserId, context.RequiredPermissions, context.CancellationToken, context.Principal)
+                .ConfigureAwait(false);
 
         if (!authorized)
         {

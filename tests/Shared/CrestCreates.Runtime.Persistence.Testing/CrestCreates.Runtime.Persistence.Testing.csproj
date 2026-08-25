@@ -14,5 +14,6 @@
     <ProjectReference Include="../../../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Eventing/CrestCreates.Runtime.Delivery.Abstractions/CrestCreates.Runtime.Delivery.Abstractions.csproj" />
   </ItemGroup>
 </Project>

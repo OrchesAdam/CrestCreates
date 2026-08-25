@@ -29,6 +29,7 @@
     <ProjectReference Include="../../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
     <ProjectReference Include="../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence/CrestCreates.Runtime.Persistence.csproj" />
     <ProjectReference Include="../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory/CrestCreates.Runtime.Persistence.InMemory.csproj" />
+    <ProjectReference Include="../../src/Runtime/Eventing/CrestCreates.Runtime.Delivery/CrestCreates.Runtime.Delivery.csproj" />
     <ProjectReference Include="../../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
     <ProjectReference Include="../../src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/CrestCreates.Agent.Memory.Abstractions.csproj" />
     <ProjectReference Include="../../src/Runtime/Agent/CrestCreates.Agent.Memory/CrestCreates.Agent.Memory.csproj" />

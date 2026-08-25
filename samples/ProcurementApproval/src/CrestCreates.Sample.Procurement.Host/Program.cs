@@ -29,7 +29,9 @@ using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.MultiTenancy;
 using CrestCreates.OpenApi;
 using CrestCreates.Runtime.Persistence;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.InMemory;
+using CrestCreates.Runtime.Delivery;
 using CrestCreates.Sample.Procurement.Application;
 using CrestCreates.Sample.Procurement.Application.Handlers;
 using CrestCreates.Sample.Procurement.Contracts;
@@ -69,7 +71,9 @@ builder.Services.AddDescriptorStableHash();
 builder.Services.AddMultiTenancy();
 builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
 builder.Services.AddRuntimePersistence();
+builder.Services.AddSingleton<IRuntimeStateContractContributor, ProcurementRuntimeStateContractContributor>();
 builder.Services.AddCrestCreatesInMemoryRuntimePersistence();
+builder.Services.AddRuntimeDelivery();
 builder.Services.AddTransient<AccountabilityHttpTerminalObserverMiddleware>();
 builder.Services.AddTransient<AccountabilityHttpOperationScopeMiddleware>();
 builder.Services.AddSingleton<InMemoryAuditSink>();
@@ -97,12 +101,25 @@ builder.Services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
 builder.Services.AddSingleton<IFormRegistry>(formRegistry);
 builder.Services.AddFormKernel();
 builder.Services.AddHumanTaskRuntime();
-builder.Services.AddScoped<ILocalEventHandler<HumanTaskCompletedEvent>, ProcurementHumanTaskDecisionHandler>();
+builder.Services.AddHumanTaskCompletionObligation(
+    ProcurementContractIds.ApprovalHumanTask,
+    1,
+    ProcurementHumanTaskDecisionHandler.ConsumerIdValue);
+builder.Services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, ProcurementHumanTaskDecisionHandler>(ProcurementHumanTaskDecisionHandler.ConsumerIdValue);
+// Keep the required consumer activation explicit for the NativeAOT host. The
+// generic registration above owns the delivery metadata/resolver; this
+// factory owns the concrete composition so the AOT DI graph does not have to
+// infer a constructor through the open generic registration path.
+builder.Services.Replace(ServiceDescriptor.Scoped<ProcurementHumanTaskDecisionHandler>(sp =>
+    new ProcurementHumanTaskDecisionHandler(
+        sp.GetRequiredService<IHumanTaskInstanceStore>(),
+        sp.GetRequiredService<ICapabilityDispatcher>(),
+        sp.GetRequiredService<IRuntimeStateContractRegistry>(),
+        sp.GetRequiredService<InMemoryProcurementRequestStore>())));
 builder.Services.AddWorkflowEngine();
 builder.Services.AddScoped<ProcurementLocalEventBus>();
 builder.Services.AddScoped<ILocalEventBus>(sp =>
     sp.GetRequiredService<ProcurementLocalEventBus>());
-builder.Services.AddScoped<IHumanTaskCompletionFailurePolicy, ProcurementHumanTaskCompletionFailurePolicy>();
 
 builder.Services.AddSingleton<ICapabilityHandlerRegistry, ProcurementHandlerRegistry>();
 builder.Services.AddSingleton<IDescriptorLookup>(new ProcurementDescriptorLookup(

@@ -27,4 +27,6 @@ public sealed class HumanTaskCreationRequest
     public string? RequestedOrganizationUnitId { get; init; }
     public string? RequestedPositionId { get; init; }
     public string? RequestedByUserId { get; init; }
+
+    public IReadOnlyList<string> RequiredCompletionConsumerIds { get; init; } = Array.Empty<string>();
 }

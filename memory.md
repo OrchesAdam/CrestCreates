@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-18 (Issue #69 Durable Control Plane and Reference Data Stores: Slices 1-10 implementation, NativeAOT provider closure, and source-discovered 77-case evidence governance are covered on PR #78. Shared contract kit, Draft/Organization/DataPermission InMemory parity with typed semantics, V011 migration/schema manifest, three PostgreSQL stores, base-first feature DI composition, source-generated reference-data JSON, structured-column fail-closed reads, six-surface crash windows, restart/corruption coverage, and AOT workflow/organization/rule scenarios are implemented.)
+Last Updated: 2026-08-24 (Issue #25 Phase 9c R4 follow-up corrections are implemented on PR #80's feature branch. Local PostgreSQL migration/contract checks and targeted runtime tests are being re-run; GitHub CI remains the final merge gate.)
 
 ## Purpose
 
@@ -9,6 +9,120 @@ This file records the current platform status for CrestCreates so future threads
 ---
 
 ## Active Design Work
+
+### Issue #25 — Phase 9c Transactional Outbox & Reliable Event Delivery
+
+Status: Design Spec R4 APPROVED / FROZEN; implementation remediation in progress in PR #80
+
+Normative draft:
+`docs/superpowers/specs/2026-08-20-phase-9c-transactional-outbox-reliable-event-delivery-design.md`
+
+The design makes Transactional Outbox an explicit participant in the existing
+`IRuntimeTransactionCoordinator` commit kernel. It does not add a second UoW,
+expose provider transactions, or turn broker/Local Event compatibility code
+into persistence authority. Transactional append is separate from dispatch
+claim/Ack/Retry/DeadLetter ownership. Producer MessageIds are stable;
+PostgreSQL lease time is provider-authoritative; monotonically increasing fences
+reject expired or stale owners; delivery is at-least-once without ordering or
+exactly-once claims.
+
+The two golden paths are HumanTask Completed + completion-event Outbox append
+to the required Workflow continuation consumer (with typed Local Event only as
+a compatibility lane), and every committed Workflow lifecycle transition +
+prepared safe AuditEnvelope append to Accountability-internal prepared
+recording. HumanTask delivery failure leaves business state Completed;
+`CompletionDispatchFailed` becomes compatibility-only and legacy rows require
+explicit upgrade reconciliation. Workflow Accountability leaves the
+best-effort observer lane and persists the prepared envelope, including
+Sanitization and Integrity, so retry across a sanitizer upgrade cannot change
+the fact hash. The intended invariant is one Accountability preparation
+implementation. Sinks remain hidden behind the
+Accountability recording boundary.
+
+Provider closure requires the frozen V012 Runtime migration/schema catalog,
+a runner-free semantic kit executed by InMemory and PostgreSQL,
+commit-unknown both-or-neither observation, restart/ack-loss/crash-worker
+coverage, Outbox-owned terminal dead-letter state, generated JSON with explicit
+ContractId handlers, and a real linux-x64 NativeAOT publish-link-run executing
+both persisted payload paths. Control Plane/reference-data Saves remain
+top-level and never implicitly append.
+
+R2 closes the first design review's four P1 and five P2 blockers without
+reopening the architecture. Claim generation now consumes attempt budget and
+over-budget claims cannot invoke handlers. Missing required handler/sink
+composition fails health/startup without terminalizing messages. The Runtime
+transaction layer classifies commit-unknown and forbids blind replay; the
+first-class HumanTask caller observation contract remains open closure work,
+and conflicting append throws a transaction-aborting provider-neutral
+exception.
+Accountability owns its delivery handler; sink membership is delivery-time
+composition; V012 provider preflight owns legacy failure-row detection; initial
+delivery eligibility uses provider insertion time; and handler registration
+caches metadata rather than scoped instances.
+
+R3 closes the second review's cross-module composition and trusted-entry gaps.
+Workflow-correlated HumanTask messages now persist the stable Workflow
+continuation required-consumer ID; the generic LocalEvent zero-handler behavior
+cannot authorize Ack, while standalone tasks require no Workflow consumer.
+Pending/Leased ContractIds and RequiredConsumerIds are checked by readiness and
+again atomically by Claim, so unsupported active facts make the Host unhealthy
+without lease/attempt mutation; terminal facts impose no current registration
+obligation. Public `IAuditRecorder` remains candidate-only, and prepared Audit
+validation/fan-out is Accountability-internal. Commit-unknown reconciliation
+now distinguishes a matching durable result from a different concurrent winner
+without claiming caller ownership. Exact final-fence Ack/DeadLetter replay is
+provider-parity `AlreadyApplied` behavior.
+
+R4 remediation closes the remaining delivery-boundary findings. Optional
+LocalEvent compatibility execution is deadline-bounded and retained by a
+bounded detached-execution tracker, so a non-cooperative handler cannot hold
+the reliable outbox Ack path open. Procurement completion now carries a
+generated-json durable `ProcurementHumanTaskDecisionFact`; its internal Apply
+capabilities are not permission-gated and exact decision replay is Duplicate,
+while changed identity is Conflict. Activation Review retains the completion
+event identity and detached decision snapshot for exact replay classification,
+and its human-task consumer maps AgentTool outcomes to Ack/Duplicate/Conflict.
+PostgreSQL obligation preflight uses provider-side bounded count/sample queries,
+and continuation acceptance requires persisted canonical-integrity proof before
+Duplicate. Missing preflight registration is fail-closed.
+
+The PostgreSQL NativeAOT host now executes the persisted HumanTask completion
+payload through the production outbox handler, required Workflow consumer, and
+terminal Ack, emitting `PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK`. The Phase
+9c evidence ledger has an executable critical-binding gate, and CI runs that
+gate explicitly alongside the PostgreSQL outbox and NativeAOT fixture tests.
+
+R4 closes the final correctness pass. Workflow continuation Ack now ends at an
+atomic durable Suspended-to-Running acceptance plus exact applied
+CompletionEventId discriminator; waiting-key absence alone is not duplicate
+proof, while post-resume `RunAsync` crash liveness remains a Workflow Runtime
+concern outside #25. Outbox delivery authority is exactly the ContractId handler
+plus persisted RequiredConsumerIds. Generic LocalEvent handlers are bounded
+best-effort, and every business-critical first-party handler must migrate to a
+stable consumer ID captured on the HumanTask. Atomic Claim composition mismatch
+now throws only provider-neutral `OutboxCompositionException`, distinct from
+infrastructure failure. Reliable Accountability generically requires at least
+one configured sink; only FullDurable evidence composed with
+`PostgreSqlAuditSink` claims final sink persistence, without expanding
+`IAuditSink`.
+
+The current follow-up closes the remaining review findings: V012 now persists
+the complete continuation receipt with a completion-event primary key and
+deferred RESTRICT foreign keys to Workflow/HumanTask rows; persisted receipt
+reads validate scalar consistency and canonical integrity. Missing Workflow
+correlation and malformed Activation/Procurement durable facts fail closed as
+explicit conflicts. Optional compatibility work reserves bounded tracker
+capacity before starting detached execution. The PostgreSQL AOT fixture now
+uses a correlated Workflow/HumanTask pair, durable continuation acceptance, and
+the Accountability outbox handler; its fixed reliable-delivery sentinels are
+asserted by the fixture test. Phase 9c now has an explicit
+acceptance-to-case/surface authority copied from the frozen Case Matrix,
+including ACT01/ACT02 and OUT01/OUT02, and the ledger validates exact
+CaseId/AcceptanceName/Runner/EvidenceVector tuples. Executable tuple
+infrastructure is implemented, but final 145 normative + 25 supplemental
+executed-tuple closure remains pending until each required test assertion
+emits its JSONL tuple; CI must not claim closure from runner completion or
+source-file markers.
 
 ### Issue #69 — Phase 9b+ Durable Control Plane and Reference Data Stores
 

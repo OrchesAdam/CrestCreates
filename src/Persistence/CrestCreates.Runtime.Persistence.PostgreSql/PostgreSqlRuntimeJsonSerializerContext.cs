@@ -7,6 +7,8 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Persistence;
 using CrestCreates.Metadata.Abstractions.Runtime;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Metadata.AgentTool;
 using CrestCreates.Workflow.Abstractions;
 
@@ -18,6 +20,7 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 [JsonSerializable(typeof(WorkflowInstance))]
 [JsonSerializable(typeof(HumanTaskInstance))]
 [JsonSerializable(typeof(WorkflowSuspensionReceipt))]
+[JsonSerializable(typeof(WorkflowContinuationAcceptance))]
 [JsonSerializable(typeof(RuntimeDescriptorPin))]
 [JsonSerializable(typeof(DescriptorSnapshot))]
 [JsonSerializable(typeof(AuditEnvelope))]
@@ -51,6 +54,9 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 [JsonSerializable(typeof(AgentCompressedContextBlock))]
 [JsonSerializable(typeof(AgentMemoryCandidate))]
 [JsonSerializable(typeof(AgentMemoryItem))]
+[JsonSerializable(typeof(RuntimeStateValue))]
+[JsonSerializable(typeof(CanonicalHash))]
+[JsonSerializable(typeof(string[]))]
 internal sealed partial class PostgreSqlRuntimeJsonSerializerContext : JsonSerializerContext
 {
 }

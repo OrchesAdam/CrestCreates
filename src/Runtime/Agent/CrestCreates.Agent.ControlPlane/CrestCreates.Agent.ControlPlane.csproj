@@ -21,5 +21,6 @@
     <ProjectReference Include="../../../Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
     <ProjectReference Include="../../../Runtime/Persistence/CrestCreates.Runtime.Persistence.Abstractions/CrestCreates.Runtime.Persistence.Abstractions.csproj" />
     <ProjectReference Include="../../../Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="../../../Runtime/Eventing/CrestCreates.Runtime.Delivery.Abstractions/CrestCreates.Runtime.Delivery.Abstractions.csproj" />
   </ItemGroup>
 </Project>

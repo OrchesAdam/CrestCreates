@@ -64,6 +64,15 @@ public static class DescriptorActivationDiagnosticCodes
     private const string ReviewResultDraftMismatchValue = "ACTIVATION_REVIEW_RESULT_DRAFT_MISMATCH";
     public static DiagnosticCode ReviewResultDraftMismatch { get; } = new(ReviewResultDraftMismatchValue);
 
+    private const string ReviewDuplicateValue = "ACTIVATION_REVIEW_DUPLICATE";
+    public static DiagnosticCode ReviewDuplicate { get; } = new(ReviewDuplicateValue);
+
+    private const string ReviewConflictValue = "ACTIVATION_REVIEW_CONFLICT";
+    public static DiagnosticCode ReviewConflict { get; } = new(ReviewConflictValue);
+
+    private const string ReviewPayloadInvalidValue = "ACTIVATION_REVIEW_PAYLOAD_INVALID";
+    public static DiagnosticCode ReviewPayloadInvalid { get; } = new(ReviewPayloadInvalidValue);
+
     private const string PackagePreviewNotFoundValue = "ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND";
     public static DiagnosticCode PackagePreviewNotFound { get; } = new(PackagePreviewNotFoundValue);
 

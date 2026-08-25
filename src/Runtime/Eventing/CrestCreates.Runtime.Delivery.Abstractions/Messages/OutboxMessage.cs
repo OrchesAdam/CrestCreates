@@ -1,0 +1,17 @@
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+
+namespace CrestCreates.Runtime.Delivery.Abstractions.Messages;
+
+public sealed class OutboxMessage
+{
+    public required OutboxMessageMetadata Metadata { get; init; }
+    public required byte[] Payload { get; init; }
+    public required CanonicalHash Integrity { get; init; }
+
+    public OutboxMessage Snapshot() => new()
+    {
+        Metadata = Metadata with { RequiredConsumerIds = Metadata.RequiredConsumerIds.ToArray() },
+        Payload = Payload.ToArray(),
+        Integrity = Integrity with { }
+    };
+}

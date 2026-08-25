@@ -8,6 +8,8 @@ using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Workflow.Accountability;
+using CrestCreates.Runtime.Delivery.Abstractions.Messages;
 
 namespace CrestCreates.Workflow;
 
@@ -23,6 +25,7 @@ internal sealed class WorkflowSuspensionCommitter
     private readonly IWorkflowSuspensionReceiptStore _receipts;
     private readonly IDescriptorSnapshotStore? _snapshots;
     private readonly ICanonicalHashComputer _hashComputer;
+    private readonly WorkflowAccountabilityOutboxAppender? _accountabilityOutbox;
 
     public WorkflowSuspensionCommitter(
         IRuntimeTransactionCoordinator transactions,
@@ -30,7 +33,8 @@ internal sealed class WorkflowSuspensionCommitter
         IHumanTaskInstanceStore humanTasks,
         IWorkflowSuspensionReceiptStore receipts,
         ICanonicalHashComputer hashComputer,
-        IDescriptorSnapshotStore? snapshots = null)
+        IDescriptorSnapshotStore? snapshots = null,
+        WorkflowAccountabilityOutboxAppender? accountabilityOutbox = null)
     {
         _transactions = transactions;
         _workflows = workflows;
@@ -38,6 +42,7 @@ internal sealed class WorkflowSuspensionCommitter
         _receipts = receipts;
         _hashComputer = hashComputer;
         _snapshots = snapshots;
+        _accountabilityOutbox = accountabilityOutbox;
     }
 
     public async Task CommitAsync(
@@ -45,6 +50,7 @@ internal sealed class WorkflowSuspensionCommitter
         WorkflowInstance suspendedWorkflow,
         HumanTaskInstance preparedHumanTask,
         string suspensionOperationId,
+        OutboxMessage? accountabilityMessage,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(workflowBefore);
@@ -81,8 +87,18 @@ internal sealed class WorkflowSuspensionCommitter
 
             await _humanTasks.AddAsync(preparedHumanTask, ct).ConfigureAwait(false);
             await _workflows.UpdateAsync(suspendedWorkflow, workflowBefore.Revision, ct).ConfigureAwait(false);
+            if (accountabilityMessage is not null)
+                await _accountabilityOutbox!.AppendAsync(accountabilityMessage, ct).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
+
+    public Task CommitAsync(
+        WorkflowInstance workflowBefore,
+        WorkflowInstance suspendedWorkflow,
+        HumanTaskInstance preparedHumanTask,
+        string suspensionOperationId,
+        CancellationToken cancellationToken)
+        => CommitAsync(workflowBefore, suspendedWorkflow, preparedHumanTask, suspensionOperationId, null, cancellationToken);
 
     private static bool ReceiptMatches(WorkflowSuspensionReceipt expected, WorkflowSuspensionReceipt actual)
         => expected.Scope == actual.Scope

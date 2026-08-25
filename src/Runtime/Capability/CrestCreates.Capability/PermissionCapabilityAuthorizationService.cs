@@ -1,5 +1,6 @@
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
+using System.Security.Claims;
 
 namespace CrestCreates.Capability;
 
@@ -17,6 +18,14 @@ public sealed class PermissionCapabilityAuthorizationService : ICapabilityAuthor
         string? userId,
         IReadOnlyList<string> requiredPermissions,
         CancellationToken ct)
+        => await AuthorizeAsync(capabilityName, userId, requiredPermissions, ct, principal: null).ConfigureAwait(false);
+
+    public async Task<bool> AuthorizeAsync(
+        string capabilityName,
+        string? userId,
+        IReadOnlyList<string> requiredPermissions,
+        CancellationToken ct,
+        ClaimsPrincipal? principal)
     {
         if (requiredPermissions.Count == 0)
             return true;
@@ -26,7 +35,9 @@ public sealed class PermissionCapabilityAuthorizationService : ICapabilityAuthor
                 "Capability requires permissions but no IPermissionChecker is registered. " +
                 "Register IPermissionChecker via AddCrestAuthorization() to enable capability authorization.");
 
-        var result = await _permissionChecker.IsGrantedAsync(requiredPermissions.ToArray());
+        var result = principal is null
+            ? await _permissionChecker.IsGrantedAsync(requiredPermissions.ToArray())
+            : await _permissionChecker.IsGrantedAsync(principal, requiredPermissions.ToArray());
         return result.AllGranted;
     }
 }

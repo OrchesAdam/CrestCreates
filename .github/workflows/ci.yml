@@ -45,6 +45,13 @@ jobs:
       - name: Reset Control Plane reference-data evidence ledger
         run: rm -rf tests/artifacts/control-plane-evidence
 
+      - name: Reset Phase 9c executed-tuple evidence ledger
+        run: |
+          rm -rf tests/artifacts/phase9c-evidence
+          mkdir -p tests/artifacts/phase9c-evidence
+          echo PHASE9C_EVIDENCE_ARTIFACT_DIR=$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence >> "$GITHUB_ENV"
+          echo PHASE9C_EVIDENCE_ARTIFACT=$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence/ci.jsonl >> "$GITHUB_ENV"
+
       # ── Core ──
       - name: Test — Core
         run: dotnet test tests/Core/CrestCreates.Core.Abstractions.Tests --no-build
@@ -153,6 +160,7 @@ jobs:
 
       - name: Test — Runtime / Eventing
         run: |
+          dotnet test tests/Runtime/Eventing/CrestCreates.Runtime.Delivery.Tests --no-build
           dotnet test tests/Runtime/Eventing/CrestCreates.Event.Tests --no-build
           dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.Tests --no-build
 
@@ -206,3 +214,13 @@ jobs:
 
       - name: Test — ControlPlane JsonContracts AotFixture (NativeAOT publish/link/run)
         run: dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests --no-build
+
+      # The old runner-green closure was intentionally removed: it could mark
+      # every acceptance in a project as Passed without the case assertion ever
+      # executing. Real producers may append assertion-produced tuples to the
+      # shared artifact above, but the exact-set closure remains disabled until
+      # every required runner emits its tuples.
+      - name: Test — Phase 9c executable evidence tuple guards
+        run: |
+          dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build \
+            --filter "FullyQualifiedName~FrozenCaseMatrix_ShouldRetainAllRcaEvidenceSurfaces|FullyQualifiedName~CriticalPhase9cSources_ShouldRemainBoundToProductionCode"

@@ -244,7 +244,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
     public async Task<AgentToolResult<ActivationRequest>> ApproveActivationRequestAsync(
         AgentToolInvocationContext context, string requestId,
-        DescriptorActivationReviewDecision reviewDecision, CancellationToken ct = default)
+        DescriptorActivationReviewDecision reviewDecision, CancellationToken ct = default, string? completionEventId = null)
     {
         var snapshot = GetRequestSnapshot(context.TenantId, requestId);
         if (snapshot is null)
@@ -253,6 +253,10 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         var request = snapshot.Request;
+
+        if (snapshot.AppliedDecision is not null
+            && request.Status is (ActivationRequestStatus.Approved or ActivationRequestStatus.Activated))
+            return ClassifyAppliedReview(snapshot, reviewDecision, completionEventId);
 
         // Fail-closed: BindingSnapshot.Hashes must be present for hash-binding validation.
         if (request.BindingSnapshot.Hashes is null)
@@ -353,7 +357,12 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
         // Transition to Approved
         var updatedRequest = request with { Status = ActivationRequestStatus.Approved };
-        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner!);
+        _requests[(context.TenantId, requestId)] = snapshot with
+        {
+            Request = updatedRequest,
+            AppliedCompletionEventId = completionEventId,
+            AppliedDecision = reviewDecision
+        };
 
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Approve,
             "Approved", [], ct, updatedRequest);
@@ -364,7 +373,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
     public async Task<AgentToolResult<ActivationRequest>> RejectActivationRequestAsync(
         AgentToolInvocationContext context, string requestId,
-        DescriptorActivationReviewDecision reviewDecision, CancellationToken ct = default)
+        DescriptorActivationReviewDecision reviewDecision, CancellationToken ct = default, string? completionEventId = null)
     {
         var snapshot = GetRequestSnapshot(context.TenantId, requestId);
         if (snapshot is null)
@@ -373,6 +382,9 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         var request = snapshot.Request;
+
+        if (snapshot.AppliedDecision is not null && request.Status == ActivationRequestStatus.Rejected)
+            return ClassifyAppliedReview(snapshot, reviewDecision, completionEventId);
 
         // Fail-closed: BindingSnapshot.Hashes must be present.
         if (request.BindingSnapshot.Hashes is null)
@@ -426,7 +438,12 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         var updatedRequest = request with { Status = ActivationRequestStatus.Rejected };
-        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner!);
+        _requests[(context.TenantId, requestId)] = snapshot with
+        {
+            Request = updatedRequest,
+            AppliedCompletionEventId = completionEventId,
+            AppliedDecision = reviewDecision
+        };
 
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Reject,
             "Rejected", [], ct, updatedRequest);
@@ -470,7 +487,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             }).ToList();
 
             var updatedRequest = request with { Status = ActivationRequestStatus.Stale };
-            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner!);
+            _requests[(context.TenantId, requestId)] = snapshot with { Request = updatedRequest };
 
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Stale,
                 "EvidenceStale", staleDiagnostics, ct, updatedRequest);
@@ -534,7 +551,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             }).ToList();
 
             var staleRequest = request with { Status = ActivationRequestStatus.Stale };
-            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(staleRequest, snapshot.Owner!);
+            _requests[(context.TenantId, requestId)] = snapshot with { Request = staleRequest };
 
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.Stale,
                 "EvidenceStale", staleDiagnostics, ct, staleRequest);
@@ -548,7 +565,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         if (gateResult.Status != AgentToolResultStatus.Success)
         {
             var failedRequest = request with { Status = ActivationRequestStatus.ActivationFailed };
-            _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(failedRequest, snapshot.Owner!);
+            _requests[(context.TenantId, requestId)] = snapshot with { Request = failedRequest };
 
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
                 "GateRejected", gateResult.Diagnostics, ct, failedRequest);
@@ -557,7 +574,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
         // Transition to Activated — gate executed successfully
         var activatedRequest = request with { Status = ActivationRequestStatus.Activated };
-        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(activatedRequest, snapshot.Owner!);
+        _requests[(context.TenantId, requestId)] = snapshot with { Request = activatedRequest };
 
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Activate,
             "GateExecuted", [], ct, activatedRequest);
@@ -593,7 +610,7 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         var updatedRequest = request with { Status = ActivationRequestStatus.Cancelled };
-        _requests[(context.TenantId, requestId)] = new ActivationResourceSnapshot(updatedRequest, snapshot.Owner!);
+        _requests[(context.TenantId, requestId)] = snapshot with { Request = updatedRequest };
 
         await RecordAudit(context, requestId, DescriptorActivationAuditAction.Cancel,
             reason, [], ct, updatedRequest);
@@ -618,6 +635,49 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
     private ActivationResourceSnapshot? GetRequestSnapshot(string tenantId, string requestId)
         => _requests.TryGetValue((tenantId, requestId), out var snapshot) ? snapshot : null;
+
+    private static AgentToolResult<ActivationRequest> ClassifyAppliedReview(
+        ActivationResourceSnapshot snapshot,
+        DescriptorActivationReviewDecision decision,
+        string? completionEventId)
+    {
+        var same = !string.IsNullOrWhiteSpace(completionEventId)
+            && string.Equals(snapshot.AppliedCompletionEventId, completionEventId, StringComparison.Ordinal)
+            && DecisionsEqual(snapshot.AppliedDecision!, decision);
+        if (same)
+        {
+            return AgentToolResult<ActivationRequest>.SucceededWithDiagnostics(
+                snapshot.Request,
+                [new AgentToolDiagnostic
+                {
+                    Code = DescriptorActivationDiagnosticCodes.ReviewDuplicate,
+                    Severity = SeverityLevel.Info,
+                    Message = "The exact activation review completion was already applied."
+                }]);
+        }
+
+        return AgentToolResult<ActivationRequest>.InvalidRequest(
+            [new AgentToolDiagnostic
+            {
+                Code = DescriptorActivationDiagnosticCodes.ReviewConflict,
+                Severity = SeverityLevel.Error,
+                Message = "The activation request already has a different durable review decision."
+            }]);
+    }
+
+    private static bool DecisionsEqual(
+        DescriptorActivationReviewDecision left,
+        DescriptorActivationReviewDecision right)
+        => string.Equals(left.ActivationRequestId, right.ActivationRequestId, StringComparison.Ordinal)
+            && string.Equals(left.TenantId, right.TenantId, StringComparison.Ordinal)
+            && string.Equals(left.CorrelationId, right.CorrelationId, StringComparison.Ordinal)
+            && left.Decision == right.Decision
+            && left.ActorKind == right.ActorKind
+            && string.Equals(left.ActorId, right.ActorId, StringComparison.Ordinal)
+            && string.Equals(left.Reason, right.Reason, StringComparison.Ordinal)
+            && left.DecidedAt == right.DecidedAt
+            && string.Equals(left.BoundEvidenceHash.Value, right.BoundEvidenceHash.Value, StringComparison.Ordinal)
+            && string.Equals(left.BoundEnvelopeHash.Value, right.BoundEnvelopeHash.Value, StringComparison.Ordinal);
 
     protected static DescriptorActivationEligibility DeriveEligibility(
         DescriptorLifecycleDecisionKind governanceDecision,

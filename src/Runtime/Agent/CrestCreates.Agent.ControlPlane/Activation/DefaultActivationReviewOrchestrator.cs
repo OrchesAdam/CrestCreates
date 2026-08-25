@@ -2,6 +2,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
@@ -13,18 +14,18 @@ namespace CrestCreates.Agent.ControlPlane.Activation;
 /// </summary>
 public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrchestrator
 {
-    private readonly IHumanTaskRuntime _humanTaskRuntime;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDescriptorActivationRequestService _activationRequestService;
     private readonly ILogger<DefaultActivationReviewOrchestrator> _logger;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
 
     public DefaultActivationReviewOrchestrator(
-        IHumanTaskRuntime humanTaskRuntime,
+        IServiceScopeFactory scopeFactory,
         IDescriptorActivationRequestService activationRequestService,
         ILogger<DefaultActivationReviewOrchestrator> logger,
         IRuntimeStateContractRegistry stateRegistry)
     {
-        _humanTaskRuntime = humanTaskRuntime;
+        _scopeFactory = scopeFactory;
         _activationRequestService = activationRequestService;
         _logger = logger;
         _stateRegistry = stateRegistry;
@@ -86,10 +87,18 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
             TenantId = activationRequest.TenantId,
             Input = _stateRegistry.Capture(taskInput),
             WorkflowKey = null,
-            WorkflowStepId = null
+            WorkflowStepId = null,
+            RequiredCompletionConsumerIds = [DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue]
         };
 
-        var instance = await _humanTaskRuntime.CreateAsync(creationRequest, ct);
+        // HumanTask runtime is scoped because it owns the scoped local-event/transaction
+        // collaborators. The control-plane orchestrator remains singleton, so acquire the
+        // runtime only for the operation that creates the task and dispose that scope after
+        // the transactional call completes.
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var instance = await scope.ServiceProvider
+            .GetRequiredService<IHumanTaskRuntime>()
+            .CreateAsync(creationRequest, ct);
 
         _logger.LogInformation(
             "Created activation review HumanTask {TaskInstanceId} for activation request {RequestId}",
@@ -98,8 +107,10 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
         return AgentToolResult<string>.Success(instance.Id);
     }
 
-    public async Task ProcessReviewDecisionAsync(
-        DescriptorActivationReviewDecision reviewDecision, CancellationToken ct = default)
+    public async Task<ActivationReviewDispatchOutcome> ProcessReviewDecisionAsync(
+        DescriptorActivationReviewDecision reviewDecision,
+        string completionEventId,
+        CancellationToken ct = default)
     {
         var context = new AgentToolInvocationContext
         {
@@ -123,8 +134,9 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
                 reviewDecision.ActivationRequestId, reviewDecision.ActorId);
 
             // ApproveActivationRequestAsync now internally executes evidence recheck + gate
-            await _activationRequestService.ApproveActivationRequestAsync(
-                context, reviewDecision.ActivationRequestId, reviewDecision, ct);
+            var result = await _activationRequestService.ApproveActivationRequestAsync(
+                context, reviewDecision.ActivationRequestId, reviewDecision, ct, completionEventId);
+            return Classify(result);
         }
         else if (reviewDecision.Decision == DescriptorActivationReviewOutcome.Rejected)
         {
@@ -132,8 +144,21 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
                 "Processing rejection for activation request {RequestId} by actor {ActorId}",
                 reviewDecision.ActivationRequestId, reviewDecision.ActorId);
 
-            await _activationRequestService.RejectActivationRequestAsync(
-                context, reviewDecision.ActivationRequestId, reviewDecision, ct);
+            var result = await _activationRequestService.RejectActivationRequestAsync(
+                context, reviewDecision.ActivationRequestId, reviewDecision, ct, completionEventId);
+            return Classify(result);
         }
+
+        return ActivationReviewDispatchOutcome.Conflict;
+    }
+
+    private static ActivationReviewDispatchOutcome Classify(AgentToolResult<ActivationRequest> result)
+    {
+        if (result.Status == AgentToolResultStatus.Success)
+            return ActivationReviewDispatchOutcome.Accepted;
+        if (result.Status == AgentToolResultStatus.SucceededWithDiagnostics
+            && result.Diagnostics.Any(d => string.Equals(d.Code.Value, DescriptorActivationDiagnosticCodes.ReviewDuplicate.Value, StringComparison.Ordinal)))
+            return ActivationReviewDispatchOutcome.Duplicate;
+        return ActivationReviewDispatchOutcome.Conflict;
     }
 }

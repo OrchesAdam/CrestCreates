@@ -143,6 +143,7 @@ public static class RuntimePersistenceContractCases
         Key = new RuntimeInstanceKey(scope, id),
         WorkflowKey = workflow,
         WorkflowStepId = step,
+        RequiredCompletionConsumerIds = ["crest.workflow.humantask-continuation/v1"],
         CreatedAt = createdAt,
         HumanTaskPin = Pin("humantask", "review", "HumanTask")
     };

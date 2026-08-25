@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
@@ -10,6 +13,8 @@ using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Core.Abstractions.Serialization;
 using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.EventBus.Abstractions;
+using CrestCreates.Capability;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -21,6 +26,10 @@ using CrestCreates.Organization.Abstractions;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Delivery;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
+using CrestCreates.Runtime.Delivery.Abstractions.Registration;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Agent.Memory.Abstractions.Accountability;
@@ -32,6 +41,7 @@ using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using Microsoft.Extensions.Logging;
 
 if (args.Length is not (2 or 3))
 {
@@ -50,14 +60,32 @@ if (args.Length == 3)
 await new PostgreSqlRuntimeMigrationRunner(options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
 await RunControlPlaneReferenceDataMainlineAsync(options);
 
-var workflowDescriptor = new WorkflowDescriptor { Id = "approval", Name = "Approval", Version = 1 };
+var workflowDescriptor = new WorkflowDescriptor
+{
+    Id = "approval",
+    Name = "Approval",
+    Version = 1,
+    Steps =
+    [
+        new WorkflowStep
+        {
+            Id = "review",
+            Name = "Review",
+            Target = new HumanTaskTarget
+            {
+                HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor> { Id = "review", Version = 1 }
+            }
+        }
+    ]
+};
 var humanTaskDescriptor = new HumanTaskDescriptor
 {
     Id = "review",
     Name = "Review",
     Version = 1,
     Interaction = new VersionedDescriptorRef<IInteractionDescriptor>("review-form", 1),
-    AssigneeStrategy = AssigneeStrategy.SingleUser
+    AssigneeStrategy = AssigneeStrategy.SingleUser,
+    Outcomes = [new CompletionOutcome { Condition = CompletionCondition.Approve }]
 };
 var workflowKey = new RuntimeInstanceKey("aot", "workflow");
 var humanTaskKey = new RuntimeInstanceKey("aot", "task");
@@ -67,6 +95,18 @@ await using (var first = BuildProvider(options, workflowDescriptor, humanTaskDes
 {
     using var scope = first.CreateScope();
     var services = scope.ServiceProvider;
+    var outbox = services.GetRequiredService<IOutboxDispatchStore>();
+    var outboxClaims = await outbox.ClaimAsync(new OutboxClaimRequest
+    {
+        OwnerId = "aot-outbox-sentinel",
+        BatchSize = 1,
+        LeaseDuration = TimeSpan.FromMinutes(1),
+        SupportedContractIds = new HashSet<string>(StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+    });
+    if (outboxClaims.Count != 0 || await outbox.GetProviderUtcNowAsync() == default)
+        return 8;
+    Console.WriteLine("PHASE9C_POSTGRES_OUTBOX_AOT_OK");
     var states = services.GetRequiredService<IRuntimeStateContractRegistry>();
     var workflowPins = services.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>();
     var taskPins = services.GetRequiredService<IRuntimeDescriptorPinResolver<HumanTaskDescriptor>>();
@@ -75,6 +115,12 @@ await using (var first = BuildProvider(options, workflowDescriptor, humanTaskDes
         Key = workflowKey,
         WorkflowPin = workflowPins.Capture(workflowDescriptor).Pin,
         StartedAt = DateTimeOffset.UnixEpoch,
+        AuditOrigin = new AuditOrigin
+        {
+            CorrelationId = "aot-workflow",
+            InitiatingActor = new AuditActor { Kind = "system", Id = "aot" },
+            InvocationSource = "aot-fixture"
+        },
         Variables = new Dictionary<string, RuntimeStateValue>(StringComparer.Ordinal)
         {
             ["mutable"] = states.Capture(mutable)
@@ -86,6 +132,7 @@ await using (var first = BuildProvider(options, workflowDescriptor, humanTaskDes
         HumanTaskPin = taskPins.Capture(humanTaskDescriptor).Pin,
         WorkflowKey = workflowKey,
         WorkflowStepId = "review",
+        RequiredCompletionConsumerIds = ["crest.workflow.humantask-continuation/v1"],
         Status = HumanTaskInstanceStatus.Assigned,
         Input = states.Capture(new MutableNestedAotState { Name = "input", Values = ["typed"] }),
         CreatedAt = DateTimeOffset.UnixEpoch
@@ -161,6 +208,146 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
     if (duplicate.Status != AuditSinkWriteStatus.Duplicate)
         return 7;
     Console.WriteLine("PHASE9B_POSTGRES_AUDIT_RETRY_OK");
+
+    // Complete the correlated persisted HumanTask and invoke the production
+    // outbox handler against a fresh provider. This is the AOT golden path for
+    // generated payload deserialization, required continuation execution,
+    // durable acceptance, accountability delivery and terminal ack.
+    var runtime = services.GetRequiredService<IHumanTaskRuntime>();
+    var completed = await runtime.CompleteAsync(new HumanTaskCompletionRequest
+    {
+        HumanTaskKey = humanTaskKey,
+        Outcome = "Approve",
+        ActorId = "aot"
+    });
+    var dispatchStore = services.GetRequiredService<IOutboxDispatchStore>();
+    var claims = await dispatchStore.ClaimAsync(new OutboxClaimRequest
+    {
+        OwnerId = "aot-human-task-dispatch",
+        BatchSize = 1,
+        LeaseDuration = TimeSpan.FromMinutes(1),
+        SupportedContractIds = new HashSet<string>([HumanTaskDeliveryConstants.CompletedContractId], StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>([HumanTaskDeliveryConstants.WorkflowContinuationConsumerId], StringComparer.Ordinal)
+    });
+    var claim = claims.Single(item => item.Message.Metadata.MessageId == completed.CompletionEventId);
+    var registration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+        .Single(item => item.ContractId == HumanTaskDeliveryConstants.CompletedContractId);
+    var deliveryOutcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    {
+        Message = claim.Message,
+        Lease = claim.Lease,
+        AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+        Services = services
+    });
+    var acceptance = await services.GetRequiredService<IWorkflowContinuationAcceptanceStore>()
+        .GetAsync(new RuntimeTenantScope("aot"), completed.CompletionEventId!);
+    var humanTaskAck = await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease);
+    if (deliveryOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
+        || acceptance is null
+        || humanTaskAck is not OutboxDeliveryMutationResult.Applied)
+    {
+        return 9;
+    }
+    Console.WriteLine("PHASE9C_POSTGRES_HUMANTASK_DISPATCH_AOT_OK");
+    Console.WriteLine("CRESTCREATES_RUNTIME_OUTBOX_OK");
+    Console.WriteLine("CRESTCREATES_HUMANTASK_RELIABLE_DELIVERY_OK");
+
+}
+
+// The accountability delivery proof deliberately crosses provider lifetimes.
+// Provider A commits the sink fact and then disappears before Ack (the response
+// loss/crash window). Provider B recovers the expired lease, observes the same
+// durable fact as Duplicate, and only then acknowledges the outbox message.
+var accountabilityMessageId = string.Empty;
+OutboxDeliveryLease accountabilityStaleLease;
+await using (var providerA = BuildProvider(options, workflowDescriptor, humanTaskDescriptor))
+{
+    using var scope = providerA.CreateScope();
+    var services = scope.ServiceProvider;
+    var dispatchStore = services.GetRequiredService<IOutboxDispatchStore>();
+    var claims = await dispatchStore.ClaimAsync(new OutboxClaimRequest
+    {
+        OwnerId = "aot-accountability-provider-a",
+        BatchSize = 32,
+        // Keep the crash window short so the recovery claim is deterministic.
+        LeaseDuration = TimeSpan.FromMilliseconds(250),
+        SupportedContractIds = new HashSet<string>(["crest.accountability.audit-envelope/v1"], StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+    });
+    var claim = claims.First();
+    var registration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+        .Single(item => item.ContractId == "crest.accountability.audit-envelope/v1");
+    var outcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    {
+        Message = claim.Message,
+        Lease = claim.Lease,
+        AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+        Services = services
+    });
+    if (outcome != OutboxDeliveryOutcome.Accepted)
+        return 10;
+    accountabilityMessageId = claim.Message.Metadata.MessageId;
+    accountabilityStaleLease = claim.Lease;
+    Console.WriteLine("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_ACCEPTED_BEFORE_RESTART_OK");
+}
+
+await Task.Delay(TimeSpan.FromMilliseconds(500));
+
+await using (var providerB = BuildProvider(options, workflowDescriptor, humanTaskDescriptor))
+{
+    using var scope = providerB.CreateScope();
+    var services = scope.ServiceProvider;
+    var dispatchStore = services.GetRequiredService<IOutboxDispatchStore>();
+    var claimRequest = new OutboxClaimRequest
+    {
+        OwnerId = "aot-accountability-provider-b",
+        BatchSize = 32,
+        LeaseDuration = TimeSpan.FromMinutes(1),
+        SupportedContractIds = new HashSet<string>(["crest.accountability.audit-envelope/v1"], StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+    };
+    OutboxDeliveryClaim? claim = null;
+    for (var attempt = 0; attempt < 50 && claim is null; attempt++)
+    {
+        var recovered = await dispatchStore.ClaimAsync(claimRequest);
+        claim = recovered.SingleOrDefault(item => item.Message.Metadata.MessageId == accountabilityMessageId);
+        if (claim is null) await Task.Delay(TimeSpan.FromMilliseconds(100));
+    }
+    if (claim is null)
+        return 15;
+    var registration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+        .Single(item => item.ContractId == "crest.accountability.audit-envelope/v1");
+    var envelope = JsonSerializer.Deserialize(
+        claim.Message.Payload,
+        AccountabilityJsonSerializerContext.Default.AuditEnvelope)
+        ?? throw new InvalidOperationException("Accountability outbox payload could not be restored after provider restart.");
+    var sinkReplay = await services.GetRequiredService<IAuditSink>().WriteAsync(envelope);
+    if (sinkReplay.Status != AuditSinkWriteStatus.Duplicate)
+        return 16;
+    Console.WriteLine("CRESTCREATES_POSTGRES_AUDIT_SINK_DUPLICATE_AFTER_RESTART_OK");
+    var outcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    {
+        Message = claim.Message,
+        Lease = claim.Lease,
+        AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+        Services = services
+    });
+    if (outcome != OutboxDeliveryOutcome.Accepted)
+        return 11;
+    if (await dispatchStore.AckAsync(accountabilityMessageId, claim.Lease) != OutboxDeliveryMutationResult.Applied)
+        return 12;
+    Console.WriteLine("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_RESTART_DUPLICATE_OK");
+
+    var terminalReplay = await dispatchStore.AckAsync(accountabilityMessageId, claim.Lease);
+    if (terminalReplay != OutboxDeliveryMutationResult.AlreadyApplied)
+        return 13;
+    Console.WriteLine("CRESTCREATES_OUTBOX_TERMINAL_ALREADY_APPLIED_OK");
+
+    var staleReplay = await dispatchStore.AckAsync(accountabilityMessageId, accountabilityStaleLease);
+    if (staleReplay != OutboxDeliveryMutationResult.StaleFence)
+        return 14;
+    Console.WriteLine("CRESTCREATES_OUTBOX_TERMINAL_STALE_FENCE_OK");
+    Console.WriteLine("CRESTCREATES_WORKFLOW_ACCOUNTABILITY_DELIVERY_OK");
 }
 
 // Phase 9b+ Durable Agent Tool Pre-Dispatch Reconciliation crash scenarios:
@@ -458,6 +645,7 @@ static ServiceProvider BuildPreDispatchProvider(PostgreSqlRuntimePersistenceOpti
     services.AddAccountability();
     services.AddCrestAgentTools();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
+    services.AddRuntimeDelivery();
     var provider = services.BuildServiceProvider();
     return provider;
 }
@@ -468,10 +656,15 @@ static ServiceProvider BuildProvider(
     HumanTaskDescriptor humanTask)
 {
     var services = new ServiceCollection();
+    services.AddLogging();
     services.AddRuntimePersistence();
     services.AddDescriptorStableHash();
+    services.AddAccountability();
+    services.AddCapabilityRuntime();
     services.AddWorkflowEngine();
     services.AddHumanTaskRuntime();
+    services.AddScoped<ILocalEventBus, AotNoopLocalEventBus>();
+    services.AddRuntimeDelivery();
     services.AddSingleton<IRuntimeStateContractContributor, AotRuntimeStateContractContributor>();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
     services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
@@ -969,4 +1162,14 @@ sealed class AotHashComputer : ICanonicalHashComputer
             ContractVersion = "memory-hash-v1",
             CanonicalShapeVersion = "aot-v1"
         };
+}
+
+internal sealed class AotNoopLocalEventBus : ILocalEventBus
+{
+    public Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+        where TEvent : ILocalEvent
+        => Task.CompletedTask;
 }

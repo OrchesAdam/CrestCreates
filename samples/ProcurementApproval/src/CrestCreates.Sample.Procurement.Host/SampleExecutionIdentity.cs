@@ -87,14 +87,15 @@ public sealed class SamplePermissionChecker(ICurrentUser currentUser) : IPermiss
         => Task.FromResult(IsGranted(permissionName));
 
     public Task<bool> IsGrantedAsync(ClaimsPrincipal principal, string permissionName)
-        => IsGrantedAsync(permissionName);
+        => Task.FromResult(IsGranted(principal, permissionName));
 
     public Task<MultiplePermissionGrantResult> IsGrantedAsync(string[] permissionNames)
         => Task.FromResult(new MultiplePermissionGrantResult(
             permissionNames.ToDictionary(name => name, IsGranted, StringComparer.Ordinal)));
 
     public Task<MultiplePermissionGrantResult> IsGrantedAsync(ClaimsPrincipal principal, string[] permissionNames)
-        => IsGrantedAsync(permissionNames);
+        => Task.FromResult(new MultiplePermissionGrantResult(
+            permissionNames.ToDictionary(name => name, name => IsGranted(principal, name), StringComparer.Ordinal)));
 
     public async Task CheckAsync(string permissionName)
     {
@@ -109,6 +110,16 @@ public sealed class SamplePermissionChecker(ICurrentUser currentUser) : IPermiss
             "Procurement.Get" => currentUser.IsAuthenticated,
             "Procurement.Search" => currentUser.IsInRole("procurement-requester")
                 || currentUser.IsInRole("procurement-manager"),
+            _ => false
+        };
+
+    private static bool IsGranted(ClaimsPrincipal principal, string permissionName)
+        => permissionName switch
+        {
+            "procurement.approve" => principal.IsInRole("procurement-manager"),
+            "Procurement.Get" => principal.Identity?.IsAuthenticated == true,
+            "Procurement.Search" => principal.IsInRole("procurement-requester")
+                || principal.IsInRole("procurement-manager"),
             _ => false
         };
 }

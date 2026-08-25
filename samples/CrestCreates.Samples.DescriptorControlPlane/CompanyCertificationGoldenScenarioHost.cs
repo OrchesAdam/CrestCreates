@@ -5,6 +5,7 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Agent.Memory;
 using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
@@ -20,11 +21,13 @@ using CrestCreates.Metadata.ContextPack;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.InMemory;
+using CrestCreates.Runtime.Delivery;
 using CrestCreates.Samples.DescriptorControlPlane.Authoring;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Samples.DescriptorControlPlane;
@@ -34,6 +37,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
     public ServiceProvider Provider { get; }
     public ICompanyCertificationStore Store { get; }
     public CompanyCertificationPersistenceOptions PersistenceOptions { get; }
+    private readonly IReadOnlyList<IHostedService> _hostedServices;
 
     // ── Factory Methods ────────────────────────────────────────────────
 
@@ -106,10 +110,19 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         services.AddRuntimePersistence();
         services.AddSingleton<IRuntimeStateContractContributor, CompanyCertificationRuntimeStateContributor>();
         services.AddCrestCreatesInMemoryRuntimePersistence();
+        services.AddRuntimeDelivery();
         RegisterRuntimeServices(services);
         RegisterControlPlaneServices(services);
 
         Provider = services.BuildServiceProvider(validateScopes: true);
+
+        // This sample deliberately uses a ServiceProvider instead of a Generic Host.
+        // Start the registered runtime hosted services explicitly so the transactional
+        // outbox worker and bootstrap/readiness gates have the same lifecycle as a
+        // production host.
+        _hostedServices = Provider.GetServices<IHostedService>().ToArray();
+        foreach (var hostedService in _hostedServices)
+            hostedService.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
 
         // ── Wire up Capability Handler Resolver with DI-resolved invokers ──
         RegisterCapabilityHandlers(services, Provider);
@@ -186,6 +199,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         });
         services.AddCapabilityRuntime();
         services.AddAccountability();
+        services.AddAuditSink<InMemoryAuditSink>();
 
         // ── HumanTask Runtime ──────────────────────────────────────────
         services.AddHumanTaskRuntime();
@@ -229,7 +243,13 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
 
     public IServiceScope CreateScope() => Provider.CreateScope();
 
-    public void Dispose() => Provider.Dispose();
+    public void Dispose()
+    {
+        for (var index = _hostedServices.Count - 1; index >= 0; index--)
+            _hostedServices[index].StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+        Provider.Dispose();
+    }
 
     // ── Nested types ───────────────────────────────────────────────────
 

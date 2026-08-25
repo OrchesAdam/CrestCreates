@@ -35,6 +35,9 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
     public int CompletionDispatchAttemptCount { get; set; }
     public string? CompletionEventId { get; set; }
 
+    [JsonIgnore]
+    public IReadOnlyList<string> RequiredCompletionConsumerIds { get; internal set; } = Array.Empty<string>();
+
     public string? CancellationReason { get; set; }
 
     public IReadOnlyList<string> CandidateUserIds { get; set; } = Array.Empty<string>();
@@ -78,6 +81,7 @@ public sealed class HumanTaskInstance : ISnapshotable<HumanTaskInstance>
             CompletionDispatchFailedAt = CompletionDispatchFailedAt,
             CompletionDispatchAttemptCount = CompletionDispatchAttemptCount,
             CompletionEventId = CompletionEventId,
+            RequiredCompletionConsumerIds = RequiredCompletionConsumerIds.ToArray(),
             CancellationReason = CancellationReason,
             Revision = Revision,
             UpdatedAt = UpdatedAt,

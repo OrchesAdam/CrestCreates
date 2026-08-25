@@ -55,7 +55,7 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         await using var command = new NpgsqlCommand(
             "select count(*) from information_schema.tables where table_schema=@schema and table_name like 'runtime_%';", connection);
         command.Parameters.AddWithValue("schema", lease.Options.Schema);
-        (await command.ExecuteScalarAsync()).Should().Be(4L);
+        (await command.ExecuteScalarAsync()).Should().Be(6L);
     }
 
     [Fact]
@@ -631,6 +631,7 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         Status = HumanTaskInstanceStatus.Assigned,
         WorkflowKey = workflowKey,
         WorkflowStepId = stepId,
+        RequiredCompletionConsumerIds = ["crest.workflow.humantask-continuation/v1"],
         AssigneeUserId = "reviewer",
         CandidateUserIds = ["reviewer", "backup"],
         CandidateRoleIds = ["approver"],

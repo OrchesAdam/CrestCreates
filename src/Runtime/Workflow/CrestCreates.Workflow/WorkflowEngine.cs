@@ -4,6 +4,8 @@ using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
+using CrestCreates.Workflow.Accountability;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;
@@ -18,6 +20,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
     private readonly WorkflowLifecycleEventFactory _events;
     private readonly IRuntimeDescriptorPinResolver<WorkflowDescriptor> _pinResolver;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
+    private readonly IRuntimeTransactionCoordinator? _transactions;
+    private readonly WorkflowAccountabilityOutboxAppender _accountabilityOutbox;
 
     internal WorkflowEngine(
         IWorkflowRegistry registry,
@@ -27,7 +31,9 @@ public sealed class WorkflowEngine : IWorkflowEngine
         IAuditOperationContextAccessor contexts,
         WorkflowLifecycleEventFactory events,
         IRuntimeDescriptorPinResolver<WorkflowDescriptor> pinResolver,
-        IRuntimeStateContractRegistry stateRegistry)
+        IRuntimeStateContractRegistry stateRegistry,
+        IRuntimeTransactionCoordinator? transactions,
+        WorkflowAccountabilityOutboxAppender accountabilityOutbox)
     {
         _registry = registry;
         _store = store;
@@ -37,6 +43,8 @@ public sealed class WorkflowEngine : IWorkflowEngine
         _events = events;
         _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
         _stateRegistry = stateRegistry ?? throw new ArgumentNullException(nameof(stateRegistry));
+        _transactions = transactions;
+        _accountabilityOutbox = accountabilityOutbox ?? throw new ArgumentNullException(nameof(accountabilityOutbox));
     }
 
     public async Task<WorkflowInstance> ExecuteAsync(
@@ -124,9 +132,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
 
         var startedIdentity = _events.AllocateLifecycleIdentity();
         instance.LastLifecycleAuditId = startedIdentity.AuditId;
-        await _store.AddAsync(instance, ct).ConfigureAwait(false);
-        instance.Revision = 1;
-        await _eventPublisher.PublishAsync(_events.Create(
+        var startedEvent = _events.Create(
             "workflow.started",
             instance,
             descriptor,
@@ -135,7 +141,25 @@ public sealed class WorkflowEngine : IWorkflowEngine
             null,
             origin.UpstreamOperationId,
             origin.UpstreamAuditId,
-            null), CancellationToken.None).ConfigureAwait(false);
+            null);
+        if (_accountabilityOutbox.IsEnabled && _transactions is null)
+            throw new InvalidOperationException("Reliable Workflow Accountability requires the Runtime transaction coordinator.");
+        var accountabilityMessage = await _accountabilityOutbox.PrepareAsync(startedEvent, ct).ConfigureAwait(false);
+        if (_transactions is null || !_accountabilityOutbox.IsEnabled)
+        {
+            await _store.AddAsync(instance, ct).ConfigureAwait(false);
+            instance.Revision = 1;
+        }
+        else
+        {
+            await _transactions.ExecuteAsync(async transactionCt =>
+            {
+                await _store.AddAsync(instance, transactionCt).ConfigureAwait(false);
+                instance.Revision = 1;
+                await _accountabilityOutbox.AppendAsync(accountabilityMessage!, transactionCt).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
+        }
+        await _eventPublisher.PublishAsync(startedEvent, CancellationToken.None).ConfigureAwait(false);
 
         return await _executionRunner.RunAsync(instance, workflowRunOperationId, enclosingAuditId, ct).ConfigureAwait(false);
     }

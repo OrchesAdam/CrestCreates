@@ -4,6 +4,8 @@ using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
+using CrestCreates.Runtime.Delivery.Abstractions.Registration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -35,7 +37,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRuntimeStateContractContributor, DescriptorActivationRuntimeStateContractContributor>());
-        services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
+        AddActivationReviewConsumer(services);
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -64,7 +66,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IRuntimeStateContractContributor, DescriptorActivationRuntimeStateContractContributor>());
-        services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
+        AddActivationReviewConsumer(services);
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -100,7 +102,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
         services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
         services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
-        services.TryAddSingleton<ILocalEventHandler<HumanTaskCompletedEvent>, DescriptorActivationReviewHumanTaskEventHandler>();
+        AddActivationReviewConsumer(services);
         services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
             ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
         return services;
@@ -124,6 +126,22 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
         services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
         return services;
+    }
+
+    private static void AddActivationReviewConsumer(IServiceCollection services)
+    {
+        services.AddSingleton(new HumanTaskCompletionObligationPolicyRegistration(
+            DescriptorActivationHumanTaskIds.ActivationReview.Value!,
+            1,
+            DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue));
+        services.TryAddSingleton<DescriptorActivationReviewHumanTaskEventHandler>();
+        services.AddSingleton(new OutboxRequiredConsumerRegistration<HumanTaskCompletedEvent>(
+            DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue,
+            sp => sp.GetRequiredService<DescriptorActivationReviewHumanTaskEventHandler>()));
+        services.AddSingleton(new OutboxRequiredConsumerMetadata(DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue));
+        services.AddSingleton(new OutboxRequiredConsumerValidationRegistration(
+            DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue,
+            sp => _ = sp.GetRequiredService<DescriptorActivationReviewHumanTaskEventHandler>()));
     }
 
     /// <summary>

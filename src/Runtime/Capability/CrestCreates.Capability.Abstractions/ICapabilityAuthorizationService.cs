@@ -1,3 +1,5 @@
+using System.Security.Claims;
+
 namespace CrestCreates.Capability.Abstractions;
 
 public interface ICapabilityAuthorizationService
@@ -7,4 +9,11 @@ public interface ICapabilityAuthorizationService
         string? userId,
         IReadOnlyList<string> requiredPermissions,
         CancellationToken ct);
+
+    Task<bool> AuthorizeAsync(
+        string capabilityName,
+        string? userId,
+        IReadOnlyList<string> requiredPermissions,
+        CancellationToken ct,
+        ClaimsPrincipal principal);
 }

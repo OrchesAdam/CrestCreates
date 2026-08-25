@@ -6,6 +6,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Workflow.Accountability;
 
 namespace CrestCreates.Workflow;
 
@@ -21,6 +22,8 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
     private readonly IRuntimeDescriptorPinResolver<WorkflowDescriptor> _pinResolver;
     private readonly WorkflowSuspensionCommitter _suspensionCommitter;
     private readonly IDescriptorSnapshotStore? _snapshots;
+    private readonly WorkflowAccountabilityOutboxAppender? _accountabilityOutbox;
+    private readonly IRuntimeTransactionCoordinator? _transactions;
 
     public WorkflowExecutionRunner(
         IWorkflowRegistry registry,
@@ -32,7 +35,9 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         IRuntimeStateContractRegistry stateRegistry,
         IRuntimeDescriptorPinResolver<WorkflowDescriptor> pinResolver,
         WorkflowSuspensionCommitter suspensionCommitter,
-        IDescriptorSnapshotStore? snapshots)
+        IDescriptorSnapshotStore? snapshots,
+        WorkflowAccountabilityOutboxAppender? accountabilityOutbox = null,
+        IRuntimeTransactionCoordinator? transactions = null)
     {
         _registry = registry;
         _executorRegistry = executorRegistry;
@@ -44,6 +49,8 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         _pinResolver = pinResolver ?? throw new ArgumentNullException(nameof(pinResolver));
         _suspensionCommitter = suspensionCommitter ?? throw new ArgumentNullException(nameof(suspensionCommitter));
         _snapshots = snapshots;
+        _accountabilityOutbox = accountabilityOutbox;
+        _transactions = transactions;
     }
 
     public async Task<WorkflowInstance> RunAsync(
@@ -100,8 +107,9 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                 var failedExceptionPreviousId = instance.LastLifecycleAuditId;
                 var failedExceptionIdentity = _events.AllocateLifecycleIdentity();
                 instance.LastLifecycleAuditId = failedExceptionIdentity.AuditId;
-                await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
-                await PublishEvent("workflow.failed", instance, descriptor, runOperationId, parentAuditId, failedFromStatus, failedExceptionPreviousId, failedExceptionIdentity, "WORKFLOW_STEP_EXECUTION_FAILED", step.Id, CancellationToken.None).ConfigureAwait(false);
+                var failedExceptionEvent = _events.Create("workflow.failed", instance, descriptor, failedExceptionIdentity, runOperationId, failedFromStatus, runOperationId, parentAuditId, failedExceptionPreviousId, "WORKFLOW_STEP_EXECUTION_FAILED", step.Id, instance.WaitingHumanTaskId);
+                await PersistWithAccountabilityAsync(instance, failedExceptionEvent, ct).ConfigureAwait(false);
+                await _eventPublisher.PublishAsync(failedExceptionEvent, CancellationToken.None).ConfigureAwait(false);
                 return instance;
             }
 
@@ -142,14 +150,17 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                     var suspendedPreviousId = instance.LastLifecycleAuditId;
                     var suspendedIdentity = _events.AllocateLifecycleIdentity();
                     instance.LastLifecycleAuditId = suspendedIdentity.AuditId;
+                    var suspendedEvent = _events.Create("workflow.suspended", instance, descriptor, suspendedIdentity, runOperationId, suspendedFromStatus, runOperationId, parentAuditId, suspendedPreviousId, null, step.Id, instance.WaitingHumanTaskId);
+                    var suspendedMessage = _accountabilityOutbox is null ? null : await _accountabilityOutbox.PrepareAsync(suspendedEvent, ct).ConfigureAwait(false);
                     await _suspensionCommitter.CommitAsync(
                         suspensionBefore,
                         instance,
                         stepResult.PreparedHumanTask,
                         $"{runOperationId}:suspend:{step.Id}",
+                        suspendedMessage,
                         ct).ConfigureAwait(false);
                     instance.Revision = suspensionBefore.Revision + 1;
-                    await PublishEvent("workflow.suspended", instance, descriptor, runOperationId, parentAuditId, suspendedFromStatus, suspendedPreviousId, suspendedIdentity, null, step.Id, CancellationToken.None).ConfigureAwait(false);
+                    await _eventPublisher.PublishAsync(suspendedEvent, CancellationToken.None).ConfigureAwait(false);
                     return instance;
 
                 case StepExecutionStatus.Failed:
@@ -163,8 +174,9 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                     var failedPreviousId = instance.LastLifecycleAuditId;
                     var failedIdentity = _events.AllocateLifecycleIdentity();
                     instance.LastLifecycleAuditId = failedIdentity.AuditId;
-                    await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
-                    await PublishEvent("workflow.failed", instance, descriptor, runOperationId, parentAuditId, failedFromStatusForStep, failedPreviousId, failedIdentity, "WORKFLOW_STEP_FAILED", step.Id, CancellationToken.None).ConfigureAwait(false);
+                    var failedEvent = _events.Create("workflow.failed", instance, descriptor, failedIdentity, runOperationId, failedFromStatusForStep, runOperationId, parentAuditId, failedPreviousId, "WORKFLOW_STEP_FAILED", step.Id, instance.WaitingHumanTaskId);
+                    await PersistWithAccountabilityAsync(instance, failedEvent, ct).ConfigureAwait(false);
+                    await _eventPublisher.PublishAsync(failedEvent, CancellationToken.None).ConfigureAwait(false);
                     return instance;
             }
         }
@@ -176,8 +188,9 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         var completedPreviousAuditId = instance.LastLifecycleAuditId;
         var completedIdentity = _events.AllocateLifecycleIdentity();
         instance.LastLifecycleAuditId = completedIdentity.AuditId;
-        await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
-        await PublishEvent("workflow.completed", instance, descriptor, runOperationId, parentAuditId, completedFromStatus, completedPreviousAuditId, completedIdentity, null, null, CancellationToken.None).ConfigureAwait(false);
+        var completedEvent = _events.Create("workflow.completed", instance, descriptor, completedIdentity, runOperationId, completedFromStatus, runOperationId, parentAuditId, completedPreviousAuditId, null, null, instance.WaitingHumanTaskId);
+        await PersistWithAccountabilityAsync(instance, completedEvent, ct).ConfigureAwait(false);
+        await _eventPublisher.PublishAsync(completedEvent, CancellationToken.None).ConfigureAwait(false);
         return instance;
     }
 
@@ -214,6 +227,27 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         var expectedRevision = instance.Revision;
         await _store.UpdateAsync(instance, expectedRevision, ct).ConfigureAwait(false);
         instance.Revision = expectedRevision + 1;
+    }
+
+    private async Task PersistWithAccountabilityAsync(WorkflowInstance instance, WorkflowLifecycleEvent lifecycleEvent, CancellationToken ct)
+    {
+        var message = _accountabilityOutbox is null
+            ? null
+            : await _accountabilityOutbox.PrepareAsync(lifecycleEvent, ct).ConfigureAwait(false);
+        if (message is not null && _transactions is null)
+            throw new InvalidOperationException("Reliable Workflow Accountability requires the Runtime transaction coordinator.");
+        if (message is null)
+        {
+            await PersistUpdateAsync(instance, ct).ConfigureAwait(false);
+            return;
+        }
+        var transactions = _transactions!;
+        var appender = _accountabilityOutbox!;
+        await transactions.ExecuteAsync(async transactionCt =>
+        {
+            await PersistUpdateAsync(instance, transactionCt).ConfigureAwait(false);
+            await appender.AppendAsync(message, transactionCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     private RuntimeStateValue? CaptureState(object? value)

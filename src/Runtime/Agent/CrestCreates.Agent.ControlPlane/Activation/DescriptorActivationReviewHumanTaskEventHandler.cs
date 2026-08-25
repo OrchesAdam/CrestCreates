@@ -1,8 +1,9 @@
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
-using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Persistence.Abstractions.Errors;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
@@ -14,8 +15,10 @@ namespace CrestCreates.Agent.ControlPlane.Activation;
 /// from the HumanTask instance, and routes it to the activation review orchestrator.
 /// </summary>
 public sealed class DescriptorActivationReviewHumanTaskEventHandler
-    : ILocalEventHandler<HumanTaskCompletedEvent>
+    : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
+    public const string ConsumerIdValue = "crest.agent-control-plane.activation-review/v1";
+    public string ConsumerId => ConsumerIdValue;
     private readonly IActivationReviewOrchestrator _orchestrator;
     private readonly IHumanTaskInstanceStore _humanTaskInstanceStore;
     private readonly ILogger<DescriptorActivationReviewHumanTaskEventHandler> _logger;
@@ -33,12 +36,12 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         _stateRegistry = stateRegistry;
     }
 
-    public async Task HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)
+    public async Task<ActivationReviewDispatchOutcome> HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)
     {
         // Only process activation review HumanTasks
         if (@event.HumanTaskPin.Ref.Id != DescriptorActivationHumanTaskIds.ActivationReview)
         {
-            return;
+            return ActivationReviewDispatchOutcome.Accepted;
         }
 
         _logger.LogInformation(
@@ -46,14 +49,20 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
             @event.HumanTaskKey.InstanceId, @event.Outcome);
 
         // Parse the review decision from the event result
-        var result = @event.Result is null ? null : _stateRegistry.Restore(@event.Result);
+        object? result;
+        try
+        {
+            result = @event.Result is null ? null : _stateRegistry.Restore(@event.Result);
+        }
+        catch (RuntimeStateContractException exception)
+        {
+            throw new InvalidOperationException("The persisted activation review result is not a valid runtime state contract.", exception);
+        }
         if (!DescriptorActivationReviewDecisionParser.TryParseReviewDecision(
             result, out var parsedDecision, out var error))
         {
-            _logger.LogError(
-                "Failed to parse activation review decision from HumanTask {TaskInstanceId}: {Error}",
-                @event.HumanTaskKey.InstanceId, error);
-            return;
+            throw new InvalidOperationException(
+                $"Failed to parse activation review decision from HumanTask '{@event.HumanTaskKey.InstanceId}': {error}");
         }
 
         // Enrich the decision with TenantId/CorrelationId from the HumanTask instance
@@ -62,11 +71,44 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
 
         if (enrichedDecision is null)
         {
-            return;
+            throw new InvalidOperationException($"HumanTask '{@event.HumanTaskKey.InstanceId}' is unavailable for activation review enrichment.");
         }
 
         // Route the enriched decision to the orchestrator
-        await _orchestrator.ProcessReviewDecisionAsync(enrichedDecision, cancellationToken);
+        return await _orchestrator.ProcessReviewDecisionAsync(enrichedDecision, @event.EventId, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async ValueTask<OutboxRequiredConsumerResult> ConsumeAsync(
+        HumanTaskCompletedEvent payload,
+        OutboxDeliveryContext context,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var outcome = await HandleAsync(payload, cancellationToken).ConfigureAwait(false);
+            return outcome switch
+            {
+                ActivationReviewDispatchOutcome.Accepted => OutboxRequiredConsumerResult.Accepted(),
+                ActivationReviewDispatchOutcome.Duplicate => OutboxRequiredConsumerResult.Duplicate(),
+                _ => OutboxRequiredConsumerResult.Conflict(DescriptorActivationDiagnosticCodes.ReviewConflict.RequireValue(), "The activation review decision conflicts with the durable request state.")
+            };
+        }
+        catch (InvalidOperationException exception)
+        {
+            // A persisted review fact or its HumanTask authority is malformed.
+            // Retrying cannot repair it; keep the outbox fail-closed and let the
+            // durable conflict/dead-letter path retain the evidence.
+            return OutboxRequiredConsumerResult.Conflict(
+                DescriptorActivationDiagnosticCodes.ReviewPayloadInvalid.RequireValue(),
+                exception.Message);
+        }
+        catch (RuntimeStateContractException exception)
+        {
+            return OutboxRequiredConsumerResult.Conflict(
+                DescriptorActivationDiagnosticCodes.ReviewPayloadInvalid.RequireValue(),
+                exception.Message);
+        }
     }
 
     private async Task<DescriptorActivationReviewDecision?> EnrichDecisionAsync(

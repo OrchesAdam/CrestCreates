@@ -22,6 +22,12 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
             RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
             "A PostgreSQL Runtime Store operation requires an ambient Runtime transaction.");
 
+    internal bool TryGetSession(out PostgreSqlRuntimeSession? session)
+    {
+        session = _accessor.Current;
+        return session is not null;
+    }
+
     public async ValueTask ExecuteAsync(Func<CancellationToken, ValueTask> work, CancellationToken cancellationToken = default)
         => await ExecuteAsync<object?>(async ct => { await work(ct).ConfigureAwait(false); return null; }, cancellationToken).ConfigureAwait(false);
 
@@ -111,9 +117,20 @@ internal sealed class PostgreSqlRuntimeTransactionCoordinator : IRuntimeTransact
         {
             throw PostgreSqlRuntimeStoreSupport.TranslateForeignKeyViolation(ex);
         }
-        catch (NpgsqlException)
+        catch (PostgresException)
         {
-            throw new RuntimePersistenceUnavailableException("PostgreSQL Runtime persistence is unavailable.");
+            // Preserve provider contract errors (check violations, unique
+            // conflicts, and schema failures) for the store-specific mapping
+            // and integration tests. PostgresException derives from
+            // NpgsqlException, so this guard must precede the availability
+            // translation below.
+            throw;
+        }
+        catch (NpgsqlException ex)
+        {
+            throw new RuntimePersistenceUnavailableException(
+                "PostgreSQL Runtime persistence is unavailable.",
+                ex);
         }
     }
 }

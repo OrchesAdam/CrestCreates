@@ -9,6 +9,12 @@
     <InternalsVisibleTo Include="CrestCreates.HumanTask" />
     <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.InMemory" />
     <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql" />
+    <InternalsVisibleTo Include="CrestCreates.HumanTask.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.InMemory.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql.Tests" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.Testing" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker" />
+    <InternalsVisibleTo Include="CrestCreates.Runtime.Persistence.PostgreSql.AotHost" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />

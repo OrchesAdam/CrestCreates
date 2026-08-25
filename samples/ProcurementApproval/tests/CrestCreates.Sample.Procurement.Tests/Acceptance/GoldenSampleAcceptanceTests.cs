@@ -157,9 +157,18 @@ public sealed class ProjectionCompositionAcceptanceTests
 
         await SubmitHttpAsync(client, "Authenticated workflow origin", 25_000m);
 
-        var workflow = factory.Services.GetRequiredService<InMemoryAuditSink>().GetRecords().Single(record =>
-            record.Action.Kind == "workflow.lifecycle"
-            && record.Action.Name == "workflow.started");
+        var sink = factory.Services.GetRequiredService<InMemoryAuditSink>();
+        AuditEnvelope? workflow = null;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (DateTimeOffset.UtcNow < deadline && workflow is null)
+        {
+            workflow = sink.GetRecords().SingleOrDefault(record =>
+                record.Action.Kind == "workflow.lifecycle"
+                && record.Action.Name == "workflow.started");
+            if (workflow is null)
+                await Task.Delay(TimeSpan.FromMilliseconds(20));
+        }
+        workflow.Should().NotBeNull();
         workflow.Actor.Kind.Should().Be("workflow");
         workflow.Actor.InitiatedBy.Should().Be(new AuditActorReference("user", "requester-a"));
     }
@@ -553,6 +562,20 @@ public sealed class WorkflowTenantAndSchemaAcceptanceTests
         await services.GetRequiredService<ProcurementApprovalTaskService>()
             .CompleteAsync(tasks[0].Id, "Approve", "Approved by manager");
 
+        // Completion is delivered asynchronously through the transactional
+        // outbox; observe the durable projection rather than relying on the
+        // request scope or worker scheduling.
+        for (var attempt = 0; attempt < 250; attempt++)
+        {
+            aggregate = services.GetRequiredService<InMemoryProcurementRequestStore>()
+                .GetById("tenant-a", submitResult.RequestId)!;
+            var observedWorkflow = await services.GetRequiredService<IWorkflowInstanceStore>()
+                .GetAsync(new RuntimeInstanceKey("tenant-a", workflow.InstanceId));
+            if (aggregate.Status.ToString() == "Approved"
+                && observedWorkflow?.Status == WorkflowInstanceStatus.Completed)
+                break;
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+        }
         aggregate.Status.ToString().Should().Be("Approved");
         aggregate.ApproverId.Should().Be("manager-a");
         var completed = await services.GetRequiredService<IWorkflowInstanceStore>()
