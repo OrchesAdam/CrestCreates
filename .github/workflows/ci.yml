@@ -45,12 +45,12 @@ jobs:
       - name: Reset Control Plane reference-data evidence ledger
         run: rm -rf tests/artifacts/control-plane-evidence
 
-      - name: Reset Phase 9c executable tuple ledger
+      - name: Reset Phase 9c executed-tuple evidence ledger
         run: |
           rm -rf tests/artifacts/phase9c-evidence
           mkdir -p tests/artifacts/phase9c-evidence
           echo PHASE9C_EVIDENCE_ARTIFACT_DIR=$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence >> "$GITHUB_ENV"
-          echo PHASE9C_EVIDENCE_ARTIFACT=$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence/postgresql.jsonl >> "$GITHUB_ENV"
+          echo PHASE9C_EVIDENCE_ARTIFACT=$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence/ci.jsonl >> "$GITHUB_ENV"
 
       # ── Core ──
       - name: Test — Core
@@ -223,10 +223,10 @@ jobs:
 
       # The old runner-green closure was intentionally removed: it could mark
       # every acceptance in a project as Passed without the case assertion ever
-      # executing. Keep the executable tuple-shape checks in CI until all test
-      # suites emit their assertion-produced JSONL tuples into the shared gate.
+      # executing. Real producers may append assertion-produced tuples to the
+      # shared artifact above, but the exact-set closure remains disabled until
+      # every required runner emits its tuples.
       - name: Test — Phase 9c executable evidence tuple guards
         run: |
           dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build \
-            --filter "FullyQualifiedName~FrozenCaseMatrix_ShouldRetainAllRcaEvidenceSurfaces|FullyQualifiedName~CriticalPhase9cEvidence_ShouldBeBoundToExecutableSources"
-          test -s "$GITHUB_WORKSPACE/tests/artifacts/phase9c-evidence/postgresql.jsonl"
+            --filter "FullyQualifiedName~FrozenCaseMatrix_ShouldRetainAllRcaEvidenceSurfaces|FullyQualifiedName~CriticalPhase9cSources_ShouldRemainBoundToProductionCode"

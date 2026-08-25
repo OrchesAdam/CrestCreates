@@ -45,7 +45,17 @@ public sealed class Phase9cEvidenceLedger
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
-        File.AppendAllLines(path, _entries.Select(entry => JsonSerializer.Serialize(entry, Phase9cEvidenceJsonContext.Default.Phase9cEvidenceEntry)));
+        foreach (var entry in _entries)
+            AppendJsonLine(path, entry);
+    }
+
+    public static void AppendJsonLine(string path, Phase9cEvidenceEntry entry)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(entry);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+        File.AppendAllText(path, JsonSerializer.Serialize(entry, Phase9cEvidenceJsonContext.Default.Phase9cEvidenceEntry) + Environment.NewLine);
     }
 
     public static Phase9cEvidenceLedger ReadJsonLines(IEnumerable<string> paths)
@@ -72,6 +82,7 @@ public sealed class Phase9cEvidenceLedger
             || supplemental.Count != supplemental.Distinct(StringComparer.Ordinal).Count()
             || normative.Intersect(supplemental, StringComparer.Ordinal).Any())
             throw new InvalidOperationException("Phase 9c frozen manifest contains duplicate or overlapping acceptance names.");
+        Phase9cEvidenceRunnerCatalog.ValidateAuthority();
     }
 
     public void ValidateFrozenClosure()
@@ -96,6 +107,32 @@ public sealed class Phase9cEvidenceLedger
             && string.Equals(entry.EvidenceVector, tuple.EvidenceVector, StringComparison.Ordinal);
 
     private static string Format(Phase9cEvidenceTuple tuple) => $"{tuple.CaseId}/{tuple.AcceptanceName}/{tuple.Runner}/{tuple.EvidenceVector}";
+}
+
+/// <summary>
+/// Test-only write-through producer. Callers invoke it only after the real
+/// assertion has passed; this class never infers evidence from project status
+/// or source-file markers. The artifact variable is intentionally optional for
+/// ordinary local test runs and is required by the eventual CI closure step.
+/// </summary>
+public static class Phase9cEvidenceProducer
+{
+    private static readonly object Sync = new();
+    private static readonly Phase9cEvidenceLedger ProcessLedger = new();
+
+    public static void RecordAfterAssertion(Phase9cEvidenceTuple tuple, string source)
+    {
+        ArgumentNullException.ThrowIfNull(tuple);
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+        var artifact = Environment.GetEnvironmentVariable("PHASE9C_EVIDENCE_ARTIFACT");
+        if (string.IsNullOrWhiteSpace(artifact)) return;
+
+        lock (Sync)
+        {
+            ProcessLedger.Record(tuple, passed: true, source: source);
+            Phase9cEvidenceLedger.AppendJsonLine(artifact, ProcessLedger.Entries[^1]);
+        }
+    }
 }
 
 [JsonSerializable(typeof(Phase9cEvidenceEntry))]

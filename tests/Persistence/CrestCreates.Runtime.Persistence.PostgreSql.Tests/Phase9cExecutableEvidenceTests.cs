@@ -11,9 +11,13 @@ public sealed class Phase9cExecutableEvidenceTests
     public void FrozenCaseMatrix_ShouldRetainAllRcaEvidenceSurfaces()
     {
         Phase9cEvidenceLedger.ValidateFrozenManifest();
+        Phase9cEvidenceRunnerCatalog.ValidateAuthority();
         Phase9cEvidenceRunnerCatalog.RequiredTuples.Select(tuple => tuple.AcceptanceName)
             .Distinct(StringComparer.Ordinal).Should().HaveCount(170);
-        Phase9cEvidenceRunnerCatalog.RequiredTuples.Count.Should().BeGreaterThan(170);
+        Phase9cEvidenceRunnerCatalog.AcceptanceCaseBindings
+            .Select(binding => $"{binding.CaseId}/{binding.AcceptanceName}")
+            .Should().OnlyHaveUniqueItems();
+        Phase9cEvidenceRunnerCatalog.RequiredTuples.Count.Should().Be(423);
 
         var rca01 = Phase9cEvidenceRunnerCatalog.ForAcceptance("WorkflowContinuationAcceptance_Integrity_Should_Use_FrozenV1Projection");
         rca01.Select(tuple => tuple.Runner).Should().BeEquivalentTo(["WF", "SH", "IM", "PG", "BND"]);
@@ -25,11 +29,10 @@ public sealed class Phase9cExecutableEvidenceTests
     }
 
     [Fact]
-    public void CriticalPhase9cEvidence_ShouldBeBoundToExecutableSources()
+    public void CriticalPhase9cSources_ShouldRemainBoundToProductionCode()
     {
         Phase9cEvidenceLedger.ValidateFrozenManifest();
         var root = FindRepositoryRoot();
-        var ledger = new Phase9cEvidenceLedger();
         var bindings = new (string Name, string Source, string ProductionMarker)[]
         {
             ("NonCooperative_OptionalHandler_Should_Not_Prevent_ReliableAckProgress", "tests/Runtime/HumanTask/CrestCreates.HumanTask.Tests/OptionalLocalEventCompatibilityTests.cs", "OptionalTrackerCapacity_ShouldReserveBeforeStartingWork"),
@@ -44,19 +47,13 @@ public sealed class Phase9cExecutableEvidenceTests
         {
             var source = Path.Combine(root, binding.Source);
             source.Should().MatchRegex(@"^.+\.(cs|csx)$");
-            var tuples = Phase9cEvidenceRunnerCatalog.ForAcceptance(binding.Name);
-            tuples.Should().NotBeEmpty();
-            foreach (var tuple in tuples)
-            ledger.RecordExecutable(
-                tuple,
-                source,
-                () => File.Exists(source)
-                    && new FileInfo(source).Length > 0
-                    && File.ReadAllText(source).Contains(binding.ProductionMarker, StringComparison.Ordinal));
+            // This is a source wiring guard only. It deliberately does not
+            // record a tuple: source presence is not execution evidence.
+            Phase9cEvidenceRunnerCatalog.ForAcceptance(binding.Name).Should().NotBeEmpty();
+            File.Exists(source).Should().BeTrue();
+            new FileInfo(source).Length.Should().BeGreaterThan(0);
+            File.ReadAllText(source).Should().Contain(binding.ProductionMarker);
         }
-
-        var artifact = Environment.GetEnvironmentVariable("PHASE9C_EVIDENCE_ARTIFACT");
-        if (!string.IsNullOrWhiteSpace(artifact)) ledger.WriteJsonLines(artifact);
     }
 
     [Fact]

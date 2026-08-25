@@ -115,10 +115,14 @@ explicit conflicts. Optional compatibility work reserves bounded tracker
 capacity before starting detached execution. The PostgreSQL AOT fixture now
 uses a correlated Workflow/HumanTask pair, durable continuation acceptance, and
 the Accountability outbox handler; its fixed reliable-delivery sentinels are
-asserted by the fixture test. The Phase 9c evidence gate now requires all nine
-owning CI runners to complete before recording and validating the exact frozen
-145 normative plus 25 supplemental tuples; it no longer treats source-file
-presence or manually supplied passed flags as closure evidence.
+asserted by the fixture test. Phase 9c now has an explicit
+acceptance-to-case/surface authority copied from the frozen Case Matrix,
+including ACT01/ACT02 and OUT01/OUT02, and the ledger validates exact
+CaseId/AcceptanceName/Runner/EvidenceVector tuples. Executable tuple
+infrastructure is implemented, but final 145 normative + 25 supplemental
+executed-tuple closure remains pending until each required test assertion
+emits its JSONL tuple; CI must not claim closure from runner completion or
+source-file markers.
 
 ### Issue #69 — Phase 9b+ Durable Control Plane and Reference Data Stores
 

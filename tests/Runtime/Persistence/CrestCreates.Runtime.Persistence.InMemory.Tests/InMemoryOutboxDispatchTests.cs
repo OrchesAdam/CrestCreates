@@ -9,6 +9,8 @@ using CrestCreates.Runtime.Delivery.Message;
 using CrestCreates.Runtime.Persistence.InMemory;
 using CrestCreates.Runtime.Persistence.InMemory.Transactions;
 using CrestCreates.Runtime.Persistence.Testing.Cases;
+using CrestCreates.Runtime.Persistence.Testing.Evidence;
+using CrestCreates.Runtime.Persistence.Testing.Manifest;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -101,10 +103,31 @@ public sealed class InMemoryOutboxDispatchTests
         await coordinator.ExecuteAsync(async ct => await writer.AppendAsync(message, ct));
         var claim = (await dispatch.ClaimAsync(new OutboxClaimRequest { OwnerId = "worker-a", BatchSize = 1 })).Single();
 
-        (await dispatch.AckAsync(message.Metadata.MessageId, claim.Lease)).Should().Be(OutboxDeliveryMutationResult.Applied);
-        (await dispatch.AckAsync(message.Metadata.MessageId, claim.Lease)).Should().Be(OutboxDeliveryMutationResult.AlreadyApplied);
-        (await dispatch.DeadLetterAsync(message.Metadata.MessageId,
+        var applied = await dispatch.AckAsync(message.Metadata.MessageId, claim.Lease);
+        applied.Should().Be(OutboxDeliveryMutationResult.Applied);
+        Phase9cEvidenceProducer.RecordAfterAssertion(
+            Tuple("Valid_Owner_Should_Acknowledge_To_Delivered", "L09"),
+            $"{nameof(InMemoryOutboxDispatchTests)}.{nameof(Terminal_mutation_replay_is_exact_fence_idempotent_and_stale_fenced)}:Applied");
+
+        var replay = await dispatch.AckAsync(message.Metadata.MessageId, claim.Lease);
+        replay.Should().Be(OutboxDeliveryMutationResult.AlreadyApplied);
+        Phase9cEvidenceProducer.RecordAfterAssertion(
+            Tuple("Ack_Replay_With_ExactTerminalFence_Should_Be_AlreadyApplied", "L14"),
+            $"{nameof(InMemoryOutboxDispatchTests)}.{nameof(Terminal_mutation_replay_is_exact_fence_idempotent_and_stale_fenced)}:AlreadyApplied");
+        Phase9cEvidenceProducer.RecordAfterAssertion(
+            Tuple("AlreadyApplied_Should_Not_Reopen_TerminalState", "L14"),
+            $"{nameof(InMemoryOutboxDispatchTests)}.{nameof(Terminal_mutation_replay_is_exact_fence_idempotent_and_stale_fenced)}:TerminalState");
+
+        var stale = await dispatch.DeadLetterAsync(message.Metadata.MessageId,
             claim.Lease with { Fence = claim.Lease.Fence + 1 },
-            new OutboxDeliveryFailure { Code = "different", Message = "different terminal outcome" })).Should().Be(OutboxDeliveryMutationResult.StaleFence);
+            new OutboxDeliveryFailure { Code = "different", Message = "different terminal outcome" });
+        stale.Should().Be(OutboxDeliveryMutationResult.StaleFence);
+        Phase9cEvidenceProducer.RecordAfterAssertion(
+            Tuple("TerminalReplay_With_DifferentFence_Should_Be_StaleOrConflict", "L16"),
+            $"{nameof(InMemoryOutboxDispatchTests)}.{nameof(Terminal_mutation_replay_is_exact_fence_idempotent_and_stale_fenced)}:StaleFence");
     }
+
+    private static Phase9cEvidenceTuple Tuple(string acceptanceName, string caseId)
+        => Phase9cEvidenceRunnerCatalog.ForAcceptance(acceptanceName)
+            .Single(tuple => tuple.CaseId == caseId && tuple.Runner == "IM");
 }

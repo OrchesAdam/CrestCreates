@@ -21,6 +21,8 @@ public static class Phase9cCaseManifest
             .. Expand("SCHEMA", 2, "7", "PostgreSql", "sql-concurrency"),
             .. Expand("OPT", 2, "5", "HumanTask|Delivery", "semantic"),
             new("HOC01", "5", "HumanTask|Delivery", "composition"),
+            new("ACT01", "7", "AgentControlPlane", "semantic"), new("ACT02", "7", "AgentControlPlane", "semantic"),
+            new("OUT01", "7", "HumanTask", "semantic"), new("OUT02", "7", "HumanTask|Workflow", "semantic"),
             new("CW01", "9", "CrashWorker|PostgreSql", "process-crash"), new("CW02", "9", "CrashWorker|PostgreSql", "process-crash"), new("CW03", "9", "CrashWorker|PostgreSql", "process-crash"), new("CW04", "9", "CrashWorker|PostgreSql", "process-crash"), new("CW04B", "9", "CrashWorker|PostgreSql", "process-crash"), new("CW05", "9", "CrashWorker|PostgreSql", "process-crash"), new("CW06", "9", "CrashWorker|PostgreSql", "process-crash"), new("CW07", "9", "CrashWorker|PostgreSql", "process-crash")
         ];
 
