@@ -27,7 +27,7 @@ authority directly on every check.
 
 **Spec status:** R4 APPROVED / FROZEN
 
-**Plan status:** READY FOR IMPLEMENTATION
+**Plan status:** R1 REMEDIATED / READY FOR IMPLEMENTATION REVIEW
 
 ```text
 Organization authority:      IOrganizationStore owns explicit scope generation
@@ -55,6 +55,7 @@ git status --short --branch
 git rev-parse HEAD
 git rev-parse master
 dotnet --info
+rg -n "IOrganizationHierarchyService|OrganizationHierarchyService|GetOrganizationAndSubIdsAsync" src tests samples
 ```
 
 Read the frozen Spec, this Plan, the previous Slice handoff, and the current
@@ -67,6 +68,8 @@ Stop and reconcile before implementation if any of these facts changed:
 - V013 already exists or V012 is no longer the migration tail;
 - `IOrganizationStore` has acquired a competing freshness/version contract;
 - `DefaultOrganizationHierarchyService` has another production registration;
+- the legacy Infrastructure hierarchy interface/implementation has gained a
+  production registration or consumer;
 - Permission has acquired one durable authority version advanced by every legal
   writer;
 - the EF Permission authority or PostgreSQL transaction coordinator changed;
@@ -74,6 +77,20 @@ Stop and reconcile before implementation if any of these facts changed:
 
 Never edit or renumber V001-V012. Never delete retired files; move them under
 `99_RecycleBin/issue-26/` so their removal remains reviewable.
+
+The R1 Plan inventory on baseline `81a42edc` found a legacy unversioned
+30-minute-TTL pair with no production registration or consumer:
+
+```text
+src/Framework/Infrastructure/CrestCreates.Infrastructure/Authorization/IOrganizationHierarchyService.cs
+src/Framework/Infrastructure/CrestCreates.Infrastructure/Permission/OrganizationHierarchyService.cs
+```
+
+The implementing agent must repeat the inventory before editing. If a production
+consumer or registration now exists, stop for Spec/Plan reconciliation; do not
+claim the stale-security-state boundary closed. If it remains uncomposed, Slice
+5 moves both files together to the Issue #26 recycle bin and adds a structural
+test that prevents future production composition.
 
 ### 1.2 Case-first TDD discipline
 
@@ -86,7 +103,8 @@ Never edit or renumber V001-V012. Never delete retired files; move them under
 - Make the smallest mainline change that turns the focused Red Green.
 - Run the changed project build, focused tests, shared contract runners,
   applicable boundary tests, and `git diff --check`.
-- End each Slice with one reviewable commit and a handoff containing: commit,
+- End each Green Slice or explicit commit group with one reviewable commit and
+  a handoff containing: commit,
   changed files, Red evidence, Green commands/counts, acceptance IDs closed,
   internal hooks added, and unresolved findings.
 - Do not update `memory.md` to implemented until Slice 10 has product evidence.
@@ -121,9 +139,12 @@ Never edit or renumber V001-V012. Never delete retired files; move them under
 ### 1.4 Commit order
 
 ```text
-Slice 1  typed generation contract + runner-free semantic cases
-    -> Slice 2  InMemory atomic scope state
-    -> Slice 3  PostgreSQL V013 + transactional generation
+Authority Generation commit group (one atomic first commit)
+    Checkpoint A  typed contract RED + runner-free semantic cases
+        -> Checkpoint B  InMemory atomic scope state RED/GREEN
+        -> Checkpoint C  PostgreSQL V013 RED/GREEN
+        -> OVG01-OVG12 Green for both providers
+        -> Commit 1: typed generation authority
     -> Slice 4  hierarchy snapshot/safety owner + deterministic unit cases
     -> Slice 5  Organization DI cutover + real PostgreSQL multi-instance cases
     -> Slice 6  Permission direct-authority cutover + unit/composition cases
@@ -133,8 +154,16 @@ Slice 1  typed generation contract + runner-free semantic cases
     -> Slice 10 H3 sidecar + product closure review
 ```
 
-A later Slice cannot begin with an activated Red, an unreviewed shared-hotspot
-change, or a missing handoff from the preceding Slice.
+Checkpoints A-C deliberately share one uncommitted worktree because the public
+interface change breaks both concrete providers at the compile boundary. Do not
+use a default interface implementation, do not commit a temporary
+`NotImplementedException`, and do not create an intermediate provider behavior.
+The first reviewable commit occurs only after the full group builds and
+OVG01-OVG12 are Green for InMemory and PostgreSQL.
+
+A later Green Slice cannot begin with an activated Red, an unreviewed
+shared-hotspot change, or a missing handoff from the preceding commit group or
+Slice.
 
 ---
 
@@ -310,10 +339,27 @@ The service preserves:
 - cycle raises the existing `OrganizationHierarchyException` when traversed;
 - membership lookups remain direct authority reads.
 
-### 2.5 Bounded owner: payload and safety are separate
+### 2.5 Bounded owner: payload, safety, and physical work are separate
 
 The production owner is one singleton per `AddOrganizationKernel` service
-provider. It has two separate bounded structures:
+provider. All resource values live in one internal
+`OrganizationHierarchyCacheOptions` object and are validated at owner
+construction. Defaults are:
+
+```text
+SnapshotCapacity         1,024 entries
+SnapshotSlidingExpiration 15 minutes
+SafetyScopeCapacity      16,384 explicit tenant scopes
+PhysicalLoadCapacity     2,048 non-terminal authority loads
+SharedLoadTimeout        30 seconds
+```
+
+Reject zero/negative capacity or timeout and any overflow-prone conversion
+before owner state is created. Keep these values internal in Phase 9d; do not
+scatter literals or create public options without a separate design decision.
+Every hierarchy Slice handoff records the effective values used by its tests.
+
+The owner has three separate bounded structures:
 
 1. **Snapshot payload cache** — `IMemoryCache`, size limit 1,024 entries,
    size 1 per tenant snapshot, 15-minute sliding expiration. Eviction and
@@ -323,11 +369,12 @@ provider. It has two separate bounded structures:
    service provider is disposed. Entries never evict, decrease high-water, or
    clear quarantine due to pressure. When the bound is full, a previously unseen
    scope fails closed before generation/cache/data I/O; existing scopes continue.
-3. **Active-flight registry** — maximum 2,048 owner-wide active flights in
-   addition to the per-scope/generation keying. Capacity is released on every
-   success, failure, timeout, and owner disposal. Saturation fails that attempted
-   load explicitly; it does not create an uncoordinated load or authorize stale
-   or direct fallback.
+3. **Physical-load registry** — maximum 2,048 owner-wide authority operations
+   whose underlying Task has not reached a terminal state, in addition to
+   logical per-scope/generation flight keying. A timeout invalidates logical
+   completion but does not release this capacity while a non-cooperative load is
+   still running. Saturation fails that attempted load explicitly; it does not
+   create an uncoordinated load or authorize stale/direct fallback.
 
 The safety registry's process-lifetime retention is deliberate. It is the only
 simple bounded mechanism that cannot turn capacity pressure into forgotten
@@ -407,50 +454,95 @@ cache throws
     -> return
 ```
 
-Both snapshot lookup failure and snapshot publication failure must use:
+Snapshot lookup failure has no candidate and must use:
 
 ```text
 capture admitted safety-state token
-    -> direct/request-local authority load
-    -> build result stamped with the admitted generation
+    -> direct authority load
+    -> build candidate stamped with the admitted generation
     -> re-enter the same per-scope safety owner
     -> apply §11 Step 12-15 final caller-completion gate
     -> return only if current state still admits that result
 ```
+
+Snapshot publication failure occurs after candidate(G) already exists and must
+not load authority a second time:
+
+```text
+retain the admission token and existing candidate(G)
+    -> mark candidate request-local / unpublished
+    -> re-enter the same per-scope safety owner
+    -> call CompleteGenerationStampedResult(...)
+    -> apply §11 Step 12-15 final caller-completion gate
+    -> return only if current state still admits candidate(G)
+```
+
+Both paths converge on the same generation-stamped completion operation. The
+lookup-failure path performs exactly one direct load; the publication-failure
+path performs no additional load.
 
 For an `Available(G)` path, final completion requires `G == current
 ObservedHighWater` and the quarantine rule. For a typed `Unavailable` path,
 completion requires NORMAL plus the exact admission-time high-water. Cache
 failure does not weaken either rule.
 
-OHC09 is not Green merely because direct authority data was returned. Its test
-must deterministically pause the fallback load, advance high-water or enter
-quarantine on a second request, release the load, and prove the first caller is
-rejected by the final gate. Reviewers must search every catch/fallback branch
-and verify they converge on the same completion operation.
+OHC09 is not Green merely because direct authority data was returned. Lookup
+failure testing deterministically pauses its direct load; publication failure
+testing pauses between failed publication and logical completion. A second
+request then advances high-water or enters quarantine, after which the first
+caller must be rejected by the final gate. Reviewers must search every
+catch/fallback branch and verify they converge on the same completion operation
+without a publication-failure double load.
 
 ### 2.8 Single-flight lifetime and cancellation
 
 Flights are local and keyed by `(explicit TenantId, observed Generation)`.
-Each flight owns:
+Distinguish these lifetimes:
+
+```text
+Logical flight
+    = joinable attempt for one (tenant, generation)
+    = can time out and become permanently inadmissible
+
+Physical load
+    = underlying authority Task
+    = remains active until the Task is actually terminal
+```
+
+Each attempt owns:
 
 ```text
 owner-created CancellationTokenSource
 30-second owner timeout
-Task<OrganizationHierarchySnapshotCandidate>
+Task physical authority load
+logical completion source
+unique attempt identity / terminal flag
 exact-key removal continuation/finalizer
 ```
 
-The shared task receives only the owner token. Every waiter awaits with
-`flight.Task.WaitAsync(callerCancellationToken)`, so one caller cancellation
-detaches that waiter without canceling or poisoning the shared load. Completion,
-fault, owner-timeout cancellation, and owner disposal remove the exact flight
-and dispose its CTS. Failed/canceled tasks are never retained. A later request
-at the same generation may create a new flight.
+The physical load receives only the owner token. Every waiter awaits the logical
+completion with `WaitAsync(callerCancellationToken)`, so one caller cancellation
+detaches that waiter without canceling or poisoning the attempt.
 
-The flight only loads and builds candidate(G). It does not decide publication
-or caller completion. Every waiter passes the candidate through the current
-safety-state completion gate. Different tenants/generations never share work.
+At owner timeout, atomically mark the logical attempt timed out and permanently
+inadmissible, cancel its owner CTS, fail/detach logical waiters, and remove the
+exact attempt from the joinable key. A later request may create a new logical
+attempt only if physical-load capacity is available. If the Store ignores
+cancellation, the old physical Task remains counted toward the 2,048 bound until
+it actually completes. Timeout never releases physical capacity by itself.
+
+Physical completion releases capacity and disposes the attempt CTS exactly once.
+If it occurs after timeout, replacement, or owner disposal, discard the late
+candidate permanently: it cannot publish, enter the final completion gate, or
+complete any caller. Successful/faulted/canceled physical completion while the
+attempt is still active resolves logical completion, removes the exact joinable
+flight, and performs the same cleanup. Failed/canceled logical results are never
+retained.
+
+The physical load only loads and builds candidate(G). It does not decide
+publication or caller completion. Every live waiter passes the candidate through
+the current safety-state completion gate. Different tenants/generations never
+share work.
 
 ### 2.9 Hierarchy production composition
 
@@ -459,11 +551,28 @@ scoped `IOrganizationHierarchyService`. Production hierarchy resolution shares
 the singleton owner across scopes in that service provider.
 
 Preserve the public `DefaultOrganizationHierarchyService(IOrganizationStore)`
-constructor for source compatibility and direct semantic tests. It creates or
-uses a private non-shared owner only for that explicitly constructed service;
-production DI must use an internal constructor/factory with the registered
-singleton owner. Add a composition test proving only one production hierarchy
-registration exists.
+constructor for source compatibility and direct semantic tests. The service
+implements `IDisposable` and `IAsyncDisposable` with explicit owner ownership:
+
+```text
+public compatibility constructor
+    -> creates private owner
+    -> ownerOwnedByService = true
+
+internal production constructor/factory
+    -> receives registered singleton owner
+    -> ownerOwnedByService = false
+```
+
+Disposing a compatibility service invalidates all logical attempts, requests
+cancellation, disposes its payload cache, and prevents late publication or
+completion. It does not pretend a non-cooperative physical load has terminated;
+per-attempt continuation retains only the minimum cleanup state until physical
+terminal, then releases capacity and disposes its CTS. DI-scoped service disposal
+must not dispose the shared singleton owner; the service provider owns that
+lifetime. Update every direct-construction test/Host path to `using`/`await using`.
+Add composition/lifetime tests proving exactly one production hierarchy
+registration, no double disposal, and no late result after private-owner disposal.
 
 For `tenantId == null`, bypass generation, safety registry, snapshot cache, and
 single-flight. Load the current unfiltered collection once, build a request-local
@@ -519,11 +628,11 @@ APIs for tests.
 
 ## 3. Acceptance Ownership Map
 
-| Slice | Acceptance IDs | Primary runner |
+| Work unit | Acceptance IDs | Primary runner |
 |---|---|---|
-| 1 | OVG01-OVG05, OVG07-OVG08, OVG12 contract shape | runner-free Organization Store kit |
-| 2 | OVG01-OVG08, OVG12 | InMemory wrapper |
-| 3 | OVG01-OVG12 | PostgreSQL wrapper + migration/failure suites |
+| Authority checkpoint A | OVG contract skeleton and compiler Red | runner-free Organization Store kit |
+| Authority checkpoint B | OVG01-OVG08, OVG12 | InMemory wrapper |
+| Authority checkpoint C / Commit 1 | OVG01-OVG12 | both provider wrappers + migration/failure suites |
 | 4 | OHC01-OHC24 except real multi-instance | Organization deterministic unit/fault driver |
 | 5 | OMI01-OMI02 + PostgreSQL-backed OHC01/OHC02/OHC12 | real PostgreSQL, independent providers |
 | 6 | PSC01-PSC02, PSC04-PSC06, PSC08 unit/composition | Application Authorization tests |
@@ -556,6 +665,19 @@ src/Framework/Modules/CrestCreates.Organization/CrestCreates.Organization.csproj
 Add the six public contract files from §2.1 and the internal hierarchy files
 from §2.4. Keep `OrganizationScopedKey` and current semantic helpers as the
 canonical key/validation source; do not invent a parallel string protocol.
+
+Legacy unique-mainline cleanup, after the mandatory zero-consumer inventory:
+
+```text
+src/Framework/Infrastructure/CrestCreates.Infrastructure/Authorization/IOrganizationHierarchyService.cs
+    -> 99_RecycleBin/issue-26/legacy-organization-hierarchy/IOrganizationHierarchyService.cs
+
+src/Framework/Infrastructure/CrestCreates.Infrastructure/Permission/OrganizationHierarchyService.cs
+    -> 99_RecycleBin/issue-26/legacy-organization-hierarchy/OrganizationHierarchyService.cs
+```
+
+Move interface and implementation together. If either has acquired a production
+consumer, do not move them silently; stop for reconciliation.
 
 ### 4.2 PostgreSQL authority and schema
 
@@ -631,7 +753,7 @@ replace the file wholesale.
 
 ---
 
-## 5. Slice 1 — Typed Generation Contract and Shared Cases
+## 5. Authority Checkpoint A — Typed Contract RED and Shared Cases
 
 **Purpose:** Make provider completeness compiler-visible and define one
 runner-free semantic oracle before either provider implementation changes.
@@ -656,29 +778,30 @@ static cases. Do not put xUnit attributes or provider branching in shared code.
 Expected Red: both InMemory and PostgreSQL fail to compile because
 `IOrganizationStore.ReadScopeGenerationAsync` is unimplemented.
 
-### 5.2 Green contract shell
+### 5.2 Atomic-group rule
 
-Add the public types and Store method. Give providers temporary explicit
-`NotImplementedException` only inside the uncommitted Red step; the Slice is not
-Green and must not commit until the InMemory wrapper has a compilable semantic
-path in Slice 2. If repository policy requires every commit Green, combine
-Slices 1 and 2 into one commit while preserving separate test-first evidence.
+Add the public types and Store method and deliberately capture the compile Red
+from both real providers. Do not add a default interface body, temporary
+production implementation, or `NotImplementedException`. Continue immediately
+in the same uncommitted worktree through Checkpoints B and C.
 
-### 5.3 Verification
+### 5.3 Red evidence
 
 ```bash
-dotnet build src/Framework/Modules/CrestCreates.Organization.Abstractions
-dotnet build tests/Shared/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing
-dotnet test tests/Framework/Modules/CrestCreates.Organization.Tests --filter "FullyQualifiedName~OrganizationStoreContractTests"
-git diff --check
+dotnet build src/Framework/Modules/CrestCreates.Organization
+dotnet build src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql
 ```
 
-**Checkpoint:** public contract and shared cases reviewed; no cache code, V013,
-or Permission change yet.
+Expected evidence names both `InMemoryOrganizationStore` and
+`PostgreSqlOrganizationStore` as missing the new method. This is the intentional
+contract Red, not a commit boundary.
+
+**Checkpoint:** preserve Red output in the eventual Commit 1 handoff and proceed
+directly to Checkpoint B without committing.
 
 ---
 
-## 6. Slice 2 — InMemory Atomic Scope State
+## 6. Authority Checkpoint B — InMemory Atomic Scope State
 
 **Purpose:** Turn the shared generation semantics Green with atomic data/version
 publication and retain all existing Organization semantics.
@@ -709,7 +832,7 @@ normalization and `Snapshot()` logic. Audit every existing read method:
 - all cancellation checks occur before returning results;
 - no returned collection shares mutable Store state.
 
-### 6.3 Verification
+### 6.3 Intermediate verification
 
 ```bash
 dotnet build src/Framework/Modules/CrestCreates.Organization
@@ -718,12 +841,16 @@ dotnet test tests/Framework/Modules/CrestCreates.Organization.Tests
 git diff --check
 ```
 
+PostgreSQL is still intentionally compile-Red at the interface boundary, so this
+is not a repository-wide Green or commit boundary. Record focused InMemory Red
+and Green evidence without weakening/removing the PostgreSQL compiler obligation.
+
 **Checkpoint:** OVG01-OVG08 and OVG12 Green for InMemory; existing hierarchy and
-identity semantic suite unchanged.
+identity semantics unchanged; proceed in the same worktree to Checkpoint C.
 
 ---
 
-## 7. Slice 3 — PostgreSQL V013 and Transactional Generation
+## 7. Authority Checkpoint C — PostgreSQL V013 and Commit 1
 
 **Purpose:** Provide FullDurable parity and prove generation cannot separate
 from the entity replacement transaction.
@@ -792,8 +919,22 @@ dotnet test tests/Framework/Modules/CrestCreates.Organization.Tests --filter "Fu
 git diff --check
 ```
 
-**Checkpoint:** OVG01-OVG12 Green for both providers, including rollback,
-upgrade, overflow/corruption, and commit-unknown evidence.
+Run the complete build surfaces changed by Checkpoints A-C before Commit 1:
+
+```bash
+dotnet build src/Framework/Modules/CrestCreates.Organization
+dotnet build src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql
+dotnet build tests/Shared/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing
+dotnet test tests/Framework/Modules/CrestCreates.Organization.Tests
+dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --filter "FullyQualifiedName~Organization"
+dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --filter "FullyQualifiedName~Migration"
+git diff --check
+```
+
+**Commit 1 checkpoint:** OVG01-OVG12 Green for both providers, including
+rollback, upgrade, overflow/corruption, and commit-unknown evidence. Commit the
+typed contract, shared kit, InMemory state, PostgreSQL provider, V013, manifests,
+and all generation tests together as one reviewable Authority Generation change.
 
 ---
 
@@ -812,9 +953,11 @@ Create a provider-neutral hierarchy fault driver that can independently:
 - fail snapshot lookup and publication separately;
 - fail safety-state admission/read separately;
 - block candidate load and final completion with deterministic barriers;
+- ignore owner cancellation until a deterministic physical-load release barrier,
+  while exposing logical-timeout and physical-terminal events separately;
 - create independent owners over one shared fake authority;
-- inspect only friend-visible evidence: publication generation, flight count,
-  mode/high-water/floor, and load count.
+- inspect only friend-visible evidence: publication generation, logical-flight
+  count, physical-load count, mode/high-water/floor, and authority-load count.
 
 Production public contracts must not widen for the driver.
 
@@ -839,13 +982,22 @@ Prove:
 - typed Unavailable in NORMAL performs one direct load, no cache use/publication,
   and final completion requires the same NORMAL/high-water admission;
 - generation mismatch plus load failure never serves the prior snapshot;
-- one canceled waiter does not cancel another or retain a poisoned flight;
+- one canceled waiter does not cancel another or retain a poisoned logical flight;
+- an owner-timed-out flight whose Store ignores cancellation cannot
+  publish/complete late and remains counted against physical-load capacity until
+  the underlying Task reaches terminal;
 - unknown/default/invalid generation result performs no data fallback;
 - generation cancellation performs no data fallback;
 - invariant/schema/contract failure propagates exactly;
 - ordinary snapshot lookup/publication failure uses request-local authority data
   only through the final safety-state gate;
 - a normal Unavailable fallback authority failure propagates without stale data.
+
+The non-cooperative cancellation case is named
+`TimedOutFlight_IgnoringCancellation_Should_NotPublishLateResult_OrEscapePhysicalLoadBound`.
+It fills/observes the physical bound deterministically, times out one logical
+attempt, proves capacity is not released, then releases the underlying Store
+Task and proves exact one-time cleanup with no late publication/completion.
 
 ### 8.4 Regression/recovery Red: OHC16-OHC24
 
@@ -858,6 +1010,8 @@ Prove the exact state transitions:
   high-water;
 - snapshot eviction/capacity pressure cannot forget quarantine;
 - unseen scope after safety capacity is full fails closed before provider I/O;
+- zero/negative capacity/timeout options fail owner construction and the default
+  option object exposes exactly the centralized values frozen in §2.5;
 - higher-generation load failure retains high-water and rejects an older next
   observation;
 - failed recovery at highest G may retry the same G above floor;
@@ -867,11 +1021,12 @@ Prove the exact state transitions:
 
 Add at least two deterministic tests:
 
-1. snapshot lookup throws; direct load blocks; another request advances
+1. snapshot lookup throws; its single direct load blocks; another request advances
    high-water; release direct load; first caller fails final completion and does
    not publish/return the older result;
-2. snapshot publication throws after candidate load; another request enters
-   quarantine before logical completion; the request-local candidate is rejected.
+2. candidate load completes; snapshot publication throws; assert no second
+   authority load occurs; another request enters quarantine before logical
+   completion; the existing request-local candidate is rejected.
 
 Also cover the safe control: if state remains admissible, direct/request-local
 data returns detached and uncached. These tests must fail if the implementation
@@ -928,9 +1083,25 @@ Prove:
 - two service providers have independent owners;
 - PostgreSQL replaces `IOrganizationStore` without disconnecting generation;
 - Organization has no dependency on `CrestCreates.Caching`, Redis, Runtime, or a
-  concrete persistence project.
+  concrete persistence project;
+- `LegacyInfrastructureHierarchyCache_Should_Have_NoProductionComposition`
+  proves the old Infrastructure TTL interface/implementation has no production
+  registration or consumer.
 
-### 9.2 Real topology
+### 9.2 Legacy unique-mainline cleanup
+
+Repeat the repository inventory from §1.1. On the reviewed baseline it must find
+only the two legacy declarations plus the new Organization mainline/test
+references. If that remains true, move both old files together to
+`99_RecycleBin/issue-26/legacy-organization-hierarchy/` and compile their former
+project plus all consumers. The architecture test must fail if either legacy
+type is later restored to a production assembly or DI graph.
+
+If any production consumer/registration exists, stop this Slice and reconcile;
+do not adapt the 30-minute TTL implementation, leave it as a second mainline, or
+silently retarget its callers.
+
+### 9.3 Real topology
 
 Build the test with:
 
@@ -955,18 +1126,25 @@ Sequence:
 Run the same key in a second tenant to prove isolation. Include null-tenant
 unfiltered bypass against real PostgreSQL without retaining a cross-tenant entry.
 
-### 9.3 Verification
+### 9.4 Verification
 
 ```bash
 dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --filter "FullyQualifiedName~PostgreSqlOrganizationHierarchyCacheTests"
 dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --filter "FullyQualifiedName~PostgreSqlOrganizationGenerationTests"
 dotnet test tests/Framework/Modules/CrestCreates.Organization.Tests
 dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
+dotnet build src/Framework/Infrastructure/CrestCreates.Infrastructure
+rg -n "GetOrganizationAndSubIdsAsync|Infrastructure\.Permission\.OrganizationHierarchyService" src tests samples
 git diff --check
 ```
 
-**Checkpoint:** OMI01-OMI02 Green; correctness requires neither event delivery,
-shared cache, nor distributed lock.
+The final `rg` may find only recycle-bin history or an explicit negative
+architecture assertion; no production assembly, consumer, or registration may
+retain the legacy API.
+
+**Checkpoint:** OMI01-OMI02 Green; the old unversioned TTL path is absent from
+production composition; correctness requires neither event delivery, shared
+cache, nor distributed lock.
 
 ---
 
@@ -1094,6 +1272,8 @@ Add `VersionedCacheConsistencyArchitectureTests` with focused assertions:
 - Organization implementation has no Runtime, Redis, Crest caching, or concrete
   persistence reference;
 - production Organization DI exposes one hierarchy service and singleton owner;
+- legacy Infrastructure TTL hierarchy types are absent from production
+  compilation/DI and cannot be recomposed accidentally;
 - null tenant cannot form an Organization hierarchy cache key;
 - `PermissionGrantStore` constructor/read path has no cache dependency;
 - Permission cache service/options are absent from production compilation/DI;
@@ -1197,10 +1377,15 @@ explicitly answer:
 - Can old snapshot data return after higher observation, regression, quarantine,
   mismatch, or authority failure?
 - Can capacity pressure erase safety knowledge?
-- Does every flight waiter and every direct fallback pass the final completion
+- Can a logical timeout release capacity while its physical Store Task is still
+  running, or can that late Task ever publish/complete?
+- Does every live flight waiter and every direct fallback pass the final completion
   gate?
 - For OHC09 specifically, is there any `cache failure -> direct load -> return`
-  branch that omits admission capture and final revalidation?
+  branch that omits admission capture/final revalidation, or any publication
+  failure branch that loads authority twice?
+- Is the legacy Infrastructure 30-minute-TTL hierarchy API absent from all
+  production assemblies, registrations, and consumers?
 - Can Permission production code consult or re-enable the old positive cache?
 - Does a legal repository writer need Manager/invalidation for correctness?
 - Were unrelated Authorization caching consumers preserved?
@@ -1285,10 +1470,16 @@ matches code and evidence; Issue #26 is ready for implementation review.
 - [ ] Same highest generation above floor can retry after failed recovery.
 - [ ] Snapshot eviction cannot remove safety state.
 - [ ] Safety capacity exhaustion fails unseen scopes closed.
+- [ ] All capacity/expiration/timeout constants are centralized and validated.
 - [ ] Delayed older candidate neither publishes nor completes over newer state.
 - [ ] Every waiter revalidates; the shared flight does not complete safety alone.
 - [ ] Caller cancellation detaches only that waiter.
-- [ ] Failed/canceled/timeout flight is removed and retryable.
+- [ ] Logical timeout removes joinability but does not release non-terminal
+      physical-load capacity.
+- [ ] Late physical result after timeout/disposal cannot publish or complete.
+- [ ] Physical terminal releases capacity and CTS exactly once.
+- [ ] Private compatibility owner is disposed by its service; DI-scoped service
+      never disposes the shared singleton owner.
 - [ ] Null tenant bypasses generation, cache, safety registry, and flight.
 - [ ] Results remain detached and traversal semantics remain exact.
 
@@ -1296,7 +1487,8 @@ matches code and evidence; Issue #26 is ready for implementation review.
 
 - [ ] Snapshot lookup failure captures an owner-issued admission token.
 - [ ] Snapshot publication failure retains/captures the admitted token.
-- [ ] Direct/request-local load is stamped with the admitted generation.
+- [ ] Lookup failure performs exactly one direct load stamped with admitted G.
+- [ ] Publication failure reuses existing candidate(G) and never reloads authority.
 - [ ] The branch re-enters the same scope safety owner after the load.
 - [ ] Available(G) result requires G equal current high-water and quarantine safety.
 - [ ] Unavailable fallback requires NORMAL and unchanged admission high-water.
@@ -1322,6 +1514,8 @@ matches code and evidence; Issue #26 is ready for implementation review.
 - [ ] Real PostgreSQL hierarchy topology uses independent providers/owners.
 - [ ] Real EF Permission topology uses fresh scopes and direct repository writer.
 - [ ] Boundary tests lock unique mainlines and dependency direction.
+- [ ] Legacy Infrastructure TTL hierarchy interface/implementation is absent from
+      production composition and retained only in the Issue #26 recycle bin.
 - [ ] Native executable, not managed DLL, emits the new and prior markers.
 - [ ] No Descriptor, Organization Identity, Data Permission Rule, derived scope,
       Redis correctness path, distributed lock, or generic cache framework added.
@@ -1357,10 +1551,13 @@ State-machine evidence:
 - observed high-water/floor transitions exercised
 - final completion gates exercised
 - OHC09 branch audit, when applicable
+- logical-flight/physical-load timeout and cleanup evidence, when applicable
 
 Compatibility/evidence notes:
 - public API impact
 - migration checksum/tail status
+- effective snapshot/safety/physical-load/timeout option values
+- compatibility-owner and DI-owner disposal evidence
 - NativeAOT status (unclaimed until Slice 9)
 - unrelated user changes preserved
 
@@ -1392,32 +1589,41 @@ Implementation is complete only when all of the following are evidenced:
 9. Quarantine cannot be erased by eviction, Unavailable, or capacity pressure.
 10. Failed higher/recovery loads retain the exact safety knowledge required by
     the frozen state machine.
-11. Per-instance single-flight has owner timeout, waiter-detach cancellation,
-    exact cleanup, and retry after failure.
+11. Per-instance single-flight separates logical timeout from physical terminal:
+    waiter-detach cancellation, late-result invalidation, retained physical-load
+    capacity, exact cleanup, and bounded retry are proven.
 12. Every cached, candidate, typed-Unavailable, and ordinary-cache-failure
     result passes the final caller-completion safety gate.
 13. OHC09 adversarial races prove cache infrastructure fallback cannot return
-    after high-water advance or quarantine transition.
+    after high-water advance or quarantine transition, and publication failure
+    never triggers a second authority load.
 14. Two independent Organization cache owners over one PostgreSQL authority
     observe committed V2 without an event or shared cache.
-15. Permission production checks query committed EF authority every time.
-16. Old positive cache state, invalidation loss, and cache outage cannot grant
+15. The legacy Infrastructure 30-minute-TTL hierarchy interface/implementation
+    is absent from production composition and structurally prevented from return.
+16. Compatibility-created private owners and DI singleton owners have explicit,
+    tested, non-overlapping disposal ownership.
+17. Resource limits are centralized, validated, tested under exhaustion, and
+    recorded in handoffs.
+18. Permission production checks query committed EF authority every time.
+19. Old positive cache state, invalidation loss, and cache outage cannot grant
     Permission.
-17. A legal direct Permission repository writer is observed without Manager or
+20. A legal direct Permission repository writer is observed without Manager or
     invalidation.
-18. Permission authority failure cannot fall back to stale positive state.
-19. Tenant/global Permission filtering and SuperAdmin behavior are unchanged.
-20. Unrelated Authorization caching/key/audit consumers remain operational.
-21. Dependency boundaries preserve the unique mainlines.
-22. The existing PostgreSQL AOT native executable runs V013 and the independent
+21. Permission authority failure cannot fall back to stale positive state.
+22. Tenant/global Permission filtering and SuperAdmin behavior are unchanged.
+23. Unrelated Authorization caching/key/audit consumers remain operational.
+24. Dependency boundaries preserve the unique mainlines.
+25. The existing PostgreSQL AOT native executable runs V013 and the independent
     cache scenario while retaining all prior markers.
-23. No out-of-scope cache/generation/framework feature was introduced.
-24. Product review passes before the H3 reuse judgment.
-25. H3 records value, misses, noise, runtime cost, maintenance cost, context,
+26. No out-of-scope cache/generation/framework feature was introduced.
+27. Product review passes before the H3 reuse judgment.
+28. H3 records value, misses, noise, runtime cost, maintenance cost, context,
     defects caught, and retain/adjust/retire verdict.
-26. `memory.md` and review artifacts describe only proven capability.
+29. `memory.md` and review artifacts describe only proven capability.
 
 When these criteria are Green, the PR is ready for implementation review. The
-first review focus is the OHC09 fallback audit, followed by provider failure
-mapping, atomic V013 writes, Permission direct-authority composition, and native
-publish-link-run provenance.
+first review focus is the OHC09 fallback audit, followed by logical-vs-physical
+load lifetime, legacy TTL path retirement, provider failure mapping, atomic V013
+writes, Permission direct-authority composition, and native publish-link-run
+provenance.
