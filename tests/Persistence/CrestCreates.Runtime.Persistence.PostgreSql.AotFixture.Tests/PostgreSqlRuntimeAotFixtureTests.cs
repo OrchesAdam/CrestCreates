@@ -86,6 +86,7 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.Output.Should().Contain("CRESTCREATES_AGENTTOOL_PREDISPATCH_CW09_OK");
             execution.Output.Should().Contain("CRESTCREATES_DURABLE_AGENT_TOOL_PREDISPATCH_OK");
             execution.Output.Should().Contain("CRESTCREATES_DURABLE_AGENT_MEMORY_OK");
+            execution.Output.Should().Contain("CRESTCREATES_VERSIONED_ORGANIZATION_CACHE_OK");
         }
         finally
         {
