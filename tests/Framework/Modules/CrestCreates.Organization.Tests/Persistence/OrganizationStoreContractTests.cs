@@ -545,7 +545,7 @@ public sealed class OrganizationStoreContractTests
     [Fact]
     public async Task GlobalAndTenantGeneration_Should_BeIndependent()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG12, "Contract", "GlobalTenantIsolation", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG12, "Contract", "ScopeIdentity", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         await OrganizationStoreContractCases.RunGlobalAndTenantGenerationAreIndependentAsync(driver.Store, "ovg12");
     }

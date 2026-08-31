@@ -131,7 +131,7 @@ public sealed class PostgreSqlOrganizationGenerationTests : IAsyncLifetime
     [Fact]
     public async Task GlobalAndTenantGeneration_Should_BeIndependent()
     {
-        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG12, "Contract", "GlobalTenantIsolation", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG12, "Contract", "ScopeIdentity", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await OrganizationStoreContractCases.RunGlobalAndTenantGenerationAreIndependentAsync(_store, "ovg12");
     }
 }

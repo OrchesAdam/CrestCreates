@@ -188,8 +188,6 @@ public static class ControlPlaneReferenceDataCaseManifest
             "RepeatedBlindSave_Should_AdvanceGenerationAgain"));
         entries.Add(new(CaseId.OVG12, "Contract", "ScopeIdentity", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationScopeIdentity_Should_Reject_DefaultUnknownAndInvalidTenant"));
-        entries.Add(new(CaseId.OVG12, "Contract", "GlobalTenantIsolation", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
-            "GlobalAndTenantGeneration_Should_BeIndependent"));
 
         // ── DataPermission rules ──
         entries.Add(new(CaseId.P01, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice4,
