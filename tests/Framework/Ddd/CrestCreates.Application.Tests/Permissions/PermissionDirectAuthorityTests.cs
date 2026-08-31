@@ -176,4 +176,84 @@ public class PermissionDirectAuthorityTests
         services.Should().NotContain(sd => sd.ServiceType.Name == "PermissionGrantCacheService");
         services.Should().NotContain(sd => sd.ServiceType.Name == "PermissionGrantCacheOptions");
     }
+
+    /// <summary>
+    /// PSC03: two instances share committed authority — fresh post-commit
+    /// authority scope rejects revoke.
+    /// </summary>
+    [Fact]
+    public async Task MultiInstance_PermissionCheck_Should_ObserveCommittedRevoke()
+    {
+        // Simulate two independent stores sharing the same repository (authority)
+        var repoMock = new Mock<IPermissionGrantRepository>();
+        var grants = new List<PermissionGrant>
+        {
+            new(Guid.NewGuid(), "Books.Delete", PermissionGrantProviderType.Role, "Librarian", PermissionGrantScope.Global, null)
+        };
+
+        repoMock.Setup(r => r.GetListByProviderAsync(
+                It.IsAny<PermissionGrantProviderType>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => grants.ToList());
+
+        repoMock.Setup(r => r.FindAsync(
+                It.IsAny<string>(),
+                It.IsAny<PermissionGrantProviderType>(),
+                It.IsAny<string>(),
+                It.IsAny<PermissionGrantScope>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => grants.FirstOrDefault());
+
+        var storeA = new PermissionGrantStore(repoMock.Object);
+        var storeB = new PermissionGrantStore(repoMock.Object);
+
+        // Instance A sees the grant
+        var permsA1 = await storeA.GetGrantedPermissionsAsync(PermissionGrantProviderType.Role, "Librarian", "tenant-a");
+        permsA1.Should().Contain("Books.Delete");
+
+        // Revoke by clearing the authority
+        grants.Clear();
+
+        // Instance B's next authority query should not see the revoked grant
+        var permsB = await storeB.GetGrantedPermissionsAsync(PermissionGrantProviderType.Role, "Librarian", "tenant-a");
+        permsB.Should().NotContain("Books.Delete");
+
+        // Instance A's next authority query should also not see it
+        var permsA2 = await storeA.GetGrantedPermissionsAsync(PermissionGrantProviderType.Role, "Librarian", "tenant-a");
+        permsA2.Should().NotContain("Books.Delete");
+    }
+
+    /// <summary>
+    /// PSC07: legal repository writer bypasses Manager — fresh authorization
+    /// observes commit without invalidation.
+    /// </summary>
+    [Fact]
+    public async Task PermissionRepositoryWriter_Should_BeObserved_WithoutCacheInvalidation()
+    {
+        var repoMock = new Mock<IPermissionGrantRepository>();
+        var grants = new List<PermissionGrant>();
+
+        repoMock.Setup(r => r.GetListByProviderAsync(
+                It.IsAny<PermissionGrantProviderType>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => grants.ToList());
+
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<PermissionGrant>(), It.IsAny<CancellationToken>()))
+            .Callback<PermissionGrant, CancellationToken>((g, _) => grants.Add(g))
+            .ReturnsAsync((PermissionGrant g, CancellationToken _) => g);
+
+        var storeA = new PermissionGrantStore(repoMock.Object);
+        var repoForWriter = repoMock.Object;
+
+        // Direct repository write (no Manager, no cache invalidation)
+        await repoForWriter.InsertAsync(
+            new PermissionGrant(Guid.NewGuid(), "Books.Create", PermissionGrantProviderType.Role, "Librarian", PermissionGrantScope.Global, null));
+
+        // Fresh authorization scope observes the commit
+        var permsA = await storeA.GetGrantedPermissionsAsync(PermissionGrantProviderType.Role, "Librarian", "tenant-a");
+        permsA.Should().Contain("Books.Create");
+    }
 }
