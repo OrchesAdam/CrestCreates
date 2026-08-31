@@ -487,6 +487,60 @@ public sealed class OrganizationStoreContractTests
         ruleEx.Should().BeNull();
     }
 
+    [Fact]
+    public async Task OrganizationScopeGeneration_Should_StartAtZero()
+    {
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunInitialGenerationIsZeroAsync(driver.Store, "ovg01");
+    }
+
+    [Fact]
+    public async Task OrganizationWrite_Should_Atomically_AdvanceGeneration()
+    {
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunOrganizationUnitSaveAdvancesGenerationAsync(driver.Store, "ovg02");
+    }
+
+    [Fact]
+    public async Task OrganizationSaveSurface_Should_AdvanceSharedScopeGeneration()
+    {
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunPositionSaveAdvancesSameScopeGenerationAsync(driver.Store, "ovg03");
+        await driver.ResetAsync();
+        await OrganizationStoreContractCases.RunMembershipSaveAdvancesSameScopeGenerationAsync(driver.Store, "ovg04");
+        await driver.ResetAsync();
+        await OrganizationStoreContractCases.RunRoleAssignmentSaveAdvancesSameScopeGenerationAsync(driver.Store, "ovg05");
+    }
+
+    [Fact]
+    public async Task TenantGeneration_Should_Not_Affect_OtherTenants()
+    {
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunTenantGenerationDoesNotAffectOtherTenantsAsync(driver.Store, "ovg07");
+    }
+
+    [Fact]
+    public async Task RepeatedBlindSave_Should_AdvanceGenerationAgain()
+    {
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunRepeatedBlindSaveAdvancesAgainAsync(driver.Store, "ovg08");
+    }
+
+    [Fact]
+    public async Task OrganizationScopeIdentity_Should_Reject_DefaultUnknownAndInvalidTenant()
+    {
+        await OrganizationStoreContractCases.RunInvalidScopeShouldBeRejectedBeforeIo();
+        Assert.Throws<ArgumentException>(() => OrganizationScopeIdentity.Tenant(""));
+        Assert.Throws<ArgumentException>(() => OrganizationScopeIdentity.Tenant("   "));
+    }
+
+    [Fact]
+    public async Task GlobalAndTenantGeneration_Should_BeIndependent()
+    {
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunGlobalAndTenantGenerationAreIndependentAsync(driver.Store, "ovg12");
+    }
+
     private static InMemoryOrganizationStoreContractDriver NewDriver() => new();
 
     private static OrganizationUnit Unit(string id, string? tenantId, int sortOrder = 0, string? parentId = null)

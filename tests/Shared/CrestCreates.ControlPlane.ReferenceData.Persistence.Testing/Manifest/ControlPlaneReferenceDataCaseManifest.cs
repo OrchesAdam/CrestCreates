@@ -68,6 +68,14 @@ public static class ControlPlaneReferenceDataCaseManifest
             [CaseId.V05] = SharedRunners,
             [CaseId.F01] = SharedRunners,
             [CaseId.F02] = SharedRunners,
+            [CaseId.OVG01] = SharedRunners,
+            [CaseId.OVG02] = SharedRunners,
+            [CaseId.OVG03] = SharedRunners,
+            [CaseId.OVG04] = SharedRunners,
+            [CaseId.OVG05] = SharedRunners,
+            [CaseId.OVG07] = SharedRunners,
+            [CaseId.OVG08] = SharedRunners,
+            [CaseId.OVG12] = SharedRunners,
         };
 
     public static IReadOnlyList<EvidenceTuple> EvidenceTuples { get; } = BuildEvidenceTuples();
@@ -162,6 +170,24 @@ public static class ControlPlaneReferenceDataCaseManifest
             "OrganizationReadSurface_Should_ReturnDetachedSnapshot"));
         entries.Add(new(CaseId.O22, "Organization", "OrganizationCreatedAtVariant", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
             "OrganizationCreatedAtVariant_Should_PreserveExactOrderAndSnapshot"));
+
+        // ── Phase 9d: Organization generation authority ──
+        entries.Add(new(CaseId.OVG01, "Authority", "InitialGeneration", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+            "OrganizationScopeGeneration_Should_StartAtZero"));
+        entries.Add(new(CaseId.OVG02, "Authority", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+            "OrganizationWrite_Should_Atomically_AdvanceGeneration"));
+        entries.Add(new(CaseId.OVG03, "Authority", "Position", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+            "OrganizationSaveSurface_Should_AdvanceSharedScopeGeneration"));
+        entries.Add(new(CaseId.OVG04, "Authority", "Membership", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+            "OrganizationSaveSurface_Should_AdvanceSharedScopeGeneration"));
+        entries.Add(new(CaseId.OVG05, "Authority", "RoleAssignment", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+            "OrganizationSaveSurface_Should_AdvanceSharedScopeGeneration"));
+        entries.Add(new(CaseId.OVG07, "Authority", "TenantIsolation", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+            "TenantGeneration_Should_Not_Affect_OtherTenants"));
+        entries.Add(new(CaseId.OVG08, "Authority", "RepeatedBlindSave", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+            "RepeatedBlindSave_Should_AdvanceGenerationAgain"));
+        entries.Add(new(CaseId.OVG12, "Contract", "ScopeIdentity", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice3,
+            "OrganizationScopeIdentity_Should_Reject_DefaultUnknownAndInvalidTenant"));
 
         // ── DataPermission rules ──
         entries.Add(new(CaseId.P01, "Rule", "Rule", EvidenceVectorKey.Default, RequiredRunner.InMemory, OwningSlice.Slice4,
