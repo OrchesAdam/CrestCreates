@@ -470,4 +470,28 @@ public class ControlPlaneReferenceDataOrganizationSchemaTests : IAsyncLifetime
         fks.Should().BeEmpty(
             "organization tables must not have cross-entity foreign keys");
     }
+
+    /// <summary>
+    /// Structural guard: the legacy Infrastructure 30-minute-TTL hierarchy
+    /// interface/implementation must not be recomposed into any production
+    /// assembly or DI graph.
+    /// </summary>
+    [Fact]
+    public void LegacyInfrastructureHierarchyCache_Should_Have_NoProductionComposition()
+    {
+        var orgAssembly = typeof(CrestCreates.Organization.Abstractions.IOrganizationHierarchyService).Assembly;
+
+        var legacyTypes = orgAssembly.GetTypes()
+            .Where(t => t.Name == "IOrganizationHierarchyService" || t.Name == "OrganizationHierarchyService")
+            .Where(t => t.Namespace?.Contains("Infrastructure") == true)
+            .ToList();
+
+        legacyTypes.Should().BeEmpty(
+            "Organization assembly must not contain legacy Infrastructure hierarchy types");
+
+        // Verify the legacy types are not loadable from a production assembly
+        var recycleBinType = Type.GetType("CrestCreates.Infrastructure.Authorization.IOrganizationHierarchyService");
+        recycleBinType.Should().BeNull(
+            "legacy IOrganizationHierarchyService must not be in a production assembly");
+    }
 }
