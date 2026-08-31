@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
-using CrestCreates.Caching;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Permissions;
@@ -21,21 +20,12 @@ public class PermissionGrantManagerTests
 {
     private readonly Mock<IPermissionGrantRepository> _permissionGrantRepositoryMock;
     private readonly Mock<IPermissionGrantStore> _permissionGrantStoreMock;
-    private readonly Mock<ICrestCacheService> _crestCacheServiceMock;
     private readonly PermissionGrantManager _permissionGrantManager;
 
     public PermissionGrantManagerTests()
     {
         _permissionGrantRepositoryMock = new Mock<IPermissionGrantRepository>();
         _permissionGrantStoreMock = new Mock<IPermissionGrantStore>();
-        _crestCacheServiceMock = new Mock<ICrestCacheService>();
-
-        var cacheService = new PermissionGrantCacheService(
-            _crestCacheServiceMock.Object,
-            new PermissionGrantCacheOptions
-            {
-                Expiration = TimeSpan.FromMinutes(1)
-            });
 
         var currentTenantMock = new Mock<ICurrentTenant>();
         currentTenantMock.Setup(t => t.Id).Returns("test-tenant");
@@ -51,19 +41,14 @@ public class PermissionGrantManagerTests
             tenantProviderMock.Object,
             Mock.Of<ILogger<TenantPermissionScopeValidator>>());
 
-        var cacheKeyContributor = new TenantCacheKeyContributor();
-
         _permissionGrantManager = new PermissionGrantManager(
             _permissionGrantRepositoryMock.Object,
             _permissionGrantStoreMock.Object,
-            cacheService,
-            scopeValidator,
-            cacheKeyContributor,
-            currentTenantMock.Object);
+            scopeValidator);
     }
 
     [Fact]
-    public async Task GrantAsync_WhenGrantDoesNotExist_InsertsGrantAndInvalidatesCache()
+    public async Task GrantAsync_WhenGrantDoesNotExist_InsertsGrant()
     {
         var input = new PermissionGrantInfo
         {
@@ -97,15 +82,6 @@ public class PermissionGrantManagerTests
                     grant.Scope == PermissionGrantScope.Global &&
                     grant.TenantId == null),
                 It.IsAny<CancellationToken>()),
-            Times.Once);
-
-        _crestCacheServiceMock.Verify(
-            cache => cache.RemoveAsync(
-                "Authorization.PermissionGrant",
-                It.Is<object[]>(parts =>
-                    parts.Length == 1 &&
-                    parts[0] != null &&
-                    parts[0].ToString() == "User:user-1")),
             Times.Once);
     }
 

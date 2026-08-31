@@ -7,37 +7,25 @@ namespace CrestCreates.Authorization;
 public class PermissionGrantStore : IPermissionGrantStore
 {
     private readonly IPermissionGrantRepository _permissionGrantRepository;
-    private readonly PermissionGrantCacheService _permissionGrantCacheService;
 
     public PermissionGrantStore(
-        IPermissionGrantRepository permissionGrantRepository,
-        PermissionGrantCacheService permissionGrantCacheService)
+        IPermissionGrantRepository permissionGrantRepository)
     {
         _permissionGrantRepository = permissionGrantRepository;
-        _permissionGrantCacheService = permissionGrantCacheService;
     }
 
-    public Task<IReadOnlyList<PermissionGrantInfo>> GetGrantsAsync(
+    public async Task<IReadOnlyList<PermissionGrantInfo>> GetGrantsAsync(
         PermissionGrantProviderType providerType,
         string providerKey,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(providerKey))
         {
-            return Task.FromResult<IReadOnlyList<PermissionGrantInfo>>(Array.Empty<PermissionGrantInfo>());
+            return Array.Empty<PermissionGrantInfo>();
         }
 
-        return _permissionGrantCacheService.GetOrAddAsync(
-            providerType,
-            providerKey.Trim(),
-            async token =>
-            {
-                var grants = await _permissionGrantRepository.GetListByProviderAsync(providerType, providerKey.Trim(), token);
-                return grants
-                    .Select(MapToGrantInfo)
-                    .ToArray();
-            },
-            cancellationToken);
+        var grants = await _permissionGrantRepository.GetListByProviderAsync(providerType, providerKey.Trim(), cancellationToken);
+        return grants.Select(MapToGrantInfo).ToArray();
     }
 
     public async Task<IReadOnlyList<string>> GetGrantedPermissionsAsync(

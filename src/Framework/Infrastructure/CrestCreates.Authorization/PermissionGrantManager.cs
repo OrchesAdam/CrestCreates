@@ -1,9 +1,7 @@
 using CrestCreates.Authorization.Abstractions;
-using CrestCreates.Caching;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared.Permissions;
-using CrestCreates.MultiTenancy.Abstract;
 
 namespace CrestCreates.Authorization;
 
@@ -11,25 +9,16 @@ public class PermissionGrantManager : IPermissionGrantManager
 {
     private readonly IPermissionGrantRepository _permissionGrantRepository;
     private readonly IPermissionGrantStore _permissionGrantStore;
-    private readonly PermissionGrantCacheService _permissionGrantCacheService;
     private readonly TenantPermissionScopeValidator _tenantPermissionScopeValidator;
-    private readonly TenantCacheKeyContributor _cacheKeyContributor;
-    private readonly ICurrentTenant _currentTenant;
 
     public PermissionGrantManager(
         IPermissionGrantRepository permissionGrantRepository,
         IPermissionGrantStore permissionGrantStore,
-        PermissionGrantCacheService permissionGrantCacheService,
-        TenantPermissionScopeValidator tenantPermissionScopeValidator,
-        TenantCacheKeyContributor cacheKeyContributor,
-        ICurrentTenant currentTenant)
+        TenantPermissionScopeValidator tenantPermissionScopeValidator)
     {
         _permissionGrantRepository = permissionGrantRepository;
         _permissionGrantStore = permissionGrantStore;
-        _permissionGrantCacheService = permissionGrantCacheService;
         _tenantPermissionScopeValidator = tenantPermissionScopeValidator;
-        _cacheKeyContributor = cacheKeyContributor;
-        _currentTenant = currentTenant;
     }
 
     public async Task GrantAsync(PermissionGrantInfo grant, CancellationToken cancellationToken = default)
@@ -64,12 +53,6 @@ public class PermissionGrantManager : IPermissionGrantManager
                 normalizedGrant.Scope,
                 normalizedGrant.TenantId),
             cancellationToken);
-
-        var cacheKey = _cacheKeyContributor.GetPermissionCacheKey(
-            normalizedGrant.TenantId,
-            normalizedGrant.ProviderType.ToString(),
-            normalizedGrant.ProviderKey);
-        await _permissionGrantCacheService.RemoveAsync(normalizedGrant.ProviderType, normalizedGrant.ProviderKey);
     }
 
     public async Task RevokeAsync(PermissionGrantInfo grant, CancellationToken cancellationToken = default)
@@ -90,12 +73,6 @@ public class PermissionGrantManager : IPermissionGrantManager
         }
 
         await _permissionGrantRepository.DeleteAsync(existingGrant, cancellationToken);
-
-        var cacheKey = _cacheKeyContributor.GetPermissionCacheKey(
-            normalizedGrant.TenantId,
-            normalizedGrant.ProviderType.ToString(),
-            normalizedGrant.ProviderKey);
-        await _permissionGrantCacheService.RemoveAsync(normalizedGrant.ProviderType, normalizedGrant.ProviderKey);
     }
 
     public Task<IReadOnlyList<PermissionGrantInfo>> GetGrantsAsync(
