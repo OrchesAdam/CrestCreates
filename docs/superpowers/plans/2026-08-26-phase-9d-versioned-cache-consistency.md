@@ -27,7 +27,7 @@ authority directly on every check.
 
 **Spec status:** R4 APPROVED / FROZEN
 
-**Plan status:** R1 REMEDIATED / READY FOR IMPLEMENTATION REVIEW
+**Plan status:** R2 APPROVED / IMPLEMENTATION MAY START
 
 ```text
 Organization authority:      IOrganizationStore owns explicit scope generation
@@ -143,7 +143,8 @@ Authority Generation commit group (one atomic first commit)
     Checkpoint A  typed contract RED + runner-free semantic cases
         -> Checkpoint B  InMemory atomic scope state RED/GREEN
         -> Checkpoint C  PostgreSQL V013 RED/GREEN
-        -> OVG01-OVG12 Green for both providers
+        -> shared OVG01-OVG08 + OVG12 Green on both providers
+        -> OVG09-OVG11 Green on their provider-specific runners
         -> Commit 1: typed generation authority
     -> Slice 4  hierarchy snapshot/safety owner + deterministic unit cases
     -> Slice 5  Organization DI cutover + real PostgreSQL multi-instance cases
@@ -158,8 +159,9 @@ Checkpoints A-C deliberately share one uncommitted worktree because the public
 interface change breaks both concrete providers at the compile boundary. Do not
 use a default interface implementation, do not commit a temporary
 `NotImplementedException`, and do not create an intermediate provider behavior.
-The first reviewable commit occurs only after the full group builds and
-OVG01-OVG12 are Green for InMemory and PostgreSQL.
+The first reviewable commit occurs only after the full group builds, the shared
+OVG01-OVG08 + OVG12 suite is Green for InMemory and PostgreSQL, and OVG09-OVG11
+are Green on the provider-specific runners assigned by the frozen Case Matrix.
 
 A later Green Slice cannot begin with an activated Red, an unreviewed
 shared-hotspot change, or a missing handoff from the preceding commit group or
@@ -297,8 +299,12 @@ Do not change all reference-data read semantics merely to support this method.
 
 For V012-to-V013 testing, add an internal one-shot migration barrier before
 V013. It may stop a test runner after V012, but must not become a public target
-migration API. Seed V012 Organization rows, release the barrier, migrate to
-V013, then prove those rows read generation 0 and the first Save reaches 1.
+migration API. While paused at V012, seed existing Organization rows only through
+V012-compatible raw SQL or a dedicated internal migration-seed helper that knows
+only the V012 entity schema. Never call the post-V013
+`PostgreSqlOrganizationStore.Save*Async` path before the generation table
+exists. Release the barrier, migrate to V013, then prove the seeded rows read
+generation 0 and the first new Store Save reaches 1.
 
 ### 2.4 Hierarchy snapshot representation
 
@@ -632,7 +638,7 @@ APIs for tests.
 |---|---|---|
 | Authority checkpoint A | OVG contract skeleton and compiler Red | runner-free Organization Store kit |
 | Authority checkpoint B | OVG01-OVG08, OVG12 | InMemory wrapper |
-| Authority checkpoint C / Commit 1 | OVG01-OVG12 | both provider wrappers + migration/failure suites |
+| Authority checkpoint C / Commit 1 | shared OVG01-OVG08 + OVG12; provider-specific OVG09-OVG11 | both shared wrappers + assigned provider/migration/failure runners |
 | 4 | OHC01-OHC24 except real multi-instance | Organization deterministic unit/fault driver |
 | 5 | OMI01-OMI02 + PostgreSQL-backed OHC01/OHC02/OHC12 | real PostgreSQL, independent providers |
 | 6 | PSC01-PSC02, PSC04-PSC06, PSC08 unit/composition | Application Authorization tests |
@@ -644,6 +650,13 @@ APIs for tests.
 The manifest is an ownership map, not permission to defer a failing earlier
 case. If an earlier implementation activates a later invariant, make it Green
 before committing or move that work into the current Slice explicitly.
+
+“Provider parity” means the shared semantic suite OVG01-OVG08 + OVG12 runs
+through both InMemory and PostgreSQL. It does not require synthetic InMemory
+migration or COMMIT-unknown fixtures. OVG09 is PostgreSQL migration evidence;
+OVG10 is provider-focused overflow/corruption evidence using the legal seam of
+each provider; OVG11 is real PostgreSQL COMMIT-unknown evidence. The full
+Authority commit requires all assigned evidence, not every Case on every driver.
 
 ---
 
@@ -871,6 +884,13 @@ Add/extend tests for:
 
 Implement the internal pre-V013 one-shot barrier for the upgrade topology. Its
 reset must run in `finally` so a failed test cannot poison later fixtures.
+After the runner pauses with V001-V012 applied, insert the Organization fixture
+with V012-compatible raw SQL or the dedicated internal migration-seed helper.
+The helper must not resolve/call the new `PostgreSqlOrganizationStore`, reference
+`organization_scope_generations`, or duplicate general production Save logic.
+After releasing the barrier and applying V013, first assert `Available(0)`, then
+call the new Store Save path and assert the atomic entity update plus generation
+1. This ordering is part of OVG09 evidence.
 
 ### 7.2 Provider semantic Red
 
@@ -931,10 +951,12 @@ dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests 
 git diff --check
 ```
 
-**Commit 1 checkpoint:** OVG01-OVG12 Green for both providers, including
-rollback, upgrade, overflow/corruption, and commit-unknown evidence. Commit the
-typed contract, shared kit, InMemory state, PostgreSQL provider, V013, manifests,
-and all generation tests together as one reviewable Authority Generation change.
+**Commit 1 checkpoint:** shared OVG01-OVG08 + OVG12 are Green for both providers;
+OVG09-OVG11 are Green on their assigned provider-specific runners, including
+V012-compatible upgrade seeding, overflow/corruption, and PostgreSQL
+commit-unknown evidence. Commit the typed contract, shared kit, InMemory state,
+PostgreSQL provider, V013, manifests, and all generation tests together as one
+reviewable Authority Generation change.
 
 ---
 
@@ -992,6 +1014,15 @@ Prove:
 - ordinary snapshot lookup/publication failure uses request-local authority data
   only through the final safety-state gate;
 - a normal Unavailable fallback authority failure propagates without stale data.
+
+Add the supplemental authorization-adjacent composition test
+`DataPermissionScope_FreshnessFailure_Should_NotReturnExpandedOrganizationScope`.
+Configure the existing `OwnOrganizationAndDescendants` path, make its hierarchy
+dependency throw `OrganizationHierarchyFreshnessException`, and prove the
+failure propagates without constructing or returning a descendant-expanded
+`DataPermissionScope`. Do not add a Case ID, cache the derived scope, or create a
+parallel policy; this test locks fail-closed propagation through the existing
+composition.
 
 The non-cooperative cancellation case is named
 `TimedOutFlight_IgnoringCancellation_Should_NotPublishLateResult_OrEscapePhysicalLoadBound`.
@@ -1386,6 +1417,8 @@ explicitly answer:
   failure branch that loads authority twice?
 - Is the legacy Infrastructure 30-minute-TTL hierarchy API absent from all
   production assemblies, registrations, and consumers?
+- Does `OwnOrganizationAndDescendants` propagate a hierarchy freshness failure
+  without returning an expanded Data Permission scope?
 - Can Permission production code consult or re-enable the old positive cache?
 - Does a legal repository writer need Manager/invalidation for correctness?
 - Were unrelated Authorization caching consumers preserved?
@@ -1482,6 +1515,8 @@ matches code and evidence; Issue #26 is ready for implementation review.
       never disposes the shared singleton owner.
 - [ ] Null tenant bypasses generation, cache, safety registry, and flight.
 - [ ] Results remain detached and traversal semantics remain exact.
+- [ ] `OwnOrganizationAndDescendants` propagates hierarchy freshness failure and
+      never returns a descendant-expanded Data Permission scope on that failure.
 
 ### 15.3 OHC09 final-gate audit
 
@@ -1510,7 +1545,8 @@ matches code and evidence; Issue #26 is ready for implementation review.
 
 ### 15.5 Evidence and scope
 
-- [ ] InMemory and PostgreSQL run the same runner-free OVG cases.
+- [ ] InMemory and PostgreSQL run shared OVG01-OVG08 + OVG12; OVG09-OVG11 run
+      only on the provider-specific runners assigned by the Case Matrix.
 - [ ] Real PostgreSQL hierarchy topology uses independent providers/owners.
 - [ ] Real EF Permission topology uses fresh scopes and direct repository writer.
 - [ ] Boundary tests lock unique mainlines and dependency direction.
@@ -1599,28 +1635,30 @@ Implementation is complete only when all of the following are evidenced:
     never triggers a second authority load.
 14. Two independent Organization cache owners over one PostgreSQL authority
     observe committed V2 without an event or shared cache.
-15. The legacy Infrastructure 30-minute-TTL hierarchy interface/implementation
+15. Data Permission `OwnOrganizationAndDescendants` propagates hierarchy
+    freshness failure without returning an expanded scope.
+16. The legacy Infrastructure 30-minute-TTL hierarchy interface/implementation
     is absent from production composition and structurally prevented from return.
-16. Compatibility-created private owners and DI singleton owners have explicit,
+17. Compatibility-created private owners and DI singleton owners have explicit,
     tested, non-overlapping disposal ownership.
-17. Resource limits are centralized, validated, tested under exhaustion, and
+18. Resource limits are centralized, validated, tested under exhaustion, and
     recorded in handoffs.
-18. Permission production checks query committed EF authority every time.
-19. Old positive cache state, invalidation loss, and cache outage cannot grant
+19. Permission production checks query committed EF authority every time.
+20. Old positive cache state, invalidation loss, and cache outage cannot grant
     Permission.
-20. A legal direct Permission repository writer is observed without Manager or
+21. A legal direct Permission repository writer is observed without Manager or
     invalidation.
-21. Permission authority failure cannot fall back to stale positive state.
-22. Tenant/global Permission filtering and SuperAdmin behavior are unchanged.
-23. Unrelated Authorization caching/key/audit consumers remain operational.
-24. Dependency boundaries preserve the unique mainlines.
-25. The existing PostgreSQL AOT native executable runs V013 and the independent
+22. Permission authority failure cannot fall back to stale positive state.
+23. Tenant/global Permission filtering and SuperAdmin behavior are unchanged.
+24. Unrelated Authorization caching/key/audit consumers remain operational.
+25. Dependency boundaries preserve the unique mainlines.
+26. The existing PostgreSQL AOT native executable runs V013 and the independent
     cache scenario while retaining all prior markers.
-26. No out-of-scope cache/generation/framework feature was introduced.
-27. Product review passes before the H3 reuse judgment.
-28. H3 records value, misses, noise, runtime cost, maintenance cost, context,
+27. No out-of-scope cache/generation/framework feature was introduced.
+28. Product review passes before the H3 reuse judgment.
+29. H3 records value, misses, noise, runtime cost, maintenance cost, context,
     defects caught, and retain/adjust/retire verdict.
-29. `memory.md` and review artifacts describe only proven capability.
+30. `memory.md` and review artifacts describe only proven capability.
 
 When these criteria are Green, the PR is ready for implementation review. The
 first review focus is the OHC09 fallback audit, followed by logical-vs-physical
