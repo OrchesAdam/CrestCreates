@@ -680,6 +680,7 @@ public sealed class OrganizationHierarchyCacheTests
         owner.ActivePhysicalLoadCount.Should().Be(0);
 
         driver.ResetInjection();
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
         var retry = await service.GetDescendantsAsync("root", "tenant-a");
         retry.Should().BeEmpty();
         driver.CollectionReadCount.Should().Be(2);
