@@ -17,6 +17,8 @@ internal sealed record OrganizationHierarchyCacheOptions
     {
         if (snapshotCapacity <= 0)
             throw new ArgumentOutOfRangeException(nameof(snapshotCapacity));
+        if (snapshotSlidingExpiration is not null && snapshotSlidingExpiration.Value <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(snapshotSlidingExpiration));
         if (safetyScopeCapacity <= 0)
             throw new ArgumentOutOfRangeException(nameof(safetyScopeCapacity));
         if (physicalLoadCapacity <= 0)

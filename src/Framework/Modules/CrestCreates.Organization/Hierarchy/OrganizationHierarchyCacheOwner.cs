@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Collections.Immutable;
 using CrestCreates.Organization.Abstractions;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace CrestCreates.Organization;
 
@@ -16,7 +14,7 @@ internal interface IOrganizationHierarchyCacheOwner
         OrganizationHierarchyCacheKey key,
         out OrganizationHierarchySnapshot snapshot);
 
-    ValueTask<OrganizationHierarchyLoadResult> JoinOrCreateFlightAsync(
+    ValueTask<OrganizationHierarchySnapshot> JoinOrCreateFlightAsync(
         OrganizationHierarchyCacheKey key,
         Func<CancellationToken, ValueTask<OrganizationHierarchySnapshot>> load,
         CancellationToken cancellationToken);
@@ -25,45 +23,45 @@ internal interface IOrganizationHierarchyCacheOwner
         OrganizationHierarchyAdmissionToken token,
         OrganizationHierarchyCacheKey key,
         OrganizationHierarchySnapshot candidate,
+        bool publish,
         out OrganizationHierarchySnapshot accepted);
 
     bool TryCompleteUnavailableFallback(
         OrganizationHierarchyAdmissionToken token,
         OrganizationHierarchySnapshot requestLocalResult);
-
-    bool TryCompleteCacheFailureFallback(
-        OrganizationHierarchyAdmissionToken token,
-        OrganizationHierarchyCacheKey key,
-        OrganizationHierarchySnapshot requestLocalResult);
-
-    long GetPublicationGeneration(string tenantId);
 }
-
-internal readonly record struct OrganizationHierarchyLoadResult(
-    bool IsOwner,
-    OrganizationHierarchySnapshot? Snapshot,
-    bool TimedOut,
-    bool Failed);
 
 internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCacheOwner, IDisposable, IAsyncDisposable
 {
-    private readonly IMemoryCache _snapshotCache;
+    private readonly IOrganizationHierarchySnapshotCache _snapshotCache;
     private readonly OrganizationHierarchyCacheOptions _options;
-    private readonly ConcurrentDictionary<string, OrganizationHierarchyScopeState> _safetyRegistry = new();
+    private readonly ConcurrentDictionary<string, OrganizationHierarchyScopeState> _safetyRegistry = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<OrganizationHierarchyCacheKey, OrganizationHierarchyFlight> _flights = new();
-    private int _activeLoadCount;
-    private int _revisionCounter;
-    private bool _disposed;
+    private readonly CancellationTokenSource _ownerCancellation = new();
+    private readonly object _safetyAdmissionGate = new();
+    private int _physicalLoadCount;
+    private long _revisionCounter;
+    private int _disposed;
+    private int _ownerCancellationDisposed;
+    private int _ownerCancellationCompleted;
 
     public OrganizationHierarchyCacheOwner(OrganizationHierarchyCacheOptions? options = null)
+        : this(options ?? new OrganizationHierarchyCacheOptions(), snapshotCache: null)
     {
-        _options = options ?? new OrganizationHierarchyCacheOptions();
-        _snapshotCache = new MemoryCache(new MemoryCacheOptions
-        {
-            SizeLimit = _options.SnapshotCapacity,
-            CompactionPercentage = 0.25
-        });
     }
+
+    internal OrganizationHierarchyCacheOwner(
+        OrganizationHierarchyCacheOptions options,
+        IOrganizationHierarchySnapshotCache? snapshotCache)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
+        _snapshotCache = snapshotCache ?? new MemoryOrganizationHierarchySnapshotCache(options);
+    }
+
+    internal int ActiveLogicalFlightCount => _flights.Count;
+    internal int ActivePhysicalLoadCount => Volatile.Read(ref _physicalLoadCount);
+    internal int SafetyScopeCount => _safetyRegistry.Count;
 
     private long NextRevision() => Interlocked.Increment(ref _revisionCounter);
 
@@ -72,175 +70,70 @@ internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCa
         OrganizationScopeGenerationRead generationRead,
         CancellationToken cancellationToken)
     {
+        ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(scopeKey))
+            throw new ArgumentException("Hierarchy cache scope key must be non-blank.", nameof(scopeKey));
 
-        var state = _safetyRegistry.GetOrAdd(scopeKey, key => new OrganizationHierarchyScopeState(key, NextRevision()));
+        var state = GetOrAdmitSafetyState(scopeKey);
         lock (state.Gate)
-        {
-            var outcome = ApplyGenerationOutcome(state, generationRead);
-            return new ValueTask<OrganizationHierarchyAdmissionToken>(outcome);
-        }
-    }
-
-    private OrganizationHierarchyAdmissionToken ApplyGenerationOutcome(
-        OrganizationHierarchyScopeState state,
-        OrganizationScopeGenerationRead generationRead)
-    {
-        var revision = NextRevision();
-
-        if (generationRead.Status == OrganizationScopeGenerationStatus.Unknown)
-        {
-            throw new OrganizationHierarchyFreshnessException(
-                OrganizationHierarchyFreshnessFailureKind.InvalidGenerationOutcome,
-                message: "default/Unknown generation outcome cannot authorize hierarchy read.");
-        }
-
-        if (generationRead.Status == OrganizationScopeGenerationStatus.Unavailable)
-        {
-            if (state.Mode == OrganizationHierarchySafetyMode.Quarantined)
-            {
-                throw new OrganizationHierarchyFreshnessException(
-                    OrganizationHierarchyFreshnessFailureKind.QuarantinedGenerationUnavailable,
-                    observedHighWaterGeneration: state.ObservedHighWater,
-                    quarantineFloorGeneration: state.QuarantineFloor,
-                    message: "quarantined scope cannot fall back to direct authority.");
-            }
-
-            return new OrganizationHierarchyAdmissionToken(
-                state.ScopeKey,
-                revision,
-                state.Mode,
-                state.ObservedHighWater,
-                state.QuarantineFloor,
-                Generation: null);
-        }
-
-        // Available(G)
-        var g = generationRead.Generation;
-
-        if (state.Mode == OrganizationHierarchySafetyMode.Normal)
-        {
-            if (state.ObservedHighWater.HasValue && g < state.ObservedHighWater.Value)
-            {
-                // Regression: capture floor, quarantine
-                var floor = state.ObservedHighWater.Value;
-                state.Update(OrganizationHierarchySafetyMode.Quarantined, state.ObservedHighWater, floor, revision);
-                throw new OrganizationHierarchyFreshnessException(
-                    OrganizationHierarchyFreshnessFailureKind.GenerationRegression,
-                    observedGeneration: g,
-                    observedHighWaterGeneration: state.ObservedHighWater,
-                    quarantineFloorGeneration: floor,
-                    message: "observed generation regression below ObservedHighWater.");
-            }
-
-            // Advance high-water
-            var newHighWater = !state.ObservedHighWater.HasValue || g > state.ObservedHighWater.Value
-                ? g
-                : state.ObservedHighWater.Value;
-            state.Update(OrganizationHierarchySafetyMode.Normal, newHighWater, null, revision);
-
-            return new OrganizationHierarchyAdmissionToken(
-                state.ScopeKey,
-                revision,
-                OrganizationHierarchySafetyMode.Normal,
-                newHighWater,
-                null,
-                Generation: g);
-        }
-
-        // QUARANTINED
-        if (g < state.ObservedHighWater)
-        {
-            state.Update(OrganizationHierarchySafetyMode.Quarantined, state.ObservedHighWater, state.QuarantineFloor, revision);
-            throw new OrganizationHierarchyFreshnessException(
-                OrganizationHierarchyFreshnessFailureKind.GenerationRegression,
-                observedGeneration: g,
-                observedHighWaterGeneration: state.ObservedHighWater,
-                quarantineFloorGeneration: state.QuarantineFloor,
-                message: "quarantined scope: generation below ObservedHighWater.");
-        }
-
-        if (g <= state.QuarantineFloor)
-        {
-            state.Update(OrganizationHierarchySafetyMode.Quarantined, state.ObservedHighWater, state.QuarantineFloor, revision);
-            throw new OrganizationHierarchyFreshnessException(
-                OrganizationHierarchyFreshnessFailureKind.GenerationRegression,
-                observedGeneration: g,
-                observedHighWaterGeneration: state.ObservedHighWater,
-                quarantineFloorGeneration: state.QuarantineFloor,
-                message: "quarantined scope: generation at/below QuarantineFloor.");
-        }
-
-        if (g > state.ObservedHighWater)
-        {
-            // Advance high-water, remain quarantined (recovery not yet published)
-            state.Update(OrganizationHierarchySafetyMode.Quarantined, g, state.QuarantineFloor, revision);
-            return new OrganizationHierarchyAdmissionToken(
-                state.ScopeKey,
-                revision,
-                OrganizationHierarchySafetyMode.Quarantined,
-                g,
-                state.QuarantineFloor,
-                Generation: g);
-        }
-
-        // g == ObservedHighWater && g > QuarantineFloor → eligible to retry
-        return new OrganizationHierarchyAdmissionToken(
-            state.ScopeKey,
-            revision,
-            OrganizationHierarchySafetyMode.Quarantined,
-            state.ObservedHighWater,
-            state.QuarantineFloor,
-            Generation: g);
+            return ValueTask.FromResult(ApplyGenerationOutcome(state, generationRead));
     }
 
     public bool TryReadSnapshot(OrganizationHierarchyCacheKey key, out OrganizationHierarchySnapshot snapshot)
     {
-        return _snapshotCache.TryGetValue(key, out snapshot!);
+        ThrowIfDisposed();
+        try
+        {
+            return _snapshotCache.TryGet(key, out snapshot);
+        }
+        catch (Exception exception) when (
+            Volatile.Read(ref _disposed) == 0 &&
+            IsOrdinarySnapshotFailure(exception) &&
+            exception is not OrganizationHierarchySnapshotCacheException)
+        {
+            throw new OrganizationHierarchySnapshotCacheException(
+                $"Organization hierarchy snapshot lookup failed for '{key.TenantId}' generation {key.Generation}.",
+                exception);
+        }
     }
 
-    public async ValueTask<OrganizationHierarchyLoadResult> JoinOrCreateFlightAsync(
+    public async ValueTask<OrganizationHierarchySnapshot> JoinOrCreateFlightAsync(
         OrganizationHierarchyCacheKey key,
         Func<CancellationToken, ValueTask<OrganizationHierarchySnapshot>> load,
         CancellationToken cancellationToken)
     {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(load);
+
         while (true)
         {
-            var flight = _flights.GetOrAdd(key, _ => new OrganizationHierarchyFlight(key, _options.SharedLoadTimeout));
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_flights.TryGetValue(key, out var existing))
+                return await existing.WaitAsync(cancellationToken).ConfigureAwait(false);
 
-            if (flight.TryJoin(out var waiter))
+            if (!TryReservePhysicalLoad())
             {
-                try
-                {
-                    var snapshot = await load(cancellationToken).ConfigureAwait(false);
-                    flight.Complete(snapshot);
-                    return new OrganizationHierarchyLoadResult(true, snapshot, false, false);
-                }
-                catch (Exception ex)
-                {
-                    flight.Fail(ex);
-                    return new OrganizationHierarchyLoadResult(true, null, false, true);
-                }
+                throw new OrganizationException(
+                    $"Organization hierarchy physical-load capacity {_options.PhysicalLoadCapacity} is exhausted.");
             }
-            else
+
+            var created = new OrganizationHierarchyFlight(
+                key,
+                _options.SharedLoadTimeout,
+                _ownerCancellation.Token,
+                load,
+                OnLogicalFlightTerminal,
+                OnPhysicalLoadTerminal);
+
+            if (_flights.TryAdd(key, created))
             {
-                // Joined as waiter
-                var result = await flight.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-                if (result.TimedOut)
-                {
-                    return new OrganizationHierarchyLoadResult(false, null, true, false);
-                }
-
-                if (result.Failed)
-                {
-                    // Retry: create a new flight
-                    _flights.TryRemove(key, out _);
-                    continue;
-                }
-
-                return new OrganizationHierarchyLoadResult(false, result.Snapshot, false, false);
+                created.Start();
+                return await created.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
+
+            created.AbandonBeforeStart();
+            ReleasePhysicalLoad();
         }
     }
 
@@ -248,123 +141,266 @@ internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCa
         OrganizationHierarchyAdmissionToken token,
         OrganizationHierarchyCacheKey key,
         OrganizationHierarchySnapshot candidate,
+        bool publish,
         out OrganizationHierarchySnapshot accepted)
     {
-        if (!_safetyRegistry.TryGetValue(token.ScopeKey, out var state))
-        {
-            accepted = candidate;
+        accepted = candidate;
+        if (Volatile.Read(ref _disposed) != 0)
             return false;
+        if (!_safetyRegistry.TryGetValue(token.ScopeKey, out var state))
+            return false;
+
+        if (!publish)
+        {
+            lock (state.Gate)
+            {
+                return Volatile.Read(ref _disposed) == 0 &&
+                       IsCandidateAdmissible(state, candidate) &&
+                       state.Mode == OrganizationHierarchySafetyMode.Normal;
+            }
+        }
+
+        // Snapshot infrastructure is deliberately outside the safety-state
+        // lock. Publication can block or fail, and observations must remain
+        // able to advance/regress/quarantine the scope while it is in flight.
+        // The second lock below is the mandatory final caller-completion gate.
+        var published = false;
+        try
+        {
+            _snapshotCache.Set(key, candidate);
+            published = true;
+        }
+        catch (Exception exception) when (
+            Volatile.Read(ref _disposed) == 0 &&
+            IsOrdinarySnapshotFailure(exception))
+        {
+            // A normal-scope candidate may still be returned request-locally,
+            // but only if the final gate remains admissible. Quarantine cannot
+            // be released without a successful publication.
         }
 
         lock (state.Gate)
         {
-            // Revalidate: revision must still match and state must admit this generation
-            if (state.Revision != token.Revision && token.Mode != OrganizationHierarchySafetyMode.Quarantined)
-            {
-                // State changed since admission
-                if (state.Mode == OrganizationHierarchySafetyMode.Quarantined &&
-                    candidate.Generation <= state.QuarantineFloor)
-                {
-                    accepted = candidate;
-                    return false;
-                }
-                if (candidate.Generation != state.ObservedHighWater &&
-                    state.ObservedHighWater.HasValue && candidate.Generation < state.ObservedHighWater)
-                {
-                    accepted = candidate;
-                    return false;
-                }
-            }
-
-            // For Available(G): G must equal current ObservedHighWater
-            if (token.Mode == OrganizationHierarchySafetyMode.Normal &&
-                candidate.Generation != state.ObservedHighWater)
-            {
-                accepted = candidate;
+            if (Volatile.Read(ref _disposed) != 0)
                 return false;
-            }
-
-            // For Quarantined: G must be above QuarantineFloor
-            if (token.Mode == OrganizationHierarchySafetyMode.Quarantined &&
-                candidate.Generation <= state.QuarantineFloor)
-            {
-                accepted = candidate;
+            if (!IsCandidateAdmissible(state, candidate))
                 return false;
-            }
 
-            // Try to publish
-            if (TryPublish(key, candidate))
+            if (!published)
+                return state.Mode == OrganizationHierarchySafetyMode.Normal;
+
+            if (state.Mode == OrganizationHierarchySafetyMode.Quarantined)
             {
-                // Release quarantine if eligible
-                if (token.Mode == OrganizationHierarchySafetyMode.Quarantined &&
-                    candidate.Generation == state.ObservedHighWater &&
-                    candidate.Generation > state.QuarantineFloor)
-                {
-                    state.Update(OrganizationHierarchySafetyMode.Normal, state.ObservedHighWater, null, NextRevision());
-                }
-
-                accepted = candidate;
-                return true;
+                state.Update(
+                    OrganizationHierarchySafetyMode.Normal,
+                    state.ObservedHighWater,
+                    quarantineFloor: null,
+                    NextRevision());
             }
 
-            accepted = candidate;
-            return true; // publication failed but result is still valid (request-local)
+            return Volatile.Read(ref _disposed) == 0;
         }
     }
+
+    private static bool IsCandidateAdmissible(
+        OrganizationHierarchyScopeState state,
+        OrganizationHierarchySnapshot candidate)
+        => state.ObservedHighWater.HasValue &&
+           candidate.Generation == state.ObservedHighWater.Value &&
+           (state.Mode != OrganizationHierarchySafetyMode.Quarantined ||
+            (state.QuarantineFloor.HasValue && candidate.Generation > state.QuarantineFloor.Value));
 
     public bool TryCompleteUnavailableFallback(
         OrganizationHierarchyAdmissionToken token,
         OrganizationHierarchySnapshot requestLocalResult)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return false;
         if (!_safetyRegistry.TryGetValue(token.ScopeKey, out var state))
             return false;
 
         lock (state.Gate)
         {
-            // Must still be NORMAL with the same ObservedHighWater
-            if (state.Mode != token.Mode)
-                return false;
-            if (state.ObservedHighWater != token.ObservedHighWater)
-                return false;
-
-            return true;
+            return Volatile.Read(ref _disposed) == 0 &&
+                   state.Mode == OrganizationHierarchySafetyMode.Normal &&
+                   token.Mode == OrganizationHierarchySafetyMode.Normal &&
+                   state.ObservedHighWater == token.ObservedHighWater;
         }
     }
 
-    public bool TryCompleteCacheFailureFallback(
-        OrganizationHierarchyAdmissionToken token,
-        OrganizationHierarchyCacheKey key,
-        OrganizationHierarchySnapshot requestLocalResult)
+    private OrganizationHierarchyScopeState GetOrAdmitSafetyState(string scopeKey)
     {
-        return TryCompleteGenerationResult(token, key, requestLocalResult, out _);
-    }
+        if (_safetyRegistry.TryGetValue(scopeKey, out var existing))
+            return existing;
 
-    public long GetPublicationGeneration(string tenantId)
-    {
-        var key = new OrganizationHierarchyCacheKey(tenantId, 0);
-        // This is a simplification; in practice we'd track per-scope
-        return 0;
-    }
-
-    private bool TryPublish(OrganizationHierarchyCacheKey key, OrganizationHierarchySnapshot candidate)
-    {
-        if (_snapshotCache.TryGetValue(key, out var existing) && existing is OrganizationHierarchySnapshot existingSnapshot)
+        lock (_safetyAdmissionGate)
         {
-            if (existingSnapshot.Generation >= candidate.Generation)
-                return false; // newer or equal already cached
+            if (_safetyRegistry.TryGetValue(scopeKey, out existing))
+                return existing;
+            if (_safetyRegistry.Count >= _options.SafetyScopeCapacity)
+            {
+                throw new OrganizationException(
+                    $"Organization hierarchy safety-scope capacity {_options.SafetyScopeCapacity} is exhausted.");
+            }
+
+            var created = new OrganizationHierarchyScopeState(scopeKey, NextRevision());
+            if (!_safetyRegistry.TryAdd(scopeKey, created))
+                return _safetyRegistry[scopeKey];
+            return created;
+        }
+    }
+
+    private OrganizationHierarchyAdmissionToken ApplyGenerationOutcome(
+        OrganizationHierarchyScopeState state,
+        OrganizationScopeGenerationRead generationRead)
+    {
+        if (generationRead.Status == OrganizationScopeGenerationStatus.Unavailable)
+        {
+            if (generationRead.Generation != 0)
+                throw InvalidGenerationOutcome(state, "Unavailable generation outcome must use canonical generation 0.");
+            if (state.Mode == OrganizationHierarchySafetyMode.Quarantined)
+            {
+                throw new OrganizationHierarchyFreshnessException(
+                    OrganizationHierarchyFreshnessFailureKind.QuarantinedGenerationUnavailable,
+                    observedHighWaterGeneration: state.ObservedHighWater,
+                    quarantineFloorGeneration: state.QuarantineFloor,
+                    message: "Quarantined hierarchy scope cannot use direct availability fallback.");
+            }
+
+            return Token(state, generation: null);
         }
 
-        var cacheEntryOptions = new MemoryCacheEntryOptions()
-            .SetSize(1)
-            .SetSlidingExpiration(_options.SnapshotSlidingExpiration);
+        if (generationRead.Status != OrganizationScopeGenerationStatus.Available || generationRead.Generation < 0)
+            throw InvalidGenerationOutcome(state, "Unknown, undefined, or malformed generation outcome cannot authorize a hierarchy read.");
 
-        _snapshotCache.Set(key, candidate, cacheEntryOptions);
-        return true;
+        var generation = generationRead.Generation;
+        var revision = NextRevision();
+
+        if (state.Mode == OrganizationHierarchySafetyMode.Normal)
+        {
+            if (state.ObservedHighWater.HasValue && generation < state.ObservedHighWater.Value)
+            {
+                var regressionFloor = state.ObservedHighWater.Value;
+                state.Update(OrganizationHierarchySafetyMode.Quarantined, regressionFloor, regressionFloor, revision);
+                throw Regression(state, generation, "Observed generation regressed below the process high-water mark.");
+            }
+
+            var highWater = !state.ObservedHighWater.HasValue || generation > state.ObservedHighWater.Value
+                ? generation
+                : state.ObservedHighWater.Value;
+            state.Update(OrganizationHierarchySafetyMode.Normal, highWater, null, revision);
+            return Token(state, generation);
+        }
+
+        var observedHighWater = state.ObservedHighWater
+            ?? throw InvalidGenerationOutcome(state, "Quarantined scope has no observed high-water mark.");
+        var floor = state.QuarantineFloor
+            ?? throw InvalidGenerationOutcome(state, "Quarantined scope has no quarantine floor.");
+
+        if (generation < observedHighWater || generation <= floor)
+            throw Regression(state, generation, "Generation is not eligible to recover the quarantined hierarchy scope.");
+
+        if (generation > observedHighWater)
+            state.Update(OrganizationHierarchySafetyMode.Quarantined, generation, floor, revision);
+
+        return Token(state, generation);
     }
+
+    private static OrganizationHierarchyAdmissionToken Token(
+        OrganizationHierarchyScopeState state,
+        long? generation)
+        => new(
+            state.ScopeKey,
+            state.Revision,
+            state.Mode,
+            state.ObservedHighWater,
+            state.QuarantineFloor,
+            generation);
+
+    private static OrganizationHierarchyFreshnessException Regression(
+        OrganizationHierarchyScopeState state,
+        long generation,
+        string message)
+        => new(
+            OrganizationHierarchyFreshnessFailureKind.GenerationRegression,
+            observedGeneration: generation,
+            observedHighWaterGeneration: state.ObservedHighWater,
+            quarantineFloorGeneration: state.QuarantineFloor,
+            message: message);
+
+    private static OrganizationHierarchyFreshnessException InvalidGenerationOutcome(
+        OrganizationHierarchyScopeState state,
+        string message)
+        => new(
+            OrganizationHierarchyFreshnessFailureKind.InvalidGenerationOutcome,
+            observedHighWaterGeneration: state.ObservedHighWater,
+            quarantineFloorGeneration: state.QuarantineFloor,
+            message: message);
+
+    private bool TryReservePhysicalLoad()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _physicalLoadCount);
+            if (current >= _options.PhysicalLoadCapacity)
+                return false;
+            if (Interlocked.CompareExchange(ref _physicalLoadCount, current + 1, current) == current)
+                return true;
+        }
+    }
+
+    private void ReleasePhysicalLoad() => Interlocked.Decrement(ref _physicalLoadCount);
+
+    private void OnLogicalFlightTerminal(OrganizationHierarchyFlight flight)
+    {
+        if (_flights.TryGetValue(flight.Key, out var current) && ReferenceEquals(current, flight))
+            _flights.TryRemove(flight.Key, out _);
+    }
+
+    private void OnPhysicalLoadTerminal(OrganizationHierarchyFlight _)
+    {
+        ReleasePhysicalLoad();
+        TryDisposeOwnerCancellation();
+    }
+
+    private void TryDisposeOwnerCancellation()
+    {
+        if (Volatile.Read(ref _disposed) == 0 ||
+            Volatile.Read(ref _ownerCancellationCompleted) == 0 ||
+            Volatile.Read(ref _physicalLoadCount) != 0)
+            return;
+        if (Interlocked.Exchange(ref _ownerCancellationDisposed, 1) == 0)
+            _ownerCancellation.Dispose();
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+            throw new ObjectDisposedException(nameof(OrganizationHierarchyCacheOwner));
+    }
+
+    private static bool IsOrdinarySnapshotFailure(Exception exception)
+        => exception is not (OutOfMemoryException or AccessViolationException);
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        try
+        {
+            _ownerCancellation.Cancel();
+        }
+        finally
+        {
+            Volatile.Write(ref _ownerCancellationCompleted, 1);
+        }
+        foreach (var flight in _flights.Values)
+            flight.InvalidateForOwnerDisposal();
         _snapshotCache.Dispose();
+        // Keep the CTS alive while non-cooperative physical loads still hold
+        // linked tokens; the last physical terminal disposes it.
+        TryDisposeOwnerCancellation();
     }
 
     public ValueTask DisposeAsync()

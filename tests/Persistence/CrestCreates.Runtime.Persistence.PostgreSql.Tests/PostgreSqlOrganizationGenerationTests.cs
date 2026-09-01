@@ -1,5 +1,7 @@
 using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.Organization.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Errors;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using FluentAssertions;
@@ -74,7 +76,7 @@ public sealed class PostgreSqlOrganizationGenerationTests : IAsyncLifetime
             $"select count(*) from information_schema.tables where table_schema = @schema and table_name = 'organization_scope_generations';",
             connection);
         cmd2.Parameters.AddWithValue("schema", _lease.Options.Schema);
-        var count = (long)await cmd2.ExecuteScalarAsync();
+        var count = Convert.ToInt64(await cmd2.ExecuteScalarAsync());
         count.Should().Be(1, "organization_scope_generations table should exist");
     }
 
@@ -92,6 +94,24 @@ public sealed class PostgreSqlOrganizationGenerationTests : IAsyncLifetime
     {
         ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG02, "Authority", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await OrganizationStoreContractCases.RunOrganizationUnitSaveAdvancesGenerationAsync(_store, "ovg02");
+    }
+
+    [Fact]
+    public async Task KnownPreCommitFailure_Should_AdvanceNeitherDataNorGeneration()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG06, "Authority", "KnownRollback", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        using var injection = PostgreSqlRuntimeTestHooks.BlockAfterWritePoint((point, _) =>
+        {
+            point.Should().Be("organization-unit-snapshot-upserted");
+            throw new InvalidOperationException("injected failure after entity upsert");
+        });
+
+        await _store.Invoking(store => store.SaveOrganizationUnitAsync(Unit("ovg06-unit", "ovg06")))
+            .Should().ThrowAsync<InvalidOperationException>();
+
+        (await _store.GetOrganizationUnitByIdAsync("ovg06-unit", "ovg06")).Should().BeNull();
+        (await _store.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg06")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(0));
     }
 
     [Fact]
@@ -113,10 +133,143 @@ public sealed class PostgreSqlOrganizationGenerationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RepeatedBlindSave_Should_AdvanceGenerationAgain()
+    public async Task Generation_Should_Not_Change_DomainBlindWriteSemantics()
     {
         ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG08, "Authority", "RepeatedBlindSave", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await OrganizationStoreContractCases.RunRepeatedBlindSaveAdvancesAgainAsync(_store, "ovg08");
+    }
+
+    [Fact]
+    public async Task V013Upgrade_Should_PreserveV012Rows_AtGenerationZero()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG09, "Provider", "V012Upgrade", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        var options = new PostgreSqlRuntimePersistenceOptions
+        {
+            ConnectionString = _fixture.ConnectionString,
+            Schema = $"itest_{Guid.NewGuid():N}"
+        };
+        await using var upgradeLease = new PostgreSqlRuntimeSchemaLease(_fixture.ConnectionString, options);
+        var reachedV013 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseV013 = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var barrier = PostgreSqlRuntimeTestHooks.BlockBeforeMigration(async (version, ct) =>
+        {
+            if (version != "V013")
+                return;
+            reachedV013.TrySetResult(true);
+            await releaseV013.Task.WaitAsync(ct);
+        });
+        var apply = new PostgreSqlRuntimeMigrationRunner(options)
+            .ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
+
+        try
+        {
+            await reachedV013.Task;
+            var original = Unit("ovg09-unit", "ovg09");
+            var json = PostgreSqlRuntimeStoreSupport.Serialize(
+                original,
+                PostgreSqlControlPlaneReferenceDataJsonSerializerContext.Default.OrganizationUnit);
+            await using (var connection = new NpgsqlConnection(options.ConnectionString))
+            {
+                await connection.OpenAsync();
+                await using var seed = new NpgsqlCommand($"""
+                    insert into "{options.Schema}".organization_units
+                        (tenant_scope_kind, tenant_id, organization_unit_id, parent_id, sort_order, is_active,
+                         created_at_utc_ticks, created_at, state_contract_version, state_json)
+                    values ('tenant', 'ovg09', 'ovg09-unit', null, 0, true, @ticks, @created, 1, @json::jsonb);
+                    """, connection);
+                seed.Parameters.AddWithValue("ticks", original.CreatedAt.UtcTicks);
+                seed.Parameters.AddWithValue("created", original.CreatedAt.UtcDateTime);
+                seed.Parameters.AddWithValue("json", json);
+                await seed.ExecuteNonQueryAsync();
+            }
+        }
+        finally
+        {
+            releaseV013.TrySetResult(true);
+            await apply;
+        }
+
+        await using var upgradedProvider = BuildProvider(options);
+        var upgradedStore = upgradedProvider.GetRequiredService<IOrganizationStore>();
+        (await upgradedStore.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg09")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(0));
+
+        await upgradedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+        {
+            Id = "ovg09-unit",
+            TenantId = "ovg09",
+            Name = "updated-after-upgrade"
+        });
+        (await upgradedStore.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg09")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(1));
+        (await upgradedStore.GetOrganizationUnitByIdAsync("ovg09-unit", "ovg09"))!.Name
+            .Should().Be("updated-after-upgrade");
+    }
+
+    [Fact]
+    public async Task GenerationOverflow_Should_FailWithoutEntityMutationOrWrap()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG10, "Provider", "GenerationOverflow", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        await _store.SaveOrganizationUnitAsync(Unit("ovg10-unit", "ovg10"));
+        await ExecuteAsync($"""
+            update "{_lease.Options.Schema}".organization_scope_generations
+            set generation = {long.MaxValue}
+            where tenant_scope_kind = 'tenant' and tenant_id = 'ovg10';
+            """);
+
+        var replacement = new OrganizationUnit
+        {
+            Id = "ovg10-unit",
+            TenantId = "ovg10",
+            Name = "must-not-commit"
+        };
+        (await Record.ExceptionAsync(() => _store.SaveOrganizationUnitAsync(replacement)))
+            .Should().NotBeNull();
+
+        (await _store.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg10")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(long.MaxValue));
+        (await _store.GetOrganizationUnitByIdAsync("ovg10-unit", "ovg10"))!.Name
+            .Should().Be("ovg10-unit");
+    }
+
+    [Fact]
+    public async Task GenerationSchemaDrift_Should_FailAsContractError_NotUnavailable()
+    {
+        await ExecuteAsync($"drop table \"{_lease.Options.Schema}\".organization_scope_generations;");
+
+        await _store.Invoking(store => store.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg10-drift")))
+            .Should().ThrowAsync<RuntimePersistenceContractException>();
+    }
+
+    [Fact]
+    public async Task CommitUnknown_Should_NeverProduce_OneSided_Data_And_Generation()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG11, "Provider", "CommitUnknown", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
+        using var injection = PostgreSqlRuntimeTestHooks.BlockAfterCommit(
+            () => throw new InvalidOperationException("injected acknowledgement loss"));
+
+        await _store.Invoking(store => store.SaveOrganizationUnitAsync(Unit("ovg11-unit", "ovg11")))
+            .Should().ThrowAsync<RuntimeTransactionCommitUnknownException>();
+
+        (await _store.GetOrganizationUnitByIdAsync("ovg11-unit", "ovg11")).Should().NotBeNull();
+        (await _store.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg11")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(1));
+    }
+
+    [Fact]
+    public async Task ConnectivityFailure_Should_ReturnTypedUnavailable()
+    {
+        var unavailableOptions = new PostgreSqlRuntimePersistenceOptions
+        {
+            ConnectionString = "Host=127.0.0.1;Port=1;Username=none;Password=none;Database=none;Timeout=1",
+            Schema = "unavailable"
+        };
+        await using var unavailableProvider = BuildProvider(unavailableOptions);
+        var unavailableStore = unavailableProvider.GetRequiredService<IOrganizationStore>();
+
+        var result = await unavailableStore.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("unavailable"));
+
+        result.Should().Be(OrganizationScopeGenerationRead.Unavailable);
     }
 
     [Fact]
@@ -133,5 +286,13 @@ public sealed class PostgreSqlOrganizationGenerationTests : IAsyncLifetime
     {
         ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG12, "Contract", "ScopeIdentity", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
         await OrganizationStoreContractCases.RunGlobalAndTenantGenerationAreIndependentAsync(_store, "ovg12");
+    }
+
+    private async Task ExecuteAsync(string sql)
+    {
+        await using var connection = new NpgsqlConnection(_lease.Options.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
     }
 }

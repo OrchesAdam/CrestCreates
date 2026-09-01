@@ -69,13 +69,14 @@ public class ControlPlaneReferenceDataSpecTestSkeletonTests
             CaseId.C11, CaseId.C12, CaseId.C13, CaseId.C14, CaseId.C15,
             // Phase 9d: Versioned Cache Consistency OVG01–OVG12
             CaseId.OVG01, CaseId.OVG02, CaseId.OVG03, CaseId.OVG04, CaseId.OVG05,
-            CaseId.OVG07, CaseId.OVG08, CaseId.OVG12,
+            CaseId.OVG06, CaseId.OVG07, CaseId.OVG08, CaseId.OVG09, CaseId.OVG10,
+            CaseId.OVG11, CaseId.OVG12,
         };
 
         var actualCaseIds = new HashSet<string>(ControlPlaneReferenceDataCaseManifest.AllCases.Select(c => c.CaseId));
 
         actualCaseIds.Should().BeEquivalentTo(expectedCaseIds,
-            "the manifest must contain exactly the Case IDs frozen in Spec §14 plus Phase 9d OVG cases");
+            "the manifest must contain exactly the Case IDs frozen in Spec §14 plus all Phase 9d authority cases");
     }
 
     [Fact]
@@ -259,11 +260,11 @@ public class ControlPlaneReferenceDataSpecTestSkeletonTests
             .ToHashSet(StringComparer.Ordinal);
 
     [Fact]
-    public void ManifestEntryCount_Should_Be85()
+    public void ManifestEntryCount_Should_Be89()
     {
-        // 77 original Spec §14 cases + 8 Phase 9d OVG cases (OVG01-05, 07, 08, 12)
-        ControlPlaneReferenceDataCaseManifest.AllCases.Should().HaveCount(85,
-            "Spec §14 defines 77 Case IDs plus 8 Phase 9d OVG cases");
+        // 77 original Spec §14 cases + all 12 Phase 9d authority cases.
+        ControlPlaneReferenceDataCaseManifest.AllCases.Should().HaveCount(89,
+            "Spec §14 defines 77 Case IDs plus 12 Phase 9d authority cases");
     }
 
     // ─────────────────────────────────────────────────────────────

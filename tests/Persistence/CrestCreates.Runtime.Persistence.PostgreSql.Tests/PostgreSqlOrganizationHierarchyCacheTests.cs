@@ -45,7 +45,7 @@ public sealed class PostgreSqlOrganizationHierarchyCacheTests : IAsyncLifetime
         return services.BuildServiceProvider();
     }
 
-    private static OrganizationUnit Unit(string id, string tenantId, string? parentId = null)
+    private static OrganizationUnit Unit(string id, string? tenantId, string? parentId = null)
         => new() { Id = id, TenantId = tenantId, Name = id, ParentId = parentId };
 
     /// <summary>

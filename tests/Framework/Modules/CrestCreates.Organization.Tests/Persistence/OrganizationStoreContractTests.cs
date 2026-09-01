@@ -518,6 +518,24 @@ public sealed class OrganizationStoreContractTests
     }
 
     [Fact]
+    public async Task KnownPreCommitFailure_Should_AdvanceNeitherDataNorGeneration()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG06, "Authority", "KnownRollback", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var store = new InMemoryOrganizationStore();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await store.Invoking(value => value.SaveOrganizationUnitAsync(
+                Unit("ovg06-unit", "ovg06"),
+                cancellation.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+
+        (await store.GetOrganizationUnitByIdAsync("ovg06-unit", "ovg06")).Should().BeNull();
+        (await store.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg06")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(0));
+    }
+
+    [Fact]
     public async Task TenantGeneration_Should_Not_Affect_OtherTenants()
     {
         ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG07, "Authority", "TenantIsolation", EvidenceVectorKey.Default, RequiredRunner.InMemory);
@@ -526,11 +544,26 @@ public sealed class OrganizationStoreContractTests
     }
 
     [Fact]
-    public async Task RepeatedBlindSave_Should_AdvanceGenerationAgain()
+    public async Task Generation_Should_Not_Change_DomainBlindWriteSemantics()
     {
         ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG08, "Authority", "RepeatedBlindSave", EvidenceVectorKey.Default, RequiredRunner.InMemory);
         var driver = NewDriver();
         await OrganizationStoreContractCases.RunRepeatedBlindSaveAdvancesAgainAsync(driver.Store, "ovg08");
+    }
+
+    [Fact]
+    public async Task GenerationOverflow_Should_FailWithoutEntityMutationOrWrap()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG10, "Provider", "GenerationOverflow", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var store = new InMemoryOrganizationStore();
+        store.SetScopeGenerationForTesting(OrganizationScopeIdentity.Tenant("ovg10"), long.MaxValue);
+
+        await store.Invoking(value => value.SaveOrganizationUnitAsync(Unit("ovg10-unit", "ovg10")))
+            .Should().ThrowAsync<OverflowException>();
+
+        (await store.GetOrganizationUnitByIdAsync("ovg10-unit", "ovg10")).Should().BeNull();
+        (await store.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg10")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(long.MaxValue));
     }
 
     [Fact]

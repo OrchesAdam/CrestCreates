@@ -86,6 +86,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
+            await PostgreSqlRuntimeTestHooks.NotifyAfterWritePointAsync(
+                "organization-unit-snapshot-upserted",
+                ct).ConfigureAwait(false);
             await AdvanceScopeGenerationAsync(session, scope, tenant, ct).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -200,6 +203,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
+            await PostgreSqlRuntimeTestHooks.NotifyAfterWritePointAsync(
+                "position-snapshot-upserted",
+                ct).ConfigureAwait(false);
             await AdvanceScopeGenerationAsync(session, scope, tenant, ct).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -319,6 +325,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
+            await PostgreSqlRuntimeTestHooks.NotifyAfterWritePointAsync(
+                "membership-snapshot-upserted",
+                ct).ConfigureAwait(false);
             await AdvanceScopeGenerationAsync(session, scope, tenant, ct).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -467,6 +476,9 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             cmd.Parameters.AddWithValue("stateJson", json);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
+            await PostgreSqlRuntimeTestHooks.NotifyAfterWritePointAsync(
+                "role-assignment-snapshot-upserted",
+                ct).ConfigureAwait(false);
             await AdvanceScopeGenerationAsync(session, scope, tenant, ct).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -543,21 +555,47 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         var tenant = OrganizationStoreSemantics.NormalizeTenantId(scope);
         var table = PostgreSqlControlPlaneReferenceDataStoreSupport.Table(_options, "organization_scope_generations");
         var sql = string.Format(PostgreSqlOrganizationGenerationSql.ReadGeneration, table);
-        return await PostgreSqlControlPlaneReferenceDataStoreSupport.ExecuteReadAsync(_dataSource, async (connection, ct) =>
+        try
         {
+            await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             await using var cmd = PostgreSqlControlPlaneReferenceDataStoreSupport.CreateReadCommand(connection, _options, sql);
             cmd.Parameters.AddWithValue("scope", scopeKind);
             cmd.Parameters.AddWithValue("tenant", tenant);
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 return OrganizationScopeGenerationRead.Available(0);
             var generation = reader.GetInt64(0);
             if (generation < 0)
                 throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
                     "organization_scope_generations.generation is negative.");
             return OrganizationScopeGenerationRead.Available(generation);
-        }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (PostgresException exception) when (IsGenerationSchemaContractViolation(exception))
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                $"organization_scope_generations generation read violated the provider contract (SQLSTATE {exception.SqlState}).");
+        }
+        catch (Exception exception) when (exception is InvalidCastException or OverflowException)
+        {
+            throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
+                "organization_scope_generations.generation is not a valid Int64 value.");
+        }
+        catch (NpgsqlException)
+        {
+            return OrganizationScopeGenerationRead.Unavailable;
+        }
     }
+
+    private static bool IsGenerationSchemaContractViolation(PostgresException exception)
+        => exception.SqlState is "3F000" // invalid_schema_name
+            or "42P01"                 // undefined_table
+            or "42703"                 // undefined_column
+            or "42804"                 // datatype_mismatch
+            or "42883";                // undefined_function/operator after schema drift
 
     private static (string Scope, string Tenant) ScopeTenant(string? tenantId)
         => tenantId is null ? ("global", "") : ("tenant", tenantId);

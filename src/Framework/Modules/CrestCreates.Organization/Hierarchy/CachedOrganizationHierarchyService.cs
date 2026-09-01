@@ -158,7 +158,7 @@ internal sealed class CachedOrganizationHierarchyService : IOrganizationHierarch
         // Unavailable fallback (non-quarantined)
         if (admission.Generation is null)
         {
-            var fallbackResult = await LoadAuthorityDirectAsync(tenantId, cancellationToken).ConfigureAwait(false);
+            var fallbackResult = await LoadAuthorityDirectAsync(tenantId, generation: 0, cancellationToken).ConfigureAwait(false);
             if (_owner.TryCompleteUnavailableFallback(admission, fallbackResult))
                 return fallbackResult;
             throw new OrganizationHierarchyFreshnessException(
@@ -169,52 +169,55 @@ internal sealed class CachedOrganizationHierarchyService : IOrganizationHierarch
         var generation = admission.Generation.Value;
         var cacheKey = new OrganizationHierarchyCacheKey(tenantId, generation);
 
-        // Cache hit
-        if (_owner.TryReadSnapshot(cacheKey, out var cached))
+        try
         {
-            return cached;
+            if (_owner.TryReadSnapshot(cacheKey, out var cached))
+            {
+                if (_owner.TryCompleteGenerationResult(admission, cacheKey, cached, publish: false, out var accepted))
+                    return accepted;
+                throw CompletionRejected(admission, generation);
+            }
+        }
+        catch (OrganizationHierarchySnapshotCacheException)
+        {
+            // OHC09 lookup failure: no candidate exists. Load exactly once and
+            // re-enter the same final caller-completion safety gate.
+            var directCandidate = await LoadAuthorityDirectAsync(tenantId, generation, cancellationToken).ConfigureAwait(false);
+            if (_owner.TryCompleteGenerationResult(admission, cacheKey, directCandidate, publish: false, out var accepted))
+                return accepted;
+            throw CompletionRejected(admission, generation);
         }
 
         // Cache miss — single-flight load
-        var loadResult = await _owner.JoinOrCreateFlightAsync(cacheKey, async ct =>
+        var candidate = await _owner.JoinOrCreateFlightAsync(cacheKey, async ct =>
         {
             var loadedUnits = await _store.GetOrganizationUnitsAsync(tenantId, cancellationToken: ct).ConfigureAwait(false);
             return OrganizationHierarchySnapshotBuilder.Build(generation, loadedUnits);
         }, cancellationToken).ConfigureAwait(false);
 
-        if (loadResult.IsOwner && loadResult.Snapshot is not null)
-        {
-            if (_owner.TryCompleteGenerationResult(admission, cacheKey, loadResult.Snapshot, out var accepted))
-                return accepted;
-            return loadResult.Snapshot; // request-local if publication failed
-        }
-
-        if (!loadResult.IsOwner && loadResult.Snapshot is not null)
-        {
-            return loadResult.Snapshot;
-        }
-
-        if (loadResult.TimedOut || loadResult.Failed)
-        {
-            // Direct authority load (cache failure path)
-            var directResult = await LoadAuthorityDirectAsync(tenantId, cancellationToken).ConfigureAwait(false);
-            if (_owner.TryCompleteCacheFailureFallback(admission, cacheKey, directResult))
-                return directResult;
-            return directResult;
-        }
-
-        throw new OrganizationHierarchyFreshnessException(
-            OrganizationHierarchyFreshnessFailureKind.InvalidGenerationOutcome,
-            message: "single-flight load returned no result.");
+        if (_owner.TryCompleteGenerationResult(admission, cacheKey, candidate, publish: true, out var completed))
+            return completed;
+        throw CompletionRejected(admission, generation);
     }
 
     private async Task<OrganizationHierarchySnapshot> LoadAuthorityDirectAsync(
         string tenantId,
+        long generation,
         CancellationToken cancellationToken)
     {
         var units = await _store.GetOrganizationUnitsAsync(tenantId, cancellationToken: cancellationToken).ConfigureAwait(false);
-        return OrganizationHierarchySnapshotBuilder.Build(0, units);
+        return OrganizationHierarchySnapshotBuilder.Build(generation, units);
     }
+
+    private static OrganizationHierarchyFreshnessException CompletionRejected(
+        OrganizationHierarchyAdmissionToken admission,
+        long generation)
+        => new(
+            OrganizationHierarchyFreshnessFailureKind.GenerationRegression,
+            observedGeneration: generation,
+            observedHighWaterGeneration: admission.ObservedHighWater,
+            quarantineFloorGeneration: admission.QuarantineFloor,
+            message: "Hierarchy result lost the final caller-completion safety-state race.");
 
     public void Dispose()
     {

@@ -350,7 +350,8 @@ public sealed class OrganizationHierarchyCacheTests
     }
 
     /// <summary>
-    /// OHC05: delayed G41 load after G42 publication → G42 remains cached.
+    /// OHC05: delayed G41 load after G42 publication → G42 remains cached and
+    /// the older caller is rejected by the final completion gate.
     /// </summary>
     [Fact]
     public async Task DelayedOlderLoad_Should_Not_RegressFreshness()
@@ -384,7 +385,7 @@ public sealed class OrganizationHierarchyCacheTests
         var r1Task = service.GetDescendantsAsync("root", "tenant-a");
 
         // Wait for R1 to start loading
-        await loadTcs.Task.ConfigureAwait(false);
+        await loadTcs.Task;
 
         // Advance to G42 and publish
         driver.InterceptLoad(null);
@@ -397,8 +398,9 @@ public sealed class OrganizationHierarchyCacheTests
         // Release R1's load
         releaseTcs.SetResult(true);
 
-        var r1Result = await r1Task;
-        // R1's G41 candidate must not replace G42
+        await FluentActions.Awaiting(async () => await r1Task)
+            .Should().ThrowAsync<OrganizationHierarchyFreshnessException>();
+        // R1's G41 candidate neither returns nor replaces G42.
         d2.Select(x => x.Id).Should().Equal("child-g41", "child-g42");
     }
 
@@ -484,27 +486,35 @@ public sealed class OrganizationHierarchyCacheTests
     public async Task SnapshotLookupFailure_OnNormalScope_AdvanceHighWater_RejectsOlderResult()
     {
         var store = NewStore();
-        var realDriver = new FaultInjectingOrganizationStore(store);
-        realDriver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
+        var driver = new FaultInjectingOrganizationStore(store);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
 
         await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
         await store.SaveOrganizationUnitAsync(Unit("child-g1", "tenant-a", "root"));
 
-        var owner = new OrganizationHierarchyCacheOwner();
-        var service = new CachedOrganizationHierarchyService(realDriver, owner);
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache { ThrowOnLookup = true };
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
+        var service = new CachedOrganizationHierarchyService(driver, owner);
+        var enteredAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        driver.InterceptLoad(async _ =>
+        {
+            enteredAuthority.TrySetResult(true);
+            await releaseAuthority.Task.ConfigureAwait(false);
+            return await store.GetOrganizationUnitsAsync("tenant-a").ConfigureAwait(false);
+        });
 
-        // Warm cache at G1
-        await service.GetDescendantsAsync("root", "tenant-a");
+        var olderRequest = service.GetDescendantsAsync("root", "tenant-a");
+        await enteredAuthority.Task;
+        await owner.AdmitScopeAsync(
+            "tenant-a",
+            OrganizationScopeGenerationRead.Available(2),
+            CancellationToken.None);
+        releaseAuthority.TrySetResult(true);
 
-        // Now create a second owner with a store that will fail snapshot lookup
-        // but allow direct load. We use the real store for direct load.
-        var driver2 = new FaultInjectingOrganizationStore(store);
-        driver2.ForceGeneration(OrganizationScopeGenerationStatus.Available, 2);
-        await store.SaveOrganizationUnitAsync(Unit("child-g2", "tenant-a", "root"));
-
-        // Direct authority load should work even after high-water advances
-        var directUnits = await store.GetOrganizationUnitsAsync("tenant-a").ConfigureAwait(false);
-        directUnits.Should().HaveCount(3);
+        await FluentActions.Awaiting(async () => await olderRequest)
+            .Should().ThrowAsync<OrganizationHierarchyFreshnessException>();
+        driver.CollectionReadCount.Should().Be(1);
     }
 
     /// <summary>
@@ -521,18 +531,108 @@ public sealed class OrganizationHierarchyCacheTests
         await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
         await store.SaveOrganizationUnitAsync(Unit("child", "tenant-a", "root"));
 
-        var owner = new OrganizationHierarchyCacheOwner();
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache { ThrowOnSet = true };
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
         var service = new CachedOrganizationHierarchyService(driver, owner);
 
-        // First call loads and caches
-        var d1 = await service.GetDescendantsAsync("root", "tenant-a");
-        d1.Select(x => x.Id).Should().Equal("child");
-        var readsAfterFirst = driver.CollectionReadCount;
+        var descendants = await service.GetDescendantsAsync("root", "tenant-a");
 
-        // Second call should use cache (no additional collection read)
-        var d2 = await service.GetDescendantsAsync("root", "tenant-a");
-        d2.Select(x => x.Id).Should().Equal("child");
-        driver.CollectionReadCount.Should().Be(readsAfterFirst);
+        descendants.Select(x => x.Id).Should().Equal("child");
+        driver.CollectionReadCount.Should().Be(1);
+        snapshotCache.SetCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SnapshotPublicationFailure_ThenQuarantine_Should_RejectRequestLocalCandidate()
+    {
+        var store = NewStore();
+        var driver = new FaultInjectingOrganizationStore(store);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
+        await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
+
+        using var enteredPublication = new ManualResetEventSlim();
+        using var releasePublication = new ManualResetEventSlim();
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache
+        {
+            ThrowOnSet = true,
+            BeforeSet = () =>
+            {
+                enteredPublication.Set();
+                if (!releasePublication.Wait(TimeSpan.FromSeconds(2)))
+                    throw new TimeoutException("test did not release snapshot publication");
+            }
+        };
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
+        var service = new CachedOrganizationHierarchyService(driver, owner);
+
+        var request = Task.Run(() => service.GetDescendantsAsync("root", "tenant-a"));
+        enteredPublication.Wait(TimeSpan.FromSeconds(2)).Should().BeTrue();
+
+        await owner.Invoking(value => value.AdmitScopeAsync(
+                "tenant-a",
+                OrganizationScopeGenerationRead.Available(0),
+                CancellationToken.None).AsTask())
+            .Should().ThrowAsync<OrganizationHierarchyFreshnessException>()
+            .Where(exception => exception.FailureKind == OrganizationHierarchyFreshnessFailureKind.GenerationRegression);
+
+        releasePublication.Set();
+        await FluentActions.Awaiting(async () => await request)
+            .Should().ThrowAsync<OrganizationHierarchyFreshnessException>();
+        driver.CollectionReadCount.Should().Be(1);
+        snapshotCache.SetCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task OrganizationSnapshotCacheFailure_OnNormalScope_Should_FallbackToAuthority()
+    {
+        var store = NewStore();
+        var driver = new FaultInjectingOrganizationStore(store);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
+        await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
+        await store.SaveOrganizationUnitAsync(Unit("child", "tenant-a", "root"));
+
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache { ThrowOnLookup = true };
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
+        var service = new CachedOrganizationHierarchyService(driver, owner);
+
+        var first = await service.GetDescendantsAsync("root", "tenant-a");
+        var second = await service.GetDescendantsAsync("root", "tenant-a");
+
+        first.Select(value => value.Id).Should().Equal("child");
+        second.Select(value => value.Id).Should().Equal("child");
+        ReferenceEquals(first[0], second[0]).Should().BeFalse();
+        driver.CollectionReadCount.Should().Be(2, "lookup fallback is request-local and uncached");
+        snapshotCache.SetCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SnapshotLookupFallback_Should_NotReturnAfterOwnerDisposal()
+    {
+        var store = NewStore();
+        var driver = new FaultInjectingOrganizationStore(store);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
+        await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
+
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache { ThrowOnLookup = true };
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
+        var service = new CachedOrganizationHierarchyService(driver, owner);
+        var enteredAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        driver.InterceptLoad(async _ =>
+        {
+            enteredAuthority.TrySetResult(true);
+            await releaseAuthority.Task;
+            return await store.GetOrganizationUnitsAsync("tenant-a");
+        });
+
+        var request = service.GetDescendantsAsync("root", "tenant-a");
+        await enteredAuthority.Task;
+        owner.Dispose();
+        releaseAuthority.TrySetResult(true);
+
+        await FluentActions.Awaiting(async () => await request)
+            .Should().ThrowAsync<OrganizationHierarchyFreshnessException>();
+        driver.CollectionReadCount.Should().Be(1);
     }
 
     /// <summary>
@@ -561,6 +661,28 @@ public sealed class OrganizationHierarchyCacheTests
         await service.Invoking(s => s.GetDescendantsAsync("root", "tenant-a"))
             .Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*authority unavailable*");
+    }
+
+    [Fact]
+    public async Task FailedAuthorityLoad_Should_ClearSingleFlight()
+    {
+        var store = NewStore();
+        var driver = new FaultInjectingOrganizationStore(store);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
+        await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
+        var owner = new OrganizationHierarchyCacheOwner();
+        var service = new CachedOrganizationHierarchyService(driver, owner);
+
+        driver.InjectCollectionReadException(new InvalidOperationException("first authority attempt failed"));
+        await service.Invoking(value => value.GetDescendantsAsync("root", "tenant-a"))
+            .Should().ThrowAsync<InvalidOperationException>();
+        owner.ActiveLogicalFlightCount.Should().Be(0);
+        owner.ActivePhysicalLoadCount.Should().Be(0);
+
+        driver.ResetInjection();
+        var retry = await service.GetDescendantsAsync("root", "tenant-a");
+        retry.Should().BeEmpty();
+        driver.CollectionReadCount.Should().Be(2);
     }
 
     /// <summary>
@@ -608,6 +730,11 @@ public sealed class OrganizationHierarchyCacheTests
         // Waiter should still complete
         var r2 = await t2;
         r2.Select(x => x.Id).Should().Equal("child");
+        await FluentActions.Awaiting(async () => await t1)
+            .Should().ThrowAsync<OperationCanceledException>();
+        loadCount.Should().Be(1);
+        owner.ActiveLogicalFlightCount.Should().Be(0);
+        owner.ActivePhysicalLoadCount.Should().Be(0);
     }
 
     /// <summary>
@@ -726,19 +853,27 @@ public sealed class OrganizationHierarchyCacheTests
         var owner = new OrganizationHierarchyCacheOwner();
         var service = new CachedOrganizationHierarchyService(driver, owner);
 
-        // Establish G5
-        await service.GetDescendantsAsync("root", "tenant-a");
+        var enteredAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        driver.InterceptLoad(async _ =>
+        {
+            enteredAuthority.TrySetResult(true);
+            await releaseAuthority.Task.ConfigureAwait(false);
+            return await store.GetOrganizationUnitsAsync("tenant-a").ConfigureAwait(false);
+        });
 
-        // Regression to G3 → quarantine with floor=5
-        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 3);
-        await service.Invoking(s => s.GetDescendantsAsync("root", "tenant-a"))
+        var candidateRequest = service.GetDescendantsAsync("root", "tenant-a");
+        await enteredAuthority.Task;
+
+        await owner.Invoking(o => o.AdmitScopeAsync(
+                "tenant-a",
+                OrganizationScopeGenerationRead.Available(3),
+                CancellationToken.None).AsTask())
             .Should().ThrowAsync<OrganizationHierarchyFreshnessException>()
             .Where(e => e.FailureKind == OrganizationHierarchyFreshnessFailureKind.GenerationRegression);
 
-        // Now any in-flight candidate at G5 should be rejected
-        // (since G5 <= floor 5)
-        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 5);
-        await service.Invoking(s => s.GetDescendantsAsync("root", "tenant-a"))
+        releaseAuthority.TrySetResult(true);
+        await FluentActions.Awaiting(async () => await candidateRequest)
             .Should().ThrowAsync<OrganizationHierarchyFreshnessException>();
     }
 
@@ -793,19 +928,70 @@ public sealed class OrganizationHierarchyCacheTests
 
         await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
 
-        var owner = new OrganizationHierarchyCacheOwner();
+        var owner = new OrganizationHierarchyCacheOwner(
+            new OrganizationHierarchyCacheOptions(safetyScopeCapacity: 1));
         var service = new CachedOrganizationHierarchyService(driver, owner);
 
         // Normal read should work
         var d1 = await service.GetDescendantsAsync("root", "tenant-a");
         d1.Should().BeEmpty();
 
-        // Generation mismatch followed by authority failure should propagate
-        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 2);
-        driver.InjectCollectionReadException(new InvalidOperationException("authority unavailable"));
+        var authorityReads = driver.CollectionReadCount;
+        await store.SaveOrganizationUnitAsync(Unit("other", "tenant-b"));
+
+        await service.Invoking(s => s.GetDescendantsAsync("other", "tenant-b"))
+            .Should().ThrowAsync<OrganizationException>()
+            .WithMessage("*safety-scope capacity*");
+        driver.CollectionReadCount.Should().Be(authorityReads);
+    }
+
+    /// <summary>
+    /// A logical timeout never releases physical capacity until the
+    /// non-cooperative Store operation is terminal, and its late result is discarded.
+    /// </summary>
+    [Fact]
+    public async Task TimedOutFlight_IgnoringCancellation_Should_NotPublishLateResult_OrEscapePhysicalLoadBound()
+    {
+        var store = NewStore();
+        var driver = new FaultInjectingOrganizationStore(store);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
+        await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
+
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache();
+        var options = new OrganizationHierarchyCacheOptions(
+            physicalLoadCapacity: 1,
+            sharedLoadTimeout: TimeSpan.FromMilliseconds(40));
+        var owner = new OrganizationHierarchyCacheOwner(options, snapshotCache);
+        var service = new CachedOrganizationHierarchyService(driver, owner);
+        var enteredAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        driver.InterceptLoad(async _ =>
+        {
+            enteredAuthority.TrySetResult(true);
+            await releaseAuthority.Task.ConfigureAwait(false);
+            return await store.GetOrganizationUnitsAsync("tenant-a").ConfigureAwait(false);
+        });
+
+        var timedOut = service.GetDescendantsAsync("root", "tenant-a");
+        await enteredAuthority.Task;
+        await FluentActions.Awaiting(async () => await timedOut)
+            .Should().ThrowAsync<TimeoutException>();
+        owner.ActiveLogicalFlightCount.Should().Be(0);
+        owner.ActivePhysicalLoadCount.Should().Be(1);
 
         await service.Invoking(s => s.GetDescendantsAsync("root", "tenant-a"))
-            .Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*authority unavailable*");
+            .Should().ThrowAsync<OrganizationException>()
+            .WithMessage("*physical-load capacity*");
+
+        releaseAuthority.TrySetResult(true);
+        await WaitUntilAsync(() => owner.ActivePhysicalLoadCount == 0);
+        snapshotCache.SetCount.Should().Be(0);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (!predicate())
+            await Task.Delay(10, timeout.Token);
     }
 }

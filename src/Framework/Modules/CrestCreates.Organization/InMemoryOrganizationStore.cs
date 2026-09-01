@@ -336,4 +336,21 @@ public sealed class InMemoryOrganizationStore : IOrganizationStore
             return Task.FromResult(OrganizationScopeGenerationRead.Available(guard.Value.Generation));
         return Task.FromResult(OrganizationScopeGenerationRead.Available(0));
     }
+
+    internal void SetScopeGenerationForTesting(OrganizationScopeIdentity scope, long generation)
+    {
+        OrganizationStoreSemantics.ValidateScopeIdentity(scope);
+        if (generation < 0)
+            throw new ArgumentOutOfRangeException(nameof(generation));
+        var guard = GetOrCreateScope(OrganizationStoreSemantics.NormalizeTenantId(scope));
+        guard.Acquire();
+        try
+        {
+            guard.Value = guard.Value with { Generation = generation };
+        }
+        finally
+        {
+            guard.Release();
+        }
+    }
 }

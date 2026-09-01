@@ -1,148 +1,142 @@
-using System.Collections.Concurrent;
-
 namespace CrestCreates.Organization;
 
+/// <summary>
+/// Separates the joinable logical attempt from the underlying physical Store
+/// operation. Logical timeout invalidates the result immediately, while the
+/// physical-capacity lease is retained until the Store task is actually terminal.
+/// </summary>
 internal sealed class OrganizationHierarchyFlight
 {
-    private readonly OrganizationHierarchyCacheKey _key;
+    private readonly Func<CancellationToken, ValueTask<OrganizationHierarchySnapshot>> _load;
+    private readonly CancellationTokenSource _loadCancellation;
+    private readonly CancellationTokenSource _timeoutCancellation = new();
     private readonly TimeSpan _timeout;
-    private readonly object _gate = new();
-    private readonly ConcurrentBag<OrganizationHierarchyWaiter> _waiters = new();
+    private readonly Action<OrganizationHierarchyFlight> _logicalTerminal;
+    private readonly Action<OrganizationHierarchyFlight> _physicalTerminal;
+    private readonly TaskCompletionSource<OrganizationHierarchySnapshot> _logicalCompletion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _logicalState;
+    private int _started;
+    private int _physicalCleanup;
 
-    private bool _ownerSet;
-    private bool _isOwner;
-    private OrganizationHierarchySnapshot? _result;
-    private Exception? _exception;
-    private bool _completed;
-    private bool _timedOut;
-
-    public OrganizationHierarchyFlight(OrganizationHierarchyCacheKey key, TimeSpan timeout)
+    public OrganizationHierarchyFlight(
+        OrganizationHierarchyCacheKey key,
+        TimeSpan timeout,
+        CancellationToken ownerCancellation,
+        Func<CancellationToken, ValueTask<OrganizationHierarchySnapshot>> load,
+        Action<OrganizationHierarchyFlight> logicalTerminal,
+        Action<OrganizationHierarchyFlight> physicalTerminal)
     {
-        _key = key;
+        Key = key;
         _timeout = timeout;
+        _load = load;
+        _logicalTerminal = logicalTerminal;
+        _physicalTerminal = physicalTerminal;
+        _loadCancellation = CancellationTokenSource.CreateLinkedTokenSource(ownerCancellation);
     }
 
-    public bool TryJoin(out OrganizationHierarchyWaiter waiter)
+    public OrganizationHierarchyCacheKey Key { get; }
+
+    public Task<OrganizationHierarchySnapshot> Completion => _logicalCompletion.Task;
+
+    public void Start()
     {
-        lock (_gate)
+        if (Interlocked.Exchange(ref _started, 1) != 0)
+            throw new InvalidOperationException("Organization hierarchy flight was already started.");
+
+        _ = RunPhysicalLoadAsync();
+        _ = WatchTimeoutAsync();
+    }
+
+    public async ValueTask<OrganizationHierarchySnapshot> WaitAsync(CancellationToken cancellationToken)
+        => await Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+    public void InvalidateForOwnerDisposal()
+    {
+        if (TryEndLogical())
+            _logicalCompletion.TrySetException(new ObjectDisposedException(nameof(OrganizationHierarchyCacheOwner)));
+        TryCancelLoad();
+    }
+
+    public void AbandonBeforeStart()
+    {
+        if (Interlocked.Exchange(ref _physicalCleanup, 1) != 0)
+            return;
+        _timeoutCancellation.Cancel();
+        _timeoutCancellation.Dispose();
+        _loadCancellation.Dispose();
+    }
+
+    private async Task WatchTimeoutAsync()
+    {
+        try
         {
-            if (_completed || _timedOut)
-            {
-                waiter = new OrganizationHierarchyWaiter();
-                return false;
-            }
+            await Task.Delay(_timeout, _timeoutCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
 
-            if (!_ownerSet)
-            {
-                _ownerSet = true;
-                _isOwner = true;
-                waiter = new OrganizationHierarchyWaiter();
-                return true;
-            }
+        if (!TryEndLogical())
+            return;
 
-            waiter = new OrganizationHierarchyWaiter();
-            _waiters.Add(waiter);
+        _logicalCompletion.TrySetException(
+            new TimeoutException($"Organization hierarchy authority load timed out for '{Key.TenantId}' generation {Key.Generation}."));
+        TryCancelLoad();
+    }
+
+    private async Task RunPhysicalLoadAsync()
+    {
+        try
+        {
+            var snapshot = await _load(_loadCancellation.Token).ConfigureAwait(false);
+            if (TryEndLogical())
+                _logicalCompletion.TrySetResult(snapshot);
+        }
+        catch (OperationCanceledException exception)
+        {
+            if (TryEndLogical())
+                _logicalCompletion.TrySetException(exception);
+        }
+        catch (Exception exception)
+        {
+            if (TryEndLogical())
+                _logicalCompletion.TrySetException(exception);
+        }
+        finally
+        {
+            _timeoutCancellation.Cancel();
+            CompletePhysicalCleanup();
+        }
+    }
+
+    private bool TryEndLogical()
+    {
+        if (Interlocked.CompareExchange(ref _logicalState, 1, 0) != 0)
             return false;
-        }
+        _logicalTerminal(this);
+        return true;
     }
 
-    public void Complete(OrganizationHierarchySnapshot snapshot)
+    private void CompletePhysicalCleanup()
     {
-        List<OrganizationHierarchyWaiter> waiters;
-        lock (_gate)
-        {
-            if (_completed || _timedOut) return;
-            _completed = true;
-            _result = snapshot;
-            _exception = null;
-            waiters = _waiters.ToList();
-            _waiters.Clear();
-        }
-
-        foreach (var w in waiters)
-            w.TrySetResult(new OrganizationHierarchyFlightResult(snapshot, false, false));
+        if (Interlocked.Exchange(ref _physicalCleanup, 1) != 0)
+            return;
+        _timeoutCancellation.Dispose();
+        _loadCancellation.Dispose();
+        _physicalTerminal(this);
     }
 
-    public void Fail(Exception exception)
+    private void TryCancelLoad()
     {
-        List<OrganizationHierarchyWaiter> waiters;
-        lock (_gate)
+        try
         {
-            if (_completed || _timedOut) return;
-            _completed = true;
-            _result = null;
-            _exception = exception;
-            waiters = _waiters.ToList();
-            _waiters.Clear();
+            _loadCancellation.Cancel();
         }
-
-        foreach (var w in waiters)
-            w.TrySetResult(new OrganizationHierarchyFlightResult(null, false, true));
-    }
-
-    public void TimeOut()
-    {
-        List<OrganizationHierarchyWaiter> waiters;
-        lock (_gate)
+        catch (ObjectDisposedException)
         {
-            if (_completed) return;
-            _timedOut = true;
-            waiters = _waiters.ToList();
-            _waiters.Clear();
+            // Physical completion won the race and already released resources.
         }
-
-        foreach (var w in waiters)
-            w.TrySetResult(new OrganizationHierarchyFlightResult(null, true, false));
-    }
-
-    public ValueTask<OrganizationHierarchyFlightResult> WaitAsync(CancellationToken cancellationToken)
-    {
-        OrganizationHierarchyWaiter? waiter = null;
-        lock (_gate)
-        {
-            if (_completed)
-            {
-                return new ValueTask<OrganizationHierarchyFlightResult>(
-                    new OrganizationHierarchyFlightResult(_result, false, _exception != null));
-            }
-
-            if (_timedOut)
-            {
-                return new ValueTask<OrganizationHierarchyFlightResult>(
-                    new OrganizationHierarchyFlightResult(null, true, false));
-            }
-
-            waiter = new OrganizationHierarchyWaiter();
-            _waiters.Add(waiter);
-        }
-
-        return waiter.WaitAsync(_timeout, cancellationToken);
     }
 }
-
-internal sealed class OrganizationHierarchyWaiter
-{
-    private readonly TaskCompletionSource<OrganizationHierarchyFlightResult> _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private CancellationTokenRegistration _ctr;
-
-    public void TrySetResult(OrganizationHierarchyFlightResult result)
-    {
-        _tcs.TrySetResult(result);
-    }
-
-    public ValueTask<OrganizationHierarchyFlightResult> WaitAsync(TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        if (cancellationToken.CanBeCanceled)
-        {
-            _ctr = cancellationToken.Register(() => _tcs.TrySetCanceled(cancellationToken));
-        }
-
-        return new ValueTask<OrganizationHierarchyFlightResult>(
-            _tcs.Task.WaitAsync(timeout, cancellationToken));
-    }
-}
-
-internal readonly record struct OrganizationHierarchyFlightResult(
-    OrganizationHierarchySnapshot? Snapshot,
-    bool TimedOut,
-    bool Failed);

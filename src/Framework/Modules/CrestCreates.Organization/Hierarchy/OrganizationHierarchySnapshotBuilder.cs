@@ -9,15 +9,19 @@ internal sealed class OrganizationHierarchySnapshotBuilder
         long generation,
         IReadOnlyList<OrganizationUnit> units)
     {
+        var canonicalUnits = units
+            .Select(unit => unit.Snapshot())
+            .OrderBy(unit => unit, OrganizationStoreSemantics.OrganizationUnitComparer)
+            .ToArray();
         var unitMap = new Dictionary<OrganizationScopedKey, OrganizationUnit>();
-        foreach (var unit in units)
+        foreach (var unit in canonicalUnits)
         {
             var key = OrganizationScopedKey.FromTenantId(unit.TenantId, unit.Id);
             unitMap[key] = unit;
         }
 
         var childrenMap = new Dictionary<OrganizationScopedKey, List<OrganizationScopedKey>>();
-        foreach (var unit in units)
+        foreach (var unit in canonicalUnits)
         {
             if (unit.ParentId is not null)
             {
@@ -31,17 +35,16 @@ internal sealed class OrganizationHierarchySnapshotBuilder
             }
         }
 
-        // Finalize with canonical comparers
+        // Preserve the canonical Store order inside each breadth-first level.
         var immutableChildrenMap = new Dictionary<OrganizationScopedKey, IReadOnlyList<OrganizationScopedKey>>();
         foreach (var (key, children) in childrenMap)
         {
-            children.Sort();
             immutableChildrenMap[key] = children.AsReadOnly();
         }
 
         return new OrganizationHierarchySnapshot(
             generation,
-            units,
+            canonicalUnits,
             unitMap.ToImmutableDictionary(),
             immutableChildrenMap.ToImmutableDictionary());
     }

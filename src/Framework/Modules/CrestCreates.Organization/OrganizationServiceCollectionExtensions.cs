@@ -14,7 +14,7 @@ public static class OrganizationServiceCollectionExtensions
         {
             var store = sp.GetRequiredService<IOrganizationStore>();
             var owner = sp.GetRequiredService<IOrganizationHierarchyCacheOwner>();
-            return new CachedOrganizationHierarchyService(store, owner);
+            return new DefaultOrganizationHierarchyService(store, owner);
         });
         services.TryAddScoped<IOrganizationIdentityService, DefaultOrganizationIdentityService>();
         services.TryAddScoped<IDataPermissionScopeProvider, DefaultDataPermissionScopeProvider>();

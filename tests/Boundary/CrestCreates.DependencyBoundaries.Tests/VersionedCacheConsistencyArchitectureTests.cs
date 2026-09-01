@@ -3,6 +3,7 @@ using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Organization;
 using CrestCreates.Organization.Abstractions;
+using CrestCreates.Runtime.Persistence.PostgreSql;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -18,13 +19,17 @@ namespace CrestCreates.DependencyBoundaries.Tests;
 /// </summary>
 public class VersionedCacheConsistencyArchitectureTests
 {
-    private static readonly Assembly OrganizationAssembly = typeof(IOrganizationHierarchyService).Assembly;
-    private static readonly Assembly AuthorizationAssembly = typeof(IPermissionGrantStore).Assembly;
+    private static readonly Assembly OrganizationAssembly = typeof(InMemoryOrganizationStore).Assembly;
+    private static readonly Assembly[] OrganizationStoreAssemblies =
+    [
+        OrganizationAssembly,
+        typeof(PostgreSqlRuntimePersistenceServiceCollectionExtensions).Assembly
+    ];
 
     [Fact]
     public void EveryOrganizationStore_Should_ImplementTypedGenerationRead()
     {
-        var storeTypes = OrganizationAssembly.GetTypes()
+        var storeTypes = OrganizationStoreAssemblies.SelectMany(assembly => assembly.GetTypes())
             .Where(t => typeof(IOrganizationStore).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract);
 
         foreach (var type in storeTypes)
@@ -95,17 +100,13 @@ public class VersionedCacheConsistencyArchitectureTests
     }
 
     [Fact]
-    public void AuthorizationModule_Should_NotDependOnCachingModule()
+    public void AuthorizationModule_Should_PreserveUnrelatedCachingComposition()
     {
         var services = new ServiceCollection();
         services.AddCrestAuthorization();
 
-        // The authorization module must not register caching services
-        // (caching is a separate concern, composed separately)
-        services.Should().NotContain(sd => sd.ServiceType.Name == "TenantCacheKeyContributor",
-            "TenantCacheKeyContributor must not be registered by authorization module");
-        services.Should().NotContain(sd => sd.ServiceType.Name == "AuditTenantContextResolver",
-            "AuditTenantContextResolver must not be registered by authorization module");
+        services.Should().Contain(sd => sd.ServiceType.Name == "TenantCacheKeyContributor",
+            "retiring permission caching must not break AuditTenantContextResolver's existing cache-key dependency");
     }
 
     [Fact]
