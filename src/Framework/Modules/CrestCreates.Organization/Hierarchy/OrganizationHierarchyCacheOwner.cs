@@ -62,6 +62,7 @@ internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCa
     internal int ActiveLogicalFlightCount => _flights.Count;
     internal int ActivePhysicalLoadCount => Volatile.Read(ref _physicalLoadCount);
     internal int SafetyScopeCount => _safetyRegistry.Count;
+    internal Action<OrganizationHierarchyCacheKey>? FlightJoinObserver { get; set; }
 
     private long NextRevision() => Interlocked.Increment(ref _revisionCounter);
 
@@ -110,7 +111,10 @@ internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCa
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_flights.TryGetValue(key, out var existing))
+            {
+                FlightJoinObserver?.Invoke(key);
                 return await existing.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
 
             if (!TryReservePhysicalLoad())
             {
@@ -160,10 +164,16 @@ internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCa
             }
         }
 
-        // Snapshot infrastructure is deliberately outside the safety-state
-        // lock. Publication can block or fail, and observations must remain
-        // able to advance/regress/quarantine the scope while it is in flight.
-        // The second lock below is the mandatory final caller-completion gate.
+        // Capture the current safety state before touching snapshot
+        // infrastructure. A concurrent regression may still win while Set is
+        // in flight; the post-publication gate removes this exact object
+        // before allowing completion, so rejected candidates are not retained.
+        lock (state.Gate)
+        {
+            if (Volatile.Read(ref _disposed) != 0 || !IsCandidateAdmissible(state, candidate))
+                return false;
+        }
+
         var published = false;
         try
         {
@@ -182,9 +192,15 @@ internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCa
         lock (state.Gate)
         {
             if (Volatile.Read(ref _disposed) != 0)
+            {
+                _snapshotCache.Remove(key, candidate);
                 return false;
+            }
             if (!IsCandidateAdmissible(state, candidate))
+            {
+                _snapshotCache.Remove(key, candidate);
                 return false;
+            }
 
             if (!published)
                 return state.Mode == OrganizationHierarchySafetyMode.Normal;

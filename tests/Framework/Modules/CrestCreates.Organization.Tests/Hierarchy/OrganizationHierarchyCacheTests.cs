@@ -422,6 +422,14 @@ public sealed class OrganizationHierarchyCacheTests
 
         var barrier = new TaskCompletionSource<bool>();
         var loadCount = 0;
+        var joined = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var joinCount = 0;
+        owner.FlightJoinObserver = _ =>
+        {
+            var count = Interlocked.Increment(ref joinCount);
+            if (count == 2)
+                joined.TrySetResult(count);
+        };
 
         driver.InterceptLoad(async ct =>
         {
@@ -434,8 +442,8 @@ public sealed class OrganizationHierarchyCacheTests
         var t2 = service.GetDescendantsAsync("root", "tenant-a");
         var t3 = service.GetDescendantsAsync("root", "tenant-a");
 
-        // Wait for all to join the flight
-        await Task.Delay(50);
+        // Wait until both non-owner callers have definitely joined the flight.
+        await joined.Task.WaitAsync(TimeSpan.FromSeconds(2));
         loadCount.Should().Be(1, "only one authority load should occur for concurrent same-key misses");
 
         barrier.SetResult(true);
@@ -555,6 +563,7 @@ public sealed class OrganizationHierarchyCacheTests
         var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache
         {
             ThrowOnSet = true,
+            WriteBeforeThrow = true,
             BeforeSet = () =>
             {
                 enteredPublication.Set();
@@ -580,6 +589,8 @@ public sealed class OrganizationHierarchyCacheTests
             .Should().ThrowAsync<OrganizationHierarchyFreshnessException>();
         driver.CollectionReadCount.Should().Be(1);
         snapshotCache.SetCount.Should().Be(1);
+        snapshotCache.TryGet(new OrganizationHierarchyCacheKey("tenant-a", 1), out _)
+            .Should().BeFalse("a publication failure that wrote before throwing must not retain the rejected candidate");
     }
 
     [Fact]
@@ -704,6 +715,8 @@ public sealed class OrganizationHierarchyCacheTests
 
         var barrier = new TaskCompletionSource<bool>();
         var loadCount = 0;
+        var joined = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        owner.FlightJoinObserver = _ => joined.TrySetResult(true);
 
         driver.InterceptLoad(async ct =>
         {
@@ -716,11 +729,10 @@ public sealed class OrganizationHierarchyCacheTests
 
         // First caller will be the owner
         var t1 = service.GetDescendantsAsync("root", "tenant-a", cts.Token);
-        await Task.Delay(20);
 
         // Second caller joins as waiter
         var t2 = service.GetDescendantsAsync("root", "tenant-a");
-        await Task.Delay(20);
+        await joined.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         // Cancel the owner
         cts.Cancel();
@@ -851,7 +863,8 @@ public sealed class OrganizationHierarchyCacheTests
 
         await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
 
-        var owner = new OrganizationHierarchyCacheOwner();
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache();
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
         var service = new CachedOrganizationHierarchyService(driver, owner);
 
         var enteredAuthority = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -876,6 +889,9 @@ public sealed class OrganizationHierarchyCacheTests
         releaseAuthority.TrySetResult(true);
         await FluentActions.Awaiting(async () => await candidateRequest)
             .Should().ThrowAsync<OrganizationHierarchyFreshnessException>();
+        snapshotCache.TryGet(new OrganizationHierarchyCacheKey("tenant-a", 5), out _)
+            .Should().BeFalse("a candidate rejected by the quarantine gate must not be retained");
+        snapshotCache.SetCount.Should().Be(0);
     }
 
     /// <summary>

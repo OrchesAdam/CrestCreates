@@ -241,6 +241,16 @@ public sealed class PostgreSqlOrganizationGenerationTests : IAsyncLifetime
             .Should().ThrowAsync<RuntimePersistenceContractException>();
     }
 
+    [Theory]
+    [InlineData("42501")] // insufficient_privilege
+    [InlineData("57014")] // query_canceled
+    [InlineData("XX000")] // internal_error
+    public void UnknownPostgresServerFailure_Should_NotBeClassifiedAsAvailability(string sqlState)
+    {
+        PostgreSqlOrganizationStore.IsGenerationSchemaContractViolation(sqlState)
+            .Should().BeFalse("only the explicit persisted-schema contract SQLSTATE allowlist may be translated");
+    }
+
     [Fact]
     public async Task CommitUnknown_Should_NeverProduce_OneSided_Data_And_Generation()
     {

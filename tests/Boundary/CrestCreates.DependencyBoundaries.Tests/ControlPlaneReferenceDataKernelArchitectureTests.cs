@@ -19,7 +19,6 @@ namespace CrestCreates.DependencyBoundaries.Tests;
 public class ControlPlaneReferenceDataKernelArchitectureTests
 {
     private static readonly Assembly PgAssembly = typeof(PostgreSqlDescriptorDraftStore).Assembly;
-
     private static Type StoreType(string name)
         => PgAssembly.GetType($"CrestCreates.Runtime.Persistence.PostgreSql.{name}")
            ?? throw new TypeLoadException($"Cannot find type {name}");
@@ -414,6 +413,10 @@ public class OrganizationSchemaFixture : IAsyncLifetime
 [Collection(ControlPlaneReferenceDataSpecTestSkeletonTests.ControlPlaneReferenceDataEvidenceCollection.Name)]
 public class ControlPlaneReferenceDataOrganizationSchemaTests : IAsyncLifetime
 {
+    private static readonly Assembly LegacyInfrastructureAssembly =
+        typeof(CrestCreates.Infrastructure.Permission.PermissionServiceCollectionExtensions).Assembly;
+    private static readonly Assembly AuthorizationAssembly =
+        typeof(CrestCreates.Authorization.AuthorizationServiceCollectionExtensions).Assembly;
     private readonly OrganizationSchemaFixture _fixture = new();
     private bool _initialized;
 
@@ -479,19 +482,23 @@ public class ControlPlaneReferenceDataOrganizationSchemaTests : IAsyncLifetime
     [Fact]
     public void LegacyInfrastructureHierarchyCache_Should_Have_NoProductionComposition()
     {
-        var orgAssembly = typeof(CrestCreates.Organization.Abstractions.IOrganizationHierarchyService).Assembly;
+        var legacyTypeNames = new[]
+        {
+            "CrestCreates.Infrastructure.Authorization.IOrganizationHierarchyService",
+            "CrestCreates.Infrastructure.Authorization.OrganizationHierarchyService"
+        };
 
-        var legacyTypes = orgAssembly.GetTypes()
-            .Where(t => t.Name == "IOrganizationHierarchyService" || t.Name == "OrganizationHierarchyService")
-            .Where(t => t.Namespace?.Contains("Infrastructure") == true)
-            .ToList();
+        foreach (var typeName in legacyTypeNames)
+        {
+            LegacyInfrastructureAssembly.GetType(typeName).Should().BeNull(
+                $"legacy type {typeName} must not be restored to the Infrastructure production assembly");
+            AuthorizationAssembly.GetType(typeName).Should().BeNull(
+                $"legacy type {typeName} must not be restored to the Authorization production assembly");
+        }
 
-        legacyTypes.Should().BeEmpty(
-            "Organization assembly must not contain legacy Infrastructure hierarchy types");
-
-        // Verify the legacy types are not loadable from a production assembly
-        var recycleBinType = Type.GetType("CrestCreates.Infrastructure.Authorization.IOrganizationHierarchyService");
-        recycleBinType.Should().BeNull(
-            "legacy IOrganizationHierarchyService must not be in a production assembly");
+        var productionAssemblies = new[] { LegacyInfrastructureAssembly, AuthorizationAssembly };
+        productionAssemblies.SelectMany(assembly => assembly.GetTypes())
+            .Where(type => type.Name is "IOrganizationHierarchyService" or "OrganizationHierarchyService")
+            .Should().BeEmpty("legacy Infrastructure hierarchy types must not re-enter any checked production assembly");
     }
 }

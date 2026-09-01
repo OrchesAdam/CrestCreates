@@ -110,6 +110,44 @@ public sealed class PermissionCacheConsistencyIntegrationTests
             .Should().NotContain(permissionName);
     }
 
+    [Fact]
+    public async Task TenantAndGlobalGrants_Should_PreserveExactEfScopeFiltering()
+    {
+        var providerKey = $"role-{Guid.NewGuid():N}";
+        var globalPermission = $"Tests.Permission.Global.{Guid.NewGuid():N}";
+        var tenantPermission = $"Tests.Permission.Tenant.{Guid.NewGuid():N}";
+
+        await InsertThroughRepositoryAsync(Grant(
+            globalPermission,
+            providerKey,
+            PermissionGrantScope.Global,
+            tenantId: null));
+        await InsertThroughRepositoryAsync(Grant(
+            tenantPermission,
+            providerKey,
+            PermissionGrantScope.Tenant,
+            tenantId: "tenant-a"));
+
+        using var scope = _factory.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IPermissionGrantStore>();
+
+        (await store.GetGrantedPermissionsAsync(
+                PermissionGrantProviderType.Role,
+                providerKey,
+                tenantId: "tenant-a"))
+            .Should().BeEquivalentTo(new[] { globalPermission, tenantPermission });
+        (await store.GetGrantedPermissionsAsync(
+                PermissionGrantProviderType.Role,
+                providerKey,
+                tenantId: "tenant-b"))
+            .Should().Equal(globalPermission);
+        (await store.GetGrantedPermissionsAsync(
+                PermissionGrantProviderType.Role,
+                providerKey,
+                tenantId: null))
+            .Should().Equal(globalPermission);
+    }
+
     private async Task InsertThroughRepositoryAsync(PermissionGrant grant)
     {
         using var writer = _factory.Services.CreateScope();
@@ -118,11 +156,18 @@ public sealed class PermissionCacheConsistencyIntegrationTests
     }
 
     private static PermissionGrant Grant(string permissionName, string providerKey)
+        => Grant(permissionName, providerKey, PermissionGrantScope.Global, tenantId: null);
+
+    private static PermissionGrant Grant(
+        string permissionName,
+        string providerKey,
+        PermissionGrantScope scope,
+        string? tenantId)
         => new(
             Guid.NewGuid(),
             permissionName,
             PermissionGrantProviderType.Role,
             providerKey,
-            PermissionGrantScope.Global,
-            tenantId: null);
+            scope,
+            tenantId);
 }

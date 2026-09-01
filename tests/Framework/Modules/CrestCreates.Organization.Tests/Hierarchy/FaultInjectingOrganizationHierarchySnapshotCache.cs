@@ -6,6 +6,7 @@ internal sealed class FaultInjectingOrganizationHierarchySnapshotCache : IOrgani
 
     internal bool ThrowOnLookup { get; set; }
     internal bool ThrowOnSet { get; set; }
+    internal bool WriteBeforeThrow { get; set; }
     internal Action? BeforeSet { get; set; }
     internal int SetCount { get; private set; }
 
@@ -21,8 +22,19 @@ internal sealed class FaultInjectingOrganizationHierarchySnapshotCache : IOrgani
         SetCount++;
         BeforeSet?.Invoke();
         if (ThrowOnSet)
+        {
+            if (WriteBeforeThrow)
+                _entries[key] = snapshot;
             throw new InvalidOperationException("injected snapshot publication failure");
+        }
         _entries[key] = snapshot;
+    }
+
+    public bool Remove(OrganizationHierarchyCacheKey key, OrganizationHierarchySnapshot expectedSnapshot)
+    {
+        if (!_entries.TryGetValue(key, out var current) || !ReferenceEquals(current, expectedSnapshot))
+            return false;
+        return _entries.Remove(key);
     }
 
     public void Dispose() => _entries.Clear();

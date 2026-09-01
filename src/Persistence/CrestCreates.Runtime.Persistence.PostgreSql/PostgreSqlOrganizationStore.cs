@@ -579,6 +579,14 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
                 $"organization_scope_generations generation read violated the provider contract (SQLSTATE {exception.SqlState}).");
         }
+        catch (PostgresException)
+        {
+            // A PostgreSQL server-side error is not a transport/provider
+            // availability signal. Preserve the exact exception instead of
+            // allowing an unknown contract or programming failure to enable
+            // direct-authority fallback.
+            throw;
+        }
         catch (Exception exception) when (exception is InvalidCastException or OverflowException)
         {
             throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
@@ -590,8 +598,11 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
         }
     }
 
-    private static bool IsGenerationSchemaContractViolation(PostgresException exception)
-        => exception.SqlState is "3F000" // invalid_schema_name
+    internal static bool IsGenerationSchemaContractViolation(PostgresException exception)
+        => IsGenerationSchemaContractViolation(exception.SqlState);
+
+    internal static bool IsGenerationSchemaContractViolation(string? sqlState)
+        => sqlState is "3F000" // invalid_schema_name
             or "42P01"                 // undefined_table
             or "42703"                 // undefined_column
             or "42804"                 // datatype_mismatch

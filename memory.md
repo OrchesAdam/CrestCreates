@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-09-01 (Issue #26 Phase 9d implementation review/fixes are on PR #81's branch; local non-PostgreSQL verification is complete, while PostgreSQL/Testcontainers and NativeAOT execution remain CI-dependent because Docker is unavailable on this host.)
+Last Updated: 2026-09-01 (Issue #26 Phase 9d R1 review fixes are on PR #81's branch; local builds pass, while PostgreSQL/Testcontainers and NativeAOT execution remain CI-dependent because Docker is unavailable on this host.)
 
 ## Purpose
 
@@ -12,8 +12,8 @@ This file records the current platform status for CrestCreates so future threads
 
 ### Issue #26 — Phase 9d Versioned Cache Consistency
 
-Status: Design Spec frozen and Implementation Plan approved; PR #81 implementation
-review remediation is in progress on branch
+Status: Design Spec frozen and Implementation Plan approved; PR #81 R1
+implementation-review remediation is in progress on branch
 `codex/issue-26-versioned-cache-consistency`.
 
 The Organization hierarchy now uses one generation-validated cache mainline with
@@ -29,7 +29,7 @@ general caching composition. The existing NativeAOT host exercises two independe
 local hierarchy caches over one PostgreSQL authority and asserts the versioned-cache
 marker.
 
-Review remediation added deterministic OHC09 publication/lookup races, physical
+Review remediation added deterministic OHC09/OHC24 publication/lookup races, physical
 capacity retention after non-cooperative timeout, owner-disposal completion gates,
 real EF permission integration coverage, PostgreSQL concrete-store boundary checks,
 and all twelve OVG authority manifest entries. Docker is not present locally, so

@@ -16,6 +16,8 @@ internal interface IOrganizationHierarchySnapshotCache : IDisposable
     bool TryGet(OrganizationHierarchyCacheKey key, out OrganizationHierarchySnapshot snapshot);
 
     void Set(OrganizationHierarchyCacheKey key, OrganizationHierarchySnapshot snapshot);
+
+    bool Remove(OrganizationHierarchyCacheKey key, OrganizationHierarchySnapshot expectedSnapshot);
 }
 
 internal sealed class MemoryOrganizationHierarchySnapshotCache : IOrganizationHierarchySnapshotCache
@@ -44,6 +46,16 @@ internal sealed class MemoryOrganizationHierarchySnapshotCache : IOrganizationHi
             new MemoryCacheEntryOptions()
                 .SetSize(1)
                 .SetSlidingExpiration(_slidingExpiration));
+    }
+
+    public bool Remove(OrganizationHierarchyCacheKey key, OrganizationHierarchySnapshot expectedSnapshot)
+    {
+        if (!_cache.TryGetValue(key, out OrganizationHierarchySnapshot? current) ||
+            !ReferenceEquals(current, expectedSnapshot))
+            return false;
+
+        _cache.Remove(key);
+        return true;
     }
 
     public void Dispose() => _cache.Dispose();
