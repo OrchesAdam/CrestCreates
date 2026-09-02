@@ -39,9 +39,9 @@ public sealed class PostgreSqlOrganizationHierarchyCacheTests : IAsyncLifetime
     {
         var services = new ServiceCollection();
         services.AddSingleton(options);
+        services.AddOrganizationKernel();
         services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
         services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
-        services.AddOrganizationKernel();
         return services.BuildServiceProvider();
     }
 
