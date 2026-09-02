@@ -6,7 +6,9 @@ using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
+using CrestCreates.Localization.Services;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
@@ -121,6 +123,92 @@ public class DescriptorReviewReportBuilderTests
             Draft = draft,
             VisibilityApplied = visibilityApplied,
         };
+    }
+
+    [Fact]
+    public void DescriptorGovernanceLocalization_Should_Preserve_ReasonCode()
+    {
+        var (english, chinese) = BuildLocalizedReports();
+
+        GetItems(english).Select(item => item.ReasonCode).Should()
+            .Equal(GetItems(chinese).Select(item => item.ReasonCode));
+    }
+
+    [Fact]
+    public void DescriptorGovernanceLocalization_Should_Preserve_MessageTemplateId()
+    {
+        var (english, chinese) = BuildLocalizedReports();
+
+        GetItems(english).Select(item => item.MessageTemplateId).Should()
+            .Equal(GetItems(chinese).Select(item => item.MessageTemplateId));
+    }
+
+    [Fact]
+    public void DescriptorGovernanceLocalization_Should_Preserve_Parameters()
+    {
+        var (english, chinese) = BuildLocalizedReports();
+
+        GetItems(english).Select(item => item.Parameters).Should()
+            .BeEquivalentTo(GetItems(chinese).Select(item => item.Parameters));
+    }
+
+    [Fact]
+    public void DescriptorGovernanceLocalization_Should_Not_Change_CanonicalHash_OrDecision()
+    {
+        var (english, chinese) = BuildLocalizedReports();
+
+        GetMessages(english).Should().NotEqual(GetMessages(chinese));
+        english.Should().BeEquivalentTo(
+            chinese,
+            options => options.Excluding(context =>
+                context.Path.EndsWith(".Message", StringComparison.Ordinal)),
+            "culture may change only the already-projected presentation Message");
+    }
+
+    private (DescriptorReviewReportDto English, DescriptorReviewReportDto Chinese) BuildLocalizedReports()
+    {
+        var request = CreateRichRequestForDeniedKindTests();
+        var transition = new DescriptorLifecycleTransition
+        {
+            Subject = new DescriptorRef("test", "desc-001", 1),
+            Operation = DescriptorLifecycleOperation.SubmitForReview,
+        };
+        var governanceReport = new DescriptorLifecycleGovernanceReport
+        {
+            Decisions =
+            [
+                new DescriptorLifecycleDecision
+                {
+                    Transition = transition,
+                    Decision = DescriptorLifecycleDecisionKind.ReviewRequired,
+                    Findings = Array.Empty<DescriptorLifecycleFinding>()
+                }
+            ],
+            MaxDecision = DescriptorLifecycleDecisionKind.ReviewRequired,
+            PackageFindings = Array.Empty<DescriptorLifecycleFinding>()
+        };
+        request = request with
+        {
+            ReviewResult = request.ReviewResult with { GovernanceDecision = governanceReport }
+        };
+        var clock = new FixedTimeProvider(new DateTimeOffset(2026, 9, 2, 0, 0, 0, TimeSpan.Zero));
+        var englishBuilder = new DefaultDescriptorReviewReportBuilder(
+            new DefaultDescriptorReviewMessageTemplateCatalog(
+                new KeyReturningLocalizationService("en"),
+                NullLogger<DefaultDescriptorReviewMessageTemplateCatalog>.Instance),
+            _reviewHashServiceMock.Object,
+            clock);
+        var chineseBuilder = new DefaultDescriptorReviewReportBuilder(
+            new DefaultDescriptorReviewMessageTemplateCatalog(
+                new KeyReturningLocalizationService("zh-CN"),
+                NullLogger<DefaultDescriptorReviewMessageTemplateCatalog>.Instance),
+            _reviewHashServiceMock.Object,
+            clock);
+
+        var english = englishBuilder.Build(request);
+        var chinese = chineseBuilder.Build(request);
+
+        return (english, chinese);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -912,5 +1000,66 @@ public class DescriptorReviewReportBuilderTests
                     $"ImpactAnalysis item '{item.ItemId}' RelatedDescriptorIds should not contain DeniedKind");
             }
         }
+    }
+
+    private static string[] GetMessages(DescriptorReviewReportDto report)
+        => new[]
+            {
+                report.SummarySection,
+                report.DraftIdentitySection,
+                report.ProposedChangesSection,
+                report.ImpactAnalysisSection,
+                report.DependencySummarySection,
+                report.CompatibilitySection,
+                report.GovernanceSection,
+                report.RequiredHumanReviewSection,
+                report.ActivationEligibilitySection,
+                report.DiagnosticsSection,
+                report.RecommendationsSection,
+                report.PackagePreviewSection,
+                report.StableHashesSection
+            }
+            .SelectMany(section => section.Items.Select(item => item.Message))
+            .Concat(report.Recommendations.Select(recommendation => recommendation.Message))
+            .ToArray();
+
+    private static DescriptorReviewReportItemDto[] GetItems(DescriptorReviewReportDto report)
+        => new[]
+            {
+                report.SummarySection,
+                report.DraftIdentitySection,
+                report.ProposedChangesSection,
+                report.ImpactAnalysisSection,
+                report.DependencySummarySection,
+                report.CompatibilitySection,
+                report.GovernanceSection,
+                report.RequiredHumanReviewSection,
+                report.ActivationEligibilitySection,
+                report.DiagnosticsSection,
+                report.RecommendationsSection,
+                report.PackagePreviewSection,
+                report.StableHashesSection
+            }
+            .SelectMany(section => section.Items)
+            .ToArray();
+
+    private sealed class KeyReturningLocalizationService(string currentCulture) : ILocalizationService
+    {
+        public string CurrentCulture { get; } = currentCulture;
+        public string GetString(string key) => key;
+        public string GetString(string key, params object[] arguments) => key;
+        public string GetString(string key, string cultureName) => key;
+        public string GetString(string key, string cultureName, params object[] arguments) => key;
+        public Task<string?> GetStringAsync(string key) => Task.FromResult<string?>(key);
+        public Task<string?> GetStringAsync(string key, params object[] arguments) => Task.FromResult<string?>(key);
+        public Task<string?> GetStringAsync(string key, string cultureName) => Task.FromResult<string?>(key);
+        public Task<string?> GetStringAsync(string key, string cultureName, params object[] arguments) => Task.FromResult<string?>(key);
+        public IDisposable ChangeCulture(string cultureName) => throw new NotSupportedException();
+        public Task<IDisposable> ChangeCultureAsync(string cultureName) => throw new NotSupportedException();
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => value;
     }
 }
