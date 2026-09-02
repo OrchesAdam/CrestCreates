@@ -1,12 +1,18 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text;
 using CrestCreates.Agent.Tools;
 using CrestCreates.Accountability.InMemory;
+using CrestCreates.Authorization;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Mcp;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using CrestCreates.Runtime.Persistence.Abstractions.Providers;
+using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Contracts.Dtos;
 using CrestCreates.Sample.AssetManagement.Contracts.Json;
@@ -25,6 +31,19 @@ public static class AssetGoldenScenario
     {
         try
         {
+            var runtimeCapabilities = app.Services.GetRequiredService<IRuntimePersistenceProviderCapabilities>();
+            if (runtimeCapabilities is not PostgreSqlRuntimeProviderCapabilities
+                || runtimeCapabilities.Tier != RuntimePersistenceProviderTier.FullDurable
+                || !runtimeCapabilities.SupportsAtomicMultiStoreTransactions
+                || !runtimeCapabilities.SupportsRestartRecovery
+                || app.Services.GetRequiredService<IWorkflowInstanceStore>().GetType().Name.Contains("InMemory", StringComparison.Ordinal)
+                || app.Services.GetRequiredService<IHumanTaskInstanceStore>().GetType().Name.Contains("InMemory", StringComparison.Ordinal)
+                || app.Services.GetRequiredService<IOutboxDispatchStore>().GetType().Name.Contains("InMemory", StringComparison.Ordinal))
+                return 18;
+            if (app.Services.GetRequiredService<IPermissionChecker>() is not PermissionChecker
+                || app.Services.GetRequiredService<IPermissionGrantStore>() is not PermissionGrantStore
+                || app.Services.GetRequiredService<IPermissionGrantManager>() is not PermissionGrantManager)
+                return 22;
             using var client = CreateClient(app);
             SetIdentity(client, "golden-tenant", "manager-1", "asset-manager", Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "Tenant");
             var registered = await SendAsync<AssetResult, RegisterAssetInput>(client, HttpMethod.Post, "/api/assets", new RegisterAssetInput
@@ -33,6 +52,10 @@ public static class AssetGoldenScenario
             }, AssetJsonContext.Default.RegisterAssetInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.Created);
             var assetId = registered.Id;
 
+            SetIdentity(client, "golden-tenant", "user-1", "asset-user", null, "Organization");
+            var missingOrganization = await client.GetAsync($"/api/assets/{assetId}");
+            if (missingOrganization.StatusCode != HttpStatusCode.NotFound)
+                return 19;
             SetIdentity(client, "golden-tenant", "user-1", "asset-user", registered.OrganizationId, "Organization");
             var read = await SendAsync<AssetResult, AssetQueryInput>(client, HttpMethod.Get, $"/api/assets/{assetId}", null, AssetJsonContext.Default.AssetQueryInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.OK);
             if (read.AssetTag != "LAPTOP-001") return 2;
@@ -60,6 +83,18 @@ public static class AssetGoldenScenario
             SetIdentity(client, "golden-tenant", "manager-1", "asset-manager", registered.OrganizationId, "Tenant");
             var assigned = await SendAsync<AssetResult, AssignAssetInput>(client, HttpMethod.Post, $"/api/assets/{assetId}/assign", new AssignAssetInput { UserId = "user-1", OrganizationId = registered.OrganizationId!.Value }, AssetJsonContext.Default.AssignAssetInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.OK);
             if (assigned.Status != "Assigned" || assigned.AssignedUserId != "user-1") return 8;
+            var persistedAssigned = await SendAsync<AssetResult, AssetQueryInput>(client, HttpMethod.Get, $"/api/assets/{assetId}", null, AssetJsonContext.Default.AssetQueryInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.OK);
+            if (persistedAssigned.Status != "Assigned" || persistedAssigned.ActiveAssignmentId is null) return 23;
+            var assignedTransfer = await SendStatusAsync(client, HttpMethod.Post, $"/api/assets/{assetId}/transfer", new TransferAssetInput { AssetId = assetId, OrganizationId = registered.OrganizationId!.Value, Location = "Shanghai" }, AssetJsonContext.Default.TransferAssetInput);
+            if (assignedTransfer != HttpStatusCode.Conflict) return 20;
+            var assignedMaintenance = await SendAsync<AssetOperationResult, MaintenanceRequestInput>(client, HttpMethod.Post, $"/api/assets/{assetId}/maintenance", new MaintenanceRequestInput { AssetId = assetId, Reason = "Assigned battery replacement" }, AssetJsonContext.Default.MaintenanceRequestInput, AssetJsonContext.Default.AssetOperationResult, HttpStatusCode.Accepted);
+            using (var scope = app.Services.CreateScope())
+            {
+                scope.ServiceProvider.GetRequiredService<AssetExecutionIdentity>().Set("golden-tenant", "manager-1", registered.OrganizationId, CrestCreates.Domain.Shared.Enums.DataScope.Tenant, "asset-manager");
+                await scope.ServiceProvider.GetRequiredService<AssetMaintenanceWorkflowService>().CompleteAsync(assignedMaintenance.HumanTaskId!, "Approve", "Assigned maintenance approved");
+            }
+            var assignedAfterMaintenance = await SendAsync<AssetResult, AssetQueryInput>(client, HttpMethod.Get, $"/api/assets/{assetId}", null, AssetJsonContext.Default.AssetQueryInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.OK);
+            if (assignedAfterMaintenance.Status != "Assigned" || assignedAfterMaintenance.AssignedUserId != "user-1" || assignedAfterMaintenance.ActiveAssignmentId is null) return 21;
             var returned = await SendAsync<AssetResult, AssetIdInput>(client, HttpMethod.Post, $"/api/assets/{assetId}/return", null, AssetJsonContext.Default.AssetIdInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.OK);
             if (returned.Status != "Available") return 9;
 
@@ -77,14 +112,23 @@ public static class AssetGoldenScenario
             {
                 var identity = scope.ServiceProvider.GetRequiredService<AssetExecutionIdentity>();
                 identity.Set("golden-tenant", "user-1", registered.OrganizationId, CrestCreates.Domain.Shared.Enums.DataScope.Organization, "asset-user");
+                var principalAccessor = scope.ServiceProvider.GetRequiredService<ICurrentPrincipalAccessor>();
+                using var principalScope = principalAccessor.Change(new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, "user-1"), new Claim(ClaimTypes.Role, "asset-user")], "golden-mcp")));
                 var mcp = await scope.ServiceProvider.GetRequiredService<IMcpToolInvoker>().InvokeAsync(AssetContractIds.GetTool, JsonSerializer.SerializeToElement(new AssetQueryInput { AssetId = assetId }, AssetJsonContext.Default.AssetQueryInput), new McpToolCallContext(new McpToolHostContext("asset-golden", "native-aot"), "mcp-1", "mcp-request-1"));
-                if (mcp.IsError || mcp.StructuredContent?.GetProperty("id").GetGuid() != assetId) return 12;
+                if (mcp.IsError)
+                    throw new InvalidOperationException($"MCP get failed ({mcp.ErrorCode}): {string.Join(" | ", mcp.Content.OfType<McpToolTextContent>().Select(content => content.Text))}");
+                if (mcp.StructuredContent is null || !mcp.StructuredContent.Value.TryGetProperty("id", out var mcpId) || mcpId.GetGuid() != assetId)
+                    throw new InvalidOperationException($"MCP get returned an unexpected structured result: {mcp.StructuredContent}");
                 identity.SetAgent("asset-agent-execution", "asset-agent-invocation");
                 var tools = await scope.ServiceProvider.GetRequiredService<IAgentToolCatalog>().ListAsync();
                 if (!tools.Any(tool => tool.ToolName == AssetContractIds.GetTool)) return 13;
                 using var agentArguments = JsonDocument.Parse(JsonSerializer.Serialize(new AssetQueryInput { AssetId = assetId }, AssetJsonContext.Default.AssetQueryInput));
                 var agent = await scope.ServiceProvider.GetRequiredService<IAgentToolInvoker>().InvokeAsync(new AgentToolInvocationRequest(AssetContractIds.GetTool, agentArguments.RootElement.Clone()));
-                if (!agent.IsSuccess || agent.StructuredOutput?.GetProperty("id").GetGuid() != assetId) return 14;
+                if (!agent.IsSuccess)
+                    throw new InvalidOperationException($"Agent get failed ({agent.Code}): {agent.Message}");
+                if (agent.StructuredOutput is null || !agent.StructuredOutput.Value.TryGetProperty("id", out var agentId) || agentId.GetGuid() != assetId)
+                    throw new InvalidOperationException($"Agent get returned an unexpected structured result: {agent.StructuredOutput}");
             }
 
             var accountabilityRecords = app.Services.GetRequiredService<InMemoryAuditSink>().GetRecords();

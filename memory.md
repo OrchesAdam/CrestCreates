@@ -2801,10 +2801,16 @@ with GitHub CI/PR verification pending.
   isolation, lifecycle rules, unauthorized mutation, organization visibility, MCP/Agent
   reachability, accountability, workflow suspension/completion, and a real NativeAOT
   publish-link-run fixture.
-- Self-review found and fixed NativeAOT DI activation for the outbox consumer by adding an
-  explicit host composition factory; no framework change was required.
-- Local evidence: business tests 4/4, E2E process 1/1, AOT metadata/query tests 2/2,
-  NativeAOT binary fixture 1/1, and the expanded golden scenario passed.
+- Second review addressed all eight blockers: the host now requires the PostgreSQL durable
+  Runtime provider, uses the real framework PermissionChecker/GrantStore chain, fails closed
+  for missing organization scope, preserves assigned-maintenance state, rejects assigned
+  transfers, compensates Runtime state when the business store fails, and persists the original
+  maintenance requester. The construction friction record now covers every frozen #85 field.
+- Production-provider hardening normalizes outbox timestamps to PostgreSQL microsecond precision
+  and compares persisted Agent structured output semantically. NativeAOT activation remains an
+  explicit host composition factory.
+- Local evidence: design-case tests 10/10, PostgreSQL E2E process 1/1, AOT metadata/query tests
+  2/2, and NativeAOT publish-link-run 1/1 passed. GitHub CI/PR verification is pending.
 
 ## Recommended Next Thread Entry Prompt
 

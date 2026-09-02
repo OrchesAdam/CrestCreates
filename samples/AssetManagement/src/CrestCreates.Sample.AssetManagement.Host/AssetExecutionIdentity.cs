@@ -95,37 +95,10 @@ public sealed class AssetAuthenticationHandler(
         var user = Request.Headers[AssetExecutionIdentity.UserHeader].ToString();
         if (string.IsNullOrWhiteSpace(user))
             return Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.NoResult());
-        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, user), new(ClaimTypes.Name, user) };
+        var tenant = Request.Headers[AssetExecutionIdentity.TenantHeader].ToString();
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, user), new(ClaimTypes.Name, user), new("tenantid", tenant) };
         claims.AddRange(Request.Headers[AssetExecutionIdentity.RolesHeader].ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(role => new Claim(ClaimTypes.Role, role)));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, SchemeName));
         return Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.Success(new Microsoft.AspNetCore.Authentication.AuthenticationTicket(principal, SchemeName)));
     }
-}
-
-public sealed class AssetPermissionChecker(ICurrentUser currentUser) : IPermissionChecker
-{
-    public Task<bool> IsGrantedAsync(string permissionName) => Task.FromResult(IsGranted(permissionName));
-    public Task<bool> IsGrantedAsync(ClaimsPrincipal principal, string permissionName) => Task.FromResult(IsGranted(principal, permissionName));
-    public Task<MultiplePermissionGrantResult> IsGrantedAsync(string[] names) => Task.FromResult(new MultiplePermissionGrantResult(names.ToDictionary(name => name, IsGranted, StringComparer.Ordinal)));
-    public Task<MultiplePermissionGrantResult> IsGrantedAsync(ClaimsPrincipal principal, string[] names) => Task.FromResult(new MultiplePermissionGrantResult(names.ToDictionary(name => name, name => IsGranted(principal, name), StringComparer.Ordinal)));
-    public async Task CheckAsync(string permissionName)
-    {
-        if (!await IsGrantedAsync(permissionName))
-            throw new UnauthorizedAccessException($"Permission '{permissionName}' is required.");
-    }
-
-    private bool IsGranted(string permission) => permission switch
-    {
-        CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Read or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Search => currentUser.IsAuthenticated && (currentUser.IsInRole("asset-user") || currentUser.IsInRole("asset-manager")),
-        CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Register or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Update or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Assign or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Return or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Transfer or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.RequestMaintenance => currentUser.IsInRole("asset-manager"),
-        CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.CompleteMaintenance => currentUser.IsInRole("asset-manager"),
-        _ => false
-    };
-
-    private static bool IsGranted(ClaimsPrincipal principal, string permission) => permission switch
-    {
-        CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Read or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Search => principal.Identity?.IsAuthenticated == true && (principal.IsInRole("asset-user") || principal.IsInRole("asset-manager")),
-        CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Register or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Update or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Assign or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Return or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.Transfer or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.RequestMaintenance or CrestCreates.Sample.AssetManagement.Contracts.AssetPermissions.Assets.CompleteMaintenance => principal.IsInRole("asset-manager"),
-        _ => false
-    };
 }

@@ -1,4 +1,3 @@
-using CrestCreates.AuditLogging.Interceptors;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Domain.Shared.DataFilter;
@@ -27,7 +26,6 @@ public sealed class AssetApplicationService
         _workflowStarter = workflowStarter;
     }
 
-    [AuditedMo("asset.register")]
     public async Task<AssetResult> RegisterAsync(RegisterAssetInput input, string tenantId, string userId, CancellationToken ct)
     {
         await CheckAsync(AssetPermissions.Assets.Register, ct);
@@ -48,7 +46,7 @@ public sealed class AssetApplicationService
     {
         await CheckAsync(AssetPermissions.Assets.Search, ct);
         var assets = await _store.ListAsync(tenantId, ct);
-        var query = await _dataPermissionFilter.ApplyFilterAsync(assets.AsQueryable());
+        var query = await ApplyAssetDataPermissionAsync(assets.AsQueryable());
         if (!string.IsNullOrWhiteSpace(input.Search))
             query = query.Where(asset => asset.AssetTag.Contains(input.Search, StringComparison.OrdinalIgnoreCase)
                 || asset.Name.Contains(input.Search, StringComparison.OrdinalIgnoreCase));
@@ -63,7 +61,6 @@ public sealed class AssetApplicationService
             .ToArray();
     }
 
-    [AuditedMo("asset.update")]
     public async Task<AssetResult> UpdateAsync(Guid assetId, UpdateAssetInput input, string tenantId, string userId, CancellationToken ct)
     {
         await CheckAsync(AssetPermissions.Assets.Update, ct);
@@ -74,7 +71,6 @@ public sealed class AssetApplicationService
         return Map(asset);
     }
 
-    [AuditedMo("asset.assign")]
     public async Task<AssetResult> AssignAsync(Guid assetId, AssignAssetInput input, string tenantId, string userId, CancellationToken ct)
     {
         await CheckAsync(AssetPermissions.Assets.Assign, ct);
@@ -86,7 +82,6 @@ public sealed class AssetApplicationService
         return Map(asset);
     }
 
-    [AuditedMo("asset.return")]
     public async Task<AssetResult> ReturnAsync(Guid assetId, string tenantId, string userId, CancellationToken ct)
     {
         await CheckAsync(AssetPermissions.Assets.Return, ct);
@@ -103,11 +98,12 @@ public sealed class AssetApplicationService
         return Map(asset);
     }
 
-    [AuditedMo("asset.transfer")]
     public async Task<AssetResult> TransferAsync(Guid assetId, TransferAssetInput input, string tenantId, string userId, CancellationToken ct)
     {
         await CheckAsync(AssetPermissions.Assets.Transfer, ct);
         var asset = await RequireVisibleAsync(assetId, tenantId, ct);
+        if (asset.Status == AssetStatus.Assigned)
+            throw new CapabilityFailureException("CAPABILITY_DECISION_CONFLICT", "An assigned asset must be returned before it can be transferred.");
         EnsureOrganizationAllowed(input.OrganizationId);
         var expected = asset.ConcurrencyStamp;
         asset.Transfer(input.OrganizationId, input.Location, userId);
@@ -115,7 +111,6 @@ public sealed class AssetApplicationService
         return Map(asset);
     }
 
-    [AuditedMo("asset.request-maintenance")]
     public async Task<AssetOperationResult> RequestMaintenanceAsync(Guid assetId, MaintenanceRequestInput input, string tenantId, string userId, CancellationToken ct)
     {
         await CheckAsync(AssetPermissions.Assets.RequestMaintenance, ct);
@@ -125,21 +120,33 @@ public sealed class AssetApplicationService
         if (asset.Status is AssetStatus.Retired or AssetStatus.MaintenancePending)
             throw new InvalidOperationException($"Asset '{asset.AssetTag}' cannot enter maintenance from status '{asset.Status}'.");
         var workflow = await _workflowStarter.StartAsync(assetId, tenantId, userId, ct);
-        var expected = asset.ConcurrencyStamp;
-        asset.RequestMaintenance(workflow.WorkflowInstanceId, userId);
-        await _store.UpdateAsync(asset, expected, ct);
+        try
+        {
+            var expected = asset.ConcurrencyStamp;
+            asset.RequestMaintenance(workflow.WorkflowInstanceId, userId);
+            await _store.UpdateAsync(asset, expected, ct);
+        }
+        catch
+        {
+            // SQLite business data and the PostgreSQL Runtime provider are
+            // separate durable authorities. Close the Runtime wait if the
+            // business transition fails after workflow suspension.
+            await _workflowStarter.AbortAsync(workflow, "Asset maintenance business transition failed.", CancellationToken.None);
+            throw;
+        }
         return new AssetOperationResult { AssetId = assetId, Status = asset.Status.ToString(), WorkflowInstanceId = workflow.WorkflowInstanceId, HumanTaskId = workflow.HumanTaskId };
     }
 
-    [AuditedMo("asset.apply-maintenance-decision")]
-    public async Task<AssetResult> ApplyMaintenanceDecisionAsync(Guid assetId, MaintenanceDecisionInput input, string tenantId, string userId, string workflowInstanceId, CancellationToken ct)
+    public async Task<AssetResult> ApplyMaintenanceDecisionAsync(Guid assetId, MaintenanceDecisionInput input, string tenantId, string userId, string requesterId, string workflowInstanceId, CancellationToken ct)
     {
         await CheckAsync(AssetPermissions.Assets.CompleteMaintenance, ct);
+        if (string.IsNullOrWhiteSpace(requesterId))
+            throw new CapabilityFailureException("CAPABILITY_CONTEXT_REQUIRED", "The maintenance requester is required.");
         var asset = await RequireVisibleAsync(assetId, tenantId, ct);
         var expected = asset.ConcurrencyStamp;
         asset.ApplyMaintenanceDecision(input.Approved, workflowInstanceId, userId);
         await _store.SaveMaintenanceDecisionAsync(asset, expected,
-            new MaintenanceRecord(Guid.NewGuid(), tenantId, asset.Id, asset.OrganizationId, workflowInstanceId, asset.CreatorId?.ToString() ?? string.Empty, userId, input.Note, input.Approved), ct);
+            new MaintenanceRecord(Guid.NewGuid(), tenantId, asset.Id, asset.OrganizationId, workflowInstanceId, requesterId, userId, input.Note, input.Approved), ct);
         return Map(asset);
     }
 
@@ -149,8 +156,23 @@ public sealed class AssetApplicationService
         var asset = await _store.GetAsync(tenantId, assetId, ct);
         if (asset is null)
             return null;
-        var query = await _dataPermissionFilter.ApplyFilterAsync(new[] { asset }.AsQueryable());
+        var query = await ApplyAssetDataPermissionAsync(new[] { asset }.AsQueryable());
         return query.SingleOrDefault();
+    }
+
+    private Task<IQueryable<Asset>> ApplyAssetDataPermissionAsync(IQueryable<Asset> query)
+    {
+        var scope = (DataScope)_currentUser.DataScopeValue;
+        if (scope is DataScope.Organization or DataScope.OrganizationAndSub
+            && _currentUser.OrganizationIds.Count == 0)
+        {
+            // The legacy filter is fail-open when OrganizationId is absent.
+            // Asset visibility must remain fail-closed at this business
+            // boundary until the framework filter contract is upgraded.
+            return Task.FromResult<IQueryable<Asset>>(Array.Empty<Asset>().AsQueryable());
+        }
+
+        return _dataPermissionFilter.ApplyFilterAsync(query);
     }
 
     private async Task<Asset> RequireVisibleAsync(Guid assetId, string tenantId, CancellationToken ct)

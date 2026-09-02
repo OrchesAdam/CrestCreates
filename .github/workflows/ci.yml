@@ -12,6 +12,22 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: crest_asset_management
+          POSTGRES_USER: crest
+          POSTGRES_PASSWORD: crest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crest -d crest_asset_management"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING: Host=127.0.0.1;Port=5432;Database=crest_asset_management;Username=crest;Password=crest
 
     steps:
       - name: Checkout

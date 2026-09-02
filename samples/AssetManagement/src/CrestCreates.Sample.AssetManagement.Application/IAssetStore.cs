@@ -17,6 +17,7 @@ public interface IAssetStore
 public interface IAssetMaintenanceWorkflowStarter
 {
     Task<AssetMaintenanceWorkflowLease> StartAsync(Guid assetId, string tenantId, string requesterId, CancellationToken cancellationToken = default);
+    Task AbortAsync(AssetMaintenanceWorkflowLease lease, string reason, CancellationToken cancellationToken = default);
 }
 
 public sealed record AssetMaintenanceWorkflowLease(string WorkflowInstanceId, string HumanTaskId);

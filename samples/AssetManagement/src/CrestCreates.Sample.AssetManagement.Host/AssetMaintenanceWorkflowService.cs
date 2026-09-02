@@ -24,6 +24,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
     private readonly IAssetStore _assets;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
     private readonly ICurrentUser _currentUser;
+    private readonly IWorkflowInstanceStore _workflowStore;
 
     public AssetMaintenanceWorkflowService(
         IWorkflowEngine workflows,
@@ -31,7 +32,8 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         IHumanTaskInstanceStore taskStore,
         IAssetStore assets,
         IRuntimeStateContractRegistry stateRegistry,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        IWorkflowInstanceStore workflowStore)
     {
         _workflows = workflows;
         _humanTasks = humanTasks;
@@ -39,6 +41,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         _assets = assets;
         _stateRegistry = stateRegistry;
         _currentUser = currentUser;
+        _workflowStore = workflowStore;
     }
 
     public async Task<AssetMaintenanceWorkflowLease> StartAsync(Guid assetId, string tenantId, string requesterId, CancellationToken ct = default)
@@ -59,6 +62,25 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         return new AssetMaintenanceWorkflowLease(workflow.InstanceId, tasks[0].Id);
     }
 
+    public async Task AbortAsync(AssetMaintenanceWorkflowLease lease, string reason, CancellationToken ct = default)
+    {
+        var taskKey = new RuntimeInstanceKey(_currentUser.TenantId, lease.HumanTaskId);
+        var task = await _taskStore.GetAsync(taskKey, ct);
+        if (task is not null && task.Status is not HumanTaskInstanceStatus.Completed and not HumanTaskInstanceStatus.Cancelled)
+            await _humanTasks.CancelAsync(taskKey, reason, ct);
+
+        var workflowKey = new RuntimeInstanceKey(_currentUser.TenantId, lease.WorkflowInstanceId);
+        var workflow = await _workflowStore.GetAsync(workflowKey, ct);
+        if (workflow is not null && workflow.Status == WorkflowInstanceStatus.Suspended)
+        {
+            workflow.Status = WorkflowInstanceStatus.Failed;
+            workflow.ErrorMessage = reason;
+            workflow.CompletedAt = DateTimeOffset.UtcNow;
+            workflow.WaitingHumanTaskKey = null;
+            await _workflowStore.UpdateAsync(workflow, workflow.Revision, ct);
+        }
+    }
+
     public async Task CompleteAsync(string humanTaskId, string outcome, string note, CancellationToken ct = default)
     {
         if (!_currentUser.IsInRole("asset-manager"))
@@ -73,6 +95,12 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         var rejected = string.Equals(outcome, "Reject", StringComparison.OrdinalIgnoreCase);
         if (!approved && !rejected)
             throw new ArgumentException("Outcome must be Approve or Reject.", nameof(outcome));
+        var variables = RestoreVariables(task.Input);
+        var requesterId = variables.TryGetValue("requesterId", out var requester)
+            ? requester?.ToString() ?? string.Empty
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(requesterId))
+            throw new InvalidOperationException("Maintenance requester is missing from the durable workflow state.");
 
         await _humanTasks.CompleteAsync(new HumanTaskCompletionRequest
         {
@@ -80,10 +108,10 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
             Outcome = approved ? "Approve" : "Reject",
             ActorId = _currentUser.Id,
             ActorRoles = _currentUser.Roles,
-            Result = _stateRegistry.Capture(new AssetMaintenanceDecisionFact { AssetId = assetId, ApproverId = _currentUser.Id, Approved = approved, Note = note })
+            Result = _stateRegistry.Capture(new AssetMaintenanceDecisionFact { AssetId = assetId, RequesterId = requesterId, ApproverId = _currentUser.Id, Approved = approved, Note = note })
         }, ct);
 
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
         while (DateTimeOffset.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
@@ -107,6 +135,7 @@ public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Deli
     private readonly IRuntimeStateContractRegistry _stateRegistry;
     private readonly ICapabilityDispatcher _dispatcher;
     private readonly AssetExecutionIdentity _identity;
+    private readonly ICurrentPrincipalAccessor _principalAccessor;
     private readonly ILogger<AssetMaintenanceDecisionConsumer> _logger;
 
     public AssetMaintenanceDecisionConsumer(
@@ -114,12 +143,14 @@ public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Deli
         IRuntimeStateContractRegistry stateRegistry,
         ICapabilityDispatcher dispatcher,
         AssetExecutionIdentity identity,
+        ICurrentPrincipalAccessor principalAccessor,
         ILogger<AssetMaintenanceDecisionConsumer> logger)
     {
         _tasks = tasks;
         _stateRegistry = stateRegistry;
         _dispatcher = dispatcher;
         _identity = identity;
+        _principalAccessor = principalAccessor;
         _logger = logger;
     }
 
@@ -153,7 +184,11 @@ public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Deli
         var command = new CrestCreates.Sample.AssetManagement.Application.Handlers.MaintenanceDecisionCommand(
             fact.AssetId,
             new CrestCreates.Sample.AssetManagement.Contracts.Dtos.MaintenanceDecisionInput { AssetId = fact.AssetId, Approved = fact.Approved, Note = fact.Note },
-            task.WorkflowInstanceId ?? string.Empty);
+            task.WorkflowInstanceId ?? string.Empty,
+            fact.RequesterId);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, fact.ApproverId), new Claim(ClaimTypes.Role, "asset-manager") }, "outbox"));
+        using var principalScope = _principalAccessor.Change(principal);
+        _logger.LogInformation("Dispatching asset maintenance decision for {AssetId} as {ApproverId}.", fact.AssetId, fact.ApproverId);
         var result = await _dispatcher.DispatchAsync(AssetContractIds.ApplyMaintenanceCapability, InvocationSource.HumanTask, command, ctx =>
         {
             ctx.InputJson = System.Text.Json.JsonSerializer.SerializeToElement(
@@ -161,8 +196,9 @@ public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Deli
                 AssetJsonContext.Default.MaintenanceDecisionInput);
             ctx.TenantId = task.TenantId;
             ctx.UserId = fact.ApproverId;
-            ctx.Principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, fact.ApproverId), new Claim(ClaimTypes.Role, "asset-manager") }, "outbox"));
+            ctx.Principal = principal;
         }, ct);
+        _logger.LogInformation("Asset maintenance decision dispatch completed for {AssetId}: {Status} {ErrorCode}.", fact.AssetId, result.Status, result.ErrorCode);
         if (!result.IsSuccess)
             _logger.LogWarning("Maintenance decision capability failed with {ErrorCode}: {ErrorMessage}.", result.ErrorCode, result.ErrorMessage);
         return result.IsSuccess

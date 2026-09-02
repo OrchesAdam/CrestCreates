@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/CrestCreates.Sample.AssetManagement.Contracts/CrestCreates.Sample.AssetManagement.Contracts.csproj" />
     <ProjectReference Include="../../src/CrestCreates.Sample.AssetManagement.Domain/CrestCreates.Sample.AssetManagement.Domain.csproj" />
+    <ProjectReference Include="../../src/CrestCreates.Sample.AssetManagement.Application/CrestCreates.Sample.AssetManagement.Application.csproj" />
     <ProjectReference Include="../../src/CrestCreates.Sample.AssetManagement.Persistence/CrestCreates.Sample.AssetManagement.Persistence.csproj" />
   </ItemGroup>
   <ItemGroup>

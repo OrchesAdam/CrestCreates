@@ -118,7 +118,7 @@ public sealed class Asset : MustHaveTenantOrganizationEntity<Guid>
 
     public void Transfer(Guid organizationId, string? location, string modifierId)
     {
-        if (Status == AssetStatus.MaintenancePending || Status == AssetStatus.Retired)
+        if (Status is AssetStatus.Assigned or AssetStatus.MaintenancePending or AssetStatus.Retired)
             throw Invalid($"Asset '{AssetTag}' cannot be transferred from status '{Status}'.");
         OrganizationId = organizationId;
         Location = string.IsNullOrWhiteSpace(location) ? null : location.Trim();
@@ -140,10 +140,9 @@ public sealed class Asset : MustHaveTenantOrganizationEntity<Guid>
         if (Status != AssetStatus.MaintenancePending
             || !string.Equals(MaintenanceWorkflowInstanceId, workflowInstanceId, StringComparison.Ordinal))
             throw Invalid("The maintenance decision does not match the active asset maintenance request.");
-        if (approved)
-            Status = AssetStatus.Available;
-        else
-            Status = AssignedUserId is null ? AssetStatus.Available : AssetStatus.Assigned;
+        // Maintenance does not implicitly return an assigned asset. The
+        // assignment remains authoritative throughout the review.
+        Status = AssignedUserId is null ? AssetStatus.Available : AssetStatus.Assigned;
         MaintenanceWorkflowInstanceId = null;
         Touch(modifierId);
     }

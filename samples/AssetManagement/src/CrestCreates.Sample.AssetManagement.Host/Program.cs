@@ -5,6 +5,7 @@ using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Accountability.InMemory;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
+using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
 using CrestCreates.AuditLogging.Interceptors;
@@ -32,7 +33,8 @@ using CrestCreates.OpenApi;
 using CrestCreates.Runtime.Delivery;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
-using CrestCreates.Runtime.Persistence.InMemory;
+using CrestCreates.Runtime.Persistence.PostgreSql;
+using CrestCreates.Domain.Shared.Permissions;
 using CrestCreates.Sample.AssetManagement.Application;
 using CrestCreates.Sample.AssetManagement.Application.Handlers;
 using CrestCreates.Sample.AssetManagement.Contracts;
@@ -55,6 +57,13 @@ if (goldenScenario)
 var databasePath = builder.Configuration["AssetManagement:DatabasePath"]
     ?? Path.Combine(Path.GetTempPath(), $"crestcreates-assets-{Environment.ProcessId}-{Guid.NewGuid():N}.db");
 var assetStore = new SqliteAssetStore($"Data Source={databasePath}");
+var runtimeConnectionString = builder.Configuration["AssetManagement:RuntimeConnectionString"]
+    ?? Environment.GetEnvironmentVariable("ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING");
+if (string.IsNullOrWhiteSpace(runtimeConnectionString))
+    throw new InvalidOperationException("AssetManagement:RuntimeConnectionString is required; the golden application has no in-memory Runtime fallback.");
+var runtimeSchema = builder.Configuration["AssetManagement:RuntimeSchema"]
+    ?? Environment.GetEnvironmentVariable("ASSET_MANAGEMENT_RUNTIME_SCHEMA")
+    ?? "crest_asset_runtime";
 var schemaRegistry = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
 schemaRegistry.Build([new AssetDescriptorProvider<SchemaDescriptor>(AssetDescriptorCatalog.Schemas)]);
 var capabilityRegistry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
@@ -71,11 +80,18 @@ formRegistry.Build([new AssetDescriptorProvider<FormDescriptor>([AssetDescriptor
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddDescriptorStableHash();
 builder.Services.AddMultiTenancy();
+builder.Services.AddInMemoryTenantProvider();
 builder.Services.AddDataFilterServices();
+builder.Services.AddCrestAuthorization();
 builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
 builder.Services.AddRuntimePersistence();
 builder.Services.AddSingleton<IRuntimeStateContractContributor, AssetRuntimeStateContractContributor>();
-builder.Services.AddCrestCreatesInMemoryRuntimePersistence();
+builder.Services.AddCrestCreatesPostgreSqlRuntimePersistence(new PostgreSqlRuntimePersistenceOptions
+{
+    ConnectionString = runtimeConnectionString,
+    Schema = runtimeSchema,
+    ApplyMigrations = true
+});
 builder.Services.AddRuntimeDelivery(options =>
 {
     if (goldenScenario)
@@ -89,6 +105,7 @@ builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAcc
 builder.Services.Replace(ServiceDescriptor.Singleton<ICapabilityInputValidationPolicy, AssetInputValidationPolicy>());
 builder.Services.AddSingleton<ICapabilityHandlerModule>(new AssetCapabilityModule());
 builder.Services.AddSingleton<IAssetStore>(assetStore);
+builder.Services.AddSingleton<CrestCreates.Domain.Repositories.Permission.IPermissionGrantRepository, AssetPermissionGrantRepository>();
 builder.Services.AddScoped<AssetApplicationService>();
 builder.Services.AddCrestCapabilityEndpoints();
 builder.Services.AddCrestCompatibilityProjection();
@@ -111,6 +128,7 @@ builder.Services.Replace(ServiceDescriptor.Scoped<AssetMaintenanceDecisionConsum
         sp.GetRequiredService<IRuntimeStateContractRegistry>(),
         sp.GetRequiredService<ICapabilityDispatcher>(),
         sp.GetRequiredService<AssetExecutionIdentity>(),
+        sp.GetRequiredService<ICurrentPrincipalAccessor>(),
         sp.GetRequiredService<ILogger<AssetMaintenanceDecisionConsumer>>())));
 builder.Services.AddWorkflowEngine();
 builder.Services.AddScoped<IAssetMaintenanceWorkflowStarter, AssetMaintenanceWorkflowService>();
@@ -130,7 +148,6 @@ builder.Services.AddScoped<AssetExecutionIdentity>();
 builder.Services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<AssetExecutionIdentity>());
 builder.Services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<AssetExecutionIdentity>());
 builder.Services.AddScoped<IAgentExecutionContextAccessor>(sp => sp.GetRequiredService<AssetExecutionIdentity>());
-builder.Services.AddScoped<IPermissionChecker, AssetPermissionChecker>();
 builder.Services.AddCrestMcpToolProjection(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
@@ -150,6 +167,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =
 });
 
 var app = builder.Build();
+await SeedAssetPermissionsAsync(app.Services);
 await assetStore.InitializeAsync();
 app.UseAccountabilityHttpTerminalObserver();
 app.UseAuthentication();
@@ -166,6 +184,27 @@ if (goldenScenario)
 
 await app.RunAsync();
 return 0;
+
+static async Task SeedAssetPermissionsAsync(IServiceProvider services)
+{
+    using var scope = services.CreateScope();
+    var manager = scope.ServiceProvider.GetRequiredService<IPermissionGrantManager>();
+    var userPermissions = new[] { AssetPermissions.Assets.Read, AssetPermissions.Assets.Search };
+    var managerPermissions = userPermissions.Concat(new[]
+    {
+        AssetPermissions.Assets.Register,
+        AssetPermissions.Assets.Update,
+        AssetPermissions.Assets.Assign,
+        AssetPermissions.Assets.Return,
+        AssetPermissions.Assets.Transfer,
+        AssetPermissions.Assets.RequestMaintenance,
+        AssetPermissions.Assets.CompleteMaintenance
+    });
+    foreach (var permission in userPermissions)
+        await manager.GrantAsync(new PermissionGrantInfo { PermissionName = permission, ProviderType = PermissionGrantProviderType.Role, ProviderKey = "asset-user", Scope = PermissionGrantScope.Global });
+    foreach (var permission in managerPermissions)
+        await manager.GrantAsync(new PermissionGrantInfo { PermissionName = permission, ProviderType = PermissionGrantProviderType.Role, ProviderKey = "asset-manager", Scope = PermissionGrantScope.Global });
+}
 
 public sealed class AssetAgentToolApprovalGate : IAgentToolApprovalGate
 {

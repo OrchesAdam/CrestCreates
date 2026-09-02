@@ -115,11 +115,11 @@ public sealed class ApplyMaintenanceDecisionHandler : ICapabilityContextAwareHan
         if (context.InvocationSource != InvocationSource.HumanTask)
             throw new CapabilityFailureException("CAPABILITY_INVOCATION_SOURCE_FORBIDDEN", "Maintenance decisions require HumanTask completion.");
         var input = (MaintenanceDecisionCommand)context.Input!;
-        return await Service(context).ApplyMaintenanceDecisionAsync(input.AssetId, input.Decision, Tenant(context), User(context), input.WorkflowInstanceId, ct);
+        return await Service(context).ApplyMaintenanceDecisionAsync(input.AssetId, input.Decision, Tenant(context), User(context), input.RequesterId, input.WorkflowInstanceId, ct);
     }
     private static AssetApplicationService Service(CapabilityExecutionContext c) => c.ServiceProvider.GetRequiredService<AssetApplicationService>();
     private static string Tenant(CapabilityExecutionContext c) => c.TenantId ?? throw new CapabilityFailureException("CAPABILITY_CONTEXT_REQUIRED", "A tenant context is required.");
     private static string User(CapabilityExecutionContext c) => c.UserId ?? throw new CapabilityFailureException("CAPABILITY_CONTEXT_REQUIRED", "A user context is required.");
 }
 
-public sealed record MaintenanceDecisionCommand(Guid AssetId, MaintenanceDecisionInput Decision, string WorkflowInstanceId);
+public sealed record MaintenanceDecisionCommand(Guid AssetId, MaintenanceDecisionInput Decision, string WorkflowInstanceId, string RequesterId);

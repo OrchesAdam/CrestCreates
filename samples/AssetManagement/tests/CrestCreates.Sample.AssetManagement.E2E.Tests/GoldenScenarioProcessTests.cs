@@ -17,6 +17,9 @@ public sealed class GoldenScenarioProcessTests
         };
         startInfo.ArgumentList.Add(hostAssembly);
         startInfo.ArgumentList.Add("--golden-scenario");
+        startInfo.Environment["ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING"] = Environment.GetEnvironmentVariable("ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING")
+            ?? throw new InvalidOperationException("ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING must point at the durable PostgreSQL test service.");
+        startInfo.Environment["ASSET_MANAGEMENT_RUNTIME_SCHEMA"] = $"crest_asset_runtime_e2e_{Guid.NewGuid():N}";
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start the Asset Management Host process.");
         var stdout = process.StandardOutput.ReadToEndAsync();

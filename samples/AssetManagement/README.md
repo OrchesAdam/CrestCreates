@@ -5,27 +5,33 @@ Phase 10a business golden application for tenant-aware asset and equipment manag
 The sample composes the existing Capability, generated Minimal API, DataPermission,
 Workflow, HumanTask, durable outbox, Accountability, MCP, Agent Tools, and source-generated
 JSON contracts. Business data uses a durable SQLite adapter with transactional concurrency
-checks; runtime workflow and outbox state use the existing runtime persistence composition.
+checks; runtime workflow, HumanTask and outbox state use the PostgreSQL production provider.
 
 Run the executable golden scenario with:
 
 ```bash
+export ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING='Host=127.0.0.1;Port=5432;Database=crest_asset_management;Username=crest;Password=crest'
 dotnet run --project src/CrestCreates.Sample.AssetManagement.Host -- --golden-scenario
 ```
 
-## Construction friction record
+The connection string must point to PostgreSQL; the host intentionally has no
+in-memory Runtime persistence fallback. CI supplies the PostgreSQL service and
+the NativeAOT fixture starts a temporary PostgreSQL container when this variable
+is absent.
 
-| Requirement | Application evidence | Classification |
+## Construction friction record (#85)
+
+| Frozen field | Evidence in this application | Classification |
 | --- | --- | --- |
-| Asset aggregate and lifecycle | `src/CrestCreates.Sample.AssetManagement.Domain/Entities/Asset.cs` | Application/domain-owned invariant |
-| Tenant and organization visibility | `AssetApplicationService` plus `IDataPermissionFilter` | Existing platform composition |
-| Durable business persistence | `SqliteAssetStore` with transactional updates and concurrency stamps | Application adapter; no framework gap |
-| Capability and generated HTTP mainline | `AssetCapabilityModule`, `AssetEndpoints`, generated registries | Compile-time generated/runtime registry |
-| Human approval | `AssetMaintenanceWorkflowService` and `AssetMaintenanceDecisionConsumer` | Existing Workflow + HumanTask + durable outbox |
-| Accountability | `AuditedMo` and host accountability middleware | Existing platform composition |
-| MCP/Agent reuse | `AssetMcpTools` and `AssetAgentTools` target the Get capability | Same capability mainline |
-| NativeAOT JSON | Contract and host `JsonSerializerContext` types | Source-generated serialization |
-
-No framework modification was required. The only sample-owned workaround is the explicit
-SQLite application adapter and explicit descriptor registration required to keep the sample
-production composition durable and reflection-free.
+| Application files/code | `src/CrestCreates.Sample.AssetManagement.{Contracts,Domain,Application,Persistence,Host}` | Application code |
+| Descriptors | `Host/AssetDescriptorCatalog.cs` owns schema, capability, workflow, HumanTask and form descriptors | Application descriptor declaration |
+| Capabilities/handlers | `Application/Handlers/AssetCapabilityModule.cs` and `AssetHandlers.cs` | Generated-runtime capability path |
+| Manual registration | `Host/Program.cs` registers registries, generated endpoint projection, PostgreSQL Runtime provider, identity and permission grants | Framework composition glue |
+| Projection-specific code | `Host/Projections/AssetCompatibilityProjection.cs`, `AgentTools/AssetAgentTools.cs` and `McpTools/AssetMcpTools.cs` | Boundary adapter |
+| Permission/DataPermission wiring | `AddCrestAuthorization`, explicit `IPermissionGrantRepository` + `IPermissionGrantManager` seed, and fail-closed `ApplyAssetDataPermissionAsync` guard | Framework authority plus application invariant |
+| Persistence-specific code | `Persistence/SqliteAssetStore.cs` for business data; `CrestCreates.Runtime.Persistence.PostgreSql` for Workflow/HumanTask/Outbox | Durable provider adapter |
+| Serialization-specific code | `Contracts/Json/AssetJsonContext.cs`, `Host/Json/AssetHostJsonContext.cs`, combined resolver and source-generated HTTP/MCP/Agent payloads | Source-generated contract glue |
+| Framework glue | `Host/Program.cs`, endpoint mapping, runtime delivery, HumanTask completion obligation, workflow starter and explicit AOT consumer factory | Required composition |
+| Workarounds | Explicit NativeAOT consumer factory; business-store failure compensates suspended Runtime records; E2E uses a CI PostgreSQL service | AOT / cross-authority boundary |
+| Framework modification? | Shared outbox integrity canonicalization normalizes timestamps to provider-safe microsecond precision, and Agent completion confirmation compares structured JSON semantically so PostgreSQL durable round-trips remain verifiable | Small framework hardening required by the production provider path |
+| Classification | Business sample with durable production Runtime composition; sample-owned permission grant storage is an explicit testable adapter | Phase 10a golden evidence |
