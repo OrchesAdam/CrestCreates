@@ -14,9 +14,11 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Localization/Resources/DescriptorReviewMessages.en.json"
-                      LogicalName="CrestCreates.Agent.ControlPlane.Localization.Resources.DescriptorReviewMessages.en.json" />
+                      LogicalName="CrestCreates.Agent.ControlPlane.Localization.Resources.DescriptorReviewMessages.en.json"
+                      WithCulture="false" />
     <EmbeddedResource Include="Localization/Resources/DescriptorReviewMessages.zh-CN.json"
-                      LogicalName="CrestCreates.Agent.ControlPlane.Localization.Resources.DescriptorReviewMessages.zh-CN.json" />
+                      LogicalName="CrestCreates.Agent.ControlPlane.Localization.Resources.DescriptorReviewMessages.zh-CN.json"
+                      WithCulture="false" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Agent.ControlPlane.Abstractions\CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
