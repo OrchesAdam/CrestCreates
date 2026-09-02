@@ -140,13 +140,25 @@ public sealed class PostgreSqlOrganizationHierarchyCacheTests : IAsyncLifetime
     public async Task MultiInstance_NullTenant_Should_BypassCache()
     {
         var storeA = _providerA.GetRequiredService<IOrganizationStore>();
-        var hierarchyA = _providerA.GetRequiredService<IOrganizationHierarchyService>();
 
-        await storeA.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
         await storeA.SaveOrganizationUnitAsync(Unit("global-root", null));
+        await storeA.SaveOrganizationUnitAsync(Unit("global-child-v1", null, "global-root"));
 
-        // Null tenant should bypass cache
-        var ancestors = await hierarchyA.GetAncestorsAsync("root", null);
-        ancestors.Should().BeEmpty();
+        using (var firstScope = _providerA.CreateScope())
+        {
+            var hierarchyA = firstScope.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+            var first = await hierarchyA.GetDescendantsAsync("global-root", null);
+            first.Select(value => value.Id).Should().Equal("global-child-v1");
+        }
+
+        await storeA.SaveOrganizationUnitAsync(Unit("global-child-v2", null, "global-root"));
+
+        using (var secondScope = _providerA.CreateScope())
+        {
+            var hierarchyA = secondScope.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+            var second = await hierarchyA.GetDescendantsAsync("global-root", null);
+            second.Select(value => value.Id).Should().Equal("global-child-v1", "global-child-v2",
+                "null-tenant hierarchy reads must reload unfiltered PostgreSQL authority instead of retaining a snapshot");
+        }
     }
 }
