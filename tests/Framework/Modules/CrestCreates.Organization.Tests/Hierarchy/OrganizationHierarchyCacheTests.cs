@@ -8,7 +8,7 @@ public sealed class OrganizationHierarchyCacheTests
 {
     private static InMemoryOrganizationStore NewStore() => new();
 
-    private static OrganizationUnit Unit(string id, string tenantId, string? parentId = null)
+    private static OrganizationUnit Unit(string id, string? tenantId, string? parentId = null)
         => new() { Id = id, TenantId = tenantId, Name = id, ParentId = parentId };
 
     private static UserOrganizationMembership Membership(string id, string userId, string tenantId, DateTimeOffset? createdAt = null)
@@ -77,19 +77,33 @@ public sealed class OrganizationHierarchyCacheTests
     {
         var store = NewStore();
         var driver = new FaultInjectingOrganizationStore(store);
-        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 99);
 
-        await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
+        await store.SaveOrganizationUnitAsync(Unit("global-root", null));
+        await store.SaveOrganizationUnitAsync(Unit("global-child-v1", null, "global-root"));
 
-        var owner = new OrganizationHierarchyCacheOwner();
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache();
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
         var service = new CachedOrganizationHierarchyService(driver, owner);
 
-        var units1 = await service.GetAncestorsAsync("root", null);
-        var genCount1 = driver.GenerationReadCount;
+        var first = await service.GetDescendantsAsync("global-root", null);
+        first.Select(value => value.Id).Should().Equal("global-child-v1");
+        var readsAfterFirst = driver.CollectionReadCount;
 
-        var units2 = await service.GetAncestorsAsync("root", null);
-        // Null tenant bypasses generation cache
-        driver.GenerationReadCount.Should().Be(genCount1);
+        await store.SaveOrganizationUnitAsync(Unit("global-child-v2", null, "global-root"));
+
+        var second = await service.GetDescendantsAsync("global-root", null);
+        second.Select(value => value.Id).Should().Equal("global-child-v1", "global-child-v2");
+
+        driver.GenerationReadCount.Should().Be(0,
+            "null-tenant unscoped hierarchy reads bypass authority-generation observation");
+        driver.CollectionReadCount.Should().Be(readsAfterFirst + 1,
+            "each null-tenant request must reload the current unfiltered authority collection");
+        snapshotCache.SetCount.Should().Be(0,
+            "null-tenant unscoped hierarchy reads must never publish a retained snapshot");
+        owner.SafetyScopeCount.Should().Be(0);
+        owner.ActiveLogicalFlightCount.Should().Be(0);
+        owner.ActivePhysicalLoadCount.Should().Be(0);
     }
 
     /// <summary>
