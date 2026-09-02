@@ -252,6 +252,16 @@ public sealed class PostgreSqlOrganizationGenerationTests : IAsyncLifetime
     }
 
     [Fact]
+    public void NonTransientNpgsqlClientFailure_Should_NotBeClassifiedAsAvailability()
+    {
+        var exception = new NpgsqlException("non-transient client failure");
+
+        PostgreSqlOrganizationStore.IsGenerationAvailabilityFailure(exception)
+            .Should().BeFalse(
+                "programming or unknown Npgsql client failures must propagate instead of enabling direct fallback");
+    }
+
+    [Fact]
     public async Task CommitUnknown_Should_NeverProduce_OneSided_Data_And_Generation()
     {
         ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG11, "Provider", "CommitUnknown", EvidenceVectorKey.Default, RequiredRunner.PostgreSql);
