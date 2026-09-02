@@ -36,6 +36,19 @@
     <Project Path="samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.E2E.Tests/CrestCreates.Sample.Procurement.E2E.Tests.csproj" />
     <Project Path="samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.Tests/CrestCreates.Sample.Procurement.Tests.csproj" />
   </Folder>
+  <Folder Name="/samples/AssetManagement/" />
+  <Folder Name="/samples/AssetManagement/src/">
+    <Project Path="samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Application/CrestCreates.Sample.AssetManagement.Application.csproj" />
+    <Project Path="samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Contracts/CrestCreates.Sample.AssetManagement.Contracts.csproj" />
+    <Project Path="samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Domain/CrestCreates.Sample.AssetManagement.Domain.csproj" />
+    <Project Path="samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Host/CrestCreates.Sample.AssetManagement.Host.csproj" />
+    <Project Path="samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Persistence/CrestCreates.Sample.AssetManagement.Persistence.csproj" />
+  </Folder>
+  <Folder Name="/samples/AssetManagement/tests/">
+    <Project Path="samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.AotFixture.Tests/CrestCreates.Sample.AssetManagement.AotFixture.Tests.csproj" />
+    <Project Path="samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/CrestCreates.Sample.AssetManagement.E2E.Tests.csproj" />
+    <Project Path="samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.Tests/CrestCreates.Sample.AssetManagement.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/Core/">
     <Project Path="src/Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />

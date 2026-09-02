@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <Import Project="../../../../src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props" />
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CrestCreates.Sample.AssetManagement.Contracts/CrestCreates.Sample.AssetManagement.Contracts.csproj" />
+    <ProjectReference Include="../CrestCreates.Sample.AssetManagement.Domain/CrestCreates.Sample.AssetManagement.Domain.csproj" />
+    <ProjectReference Include="../CrestCreates.Sample.AssetManagement.Application/CrestCreates.Sample.AssetManagement.Application.csproj" />
+    <ProjectReference Include="../CrestCreates.Sample.AssetManagement.Persistence/CrestCreates.Sample.AssetManagement.Persistence.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Web/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Modules/CrestCreates.Form/CrestCreates.Form.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence/CrestCreates.Runtime.Persistence.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory/CrestCreates.Runtime.Persistence.InMemory.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Runtime.Delivery/CrestCreates.Runtime.Delivery.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
+    <ProjectReference Include="../../../../src/Integrations/CrestCreates.Mcp/CrestCreates.Mcp.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+  </ItemGroup>
+</Project>

@@ -2781,6 +2781,31 @@ CHANGES (1×P0 PostgreSQL null ReasonCode / 1×P1 TOCTOU in CAS-loser recovery):
 composition suite with Accepted/Duplicate/Conflict assertions, dependency boundaries,
 and all NativeAOT publish-link-run fixtures with exact Capability causal matching.
 
+### Issue #85 — Phase 10a Asset Management Business Golden Application (2026-09-02)
+
+**Status**: Implementation completed on branch
+`codex/phase-10a-asset-management-golden-application-85`; local validation is complete,
+with GitHub CI/PR verification pending.
+
+- Added the first Phase 10 business golden application for tenant- and organization-scoped
+  Asset management: registration, deterministic query, assignment/return/transfer lifecycle,
+  maintenance records, and concurrency stamps.
+- Business data uses a durable SQLite adapter with composite `(TenantId, Id)` identity,
+  tenant-scoped uniqueness, foreign-key enforcement, and transactional lifecycle writes.
+- HTTP uses generated Minimal API capability endpoints; MCP and Agent read projections reuse
+  the same `asset-management.assets.get` capability. Maintenance approval uses the existing
+  Workflow → HumanTask → durable outbox → capability mainline.
+- Accountability is composed through the existing HTTP/method/capability/runtime sinks, and
+  contracts use source-generated JSON metadata with reflection disabled in the host.
+- Acceptance coverage includes durable round-trip, deterministic query, same-ID tenant
+  isolation, lifecycle rules, unauthorized mutation, organization visibility, MCP/Agent
+  reachability, accountability, workflow suspension/completion, and a real NativeAOT
+  publish-link-run fixture.
+- Self-review found and fixed NativeAOT DI activation for the outbox consumer by adding an
+  explicit host composition factory; no framework change was required.
+- Local evidence: business tests 4/4, E2E process 1/1, AOT metadata/query tests 2/2,
+  NativeAOT binary fixture 1/1, and the expanded golden scenario passed.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:

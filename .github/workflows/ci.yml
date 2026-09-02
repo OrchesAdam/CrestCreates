@@ -98,6 +98,12 @@ jobs:
           dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.E2E.Tests --no-build
           dotnet test samples/ProcurementApproval/tests/CrestCreates.Sample.Procurement.AotFixture.Tests --no-build
 
+      - name: Test — Asset Management Golden Sample
+        run: |
+          dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.Tests --no-build
+          dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests --no-build
+          dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.AotFixture.Tests --no-build
+
       # ── Metadata ──
       - name: Test — Metadata / Core
         run: |
