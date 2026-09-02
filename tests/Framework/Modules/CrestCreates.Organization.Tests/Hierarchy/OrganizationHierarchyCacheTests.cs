@@ -551,6 +551,35 @@ public sealed class OrganizationHierarchyCacheTests
     }
 
     [Fact]
+    public async Task SnapshotPublicationFailure_AfterPartialWrite_Should_RemainRequestLocalAndUncached()
+    {
+        var store = NewStore();
+        var driver = new FaultInjectingOrganizationStore(store);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 1);
+        await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
+        await store.SaveOrganizationUnitAsync(Unit("child", "tenant-a", "root"));
+
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache
+        {
+            ThrowOnSet = true,
+            WriteBeforeThrow = true
+        };
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
+        var service = new CachedOrganizationHierarchyService(driver, owner);
+
+        var first = await service.GetDescendantsAsync("root", "tenant-a");
+        first.Select(value => value.Id).Should().Equal("child");
+        snapshotCache.TryGet(new OrganizationHierarchyCacheKey("tenant-a", 1), out _)
+            .Should().BeFalse("publication failure must leave only a request-local candidate");
+
+        var second = await service.GetDescendantsAsync("root", "tenant-a");
+        second.Select(value => value.Id).Should().Equal("child");
+        driver.CollectionReadCount.Should().Be(2,
+            "a candidate from failed publication must not become a reusable cache entry");
+        snapshotCache.SetCount.Should().Be(2);
+    }
+
+    [Fact]
     public async Task SnapshotPublicationFailure_ThenQuarantine_Should_RejectRequestLocalCandidate()
     {
         var store = NewStore();
