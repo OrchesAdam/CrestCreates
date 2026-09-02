@@ -184,21 +184,22 @@ internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCa
             Volatile.Read(ref _disposed) == 0 &&
             IsOrdinarySnapshotFailure(exception))
         {
-            // A normal-scope candidate may still be returned request-locally,
-            // but only if the final gate remains admissible. Quarantine cannot
-            // be released without a successful publication.
+            // A cache implementation may have mutated before throwing. Treat
+            // publication failure as request-local/unpublished by removing the
+            // exact candidate on a best-effort basis before the final gate.
+            TryRemoveSnapshotCandidate(key, candidate);
         }
 
         lock (state.Gate)
         {
             if (Volatile.Read(ref _disposed) != 0)
             {
-                _snapshotCache.Remove(key, candidate);
+                TryRemoveSnapshotCandidate(key, candidate);
                 return false;
             }
             if (!IsCandidateAdmissible(state, candidate))
             {
-                _snapshotCache.Remove(key, candidate);
+                TryRemoveSnapshotCandidate(key, candidate);
                 return false;
             }
 
@@ -215,6 +216,22 @@ internal sealed class OrganizationHierarchyCacheOwner : IOrganizationHierarchyCa
             }
 
             return Volatile.Read(ref _disposed) == 0;
+        }
+    }
+
+    private void TryRemoveSnapshotCandidate(
+        OrganizationHierarchyCacheKey key,
+        OrganizationHierarchySnapshot candidate)
+    {
+        try
+        {
+            _snapshotCache.Remove(key, candidate);
+        }
+        catch (Exception exception) when (IsOrdinarySnapshotFailure(exception))
+        {
+            // Cleanup must never weaken the final freshness gate. If the cache
+            // itself cannot remove the exact candidate, later reads still pass
+            // through authority-generation validation and the safety owner.
         }
     }
 
