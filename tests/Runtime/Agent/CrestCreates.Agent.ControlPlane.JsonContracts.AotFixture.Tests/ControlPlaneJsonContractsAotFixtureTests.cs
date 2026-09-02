@@ -50,6 +50,7 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
             execution.ExitCode.Should().Be(0, execution.Output);
             execution.Output.Should().Contain("ReflectionFallback_IsDisabled:PASS");
             execution.Output.Should().Contain("SerializeDeserialize_RepresentativeToolRoots:PASS");
+            execution.Output.Should().Contain("CONTROL_PLANE_LOCALIZED_MESSAGE_NATIVEAOT_OK");
             execution.Output.Should().Contain("CONTROL_PLANE_JSON_CONTRACT_NATIVEAOT_OK");
         }
         finally
