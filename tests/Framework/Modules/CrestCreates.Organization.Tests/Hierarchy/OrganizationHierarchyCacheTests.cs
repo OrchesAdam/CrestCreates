@@ -894,6 +894,49 @@ public sealed class OrganizationHierarchyCacheTests
         snapshotCache.SetCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task InFlightPublication_Should_RemoveCandidate_WhenQuarantineWinsDuringSet()
+    {
+        var store = NewStore();
+        var driver = new FaultInjectingOrganizationStore(store);
+        driver.ForceGeneration(OrganizationScopeGenerationStatus.Available, 5);
+        await store.SaveOrganizationUnitAsync(Unit("root", "tenant-a"));
+
+        using var enteredPublication = new ManualResetEventSlim();
+        using var releasePublication = new ManualResetEventSlim();
+        var snapshotCache = new FaultInjectingOrganizationHierarchySnapshotCache
+        {
+            BeforeSet = () =>
+            {
+                enteredPublication.Set();
+                if (!releasePublication.Wait(TimeSpan.FromSeconds(2)))
+                    throw new TimeoutException("test did not release successful snapshot publication");
+            }
+        };
+        var owner = new OrganizationHierarchyCacheOwner(new OrganizationHierarchyCacheOptions(), snapshotCache);
+        var service = new CachedOrganizationHierarchyService(driver, owner);
+
+        var request = Task.Run(() => service.GetDescendantsAsync("root", "tenant-a"));
+        enteredPublication.Wait(TimeSpan.FromSeconds(2)).Should().BeTrue();
+
+        await owner.Invoking(value => value.AdmitScopeAsync(
+                "tenant-a",
+                OrganizationScopeGenerationRead.Available(3),
+                CancellationToken.None).AsTask())
+            .Should().ThrowAsync<OrganizationHierarchyFreshnessException>()
+            .Where(exception => exception.FailureKind == OrganizationHierarchyFreshnessFailureKind.GenerationRegression);
+
+        releasePublication.Set();
+
+        await FluentActions.Awaiting(async () => await request)
+            .Should().ThrowAsync<OrganizationHierarchyFreshnessException>();
+        snapshotCache.SetCount.Should().Be(1,
+            "the candidate passed the pre-publication gate before quarantine won");
+        snapshotCache.TryGet(new OrganizationHierarchyCacheKey("tenant-a", 5), out _)
+            .Should().BeFalse(
+                "the post-publication final gate must remove a candidate published before quarantine won");
+    }
+
     /// <summary>
     /// OHC20: snapshot eviction/capacity pressure while scope is quarantined →
     /// quarantine remains effective; direct fallback is never re-enabled.
