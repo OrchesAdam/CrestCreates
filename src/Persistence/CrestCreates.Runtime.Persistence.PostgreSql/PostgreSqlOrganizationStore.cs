@@ -592,11 +592,18 @@ internal sealed class PostgreSqlOrganizationStore : IOrganizationStore
             throw PostgreSqlControlPlaneReferenceDataStoreSupport.PersistedInvariant(
                 "organization_scope_generations.generation is not a valid Int64 value.");
         }
-        catch (NpgsqlException)
+        catch (NpgsqlException exception) when (IsGenerationAvailabilityFailure(exception))
         {
             return OrganizationScopeGenerationRead.Unavailable;
         }
+        catch (NpgsqlException)
+        {
+            throw;
+        }
     }
+
+    internal static bool IsGenerationAvailabilityFailure(NpgsqlException exception)
+        => exception is not PostgresException && exception.IsTransient;
 
     internal static bool IsGenerationSchemaContractViolation(PostgresException exception)
         => IsGenerationSchemaContractViolation(exception.SqlState);
