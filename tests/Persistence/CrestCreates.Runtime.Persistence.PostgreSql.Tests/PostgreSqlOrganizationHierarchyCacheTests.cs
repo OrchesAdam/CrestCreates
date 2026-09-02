@@ -157,7 +157,8 @@ public sealed class PostgreSqlOrganizationHierarchyCacheTests : IAsyncLifetime
         {
             var hierarchyA = secondScope.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
             var second = await hierarchyA.GetDescendantsAsync("global-root", null);
-            second.Select(value => value.Id).Should().Equal("global-child-v1", "global-child-v2",
+            second.Select(value => value.Id).Should().Equal(
+                new[] { "global-child-v1", "global-child-v2" },
                 "null-tenant hierarchy reads must reload unfiltered PostgreSQL authority instead of retaining a snapshot");
         }
     }
