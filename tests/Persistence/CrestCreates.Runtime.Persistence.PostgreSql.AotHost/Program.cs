@@ -961,9 +961,9 @@ static async Task RunVersionedOrganizationCacheAotScenarioAsync(
 static ServiceProvider BuildVersionedCacheProvider(PostgreSqlRuntimePersistenceOptions options)
 {
     var services = new ServiceCollection();
+    services.AddOrganizationKernel();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
     services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
-    services.AddOrganizationKernel();
     return services.BuildServiceProvider();
 }
 
