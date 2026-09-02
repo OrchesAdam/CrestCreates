@@ -4,7 +4,10 @@ using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+using CrestCreates.Agent.ControlPlane;
+using CrestCreates.Localization.Services;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using Microsoft.Extensions.Logging.Abstractions;
 
 public static class ControlPlaneJsonContractFixtureRunner
 {
@@ -65,6 +68,25 @@ public static class ControlPlaneJsonContractFixtureRunner
                 "DescriptorActivationReviewDecision");
 
             allPassed &= RoundTrip<CanonicalHash>(FixtureHash, "CanonicalHash");
+
+            var localizedCatalog = new DefaultDescriptorReviewMessageTemplateCatalog(
+                new KeyReturningLocalizationService("zh-CN"),
+                NullLogger<DefaultDescriptorReviewMessageTemplateCatalog>.Instance);
+            var localizedMessage = localizedCatalog.Format(
+                DescriptorActivationMessageTemplateIds.ActivationBlocked,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["BlockingReasons"] = "策略检查"
+                });
+            var localizedMessagePassed = string.Equals(
+                localizedMessage,
+                "草稿不符合激活条件：策略检查。",
+                StringComparison.Ordinal);
+            allPassed &= localizedMessagePassed;
+            if (localizedMessagePassed)
+                Console.WriteLine("CONTROL_PLANE_LOCALIZED_MESSAGE_NATIVEAOT_OK");
+            else
+                Console.Error.WriteLine($"FAIL: localized descriptor-governance message was '{localizedMessage}'.");
 
             bool unregisteredTypeRejected = false;
             try
@@ -130,5 +152,20 @@ public static class ControlPlaneJsonContractFixtureRunner
             Console.Error.WriteLine($"FAIL [{label}]: {ex.Message}");
             return false;
         }
+    }
+
+    private sealed class KeyReturningLocalizationService(string currentCulture) : ILocalizationService
+    {
+        public string CurrentCulture { get; } = currentCulture;
+        public string GetString(string key) => key;
+        public string GetString(string key, params object[] arguments) => key;
+        public string GetString(string key, string cultureName) => key;
+        public string GetString(string key, string cultureName, params object[] arguments) => key;
+        public Task<string?> GetStringAsync(string key) => Task.FromResult<string?>(key);
+        public Task<string?> GetStringAsync(string key, params object[] arguments) => Task.FromResult<string?>(key);
+        public Task<string?> GetStringAsync(string key, string cultureName) => Task.FromResult<string?>(key);
+        public Task<string?> GetStringAsync(string key, string cultureName, params object[] arguments) => Task.FromResult<string?>(key);
+        public IDisposable ChangeCulture(string cultureName) => throw new NotSupportedException();
+        public Task<IDisposable> ChangeCultureAsync(string cultureName) => throw new NotSupportedException();
     }
 }
