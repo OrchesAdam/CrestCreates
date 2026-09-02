@@ -945,14 +945,48 @@ static async Task RunVersionedOrganizationCacheAotScenarioAsync(
             throw new InvalidOperationException("AOT versioned cache: provider B V2 reload failed.");
     }
 
-    // Null tenant bypass executes without retained snapshot
+    // Null tenant bypass executes against current unfiltered authority
+    // without retaining a snapshot between requests.
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-global-root",
+        TenantId = null,
+        Name = "VC Global Root",
+        CreatedAt = DateTimeOffset.UnixEpoch
+    });
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-global-child-v1",
+        TenantId = null,
+        Name = "VC Global Child V1",
+        ParentId = "vc-global-root",
+        CreatedAt = DateTimeOffset.UnixEpoch
+    });
+
     using (var scopeA = providerA.CreateScope())
     {
         var hierarchyA = scopeA.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
-        var nullResult = await hierarchyA.GetDescendantsAsync("vc-root", null);
-        // Null tenant should not throw and should return results from unfiltered query
-        if (nullResult is null)
-            throw new InvalidOperationException("AOT versioned cache: null tenant bypass returned null.");
+        var firstNull = await hierarchyA.GetDescendantsAsync("vc-global-root", null);
+        if (firstNull.Count != 1 || firstNull[0].Id != "vc-global-child-v1")
+            throw new InvalidOperationException("AOT versioned cache: null tenant first authority read failed.");
+    }
+
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-global-child-v2",
+        TenantId = null,
+        Name = "VC Global Child V2",
+        ParentId = "vc-global-root",
+        CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(1)
+    });
+
+    using (var scopeA = providerA.CreateScope())
+    {
+        var hierarchyA = scopeA.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+        var secondNull = await hierarchyA.GetDescendantsAsync("vc-global-root", null);
+        var nullIds = secondNull.Select(value => value.Id).ToList();
+        if (!nullIds.Contains("vc-global-child-v1") || !nullIds.Contains("vc-global-child-v2"))
+            throw new InvalidOperationException("AOT versioned cache: null tenant bypass retained a stale snapshot.");
     }
 
     Console.WriteLine("CRESTCREATES_VERSIONED_ORGANIZATION_CACHE_OK");
