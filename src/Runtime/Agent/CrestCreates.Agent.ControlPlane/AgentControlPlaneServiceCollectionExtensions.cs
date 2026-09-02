@@ -6,8 +6,11 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using CrestCreates.Runtime.Delivery.Abstractions.Registration;
+using CrestCreates.Localization.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CrestCreates.Agent.ControlPlane;
 
@@ -30,7 +33,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
-        services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
+        AddDescriptorReviewMessageTemplateCatalog(services);
         services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
@@ -59,7 +62,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
-        services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
+        AddDescriptorReviewMessageTemplateCatalog(services);
         services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
@@ -96,7 +99,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
         services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
-        services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog, DefaultDescriptorReviewMessageTemplateCatalog>();
+        AddDescriptorReviewMessageTemplateCatalog(services);
         services.TryAddSingleton<ActivationBindingHashValidator>();
         services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
         services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
@@ -142,6 +145,15 @@ public static class AgentControlPlaneServiceCollectionExtensions
         services.AddSingleton(new OutboxRequiredConsumerValidationRegistration(
             DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue,
             sp => _ = sp.GetRequiredService<DescriptorActivationReviewHumanTaskEventHandler>()));
+    }
+
+    private static void AddDescriptorReviewMessageTemplateCatalog(IServiceCollection services)
+    {
+        services.TryAddSingleton<IDescriptorReviewMessageTemplateCatalog>(serviceProvider =>
+            new DefaultDescriptorReviewMessageTemplateCatalog(
+                serviceProvider.GetService<ILocalizationService>(),
+                serviceProvider.GetService<ILogger<DefaultDescriptorReviewMessageTemplateCatalog>>()
+                    ?? NullLogger<DefaultDescriptorReviewMessageTemplateCatalog>.Instance));
     }
 
     /// <summary>

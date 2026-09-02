@@ -1,12 +1,35 @@
 using System.Text;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using CrestCreates.Localization.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CrestCreates.Agent.ControlPlane;
 
 public sealed class DefaultDescriptorReviewMessageTemplateCatalog
     : IDescriptorReviewMessageTemplateCatalog
 {
+    private const string DefaultCulture = "en";
+
+    private readonly ILocalizationService? _localizationService;
+    private readonly ILogger<DefaultDescriptorReviewMessageTemplateCatalog> _logger;
+    private readonly DescriptorReviewMessageResourceCatalog _resourceCatalog;
+
+    public DefaultDescriptorReviewMessageTemplateCatalog()
+        : this(null, NullLogger<DefaultDescriptorReviewMessageTemplateCatalog>.Instance)
+    {
+    }
+
+    public DefaultDescriptorReviewMessageTemplateCatalog(
+        ILocalizationService? localizationService,
+        ILogger<DefaultDescriptorReviewMessageTemplateCatalog> logger)
+    {
+        _localizationService = localizationService;
+        _logger = logger;
+        _resourceCatalog = new DescriptorReviewMessageResourceCatalog(logger);
+    }
+
     public string TemplateVersion => "7d.v1";
 
     private static readonly Dictionary<string, string> Templates = new(StringComparer.Ordinal)
@@ -50,8 +73,18 @@ public sealed class DefaultDescriptorReviewMessageTemplateCatalog
     /// </summary>
     public string Format(string messageTemplateId, IReadOnlyDictionary<string, string> parameters)
     {
-        if (!Templates.TryGetValue(messageTemplateId, out var template))
+        if (!Templates.TryGetValue(messageTemplateId, out var stableEnglishTemplate))
             return $"[Unknown template: {messageTemplateId}]";
+
+        var cultureName = ResolveCultureName();
+        var template = TryResolveLocalizationServiceTemplate(messageTemplateId, cultureName);
+        if (template is null
+            && _resourceCatalog.TryGetTemplate(cultureName, messageTemplateId, out var resourceTemplate)
+            && !IsLocalizationMiss(resourceTemplate, messageTemplateId))
+        {
+            template = resourceTemplate;
+        }
+        template ??= stableEnglishTemplate;
 
         // Hand-written replacer for {Word} placeholders — avoids Regex for AOT safety
         var result = new StringBuilder(template.Length);
@@ -74,4 +107,47 @@ public sealed class DefaultDescriptorReviewMessageTemplateCatalog
         }
         return result.ToString();
     }
+
+    private string ResolveCultureName()
+    {
+        if (_localizationService is null)
+            return DefaultCulture;
+
+        try
+        {
+            var cultureName = _localizationService.CurrentCulture;
+            return string.IsNullOrWhiteSpace(cultureName) ? DefaultCulture : cultureName;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Descriptor governance localization culture resolution failed; using the stable fallback culture.");
+            return DefaultCulture;
+        }
+    }
+
+    private string? TryResolveLocalizationServiceTemplate(string messageTemplateId, string cultureName)
+    {
+        if (_localizationService is null)
+            return null;
+
+        try
+        {
+            var value = _localizationService.GetString(messageTemplateId, cultureName);
+            return IsLocalizationMiss(value, messageTemplateId) ? null : value;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Descriptor governance localization lookup failed for template {MessageTemplateId}; using deterministic fallback.",
+                messageTemplateId);
+            return null;
+        }
+    }
+
+    private static bool IsLocalizationMiss(string? value, string messageTemplateId)
+        => string.IsNullOrWhiteSpace(value)
+            || string.Equals(value, messageTemplateId, StringComparison.Ordinal);
 }

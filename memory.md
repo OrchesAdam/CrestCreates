@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-09-01 (Issue #26 Phase 9d R1 review fixes are on PR #81's branch; local builds pass, while PostgreSQL/Testcontainers and NativeAOT execution remain CI-dependent because Docker is unavailable on this host.)
+Last Updated: 2026-09-02 (Issue #27 Phase 9e implementation connects the stable descriptor-governance MessageTemplateId catalog to optional Localization plus exact en/zh-CN embedded resources; executable closure is verified by PR #83 CI run 33589082807.)
 
 ## Purpose
 
@@ -9,6 +9,36 @@ This file records the current platform status for CrestCreates so future threads
 ---
 
 ## Active Design Work
+
+### Issue #27 — Phase 9e Localized Descriptor Governance Messages
+
+Status: Design Spec frozen; implementation completed on branch
+`feat/issue-27-localized-message-templates`; executable verification is
+NativeAOT-verified by PR #83 CI run 33589082807.
+
+The existing `DefaultDescriptorReviewMessageTemplateCatalog` remains the only
+descriptor-review projection mainline. Its 31 stable `MessageTemplateId` values
+now resolve through optional `ILocalizationService` contributors first, then
+explicit embedded `en` / `zh-CN` resources with string-based exact/parent
+culture fallback, and finally the byte-for-byte stable English templates.
+Provider misses and failures cannot fail report building. The hand-written
+ordinal named-placeholder formatter and `TemplateVersion = 7d.v1` are unchanged.
+
+All three `AddAgentControlPlane(...)` overloads share one optional-localization
+catalog factory, while hosts without Localization retain English behavior. The
+resource exact-set/placeholder-schema tests cover all 31 ids; report composition
+tests assert that culture changes only projected `Message` values; the existing
+Control Plane NativeAOT fixture now loads a `zh-CN` embedded template under
+invariant globalization and emits
+`CONTROL_PLANE_LOCALIZED_MESSAGE_NATIVEAOT_OK` on success. No DTO/JSON contract,
+ReasonCode, ErrorCode, MessageTemplateId, parameter schema, hash, decision,
+governance, activation, renderer, or builder path was changed.
+
+Closure evidence: the PR CI run completed the Control Plane, Localization,
+exception localization, dependency-boundary, Control Plane NativeAOT
+publish-link-run, and full-solution build gates successfully. The local focused
+Control Plane suite (539), Localization suite (12), exception localization
+suite (9), and Control Plane NativeAOT fixture (1) also passed before push.
 
 ### Issue #26 — Phase 9d Versioned Cache Consistency
 

@@ -193,4 +193,39 @@ public class LocalizationServiceTests
         // Assert
         result.Should().Be("ResourceValue");
     }
+
+    [Fact]
+    public async Task MultipleLocalizationContributors_Should_Not_Change_DeterministicResolutionOrder()
+    {
+        var lowerPriorityContributor = new Mock<ILocalizationResourceContributor>();
+        lowerPriorityContributor.Setup(c => c.ResourceName).Returns("LowerPriority");
+        lowerPriorityContributor.Setup(c => c.GetStringAsync("en", "SharedKey"))
+            .ReturnsAsync("lower-priority-value");
+        var higherPriorityContributor = new Mock<ILocalizationResourceContributor>();
+        higherPriorityContributor.Setup(c => c.ResourceName).Returns("HigherPriority");
+        higherPriorityContributor.Setup(c => c.GetStringAsync("en", "SharedKey"))
+            .ReturnsAsync("higher-priority-value");
+
+        _service.RegisterResource(new LocalizationResource
+        {
+            Name = "HigherPriority",
+            Contributor = higherPriorityContributor.Object,
+            Priority = 20
+        });
+        _service.RegisterResource(new LocalizationResource
+        {
+            Name = "LowerPriority",
+            Contributor = lowerPriorityContributor.Object,
+            Priority = 10
+        });
+
+        var first = await _service.GetStringAsync("SharedKey", "en");
+        var second = await _service.GetStringAsync("SharedKey", "en");
+
+        first.Should().Be("lower-priority-value");
+        second.Should().Be(first);
+        higherPriorityContributor.Verify(
+            contributor => contributor.GetStringAsync("en", "SharedKey"),
+            Times.Never);
+    }
 }

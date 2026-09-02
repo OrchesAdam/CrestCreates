@@ -2610,8 +2610,12 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 Kind = FixProposalActionKind.SetValue,
                 TargetPath = "Rationale",
-                CurrentValue = JsonSerializer.SerializeToElement(""),
-                ProposedValue = JsonSerializer.SerializeToElement("(provide rationale)"),
+                CurrentValue = JsonSerializer.SerializeToElement(
+                    "",
+                    AgentControlPlaneToolJsonSerializerContext.Default.String),
+                ProposedValue = JsonSerializer.SerializeToElement(
+                    "(provide rationale)",
+                    AgentControlPlaneToolJsonSerializerContext.Default.String),
                 IsExecutable = true,
                 SafetyLevel = FixProposalActionSafetyLevel.Safe,
                 Description = "Provide a rationale for the draft."
@@ -2623,8 +2627,12 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             {
                 Kind = FixProposalActionKind.SetValue,
                 TargetPath = "Intent",
-                CurrentValue = JsonSerializer.SerializeToElement(""),
-                ProposedValue = JsonSerializer.SerializeToElement("(provide intent)"),
+                CurrentValue = JsonSerializer.SerializeToElement(
+                    "",
+                    AgentControlPlaneToolJsonSerializerContext.Default.String),
+                ProposedValue = JsonSerializer.SerializeToElement(
+                    "(provide intent)",
+                    AgentControlPlaneToolJsonSerializerContext.Default.String),
                 IsExecutable = true,
                 SafetyLevel = FixProposalActionSafetyLevel.Safe,
                 Description = "Provide an intent for the draft."
