@@ -487,6 +487,102 @@ public sealed class OrganizationStoreContractTests
         ruleEx.Should().BeNull();
     }
 
+    [Fact]
+    public async Task OrganizationScopeGeneration_Should_StartAtZero()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG01, "Authority", "InitialGeneration", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunInitialGenerationIsZeroAsync(driver.Store, "ovg01");
+    }
+
+    [Fact]
+    public async Task OrganizationWrite_Should_Atomically_AdvanceGeneration()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG02, "Authority", "OrganizationUnit", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunOrganizationUnitSaveAdvancesGenerationAsync(driver.Store, "ovg02");
+    }
+
+    [Fact]
+    public async Task OrganizationSaveSurface_Should_AdvanceSharedScopeGeneration()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG03, "Authority", "Position", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG04, "Authority", "Membership", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG05, "Authority", "RoleAssignment", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunPositionSaveAdvancesSameScopeGenerationAsync(driver.Store, "ovg03");
+        await driver.ResetAsync();
+        await OrganizationStoreContractCases.RunMembershipSaveAdvancesSameScopeGenerationAsync(driver.Store, "ovg04");
+        await driver.ResetAsync();
+        await OrganizationStoreContractCases.RunRoleAssignmentSaveAdvancesSameScopeGenerationAsync(driver.Store, "ovg05");
+    }
+
+    [Fact]
+    public async Task KnownPreCommitFailure_Should_AdvanceNeitherDataNorGeneration()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG06, "Authority", "KnownRollback", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var store = new InMemoryOrganizationStore();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await store.Invoking(value => value.SaveOrganizationUnitAsync(
+                Unit("ovg06-unit", "ovg06"),
+                cancellation.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+
+        (await store.GetOrganizationUnitByIdAsync("ovg06-unit", "ovg06")).Should().BeNull();
+        (await store.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg06")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(0));
+    }
+
+    [Fact]
+    public async Task TenantGeneration_Should_Not_Affect_OtherTenants()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG07, "Authority", "TenantIsolation", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunTenantGenerationDoesNotAffectOtherTenantsAsync(driver.Store, "ovg07");
+    }
+
+    [Fact]
+    public async Task Generation_Should_Not_Change_DomainBlindWriteSemantics()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG08, "Authority", "RepeatedBlindSave", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunRepeatedBlindSaveAdvancesAgainAsync(driver.Store, "ovg08");
+    }
+
+    [Fact]
+    public async Task GenerationOverflow_Should_FailWithoutEntityMutationOrWrap()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG10, "Provider", "GenerationOverflow", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var store = new InMemoryOrganizationStore();
+        store.SetScopeGenerationForTesting(OrganizationScopeIdentity.Tenant("ovg10"), long.MaxValue);
+
+        await store.Invoking(value => value.SaveOrganizationUnitAsync(Unit("ovg10-unit", "ovg10")))
+            .Should().ThrowAsync<OverflowException>();
+
+        (await store.GetOrganizationUnitByIdAsync("ovg10-unit", "ovg10")).Should().BeNull();
+        (await store.ReadScopeGenerationAsync(OrganizationScopeIdentity.Tenant("ovg10")))
+            .Should().Be(OrganizationScopeGenerationRead.Available(long.MaxValue));
+    }
+
+    [Fact]
+    public async Task OrganizationScopeIdentity_Should_Reject_DefaultUnknownAndInvalidTenant()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG12, "Contract", "ScopeIdentity", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        await OrganizationStoreContractCases.RunInvalidScopeShouldBeRejectedBeforeIo();
+        Assert.Throws<ArgumentException>(() => OrganizationScopeIdentity.Tenant(""));
+        Assert.Throws<ArgumentException>(() => OrganizationScopeIdentity.Tenant("   "));
+    }
+
+    [Fact]
+    public async Task GlobalAndTenantGeneration_Should_BeIndependent()
+    {
+        ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.OVG12, "Contract", "ScopeIdentity", EvidenceVectorKey.Default, RequiredRunner.InMemory);
+        var driver = NewDriver();
+        await OrganizationStoreContractCases.RunGlobalAndTenantGenerationAreIndependentAsync(driver.Store, "ovg12");
+    }
+
     private static InMemoryOrganizationStoreContractDriver NewDriver() => new();
 
     private static OrganizationUnit Unit(string id, string? tenantId, int sortOrder = 0, string? parentId = null)

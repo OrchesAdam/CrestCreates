@@ -74,6 +74,32 @@ internal static class OrganizationStoreSemantics
             throw new ArgumentException("Non-null tenantId must not be empty or whitespace.", nameof(tenantId));
     }
 
+    public static void ValidateScopeIdentity(OrganizationScopeIdentity scope)
+    {
+        if (scope.Kind == OrganizationScopeKind.Unknown)
+            throw new ArgumentException("Scope identity must be Global or Tenant; Unknown is not a valid generation scope.", nameof(scope));
+        if (scope.Kind == OrganizationScopeKind.Global && scope.TenantId is not null)
+            throw new ArgumentException("Global scope must have a null TenantId.", nameof(scope));
+        if (scope.Kind == OrganizationScopeKind.Tenant && string.IsNullOrWhiteSpace(scope.TenantId))
+            throw new ArgumentException("Tenant scope must have a non-blank TenantId.", nameof(scope));
+    }
+
+    public static string NormalizeScopeKind(OrganizationScopeIdentity scope)
+        => scope.Kind switch
+        {
+            OrganizationScopeKind.Global => "global",
+            OrganizationScopeKind.Tenant => "tenant",
+            _ => throw new ArgumentException($"Unknown scope kind: {scope.Kind}", nameof(scope))
+        };
+
+    public static string NormalizeTenantId(OrganizationScopeIdentity scope)
+        => scope.Kind switch
+        {
+            OrganizationScopeKind.Global => string.Empty,
+            OrganizationScopeKind.Tenant => scope.TenantId!,
+            _ => throw new ArgumentException($"Unknown scope kind: {scope.Kind}", nameof(scope))
+        };
+
     public static IComparer<OrganizationUnit> OrganizationUnitComparer { get; } = new UnitOrderComparer();
     public static IComparer<Position> PositionComparer { get; } = new PositionOrderComparer();
     public static IComparer<UserOrganizationMembership> MembershipByUserComparer { get; } = new MembershipOrderComparer();

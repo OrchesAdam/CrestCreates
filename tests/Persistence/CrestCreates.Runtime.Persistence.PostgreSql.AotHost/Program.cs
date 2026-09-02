@@ -59,6 +59,7 @@ if (args.Length == 3)
 
 await new PostgreSqlRuntimeMigrationRunner(options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
 await RunControlPlaneReferenceDataMainlineAsync(options);
+await RunVersionedOrganizationCacheAotScenarioAsync(options);
 
 var workflowDescriptor = new WorkflowDescriptor
 {
@@ -668,6 +669,7 @@ static ServiceProvider BuildProvider(
     services.AddSingleton<IRuntimeStateContractContributor, AotRuntimeStateContractContributor>();
     services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
     services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+    services.AddOrganizationKernel();
     var provider = services.BuildServiceProvider();
     provider.GetRequiredService<IWorkflowRegistry>().Build([new SingleDescriptorProvider<WorkflowDescriptor>(workflow)]);
     provider.GetRequiredService<IHumanTaskRegistry>().Build([new SingleDescriptorProvider<HumanTaskDescriptor>(humanTask)]);
@@ -803,7 +805,8 @@ static async Task RunControlPlaneReferenceDataMainlineAsync(PostgreSqlRuntimePer
         || !(await organizations.GetRoleAssignmentsByUserAsync(role.UserId, role.TenantId)).Any())
         throw new InvalidOperationException("Reference Data Organization entity AOT round-trip failed.");
 
-    var hierarchy = new DefaultOrganizationHierarchyService(organizations);
+    // Use the cached hierarchy service from DI (production composition)
+    var hierarchy = services.GetRequiredService<IOrganizationHierarchyService>();
     if (!(await hierarchy.GetDescendantsAsync(unit.Id, unit.TenantId)).Any(value => value.Id == child.Id))
         throw new InvalidOperationException("Reference Data Organization hierarchy AOT projection failed.");
     var identity = await new DefaultOrganizationIdentityService(organizations)
@@ -852,6 +855,150 @@ static async Task RunControlPlaneReferenceDataMainlineAsync(PostgreSqlRuntimePer
         throw new InvalidOperationException("Reference Data provider reconstruction failed.");
 
     Console.WriteLine("CRESTCREATES_DURABLE_CONTROL_PLANE_REFERENCE_DATA_OK");
+}
+
+/// <summary>
+/// Phase 9d AOT versioned-cache scenario: two independent local hierarchy
+/// cache owners over the same PostgreSQL Store. Save V1/G1, warm both
+/// providers, save V2/G2 through provider A only (no event, no shared
+/// local cache), prove both reject V1 and return detached V2.
+/// </summary>
+static async Task RunVersionedOrganizationCacheAotScenarioAsync(
+    PostgreSqlRuntimePersistenceOptions options)
+{
+    // Build a shared store provider (PostgreSQL) without cache owner
+    var storeProvider = new ServiceCollection();
+    storeProvider.AddCrestCreatesPostgreSqlRuntimePersistence(options);
+    storeProvider.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+    var storeServices = storeProvider.BuildServiceProvider();
+    var sharedStore = storeServices.GetRequiredService<IOrganizationStore>();
+
+    // Provider A: independent cache owner A over the shared store
+    var providerA = BuildVersionedCacheProvider(options);
+    // Provider B: independent cache owner B over the shared store
+    var providerB = BuildVersionedCacheProvider(options);
+
+    const string tenantId = "aot-versioned-cache";
+
+    // Save V1 / G1
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-root",
+        TenantId = tenantId,
+        Name = "VC Root",
+        CreatedAt = DateTimeOffset.UnixEpoch
+    });
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-child-v1",
+        TenantId = tenantId,
+        Name = "VC Child V1",
+        ParentId = "vc-root",
+        CreatedAt = DateTimeOffset.UnixEpoch
+    });
+
+    // Warm V1 through both providers
+    using (var scopeA = providerA.CreateScope())
+    {
+        var hierarchyA = scopeA.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+        var descA = await hierarchyA.GetDescendantsAsync("vc-root", tenantId);
+        if (descA.Count != 1 || descA[0].Id != "vc-child-v1")
+            throw new InvalidOperationException("AOT versioned cache: provider A V1 warm failed.");
+    }
+    using (var scopeB = providerB.CreateScope())
+    {
+        var hierarchyB = scopeB.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+        var descB = await hierarchyB.GetDescendantsAsync("vc-root", tenantId);
+        if (descB.Count != 1 || descB[0].Id != "vc-child-v1")
+            throw new InvalidOperationException("AOT versioned cache: provider B V1 warm failed.");
+    }
+
+    // Save V2 / G2 through shared store only (no event, no shared cache)
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-child-v2",
+        TenantId = tenantId,
+        Name = "VC Child V2",
+        ParentId = "vc-root",
+        CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(1)
+    });
+
+    // Both providers should reject V1 and return detached V2
+    using (var scopeA = providerA.CreateScope())
+    {
+        var hierarchyA = scopeA.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+        var descA = await hierarchyA.GetDescendantsAsync("vc-root", tenantId);
+        var idsA = descA.Select(d => d.Id).ToList();
+        if (!idsA.Contains("vc-child-v1") || !idsA.Contains("vc-child-v2"))
+            throw new InvalidOperationException("AOT versioned cache: provider A V2 reload failed.");
+        // Detached results
+        var descA2 = await hierarchyA.GetDescendantsAsync("vc-root", tenantId);
+        if (ReferenceEquals(descA[0], descA2[0]))
+            throw new InvalidOperationException("AOT versioned cache: provider A results not detached.");
+    }
+    using (var scopeB = providerB.CreateScope())
+    {
+        var hierarchyB = scopeB.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+        var descB = await hierarchyB.GetDescendantsAsync("vc-root", tenantId);
+        var idsB = descB.Select(d => d.Id).ToList();
+        if (!idsB.Contains("vc-child-v1") || !idsB.Contains("vc-child-v2"))
+            throw new InvalidOperationException("AOT versioned cache: provider B V2 reload failed.");
+    }
+
+    // Null tenant bypass executes against current unfiltered authority
+    // without retaining a snapshot between requests.
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-global-root",
+        TenantId = null,
+        Name = "VC Global Root",
+        CreatedAt = DateTimeOffset.UnixEpoch
+    });
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-global-child-v1",
+        TenantId = null,
+        Name = "VC Global Child V1",
+        ParentId = "vc-global-root",
+        CreatedAt = DateTimeOffset.UnixEpoch
+    });
+
+    using (var scopeA = providerA.CreateScope())
+    {
+        var hierarchyA = scopeA.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+        var firstNull = await hierarchyA.GetDescendantsAsync("vc-global-root", null);
+        if (firstNull.Count != 1 || firstNull[0].Id != "vc-global-child-v1")
+            throw new InvalidOperationException("AOT versioned cache: null tenant first authority read failed.");
+    }
+
+    await sharedStore.SaveOrganizationUnitAsync(new OrganizationUnit
+    {
+        Id = "vc-global-child-v2",
+        TenantId = null,
+        Name = "VC Global Child V2",
+        ParentId = "vc-global-root",
+        CreatedAt = DateTimeOffset.UnixEpoch.AddTicks(1)
+    });
+
+    using (var scopeA = providerA.CreateScope())
+    {
+        var hierarchyA = scopeA.ServiceProvider.GetRequiredService<IOrganizationHierarchyService>();
+        var secondNull = await hierarchyA.GetDescendantsAsync("vc-global-root", null);
+        var nullIds = secondNull.Select(value => value.Id).ToList();
+        if (!nullIds.Contains("vc-global-child-v1") || !nullIds.Contains("vc-global-child-v2"))
+            throw new InvalidOperationException("AOT versioned cache: null tenant bypass retained a stale snapshot.");
+    }
+
+    Console.WriteLine("CRESTCREATES_VERSIONED_ORGANIZATION_CACHE_OK");
+}
+
+static ServiceProvider BuildVersionedCacheProvider(PostgreSqlRuntimePersistenceOptions options)
+{
+    var services = new ServiceCollection();
+    services.AddOrganizationKernel();
+    services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
+    services.AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence();
+    return services.BuildServiceProvider();
 }
 
 static CanonicalHash RuntimeHash(string value, string purpose) => new()

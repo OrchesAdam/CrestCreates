@@ -9,7 +9,13 @@ public static class OrganizationServiceCollectionExtensions
     public static IServiceCollection AddOrganizationKernel(this IServiceCollection services)
     {
         services.TryAddSingleton<IOrganizationStore, InMemoryOrganizationStore>();
-        services.TryAddScoped<IOrganizationHierarchyService, DefaultOrganizationHierarchyService>();
+        services.TryAddSingleton<IOrganizationHierarchyCacheOwner>(sp => new OrganizationHierarchyCacheOwner());
+        services.TryAddScoped<IOrganizationHierarchyService>(sp =>
+        {
+            var store = sp.GetRequiredService<IOrganizationStore>();
+            var owner = sp.GetRequiredService<IOrganizationHierarchyCacheOwner>();
+            return new DefaultOrganizationHierarchyService(store, owner);
+        });
         services.TryAddScoped<IOrganizationIdentityService, DefaultOrganizationIdentityService>();
         services.TryAddScoped<IDataPermissionScopeProvider, DefaultDataPermissionScopeProvider>();
         services.TryAddSingleton<IDataPermissionScopeRuleStore, InMemoryDataPermissionScopeRuleStore>();

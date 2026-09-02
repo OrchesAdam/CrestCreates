@@ -16,4 +16,8 @@ public interface IOrganizationStore
 
     Task SaveRoleAssignmentAsync(UserOrganizationRoleAssignment assignment, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<UserOrganizationRoleAssignment>> GetRoleAssignmentsByUserAsync(string userId, string? tenantId = null, CancellationToken cancellationToken = default);
+
+    Task<OrganizationScopeGenerationRead> ReadScopeGenerationAsync(
+        OrganizationScopeIdentity scope,
+        CancellationToken cancellationToken = default);
 }

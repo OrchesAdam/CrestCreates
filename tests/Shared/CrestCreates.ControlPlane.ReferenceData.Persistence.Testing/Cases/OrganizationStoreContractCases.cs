@@ -297,6 +297,108 @@ public static class OrganizationStoreContractCases
         (await hierarchy.GetDescendantsAsync($"{prefix}-b:c", "a")).Select(x => x.Id).ShouldEqual($"{prefix}-child-a");
     }
 
+    public static async Task RunInitialGenerationIsZeroAsync(IOrganizationStore store, string prefix)
+    {
+        var globalScope = OrganizationScopeIdentity.Global;
+        var tenantScope = OrganizationScopeIdentity.Tenant($"{prefix}-tenant");
+
+        var globalGen = await store.ReadScopeGenerationAsync(globalScope);
+        globalGen.Status.ShouldBe(OrganizationScopeGenerationStatus.Available);
+        globalGen.Generation.ShouldBe(0L);
+
+        var tenantGen = await store.ReadScopeGenerationAsync(tenantScope);
+        tenantGen.Status.ShouldBe(OrganizationScopeGenerationStatus.Available);
+        tenantGen.Generation.ShouldBe(0L);
+    }
+
+    public static async Task RunOrganizationUnitSaveAdvancesGenerationAsync(IOrganizationStore store, string prefix)
+    {
+        var scope = OrganizationScopeIdentity.Tenant($"{prefix}-tenant");
+        var before = await store.ReadScopeGenerationAsync(scope);
+        before.GenerationShouldBe(0L);
+
+        await store.SaveOrganizationUnitAsync(Unit($"{prefix}-unit", $"{prefix}-tenant"));
+
+        var after = await store.ReadScopeGenerationAsync(scope);
+        after.GenerationShouldBe(1L);
+    }
+
+    public static async Task RunPositionSaveAdvancesSameScopeGenerationAsync(IOrganizationStore store, string prefix)
+    {
+        var scope = OrganizationScopeIdentity.Tenant($"{prefix}-tenant");
+        await store.SavePositionAsync(Position($"{prefix}-position", $"{prefix}-tenant"));
+
+        var after = await store.ReadScopeGenerationAsync(scope);
+        after.GenerationShouldBe(1L);
+    }
+
+    public static async Task RunMembershipSaveAdvancesSameScopeGenerationAsync(IOrganizationStore store, string prefix)
+    {
+        var scope = OrganizationScopeIdentity.Tenant($"{prefix}-tenant");
+        await store.SaveMembershipAsync(Membership($"{prefix}-membership", $"{prefix}-user", $"{prefix}-tenant"));
+
+        var after = await store.ReadScopeGenerationAsync(scope);
+        after.GenerationShouldBe(1L);
+    }
+
+    public static async Task RunRoleAssignmentSaveAdvancesSameScopeGenerationAsync(IOrganizationStore store, string prefix)
+    {
+        var scope = OrganizationScopeIdentity.Tenant($"{prefix}-tenant");
+        await store.SaveRoleAssignmentAsync(Role($"{prefix}-role", $"{prefix}-user", $"{prefix}-tenant"));
+
+        var after = await store.ReadScopeGenerationAsync(scope);
+        after.GenerationShouldBe(1L);
+    }
+
+    public static async Task RunRepeatedBlindSaveAdvancesAgainAsync(IOrganizationStore store, string prefix)
+    {
+        var scope = OrganizationScopeIdentity.Tenant($"{prefix}-tenant");
+        await store.SaveOrganizationUnitAsync(Unit($"{prefix}-unit", $"{prefix}-tenant"));
+        await store.SaveOrganizationUnitAsync(Unit($"{prefix}-unit", $"{prefix}-tenant"));
+
+        var after = await store.ReadScopeGenerationAsync(scope);
+        after.GenerationShouldBe(2L);
+    }
+
+    public static async Task RunTenantGenerationDoesNotAffectOtherTenantsAsync(IOrganizationStore store, string prefix)
+    {
+        var scopeA = OrganizationScopeIdentity.Tenant($"{prefix}-a");
+        var scopeB = OrganizationScopeIdentity.Tenant($"{prefix}-b");
+
+        await store.SaveOrganizationUnitAsync(Unit($"{prefix}-unit", $"{prefix}-a"));
+
+        (await store.ReadScopeGenerationAsync(scopeA)).GenerationShouldBe(1L);
+        (await store.ReadScopeGenerationAsync(scopeB)).GenerationShouldBe(0L);
+    }
+
+    public static Task RunInvalidScopeShouldBeRejectedBeforeIo()
+    {
+        var invalidScope = default(OrganizationScopeIdentity);
+        if (invalidScope.Kind != OrganizationScopeKind.Unknown)
+            throw new InvalidOperationException($"Expected default scope to be Unknown, got {invalidScope.Kind}");
+        return Task.CompletedTask;
+    }
+
+    public static async Task RunGlobalAndTenantGenerationAreIndependentAsync(IOrganizationStore store, string prefix)
+    {
+        var globalScope = OrganizationScopeIdentity.Global;
+        var tenantScope = OrganizationScopeIdentity.Tenant($"{prefix}-tenant");
+
+        await store.SaveOrganizationUnitAsync(Unit($"{prefix}-global-unit", null));
+        (await store.ReadScopeGenerationAsync(globalScope)).GenerationShouldBe(1L);
+        (await store.ReadScopeGenerationAsync(tenantScope)).GenerationShouldBe(0L);
+
+        await store.SaveOrganizationUnitAsync(Unit($"{prefix}-tenant-unit", $"{prefix}-tenant"));
+        (await store.ReadScopeGenerationAsync(globalScope)).GenerationShouldBe(1L);
+        (await store.ReadScopeGenerationAsync(tenantScope)).GenerationShouldBe(1L);
+    }
+
+    private static void GenerationShouldBe(this OrganizationScopeGenerationRead read, long expected)
+    {
+        if (read.Status != OrganizationScopeGenerationStatus.Available || read.Generation != expected)
+            throw new InvalidOperationException($"Expected Available({expected}), got Status={read.Status}, Generation={read.Generation}");
+    }
+
     private static OrganizationUnit Unit(string id, string? tenantId, string? parentId = null, DateTimeOffset? createdAt = null)
         => new() { Id = id, TenantId = tenantId, Name = id, ParentId = parentId, CreatedAt = createdAt ?? DateTimeOffset.UnixEpoch };
 

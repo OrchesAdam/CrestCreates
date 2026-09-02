@@ -1,6 +1,6 @@
 # CrestCreates Progress Memory
 
-Last Updated: 2026-08-24 (Issue #25 Phase 9c R4 follow-up corrections are implemented on PR #80's feature branch. Local PostgreSQL migration/contract checks and targeted runtime tests are being re-run; GitHub CI remains the final merge gate.)
+Last Updated: 2026-09-01 (Issue #26 Phase 9d R1 review fixes are on PR #81's branch; local builds pass, while PostgreSQL/Testcontainers and NativeAOT execution remain CI-dependent because Docker is unavailable on this host.)
 
 ## Purpose
 
@@ -9,6 +9,31 @@ This file records the current platform status for CrestCreates so future threads
 ---
 
 ## Active Design Work
+
+### Issue #26 — Phase 9d Versioned Cache Consistency
+
+Status: Design Spec frozen and Implementation Plan approved; PR #81 R1
+implementation-review remediation is in progress on branch
+`codex/issue-26-versioned-cache-consistency`.
+
+The Organization hierarchy now uses one generation-validated cache mainline with
+immutable snapshots, bounded safety-state/high-water tracking, quarantine and
+recovery, owner-scoped single-flight loads, separate logical timeout and physical
+load capacity, and a final caller-completion safety gate for cache hits, shared
+loads, direct authority fallback, and ordinary snapshot infrastructure failures.
+The PostgreSQL provider persists scope generation atomically with each Organization
+save surface, appends V013, classifies schema/invariant failures separately from
+typed provider unavailability, and includes migration, overflow, rollback, and
+commit-unknown evidence. Permission reads use direct authority and retain unrelated
+general caching composition. The existing NativeAOT host exercises two independent
+local hierarchy caches over one PostgreSQL authority and asserts the versioned-cache
+marker.
+
+Review remediation added deterministic OHC09/OHC24 publication/lookup races, physical
+capacity retention after non-cooperative timeout, owner-disposal completion gates,
+real EF permission integration coverage, PostgreSQL concrete-store boundary checks,
+and all twelve OVG authority manifest entries. Docker is not present locally, so
+PostgreSQL integration and publish-link-run evidence must be confirmed by CI.
 
 ### Issue #25 — Phase 9c Transactional Outbox & Reliable Event Delivery
 

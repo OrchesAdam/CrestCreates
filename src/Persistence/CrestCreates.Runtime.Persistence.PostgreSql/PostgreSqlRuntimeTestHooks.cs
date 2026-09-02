@@ -11,6 +11,7 @@ internal static class PostgreSqlRuntimeTestHooks
     private static Func<ValueTask>? _afterCommitBlock;
     private static SnapshotBarrier? _afterReferenceSnapshotBarrier;
     private static Func<string, CancellationToken, ValueTask>? _afterWritePointBlock;
+    private static Func<string, CancellationToken, ValueTask>? _beforeMigrationBlock;
 
     internal static IDisposable BlockFirstCommand(Action afterLeaseAcquired)
     {
@@ -102,6 +103,20 @@ internal static class PostgreSqlRuntimeTestHooks
 
     internal static bool IsAfterWritePointActive => _afterWritePointBlock is not null;
 
+    internal static IDisposable BlockBeforeMigration(Func<string, CancellationToken, ValueTask> block)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        if (Interlocked.CompareExchange(ref _beforeMigrationBlock, block, null) is not null)
+            throw new InvalidOperationException("A PostgreSQL Runtime migration barrier is already active.");
+        return new ResetBeforeMigration();
+    }
+
+    internal static ValueTask NotifyBeforeMigrationAsync(string version, CancellationToken cancellationToken)
+    {
+        var block = Volatile.Read(ref _beforeMigrationBlock);
+        return block is null ? ValueTask.CompletedTask : block(version, cancellationToken);
+    }
+
     internal static ValueTask NotifyAfterWritePointAsync(string writePoint, CancellationToken cancellationToken)
     {
         var block = Volatile.Read(ref _afterWritePointBlock);
@@ -151,5 +166,10 @@ internal static class PostgreSqlRuntimeTestHooks
     private sealed class ResetAfterCommand : IDisposable
     {
         public void Dispose() => Interlocked.Exchange(ref _afterFirstCommandCompleted, null);
+    }
+
+    private sealed class ResetBeforeMigration : IDisposable
+    {
+        public void Dispose() => Interlocked.Exchange(ref _beforeMigrationBlock, null);
     }
 }

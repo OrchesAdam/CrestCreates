@@ -38,6 +38,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             ValidateHistory(applied, allowPending: true);
             foreach (var migration in Catalog.Skip(applied.Count))
             {
+                await PostgreSqlRuntimeTestHooks.NotifyBeforeMigrationAsync(migration.Version, cancellationToken).ConfigureAwait(false);
                 await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
                 await ExecuteAsync(connection, migration.Sql.Replace("{schema}", QuotedSchema(), StringComparison.Ordinal), [], cancellationToken, transaction).ConfigureAwait(false);
                 await ExecuteAsync(connection,
@@ -191,6 +192,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             "data_permission_scope_rules"
             ,"runtime_outbox_messages"
             ,"runtime_workflow_continuation_acceptances"
+            ,"organization_scope_generations"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -978,9 +980,15 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             }, ["completion_event_id"],
             [new("ck_runtime_continuation_acceptance_revision", "check (workflow_to_revision = workflow_from_revision + 1)"),
              new("ck_runtime_continuation_acceptance_tenant", "check ((tenant_scope_kind = 'host' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))")],
-            [new("uq_runtime_continuation_acceptance_task", ["tenant_scope_kind", "tenant_id", "human_task_instance_id"], "", Unique: true)],
-            [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", DeleteAction: "RESTRICT"),
-             new("tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", DeleteAction: "RESTRICT")])
+             [new("uq_runtime_continuation_acceptance_task", ["tenant_scope_kind", "tenant_id", "human_task_instance_id"], "", Unique: true)],
+             [new("tenant_scope_kind, tenant_id, workflow_instance_id", "runtime_workflow_instances", "tenant_scope_kind, tenant_id, instance_id", DeleteAction: "RESTRICT"),
+              new("tenant_scope_kind, tenant_id, workflow_instance_id, human_task_instance_id", "runtime_human_task_instances", "tenant_scope_kind, tenant_id, workflow_instance_id, instance_id", DeleteAction: "RESTRICT")])
+             ,new("organization_scope_generations", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+             {
+                 ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["generation"] = BigInt, ["updated_at"] = Timestamp
+             }, ["tenant_scope_kind", "tenant_id"],
+             [new("ck_org_scope_generation_tenant_scope", "check ((tenant_scope_kind = 'global' and tenant_id = '') or (tenant_scope_kind = 'tenant' and tenant_id <> ''))"),
+              new("ck_org_scope_generation_value", "check (generation >= 1)")], [], [])
         ];
     }
 
@@ -1663,6 +1671,19 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                     on delete restrict deferrable initially deferred
             );
             create unique index uq_runtime_continuation_acceptance_task on {schema}.runtime_workflow_continuation_acceptances (tenant_scope_kind, tenant_id, human_task_instance_id);
+            """),
+        new RuntimeMigration("V013", "organization_scope_generation", """
+            create table {schema}.organization_scope_generations (
+                tenant_scope_kind text collate "C" not null,
+                tenant_id text collate "C" not null,
+                generation bigint not null,
+                updated_at timestamptz not null,
+                primary key (tenant_scope_kind, tenant_id),
+                constraint ck_org_scope_generation_tenant_scope check (
+                    (tenant_scope_kind = 'global' and tenant_id = '')
+                    or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
+                constraint ck_org_scope_generation_value check (generation >= 1)
+            );
             """),
     ];
 }

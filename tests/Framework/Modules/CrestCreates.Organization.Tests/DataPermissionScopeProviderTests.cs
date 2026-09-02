@@ -1,5 +1,6 @@
 using CrestCreates.Organization;
 using CrestCreates.Organization.Abstractions;
+using Moq;
 
 namespace CrestCreates.Organization.Tests;
 
@@ -271,5 +272,48 @@ public class DataPermissionScopeProviderTests
         var scope = await provider.GetScopeAsync(Request("user-1", resource: "Book", action: "Read"));
         scope.Kind.Should().Be(DataPermissionScopeKind.None);
         scope.IsEmpty.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DataPermissionScope_FreshnessFailure_Should_NotReturnExpandedOrganizationScope()
+    {
+        var store = new InMemoryOrganizationStore();
+        await store.SaveMembershipAsync(new UserOrganizationMembership
+        {
+            Id = "m-1",
+            UserId = "user-1",
+            TenantId = "tenant-a",
+            OrganizationUnitId = "dept-1",
+            IsPrimary = true,
+            IsActive = true
+        });
+        var ruleStore = new InMemoryDataPermissionScopeRuleStore();
+        await ruleStore.SaveRuleAsync(new DataPermissionScopeRule
+        {
+            Resource = "Book",
+            Action = "Read",
+            TenantId = "tenant-a",
+            ScopeKind = DataPermissionScopeKind.OwnOrganizationAndDescendants
+        });
+        var hierarchy = new Mock<IOrganizationHierarchyService>();
+        hierarchy.Setup(service => service.GetDescendantsAsync(
+                "dept-1",
+                "tenant-a",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OrganizationHierarchyFreshnessException(
+                OrganizationHierarchyFreshnessFailureKind.GenerationRegression,
+                message: "injected freshness failure"));
+        var provider = new DefaultDataPermissionScopeProvider(
+            new DefaultOrganizationIdentityService(store),
+            hierarchy.Object,
+            ruleStore);
+
+        await provider.Invoking(value => value.GetScopeAsync(Request(
+                "user-1",
+                tenantId: "tenant-a",
+                resource: "Book",
+                action: "Read")))
+            .Should().ThrowAsync<OrganizationHierarchyFreshnessException>()
+            .Where(exception => exception.FailureKind == OrganizationHierarchyFreshnessFailureKind.GenerationRegression);
     }
 }
