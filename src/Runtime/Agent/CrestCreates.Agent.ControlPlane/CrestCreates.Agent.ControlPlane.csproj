@@ -13,6 +13,12 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Localization/Resources/DescriptorReviewMessages.en.json"
+                      LogicalName="CrestCreates.Agent.ControlPlane.Localization.Resources.DescriptorReviewMessages.en.json" />
+    <EmbeddedResource Include="Localization/Resources/DescriptorReviewMessages.zh-CN.json"
+                      LogicalName="CrestCreates.Agent.ControlPlane.Localization.Resources.DescriptorReviewMessages.zh-CN.json" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Agent.ControlPlane.Abstractions\CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
     <ProjectReference Include="..\CrestCreates.Agent.DraftContracts\CrestCreates.Agent.DraftContracts.csproj" />
     <ProjectReference Include="../../../Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
@@ -22,5 +28,6 @@
     <ProjectReference Include="../../../Runtime/Persistence/CrestCreates.Runtime.Persistence.Abstractions/CrestCreates.Runtime.Persistence.Abstractions.csproj" />
     <ProjectReference Include="../../../Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
     <ProjectReference Include="../../../Runtime/Eventing/CrestCreates.Runtime.Delivery.Abstractions/CrestCreates.Runtime.Delivery.Abstractions.csproj" />
+    <ProjectReference Include="../../../Framework/Infrastructure/CrestCreates.Localization/CrestCreates.Localization.csproj" />
   </ItemGroup>
 </Project>
