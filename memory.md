@@ -2819,6 +2819,35 @@ with GitHub CI/PR verification pending.
   Outbox factory cases 3/3, PostgreSQL Workflow abort success/rollback 2/2, PostgreSQL outbox
   round-trip 1/1. GitHub CI/PR verification is pending.
 
+### Issue #86 — Phase 10b Business Construction Friction Review (2026-09-03)
+
+**Status**: Review artifact and closure tests implemented on branch
+`codex/phase-10b-business-construction-friction-review-86`; the CI-equivalent local test
+and publish gates are green, with GitHub CI/PR verification pending.
+
+- Added the canonical review artifact at
+  `docs/reviews/2026-09-03-phase-10b-business-construction-friction-review.md`.
+- The artifact normalizes every frozen #85 construction-friction field into F01-F11,
+  records explicit semantic ownership and one primary classification per entry, and
+  compares Asset with Procurement across the eight required shared dimensions.
+- Human and Agent discoverability are separated. #87 receives five bounded evolution
+  scenarios; #88 receives only one promoted, evidence-backed usability candidate:
+  safe NativeAOT Outbox consumer activation. The apparent JSON composition candidate
+  was rejected because .NET `JsonTypeInfoResolver.Combine(...)` already provides the
+  semantic and CrestCreates already uses it; that observation goes to #87.
+- The three #85 production corrections are retrospective I01-I03 exemplars only:
+  I01 is the proven Workflow abort capability gap; I02 and I03 are contract-correctness
+  repairs inside existing Outbox and Agent owners. Phase 9 durability/transaction/
+  Outbox/cache/Accountability semantics are not reopened.
+- Blocking review follow-up separated those incident classifications explicitly and
+  rejected C88-02 after confirming the existing .NET `JsonTypeInfoResolver.Combine(...)`
+  pattern is already used by CrestCreates. The C88-01 negative Design Case removed
+  both sample consumer factories and proved NativeAOT publish/link succeeds but runtime
+  activation fails in `OutboxCompositionValidator` without the explicit factory.
+- Added 18 deterministic `Phase10bBusinessConstructionFrictionReviewTests` and an
+  explicit Phase 10b test step to `.github/workflows/ci.yml`. No production Runtime,
+  Generator, Analyzer, or framework abstraction changed in #86.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:
