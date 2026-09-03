@@ -33,6 +33,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Phase 10b closure tests inspect the checked-out PR diff for production
+      # Runtime changes. The default shallow checkout does not include HEAD^.
+      - name: Fetch PR base for review diff invariants
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         env:
