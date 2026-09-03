@@ -8,7 +8,6 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
-using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 

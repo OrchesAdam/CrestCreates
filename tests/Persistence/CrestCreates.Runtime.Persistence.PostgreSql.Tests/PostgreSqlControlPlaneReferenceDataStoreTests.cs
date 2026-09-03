@@ -13,7 +13,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
-using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
+using DescriptorDraftModel = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 
@@ -175,7 +175,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
         var drafts = provider.GetRequiredService<IDescriptorDraftStore>();
         var organizations = provider.GetRequiredService<IOrganizationStore>();
 
-        var draft = new Draft
+        var draft = new DescriptorDraftModel
         {
             TenantId = "tenant-1",
             DraftId = "draft-1",
@@ -848,7 +848,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             {
                 var drafts = provider.GetRequiredService<IDescriptorDraftStore>();
                 // AuthorId is init-only; use two separate draft instances with different AuthorId via CreateDraft variants
-                var draftA = new Draft
+                var draftA = new DescriptorDraftModel
                 {
                     TenantId = "tenant-1", DraftId = "concurrent",
                     DescriptorKind = Metadata.Abstractions.DescriptorKind.Schema, DescriptorId = "schema-1",
@@ -857,7 +857,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
                     Intent = "intent-a",
                     Payload = new SchemaDescriptorDraftPayload(new SchemaDescriptor { Id = "schema-1", Name = "Schema A" })
                 };
-                var draftB = new Draft
+                var draftB = new DescriptorDraftModel
                 {
                     TenantId = "tenant-1", DraftId = "concurrent",
                     DescriptorKind = Metadata.Abstractions.DescriptorKind.Schema, DescriptorId = "schema-1",
@@ -1110,7 +1110,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
             case PersistedSnapshotCorruptionVariant.DraftInvalidWorkflowTargetUnionShape:
             {
                 var store = provider.GetRequiredService<IDescriptorDraftStore>();
-                var draft = new Draft
+                var draft = new DescriptorDraftModel
                 {
                     TenantId = "tenant-1", DraftId = "f07-draft-wf",
                     DescriptorKind = Metadata.Abstractions.DescriptorKind.Workflow,
@@ -1735,7 +1735,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataStoreTests
         public override DescriptorDraftPayload Snapshot() => this;
     }
 
-    private static Draft CreateDraft(
+    private static DescriptorDraftModel CreateDraft(
         string draftId,
         DescriptorDraftOperation operation,
         DescriptorDraftStatus status,

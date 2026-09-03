@@ -13,7 +13,7 @@ using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Xunit;
-using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
+using DescriptorDraftModel = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 
@@ -108,7 +108,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
         restored.Should().BeEquivalentTo(value);
     }
 
-    internal static Draft CreateDraft(DescriptorKind kind)
+    internal static DescriptorDraftModel CreateDraft(DescriptorKind kind)
     {
         DescriptorDraftPayload payload = kind switch
         {
@@ -197,7 +197,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null)
         };
 
-        return new Draft
+        return new DescriptorDraftModel
         {
             TenantId = "tenant-1",
             DraftId = $"draft-{kind}",
@@ -219,7 +219,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
         };
     }
 
-    internal static Draft CreateWorkflowDraft(PostgreSqlWorkflowTargetType targetType)
+    internal static DescriptorDraftModel CreateWorkflowDraft(PostgreSqlWorkflowTargetType targetType)
     {
         InteractionTarget target = targetType switch
         {
@@ -238,7 +238,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
             _ => throw new ArgumentOutOfRangeException(nameof(targetType), targetType, null)
         };
 
-        return new Draft
+        return new DescriptorDraftModel
         {
             TenantId = "tenant-1",
             DraftId = $"draft-workflow-{targetType}",
