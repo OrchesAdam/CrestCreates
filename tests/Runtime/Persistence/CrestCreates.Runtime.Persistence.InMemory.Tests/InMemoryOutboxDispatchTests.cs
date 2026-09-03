@@ -20,6 +20,45 @@ namespace CrestCreates.Runtime.Persistence.InMemory.Tests;
 public sealed class InMemoryOutboxDispatchTests
 {
     [Fact]
+    public async Task Append_rejects_manually_constructed_high_precision_message_before_mutation()
+    {
+        var services = new ServiceCollection();
+        services.AddCrestCreatesInMemoryRuntimePersistence();
+        using var provider = services.BuildServiceProvider();
+        var timestamp = DateTimeOffset.UnixEpoch.AddTicks(1);
+        var metadata = new OutboxMessageMetadata
+        {
+            MessageId = "precision-manual",
+            TenantId = "tenant-a",
+            ContractId = "contract/v1",
+            EventName = "contract/v1",
+            RequiredConsumerIds = [],
+            CreatedAt = timestamp,
+            OccurredAt = timestamp
+        };
+        var payload = new byte[] { 1 };
+        var message = new OutboxMessage
+        {
+            Metadata = metadata,
+            Payload = payload,
+            Integrity = OutboxMessageIntegrity.Compute(metadata, payload)
+        };
+
+        var action = () => provider.GetRequiredService<InMemoryRuntimeTransactionCoordinator>().ExecuteAsync(
+            async ct => await provider.GetRequiredService<ITransactionalOutboxWriter>().AppendAsync(message, ct)).AsTask();
+        await action.Should().ThrowAsync<CrestCreates.Runtime.Persistence.Abstractions.Errors.RuntimePersistenceContractException>();
+
+        var claims = await provider.GetRequiredService<IOutboxDispatchStore>().ClaimAsync(new OutboxClaimRequest
+        {
+            OwnerId = "precision-manual-test",
+            BatchSize = 10,
+            SupportedContractIds = new HashSet<string>(["contract/v1"], StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        });
+        claims.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SharedOutboxContract_UsesProviderClockAndEmptyClaim()
     {
         var services = new ServiceCollection();

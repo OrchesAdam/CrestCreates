@@ -165,10 +165,9 @@ internal sealed class AgentToolPreDispatchFinalizer
             && left.Issues.SequenceEqual(right.Issues)
             && (!left.StructuredOutput.HasValue == !right.StructuredOutput.HasValue
                 && (!left.StructuredOutput.HasValue
-                    || string.Equals(
-                        left.StructuredOutput.Value.GetRawText(),
-                        right.StructuredOutput?.GetRawText(),
-                        StringComparison.Ordinal)));
+                    || System.Text.Json.JsonElement.DeepEquals(
+                        left.StructuredOutput.Value,
+                        right.StructuredOutput!.Value)));
 
     internal async ValueTask<AgentToolInvocationOutcome> FinishIndeterminateWithSettledBudgetAsync(
         AgentToolGovernancePreDispatchReceipt? auditHandle,

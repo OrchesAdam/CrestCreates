@@ -59,12 +59,14 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
             _committed.HumanTasks.Clear();
             _committed.Snapshots.Clear();
             _committed.Receipts.Clear();
+            _committed.AbortReceipts.Clear();
             _committed.Outbox.Clear();
             _committed.ContinuationAcceptances.Clear();
             foreach (var (key, value) in context.StagedState.Workflows) _committed.Workflows[key] = value.Snapshot();
             foreach (var (key, value) in context.StagedState.HumanTasks) _committed.HumanTasks[key] = value.Snapshot();
             foreach (var (key, value) in context.StagedState.Snapshots) _committed.Snapshots[key] = (value.Snapshot.Snapshot(), value.Fingerprint);
             foreach (var (key, value) in context.StagedState.Receipts) _committed.Receipts[key] = value;
+            foreach (var (key, value) in context.StagedState.AbortReceipts) _committed.AbortReceipts[key] = value;
             foreach (var (key, value) in context.StagedState.Outbox) _committed.Outbox[key] = value.Clone();
             foreach (var (key, value) in context.StagedState.ContinuationAcceptances) _committed.ContinuationAcceptances[key] = value;
             return result;
@@ -97,6 +99,17 @@ internal sealed class InMemoryRuntimeTransactionCoordinator : IRuntimeTransactio
                 throw new RuntimePersistenceContractException(
                     RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
                     "Receipt HumanTask correlation must be reciprocal and tenant-local.");
+            }
+        }
+
+        foreach (var receipt in state.AbortReceipts.Values)
+        {
+            if (!state.HumanTasks.TryGetValue(receipt.HumanTaskKey, out var task)
+                || task.WorkflowKey != receipt.WorkflowKey)
+            {
+                throw new RuntimePersistenceContractException(
+                    RuntimePersistenceContractErrorCode.WaitingTaskCorrelationConflict,
+                    "Abort receipt HumanTask correlation must be reciprocal and tenant-local.");
             }
         }
 

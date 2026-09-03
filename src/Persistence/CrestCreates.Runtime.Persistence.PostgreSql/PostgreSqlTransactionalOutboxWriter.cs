@@ -18,6 +18,10 @@ internal sealed class PostgreSqlTransactionalOutboxWriter : ITransactionalOutbox
 
     public async ValueTask<OutboxAppendResult> AppendAsync(OutboxMessage message, CancellationToken cancellationToken = default)
     {
+        if (!OutboxMessageMetadataCanonicalizer.IsCanonical(message.Metadata))
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "Outbox message timestamps must be UTC and canonicalized to microsecond precision before append.");
         if (!OutboxMessageIntegrity.Matches(message))
             throw new RuntimePersistenceContractException(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, "Outbox message integrity does not match its immutable payload.");
         var session = _coordinator.RequireSession();

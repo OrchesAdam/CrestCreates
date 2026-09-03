@@ -11,7 +11,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow.Abstractions;
-using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
+using DescriptorDraftModel = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 
@@ -26,7 +26,7 @@ internal sealed class PostgreSqlDescriptorDraftStoreContractDriver : IDescriptor
     public IDescriptorDraftStore Store { get; }
     public IDescriptorDraftValidator Validator { get; }
 
-    public Draft CreatePayloadVariant(DescriptorPayloadVariant variant)
+    public DescriptorDraftModel CreatePayloadVariant(DescriptorPayloadVariant variant)
         => variant switch
         {
             DescriptorPayloadVariant.Schema => PostgreSqlControlPlaneReferenceDataJsonCodecTests.CreateDraft(DescriptorKind.Schema),
@@ -40,7 +40,7 @@ internal sealed class PostgreSqlDescriptorDraftStoreContractDriver : IDescriptor
             _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, null)
         };
 
-    public DescriptorPayloadObservation ObservePayload(Draft draft, DescriptorPayloadVariant variant)
+    public DescriptorPayloadObservation ObservePayload(DescriptorDraftModel draft, DescriptorPayloadVariant variant)
     {
         var leaves = Header(draft);
         switch (draft.Payload)
@@ -70,7 +70,7 @@ internal sealed class PostgreSqlDescriptorDraftStoreContractDriver : IDescriptor
         return new DescriptorPayloadObservation(variant, leaves.ToImmutableArray());
     }
 
-    public Draft CreateValidatorOwnedInvalid(DraftValidatorOwnedInvalidVariant variant)
+    public DescriptorDraftModel CreateValidatorOwnedInvalid(DraftValidatorOwnedInvalidVariant variant)
         => variant switch
         {
             DraftValidatorOwnedInvalidVariant.DraftIdBlank => CreateSchema() with { DraftId = string.Empty },
@@ -93,7 +93,7 @@ internal sealed class PostgreSqlDescriptorDraftStoreContractDriver : IDescriptor
             _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, null)
         };
 
-    public Draft CreateValidatorOwnedInvalid(DraftValidatorOwnedInvalidVariant variant, EvidenceVectorKey key)
+    public DescriptorDraftModel CreateValidatorOwnedInvalid(DraftValidatorOwnedInvalidVariant variant, EvidenceVectorKey key)
         => variant switch
         {
             DraftValidatorOwnedInvalidVariant.DescriptorIdBlank => CreateSchema() with { DescriptorId = InvalidText(key) },
@@ -118,7 +118,7 @@ internal sealed class PostgreSqlDescriptorDraftStoreContractDriver : IDescriptor
 
     public ValueTask ResetAsync() => ValueTask.CompletedTask;
 
-    private static List<DescriptorPayloadObservationLeaf> Header(Draft draft)
+    private static List<DescriptorPayloadObservationLeaf> Header(DescriptorDraftModel draft)
         => new()
         {
             new("TenantId", ObservationValueKind.Text, draft.TenantId, null, null, null),
@@ -256,7 +256,7 @@ internal sealed class PostgreSqlDescriptorDraftStoreContractDriver : IDescriptor
     private static void Ticks(List<DescriptorPayloadObservationLeaf> leaves, string path, long value)
         => leaves.Add(new(path, ObservationValueKind.Ticks, null, value, null, null));
 
-    private static Draft CreateSchema()
+    private static DescriptorDraftModel CreateSchema()
         => PostgreSqlControlPlaneReferenceDataJsonCodecTests.CreateDraft(DescriptorKind.Schema);
 
     private static string? InvalidText(EvidenceVectorKey key)

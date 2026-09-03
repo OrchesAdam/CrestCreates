@@ -14,6 +14,7 @@ internal sealed class InMemoryRuntimePersistenceState
     public Dictionary<RuntimeInstanceKey, HumanTaskInstance> HumanTasks { get; } = new();
     public Dictionary<string, (DescriptorSnapshot Snapshot, string Fingerprint)> Snapshots { get; } = new(StringComparer.Ordinal);
     public Dictionary<(RuntimeTenantScope Scope, string Operation), WorkflowSuspensionReceipt> Receipts { get; } = new();
+    public Dictionary<(RuntimeTenantScope Scope, string Operation), WorkflowAbortReceipt> AbortReceipts { get; } = new();
     public Dictionary<string, InMemoryOutboxRecord> Outbox { get; } = new(StringComparer.Ordinal);
     public Dictionary<(RuntimeTenantScope Scope, string CompletionEventId), WorkflowContinuationAcceptance> ContinuationAcceptances { get; } = new();
 
@@ -28,6 +29,8 @@ internal sealed class InMemoryRuntimePersistenceState
             clone.Snapshots[key] = (value.Snapshot.Snapshot(), value.Fingerprint);
         foreach (var (key, value) in Receipts)
             clone.Receipts[key] = value;
+        foreach (var (key, value) in AbortReceipts)
+            clone.AbortReceipts[key] = value;
         foreach (var (key, value) in Outbox)
             clone.Outbox[key] = value.Clone();
         foreach (var (key, value) in ContinuationAcceptances)

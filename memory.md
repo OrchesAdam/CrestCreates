@@ -2781,6 +2781,44 @@ CHANGES (1×P0 PostgreSQL null ReasonCode / 1×P1 TOCTOU in CAS-loser recovery):
 composition suite with Accepted/Duplicate/Conflict assertions, dependency boundaries,
 and all NativeAOT publish-link-run fixtures with exact Capability causal matching.
 
+### Issue #85 — Phase 10a Asset Management Business Golden Application (2026-09-02)
+
+**Status**: Implementation completed on branch
+`codex/phase-10a-asset-management-golden-application-85`; local validation is complete,
+with GitHub CI/PR verification pending.
+
+- Added the first Phase 10 business golden application for tenant- and organization-scoped
+  Asset management: registration, deterministic query, assignment/return/transfer lifecycle,
+  maintenance records, and concurrency stamps.
+- Business data uses a durable SQLite adapter with composite `(TenantId, Id)` identity,
+  tenant-scoped uniqueness, foreign-key enforcement, and transactional lifecycle writes.
+- HTTP uses generated Minimal API capability endpoints; MCP and Agent read projections reuse
+  the same `asset-management.assets.get` capability. Maintenance approval uses the existing
+  Workflow → HumanTask → durable outbox → capability mainline.
+- Accountability is composed through the existing HTTP/method/capability/runtime sinks, and
+  contracts use source-generated JSON metadata with reflection disabled in the host.
+- Acceptance coverage includes durable round-trip, deterministic query, same-ID tenant
+  isolation, lifecycle rules, unauthorized mutation, organization visibility, MCP/Agent
+  reachability, accountability, workflow suspension/completion, and a real NativeAOT
+  publish-link-run fixture.
+- Second review addressed all eight blockers: the host now requires the PostgreSQL durable
+  Runtime provider, uses the real framework PermissionChecker/GrantStore chain, fails closed
+  for both organization identity shapes, preserves assigned-maintenance state, rejects assigned
+  transfers, compensates Runtime state when the business store fails, and persists the original
+  maintenance requester. The construction friction record now covers every frozen #85 field.
+- The business failure case exposed a genuine Runtime capability gap. The canonical
+  `IWorkflowAbortService` now owns legal `Suspended -> Failed` transitions, cancels the correlated
+  HumanTask and emits the normal `workflow.failed` accountability fact in one Runtime transaction;
+  PostgreSQL tests prove both commit and rollback of the cross-store operation.
+- Outbox v1 integrity remains an exact provider-neutral canonical writer. Producer metadata is
+  normalized to contract microsecond precision before hashing and persistence, and a PostgreSQL
+  100ns-tail round-trip test recomputes the unchanged v1 hash. Agent completion confirmation has
+  dedicated semantic JSON boundary tests (object reorder accepted; value and array reorder rejected).
+  NativeAOT activation remains an explicit host composition factory.
+- Local evidence: Asset design cases 7/7, Workflow state cases 8/8, Agent semantic cases 3/3,
+  Outbox factory cases 3/3, PostgreSQL Workflow abort success/rollback 2/2, PostgreSQL outbox
+  round-trip 1/1. GitHub CI/PR verification is pending.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:

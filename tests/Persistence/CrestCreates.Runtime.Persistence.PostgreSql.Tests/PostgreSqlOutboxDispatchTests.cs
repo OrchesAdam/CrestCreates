@@ -1,9 +1,14 @@
 using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using CrestCreates.Runtime.Delivery.Abstractions.Messages;
+using CrestCreates.Runtime.Delivery.Message;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
+using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
+using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 using CrestCreates.Runtime.Persistence.Testing.Cases;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
 
@@ -13,6 +18,46 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFixture fixture)
 {
     [Fact]
+    public async Task Append_rejects_manually_constructed_high_precision_message_before_provider_mutation()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .BuildServiceProvider();
+        var timestamp = DateTimeOffset.UnixEpoch.AddTicks(1);
+        var metadata = new OutboxMessageMetadata
+        {
+            MessageId = "precision-manual-pg",
+            TenantId = "tenant-a",
+            ContractId = "contract/v1",
+            EventName = "contract/v1",
+            RequiredConsumerIds = [],
+            CreatedAt = timestamp,
+            OccurredAt = timestamp
+        };
+        var payload = new byte[] { 1 };
+        var message = new OutboxMessage
+        {
+            Metadata = metadata,
+            Payload = payload,
+            Integrity = OutboxMessageIntegrity.Compute(metadata, payload)
+        };
+
+        var action = () => provider.GetRequiredService<IRuntimeTransactionCoordinator>().ExecuteAsync(
+            async ct => await provider.GetRequiredService<ITransactionalOutboxWriter>().AppendAsync(message, ct)).AsTask();
+        await action.Should().ThrowAsync<RuntimePersistenceContractException>();
+
+        var claims = await provider.GetRequiredService<IOutboxDispatchStore>().ClaimAsync(new OutboxClaimRequest
+        {
+            OwnerId = "precision-manual-pg-test",
+            BatchSize = 10,
+            SupportedContractIds = new HashSet<string>(["contract/v1"], StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        });
+        claims.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SharedOutboxContract_UsesProviderClockAndEmptyClaim()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
@@ -21,6 +66,48 @@ public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFix
             .Build();
         await OutboxDispatchContractCases.EmptyClaimUsesProviderClockAsync(
             new PostgreSqlOutboxDispatchStore(lease.Options, dataSource));
+    }
+
+    [Fact]
+    public async Task OutboxV1Integrity_SurvivesPostgreSqlRoundTripWithHundredNanosecondTail()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .BuildServiceProvider();
+        var timestamp = DateTimeOffset.UnixEpoch.AddTicks(1_234_567);
+        var message = new DefaultOutboxMessageFactory().Create(
+            "precision-roundtrip",
+            "tenant-a",
+            "test.contract/v1",
+            "test.payload/v1",
+            new byte[] { 1, 2, 3 },
+            createdAt: timestamp);
+
+        await provider.GetRequiredService<IRuntimeTransactionCoordinator>().ExecuteAsync(async ct =>
+        {
+            (await provider.GetRequiredService<ITransactionalOutboxWriter>().AppendAsync(message, ct))
+                .Should().Be(OutboxAppendResult.Appended);
+        });
+
+        await using var dataSource = new NpgsqlSlimDataSourceBuilder(lease.Options.ConnectionString)
+            .EnableArrays()
+            .Build();
+        var claims = await new PostgreSqlOutboxDispatchStore(lease.Options, dataSource).ClaimAsync(new OutboxClaimRequest
+        {
+            OwnerId = "precision-test",
+            BatchSize = 1,
+            LeaseDuration = TimeSpan.FromMinutes(1),
+            SupportedContractIds = new HashSet<string>(["test.contract/v1"], StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        });
+
+        claims.Should().ContainSingle();
+        var roundTripped = claims[0].Message;
+        roundTripped.Metadata.OccurredAt.Should().Be(message.Metadata.OccurredAt);
+        OutboxMessageIntegrity.Matches(roundTripped).Should().BeTrue();
+        roundTripped.Integrity.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
+        roundTripped.Integrity.CanonicalShapeVersion.Should().Be("runtime-outbox-message-v1");
     }
 
     [Fact]

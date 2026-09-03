@@ -14,6 +14,10 @@ internal sealed class InMemoryTransactionalOutboxWriter : ITransactionalOutboxWr
     public ValueTask<OutboxAppendResult> AppendAsync(OutboxMessage message, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (!OutboxMessageMetadataCanonicalizer.IsCanonical(message.Metadata))
+            throw new RuntimePersistenceContractException(
+                RuntimePersistenceContractErrorCode.PersistedInvariantViolation,
+                "Outbox message timestamps must be UTC and canonicalized to microsecond precision before append.");
         if (!OutboxMessageIntegrity.Matches(message))
             throw new RuntimePersistenceContractException(RuntimePersistenceContractErrorCode.PersistedInvariantViolation, "Outbox message integrity does not match its immutable payload.");
         var state = _coordinator.RequireAmbientState();

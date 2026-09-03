@@ -20,6 +20,7 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 [JsonSerializable(typeof(WorkflowInstance))]
 [JsonSerializable(typeof(HumanTaskInstance))]
 [JsonSerializable(typeof(WorkflowSuspensionReceipt))]
+[JsonSerializable(typeof(WorkflowAbortReceipt))]
 [JsonSerializable(typeof(WorkflowContinuationAcceptance))]
 [JsonSerializable(typeof(RuntimeDescriptorPin))]
 [JsonSerializable(typeof(DescriptorSnapshot))]

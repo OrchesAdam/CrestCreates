@@ -12,7 +12,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
-using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
+using DescriptorDraftModel = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 
@@ -218,7 +218,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataRestartTests(PostgreSqlRu
         throw new InvalidOperationException("Repository root not found.");
     }
 
-    private static Draft CreateRestartDraft(string draftId)
+    private static DescriptorDraftModel CreateRestartDraft(string draftId)
         => new()
         {
             TenantId = "restart",

@@ -539,7 +539,6 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             var confirmation = await _finalizer.ConfirmAuditFinalizationAsync(
                 completedFinalization,
                 entry.Governance.EffectiveAuditMode).ConfigureAwait(false);
-
             if (confirmation == AgentToolAuditConfirmation.Indeterminate)
             {
                 await _finalizer.MarkIndeterminateIgnoringFailureAsync(

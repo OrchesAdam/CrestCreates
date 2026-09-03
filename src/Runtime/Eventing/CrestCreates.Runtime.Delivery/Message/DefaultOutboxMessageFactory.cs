@@ -67,14 +67,13 @@ public sealed class DefaultOutboxMessageFactory : IOutboxMessageFactory
     private static OutboxMessage CreateCore(OutboxMessageMetadata metadata, byte[] detachedPayload)
     {
         var createdAt = metadata.CreatedAt == default ? DateTimeOffset.UtcNow : metadata.CreatedAt;
-        var normalized = metadata with
+        var normalized = OutboxMessageMetadataCanonicalizer.Normalize(metadata with
         {
-            CreatedAt = createdAt,
             EventName = string.IsNullOrWhiteSpace(metadata.EventName) ? metadata.ContractId : metadata.EventName,
             EventVersion = metadata.EventVersion <= 0 ? 1 : metadata.EventVersion,
             OccurredAt = metadata.OccurredAt == default ? createdAt : metadata.OccurredAt,
             RequiredConsumerIds = metadata.RequiredConsumerIds.Order(StringComparer.Ordinal).Distinct(StringComparer.Ordinal).ToArray()
-        };
+        });
         return new OutboxMessage
         {
             Metadata = normalized,

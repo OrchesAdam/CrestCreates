@@ -35,6 +35,8 @@ public static class InMemoryRuntimePersistenceServiceCollectionExtensions
                 sp.GetRequiredService<IDescriptorSnapshotPersistenceHasher>()));
         services.TryAddSingleton<IWorkflowSuspensionReceiptStore>(sp =>
             new InMemoryWorkflowSuspensionReceiptStore(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
+        services.TryAddSingleton<IWorkflowAbortReceiptStore>(sp =>
+            new InMemoryWorkflowAbortReceiptStore(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
         services.TryAddSingleton<ITransactionalOutboxWriter>(sp => new InMemoryTransactionalOutboxWriter(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
         services.TryAddSingleton<IOutboxDispatchStore>(sp => new InMemoryOutboxDispatchStore(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
         services.TryAddSingleton<IWorkflowContinuationAcceptanceStore>(sp => new InMemoryWorkflowContinuationAcceptanceStore(sp.GetRequiredService<InMemoryRuntimeTransactionCoordinator>()));
