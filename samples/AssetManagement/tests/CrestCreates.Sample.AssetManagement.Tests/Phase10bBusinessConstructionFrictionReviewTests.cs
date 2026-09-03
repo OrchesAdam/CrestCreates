@@ -290,9 +290,10 @@ public sealed class Phase10bBusinessConstructionFrictionReviewTests
         review.Should().Contain("only review documentation, contract tests, and CI wiring");
 
         var repositoryRoot = FindRepositoryRoot();
+        var baseRevision = Environment.GetEnvironmentVariable("PHASE10B_BASE_SHA") ?? "HEAD^";
         foreach (var arguments in new[]
         {
-            new[] { "diff", "HEAD^", "HEAD", "--", "src/Runtime" },
+            new[] { "diff", baseRevision, "HEAD", "--", "src/Runtime" },
             new[] { "diff", "--", "src/Runtime" },
             new[] { "diff", "--cached", "--", "src/Runtime" }
         })
