@@ -28,6 +28,7 @@ jobs:
           --health-retries 5
     env:
       ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING: Host=127.0.0.1;Port=5432;Database=crest_asset_management;Username=crest;Password=crest
+      PHASE10B_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
 
     steps:
       - name: Checkout
@@ -127,8 +128,6 @@ jobs:
           dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.AotFixture.Tests --no-build
 
       - name: Test — Phase 10b business construction friction review
-        env:
-          PHASE10B_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.Tests --no-build --filter "FullyQualifiedName~Phase10bBusinessConstructionFrictionReviewTests"
 
       # Phase 10a review-closure cases are kept as an explicit CI signal in
