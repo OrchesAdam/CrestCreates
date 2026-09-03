@@ -2819,6 +2819,28 @@ with GitHub CI/PR verification pending.
   Outbox factory cases 3/3, PostgreSQL Workflow abort success/rollback 2/2, PostgreSQL outbox
   round-trip 1/1. GitHub CI/PR verification is pending.
 
+### Issue #86 — Phase 10b Business Construction Friction Review (2026-09-03)
+
+**Status**: Review artifact and closure tests implemented on branch
+`codex/phase-10b-business-construction-friction-review-86`; the CI-equivalent local test
+and publish gates are green, with GitHub CI/PR verification pending.
+
+- Added the canonical review artifact at
+  `docs/reviews/2026-09-03-phase-10b-business-construction-friction-review.md`.
+- The artifact normalizes every frozen #85 construction-friction field into F01-F11,
+  records explicit semantic ownership and one primary classification per entry, and
+  compares Asset with Procurement across the eight required shared dimensions.
+- Human and Agent discoverability are separated. #87 receives four bounded evolution
+  scenarios; #88 receives only two small, evidence-backed usability candidates: safe
+  NativeAOT Outbox consumer activation and safe contract/host JSON root composition.
+- The three #85 production corrections are retrospective I01-I03 exemplars only:
+  canonical Workflow abort authority, Outbox producer precision normalization, and
+  Agent semantic JSON comparison. Phase 9 durability/transaction/Outbox/cache/
+  Accountability semantics are not reopened.
+- Added 16 deterministic `Phase10bBusinessConstructionFrictionReviewTests` and an
+  explicit Phase 10b test step to `.github/workflows/ci.yml`. No production Runtime,
+  Generator, Analyzer, or framework abstraction changed in #86.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:
