@@ -68,6 +68,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
             new RuntimeInstanceKey(_currentUser.TenantId, lease.WorkflowInstanceId),
             new RuntimeInstanceKey(_currentUser.TenantId, lease.HumanTaskId),
             reason,
+            $"asset-maintenance-abort:{lease.WorkflowInstanceId}",
             ct);
     }
 

@@ -39,6 +39,7 @@ public static class PostgreSqlRuntimePersistenceServiceCollectionExtensions
         services.AddSingleton<IWorkflowInstanceStore, PostgreSqlWorkflowInstanceStore>();
         services.AddSingleton<IHumanTaskInstanceStore, PostgreSqlHumanTaskInstanceStore>();
         services.AddSingleton<IWorkflowSuspensionReceiptStore, PostgreSqlWorkflowSuspensionReceiptStore>();
+        services.AddSingleton<IWorkflowAbortReceiptStore, PostgreSqlWorkflowAbortReceiptStore>();
         services.AddSingleton<ITransactionalOutboxWriter, PostgreSqlTransactionalOutboxWriter>();
         services.AddSingleton<IOutboxDispatchStore, PostgreSqlOutboxDispatchStore>();
         services.AddSingleton<IWorkflowContinuationAcceptanceStore, PostgreSqlWorkflowContinuationAcceptanceStore>();

@@ -18,6 +18,46 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests;
 public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFixture fixture)
 {
     [Fact]
+    public async Task Append_rejects_manually_constructed_high_precision_message_before_provider_mutation()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .BuildServiceProvider();
+        var timestamp = DateTimeOffset.UnixEpoch.AddTicks(1);
+        var metadata = new OutboxMessageMetadata
+        {
+            MessageId = "precision-manual-pg",
+            TenantId = "tenant-a",
+            ContractId = "contract/v1",
+            EventName = "contract/v1",
+            RequiredConsumerIds = [],
+            CreatedAt = timestamp,
+            OccurredAt = timestamp
+        };
+        var payload = new byte[] { 1 };
+        var message = new OutboxMessage
+        {
+            Metadata = metadata,
+            Payload = payload,
+            Integrity = OutboxMessageIntegrity.Compute(metadata, payload)
+        };
+
+        var action = () => provider.GetRequiredService<IRuntimeTransactionCoordinator>().ExecuteAsync(
+            async ct => await provider.GetRequiredService<ITransactionalOutboxWriter>().AppendAsync(message, ct)).AsTask();
+        await action.Should().ThrowAsync<RuntimePersistenceContractException>();
+
+        var claims = await provider.GetRequiredService<IOutboxDispatchStore>().ClaimAsync(new OutboxClaimRequest
+        {
+            OwnerId = "precision-manual-pg-test",
+            BatchSize = 10,
+            SupportedContractIds = new HashSet<string>(["contract/v1"], StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        });
+        claims.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SharedOutboxContract_UsesProviderClockAndEmptyClaim()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();

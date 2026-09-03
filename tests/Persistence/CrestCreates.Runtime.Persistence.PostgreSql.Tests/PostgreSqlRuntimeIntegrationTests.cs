@@ -1,8 +1,14 @@
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Context;
+using CrestCreates.Accountability.Abstractions.Preparation;
+using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Accountability.Testing.Sinks;
 using CrestCreates.Accountability.Abstractions.Identity;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Runtime.Delivery;
+using CrestCreates.Runtime.Delivery.Abstractions.Messages;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Persistence;
@@ -268,9 +274,12 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         var abort = new WorkflowAbortService(
             workflows,
             tasks,
+            new StoreBackedHumanTaskRuntime(tasks),
             new DefaultWorkflowStateMachine(),
             new FixedWorkflowPinResolver(new WorkflowDescriptor { Id = "approval", Name = "Approval", Version = 1, State = DescriptorState.Active }),
+            provider.GetRequiredService<IDescriptorSnapshotStore>(),
             transaction,
+            provider.GetRequiredService<IWorkflowAbortReceiptStore>(),
             new WorkflowLifecycleEventFactory(new TestIdentity(), new TestHashBuilder()),
             publisher,
             new CrestCreates.Accountability.Context.AuditOperationContextAccessor(),
@@ -287,7 +296,8 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         publisher.Events.Should().ContainSingle(eventItem =>
             eventItem.EventType == "workflow.failed"
             && eventItem.FromStatus == WorkflowInstanceStatus.Suspended
-            && eventItem.ToStatus == WorkflowInstanceStatus.Failed);
+            && eventItem.ToStatus == WorkflowInstanceStatus.Failed
+            && eventItem.ReasonCode == WorkflowLifecycleReasonCodes.Aborted);
     }
 
     [Fact]
@@ -298,7 +308,7 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
         var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
         var transaction = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
-        var workflow = NewWorkflow("tenant-a", "abort-rollback-workflow");
+        var workflow = NewWorkflow("tenant-a", "abort-rollback-workflow", includeAuditOrigin: true);
         var task = NewTask("tenant-a", "abort-rollback-task", workflow.Key);
         await workflows.AddAsync(workflow);
         var persisted = (await workflows.GetAsync(workflow.Key))!;
@@ -314,19 +324,143 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         var abort = new WorkflowAbortService(
             new FailingWorkflowUpdateStore(workflows),
             tasks,
+            new StoreBackedHumanTaskRuntime(tasks),
             new DefaultWorkflowStateMachine(),
             new FixedWorkflowPinResolver(new WorkflowDescriptor { Id = "approval", Name = "Approval", Version = 1, State = DescriptorState.Active }),
+            provider.GetRequiredService<IDescriptorSnapshotStore>(),
             transaction,
+            provider.GetRequiredService<IWorkflowAbortReceiptStore>(),
             new WorkflowLifecycleEventFactory(new TestIdentity(), new TestHashBuilder()),
             new RecordingWorkflowLifecyclePublisher(),
             new CrestCreates.Accountability.Context.AuditOperationContextAccessor(),
-            new CrestCreates.Workflow.Accountability.WorkflowAccountabilityOutboxAppender(null, null, null));
+            new CrestCreates.Workflow.Accountability.WorkflowAccountabilityOutboxAppender(
+                provider.GetRequiredService<IAuditEnvelopePreparer>(),
+                provider.GetRequiredService<ITransactionalOutboxWriter>(),
+                provider.GetRequiredService<IOutboxMessageFactory>()));
 
         var action = () => abort.AbortAsync(workflow.Key, task.Key, "business store unavailable");
         await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*forced workflow write failure*");
         (await workflows.GetAsync(workflow.Key))!.Status.Should().Be(WorkflowInstanceStatus.Suspended);
         (await tasks.GetAsync(task.Key))!.Status.Should().Be(HumanTaskInstanceStatus.Assigned);
+        (await provider.GetRequiredService<IOutboxDispatchStore>().ClaimAsync(new OutboxClaimRequest
+        {
+            OwnerId = "abort-rollback-test",
+            BatchSize = 10,
+            SupportedContractIds = new HashSet<string>(["crest.accountability.audit-envelope/v1"], StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        })).Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task WorkflowAbort_ReplaysSameOperationAfterCommitAcknowledgementLossWithoutDuplicateLifecycleOrAccountability()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var transaction = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var workflow = NewWorkflow("tenant-a", "abort-replay-workflow");
+        var task = NewTask("tenant-a", "abort-replay-task", workflow.Key);
+        await workflows.AddAsync(workflow);
+        var persisted = (await workflows.GetAsync(workflow.Key))!;
+        var suspended = persisted.Snapshot();
+        suspended.Status = WorkflowInstanceStatus.Suspended;
+        suspended.WaitingHumanTaskKey = task.Key;
+        await transaction.ExecuteAsync(async ct =>
+        {
+            await tasks.AddAsync(task, ct);
+            await workflows.UpdateAsync(suspended, persisted.Revision, ct);
+        });
+
+        var publisher = new RecordingWorkflowLifecyclePublisher();
+        var abort = CreateAbort(provider, workflows, tasks, transaction, publisher);
+        using (PostgreSqlRuntimeTestHooks.BlockAfterCommit(() => ValueTask.FromException(new InvalidOperationException("lost commit acknowledgement"))))
+        {
+            var uncertain = () => abort.AbortAsync(workflow.Key, task.Key, "business store unavailable", "abort-replay-1");
+            await uncertain.Should().ThrowAsync<RuntimeTransactionCommitUnknownException>();
+        }
+
+        var replay = await abort.AbortAsync(workflow.Key, task.Key, "business store unavailable", "abort-replay-1");
+        replay.Status.Should().Be(WorkflowAbortResultStatus.Duplicate);
+        publisher.Events.Should().BeEmpty();
+        (await workflows.GetAsync(workflow.Key))!.Status.Should().Be(WorkflowInstanceStatus.Failed);
+        (await tasks.GetAsync(task.Key))!.Status.Should().Be(HumanTaskInstanceStatus.Cancelled);
+
+        var conflict = () => abort.AbortAsync(workflow.Key, task.Key, "different abort", "abort-replay-1");
+        await conflict.Should().ThrowAsync<RuntimePersistenceContractException>();
+    }
+
+    [Fact]
+    public async Task WorkflowAbort_ComposedAccountabilityIsCommittedAndRolledBackWithRuntimeState()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var transaction = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var workflow = NewWorkflow("tenant-a", "abort-accountability-workflow", includeAuditOrigin: true);
+        var task = NewTask("tenant-a", "abort-accountability-task", workflow.Key);
+        await SeedSuspendedAsync(workflows, tasks, transaction, workflow, task);
+        var publisher = new RecordingWorkflowLifecyclePublisher();
+        var abort = CreateAbort(provider, workflows, tasks, transaction, publisher, useRealAccountability: true);
+
+        (await abort.AbortAsync(workflow.Key, task.Key, "business store unavailable", "abort-accountability-1"))
+            .Status.Should().Be(WorkflowAbortResultStatus.Accepted);
+        var claims = await provider.GetRequiredService<IOutboxDispatchStore>().ClaimAsync(new OutboxClaimRequest
+        {
+            OwnerId = "abort-accountability-test",
+            BatchSize = 10,
+            SupportedContractIds = new HashSet<string>(["crest.accountability.audit-envelope/v1"], StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        });
+        claims.Should().ContainSingle(item => item.Message.Metadata.EventName == "workflow.failed");
+        publisher.Events.Should().ContainSingle();
+    }
+
+    private static async Task SeedSuspendedAsync(
+        IWorkflowInstanceStore workflows,
+        IHumanTaskInstanceStore tasks,
+        IRuntimeTransactionCoordinator transaction,
+        WorkflowInstance workflow,
+        HumanTaskInstance task)
+    {
+        await workflows.AddAsync(workflow);
+        var persisted = (await workflows.GetAsync(workflow.Key))!;
+        var suspended = persisted.Snapshot();
+        suspended.Status = WorkflowInstanceStatus.Suspended;
+        suspended.WaitingHumanTaskKey = task.Key;
+        await transaction.ExecuteAsync(async ct =>
+        {
+            await tasks.AddAsync(task, ct);
+            await workflows.UpdateAsync(suspended, persisted.Revision, ct);
+        });
+    }
+
+    private static WorkflowAbortService CreateAbort(
+        ServiceProvider provider,
+        IWorkflowInstanceStore workflows,
+        IHumanTaskInstanceStore tasks,
+        IRuntimeTransactionCoordinator transaction,
+        RecordingWorkflowLifecyclePublisher publisher,
+        bool useRealAccountability = false)
+        => new(
+            workflows,
+            tasks,
+            new StoreBackedHumanTaskRuntime(tasks),
+            new DefaultWorkflowStateMachine(),
+            new FixedWorkflowPinResolver(new WorkflowDescriptor { Id = "approval", Name = "Approval", Version = 1, State = DescriptorState.Active }),
+            provider.GetRequiredService<IDescriptorSnapshotStore>(),
+            transaction,
+            provider.GetRequiredService<IWorkflowAbortReceiptStore>(),
+            new WorkflowLifecycleEventFactory(new TestIdentity(), new TestHashBuilder()),
+            publisher,
+            new CrestCreates.Accountability.Context.AuditOperationContextAccessor(),
+            useRealAccountability
+                ? new CrestCreates.Workflow.Accountability.WorkflowAccountabilityOutboxAppender(
+                    provider.GetRequiredService<IAuditEnvelopePreparer>(),
+                    provider.GetRequiredService<ITransactionalOutboxWriter>(),
+                    provider.GetRequiredService<IOutboxMessageFactory>())
+                : new CrestCreates.Workflow.Accountability.WorkflowAccountabilityOutboxAppender(null, null, null));
 
     [Fact]
     public async Task TenantScopedKeysAndReceiptIntegrity_ShouldRemainIsolatedAndClassifyConflicts()
@@ -673,7 +807,11 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
     }
 
     private static ServiceProvider BuildProvider(PostgreSqlRuntimePersistenceOptions options)
-        => new ServiceCollection().AddCrestCreatesPostgreSqlRuntimePersistence(options).BuildServiceProvider();
+        => new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(options)
+            .AddAccountability()
+            .AddRuntimeDelivery()
+            .BuildServiceProvider();
 
     private static async Task ExecuteSchemaDdlAsync(PostgreSqlRuntimePersistenceOptions options, string sql)
     {
@@ -683,9 +821,17 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         await command.ExecuteNonQueryAsync();
     }
 
-    private static WorkflowInstance NewWorkflow(string? tenantId, string id) => new()
+    private static WorkflowInstance NewWorkflow(string? tenantId, string id, bool includeAuditOrigin = false) => new()
     {
         Key = new RuntimeInstanceKey(tenantId, id),
+        AuditOrigin = includeAuditOrigin
+            ? new AuditOrigin
+            {
+                CorrelationId = $"correlation-{id}",
+                InitiatingActor = new AuditActor { Kind = "test", Id = "test" },
+                InvocationSource = "test"
+            }
+            : null,
         WorkflowPin = Pin("workflow", "approval", "Workflow"),
         Status = WorkflowInstanceStatus.Running,
         StartedAt = DateTimeOffset.UnixEpoch,
@@ -816,6 +962,31 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
 
         public Task<WorkflowInstance?> GetByWaitingHumanTaskAsync(RuntimeInstanceKey humanTaskKey, CancellationToken cancellationToken = default)
             => inner.GetByWaitingHumanTaskAsync(humanTaskKey, cancellationToken);
+    }
+
+    private sealed class StoreBackedHumanTaskRuntime(IHumanTaskInstanceStore store) : IHumanTaskRuntime
+    {
+        public Task<HumanTaskInstance> PrepareAsync(HumanTaskCreationRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<HumanTaskInstance> CreateAsync(HumanTaskCreationRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<HumanTaskInstance> CompleteAsync(HumanTaskCompletionRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public async Task<HumanTaskInstance> CancelAsync(RuntimeInstanceKey humanTaskKey, string reason, CancellationToken ct = default)
+        {
+            var loaded = await store.GetAsync(humanTaskKey, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("HumanTask not found.");
+            var candidate = loaded.Snapshot();
+            candidate.Status = HumanTaskInstanceStatus.Cancelled;
+            candidate.CancellationReason = reason;
+            candidate.CancelledAt = DateTimeOffset.UtcNow;
+            await store.UpdateAsync(candidate, loaded.Revision, ct).ConfigureAwait(false);
+            candidate.Revision = loaded.Revision + 1;
+            return candidate;
+        }
     }
 
     private sealed class TestIdentity : IAuditIdentityGenerator

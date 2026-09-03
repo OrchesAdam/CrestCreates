@@ -9,9 +9,16 @@ namespace CrestCreates.Workflow.Abstractions;
 /// </summary>
 public interface IWorkflowAbortService
 {
-    Task AbortAsync(
+    Task<WorkflowAbortResult> AbortAsync(
         RuntimeInstanceKey workflowKey,
         RuntimeInstanceKey humanTaskKey,
         string reason,
+        CancellationToken cancellationToken = default);
+
+    Task<WorkflowAbortResult> AbortAsync(
+        RuntimeInstanceKey workflowKey,
+        RuntimeInstanceKey humanTaskKey,
+        string reason,
+        string abortOperationId,
         CancellationToken cancellationToken = default);
 }

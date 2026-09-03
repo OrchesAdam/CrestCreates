@@ -80,9 +80,12 @@ public static class WorkflowServiceCollectionExtensions
         services.TryAddScoped<IWorkflowAbortService>(sp => new WorkflowAbortService(
             sp.GetRequiredService<IWorkflowInstanceStore>(),
             sp.GetRequiredService<IHumanTaskInstanceStore>(),
+            sp.GetRequiredService<IHumanTaskRuntime>(),
             sp.GetRequiredService<IWorkflowStateMachine>(),
             sp.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>(),
+            sp.GetService<IDescriptorSnapshotStore>(),
             sp.GetRequiredService<IRuntimeTransactionCoordinator>(),
+            sp.GetRequiredService<IWorkflowAbortReceiptStore>(),
             sp.GetRequiredService<WorkflowLifecycleEventFactory>(),
             sp.GetRequiredService<IWorkflowLifecycleEventPublisher>(),
             sp.GetRequiredService<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(),

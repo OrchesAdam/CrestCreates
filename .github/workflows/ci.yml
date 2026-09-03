@@ -120,6 +120,15 @@ jobs:
           dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests --no-build
           dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.AotFixture.Tests --no-build
 
+      # Phase 10a review-closure cases are kept as an explicit CI signal in
+      # addition to the full project suites below: provider-boundary outbox
+      # precision, semantic jsonb equality, and abort replay/compensation.
+      - name: Test — Phase 10a review closure contracts
+        run: |
+          dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.Tests --no-build --filter "FullyQualifiedName~OrganizationScope"
+          dotnet test tests/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory.Tests --no-build --filter "FullyQualifiedName~Append_rejects_manually_constructed_high_precision_message"
+          dotnet test tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests --no-build --filter "FullyQualifiedName~WorkflowAbort_|FullyQualifiedName~Append_rejects_manually_constructed_high_precision_message|FullyQualifiedName~PostgreSqlJsonEqualityContractTests"
+
       # ── Metadata ──
       - name: Test — Metadata / Core
         run: |
