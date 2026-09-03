@@ -19,13 +19,7 @@ public static class OutboxMessageIntegrity
             writer.WriteNumber("eventVersion", metadata.EventVersion);
             if (metadata.CorrelationId is null) writer.WriteNull("correlationId"); else writer.WriteString("correlationId", metadata.CorrelationId);
             if (metadata.CausationId is null) writer.WriteNull("causationId"); else writer.WriteString("causationId", metadata.CausationId);
-            // Runtime providers commonly persist timestamps at microsecond
-            // precision (for example PostgreSQL timestamptz). Normalize the
-            // signed payload before hashing so a durable round-trip remains
-            // verifiable without weakening the rest of the envelope hash.
-            var occurredAt = (metadata.OccurredAt == default ? metadata.CreatedAt : metadata.OccurredAt).ToUniversalTime();
-            occurredAt = occurredAt.AddTicks(-(occurredAt.Ticks % TimeSpan.TicksPerMicrosecond));
-            writer.WriteString("occurredAt", occurredAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            writer.WriteString("occurredAt", (metadata.OccurredAt == default ? metadata.CreatedAt : metadata.OccurredAt).ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
             writer.WritePropertyName("requiredConsumerIds");
             writer.WriteStartArray();
             foreach (var id in metadata.RequiredConsumerIds.Order(StringComparer.Ordinal)) writer.WriteStringValue(id);

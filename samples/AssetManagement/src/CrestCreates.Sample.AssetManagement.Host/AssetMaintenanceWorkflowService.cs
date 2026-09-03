@@ -24,7 +24,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
     private readonly IAssetStore _assets;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
     private readonly ICurrentUser _currentUser;
-    private readonly IWorkflowInstanceStore _workflowStore;
+    private readonly IWorkflowAbortService _workflowAbortService;
 
     public AssetMaintenanceWorkflowService(
         IWorkflowEngine workflows,
@@ -33,7 +33,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         IAssetStore assets,
         IRuntimeStateContractRegistry stateRegistry,
         ICurrentUser currentUser,
-        IWorkflowInstanceStore workflowStore)
+        IWorkflowAbortService workflowAbortService)
     {
         _workflows = workflows;
         _humanTasks = humanTasks;
@@ -41,7 +41,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         _assets = assets;
         _stateRegistry = stateRegistry;
         _currentUser = currentUser;
-        _workflowStore = workflowStore;
+        _workflowAbortService = workflowAbortService;
     }
 
     public async Task<AssetMaintenanceWorkflowLease> StartAsync(Guid assetId, string tenantId, string requesterId, CancellationToken ct = default)
@@ -64,21 +64,11 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
 
     public async Task AbortAsync(AssetMaintenanceWorkflowLease lease, string reason, CancellationToken ct = default)
     {
-        var taskKey = new RuntimeInstanceKey(_currentUser.TenantId, lease.HumanTaskId);
-        var task = await _taskStore.GetAsync(taskKey, ct);
-        if (task is not null && task.Status is not HumanTaskInstanceStatus.Completed and not HumanTaskInstanceStatus.Cancelled)
-            await _humanTasks.CancelAsync(taskKey, reason, ct);
-
-        var workflowKey = new RuntimeInstanceKey(_currentUser.TenantId, lease.WorkflowInstanceId);
-        var workflow = await _workflowStore.GetAsync(workflowKey, ct);
-        if (workflow is not null && workflow.Status == WorkflowInstanceStatus.Suspended)
-        {
-            workflow.Status = WorkflowInstanceStatus.Failed;
-            workflow.ErrorMessage = reason;
-            workflow.CompletedAt = DateTimeOffset.UtcNow;
-            workflow.WaitingHumanTaskKey = null;
-            await _workflowStore.UpdateAsync(workflow, workflow.Revision, ct);
-        }
+        await _workflowAbortService.AbortAsync(
+            new RuntimeInstanceKey(_currentUser.TenantId, lease.WorkflowInstanceId),
+            new RuntimeInstanceKey(_currentUser.TenantId, lease.HumanTaskId),
+            reason,
+            ct);
     }
 
     public async Task CompleteAsync(string humanTaskId, string outcome, string note, CancellationToken ct = default)

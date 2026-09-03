@@ -2803,14 +2803,21 @@ with GitHub CI/PR verification pending.
   publish-link-run fixture.
 - Second review addressed all eight blockers: the host now requires the PostgreSQL durable
   Runtime provider, uses the real framework PermissionChecker/GrantStore chain, fails closed
-  for missing organization scope, preserves assigned-maintenance state, rejects assigned
+  for both organization identity shapes, preserves assigned-maintenance state, rejects assigned
   transfers, compensates Runtime state when the business store fails, and persists the original
   maintenance requester. The construction friction record now covers every frozen #85 field.
-- Production-provider hardening normalizes outbox timestamps to PostgreSQL microsecond precision
-  and compares persisted Agent structured output semantically. NativeAOT activation remains an
-  explicit host composition factory.
-- Local evidence: design-case tests 10/10, PostgreSQL E2E process 1/1, AOT metadata/query tests
-  2/2, and NativeAOT publish-link-run 1/1 passed. GitHub CI/PR verification is pending.
+- The business failure case exposed a genuine Runtime capability gap. The canonical
+  `IWorkflowAbortService` now owns legal `Suspended -> Failed` transitions, cancels the correlated
+  HumanTask and emits the normal `workflow.failed` accountability fact in one Runtime transaction;
+  PostgreSQL tests prove both commit and rollback of the cross-store operation.
+- Outbox v1 integrity remains an exact provider-neutral canonical writer. Producer metadata is
+  normalized to contract microsecond precision before hashing and persistence, and a PostgreSQL
+  100ns-tail round-trip test recomputes the unchanged v1 hash. Agent completion confirmation has
+  dedicated semantic JSON boundary tests (object reorder accepted; value and array reorder rejected).
+  NativeAOT activation remains an explicit host composition factory.
+- Local evidence: Asset design cases 7/7, Workflow state cases 8/8, Agent semantic cases 3/3,
+  Outbox factory cases 3/3, PostgreSQL Workflow abort success/rollback 2/2, PostgreSQL outbox
+  round-trip 1/1. GitHub CI/PR verification is pending.
 
 ## Recommended Next Thread Entry Prompt
 

@@ -163,12 +163,18 @@ public sealed class AssetApplicationService
     private Task<IQueryable<Asset>> ApplyAssetDataPermissionAsync(IQueryable<Asset> query)
     {
         var scope = (DataScope)_currentUser.DataScopeValue;
-        if (scope is DataScope.Organization or DataScope.OrganizationAndSub
-            && _currentUser.OrganizationIds.Count == 0)
+        if (scope == DataScope.Organization && !_currentUser.OrganizationId.HasValue)
         {
-            // The legacy filter is fail-open when OrganizationId is absent.
-            // Asset visibility must remain fail-closed at this business
-            // boundary until the framework filter contract is upgraded.
+            // The legacy Organization filter reads the singular organization
+            // identity. A plural identity alone must never widen this scope
+            // to the whole tenant.
+            return Task.FromResult<IQueryable<Asset>>(Array.Empty<Asset>().AsQueryable());
+        }
+
+        if (scope == DataScope.OrganizationAndSub && _currentUser.OrganizationIds.Count == 0)
+        {
+            // Asset visibility must remain fail-closed when the hierarchy
+            // roots are absent.
             return Task.FromResult<IQueryable<Asset>>(Array.Empty<Asset>().AsQueryable());
         }
 

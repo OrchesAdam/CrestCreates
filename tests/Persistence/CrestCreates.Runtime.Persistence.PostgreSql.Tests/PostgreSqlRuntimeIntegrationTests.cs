@@ -1,6 +1,7 @@
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Accountability.Testing.Sinks;
+using CrestCreates.Accountability.Abstractions.Identity;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
@@ -11,6 +12,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
+using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using CrestCreates.Runtime.Persistence.Testing.Cases;
 using FluentAssertions;
@@ -239,6 +241,91 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         recoveredTask!.Input.Should().Be(task.Input);
         recoveredTask.Revision.Should().Be(1);
         recoveredReceipt.Should().BeEquivalentTo(receipt);
+    }
+
+    [Fact]
+    public async Task WorkflowAbort_ShouldAtomicallyCancelTaskFailWorkflowAndPublishCanonicalFailure()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var transaction = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var workflow = NewWorkflow("tenant-a", "abort-workflow");
+        var task = NewTask("tenant-a", "abort-task", workflow.Key);
+        await workflows.AddAsync(workflow);
+        var persisted = (await workflows.GetAsync(workflow.Key))!;
+        var suspended = persisted.Snapshot();
+        suspended.Status = WorkflowInstanceStatus.Suspended;
+        suspended.WaitingHumanTaskKey = task.Key;
+        await transaction.ExecuteAsync(async ct =>
+        {
+            await tasks.AddAsync(task, ct);
+            await workflows.UpdateAsync(suspended, persisted.Revision, ct);
+        });
+
+        var publisher = new RecordingWorkflowLifecyclePublisher();
+        var abort = new WorkflowAbortService(
+            workflows,
+            tasks,
+            new DefaultWorkflowStateMachine(),
+            new FixedWorkflowPinResolver(new WorkflowDescriptor { Id = "approval", Name = "Approval", Version = 1, State = DescriptorState.Active }),
+            transaction,
+            new WorkflowLifecycleEventFactory(new TestIdentity(), new TestHashBuilder()),
+            publisher,
+            new CrestCreates.Accountability.Context.AuditOperationContextAccessor(),
+            new CrestCreates.Workflow.Accountability.WorkflowAccountabilityOutboxAppender(null, null, null));
+
+        await abort.AbortAsync(workflow.Key, task.Key, "business store unavailable");
+
+        var recoveredWorkflow = (await workflows.GetAsync(workflow.Key))!;
+        var recoveredTask = (await tasks.GetAsync(task.Key))!;
+        recoveredWorkflow.Status.Should().Be(WorkflowInstanceStatus.Failed);
+        recoveredWorkflow.WaitingHumanTaskKey.Should().BeNull();
+        recoveredWorkflow.ErrorMessage.Should().Be("business store unavailable");
+        recoveredTask.Status.Should().Be(HumanTaskInstanceStatus.Cancelled);
+        publisher.Events.Should().ContainSingle(eventItem =>
+            eventItem.EventType == "workflow.failed"
+            && eventItem.FromStatus == WorkflowInstanceStatus.Suspended
+            && eventItem.ToStatus == WorkflowInstanceStatus.Failed);
+    }
+
+    [Fact]
+    public async Task WorkflowAbort_WhenWorkflowWriteFails_RollsBackTaskCancellationOnPostgreSql()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var workflows = provider.GetRequiredService<IWorkflowInstanceStore>();
+        var tasks = provider.GetRequiredService<IHumanTaskInstanceStore>();
+        var transaction = provider.GetRequiredService<IRuntimeTransactionCoordinator>();
+        var workflow = NewWorkflow("tenant-a", "abort-rollback-workflow");
+        var task = NewTask("tenant-a", "abort-rollback-task", workflow.Key);
+        await workflows.AddAsync(workflow);
+        var persisted = (await workflows.GetAsync(workflow.Key))!;
+        var suspended = persisted.Snapshot();
+        suspended.Status = WorkflowInstanceStatus.Suspended;
+        suspended.WaitingHumanTaskKey = task.Key;
+        await transaction.ExecuteAsync(async ct =>
+        {
+            await tasks.AddAsync(task, ct);
+            await workflows.UpdateAsync(suspended, persisted.Revision, ct);
+        });
+
+        var abort = new WorkflowAbortService(
+            new FailingWorkflowUpdateStore(workflows),
+            tasks,
+            new DefaultWorkflowStateMachine(),
+            new FixedWorkflowPinResolver(new WorkflowDescriptor { Id = "approval", Name = "Approval", Version = 1, State = DescriptorState.Active }),
+            transaction,
+            new WorkflowLifecycleEventFactory(new TestIdentity(), new TestHashBuilder()),
+            new RecordingWorkflowLifecyclePublisher(),
+            new CrestCreates.Accountability.Context.AuditOperationContextAccessor(),
+            new CrestCreates.Workflow.Accountability.WorkflowAccountabilityOutboxAppender(null, null, null));
+
+        var action = () => abort.AbortAsync(workflow.Key, task.Key, "business store unavailable");
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*forced workflow write failure*");
+        (await workflows.GetAsync(workflow.Key))!.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+        (await tasks.GetAsync(task.Key))!.Status.Should().Be(HumanTaskInstanceStatus.Assigned);
     }
 
     [Fact]
@@ -688,4 +775,59 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         Outcome = new AuditOutcome { Status = "succeeded" },
         Integrity = integrity
     };
+
+    private sealed class RecordingWorkflowLifecyclePublisher : IWorkflowLifecycleEventPublisher
+    {
+        public List<WorkflowLifecycleEvent> Events { get; } = [];
+
+        public Task PublishAsync(WorkflowLifecycleEvent lifecycleEvent, CancellationToken ct)
+        {
+            Events.Add(lifecycleEvent);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FixedWorkflowPinResolver(WorkflowDescriptor descriptor) : IRuntimeDescriptorPinResolver<WorkflowDescriptor>
+    {
+        public ResolvedRuntimeDescriptor<WorkflowDescriptor> Capture(WorkflowDescriptor value)
+            => new() { Descriptor = value, Pin = descriptorPin };
+
+        public ResolvedRuntimeDescriptor<WorkflowDescriptor> Resolve(RuntimeDescriptorPin pin)
+            => new() { Descriptor = descriptor, Pin = pin };
+
+        private static RuntimeDescriptorPin descriptorPin => new()
+        {
+            Ref = new DescriptorRef("workflow", "approval", 1),
+            ContractHash = Hash("approval-contract", "Contract", "Workflow"),
+            DefinitionHash = Hash("approval-definition", "Definition", "Workflow")
+        };
+    }
+
+    private sealed class FailingWorkflowUpdateStore(IWorkflowInstanceStore inner) : IWorkflowInstanceStore
+    {
+        public Task AddAsync(WorkflowInstance instance, CancellationToken cancellationToken = default)
+            => inner.AddAsync(instance, cancellationToken);
+
+        public Task UpdateAsync(WorkflowInstance instance, long expectedRevision, CancellationToken cancellationToken = default)
+            => Task.FromException(new InvalidOperationException("forced workflow write failure"));
+
+        public Task<WorkflowInstance?> GetAsync(RuntimeInstanceKey key, CancellationToken cancellationToken = default)
+            => inner.GetAsync(key, cancellationToken);
+
+        public Task<WorkflowInstance?> GetByWaitingHumanTaskAsync(RuntimeInstanceKey humanTaskKey, CancellationToken cancellationToken = default)
+            => inner.GetByWaitingHumanTaskAsync(humanTaskKey, cancellationToken);
+    }
+
+    private sealed class TestIdentity : IAuditIdentityGenerator
+    {
+        private int _counter;
+        public string CreateOperationId() => $"abort-operation-{Interlocked.Increment(ref _counter)}";
+        public string CreateAuditId() => $"abort-audit-{Interlocked.Increment(ref _counter)}";
+    }
+
+    private sealed class TestHashBuilder : IDescriptorStableHashBuilder
+    {
+        public DescriptorStableHashes Build(IDescriptor descriptor)
+            => new() { ContractHash = Hash("contract", "Contract", "Workflow"), DefinitionHash = Hash("definition", "Definition", "Workflow") };
+    }
 }

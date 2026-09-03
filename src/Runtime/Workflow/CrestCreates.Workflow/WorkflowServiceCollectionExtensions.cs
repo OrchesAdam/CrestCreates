@@ -77,6 +77,16 @@ public static class WorkflowServiceCollectionExtensions
             sp.GetService<IDescriptorSnapshotStore>(),
             sp.GetRequiredService<WorkflowAccountabilityOutboxAppender>(),
             sp.GetService<IRuntimeTransactionCoordinator>()));
+        services.TryAddScoped<IWorkflowAbortService>(sp => new WorkflowAbortService(
+            sp.GetRequiredService<IWorkflowInstanceStore>(),
+            sp.GetRequiredService<IHumanTaskInstanceStore>(),
+            sp.GetRequiredService<IWorkflowStateMachine>(),
+            sp.GetRequiredService<IRuntimeDescriptorPinResolver<WorkflowDescriptor>>(),
+            sp.GetRequiredService<IRuntimeTransactionCoordinator>(),
+            sp.GetRequiredService<WorkflowLifecycleEventFactory>(),
+            sp.GetRequiredService<IWorkflowLifecycleEventPublisher>(),
+            sp.GetRequiredService<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(),
+            sp.GetRequiredService<WorkflowAccountabilityOutboxAppender>()));
         services.TryAddScoped<IWorkflowContinuationService>(sp => new WorkflowContinuationService(
             sp.GetRequiredService<IWorkflowInstanceStore>(),
             sp.GetRequiredService<IWorkflowStateMachine>(),

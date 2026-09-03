@@ -25,6 +25,25 @@ public sealed class OutboxMessageFactoryTests
     }
 
     [Fact]
+    public void Factory_canonicalizes_timestamps_before_v1_integrity_is_computed()
+    {
+        var timestamp = DateTimeOffset.UnixEpoch.AddTicks(1_234_567);
+        var message = new DefaultOutboxMessageFactory().Create(
+            "m-precision",
+            "tenant-a",
+            "contract/v1",
+            "payload/v1",
+            new byte[] { 1 },
+            createdAt: timestamp);
+
+        message.Metadata.OccurredAt.Ticks.Should().Be(timestamp.Ticks - (timestamp.Ticks % TimeSpan.TicksPerMicrosecond));
+        message.Metadata.CreatedAt.Ticks.Should().Be(message.Metadata.OccurredAt.Ticks);
+        message.Integrity.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
+        message.Integrity.CanonicalShapeVersion.Should().Be("runtime-outbox-message-v1");
+        OutboxMessageIntegrity.Matches(message).Should().BeTrue();
+    }
+
+    [Fact]
     public void Options_reject_timeout_that_can_outlive_lease()
     {
         var options = new OutboxDeliveryOptions { LeaseDuration = TimeSpan.FromSeconds(1), HandlerTimeout = TimeSpan.FromSeconds(1) };

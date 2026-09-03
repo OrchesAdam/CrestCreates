@@ -33,6 +33,12 @@ public class WorkflowStateMachineTests
             .Should().NotThrow();
 
     [Fact]
+    public void ValidateTransition_SuspendedToFailed_DoesNotThrowForAbortAuthority()
+        => new Action(() => _machine.ValidateTransition(
+            WorkflowInstanceStatus.Suspended, WorkflowInstanceStatus.Failed))
+            .Should().NotThrow();
+
+    [Fact]
     public void ValidateTransition_CompletedToRunning_Throws()
         => new Action(() => _machine.ValidateTransition(
             WorkflowInstanceStatus.Completed, WorkflowInstanceStatus.Running))

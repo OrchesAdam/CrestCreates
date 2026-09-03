@@ -100,7 +100,30 @@ public sealed class AssetDesignCaseTests
         var currentUser = new TestCurrentUser
         {
             DataScopeValue = (int)DataScope.Organization,
+            OrganizationId = null,
             OrganizationIds = []
+        };
+        var asset = CreateAsset();
+        var service = new AssetApplicationService(
+            new ThrowingAssetStore(asset) { ThrowOnUpdate = false },
+            currentUser,
+            new AllowAllDataPermissionFilter(),
+            new AllowAllPermissionChecker(),
+            new RecordingWorkflowStarter());
+
+        var result = await service.QueryAsync(new AssetQueryInput(), asset.TenantId, CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OrganizationScopeWithOnlyPluralOrganizationIds_FailsClosed()
+    {
+        var currentUser = new TestCurrentUser
+        {
+            DataScopeValue = (int)DataScope.Organization,
+            OrganizationId = null,
+            OrganizationIds = [Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")]
         };
         var asset = CreateAsset();
         var service = new AssetApplicationService(
@@ -186,7 +209,7 @@ public sealed class AssetDesignCaseTests
         public bool IsAuthenticated => true;
         public string TenantId => "tenant-a";
         public string[] Roles => ["asset-manager"];
-        public Guid? OrganizationId => Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        public Guid? OrganizationId { get; init; } = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
         public IReadOnlyList<Guid> OrganizationIds { get; init; } = [Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")];
         public int DataScopeValue { get; init; } = (int)DataScope.Tenant;
         public bool IsSuperAdmin => false;
