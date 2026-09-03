@@ -25,7 +25,10 @@ internal sealed class InMemoryWorkflowAbortReceiptStore : IWorkflowAbortReceiptS
         => _coordinator.ExecuteAsync(_ =>
         {
             using var guard = _coordinator.EnterStoreOperation();
-            return ValueTask.FromResult(_coordinator.CurrentState.AbortReceipts.TryGetValue((scope, abortOperationId), out var receipt) ? receipt : null);
+            if (!_coordinator.CurrentState.AbortReceipts.TryGetValue((scope, abortOperationId), out var receipt))
+                return ValueTask.FromResult<WorkflowAbortReceipt?>(null);
+            Validate(receipt);
+            return ValueTask.FromResult<WorkflowAbortReceipt?>(receipt);
         }, cancellationToken).AsTask();
 
     private WorkflowAbortReceiptWriteResult AddCore(WorkflowAbortReceipt receipt)

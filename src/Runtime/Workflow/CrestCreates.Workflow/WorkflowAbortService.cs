@@ -60,13 +60,6 @@ public sealed class WorkflowAbortService : IWorkflowAbortService
         _accountabilityOutbox = accountabilityOutbox;
     }
 
-    public Task<WorkflowAbortResult> AbortAsync(
-        RuntimeInstanceKey workflowKey,
-        RuntimeInstanceKey humanTaskKey,
-        string reason,
-        CancellationToken cancellationToken = default)
-        => AbortAsync(workflowKey, humanTaskKey, reason, _events.CreateRunOperationId(), cancellationToken);
-
     public async Task<WorkflowAbortResult> AbortAsync(
         RuntimeInstanceKey workflowKey,
         RuntimeInstanceKey humanTaskKey,

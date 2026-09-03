@@ -13,12 +13,6 @@ public interface IWorkflowAbortService
         RuntimeInstanceKey workflowKey,
         RuntimeInstanceKey humanTaskKey,
         string reason,
-        CancellationToken cancellationToken = default);
-
-    Task<WorkflowAbortResult> AbortAsync(
-        RuntimeInstanceKey workflowKey,
-        RuntimeInstanceKey humanTaskKey,
-        string reason,
         string abortOperationId,
         CancellationToken cancellationToken = default);
 }

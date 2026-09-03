@@ -75,7 +75,12 @@ internal sealed class PostgreSqlWorkflowAbortReceiptStore : IWorkflowAbortReceip
         PostgreSqlRuntimeStoreSupport.AddScope(command, scope);
         command.Parameters.AddWithValue("operation", Prefix + abortOperationId);
         var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
-        return value is null ? null : PostgreSqlRuntimeStoreSupport.Deserialize(value, PostgreSqlRuntimeJsonSerializerContext.Default.WorkflowAbortReceipt);
+        if (value is null)
+            return null;
+
+        var receipt = PostgreSqlRuntimeStoreSupport.Deserialize(value, PostgreSqlRuntimeJsonSerializerContext.Default.WorkflowAbortReceipt);
+        Validate(receipt);
+        return receipt;
     }
 
     private static void Validate(WorkflowAbortReceipt receipt)
