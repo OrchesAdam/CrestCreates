@@ -2830,14 +2830,21 @@ and publish gates are green, with GitHub CI/PR verification pending.
 - The artifact normalizes every frozen #85 construction-friction field into F01-F11,
   records explicit semantic ownership and one primary classification per entry, and
   compares Asset with Procurement across the eight required shared dimensions.
-- Human and Agent discoverability are separated. #87 receives four bounded evolution
-  scenarios; #88 receives only two small, evidence-backed usability candidates: safe
-  NativeAOT Outbox consumer activation and safe contract/host JSON root composition.
+- Human and Agent discoverability are separated. #87 receives five bounded evolution
+  scenarios; #88 receives only one promoted, evidence-backed usability candidate:
+  safe NativeAOT Outbox consumer activation. The apparent JSON composition candidate
+  was rejected because .NET `JsonTypeInfoResolver.Combine(...)` already provides the
+  semantic and CrestCreates already uses it; that observation goes to #87.
 - The three #85 production corrections are retrospective I01-I03 exemplars only:
-  canonical Workflow abort authority, Outbox producer precision normalization, and
-  Agent semantic JSON comparison. Phase 9 durability/transaction/Outbox/cache/
-  Accountability semantics are not reopened.
-- Added 16 deterministic `Phase10bBusinessConstructionFrictionReviewTests` and an
+  I01 is the proven Workflow abort capability gap; I02 and I03 are contract-correctness
+  repairs inside existing Outbox and Agent owners. Phase 9 durability/transaction/
+  Outbox/cache/Accountability semantics are not reopened.
+- Blocking review follow-up separated those incident classifications explicitly and
+  rejected C88-02 after confirming the existing .NET `JsonTypeInfoResolver.Combine(...)`
+  pattern is already used by CrestCreates. The C88-01 negative Design Case removed
+  both sample consumer factories and proved NativeAOT publish/link succeeds but runtime
+  activation fails in `OutboxCompositionValidator` without the explicit factory.
+- Added 18 deterministic `Phase10bBusinessConstructionFrictionReviewTests` and an
   explicit Phase 10b test step to `.github/workflows/ci.yml`. No production Runtime,
   Generator, Analyzer, or framework abstraction changed in #86.
 

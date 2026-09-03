@@ -14,19 +14,19 @@ not accidental: asset lifecycle transitions, assignment identity, maintenance po
 organization visibility, deterministic ordering, and the choice of a business SQLite
 authority are legitimate application responsibilities.
 
-The review found a small set of two bounded, cross-domain usability candidates for
-#88. NativeAOT outbox consumer activation still requires a host-written concrete
-factory even though the durable delivery registry already owns the consumer contract
-metadata. Contract/host JSON root composition also repeats safe resolver wiring in
-both samples. Both candidates have bounded owners and pre-implementation failing
-acceptance cases; neither is a new #86 framework implementation.
+The review found one bounded, cross-domain usability candidate for #88: NativeAOT
+outbox consumer activation still requires a host-written concrete factory even
+though the durable delivery registry already owns the consumer contract metadata.
+The apparent contract/host JSON composition candidate was rejected after checking
+the existing `JsonTypeInfoResolver.Combine(...)` API and the repository's own
+Control Plane usage; it is a documentation/sample-discoverability input for #87.
 
-The review found no new capability gap. The three production changes exposed by #85
-were legitimate framework-owned corrections and are closed with business acceptance
-evidence. Descriptor/projection/JSON verbosity is either intentional authority, an
-explicit NativeAOT constraint, or a discoverability issue. Those observations are
-sent to #87 or deferred; they are not promoted to #88 merely because they require
-several declarations.
+The review found no new capability gap. Among the closed #85 incidents, I01 was a
+proven framework capability gap, while I02 and I03 were contract-correctness fixes
+inside already-existing framework owners. Descriptor/projection/JSON verbosity is
+either intentional authority, an explicit NativeAOT constraint, or a discoverability
+issue. Those observations are sent to #87 or deferred; they are not promoted to #88
+merely because they require several declarations.
 
 ## Evidence baseline
 
@@ -112,14 +112,14 @@ repeated?` means the same semantic obligation, not merely similar-looking code.
 - Observed construction work: The application declares Capability metadata, implements handlers, and registers the handler module; handlers delegate to `AssetApplicationService`.
 - Evidence: `samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Application/Handlers/AssetCapabilityModule.cs`; `samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Application/Handlers/AssetHandlers.cs`; `samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Host/Program.cs`
 - Semantic owner: Capability runtime for dispatch; Asset Application for business action and error mapping.
-- Primary classification: Framework usability friction.
+- Primary classification: Documentation / discoverability gap.
 - Cross-domain repeated?: Yes; Procurement also declares handler bindings and routes HTTP/MCP/Agent actions into the Capability path.
 - Human discoverability: Medium; the module, registry, and service registration are separate files.
 - Agent discoverability: Medium; generated metadata identifies the path, but the host registry is manual.
 - Workaround?: No; the path is canonical and semantically correct.
 - Acceptance case: Asset HTTP operations and read projections must reach the same Capability handler and preserve authorization/accountability outcomes.
 - Disposition: #87.
-- Rationale: Capability already removes transport-specific business dispatch. The remaining cost is locating the binding and is therefore a discoverability/usability observation, not a missing semantic.
+- Rationale: Capability already removes transport-specific business dispatch and the binding is semantically adequate. The remaining cost is locating the canonical path, so this is a discoverability gap for #87 rather than framework usability friction.
 
 ### F04 — Host registration and infrastructure composition
 
@@ -187,14 +187,14 @@ repeated?` means the same semantic obligation, not merely similar-looking code.
 - Observed construction work: Contracts and host responses have separate source-generated contexts; the host composes a combined resolver and an explicit AOT consumer factory.
 - Evidence: `samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Contracts/Json/AssetJsonContext.cs`; `samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Host/Json/AssetHostJsonContext.cs`; `samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.AotFixture.Tests/AssetAotFixtureTests.cs`
 - Semantic owner: Json contracts for payload roots; host for host-only response roots; NativeAOT host for explicit activation.
-- Primary classification: Framework usability friction.
+- Primary classification: Documentation / discoverability gap.
 - Cross-domain repeated?: Yes; Asset and Procurement both have contract/host contexts and combined resolvers.
 - Human discoverability: Medium; source-generated roots are explicit but split across Contracts and Host.
 - Agent discoverability: Low-to-medium; an agent must identify the correct context and resolver before adding a payload.
-- Workaround?: Explicit NativeAOT consumer factory is required by the current activation surface.
+- Workaround?: The current host repeats `JsonTypeInfoResolver.Combine(...)` composition, but that API already provides the required semantics.
 - Acceptance case: A clean linux-x64 publish-link-run must execute the Asset golden scenario with reflection disabled and all required payload roots available.
-- Disposition: #88.
-- Rationale: Source generation and explicit roots are legitimate NativeAOT constraints. The repeated activation/context composition is a bounded usability candidate only where the framework can own the safe default without hiding application payload authority.
+- Disposition: #87.
+- Rationale: Source generation and explicit roots are legitimate NativeAOT constraints, and the required resolver composition already exists in .NET. The remaining cost is finding and copying the documented pattern, so it belongs to #87 discoverability work rather than a new CrestCreates abstraction.
 
 ### F09 — Workflow, HumanTask, continuation, and accountability composition
 
@@ -228,18 +228,18 @@ repeated?` means the same semantic obligation, not merely similar-looking code.
 
 ### F11 — Production framework corrections exposed by #85
 
-- Business requirement: Make the real Asset golden scenario correct at Runtime boundaries, including abort, Outbox metadata integrity, and Agent completion confirmation.
-- Observed construction work: Three failing business cases required production framework contract changes; the Asset sample then consumed those canonical contracts.
+- Business requirement: Determine whether the framework changes exposed by the Asset golden scenario were missing reusable semantics, correctness repairs inside existing owners, or new construction friction.
+- Observed construction work: Three failing business cases required production framework changes; the review separates their classifications instead of treating the historical “framework modification” field as one homogeneous defect.
 - Evidence: `memory.md` (Issue #85 entry); `samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.Tests/AssetDesignCaseTests.cs`; `tests/Runtime/Agent/CrestCreates.Agent.Tools.Tests/Invocation/AgentToolInvokerTests.cs`; `tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/PostgreSqlRuntimeIntegrationTests.cs`
-- Semantic owner: Workflow Runtime, Outbox canonical writer, and Agent confirmation contract respectively.
-- Primary classification: Framework capability gap.
-- Cross-domain repeated?: Partly; the corrected contracts are reusable, but the triggering Asset failure was not generalized from occurrence count alone.
-- Human discoverability: High after closure evidence is documented; before the fix, the missing owner was visible only through a failing business path.
-- Agent discoverability: Medium after closure; stable owners and tests exist, but the decision rule must be learned from the incident record.
-- Workaround?: No valid application workaround; direct Runtime mutation or Asset-specific JSON comparison would violate canonical ownership.
-- Acceptance case: `BusinessStoreFailureAfterWorkflowStart_AbortsRuntimeLease`; PostgreSQL 100ns-tail Outbox round-trip hash verification; Agent semantic JSON object-reorder acceptance with value/array-reorder rejection.
+- Semantic owner: I01 — Workflow Runtime abort authority; I02 — provider-neutral Outbox canonical writer; I03 — Agent completion confirmation contract.
+- Primary classification: Documentation / discoverability gap.
+- Cross-domain repeated?: Partly; the corrected contracts are reusable, but the three incidents do not share one classification or imply three new capability gaps.
+- Human discoverability: High after closure evidence is documented; before closure, the distinction between missing authority and correctness repair was visible only through failing business paths.
+- Agent discoverability: Medium after closure; stable owners and tests exist, but the incident-level decision rule must be stated explicitly.
+- Workaround?: No valid application workaround for I01/I02/I03; direct Runtime mutation, timestamp rewriting, or Asset-specific JSON comparison would violate canonical ownership.
+- Acceptance case: The review must classify I01 as a proven `Framework capability gap`, and I02/I03 as `Framework contract correctness correction` within existing owners, with their original acceptance tests retained.
 - Disposition: Keep.
-- Rationale: These are retrospective examples of legitimate framework ownership. They are closed during #85, are not promoted as new #88 work, and must not be reopened without a downstream contract failure.
+- Rationale: F11 is a historical review field, so its own classification describes the documentation ambiguity that must be resolved. Incident-level classifications are explicit below: I01 is the only proven capability gap; I02 and I03 are closed contract-correctness repairs, not new #88 candidates.
 
 ## Repeated glue inventory
 
@@ -248,8 +248,8 @@ repeated?` means the same semantic obligation, not merely similar-looking code.
 | Schema / Capability / Workflow / HumanTask / Form | `AssetDescriptorCatalog.cs` | `ProcurementDescriptorCatalog.cs` | Yes | Different declarations remain because fields, outcomes, and policy differ; discoverability goes to #87. |
 | Capability handler binding | `AssetCapabilityModule.cs` + `AssetHandlers.cs` | `Procurement.Application/Handlers/*` | Yes | Shared Capability owner; host/module composition is a bounded #87/#88 observation. |
 | HTTP / MCP / Agent projections | Asset endpoint + tool attributes | Procurement endpoint + tool attributes | Yes | Invocation semantics are shared; projection metadata and policy stay explicit. |
-| Serialization roots / resolver | `AssetJsonContext.cs` + `AssetHostJsonContext.cs` | `ProcurementJsonContext.cs` + `ProcurementHostJsonContext.cs` | Yes | NativeAOT constraint is intentional; repeated safe composition is C88-02 candidate material. |
-| Host DI / composition | Asset `Program.cs` | Procurement `Program.cs` | Yes | Provider, credentials, permissions, and business adapters remain application choices; repeated framework registration is C88-01/C88-02 evidence. |
+| Serialization roots / resolver | `AssetJsonContext.cs` + `AssetHostJsonContext.cs` | `ProcurementJsonContext.cs` + `ProcurementHostJsonContext.cs` | Yes | NativeAOT roots are intentional; the repeated composition uses the existing .NET `JsonTypeInfoResolver.Combine(...)` API and is a #87 discoverability/sample-documentation input. |
+| Host DI / composition | Asset `Program.cs` | Procurement `Program.cs` | Yes | Provider, credentials, permissions, and business adapters remain application choices; repeated framework registration is C88-01 evidence only where the negative AOT case fails. |
 | Durable provider composition | PostgreSQL Runtime + SQLite business store | Runtime provider + Procurement business store | No | Different authority shapes are not a defect; do not generalize two-store composition. |
 | NativeAOT activation | Explicit Asset consumer factory | Explicit Procurement consumer factory | Yes | Runtime Delivery should be evaluated by #88 for a safe generated activation path. |
 | Accountability | Asset host sinks and Runtime delivery | Procurement host sinks and Runtime delivery | Yes | Shared responsibility boundary is reused; business facts remain application-specific. |
@@ -277,8 +277,9 @@ The shared conclusions are:
   grant seeding remain application/sample choices.
 - Durable Runtime and Accountability composition are reusable platform boundaries;
   business persistence remains an explicit application/provider choice.
-- Source-generated JSON and NativeAOT roots are real constraints, with repeated safe
-  composition captured as bounded #88 input rather than a blanket “framework defect”.
+- Source-generated JSON and NativeAOT roots are real constraints. The repeated resolver
+  composition is already expressible with `JsonTypeInfoResolver.Combine(...)`, so it is
+  a #87 documentation/discoverability input rather than a #88 framework candidate.
 
 ## Human discoverability findings
 
@@ -294,9 +295,10 @@ the change context.
   discoverable after reading Runtime tests and the #85 closure, but not from the
   Asset application service alone. Keep the closed incident and defer new framework
   work unless a new failing business case appears.
-- H03: Contract versus Host JSON contexts are correct but require repository
-  archaeology. Send to #87; candidate C88-02 is limited to repeated safe composition,
-  not the removal of application payload roots.
+- H03: Contract versus Host JSON contexts are correct and the repository already
+  demonstrates `JsonTypeInfoResolver.Combine(...)` in Agent Control Plane options, but
+  finding that pattern still requires repository archaeology. Send to #87; do not
+  create a CrestCreates JSON-composition abstraction.
 
 ## Agent discoverability findings
 
@@ -309,8 +311,8 @@ Agent discoverability differs from human discoverability:
   Workflow, DataPermission, or Outbox state unless semantic owners are stated near the
   change. Send to #87 as a bounded authoring/review scenario.
 - A03: The explicit AOT consumer factory is easy to miss and appears unrelated to the
-  business requirement. Record as #88 candidate C88-01 only because Asset and
-  Procurement provide the same semantic repetition.
+  business requirement. Record as #88 candidate C88-01 because the negative AOT
+  design case fails in both Asset and Procurement.
 
 ## Closed-during-#85 incident review
 
@@ -319,6 +321,7 @@ Agent discoverability differs from human discoverability:
 - Business acceptance case: A maintenance request suspends Workflow/HumanTask, then the business store fails; no live Runtime lease may remain.
 - Observed failure: Application code had a business-store failure after Runtime suspension but no legal canonical way to transition `Suspended -> Failed`, cancel the HumanTask, and emit normal failure accountability.
 - Original owner: Workflow Runtime transaction kernel.
+- Incident classification: Framework capability gap — the canonical owner could not express the reusable abort semantic before #85.
 - Why application workaround was invalid: Direct mutation of Workflow/HumanTask state would bypass Runtime lifecycle, transaction, audit, and replay ownership.
 - Framework contract added/fixed: `IWorkflowAbortService` atomically performs the abort, HumanTask cancellation, and `workflow.failed` accountability fact; stable operation receipts classify replay.
 - Tests proving the fix: Asset `BusinessStoreFailureAfterWorkflowStart_AbortsRuntimeLease`; PostgreSQL Workflow abort commit/rollback tests in `PostgreSqlRuntimeIntegrationTests.cs`.
@@ -329,6 +332,7 @@ Agent discoverability differs from human discoverability:
 - Business acceptance case: An Outbox message containing a producer timestamp with a 100ns tail must round-trip through PostgreSQL and preserve the canonical v1 integrity hash.
 - Observed failure: Provider timestamp precision could differ from the contract precision, making persistence/recomputation disagree even though business metadata was otherwise valid.
 - Original owner: Provider-neutral Outbox canonical writer and PostgreSQL persistence boundary.
+- Incident classification: Framework contract correctness correction — the existing Outbox owner needed to normalize its canonical contract at the provider boundary.
 - Why application workaround was invalid: An Asset-specific timestamp adjustment would duplicate the canonical hash contract and leave other producers/provider paths inconsistent.
 - Framework contract added/fixed: Normalize producer metadata to contract microsecond precision before the unchanged v1 hash and persistence.
 - Tests proving the fix: InMemory rejection of manually constructed high-precision messages and PostgreSQL 100ns-tail round-trip/hash verification.
@@ -339,14 +343,17 @@ Agent discoverability differs from human discoverability:
 - Business acceptance case: Equivalent completion JSON with object-property reordering is accepted, while changed values or array order are rejected.
 - Observed failure: Byte/string comparison treated semantically equivalent JSON as different and would have encouraged an Asset-specific comparison workaround.
 - Original owner: Agent completion confirmation contract.
+- Incident classification: Framework contract correctness correction — the existing Agent confirmation owner needed structured semantic equality.
 - Why application workaround was invalid: The semantic equality rule applies to every Agent completion payload and cannot be owned by Asset business code.
 - Framework contract added/fixed: Completion confirmation compares structured JSON semantics with the required object/array/value boundaries.
 - Tests proving the fix: `AgentToolPreDispatchFinalizerSemanticEqualityTests` and the Agent invocation completion contract tests.
 - Whether the lesson generalizes: Yes, semantic JSON equality is a reusable confirmation contract; it is closed and not a new #88 item.
 
-These three incidents are decision-rule exemplars, not reopened backlog. Phase 9
-durability, transaction, Outbox, cache, and Accountability semantics remain frozen
-unless a downstream contract failure demonstrates otherwise.
+I01 is the only incident that satisfies the capability-gap definition. I02 and I03
+repair correctness inside owners that already existed; neither establishes a new
+missing semantic. These three incidents are decision-rule exemplars, not reopened
+backlog. Phase 9 durability, transaction, Outbox, cache, and Accountability semantics
+remain frozen unless a downstream contract failure demonstrates otherwise.
 
 ## Promote / Reject / Defer decisions
 
@@ -359,24 +366,23 @@ unless a downstream contract failure demonstrates otherwise.
 - Current unnecessary cost: Asset and Procurement both register delivery metadata and then repeat a host-written concrete constructor factory to avoid runtime discovery.
 - Evidence: Asset `Program.cs` and Procurement `Program.cs`, plus both NativeAOT fixtures.
 - Bounded proposed responsibility: Provide a generated or otherwise AOT-safe activation path for registered consumers while keeping constructor dependencies and provider choices explicit.
-- Pre-implementation failing acceptance case: Remove the host factory from both sample hosts, retain canonical required-consumer registration, publish-link-run each sample, and assert durable completion reaches its business terminal state. The current contract cannot pass this case without a factory.
+- Pre-implementation failing acceptance case: Remove the host factory from both sample hosts, retain canonical required-consumer registration, publish-link-run each sample, and assert durable completion reaches its business terminal state. The experiment completed on 2026-09-03: both binaries linked successfully but failed at runtime in `OutboxCompositionValidator` when `GetRequiredService<TConsumer>()` could not locate a suitable constructor (`AssetMaintenanceDecisionConsumer` and `ProcurementHumanTaskDecisionHandler`).
 - Classification: Framework usability friction.
 - Disposition: #88.
 
-#### C88-02 — Safe composition of contract and host JSON roots
+#### Rejected candidate — C88-02 — Contract/host JSON resolver composition
 
 - Legitimate reusable business requirement: A NativeAOT host must expose application contracts and host-only response types through one source-generated resolver.
-- Correct framework semantic owner: JSON contract/build composition boundary.
-- Current unnecessary cost: Asset and Procurement each repeat a contract context, host context, and combined resolver setup.
-- Evidence: Asset and Procurement `*JsonContext.cs` / `*HostJsonContext.cs` files.
-- Bounded proposed responsibility: Evaluate a compile-time composition aid that does not hide application-owned roots or provider/runtime payload ownership.
-- Pre-implementation failing acceptance case: A host containing one contract context and one host response context, with no handwritten resolver glue, must publish-link-run and serialize both roots under reflection-disabled options. Current samples require handwritten composition.
-- Classification: Framework usability friction.
-- Disposition: #88.
+- Evidence reviewed: Asset and Procurement `*JsonContext.cs` / `*HostJsonContext.cs` files, plus `src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/Json/AgentControlPlaneToolJsonSerializerOptions.cs`.
+- Finding: The repeated sample code is semantically equivalent to the existing .NET `JsonTypeInfoResolver.Combine(...)` API, which CrestCreates already uses and documents in Agent Control Plane options.
+- Pre-implementation failing acceptance case: None — a host can already compose both roots with the supported .NET API, so no failing acceptance case demonstrates a missing CrestCreates semantic.
+- Classification: Documentation / discoverability gap.
+- Disposition: Reject.
+- Rationale: This was a false-positive framework candidate. Copying the existing resolver pattern is sample/documentation friction for #87, not evidence for a new CrestCreates JSON composition abstraction.
 
-These are intentionally small usability candidates, not capability-gap claims. No new
-capability-gap candidate is promoted: the only proven capability gap in the baseline
-is I01, already closed in #85.
+C88-01 is the only promoted #88 candidate. It is a usability candidate, not a new
+capability-gap claim. No new capability-gap candidate is promoted: the only proven
+capability gap in the baseline is I01, already closed in #85.
 
 ### #87 input list
 
@@ -386,6 +392,7 @@ is I01, already closed in #85.
 | 87-02 | Expose an existing Asset read Capability through a new agent-facing projection. | Tests finding and reusing the canonical invocation path. |
 | 87-03 | Change organization visibility policy and obtain a reviewable activation proposal. | Tests separating application policy from framework authorization/DataPermission. |
 | 87-04 | Add a new durable completion payload under NativeAOT. | Tests finding contract roots, resolver composition, and required consumer identity. |
+| 87-05 | Add a host-only JSON response root beside an existing contract root. | Tests whether humans/agents discover the existing `JsonTypeInfoResolver.Combine(...)` pattern before proposing a new framework abstraction. |
 
 #87 must exercise these as business evolution scenarios; it must not implement a
 framework cleanup merely because an agent encounters an authoring obstacle.
@@ -413,7 +420,8 @@ framework cleanup merely because an agent encounters an authoring obstacle.
 
 ## Remaining uncertainty
 
-- C88-01 and C88-02 are decision candidates, not approved framework changes. #88 must validate whether the repeated cost is large enough to justify generated composition without obscuring ownership.
+- C88-01 is the only promoted decision candidate, not an approved framework change. #88 must validate whether the repeated activation cost justifies a generated or otherwise AOT-safe path without obscuring constructor ownership.
+- The rejected C88-02 observation remains useful as a #87 discoverability scenario because the required JSON composition semantic already exists in .NET and is used by CrestCreates itself.
 - The Asset and Procurement samples establish two-domain repetition for several concerns, but they do not establish a third-domain frequency threshold.
 - Human/Agent discoverability is inferred from repository navigation and review intervention evidence, not from a benchmark. #87 should test these observations through realistic change tasks.
 - The review does not claim distributed exactly-once behavior, generic cross-database atomicity, or automatic provider selection.
@@ -429,9 +437,9 @@ framework cleanup merely because an agent encounters an authoring obstacle.
 | Three #85 framework corrections traced | Pass — I01 through I03 include acceptance, failure, owner, fix, and tests. |
 | No application policy promoted as framework work | Pass — policy entries are Keep; #88 candidates are bounded composition concerns. |
 | No Phase 9 reopening | Pass — incidents are closed exemplars only. |
-| #87 receives bounded evolution inputs | Pass — 87-01 through 87-04. |
-| #88 receives a small evidence-backed set | Pass — C88-01 and C88-02 only. |
-| #88 candidates have failing acceptance skeletons | Pass — both candidates include pre-implementation cases. |
+| #87 receives bounded evolution inputs | Pass — 87-01 through 87-05. |
+| #88 receives a small evidence-backed set | Pass — C88-01 only; C88-02 is explicitly rejected as a false-positive candidate. |
+| Promoted #88 candidate has a failing acceptance skeleton | Pass — C88-01 includes the completed negative NativeAOT design case. |
 | Rejected/deferred candidates have reasons | Pass — explicit Reject and Defer sections. |
 | Review closure tests are green | Verified by `Phase10bBusinessConstructionFrictionReviewTests`. |
 | No production Runtime feature implemented in #86 | Pass — this change adds only review documentation, contract tests, and CI wiring. |

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace CrestCreates.Sample.AssetManagement.Tests;
@@ -138,6 +139,28 @@ public sealed class Phase10bBusinessConstructionFrictionReviewTests
     }
 
     [Fact]
+    public void Review_Should_Separate_F11_Incident_Classifications()
+    {
+        var review = ReadReview();
+        var entries = ReadFrictionEntries();
+
+        entries.Single(entry => entry.Id == "F03").Body
+            .Should().Contain("- Primary classification: Documentation / discoverability gap");
+        entries.Single(entry => entry.Id == "F08").Body
+            .Should().Contain("- Primary classification: Documentation / discoverability gap");
+        entries.Single(entry => entry.Id == "F11").Body
+            .Should().Contain("- Primary classification: Documentation / discoverability gap")
+            .And.NotContain("- Primary classification: Framework capability gap");
+
+        ExtractSection(review, "### I01 —")
+            .Should().Contain("Incident classification: Framework capability gap");
+        ExtractSection(review, "### I02 —")
+            .Should().Contain("Incident classification: Framework contract correctness correction");
+        ExtractSection(review, "### I03 —")
+            .Should().Contain("Incident classification: Framework contract correctness correction");
+    }
+
+    [Fact]
     public void BusinessPolicy_Should_Not_Be_Promoted_As_FrameworkGap()
     {
         var review = ReadReview();
@@ -207,14 +230,29 @@ public sealed class Phase10bBusinessConstructionFrictionReviewTests
     }
 
     [Fact]
+    public void ExtractedSections_Should_Not_Feed_Neighboring_Entries()
+    {
+        var review = ReadReview();
+
+        ExtractSection(review, "### F01 —").Should().NotContain("### F02 —");
+        ExtractSection(review, "### I01 —").Should().NotContain("I02 —");
+        ExtractSection(review, "### I02 —").Should().NotContain("I03 —");
+        ExtractSection(review, "### I03 —").Should().NotContain("## Promote / Reject / Defer decisions");
+    }
+
+    [Fact]
     public void Phase10b_FrameworkCandidates_Should_Target_Issue88()
     {
         var review = ExtractSection(ReadReview(), "### #88 candidates");
 
         review.Should().Contain("#### C88-01");
-        review.Should().Contain("#### C88-02");
+        review.Should().Contain("C88-02 — Contract/host JSON resolver composition");
         review.Should().Contain("Disposition: #88");
+        review.Should().Contain("Disposition: Reject");
+        review.Should().Contain("false-positive framework candidate");
+        review.Should().Contain("JsonTypeInfoResolver.Combine(...)");
         review.Should().Contain("Pre-implementation failing acceptance case:");
+        review.Should().Contain("both binaries linked successfully but failed at runtime");
         review.Should().MatchRegex("No new\\s+capability-gap candidate is promoted");
     }
 
@@ -250,8 +288,19 @@ public sealed class Phase10bBusinessConstructionFrictionReviewTests
 
         review.Should().Contain("No production Runtime feature implemented in #86");
         review.Should().Contain("only review documentation, contract tests, and CI wiring");
-        File.Exists(Path.Combine(FindRepositoryRoot(), "src/Runtime/Workflow/CrestCreates.Workflow/WorkflowAbortService.cs"))
-            .Should().BeTrue("the review must point at the already-closed production owner, not add one");
+
+        var repositoryRoot = FindRepositoryRoot();
+        foreach (var arguments in new[]
+        {
+            new[] { "diff", "HEAD^", "HEAD", "--", "src/Runtime" },
+            new[] { "diff", "--", "src/Runtime" },
+            new[] { "diff", "--cached", "--", "src/Runtime" }
+        })
+        {
+            var result = RunGit(repositoryRoot, arguments);
+            result.ExitCode.Should().Be(0, result.StandardError);
+            result.StandardOutput.Trim().Should().BeEmpty("the Phase 10b change must not modify production Runtime files");
+        }
     }
 
     private static IReadOnlyList<ReviewEntry> ReadFrictionEntries()
@@ -285,9 +334,31 @@ public sealed class Phase10bBusinessConstructionFrictionReviewTests
     {
         var start = review.IndexOf(heading, StringComparison.Ordinal);
         start.Should().BeGreaterThanOrEqualTo(0, $"section {heading} should exist");
-        var next = review.IndexOf("\n## ", start + heading.Length, StringComparison.Ordinal);
-        return review[start..(next < 0 ? review.Length : next)];
+        var contentStart = start + heading.Length;
+        var nextHeading = Regex.Match(review[contentStart..], "(?m)^#{2,3} ");
+        var end = nextHeading.Success ? contentStart + nextHeading.Index : review.Length;
+        return review[start..end];
+    }
+
+    private static GitResult RunGit(string repositoryRoot, IReadOnlyList<string> arguments)
+    {
+        var startInfo = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = repositoryRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
+        var standardOutput = process.StandardOutput.ReadToEnd();
+        var standardError = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return new GitResult(process.ExitCode, standardOutput, standardError);
     }
 
     private sealed record ReviewEntry(string Id, string Body);
+    private sealed record GitResult(int ExitCode, string StandardOutput, string StandardError);
 }
