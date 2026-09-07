@@ -2848,6 +2848,32 @@ and publish gates are green, with GitHub CI/PR verification pending.
   explicit Phase 10b test step to `.github/workflows/ci.yml`. No production Runtime,
   Generator, Analyzer, or framework abstraction changed in #86.
 
+### Issues #87 / #88 — Workflow outcome condition prerequisite (2026-09-07)
+
+**Status**: PR #91 is draft; this is a prerequisite repair, not completion of
+the Asset evolution roadmap. The default Asset v1 composition is unchanged.
+
+- The correctly composed Workflow/HumanTask/Outbox reproduction reached its
+  business assertion: rejecting initial approval still created final approval
+  because Runtime ignored `WorkflowStep.Condition`.
+- Commit `318e3f83` implements two exact Workflow-owned tokens,
+  `previous-human-task-approved` and `previous-human-task-rejected`, through
+  shared descriptor validation and runtime evaluation. Unknown conditions fail
+  before workflow start. False conditions record `Skipped`; corrupt outcome
+  evidence follows the normal failed-step persistence/accountability path.
+- Conditions consume the immediately preceding completed HumanTask step and
+  persisted typed outcome. This is not an expression engine or a new approval
+  authority. The existing nullable string descriptor field and hash shape remain.
+- Focused tests passed 11/11; the primary reviewer independently reran the full
+  Workflow suite, 90/90. Additional public failure-path tests, native execution
+  against PostgreSQL, and final GitHub CI review are still required. Native
+  publish/link succeeded, but that alone is not NativeAOT verification.
+- Commit `66e56d33` fixes the #86 no-runtime-change gate to compare its frozen
+  historical revisions. It no longer prohibits legitimate subsequent repairs.
+- See `docs/superpowers/specs/2026-09-07-workflow-outcome-condition-prerequisite.md`
+  and `docs/review/2026-09-07-phase-10c-resume.md` before resuming. Full governed
+  Asset v2 evolution and live DeepSeek evaluation remain pending; #87/#88 stay open.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:
