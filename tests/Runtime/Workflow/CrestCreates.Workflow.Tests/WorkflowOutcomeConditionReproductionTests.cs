@@ -23,7 +23,8 @@ namespace CrestCreates.Workflow.Tests;
 
 /// <summary>
 /// B04 reproduction for the Phase 10c Asset scenario. This intentionally
-/// remains red until WorkflowStep.Condition is consumed by the runner.
+/// Guards the production WorkflowStep.Condition routing contract for the
+/// Phase 10c Asset scenario.
 /// </summary>
 public sealed class WorkflowOutcomeConditionReproductionTests
 {

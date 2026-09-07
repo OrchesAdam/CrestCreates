@@ -255,6 +255,8 @@ await using (var fresh = BuildProvider(options, workflowDescriptor, humanTaskDes
 
 }
 
+await RunConditionalWorkflowAotScenarioAsync(options);
+
 // The accountability delivery proof deliberately crosses provider lifetimes.
 // Provider A commits the sink fact and then disappears before Ack (the response
 // loss/crash window). Provider B recovers the expired lease, observes the same
@@ -654,7 +656,7 @@ static ServiceProvider BuildPreDispatchProvider(PostgreSqlRuntimePersistenceOpti
 static ServiceProvider BuildProvider(
     PostgreSqlRuntimePersistenceOptions options,
     WorkflowDescriptor workflow,
-    HumanTaskDescriptor humanTask)
+    params HumanTaskDescriptor[] humanTasks)
 {
     var services = new ServiceCollection();
     services.AddLogging();
@@ -672,8 +674,175 @@ static ServiceProvider BuildProvider(
     services.AddOrganizationKernel();
     var provider = services.BuildServiceProvider();
     provider.GetRequiredService<IWorkflowRegistry>().Build([new SingleDescriptorProvider<WorkflowDescriptor>(workflow)]);
-    provider.GetRequiredService<IHumanTaskRegistry>().Build([new SingleDescriptorProvider<HumanTaskDescriptor>(humanTask)]);
+    provider.GetRequiredService<IHumanTaskRegistry>().Build([new SingleDescriptorProvider<HumanTaskDescriptor>(humanTasks)]);
     return provider;
+}
+
+static async Task RunConditionalWorkflowAotScenarioAsync(PostgreSqlRuntimePersistenceOptions options)
+{
+    var initial = new HumanTaskDescriptor
+    {
+        Id = "condition-initial",
+        Name = "Condition Initial",
+        Version = 1,
+        Outcomes =
+        [
+            new CompletionOutcome { Condition = CompletionCondition.Approve },
+            new CompletionOutcome { Condition = CompletionCondition.Reject }
+        ]
+    };
+    var final = new HumanTaskDescriptor
+    {
+        Id = "condition-final",
+        Name = "Condition Final",
+        Version = 1,
+        Outcomes = [new CompletionOutcome { Condition = CompletionCondition.Approve }]
+    };
+    var workflow = new WorkflowDescriptor
+    {
+        Id = "condition-routing",
+        Name = "Condition Routing",
+        Version = 1,
+        Steps =
+        [
+            new WorkflowStep
+            {
+                Id = "initial",
+                Name = "Initial",
+                Target = new HumanTaskTarget
+                {
+                    HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(initial.Id, 1)
+                }
+            },
+            new WorkflowStep
+            {
+                Id = "final",
+                Name = "Final",
+                Condition = WorkflowConditionTokens.PreviousHumanTaskApproved,
+                Target = new HumanTaskTarget
+                {
+                    HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(final.Id, 1)
+                }
+            }
+        ]
+    };
+
+    RuntimeInstanceKey rejectedKey;
+    HumanTaskInstance rejectedCompletion;
+    await using (var first = BuildProvider(options, workflow, initial, final))
+    {
+        using var scope = first.CreateScope();
+        var services = scope.ServiceProvider;
+        var engine = services.GetRequiredService<IWorkflowEngine>();
+        var humanTasks = services.GetRequiredService<IHumanTaskRuntime>();
+        var taskStore = services.GetRequiredService<IHumanTaskInstanceStore>();
+        var rejected = await engine.ExecuteAsync(new WorkflowExecutionRequest
+        {
+            WorkflowId = workflow.Id,
+            TenantId = "aot-condition-reject"
+        });
+        rejectedKey = rejected.Key;
+        var rejectedInitial = (await taskStore.GetPendingByWorkflowAsync(rejected.Key)).Single();
+        rejectedCompletion = await humanTasks.CompleteAsync(new HumanTaskCompletionRequest
+        {
+            HumanTaskKey = rejectedInitial.Key,
+            Outcome = CompletionCondition.Reject.ToString(),
+            ActorId = "aot"
+        });
+    }
+    await using (var recovered = BuildProvider(options, workflow, initial, final))
+    {
+        using var scope = recovered.CreateScope();
+        var services = scope.ServiceProvider;
+        await DispatchConditionalCompletionAsync(services, rejectedCompletion);
+        var rejectedFinal = await services.GetRequiredService<IWorkflowInstanceStore>().GetAsync(rejectedKey);
+        if (rejectedFinal?.Status != WorkflowInstanceStatus.Completed
+            || rejectedFinal.StepResults.SingleOrDefault(result => result.StepId == "final")?.Status != StepExecutionStatus.Skipped
+            || (await services.GetRequiredService<IHumanTaskInstanceStore>().GetPendingByWorkflowAsync(rejectedKey)).Count != 0)
+        {
+            throw new InvalidOperationException("NativeAOT reject routing did not persist a skipped final step.");
+        }
+    }
+
+    RuntimeInstanceKey approvedKey;
+    HumanTaskInstance approvedCompletion;
+    await using (var first = BuildProvider(options, workflow, initial, final))
+    {
+        using var scope = first.CreateScope();
+        var services = scope.ServiceProvider;
+        var engine = services.GetRequiredService<IWorkflowEngine>();
+        var humanTasks = services.GetRequiredService<IHumanTaskRuntime>();
+        var taskStore = services.GetRequiredService<IHumanTaskInstanceStore>();
+        var approved = await engine.ExecuteAsync(new WorkflowExecutionRequest
+        {
+            WorkflowId = workflow.Id,
+            TenantId = "aot-condition-approve"
+        });
+        approvedKey = approved.Key;
+        var approvedInitial = (await taskStore.GetPendingByWorkflowAsync(approved.Key)).Single();
+        approvedCompletion = await humanTasks.CompleteAsync(new HumanTaskCompletionRequest
+        {
+            HumanTaskKey = approvedInitial.Key,
+            Outcome = CompletionCondition.Approve.ToString(),
+            ActorId = "aot"
+        });
+    }
+    await using (var recovered = BuildProvider(options, workflow, initial, final))
+    {
+        using var scope = recovered.CreateScope();
+        var services = scope.ServiceProvider;
+        await DispatchConditionalCompletionAsync(services, approvedCompletion);
+        var taskStore = services.GetRequiredService<IHumanTaskInstanceStore>();
+        var finalTasks = (await taskStore.GetPendingByWorkflowAsync(approvedKey))
+            .Where(task => task.WorkflowStepId == "final")
+            .ToArray();
+        if (finalTasks.Length != 1)
+            throw new InvalidOperationException($"NativeAOT approve routing created {finalTasks.Length} final tasks, expected one.");
+
+        var finalCompletion = await services.GetRequiredService<IHumanTaskRuntime>().CompleteAsync(new HumanTaskCompletionRequest
+        {
+            HumanTaskKey = finalTasks[0].Key,
+            Outcome = CompletionCondition.Approve.ToString(),
+            ActorId = "aot"
+        });
+        await DispatchConditionalCompletionAsync(services, finalCompletion);
+        var approvedFinal = await services.GetRequiredService<IWorkflowInstanceStore>().GetAsync(approvedKey);
+        if (approvedFinal?.Status != WorkflowInstanceStatus.Completed
+            || (await taskStore.GetPendingByWorkflowAsync(approvedKey)).Count != 0)
+        {
+            throw new InvalidOperationException("NativeAOT approve routing did not complete the final task path.");
+        }
+    }
+
+    Console.WriteLine("CRESTCREATES_WORKFLOW_CONDITION_AOT_OK");
+}
+
+static async Task DispatchConditionalCompletionAsync(IServiceProvider services, HumanTaskInstance completed)
+{
+    var dispatchStore = services.GetRequiredService<IOutboxDispatchStore>();
+    var claims = await dispatchStore.ClaimAsync(new OutboxClaimRequest
+    {
+        OwnerId = "aot-condition-dispatch-" + completed.Id,
+        BatchSize = 16,
+        LeaseDuration = TimeSpan.FromMinutes(1),
+        SupportedContractIds = new HashSet<string>([HumanTaskDeliveryConstants.CompletedContractId], StringComparer.Ordinal),
+        SupportedRequiredConsumerIds = new HashSet<string>([HumanTaskDeliveryConstants.WorkflowContinuationConsumerId], StringComparer.Ordinal)
+    });
+    var claim = claims.Single(item => item.Message.Metadata.MessageId == completed.CompletionEventId);
+    var registration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
+        .Single(item => item.ContractId == HumanTaskDeliveryConstants.CompletedContractId);
+    var outcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    {
+        Message = claim.Message,
+        Lease = claim.Lease,
+        AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+        Services = services
+    });
+    if (outcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
+        || await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease) != OutboxDeliveryMutationResult.Applied)
+    {
+        throw new InvalidOperationException("NativeAOT conditional completion dispatch was not accepted.");
+    }
 }
 
 static async Task RunControlPlaneReferenceDataMainlineAsync(PostgreSqlRuntimePersistenceOptions options)
@@ -1247,10 +1416,10 @@ static ServiceProvider BuildAgentMemoryProvider(PostgreSqlRuntimePersistenceOpti
         .BuildServiceProvider();
 
 
-internal sealed class SingleDescriptorProvider<TDescriptor>(TDescriptor descriptor) : IDescriptorProvider<TDescriptor>
+internal sealed class SingleDescriptorProvider<TDescriptor>(params TDescriptor[] descriptors) : IDescriptorProvider<TDescriptor>
     where TDescriptor : IDescriptor
 {
-    public IReadOnlyList<TDescriptor> GetDescriptors() => [descriptor];
+    public IReadOnlyList<TDescriptor> GetDescriptors() => descriptors;
 }
 
 public sealed class MutableNestedAotState
