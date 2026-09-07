@@ -1,6 +1,10 @@
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
+using CrestCreates.Event;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.EventBus.Abstractions;
+using CrestCreates.EventBus.Local;
 using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
@@ -25,6 +29,13 @@ public sealed class WorkflowOutcomeConditionReproductionTests
 {
     [Fact]
     public async Task InitialReject_DoesNotCreateFinalApprovalTask()
+        => await RunScenarioAsync(CompletionCondition.Reject.ToString(), expectFinalTask: false);
+
+    [Fact]
+    public async Task InitialApprove_CreatesExactlyOneFinalApprovalTask()
+        => await RunScenarioAsync(CompletionCondition.Approve.ToString(), expectFinalTask: true);
+
+    private static async Task RunScenarioAsync(string outcome, bool expectFinalTask)
     {
         var initialReview = HumanTask("ht_asset_maintenance_initial_review");
         var finalReview = HumanTask("ht_asset_maintenance_final_review");
@@ -60,6 +71,11 @@ public sealed class WorkflowOutcomeConditionReproductionTests
 
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+        services.AddSingleton<LocalEventBusOptions>();
+        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
+        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
         services.AddAccountability().AddAuditSink<InMemoryAuditSink>();
         services.AddCapabilityRuntime();
         services.AddRuntimePersistence();
@@ -102,7 +118,7 @@ public sealed class WorkflowOutcomeConditionReproductionTests
             await humanTasks.CompleteAsync(new HumanTaskCompletionRequest
             {
                 HumanTaskKey = firstTask.Key,
-                Outcome = CompletionCondition.Reject.ToString(),
+                Outcome = outcome,
                 ActorId = "asset-manager",
                 ActorRoles = ["asset-manager"]
             });
@@ -118,9 +134,16 @@ public sealed class WorkflowOutcomeConditionReproductionTests
                 .Where(task => task.WorkflowStepId == "final-review")
                 .ToArray();
 
-            // Independent business oracle B04: an initial rejection ends
-            // maintenance and must not create a later approval task.
-            finalTasks.Should().BeEmpty("an initial maintenance rejection must not produce a final approval task");
+            if (expectFinalTask)
+                finalTasks.Should().ContainSingle("an initial approval must produce exactly one final approval task");
+            else
+            {
+                finalTasks.Should().BeEmpty("an initial maintenance rejection must not produce a final approval task");
+                var completed = await workflowStore.GetAsync(started.Key);
+                completed.Should().NotBeNull();
+                completed!.StepResults.Should().Contain(result =>
+                    result.StepId == "final-review" && result.Status == StepExecutionStatus.Skipped);
+            }
         }
         finally
         {

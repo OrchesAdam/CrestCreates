@@ -28,6 +28,10 @@ public sealed class WorkflowCompatibilityValidator
 
     public void Validate(WorkflowDescriptor descriptor)
     {
+        var conditionErrors = WorkflowConditionPolicy.ValidateDescriptor(descriptor);
+        if (conditionErrors.Count != 0)
+            throw new WorkflowValidationException(conditionErrors[0]);
+
         foreach (var step in descriptor.Steps)
         {
             ValidateTarget(step.Target);
