@@ -5,6 +5,7 @@ using CrestCreates.Capability.Abstractions;
 using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
+using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Sample.AssetManagement.Application;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Contracts.Json;
@@ -21,6 +22,8 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
     private readonly IWorkflowEngine _workflows;
     private readonly IHumanTaskRuntime _humanTasks;
     private readonly IHumanTaskInstanceStore _taskStore;
+    private readonly IWorkflowInstanceStore _workflowStore;
+    private readonly IRuntimeDescriptorPinResolver<HumanTaskDescriptor> _taskPinResolver;
     private readonly IAssetStore _assets;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
     private readonly ICurrentUser _currentUser;
@@ -30,6 +33,8 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         IWorkflowEngine workflows,
         IHumanTaskRuntime humanTasks,
         IHumanTaskInstanceStore taskStore,
+        IWorkflowInstanceStore workflowStore,
+        IRuntimeDescriptorPinResolver<HumanTaskDescriptor> taskPinResolver,
         IAssetStore assets,
         IRuntimeStateContractRegistry stateRegistry,
         ICurrentUser currentUser,
@@ -38,6 +43,8 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         _workflows = workflows;
         _humanTasks = humanTasks;
         _taskStore = taskStore;
+        _workflowStore = workflowStore;
+        _taskPinResolver = taskPinResolver;
         _assets = assets;
         _stateRegistry = stateRegistry;
         _currentUser = currentUser;
@@ -82,6 +89,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         var assetId = values["assetId"] is Guid id ? id : Guid.Parse(values["assetId"]!.ToString()!);
         if (!string.Equals(task.TenantId, _currentUser.TenantId, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("The HumanTask belongs to another tenant.");
+        var taskRole = ResolveRole(task);
         var approved = string.Equals(outcome, "Approve", StringComparison.OrdinalIgnoreCase);
         var rejected = string.Equals(outcome, "Reject", StringComparison.OrdinalIgnoreCase);
         if (!approved && !rejected)
@@ -102,6 +110,12 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
             Result = _stateRegistry.Capture(new AssetMaintenanceDecisionFact { AssetId = assetId, RequesterId = requesterId, ApproverId = _currentUser.Id, Approved = approved, Note = note })
         }, ct);
 
+        if (taskRole == MaintenanceTaskRole.Initial && approved)
+        {
+            await WaitForInitialContinuationAsync(task, ct);
+            return;
+        }
+
         var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
         while (DateTimeOffset.UtcNow < deadline)
         {
@@ -114,6 +128,49 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
         throw new CapabilityFailureException("ASSET_MAINTENANCE_COMPLETION_TIMEOUT", "The durable maintenance decision was not observed before the completion deadline.");
     }
 
+    private async Task WaitForInitialContinuationAsync(HumanTaskInstance initialTask, CancellationToken ct)
+    {
+        var workflowKey = initialTask.WorkflowKey
+            ?? throw new InvalidOperationException("Initial maintenance review is missing its Workflow correlation.");
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            var completed = await _taskStore.GetAsync(initialTask.Key, ct);
+            var finalTasks = await _taskStore.GetPendingByWorkflowAsync(workflowKey, ct);
+            var workflow = await _workflowStore.GetAsync(workflowKey, ct);
+            if (completed?.Status == HumanTaskInstanceStatus.Completed
+                && workflow?.Status == WorkflowInstanceStatus.Suspended
+                && finalTasks.Count == 1
+                && IsKnownRole(finalTasks[0], MaintenanceTaskRole.Terminal))
+                return;
+            await Task.Delay(20, ct);
+        }
+        throw new CapabilityFailureException("ASSET_MAINTENANCE_CONTINUATION_TIMEOUT", "The durable initial review continuation was not observed before the completion deadline.");
+    }
+
+    private MaintenanceTaskRole ResolveRole(HumanTaskInstance task)
+    {
+        var descriptor = _taskPinResolver.Resolve(task.HumanTaskPin).Descriptor;
+        if (descriptor.Id == AssetContractIds.MaintenanceInitialHumanTask && descriptor.Version == 1)
+            return MaintenanceTaskRole.Initial;
+        if (descriptor.Id == AssetContractIds.MaintenanceHumanTask && descriptor.Version == 1)
+            return MaintenanceTaskRole.Terminal;
+        throw new InvalidOperationException("The maintenance HumanTask contract is not an approved Asset maintenance role.");
+    }
+
+    private bool IsKnownRole(HumanTaskInstance task, MaintenanceTaskRole expected)
+    {
+        try { return ResolveRole(task) == expected; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    private enum MaintenanceTaskRole
+    {
+        Initial,
+        Terminal
+    }
+
     private Dictionary<string, object?> RestoreVariables(RuntimeStateValue? input)
         => input is not null && _stateRegistry.Restore(input) is RuntimeStateBag bag
             ? bag.Values.ToDictionary(pair => pair.Key, pair => _stateRegistry.Restore(pair.Value))
@@ -124,6 +181,7 @@ public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Deli
 {
     private readonly IHumanTaskInstanceStore _tasks;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
+    private readonly IRuntimeDescriptorPinResolver<HumanTaskDescriptor> _taskPinResolver;
     private readonly ICapabilityDispatcher _dispatcher;
     private readonly AssetExecutionIdentity _identity;
     private readonly ICurrentPrincipalAccessor _principalAccessor;
@@ -132,6 +190,7 @@ public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Deli
     public AssetMaintenanceDecisionConsumer(
         IHumanTaskInstanceStore tasks,
         IRuntimeStateContractRegistry stateRegistry,
+        IRuntimeDescriptorPinResolver<HumanTaskDescriptor> taskPinResolver,
         ICapabilityDispatcher dispatcher,
         AssetExecutionIdentity identity,
         ICurrentPrincipalAccessor principalAccessor,
@@ -139,6 +198,7 @@ public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Deli
     {
         _tasks = tasks;
         _stateRegistry = stateRegistry;
+        _taskPinResolver = taskPinResolver;
         _dispatcher = dispatcher;
         _identity = identity;
         _principalAccessor = principalAccessor;
@@ -171,6 +231,16 @@ public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Deli
         }
         if (_stateRegistry.Restore(payload.Result) is not AssetMaintenanceDecisionFact fact)
             return CrestCreates.Runtime.Delivery.Abstractions.Handlers.OutboxRequiredConsumerResult.Conflict("ASSET_MAINTENANCE_FACT_INVALID", "Maintenance completion fact has an invalid contract.");
+        var descriptor = _taskPinResolver.Resolve(task.HumanTaskPin).Descriptor;
+        var isInitial = descriptor.Id == AssetContractIds.MaintenanceInitialHumanTask && descriptor.Version == 1;
+        var isTerminal = descriptor.Id == AssetContractIds.MaintenanceHumanTask && descriptor.Version == 1;
+        if (!isInitial && !isTerminal)
+            return CrestCreates.Runtime.Delivery.Abstractions.Handlers.OutboxRequiredConsumerResult.Conflict("ASSET_MAINTENANCE_TASK_INVALID", "Maintenance completion is not bound to a known Asset HumanTask contract.");
+        if (isInitial && fact.Approved)
+        {
+            _logger.LogInformation("Acknowledging initial Asset maintenance approval for {AssetId} without applying a terminal decision.", fact.AssetId);
+            return CrestCreates.Runtime.Delivery.Abstractions.Handlers.OutboxRequiredConsumerResult.Accepted();
+        }
         _identity.Set(task.TenantId, fact.ApproverId, dataScope: CrestCreates.Domain.Shared.Enums.DataScope.Tenant, roles: ["asset-manager"]);
         var command = new CrestCreates.Sample.AssetManagement.Application.Handlers.MaintenanceDecisionCommand(
             fact.AssetId,

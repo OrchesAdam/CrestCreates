@@ -22,6 +22,7 @@ using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Infrastructure.Permission;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.Metadata.DescriptorCapability;
@@ -118,6 +119,7 @@ builder.Services.AddSingleton<IFormRegistry>(formRegistry);
 builder.Services.AddFormKernel();
 builder.Services.AddHumanTaskRuntime();
 builder.Services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
+builder.Services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceInitialHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
 builder.Services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, AssetMaintenanceDecisionConsumer>(AssetContractIds.MaintenanceDecisionConsumer);
 // Keep concrete consumer activation explicit for the NativeAOT host. The
 // generic registration above owns delivery metadata and resolution; this
@@ -126,6 +128,7 @@ builder.Services.Replace(ServiceDescriptor.Scoped<AssetMaintenanceDecisionConsum
     new AssetMaintenanceDecisionConsumer(
         sp.GetRequiredService<IHumanTaskInstanceStore>(),
         sp.GetRequiredService<IRuntimeStateContractRegistry>(),
+        sp.GetRequiredService<IRuntimeDescriptorPinResolver<HumanTaskDescriptor>>(),
         sp.GetRequiredService<ICapabilityDispatcher>(),
         sp.GetRequiredService<AssetExecutionIdentity>(),
         sp.GetRequiredService<ICurrentPrincipalAccessor>(),
