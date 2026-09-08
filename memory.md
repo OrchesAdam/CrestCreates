@@ -2848,6 +2848,39 @@ and publish gates are green, with GitHub CI/PR verification pending.
   explicit Phase 10b test step to `.github/workflows/ci.yml`. No production Runtime,
   Generator, Analyzer, or framework abstraction changed in #86.
 
+### Issues #87 / #88 — Workflow outcome condition prerequisite (2026-09-07)
+
+**Status**: PR #91 is draft; this is a prerequisite repair, not completion of
+the Asset evolution roadmap. The default Asset v1 composition is unchanged.
+
+- The correctly composed Workflow/HumanTask/Outbox reproduction reached its
+  business assertion: rejecting initial approval still created final approval
+  because Runtime ignored `WorkflowStep.Condition`.
+- Commit `318e3f83` implements two exact Workflow-owned tokens,
+  `previous-human-task-approved` and `previous-human-task-rejected`, through
+  shared descriptor validation and runtime evaluation. Unknown conditions fail
+  before workflow start. False conditions record `Skipped`; corrupt outcome
+  evidence follows the normal failed-step persistence/accountability path.
+- Conditions consume the immediately preceding completed HumanTask step and
+  persisted typed outcome. This is not an expression engine or a new approval
+  authority. The existing nullable string descriptor field and hash shape remain.
+- The latest focused Workflow tests passed 19/19; the primary reviewer independently
+  reran the full suite, 98/98, including malformed-state failure/accountability.
+  Condition hash, draft snapshot, and generated PostgreSQL JSON tests passed
+  3/3 each (`aaae81d7`). CI 189 passed existing Metadata/sample/Workflow and 433
+  PostgreSQL tests but exposed incomplete supported-contract inventory in the
+  new native fixture. The subsequent CS0136 in CI 191 was fixed by `9686e11a`.
+  The complete linux-x64 native host then published, linked, and executed with
+  exit 0 against PostgreSQL, including condition routing across provider lifetimes.
+  The primary reviewer inspected the ELF and all success markers; the log is
+  preserved in `docs/review/2026-09-08-workflow-condition-native.log`. Existing
+  warnings remain; final-head GitHub CI is still required before PR readiness.
+- Commit `66e56d33` fixes the #86 no-runtime-change gate to compare its frozen
+  historical revisions. It no longer prohibits legitimate subsequent repairs.
+- See `docs/superpowers/specs/2026-09-07-workflow-outcome-condition-prerequisite.md`
+  and `docs/review/2026-09-07-phase-10c-resume.md` before resuming. Full governed
+  Asset v2 evolution and live DeepSeek evaluation remain pending; #87/#88 stay open.
+
 ## Recommended Next Thread Entry Prompt
 
 If a future thread should resume from this state, use a prompt like:

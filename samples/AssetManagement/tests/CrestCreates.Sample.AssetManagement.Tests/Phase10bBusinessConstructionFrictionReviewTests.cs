@@ -6,6 +6,8 @@ namespace CrestCreates.Sample.AssetManagement.Tests;
 public sealed class Phase10bBusinessConstructionFrictionReviewTests
 {
     private const string ReviewRelativePath = "docs/reviews/2026-09-03-phase-10b-business-construction-friction-review.md";
+    private const string Phase10bIssue86BaseRevision = "cac7bd2df33dc89a1071bc91dae059a36d5069bb";
+    private const string Phase10bIssue86MergedByIssue90Revision = "a8001dbbd01ad9f96ae3b71009dfd2df89418712";
     private static readonly string[] RequiredSections =
     [
         "## Executive conclusion",
@@ -290,18 +292,19 @@ public sealed class Phase10bBusinessConstructionFrictionReviewTests
         review.Should().Contain("only review documentation, contract tests, and CI wiring");
 
         var repositoryRoot = FindRepositoryRoot();
-        var baseRevision = Environment.GetEnvironmentVariable("PHASE10B_BASE_SHA") ?? "HEAD^";
-        foreach (var arguments in new[]
-        {
-            new[] { "diff", baseRevision, "HEAD", "--", "src/Runtime" },
-            new[] { "diff", "--", "src/Runtime" },
-            new[] { "diff", "--cached", "--", "src/Runtime" }
-        })
-        {
-            var result = RunGit(repositoryRoot, arguments);
-            result.ExitCode.Should().Be(0, result.StandardError);
-            result.StandardOutput.Trim().Should().BeEmpty("the Phase 10b change must not modify production Runtime files");
-        }
+        var result = RunGit(repositoryRoot,
+        [
+            "diff",
+            "--name-only",
+            Phase10bIssue86BaseRevision,
+            Phase10bIssue86MergedByIssue90Revision,
+            "--",
+            "src/Runtime"
+        ]);
+
+        result.ExitCode.Should().Be(0, result.StandardError);
+        result.StandardOutput.Trim().Should().BeEmpty(
+            "the closed #86 change, merged by #90, must not modify production Runtime files");
     }
 
     private static IReadOnlyList<ReviewEntry> ReadFrictionEntries()

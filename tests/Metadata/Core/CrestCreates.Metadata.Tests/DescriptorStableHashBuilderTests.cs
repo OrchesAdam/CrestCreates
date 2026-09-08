@@ -1543,6 +1543,32 @@ public sealed class DescriptorStableHashBuilderTests
             "different target type (HumanTask vs Capability) must produce different ContractHash");
     }
 
+    [Theory]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskApproved)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskRejected)]
+    public void SupportedWorkflowConditionToken_ChangesContractAndDefinitionHashes(string condition)
+    {
+        var unconditional = _builder.Build(CreateWorkflowWithCondition(null));
+        var conditional = _builder.Build(CreateWorkflowWithCondition(condition));
+
+        conditional.ContractHash.Should().NotBe(unconditional.ContractHash,
+            "a supported condition changes the workflow execution contract");
+        conditional.DefinitionHash.Should().NotBe(unconditional.DefinitionHash,
+            "a supported condition changes the workflow definition hash");
+    }
+
+    [Fact]
+    public void SupportedWorkflowConditionTokens_AreDistinctInBothHashes()
+    {
+        var approved = _builder.Build(
+            CreateWorkflowWithCondition(WorkflowConditionTokens.PreviousHumanTaskApproved));
+        var rejected = _builder.Build(
+            CreateWorkflowWithCondition(WorkflowConditionTokens.PreviousHumanTaskRejected));
+
+        approved.ContractHash.Should().NotBe(rejected.ContractHash);
+        approved.DefinitionHash.Should().NotBe(rejected.DefinitionHash);
+    }
+
     // ── Double Culture Stability ──
 
     [Fact]
@@ -1591,4 +1617,36 @@ public sealed class DescriptorStableHashBuilderTests
             ChangeKind = SchemaChangeKind.Additive
         };
     }
+
+    private static WorkflowDescriptor CreateWorkflowWithCondition(string? condition) => new()
+    {
+        Id = "wf-condition-hash",
+        Name = "Condition hash fixture",
+        Version = 1,
+        State = DescriptorState.Active,
+        Steps =
+        [
+            new WorkflowStep
+            {
+                Id = "initial-review",
+                Name = "Initial review",
+                Target = new CapabilityTarget
+                {
+                    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_initial_review", 1)
+                },
+                Transitions = Array.Empty<string>()
+            },
+            new WorkflowStep
+            {
+                Id = "final-review",
+                Name = "Final review",
+                Condition = condition,
+                Target = new CapabilityTarget
+                {
+                    Capability = new VersionedDescriptorRef<IVersionedDescriptor>("cap_final_review", 1)
+                },
+                Transitions = Array.Empty<string>()
+            }
+        ]
+    };
 }

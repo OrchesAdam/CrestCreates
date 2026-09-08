@@ -28,17 +28,12 @@ jobs:
           --health-retries 5
     env:
       ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING: Host=127.0.0.1;Port=5432;Database=crest_asset_management;Username=crest;Password=crest
-      PHASE10B_BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # Phase 10b closure tests inspect the checked-out PR diff for production
-      # Runtime changes. The default shallow checkout does not include HEAD^.
-      - name: Fetch PR base for review diff invariants
-        if: github.event_name == 'pull_request'
-        run: git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
