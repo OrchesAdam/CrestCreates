@@ -1,6 +1,53 @@
 # Phase 10c resume checkpoint
 
-## Current checkpoint (supersedes the initial checkpoint below)
+## 2026-09-08 review checkpoint
+
+### Latest verified state
+
+- `74edcea3`: four real approve/reject routing combinations, early-invalid
+  Engine guard and malformed-state runner/accountability tests, plus an AOT
+  claim-helper correction that still needs a compile fix.
+- `aaae81d71b7fb899db10885c2a286dc0c675936b`: condition hash distinctions,
+  null/token draft snapshot and generated PostgreSQL JSON roundtrips. Three
+  focused groups passed 3/3 each. No new self-generated historical hash golden.
+- Workflow focused tests passed 19/19. The primary reviewer independently reran
+  the complete Workflow suite using the no-build command below: **98/98 passed**.
+- [CI run 191](https://github.com/OrchesAdam/CrestCreates/actions/runs/34174963915)
+  failed at Build with CS0136 in AotHost `Program.cs:835`: `registration` is
+  declared inside the ancillary-claim loop and again in its enclosing scope.
+  Luna has been directed to fix and compile this before further native claims.
+- Native publish-and-run for the final fixture is not yet verified. The PR
+  remains draft; do not merge, close #87/#88, or start claiming model quality.
+
+### Earlier CI diagnosis
+
+The user manually resumed after the five-hour limit. HEAD `39d4aefb` includes
+the AOT fixture commit `8588636e`; the last local test session no longer exists.
+Do not infer its result from a missing process.
+
+[CI run 189](https://github.com/OrchesAdam/CrestCreates/actions/runs/34116588850)
+provides the concrete native execution result for that head:
+
+- Build, Core/Framework, Procurement/Asset samples, the frozen Phase 10b gate,
+  Metadata Core/Draft, and Workflow/HumanTask stages passed.
+- PostgreSQL direct-provider tests passed 433/433.
+- The PostgreSQL native fixture linked and executed, then failed in
+  `DispatchConditionalCompletionAsync` with `OutboxCompositionException`:
+  `Outbox contract 'crest.accountability.audit-envelope/v1' is not registered.`
+- `ClaimAsync` validates the supported-contract inventory against every active
+  row in the schema. The helper declared only HumanTask completion support while
+  sharing a schema with pending audit envelopes. This is fixture composition,
+  not a missing PostgreSQL service. Simply draining those envelopes can also
+  interfere with the subsequent accountability recovery proof; isolate the
+  scenario or preserve the full fixture's intended evidence.
+- Later CI stages were skipped after this failure. The PR remains draft.
+
+Luna is correcting the native fixture and adding public early-validation and
+failed-step accountability cases. A separate Luna subtask owns Metadata/Draft
+condition JSON/hash compatibility tests. Native execution success, the new
+boundary cases, and final-head CI remain required before marking PR ready.
+
+## Previous checkpoint (supersedes the initial checkpoint below)
 
 - PR #91 now scopes only the bounded Workflow prerequisite. It remains draft;
   #87 Asset evolution and #88 final decisions are not complete.

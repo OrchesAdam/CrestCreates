@@ -2,7 +2,8 @@
 
 Issue #87 business case B04; framework decision owner #88; draft PR #91.
 Design owner: primary reviewer. Implementation owner: GPT-5.6 Luna (high).
-Status: design selected; executable reproduction required before implementation.
+Status: implemented in draft PR #91; reproduction and Workflow regression verified,
+with final native execution and CI acceptance pending.
 
 ## Problem and decision
 
@@ -33,6 +34,13 @@ than adding a field that would change every pre-existing descriptor pin.
 Null means unconditional, preserving the existing mainline. Every other token,
 including empty/whitespace, arbitrary expressions and case variants, is invalid.
 No expression evaluator, reflection, script engine, new provider or plugin.
+
+Compatibility is deliberately narrower than preserving all previous behavior:
+unconditional descriptors retain their behavior and hash shape, but previously
+ignored non-null conditions now execute only if supported, or fail validation.
+An unchanged hash is identity evidence, not a promise to retain the bug that
+ignored that field. No migration of already-running conditional workflows is
+claimed by this prerequisite.
 
 Both supported conditions refer only to the immediately preceding descriptor step.
 That step must target a HumanTask. First-step conditions and conditions after a

@@ -2864,10 +2864,14 @@ the Asset evolution roadmap. The default Asset v1 composition is unchanged.
 - Conditions consume the immediately preceding completed HumanTask step and
   persisted typed outcome. This is not an expression engine or a new approval
   authority. The existing nullable string descriptor field and hash shape remain.
-- Focused tests passed 11/11; the primary reviewer independently reran the full
-  Workflow suite, 90/90. Additional public failure-path tests, native execution
-  against PostgreSQL, and final GitHub CI review are still required. Native
-  publish/link succeeded, but that alone is not NativeAOT verification.
+- The latest focused Workflow tests passed 19/19; the primary reviewer independently
+  reran the full suite, 98/98, including malformed-state failure/accountability.
+  Condition hash, draft snapshot, and generated PostgreSQL JSON tests passed
+  3/3 each (`aaae81d7`). CI 189 passed existing Metadata/sample/Workflow and 433
+  PostgreSQL tests but exposed incomplete supported-contract inventory in the
+  new native fixture. The subsequent helper correction hits CS0136 in CI 191;
+  fixing it and verifying final native execution/CI remain required. Prior
+  publish/link evidence alone is not NativeAOT verification of the final change.
 - Commit `66e56d33` fixes the #86 no-runtime-change gate to compare its frozen
   historical revisions. It no longer prohibits legitimate subsequent repairs.
 - See `docs/superpowers/specs/2026-09-07-workflow-outcome-condition-prerequisite.md`
