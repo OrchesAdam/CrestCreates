@@ -2,8 +2,8 @@
 
 Issue #87 business case B04; framework decision owner #88; draft PR #91.
 Design owner: primary reviewer. Implementation owner: GPT-5.6 Luna (high).
-Status: implemented in draft PR #91; reproduction and Workflow regression verified,
-with final native execution and CI acceptance pending.
+Status: implemented in draft PR #91; reproduction, Workflow regression and local
+native publish/link/run verified. Final-head CI acceptance remains pending.
 
 ## Problem and decision
 

@@ -4,6 +4,16 @@
 
 ### Latest verified state
 
+Final local native result supersedes the blockers below: `9686e11a` fixes the
+shadowed variable. Luna published the linux-x64 AotHost with
+`-p:CrestCreatesPublishMode=aot --disable-build-servers`, then executed the linked
+binary against PostgreSQL; native exit was 0. The primary reviewer inspected the
+ELF executable and full log, including `CRESTCREATES_WORKFLOW_CONDITION_AOT_OK`
+and every existing recovery/accountability/agent marker. The log is preserved at
+`docs/review/2026-09-08-workflow-condition-native.log`. No IL2026/IL3050 was reported;
+existing IL2091/MSB3106 warnings remain, so this is not a warning-free claim.
+Final-head GitHub CI remains pending. The PR stays draft until it passes.
+
 - `74edcea3`: four real approve/reject routing combinations, early-invalid
   Engine guard and malformed-state runner/accountability tests, plus an AOT
   claim-helper correction that still needs a compile fix.
