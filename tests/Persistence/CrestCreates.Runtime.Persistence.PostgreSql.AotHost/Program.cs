@@ -825,21 +825,39 @@ static async Task DispatchConditionalCompletionAsync(IServiceProvider services, 
         OwnerId = "aot-condition-dispatch-" + completed.Id,
         BatchSize = 16,
         LeaseDuration = TimeSpan.FromMinutes(1),
-        SupportedContractIds = new HashSet<string>([HumanTaskDeliveryConstants.CompletedContractId], StringComparer.Ordinal),
+        SupportedContractIds = new HashSet<string>(
+        [HumanTaskDeliveryConstants.CompletedContractId, "crest.accountability.audit-envelope/v1"], StringComparer.Ordinal),
         SupportedRequiredConsumerIds = new HashSet<string>([HumanTaskDeliveryConstants.WorkflowContinuationConsumerId], StringComparer.Ordinal)
     });
-    var claim = claims.Single(item => item.Message.Metadata.MessageId == completed.CompletionEventId);
-    var registration = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>()
-        .Single(item => item.ContractId == HumanTaskDeliveryConstants.CompletedContractId);
-    var outcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    var registrations = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>();
+    foreach (var claim in claims.Where(item => item.Message.Metadata.MessageId != completed.CompletionEventId))
     {
-        Message = claim.Message,
-        Lease = claim.Lease,
+        var registration = registrations.Single(item => item.ContractId == claim.Message.Metadata.ContractId);
+        var ancillaryOutcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+        {
+            Message = claim.Message,
+            Lease = claim.Lease,
+            AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+            Services = services
+        });
+        if (ancillaryOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
+            || await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease) != OutboxDeliveryMutationResult.Applied)
+        {
+            throw new InvalidOperationException("NativeAOT ancillary completion dispatch was not accepted.");
+        }
+    }
+
+    var target = claims.Single(item => item.Message.Metadata.MessageId == completed.CompletionEventId);
+    var registration = registrations.Single(item => item.ContractId == HumanTaskDeliveryConstants.CompletedContractId);
+    var targetOutcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    {
+        Message = target.Message,
+        Lease = target.Lease,
         AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
         Services = services
     });
-    if (outcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
-        || await dispatchStore.AckAsync(claim.Message.Metadata.MessageId, claim.Lease) != OutboxDeliveryMutationResult.Applied)
+    if (targetOutcome is not (OutboxDeliveryOutcome.Accepted or OutboxDeliveryOutcome.Duplicate)
+        || await dispatchStore.AckAsync(target.Message.Metadata.MessageId, target.Lease) != OutboxDeliveryMutationResult.Applied)
     {
         throw new InvalidOperationException("NativeAOT conditional completion dispatch was not accepted.");
     }

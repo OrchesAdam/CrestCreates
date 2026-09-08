@@ -1,10 +1,17 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Accountability.Abstractions.Context;
+using CrestCreates.Accountability.Identity;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Schema.Abstractions;
+using CrestCreates.Workflow;
+using CrestCreates.Workflow.Accountability;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -146,6 +153,79 @@ public sealed class WorkflowConditionPolicyTests
             .WithMessage("*malformed persisted lastStepOutcome*");
     }
 
+    [Theory]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskApproved, "Approve", true)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskApproved, "Reject", false)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskRejected, "Approve", false)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskRejected, "Reject", true)]
+    public void Evaluation_UsesCanonicalApprovedAndRejectedOutcomes(
+        string condition, string outcome, bool expected)
+    {
+        var descriptor = Descriptor(
+            new WorkflowStep { Id = "initial", Target = HumanTaskTarget("initial") },
+            new WorkflowStep
+            {
+                Id = "conditional",
+                Target = HumanTaskTarget("final"),
+                Condition = condition
+            });
+        var stateRegistry = StateRegistry();
+        var instance = new WorkflowInstance { StepIndex = 1 };
+        instance.StepResults.Add(new WorkflowStepResult
+        {
+            StepId = "initial",
+            Status = StepExecutionStatus.Completed
+        });
+        instance.Variables["lastStepOutcome"] = stateRegistry.Capture(outcome);
+
+        WorkflowConditionPolicy.Evaluate(descriptor, instance, 1, stateRegistry)
+            .Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task Engine_RejectsLaterInvalidConditionBeforeAnyPersistenceOrTargetExecution()
+    {
+        var descriptor = Descriptor(
+            new WorkflowStep { Id = "side-effecting", Target = HumanTaskTarget("initial") },
+            new WorkflowStep
+            {
+                Id = "invalid-later",
+                Target = HumanTaskTarget("final"),
+                Condition = " "
+            });
+        var workflowRegistry = new Mock<IWorkflowRegistry>();
+        workflowRegistry.Setup(registry => registry.GetById(descriptor.Id)).Returns(descriptor);
+        var store = new Mock<IWorkflowInstanceStore>();
+        var runner = new RecordingRunner();
+        var eventPublisher = new RecordingLifecyclePublisher();
+        var contexts = new CrestCreates.Accountability.Context.AuditOperationContextAccessor();
+        var pinResolver = new ThrowingPinResolver();
+        var engine = new WorkflowEngine(
+            workflowRegistry.Object,
+            store.Object,
+            runner,
+            eventPublisher,
+            contexts,
+            new WorkflowLifecycleEventFactory(
+                new GuidAuditIdentityGenerator(),
+                new DescriptorStableHashBuilder(new DefaultCanonicalHashComputer())),
+            pinResolver,
+            StateRegistry(),
+            transactions: null,
+            new WorkflowAccountabilityOutboxAppender(null, null, null));
+
+        var act = () => engine.ExecuteAsync(new WorkflowExecutionRequest
+        {
+            WorkflowId = descriptor.Id,
+            TenantId = "tenant"
+        });
+
+        await act.Should().ThrowAsync<WorkflowValidationException>();
+        store.Verify(value => value.AddAsync(It.IsAny<WorkflowInstance>(), It.IsAny<CancellationToken>()), Times.Never);
+        runner.Calls.Should().Be(0);
+        eventPublisher.Calls.Should().Be(0);
+    }
+
     private static WorkflowDescriptor Descriptor(params WorkflowStep[] steps) => new()
     {
         Id = "workflow",
@@ -174,5 +254,40 @@ public sealed class WorkflowConditionPolicyTests
         var services = new ServiceCollection();
         services.AddRuntimePersistence();
         return services.BuildServiceProvider().GetRequiredService<IRuntimeStateContractRegistry>();
+    }
+
+    private sealed class RecordingRunner : IWorkflowExecutionRunner
+    {
+        public int Calls { get; private set; }
+
+        public Task<WorkflowInstance> RunAsync(
+            WorkflowInstance instance,
+            string workflowRunOperationId,
+            string? enclosingAuditId,
+            CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(instance);
+        }
+    }
+
+    private sealed class RecordingLifecyclePublisher : IWorkflowLifecycleEventPublisher
+    {
+        public int Calls { get; private set; }
+
+        public Task PublishAsync(WorkflowLifecycleEvent lifecycleEvent, CancellationToken ct)
+        {
+            Calls++;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingPinResolver : IRuntimeDescriptorPinResolver<WorkflowDescriptor>
+    {
+        public ResolvedRuntimeDescriptor<WorkflowDescriptor> Capture(WorkflowDescriptor descriptor)
+            => throw new InvalidOperationException("The pin resolver must not be reached after condition validation.");
+
+        public ResolvedRuntimeDescriptor<WorkflowDescriptor> Resolve(RuntimeDescriptorPin pin)
+            => throw new InvalidOperationException("The pin resolver must not be reached after condition validation.");
     }
 }

@@ -1,4 +1,5 @@
 using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Accountability.InMemory;
 using CrestCreates.Capability;
 using CrestCreates.Event;
@@ -13,6 +14,8 @@ using CrestCreates.Metadata.Registry;
 using CrestCreates.Runtime.Delivery;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.InMemory;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,15 +31,137 @@ namespace CrestCreates.Workflow.Tests;
 /// </summary>
 public sealed class WorkflowOutcomeConditionReproductionTests
 {
-    [Fact]
-    public async Task InitialReject_DoesNotCreateFinalApprovalTask()
-        => await RunScenarioAsync(CompletionCondition.Reject.ToString(), expectFinalTask: false);
+    [Theory]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskApproved, "Approve", true)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskApproved, "Reject", false)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskRejected, "Approve", false)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskRejected, "Reject", true)]
+    public async Task OutcomeConditionRoutesOnlyMatchingCanonicalOutcome(
+        string condition, string outcome, bool expectFinalTask)
+        => await RunScenarioAsync(outcome, expectFinalTask, condition);
 
     [Fact]
-    public async Task InitialApprove_CreatesExactlyOneFinalApprovalTask()
-        => await RunScenarioAsync(CompletionCondition.Approve.ToString(), expectFinalTask: true);
+    public async Task MalformedOutcome_FailsRunnerPersistsFailureAndAccountability()
+    {
+        var initialReview = HumanTask("ht_asset_malformed_initial_review");
+        var finalReview = HumanTask("ht_asset_malformed_final_review");
+        var workflow = new WorkflowDescriptor
+        {
+            Id = "wf_asset_malformed_outcome_reproduction",
+            Name = "Asset malformed outcome reproduction",
+            Version = 1,
+            State = DescriptorState.Active,
+            Steps =
+            [
+                new WorkflowStep
+                {
+                    Id = "initial-review",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(initialReview.Id, 1)
+                    }
+                },
+                new WorkflowStep
+                {
+                    Id = "final-review",
+                    Condition = WorkflowConditionTokens.PreviousHumanTaskApproved,
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(finalReview.Id, 1)
+                    }
+                }
+            ]
+        };
+        var auditSink = new InMemoryAuditSink();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+        services.AddSingleton<LocalEventBusOptions>();
+        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
+        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
+        services.AddAccountability();
+        services.AddSingleton(auditSink);
+        services.AddSingleton<IAuditSink>(auditSink);
+        services.AddCapabilityRuntime();
+        services.AddRuntimePersistence();
+        services.AddCrestCreatesInMemoryRuntimePersistence();
+        services.AddRuntimeDelivery(options => options.PollingInterval = TimeSpan.FromMilliseconds(10));
+        services.AddHumanTaskRuntime();
+        services.AddWorkflowEngine();
 
-    private static async Task RunScenarioAsync(string outcome, bool expectFinalTask)
+        var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
+        workflowRegistry.Build([new InlineDescriptorProvider<WorkflowDescriptor>(workflow)]);
+        services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
+        var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
+        humanTaskRegistry.Build([new InlineDescriptorProvider<HumanTaskDescriptor>(initialReview, finalReview)]);
+        services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
+
+        await using var provider = services.BuildServiceProvider(validateScopes: true);
+        var hostedServices = provider.GetServices<IHostedService>().ToArray();
+        foreach (var hostedService in hostedServices)
+            await hostedService.StartAsync(CancellationToken.None);
+
+        try
+        {
+            using var scope = provider.CreateScope();
+            var serviceProvider = scope.ServiceProvider;
+            var engine = serviceProvider.GetRequiredService<IWorkflowEngine>();
+            var workflowStore = serviceProvider.GetRequiredService<IWorkflowInstanceStore>();
+            var stateRegistry = serviceProvider.GetRequiredService<IRuntimeStateContractRegistry>();
+            var started = await engine.ExecuteAsync(new WorkflowExecutionRequest
+            {
+                WorkflowId = workflow.Id,
+                TenantId = "asset-tenant"
+            });
+
+            var malformed = (await workflowStore.GetAsync(started.Key))!;
+            malformed.Status = WorkflowInstanceStatus.Running;
+            malformed.StepIndex = 1;
+            malformed.CurrentStepId = "final-review";
+            malformed.WaitingHumanTaskKey = null;
+            malformed.StepResults.Add(new WorkflowStepResult
+            {
+                StepId = "initial-review",
+                StepName = "Initial review",
+                Status = StepExecutionStatus.Completed,
+                ExecutedAt = DateTimeOffset.UtcNow
+            });
+            malformed.Variables["lastStepOutcome"] = stateRegistry.Capture(42);
+            await workflowStore.UpdateAsync(malformed, malformed.Revision);
+
+            var runner = serviceProvider.GetRequiredService<IWorkflowExecutionRunner>();
+            var result = await runner.RunAsync(
+                (await workflowStore.GetAsync(started.Key))!,
+                "malformed-outcome-run",
+                null,
+                CancellationToken.None);
+
+            result.Status.Should().Be(WorkflowInstanceStatus.Failed);
+            result.StepResults.Should().Contain(step =>
+                step.StepId == "final-review" && step.Status == StepExecutionStatus.Failed);
+            result.ErrorMessage.Should().Contain("malformed persisted lastStepOutcome");
+
+            var persisted = await workflowStore.GetAsync(started.Key);
+            persisted.Should().NotBeNull();
+            persisted!.Status.Should().Be(WorkflowInstanceStatus.Failed);
+            persisted.LastLifecycleAuditId.Should().NotBeNullOrWhiteSpace();
+
+            await WaitForAsync(async () => auditSink.GetRecords().Any(record =>
+                record.Action.Name == "workflow.failed"
+                && record.Outcome.Status == "failed"));
+        }
+        finally
+        {
+            for (var index = hostedServices.Length - 1; index >= 0; index--)
+                await hostedServices[index].StopAsync(CancellationToken.None);
+        }
+    }
+
+    private static async Task RunScenarioAsync(
+        string outcome,
+        bool expectFinalTask,
+        string condition = WorkflowConditionTokens.PreviousHumanTaskApproved)
     {
         var initialReview = HumanTask("ht_asset_maintenance_initial_review");
         var finalReview = HumanTask("ht_asset_maintenance_final_review");
@@ -61,7 +186,7 @@ public sealed class WorkflowOutcomeConditionReproductionTests
                 {
                     Id = "final-review",
                     Name = "Final maintenance approval",
-                    Condition = "previous-human-task-approved",
+                    Condition = condition,
                     Target = new HumanTaskTarget
                     {
                         HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(finalReview.Id, 1)
