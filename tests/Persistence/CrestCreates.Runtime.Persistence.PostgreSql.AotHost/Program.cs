@@ -832,8 +832,8 @@ static async Task DispatchConditionalCompletionAsync(IServiceProvider services, 
     var registrations = services.GetRequiredService<IEnumerable<OutboxDeliveryHandlerRegistration>>();
     foreach (var claim in claims.Where(item => item.Message.Metadata.MessageId != completed.CompletionEventId))
     {
-        var registration = registrations.Single(item => item.ContractId == claim.Message.Metadata.ContractId);
-        var ancillaryOutcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+        var ancillaryRegistration = registrations.Single(item => item.ContractId == claim.Message.Metadata.ContractId);
+        var ancillaryOutcome = await ancillaryRegistration.Resolve(services).HandleAsync(new OutboxDeliveryContext
         {
             Message = claim.Message,
             Lease = claim.Lease,
@@ -848,8 +848,8 @@ static async Task DispatchConditionalCompletionAsync(IServiceProvider services, 
     }
 
     var target = claims.Single(item => item.Message.Metadata.MessageId == completed.CompletionEventId);
-    var registration = registrations.Single(item => item.ContractId == HumanTaskDeliveryConstants.CompletedContractId);
-    var targetOutcome = await registration.Resolve(services).HandleAsync(new OutboxDeliveryContext
+    var targetRegistration = registrations.Single(item => item.ContractId == HumanTaskDeliveryConstants.CompletedContractId);
+    var targetOutcome = await targetRegistration.Resolve(services).HandleAsync(new OutboxDeliveryContext
     {
         Message = target.Message,
         Lease = target.Lease,
