@@ -18,6 +18,7 @@ public static class AssetContractIds
 
     public const string MaintenanceWorkflow = "wf_asset_maintenance_review";
     public const string MaintenanceHumanTask = "ht_asset_maintenance_review";
+    public const string MaintenanceInitialHumanTask = "ht_asset_maintenance_initial_review";
     public const string MaintenanceForm = "form_asset_maintenance_review";
     public const string MaintenanceDecisionConsumer = "crest.sample.asset-management.maintenance-decision/v1";
 
