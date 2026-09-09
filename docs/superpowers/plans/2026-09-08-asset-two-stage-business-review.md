@@ -72,6 +72,13 @@ prove B06/B08 activation authority, B10 retained-pin deployment, B11 process res
 or model quality. Preserve existing native fixture composition; maintain a native
 candidate case if the changed host/consumer mainline requires it.
 
+For native verification, the existing terminating `--golden-scenario` harness may
+select an explicit candidate verification profile. It must bind only to loopback,
+use isolated test state and exit after its assertions. The ordinary server mode
+must not select v2 through this profile. Reuse the same Host composition and
+runtime/consumer implementation; do not duplicate a host or add an activation
+boolean. Such a profile demonstrates candidate behavior, not approved deployment.
+
 ## Handoff to subsequent work
 
 Before authoring/activation implementation, exercise the existing control-plane
