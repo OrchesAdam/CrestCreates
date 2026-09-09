@@ -55,3 +55,22 @@ reported as durable Outbox delivery verification.
 PR #92 remains a draft stacked on PR #91. Its base does not match the CI workflow's
 master-only pull-request trigger; run the existing workflow manually on the final
 branch head and record that exact SHA. No workflow policy change is required.
+
+At `efbf1396`, the primary reviewer independently reran the built Asset E2E
+assembly with `dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests --no-build --no-restore --logger 'console;verbosity=minimal'`:
+10 passed, 0 failed (19 seconds), against the isolated local PostgreSQL database.
+The compiled-pin test now uses the same alternate registry for both the generic
+resolver and the Asset resolver. The outcome/fact test uses a real completed task
+and directly invokes the consumer; its placeholder delivery context is not an
+Outbox transport-integrity test.
+
+The implementation agent's native-fixture log records one passing
+`NativeAotBinary_RunsGoldenScenarioAndExits` run (3 minutes 20 seconds). The fixture
+publishes, links and runs the default v1 Host through the existing script. The
+primary reviewer checked that log and fixture, but did not independently repeat
+that native run. Candidate v2 native behavior remains unverified.
+
+The race test in `efbf1396` is still nondeterministic: the initial call may return
+before the final task completes. Its passing result does not yet establish the
+missed-transient-state regression. A deterministic completion-response barrier
+is required before counting this correction as regression-verified.
