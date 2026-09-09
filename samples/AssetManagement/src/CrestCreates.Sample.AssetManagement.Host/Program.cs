@@ -51,12 +51,17 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var goldenScenario = args.Contains("--golden-scenario", StringComparer.Ordinal);
+var candidateProfile = args.Contains("--golden-scenario-profile=asset-v2-candidate", StringComparer.Ordinal);
+if (candidateProfile && !goldenScenario)
+    throw new InvalidOperationException("The Asset v2 candidate profile is only valid with --golden-scenario.");
+var candidateGoldenScenario = goldenScenario && candidateProfile;
 var builder = WebApplication.CreateBuilder(args);
 if (goldenScenario)
     builder.WebHost.UseUrls("http://127.0.0.1:0");
 
 var databasePath = builder.Configuration["AssetManagement:DatabasePath"]
     ?? Path.Combine(Path.GetTempPath(), $"crestcreates-assets-{Environment.ProcessId}-{Guid.NewGuid():N}.db");
+builder.Configuration["AssetManagement:DatabasePath"] = databasePath;
 var assetStore = new SqliteAssetStore($"Data Source={databasePath}");
 var runtimeConnectionString = builder.Configuration["AssetManagement:RuntimeConnectionString"]
     ?? Environment.GetEnvironmentVariable("ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING");
@@ -72,9 +77,13 @@ capabilityRegistry.Build(
     DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>()
         .Append(new AssetDescriptorProvider<CapabilityDescriptor>(AssetDescriptorCatalog.Capabilities)));
 var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
-humanTaskRegistry.Build([new AssetDescriptorProvider<HumanTaskDescriptor>([AssetDescriptorCatalog.MaintenanceHumanTask])]);
+humanTaskRegistry.Build([new AssetDescriptorProvider<HumanTaskDescriptor>(candidateGoldenScenario
+    ? [AssetDescriptorCatalog.MaintenanceHumanTask, AssetDescriptorCatalog.MaintenanceInitialHumanTask]
+    : [AssetDescriptorCatalog.MaintenanceHumanTask])]);
 var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
-workflowRegistry.Build([new AssetDescriptorProvider<WorkflowDescriptor>([AssetDescriptorCatalog.MaintenanceWorkflow])]);
+workflowRegistry.Build([new AssetDescriptorProvider<WorkflowDescriptor>(candidateGoldenScenario
+    ? [AssetDescriptorCatalog.MaintenanceWorkflow, AssetCandidateDescriptorCatalog.MaintenanceWorkflow]
+    : [AssetDescriptorCatalog.MaintenanceWorkflow])]);
 var formRegistry = new FormRegistry(new RegistryValidationEngine<FormDescriptor>([]));
 formRegistry.Build([new AssetDescriptorProvider<FormDescriptor>([AssetDescriptorCatalog.MaintenanceForm])]);
 
@@ -143,7 +152,10 @@ builder.Services.AddSingleton<IDescriptorLookup>(new AssetDescriptorLookup(
         .Concat(capabilityRegistry.GetAll())
         .Append(AssetDescriptorCatalog.MaintenanceForm)
         .Append(AssetDescriptorCatalog.MaintenanceHumanTask)
-        .Append(AssetDescriptorCatalog.MaintenanceWorkflow)));
+        .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
+        .Concat(candidateGoldenScenario
+            ? new IDescriptor[] { AssetDescriptorCatalog.MaintenanceInitialHumanTask, AssetCandidateDescriptorCatalog.MaintenanceWorkflow }
+            : Array.Empty<IDescriptor>())));
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(AssetAuthenticationHandler.SchemeName)
@@ -182,7 +194,9 @@ app.MapCrestOpenApi();
 if (goldenScenario)
 {
     await app.StartAsync();
-    try { return await AssetGoldenScenario.RunAsync(app); }
+    try { return candidateGoldenScenario
+        ? await AssetGoldenScenario.RunCandidateV2Async(app)
+        : await AssetGoldenScenario.RunAsync(app); }
     finally { await app.StopAsync(); }
 }
 

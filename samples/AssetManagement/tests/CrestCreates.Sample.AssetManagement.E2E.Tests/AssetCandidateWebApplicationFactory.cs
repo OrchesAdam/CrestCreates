@@ -52,35 +52,7 @@ public sealed class AssetCandidateWebApplicationFactory : WebApplicationFactory<
             services.AddSingleton<ICapabilityHandlerRegistry>(new CandidateCapabilityHandlerRegistry());
 
             var workflows = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
-            var candidateWorkflow = new WorkflowDescriptor
-            {
-                Id = AssetContractIds.MaintenanceWorkflow,
-                Name = "Asset maintenance review",
-                Version = 2,
-                State = DescriptorState.Active,
-                Steps =
-                [
-                    new WorkflowStep
-                    {
-                        Id = "maintenance-initial-review",
-                        Name = "Manager initial maintenance review",
-                        Target = new HumanTaskTarget
-                        {
-                            HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(AssetContractIds.MaintenanceInitialHumanTask, 1)
-                        }
-                    },
-                    new WorkflowStep
-                    {
-                        Id = "maintenance-final-review",
-                        Name = "Manager final maintenance review",
-                        Condition = WorkflowConditionTokens.PreviousHumanTaskApproved,
-                        Target = new HumanTaskTarget
-                        {
-                            HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(AssetContractIds.MaintenanceHumanTask, 1)
-                        }
-                    }
-                ]
-            };
+            var candidateWorkflow = AssetCandidateDescriptorCatalog.MaintenanceWorkflow;
             workflows.Build([new AssetDescriptorProvider<WorkflowDescriptor>(
                 [AssetDescriptorCatalog.MaintenanceWorkflow, candidateWorkflow])]);
             services.RemoveAll<IWorkflowRegistry>();
