@@ -33,6 +33,7 @@ public sealed class AssetAotFixtureTests
         var result = await NativeAotRun.Value;
         result.ExitCode.Should().Be(0, result.Output);
         result.Output.Should().Contain("CRESTCREATES_ASSET_MANAGEMENT_GOLDEN_OK");
+        result.Output.Should().Contain("CRESTCREATES_ASSET_MANAGEMENT_CANDIDATE_V2_GOLDEN_OK");
     }
 
     private static async Task<NativeAotRunResult> RunNativeAotScenarioAsync()
