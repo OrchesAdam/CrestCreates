@@ -118,6 +118,7 @@ builder.Services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
 builder.Services.AddSingleton<IFormRegistry>(formRegistry);
 builder.Services.AddFormKernel();
 builder.Services.AddHumanTaskRuntime();
+builder.Services.AddSingleton<AssetMaintenanceTaskContractResolver>();
 builder.Services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
 builder.Services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceInitialHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
 builder.Services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, AssetMaintenanceDecisionConsumer>(AssetContractIds.MaintenanceDecisionConsumer);
@@ -128,7 +129,7 @@ builder.Services.Replace(ServiceDescriptor.Scoped<AssetMaintenanceDecisionConsum
     new AssetMaintenanceDecisionConsumer(
         sp.GetRequiredService<IHumanTaskInstanceStore>(),
         sp.GetRequiredService<IRuntimeStateContractRegistry>(),
-        sp.GetRequiredService<IRuntimeDescriptorPinResolver<HumanTaskDescriptor>>(),
+        sp.GetRequiredService<AssetMaintenanceTaskContractResolver>(),
         sp.GetRequiredService<ICapabilityDispatcher>(),
         sp.GetRequiredService<AssetExecutionIdentity>(),
         sp.GetRequiredService<ICurrentPrincipalAccessor>(),
