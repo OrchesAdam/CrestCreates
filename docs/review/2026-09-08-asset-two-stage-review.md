@@ -1,7 +1,8 @@
 # Asset two-stage review checkpoint
 
 Latest local verification: `547fecf8` implements and verifies the bounded candidate
-v2 NativeAOT profile. Final-head CI is pending. Earlier checkpoints below preserve
+v2 NativeAOT profile. Final-head CI `34319577314` passed at `895feecd`; PR #92 is
+ready for review and remains unmerged. Earlier checkpoints below preserve
 the distinction between review findings and completed verification.
 
 Base dependency: PR #91, commit `669470a9`. Its complete CI run 192 passed;
