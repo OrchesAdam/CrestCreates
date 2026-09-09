@@ -222,11 +222,23 @@ public sealed class AssetTwoStageAcceptanceTests
     public async Task CandidateV2_InitialCompletion_ReturnsWhenFinalAlreadyCompleted()
     {
         using var factory = new AssetCandidateWebApplicationFactory();
+        factory.GateInitialCompletion = true;
         using var client = factory.CreateClient();
         var (asset, initial) = await StartMaintenanceAsync(client);
-        var initialCompletion = CompleteAsync(factory, initial.HumanTaskId!, "Approve", "Initial review approved");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var initialCompletion = CompleteAsync(factory, initial.HumanTaskId!, "Approve", "Initial review approved", timeout.Token);
+        await factory.CompletionGate.Persisted.Task.WaitAsync(timeout.Token);
         var final = await WaitForSingleFinalTaskAsync(factory, initial.HumanTaskId!);
         await CompleteAsync(factory, final.Id, "Approve", "Final review approved");
+        try
+        {
+            await WaitForWorkflowCompletedAsync(factory, initial.HumanTaskId!, timeout.Token);
+            initialCompletion.IsCompleted.Should().BeFalse();
+        }
+        finally
+        {
+            factory.CompletionGate.Release.TrySetResult(true);
+        }
         await initialCompletion;
         (await SendAsync<AssetResult>(client, HttpMethod.Get, $"/api/assets/{asset.Id}", null, HttpStatusCode.OK))
             .Status.Should().Be(nameof(AssetStatus.Available));
@@ -296,13 +308,13 @@ public sealed class AssetTwoStageAcceptanceTests
         return (asset, maintenance);
     }
 
-    private static async Task CompleteAsync(AssetCandidateWebApplicationFactory factory, string taskId, string outcome, string note)
+    private static async Task CompleteAsync(AssetCandidateWebApplicationFactory factory, string taskId, string outcome, string note, CancellationToken ct = default)
     {
         using var scope = factory.Services.CreateScope();
         var identity = scope.ServiceProvider.GetRequiredService<AssetExecutionIdentity>();
         identity.Set("tenant-a", "manager-1", Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), DataScope.Tenant, "asset-manager");
         await scope.ServiceProvider.GetRequiredService<AssetMaintenanceWorkflowService>()
-            .CompleteAsync(taskId, outcome, note);
+            .CompleteAsync(taskId, outcome, note, ct);
     }
 
     private static async Task<HumanTaskInstance> WaitForSingleFinalTaskAsync(AssetCandidateWebApplicationFactory factory, string initialTaskId)
@@ -322,6 +334,24 @@ public sealed class AssetTwoStageAcceptanceTests
             await Task.Delay(20);
         }
         throw new TimeoutException("The candidate final maintenance task was not created.");
+    }
+
+    private static async Task WaitForWorkflowCompletedAsync(AssetCandidateWebApplicationFactory factory, string initialTaskId, CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var scope = factory.Services.CreateScope();
+            var tasks = scope.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+            var initial = await tasks.GetAsync(new RuntimeInstanceKey("tenant-a", initialTaskId), ct);
+            if (initial?.WorkflowKey is RuntimeInstanceKey workflowKey)
+            {
+                var workflow = await scope.ServiceProvider.GetRequiredService<IWorkflowInstanceStore>().GetAsync(workflowKey, ct);
+                if (workflow?.Status == WorkflowInstanceStatus.Completed)
+                    return;
+            }
+            await Task.Delay(20, ct);
+        }
     }
 
     private static async Task<int> ReadMaintenanceRecordCountAsync(string path, bool approved)

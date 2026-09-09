@@ -1,6 +1,7 @@
 using CrestCreates.Form.Abstractions;
-using CrestCreates.HumanTask;
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.HumanTask;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
@@ -25,6 +26,8 @@ namespace CrestCreates.Sample.AssetManagement.E2E.Tests;
 /// </summary>
 public sealed class AssetCandidateWebApplicationFactory : WebApplicationFactory<Program>
 {
+    public InitialHumanTaskCompletionGate CompletionGate { get; } = new();
+    public bool GateInitialCompletion { get; set; }
     public string DatabasePath { get; } = Path.Combine(Path.GetTempPath(), $"crest-assets-e2e-{Guid.NewGuid():N}.db");
     public string RuntimeSchema { get; } = $"crest_asset_runtime_e2e_{Guid.NewGuid():N}";
 
@@ -92,9 +95,51 @@ public sealed class AssetCandidateWebApplicationFactory : WebApplicationFactory<
                     .Append(AssetDescriptorCatalog.MaintenanceInitialHumanTask)
                     .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
                     .Append(candidateWorkflow)));
+
+            if (GateInitialCompletion)
+            {
+                var runtimeDescriptor = services.LastOrDefault(service => service.ServiceType == typeof(IHumanTaskRuntime));
+                if (runtimeDescriptor?.ImplementationType is not { } runtimeType)
+                    throw new InvalidOperationException("The test composition could not locate the production HumanTask runtime.");
+                services.RemoveAll<IHumanTaskRuntime>();
+                services.AddScoped<IHumanTaskRuntime>(sp => new InitialHumanTaskCompletionGateRuntime(
+                    (IHumanTaskRuntime)ActivatorUtilities.CreateInstance(sp, runtimeType), CompletionGate));
+            }
         });
     }
 
+}
+
+public sealed class InitialHumanTaskCompletionGate
+{
+    private int _armed = 1;
+    public TaskCompletionSource<HumanTaskInstance> Persisted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource<bool> Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public bool TryArm() => Interlocked.Exchange(ref _armed, 0) == 1;
+}
+
+internal sealed class InitialHumanTaskCompletionGateRuntime(
+    IHumanTaskRuntime inner,
+    InitialHumanTaskCompletionGate gate) : IHumanTaskRuntime
+{
+    public Task<HumanTaskInstance> PrepareAsync(HumanTaskCreationRequest request, CancellationToken ct = default)
+        => inner.PrepareAsync(request, ct);
+
+    public Task<HumanTaskInstance> CreateAsync(HumanTaskCreationRequest request, CancellationToken ct = default)
+        => inner.CreateAsync(request, ct);
+
+    public Task<HumanTaskInstance> CancelAsync(RuntimeInstanceKey humanTaskKey, string reason, CancellationToken ct = default)
+        => inner.CancelAsync(humanTaskKey, reason, ct);
+
+    public async Task<HumanTaskInstance> CompleteAsync(HumanTaskCompletionRequest request, CancellationToken ct = default)
+    {
+        var completed = await inner.CompleteAsync(request, ct);
+        if (!gate.TryArm())
+            return completed;
+        gate.Persisted.TrySetResult(completed);
+        await gate.Release.Task.WaitAsync(ct);
+        return completed;
+    }
 }
 #pragma warning restore CC1001
 
