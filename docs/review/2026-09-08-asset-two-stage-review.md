@@ -89,3 +89,7 @@ It was still running at this checkpoint. The final branch needs its own CI resul
 The remaining implementation gate for this PR is candidate v2 NativeAOT behavior
 in the bounded verification profile. Default v1 remains unchanged. Do not mark
 the PR ready or close #87/#88 from the results above.
+
+On resumption, final-head CI run `34299642183` was verified successful at
+`fdbcfe02b189ae7b02a4ceb476a84414811e779e`. The remaining implementation gate is
+candidate v2 NativeAOT publish/link/run; the PR remains draft for that work.
