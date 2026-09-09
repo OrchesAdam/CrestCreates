@@ -2896,9 +2896,11 @@ candidate tests do not establish governed activation or live-model quality.
   `efbf1396`) and the final deterministic missed-transient-state regression
   (1/1 at `f77b4995`). The latter delays the real initial completion response until
   final completion; no production test-only interface was added.
-- Default v1 NativeAOT publish/link/run passed in the implementation agent's
-  fixture, with its log reviewed by the primary reviewer. Candidate v2 NativeAOT
-  execution is the remaining implementation gate for this PR.
+- `547fecf8` adds the candidate v2 NativeAOT profile to the existing CI fixture.
+  A single native publish runs v1, v2 and invalid-selector checks. The primary
+  reviewer independently ran the retained candidate binary against fresh state:
+  exit 0, including exact Assigned identity retention and rejected-step Skipped
+  assertions. Dependency AOT/trim warnings remain. Final-head CI is pending.
 - Approved evidence-bound host handoff, retained-pin deployment, runtime restart
   and live DeepSeek evaluation remain later #87 work; #87 and #88 remain open.
   See `docs/review/2026-09-08-asset-two-stage-review.md` for evidence limitations.

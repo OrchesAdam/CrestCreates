@@ -1,5 +1,9 @@
 # Asset two-stage review checkpoint
 
+Latest local verification: `547fecf8` implements and verifies the bounded candidate
+v2 NativeAOT profile. Final-head CI is pending. Earlier checkpoints below preserve
+the distinction between review findings and completed verification.
+
 Base dependency: PR #91, commit `669470a9`. Its complete CI run 192 passed;
 the PR is ready for review and has not been merged.
 
@@ -93,3 +97,34 @@ the PR ready or close #87/#88 from the results above.
 On resumption, final-head CI run `34299642183` was verified successful at
 `fdbcfe02b189ae7b02a4ceb476a84414811e779e`. The remaining implementation gate is
 candidate v2 NativeAOT publish/link/run; the PR remains draft for that work.
+
+## Candidate native verification — 2026-09-09
+
+Implementation `547fecf8` keeps the candidate descriptor in a verification catalog.
+Ordinary startup still selects v1. The candidate selector is rejected before Host
+construction unless `--golden-scenario` is present. The terminating golden mode
+binds to loopback and uses the same Host, generated HTTP endpoints, runtime,
+consumer and business capability.
+
+The default native script publishes once and runs v1, candidate v2 and the invalid
+selector check. The existing AOT fixture requires both success markers, putting
+candidate verification in the regular CI gate. Runs retain binaries/logs and use
+separate SQLite files and PostgreSQL schemas.
+
+The implementation agent ran `bash samples/AssetManagement/scripts/run-nativeaot-golden-scenario.sh`
+and the full Asset E2E suite (10/10). The primary reviewer inspected the published
+linux-x64 ELF and independently ran that binary with
+`--golden-scenario --golden-scenario-profile=asset-v2-candidate`, a new SQLite file
+and PostgreSQL schema: exit 0 and candidate success marker. The complete independent
+log is `docs/review/2026-09-09-asset-candidate-native.log`.
+
+Observations include initial approval remaining pending with zero terminal records
+and one final task; final approval restoring Available or Assigned with the exact
+prior assignment ID; initial rejection completing Workflow with its final step
+Skipped; and final rejection producing one rejected record and no approved record.
+Terminal assertions wait for durable Workflow completion.
+
+Dependency AOT/trim warnings remain. This is executed candidate-host evidence, not
+a blanket support claim for every dependency. It does not prove approved deployment,
+process restart, arbitrary authored business correctness, real-model quality or
+distributed exactly-once delivery. Final-head CI remains required for readiness.
