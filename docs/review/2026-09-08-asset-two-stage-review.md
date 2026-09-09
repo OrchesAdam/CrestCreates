@@ -74,3 +74,18 @@ The race test in `efbf1396` is still nondeterministic: the initial call may retu
 before the final task completes. Its passing result does not yet establish the
 missed-transient-state regression. A deterministic completion-response barrier
 is required before counting this correction as regression-verified.
+
+Commit `f77b4995` replaces that concurrent-call test with a test-only decorator
+over the real HumanTask runtime. It holds the initial completion response after
+persistence, waits until the terminal review and Workflow have completed, asserts
+the initial call is still blocked, then releases it. No production interface was
+added. The primary reviewer independently reran this exact focused test with
+`--no-build --no-restore --filter FullyQualifiedName~CandidateV2_InitialCompletion_ReturnsWhenFinalAlreadyCompleted`:
+1 passed, 0 failed (3 seconds). This establishes the required ordering; an actual
+run against reverted production code has not been recorded.
+
+Manual CI run `34299002209` targets `70fa81a8`, before this final test correction.
+It was still running at this checkpoint. The final branch needs its own CI result.
+The remaining implementation gate for this PR is candidate v2 NativeAOT behavior
+in the bounded verification profile. Default v1 remains unchanged. Do not mark
+the PR ready or close #87/#88 from the results above.
