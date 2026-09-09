@@ -36,3 +36,22 @@ Add focused failure/race tests for these corrections, then verify the complete
 Asset regression suite and the relevant native paths. Candidate NativeAOT evidence
 is not yet established by the six integration tests. Preserve v1 descriptors and
 the independent B01–B05, replay, tenant and authorization observations in the plan.
+
+## Follow-up review — 2026-09-09
+
+Commits `5073268e` and `7d656aa2` implement the shared compiled-contract resolver,
+durable continuation acceptance check, and canonical outcome/fact consistency.
+The resolver also maps invalid runtime pins to a consumer conflict rather than a
+retry. Source inspection confirms these corrections; this does not replace their
+pending failure/race verification or the complete regression and native runs.
+
+The contract regression must use a valid alternate registry descriptor with the
+same ID/version, so it tests the Asset compiled-contract boundary in addition to
+the existing generic pin validator. The completion race must deterministically
+reach the wait after final completion; concurrent calls alone can pass the old
+implementation. Consumer fault injection is scoped evidence and must not be
+reported as durable Outbox delivery verification.
+
+PR #92 remains a draft stacked on PR #91. Its base does not match the CI workflow's
+master-only pull-request trigger; run the existing workflow manually on the final
+branch head and record that exact SHA. No workflow policy change is required.
