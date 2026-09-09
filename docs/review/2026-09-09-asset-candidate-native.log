@@ -1,0 +1,233 @@
+info: Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager[62]
+      User profile is available. Using '/home/orches/.aspnet/DataProtection-Keys' as key repository; keys will not be encrypted at rest.
+info: CrestCreates.Metadata.Bootstrap.BootstrapCoordinator[0]
+      Bootstrapping runtime-schema-compatibility (PostgreSqlRuntimeSchemaCompatibilityHostedService)...
+info: CrestCreates.Metadata.Bootstrap.BootstrapCoordinator[0]
+      Bootstrapping runtime-delivery-durable-composition (OutboxDurableCompositionBootstrapTask)...
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://127.0.0.1:46155
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Production
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: /home/orches/workspace/CrestCreates/.worktrees/asset-evolution-87
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets - application/json;+charset=utf-8 260
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.register → /api/assets'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 201.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.register → /api/assets'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets - 201 - application/json;+charset=utf-8 23.6672ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets/3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5/maintenance - application/json;+charset=utf-8 79
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.request-maintenance → /api/assets/{assetId:guid}/maintenance'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 202.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetOperationResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.request-maintenance → /api/assets/{assetId:guid}/maintenance'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets/3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5/maintenance - 202 - application/json;+charset=utf-8 43.4975ms
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Processing asset maintenance completion 9d7672759e1e4caa86eb22fe91bf1910 for HumanTask ht_89c583d403cfc04fd991754fe99235bc284fed472d1e55f4972b9421df208046.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Acknowledging initial Asset maintenance approval for 3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5 without applying a terminal decision.
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:46155/api/assets/3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:46155/api/assets/3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5 - 200 - application/json;+charset=utf-8 8.1257ms
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Processing asset maintenance completion 5e63d67dd6c749789355ec9036476776 for HumanTask ht_01a6647c7de4b50e122f3700f22763de204da82b9b2ad9d1691c82546a7b79aa.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Dispatching asset maintenance decision for 3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5 as manager-1.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Asset maintenance decision dispatch completed for 3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5: Succeeded (null).
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:46155/api/assets/3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:46155/api/assets/3e6e28d1-d7de-4a3d-9729-ebd6fdd062e5 - 200 - application/json;+charset=utf-8 6.3546ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets - application/json;+charset=utf-8 269
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.register → /api/assets'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 201.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.register → /api/assets'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets - 201 - application/json;+charset=utf-8 17.7233ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets/d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6/assign - application/json;+charset=utf-8 131
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.assign → /api/assets/{assetId:guid}/assign'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.assign → /api/assets/{assetId:guid}/assign'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets/d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6/assign - 200 - application/json;+charset=utf-8 17.7114ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets/d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6/maintenance - application/json;+charset=utf-8 88
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.request-maintenance → /api/assets/{assetId:guid}/maintenance'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 202.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetOperationResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.request-maintenance → /api/assets/{assetId:guid}/maintenance'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets/d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6/maintenance - 202 - application/json;+charset=utf-8 27.0345ms
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Processing asset maintenance completion 30a23717ed564dad8092a193b43998af for HumanTask ht_b25119b707308168e5fd6f4bfbdffa6ff71e6e68ac6e975a09bb56bb460f8b3e.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Acknowledging initial Asset maintenance approval for d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6 without applying a terminal decision.
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:46155/api/assets/d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:46155/api/assets/d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6 - 200 - application/json;+charset=utf-8 6.8182ms
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Processing asset maintenance completion 43ae275672554890afcd5bcd7f6491cd for HumanTask ht_ffe939f85f3c3c4585b23e98a5e6c433372575e48ecf26220c84ca6c9186c565.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Dispatching asset maintenance decision for d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6 as manager-1.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Asset maintenance decision dispatch completed for d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6: Succeeded (null).
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:46155/api/assets/d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:46155/api/assets/d4c3e7eb-5dc7-4c51-9e6c-ef7ddc9070c6 - 200 - application/json;+charset=utf-8 7.1969ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets - application/json;+charset=utf-8 267
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.register → /api/assets'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 201.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.register → /api/assets'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets - 201 - application/json;+charset=utf-8 17.7384ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets/239f427d-9cad-4a19-ad56-f0e98e813bea/maintenance - application/json;+charset=utf-8 86
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.request-maintenance → /api/assets/{assetId:guid}/maintenance'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 202.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetOperationResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.request-maintenance → /api/assets/{assetId:guid}/maintenance'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets/239f427d-9cad-4a19-ad56-f0e98e813bea/maintenance - 202 - application/json;+charset=utf-8 26.9040ms
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Processing asset maintenance completion 11482a5400e94b5cb3feb9a1f848ff75 for HumanTask ht_3821f52e7c388542c0f40dadfe4a654b2e300a32bbcd0b0d6139a8f51eee933d.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Dispatching asset maintenance decision for 239f427d-9cad-4a19-ad56-f0e98e813bea as manager-1.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Asset maintenance decision dispatch completed for 239f427d-9cad-4a19-ad56-f0e98e813bea: Succeeded (null).
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:46155/api/assets/239f427d-9cad-4a19-ad56-f0e98e813bea - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:46155/api/assets/239f427d-9cad-4a19-ad56-f0e98e813bea - 200 - application/json;+charset=utf-8 7.0038ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets - application/json;+charset=utf-8 265
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.register → /api/assets'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 201.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.register → /api/assets'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets - 201 - application/json;+charset=utf-8 17.7410ms
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 POST http://127.0.0.1:46155/api/assets/dc6b277e-2949-4921-9b3e-e968b7c2da81/maintenance - application/json;+charset=utf-8 84
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.request-maintenance → /api/assets/{assetId:guid}/maintenance'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 202.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetOperationResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.request-maintenance → /api/assets/{assetId:guid}/maintenance'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 POST http://127.0.0.1:46155/api/assets/dc6b277e-2949-4921-9b3e-e968b7c2da81/maintenance - 202 - application/json;+charset=utf-8 26.8088ms
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Processing asset maintenance completion 1371d08ac3524d779b8c807beeadc9b8 for HumanTask ht_e914b3b62922100a01118d1f649678d375c748b21b802d4feb4019d9bbd03af9.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Acknowledging initial Asset maintenance approval for dc6b277e-2949-4921-9b3e-e968b7c2da81 without applying a terminal decision.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Processing asset maintenance completion cbe87cce9950415093000f03ff775700 for HumanTask ht_8c2254a0799d7f8821a220aa3b7bcc3b573b6b8024f7d9556e767e18bd5e39c6.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Dispatching asset maintenance decision for dc6b277e-2949-4921-9b3e-e968b7c2da81 as manager-1.
+info: CrestCreates.Sample.AssetManagement.Host.AssetMaintenanceDecisionConsumer[0]
+      Asset maintenance decision dispatch completed for dc6b277e-2949-4921-9b3e-e968b7c2da81: Succeeded (null).
+info: Microsoft.AspNetCore.Hosting.Diagnostics[1]
+      Request starting HTTP/1.1 GET http://127.0.0.1:46155/api/assets/dc6b277e-2949-4921-9b3e-e968b7c2da81 - - -
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[0]
+      Executing endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Http.Result.JsonResult[1]
+      Setting HTTP status code 200.
+info: Microsoft.AspNetCore.Http.Result.JsonResult[3]
+      Writing value of type 'AssetResult' as Json.
+info: Microsoft.AspNetCore.Routing.EndpointMiddleware[1]
+      Executed endpoint 'asset-management.assets.get → /api/assets/{assetId:guid}'
+info: Microsoft.AspNetCore.Hosting.Diagnostics[2]
+      Request finished HTTP/1.1 GET http://127.0.0.1:46155/api/assets/dc6b277e-2949-4921-9b3e-e968b7c2da81 - 200 - application/json;+charset=utf-8 6.4337ms
+CRESTCREATES_ASSET_MANAGEMENT_CANDIDATE_V2_GOLDEN_OK
+info: Microsoft.Hosting.Lifetime[0]
+      Application is shutting down...
