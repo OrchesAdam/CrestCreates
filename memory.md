@@ -2883,8 +2883,8 @@ the Asset evolution roadmap. The default Asset v1 composition is unchanged.
 
 ### Issue #87 — Candidate Asset two-stage review (2026-09-09)
 
-**Status**: PR #92 is draft, stacked on unmerged PR #91. Its head `fdbcfe02`
-passed full CI run `34299642183`. Default production Asset composition remains v1;
+**Status**: PR #92 is ready for review, stacked on unmerged PR #91. Its final head
+`895feecd` passed full CI run `34319577314`. Default production Asset composition remains v1;
 candidate tests do not establish governed activation or live-model quality.
 
 - Initial approval remains nonterminal; initial rejection and the existing final
@@ -2900,7 +2900,8 @@ candidate tests do not establish governed activation or live-model quality.
   A single native publish runs v1, v2 and invalid-selector checks. The primary
   reviewer independently ran the retained candidate binary against fresh state:
   exit 0, including exact Assigned identity retention and rejected-step Skipped
-  assertions. Dependency AOT/trim warnings remain. Final-head CI is pending.
+  assertions. Dependency AOT/trim warnings remain. Final-head CI passed; PR #92
+  was marked ready for review and remains unmerged.
 - Approved evidence-bound host handoff, retained-pin deployment, runtime restart
   and live DeepSeek evaluation remain later #87 work; #87 and #88 remain open.
   See `docs/review/2026-09-08-asset-two-stage-review.md` for evidence limitations.
