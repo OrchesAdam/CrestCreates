@@ -71,6 +71,17 @@ public static class AssetDescriptorCatalog
         Outcomes = [new CompletionOutcome { Condition = CompletionCondition.Approve }, new CompletionOutcome { Condition = CompletionCondition.Reject }]
     };
 
+    // This contract is compiled with the Asset host so candidate compositions
+    // can pin it through the same registry/hash path as the production v1
+    // task. It is deliberately omitted from the default registry in Program.
+    public static HumanTaskDescriptor MaintenanceInitialHumanTask { get; } = new()
+    {
+        Id = AssetContractIds.MaintenanceInitialHumanTask, Name = "Asset maintenance initial review", Version = 1, State = DescriptorState.Active,
+        Interaction = new VersionedDescriptorRef<IInteractionDescriptor>(AssetContractIds.MaintenanceForm, 1),
+        AssigneeStrategy = AssigneeStrategy.CandidateGroup,
+        Outcomes = [new CompletionOutcome { Condition = CompletionCondition.Approve }, new CompletionOutcome { Condition = CompletionCondition.Reject }]
+    };
+
     public static WorkflowDescriptor MaintenanceWorkflow { get; } = new()
     {
         Id = AssetContractIds.MaintenanceWorkflow, Name = "Asset maintenance review", Version = 1, State = DescriptorState.Active,

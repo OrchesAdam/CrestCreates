@@ -2850,7 +2850,7 @@ and publish gates are green, with GitHub CI/PR verification pending.
 
 ### Issues #87 / #88 — Workflow outcome condition prerequisite (2026-09-07)
 
-**Status**: PR #91 is draft; this is a prerequisite repair, not completion of
+**Status**: PR #91 is ready for review and remains unmerged; this is a prerequisite repair, not completion of
 the Asset evolution roadmap. The default Asset v1 composition is unchanged.
 
 - The correctly composed Workflow/HumanTask/Outbox reproduction reached its
@@ -2874,12 +2874,36 @@ the Asset evolution roadmap. The default Asset v1 composition is unchanged.
   exit 0 against PostgreSQL, including condition routing across provider lifetimes.
   The primary reviewer inspected the ELF and all success markers; the log is
   preserved in `docs/review/2026-09-08-workflow-condition-native.log`. Existing
-  warnings remain; final-head GitHub CI is still required before PR readiness.
+  warnings remain. Final-head CI run `34191548223` passed on `669470a9`.
 - Commit `66e56d33` fixes the #86 no-runtime-change gate to compare its frozen
   historical revisions. It no longer prohibits legitimate subsequent repairs.
 - See `docs/superpowers/specs/2026-09-07-workflow-outcome-condition-prerequisite.md`
   and `docs/review/2026-09-07-phase-10c-resume.md` before resuming. Full governed
   Asset v2 evolution and live DeepSeek evaluation remain pending; #87/#88 stay open.
+
+### Issue #87 — Candidate Asset two-stage review (2026-09-09)
+
+**Status**: PR #92 is draft, stacked on unmerged PR #91. Its head `fdbcfe02`
+passed full CI run `34299642183`. Default production Asset composition remains v1;
+candidate tests do not establish governed activation or live-model quality.
+
+- Initial approval remains nonterminal; initial rejection and the existing final
+  review use the current Asset business capability and durable consumer.
+- Asset-owned role resolution validates equality with known compiled contracts.
+  Completion routing rejects inconsistent canonical outcomes and decision facts.
+  Initial completion uses the existing durable Workflow continuation acceptance.
+- Primary reviewer independently ran the full Asset E2E suite (10/10 at
+  `efbf1396`) and the final deterministic missed-transient-state regression
+  (1/1 at `f77b4995`). The latter delays the real initial completion response until
+  final completion; no production test-only interface was added.
+- `547fecf8` adds the candidate v2 NativeAOT profile to the existing CI fixture.
+  A single native publish runs v1, v2 and invalid-selector checks. The primary
+  reviewer independently ran the retained candidate binary against fresh state:
+  exit 0, including exact Assigned identity retention and rejected-step Skipped
+  assertions. Dependency AOT/trim warnings remain. Final-head CI is pending.
+- Approved evidence-bound host handoff, retained-pin deployment, runtime restart
+  and live DeepSeek evaluation remain later #87 work; #87 and #88 remain open.
+  See `docs/review/2026-09-08-asset-two-stage-review.md` for evidence limitations.
 
 ## Recommended Next Thread Entry Prompt
 
