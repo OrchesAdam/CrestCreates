@@ -24,7 +24,14 @@ public sealed class AssetMaintenanceTaskContractResolver
 
     public AssetMaintenanceTaskRole Resolve(RuntimeDescriptorPin pin)
     {
-        _pins.Resolve(pin);
+        try
+        {
+            _pins.Resolve(pin);
+        }
+        catch (RuntimeDescriptorPinValidationException exception)
+        {
+            throw new InvalidOperationException("The maintenance HumanTask pin is not a known compiled Asset contract.", exception);
+        }
         if (Matches(pin, AssetDescriptorCatalog.MaintenanceInitialHumanTask))
             return AssetMaintenanceTaskRole.Initial;
         if (Matches(pin, AssetDescriptorCatalog.MaintenanceHumanTask))
