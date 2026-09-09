@@ -10,6 +10,15 @@ using CrestCreates.Sample.AssetManagement.Host;
 using CrestCreates.Workflow.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
+using CrestCreates.Runtime.Delivery.Abstractions.Messages;
+using CrestCreates.Runtime.Delivery.Abstractions.Stores;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.Registry;
+using CrestCreates.Metadata.Runtime;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.HumanTask;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Data.Sqlite;
 
@@ -175,6 +184,99 @@ public sealed class AssetTwoStageAcceptanceTests
         await CompleteAsync(factory, initial.HumanTaskId!, "Approve", "Initial review approved");
     }
 
+    [Fact]
+    public async Task CandidateV2_ChangedCompiledTaskPin_IsRejectedBeforeCompletion()
+    {
+        using var factory = new AssetCandidateWebApplicationFactory();
+        using var client = factory.CreateClient();
+        var (asset, initial) = await StartMaintenanceAsync(client);
+        using var scope = factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+        var task = (await tasks.GetAsync(new RuntimeInstanceKey("tenant-a", initial.HumanTaskId!)))!;
+        var changedDescriptor = new HumanTaskDescriptor
+        {
+            Id = AssetContractIds.MaintenanceInitialHumanTask,
+            Name = "Changed candidate contract",
+            Version = 1,
+            State = DescriptorState.Active,
+            Interaction = AssetDescriptorCatalog.MaintenanceInitialHumanTask.Interaction,
+            AssigneeStrategy = AssetDescriptorCatalog.MaintenanceInitialHumanTask.AssigneeStrategy,
+            Outcomes = AssetDescriptorCatalog.MaintenanceInitialHumanTask.Outcomes
+        };
+        var changedRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
+        changedRegistry.Build([new AssetDescriptorProvider<HumanTaskDescriptor>([changedDescriptor])]);
+        var stableHashes = scope.ServiceProvider.GetRequiredService<IDescriptorStableHashBuilder>();
+        var changedPinResolver = new RuntimeDescriptorPinResolver<HumanTaskDescriptor>(
+            changedRegistry, stableHashes, "humantask", DescriptorKind.HumanTask);
+        var changedPin = changedPinResolver.Capture(changedDescriptor).Pin;
+        changedPinResolver
+            .Resolve(changedPin).Descriptor.Name.Should().Be("Changed candidate contract");
+        var resolver = new AssetMaintenanceTaskContractResolver(changedPinResolver);
+        Action resolve = () => resolver.Resolve(changedPin);
+        resolve.Should().Throw<InvalidOperationException>();
+        (await SendAsync<AssetResult>(client, HttpMethod.Get, $"/api/assets/{asset.Id}", null, HttpStatusCode.OK))
+            .Status.Should().Be(nameof(AssetStatus.MaintenancePending));
+    }
+
+    [Fact]
+    public async Task CandidateV2_InitialCompletion_ReturnsWhenFinalAlreadyCompleted()
+    {
+        using var factory = new AssetCandidateWebApplicationFactory();
+        using var client = factory.CreateClient();
+        var (asset, initial) = await StartMaintenanceAsync(client);
+        var initialCompletion = CompleteAsync(factory, initial.HumanTaskId!, "Approve", "Initial review approved");
+        var final = await WaitForSingleFinalTaskAsync(factory, initial.HumanTaskId!);
+        await CompleteAsync(factory, final.Id, "Approve", "Final review approved");
+        await initialCompletion;
+        (await SendAsync<AssetResult>(client, HttpMethod.Get, $"/api/assets/{asset.Id}", null, HttpStatusCode.OK))
+            .Status.Should().Be(nameof(AssetStatus.Available));
+    }
+
+    [Fact]
+    public async Task CandidateV2_InconsistentCanonicalOutcomeAndFact_IsConflict()
+    {
+        using var factory = new AssetCandidateWebApplicationFactory();
+        using var client = factory.CreateClient();
+        var (asset, initial) = await StartMaintenanceAsync(client);
+        using var scope = factory.Services.CreateScope();
+        var tasks = scope.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+        var task = (await tasks.GetAsync(new RuntimeInstanceKey("tenant-a", initial.HumanTaskId!)))!;
+        var state = scope.ServiceProvider.GetRequiredService<IRuntimeStateContractRegistry>();
+        var completed = await scope.ServiceProvider.GetRequiredService<IHumanTaskRuntime>().CompleteAsync(new HumanTaskCompletionRequest
+        {
+            HumanTaskKey = task.Key,
+            Outcome = "Approve",
+            ActorId = "manager-1",
+            ActorRoles = ["asset-manager"],
+            Result = state.Capture(new AssetMaintenanceDecisionFact { Approved = false, AssetId = asset.Id, RequesterId = "requester", ApproverId = "manager-1" })
+        });
+        var consumer = scope.ServiceProvider.GetRequiredService<AssetMaintenanceDecisionConsumer>();
+        var result = await consumer.ConsumeAsync(new HumanTaskCompletedEvent
+        {
+            EventId = completed.CompletionEventId!,
+            HumanTaskKey = completed.Key,
+            WorkflowKey = completed.WorkflowKey,
+            HumanTaskPin = completed.HumanTaskPin,
+            Outcome = "Approve",
+            Result = completed.Output
+        }, new OutboxDeliveryContext
+        {
+            Message = new OutboxMessage
+            {
+                Metadata = new OutboxMessageMetadata { MessageId = "asset-inconsistent-fact", ContractId = "test", RequiredConsumerIds = [], OccurredAt = DateTimeOffset.UtcNow, CreatedAt = DateTimeOffset.UtcNow },
+                Payload = [],
+                Integrity = new CanonicalHash { Value = "test", Algorithm = "test", AlgorithmVersion = "test", ArtifactKind = "test", Scope = "test", Purpose = "test", ContractVersion = "test", CanonicalShapeVersion = "test" }
+            },
+            Lease = new OutboxDeliveryLease { OwnerId = "test", ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1), Attempt = 1, Fence = 1 },
+            AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+            Services = scope.ServiceProvider
+        });
+        result.Outcome.Should().Be(OutboxDeliveryOutcome.Conflict);
+        result.FailureCode.Should().Be("ASSET_MAINTENANCE_FACT_INVALID");
+        (await ReadMaintenanceRecordCountAsync(factory.DatabasePath, approved: true)).Should().Be(0);
+        (await ReadMaintenanceRecordCountAsync(factory.DatabasePath, approved: false)).Should().Be(0);
+    }
+
     private static async Task<(AssetResult Asset, AssetOperationResult Maintenance)> StartMaintenanceAsync(HttpClient client)
     {
         SetIdentity(client, "tenant-a", "manager-1", "asset-manager", "Tenant");
@@ -201,6 +303,25 @@ public sealed class AssetTwoStageAcceptanceTests
         identity.Set("tenant-a", "manager-1", Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), DataScope.Tenant, "asset-manager");
         await scope.ServiceProvider.GetRequiredService<AssetMaintenanceWorkflowService>()
             .CompleteAsync(taskId, outcome, note);
+    }
+
+    private static async Task<HumanTaskInstance> WaitForSingleFinalTaskAsync(AssetCandidateWebApplicationFactory factory, string initialTaskId)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            using var scope = factory.Services.CreateScope();
+            var tasks = scope.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+            var initial = await tasks.GetAsync(new RuntimeInstanceKey("tenant-a", initialTaskId));
+            if (initial?.WorkflowKey is RuntimeInstanceKey workflowKey)
+            {
+                var pending = await tasks.GetPendingByWorkflowAsync(workflowKey);
+                if (pending.Count == 1 && pending[0].HumanTaskId == AssetContractIds.MaintenanceHumanTask)
+                    return pending[0];
+            }
+            await Task.Delay(20);
+        }
+        throw new TimeoutException("The candidate final maintenance task was not created.");
     }
 
     private static async Task<int> ReadMaintenanceRecordCountAsync(string path, bool approved)
