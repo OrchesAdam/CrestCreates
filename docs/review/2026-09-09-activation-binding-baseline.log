@@ -1,0 +1,101 @@
+Test run for /home/orches/workspace/CrestCreates/.worktrees/asset-handoff-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/bin/Debug/net10.0/CrestCreates.Agent.ControlPlane.Tests.dll (.NETCoreApp,Version=v10.0)
+VSTest version 18.0.2 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.5+1b188a7b0a (64-bit .NET 10.0.11)
+[xUnit.net 00:00:00.09]   Discovering: CrestCreates.Agent.ControlPlane.Tests
+[xUnit.net 00:00:00.18]   Discovered:  CrestCreates.Agent.ControlPlane.Tests
+[xUnit.net 00:00:00.20]   Starting:    CrestCreates.Agent.ControlPlane.Tests
+     Warning:
+     The component "Fluent Assertions" is governed by the rules defined in the Xceed License Agreement and
+     the Xceed Fluent Assertions Community License. You may use Fluent Assertions free of charge for
+     non-commercial use only. An active subscription is required to use Fluent Assertions for commercial use.
+     Please contact Xceed Sales mailto:sales@xceed.com to acquire a subscription at a very low cost.
+     A paid commercial license supports the development and continued increasing support of
+     Fluent Assertions users under both commercial and community licenses. Help us
+     keep Fluent Assertions at the forefront of unit testing.
+     For more information, visit https://xceed.com/products/unit-testing/fluent-assertions/
+[xUnit.net 00:00:00.46]     CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.TaskCreatorCannotBypassSelfApprovalBySpoofingTypedActor [FAIL]
+[xUnit.net 00:00:00.46]       Expected outcome to be ActivationReviewDispatchOutcome.Conflict {value: 2}, but found ActivationReviewDispatchOutcome.Accepted {value: 0}.
+[xUnit.net 00:00:00.46]       Expected status to be ActivationRequestStatus.UnderReview {value: 1}, but found ActivationRequestStatus.Activated {value: 3}.
+[xUnit.net 00:00:00.46]       Expected gateCalls to be 0, but found 1 (difference of 1).
+[xUnit.net 00:00:00.46]       
+[xUnit.net 00:00:00.46]       Stack Trace:
+[xUnit.net 00:00:00.46]         /home/orches/workspace/CrestCreates/.worktrees/asset-handoff-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/Activation/ActivationReviewCompletionBindingRegressionTests.cs(108,0): at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.TaskCreatorCannotBypassSelfApprovalBySpoofingTypedActor()
+[xUnit.net 00:00:00.46]            at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.TaskCreatorCannotBypassSelfApprovalBySpoofingTypedActor()
+[xUnit.net 00:00:00.46]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.46]       Output:
+[xUnit.net 00:00:00.46]         creator-event/spoofed-actor: dispatch=Accepted, requestStatus=Activated, gateActivateCalls=1
+[xUnit.net 00:00:00.47]     CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CanonicalRejectCannotBecomeApprovalFromTypedResult [FAIL]
+[xUnit.net 00:00:00.47]       Expected outcome to be ActivationReviewDispatchOutcome.Conflict {value: 2}, but found ActivationReviewDispatchOutcome.Accepted {value: 0}.
+[xUnit.net 00:00:00.47]       Expected status to be ActivationRequestStatus.UnderReview {value: 1}, but found ActivationRequestStatus.Activated {value: 3}.
+[xUnit.net 00:00:00.47]       Expected gateCalls to be 0, but found 1 (difference of 1).
+[xUnit.net 00:00:00.47]       
+[xUnit.net 00:00:00.47]       Stack Trace:
+[xUnit.net 00:00:00.47]         /home/orches/workspace/CrestCreates/.worktrees/asset-handoff-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/Activation/ActivationReviewCompletionBindingRegressionTests.cs(63,0): at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CanonicalRejectCannotBecomeApprovalFromTypedResult()
+[xUnit.net 00:00:00.47]            at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CanonicalRejectCannotBecomeApprovalFromTypedResult()
+[xUnit.net 00:00:00.47]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.47]       Output:
+[xUnit.net 00:00:00.47]         canonical-reject/typed-approve: dispatch=Accepted, requestStatus=Activated, gateActivateCalls=1
+[xUnit.net 00:00:00.48]     CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CompletionForRequestAIsNotAllowedToApproveRequestB [FAIL]
+[xUnit.net 00:00:00.48]       Expected outcome to be ActivationReviewDispatchOutcome.Conflict {value: 2}, but found ActivationReviewDispatchOutcome.Accepted {value: 0}.
+[xUnit.net 00:00:00.48]       Expected statusB to be ActivationRequestStatus.UnderReview {value: 1}, but found ActivationRequestStatus.Activated {value: 3}.
+[xUnit.net 00:00:00.48]       Expected gateCalls to be 0, but found 1 (difference of 1).
+[xUnit.net 00:00:00.48]       
+[xUnit.net 00:00:00.48]       Stack Trace:
+[xUnit.net 00:00:00.48]         /home/orches/workspace/CrestCreates/.worktrees/asset-handoff-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/Activation/ActivationReviewCompletionBindingRegressionTests.cs(87,0): at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CompletionForRequestAIsNotAllowedToApproveRequestB()
+[xUnit.net 00:00:00.48]            at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CompletionForRequestAIsNotAllowedToApproveRequestB()
+[xUnit.net 00:00:00.48]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.48]       Output:
+[xUnit.net 00:00:00.48]         task-A/result-B: dispatch=Accepted, requestAStatus=UnderReview, requestBStatus=Activated, gateActivateCalls=1
+[xUnit.net 00:00:00.48]   Finished:    CrestCreates.Agent.ControlPlane.Tests
+  Failed CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.TaskCreatorCannotBypassSelfApprovalBySpoofingTypedActor [221 ms]
+  Error Message:
+   Expected outcome to be ActivationReviewDispatchOutcome.Conflict {value: 2}, but found ActivationReviewDispatchOutcome.Accepted {value: 0}.
+Expected status to be ActivationRequestStatus.UnderReview {value: 1}, but found ActivationRequestStatus.Activated {value: 3}.
+Expected gateCalls to be 0, but found 1 (difference of 1).
+
+  Stack Trace:
+     at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.TaskCreatorCannotBypassSelfApprovalBySpoofingTypedActor() in /home/orches/workspace/CrestCreates/.worktrees/asset-handoff-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/Activation/ActivationReviewCompletionBindingRegressionTests.cs:line 108
+   at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.TaskCreatorCannotBypassSelfApprovalBySpoofingTypedActor()
+--- End of stack trace from previous location ---
+  Standard Output Messages:
+ creator-event/spoofed-actor: dispatch=Accepted, requestStatus=Activated, gateActivateCalls=1
+
+
+  Passed CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.HonestAuthorizedApprovalStillUsesRequestServiceAndGate [13 ms]
+  Failed CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CanonicalRejectCannotBecomeApprovalFromTypedResult [4 ms]
+  Error Message:
+   Expected outcome to be ActivationReviewDispatchOutcome.Conflict {value: 2}, but found ActivationReviewDispatchOutcome.Accepted {value: 0}.
+Expected status to be ActivationRequestStatus.UnderReview {value: 1}, but found ActivationRequestStatus.Activated {value: 3}.
+Expected gateCalls to be 0, but found 1 (difference of 1).
+
+  Stack Trace:
+     at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CanonicalRejectCannotBecomeApprovalFromTypedResult() in /home/orches/workspace/CrestCreates/.worktrees/asset-handoff-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/Activation/ActivationReviewCompletionBindingRegressionTests.cs:line 63
+   at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CanonicalRejectCannotBecomeApprovalFromTypedResult()
+--- End of stack trace from previous location ---
+  Standard Output Messages:
+ canonical-reject/typed-approve: dispatch=Accepted, requestStatus=Activated, gateActivateCalls=1
+
+
+  Failed CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CompletionForRequestAIsNotAllowedToApproveRequestB [4 ms]
+  Error Message:
+   Expected outcome to be ActivationReviewDispatchOutcome.Conflict {value: 2}, but found ActivationReviewDispatchOutcome.Accepted {value: 0}.
+Expected statusB to be ActivationRequestStatus.UnderReview {value: 1}, but found ActivationRequestStatus.Activated {value: 3}.
+Expected gateCalls to be 0, but found 1 (difference of 1).
+
+  Stack Trace:
+     at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CompletionForRequestAIsNotAllowedToApproveRequestB() in /home/orches/workspace/CrestCreates/.worktrees/asset-handoff-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/Activation/ActivationReviewCompletionBindingRegressionTests.cs:line 87
+   at CrestCreates.Agent.ControlPlane.Tests.Activation.ActivationReviewCompletionBindingRegressionTests.CompletionForRequestAIsNotAllowedToApproveRequestB()
+--- End of stack trace from previous location ---
+  Standard Output Messages:
+ task-A/result-B: dispatch=Accepted, requestAStatus=UnderReview, requestBStatus=Activated, gateActivateCalls=1
+
+
+
+Test Run Failed.
+Total tests: 4
+     Passed: 1
+     Failed: 3
+ Total time: 0.9763 Seconds

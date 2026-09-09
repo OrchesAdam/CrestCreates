@@ -52,3 +52,25 @@ state and which expectation failed. The review owner will confirm the narrow fix
 Any repair belongs to the current consumer/orchestrator/request owners. Preserve
 canonical contracts, tenant boundaries, evidence ownership and NativeAOT gates;
 do not add a generic completion protocol or testing-only production hook.
+
+## Repair direction after baseline confirmation
+
+Keep the fix in the existing activation review consumer. Before dispatch, load
+the completed task and its typed review input; verify task/event identity and
+completion correlation. Bind the decision to the task tenant and activation
+request, and require its outcome and actor ID to agree with the canonical runtime
+completion event. Conflicts must return the existing conflict outcome before
+the request service or gate can accept the decision. Empty correlation fields may
+be enriched from the task input only where the existing contract permits it;
+nonempty fields must not bypass validation.
+
+Do not claim that this authenticates the completion caller: the trusted completion
+adapter remains responsible for supplying the actor to HumanTask runtime. The
+event has no ActorKind field, so do not invent authoritative human/agent identity
+from the result's ActorKind. Preserve the existing self-approval policy and test
+its operation with the canonical event actor ID.
+
+The repair must retain honest rejection/approval and duplicate-delivery behavior,
+add missing/mismatched task and cross-tenant cases, and execute the changed callback
+in an existing NativeAOT fixture. JSON roundtrip alone is insufficient. Full
+approved-artifact-to-runtime deployment remains a separate acceptance slice.
