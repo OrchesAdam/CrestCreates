@@ -50,3 +50,37 @@ Once fresh-host handoff is proven, separately interrupt/restart the runtime usin
 the same authorized descriptors and durable state. Keep live-model quality as a
 separate experiment; deterministic authoring and structural review do not prove
 that DeepSeek understood the requested business semantics.
+
+
+## Existing-boundary candidate retention (reviewed 2026-09-10)
+
+Read-only review found a viable experiment without a new artifact-store API.
+Install an acceptance-only decorator for the existing IDescriptorPackageBuilder
+before authoring/review/preview. Delegate to DefaultDescriptorPackageBuilder and
+retain its actual request and returned package. Control-plane previews use draft
+identity/version/CreatedAt metadata and a visibility-filtered proposed inventory;
+retain that actual input rather than guessing from the current catalog.
+
+The retained data is an observation of real package construction, not approval
+or production persistence. Obtain authoritative activation status under the same
+tenant and bind the retained package to that request's artifact/hash snapshot.
+Recompute all three package hashes through the existing canonical hash computer;
+do not trust the package's stored Hashes property. Also rebuild manifest entries
+from the exact retained descriptor definitions using the real stable hash builder.
+Rehashing only a stored manifest cannot detect mutation of the retained inventory.
+Reject additional/missing refs, different versions, changed definitions, cross-
+tenant/request substitutions, incomplete required approvals and changed evidence
+before creating the new host. Revalidate the same content before runtime restart.
+
+The acceptance runner must pass only the verified inventory to the host. A gate
+success flag, proposed-inventory report, or matching package hash with unverified
+runtime definitions is insufficient. Establish the checked-to-loaded association
+explicitly; do not claim arbitrary concurrent mutation is prevented by a sequential
+fixture. Full package snapshots contain refs/hashes, not executable definitions,
+so retaining only their JSON cannot reconstruct the runtime inventory.
+
+This experiment keeps the control plane alive and does not claim durable artifact
+lookup, control-plane restart, automatic production deployment, or protection for
+snapshot relationship payload outside the canonical package hash coverage.
+First prove the bounded handoff before proposing a platform API. Production API
+changes remain contingent on an executable unmet requirement.
