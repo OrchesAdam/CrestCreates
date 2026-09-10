@@ -33,7 +33,7 @@ namespace CrestCreates.Agent.ControlPlane.Tests.Activation;
 /// </summary>
 public sealed class ActivationReviewCompletionBindingRegressionTests : AgentControlPlaneTestBase
 {
-    private const string ReviewTaskId = "descriptor-activation-review";
+    private static readonly string ReviewTaskId = DescriptorActivationHumanTaskIds.ActivationReview.RequireValue();
     private const string ReviewerId = "reviewer-001";
     private readonly Xunit.Abstractions.ITestOutputHelper _output;
 
