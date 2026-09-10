@@ -70,3 +70,11 @@ Commit `b75493bb` adds the native callback fixture. The full ControlPlane suite
 passed **551/551**, and the updated native publish/link/run gate passed **1/1**.
 Final-head CI is pending. Live model evaluation and approved artifact-to-runtime
 handoff remain separate unfinished acceptance.
+
+
+CI run `34424386045` on `9ec496be` passed the complete ControlPlane suite and
+preceding runtime/sample tests, then failed SemanticStringGuard because the new
+regression fixture inlined the protected review-task ID. `04ffad65` replaces that
+literal with the existing typed HumanTask ID definition; guard 1/1 and focused
+binding tests 12/12 passed. No production behavior or guard allowlist changed.
+A new final-head CI run is required.
