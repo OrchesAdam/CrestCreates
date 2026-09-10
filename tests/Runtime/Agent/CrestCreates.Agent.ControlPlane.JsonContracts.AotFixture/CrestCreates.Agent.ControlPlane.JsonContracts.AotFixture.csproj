@@ -12,5 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence/CrestCreates.Runtime.Persistence.csproj" />
   </ItemGroup>
 </Project>
