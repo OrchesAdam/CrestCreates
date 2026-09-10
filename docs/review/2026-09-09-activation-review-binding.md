@@ -56,5 +56,17 @@ limits described above still apply. The canonical ActorId is supplied by the
 completion adapter; this repair does not authenticate that adapter's caller or
 establish authoritative ActorKind.
 
-Native callback execution and final-head CI are pending. Live model evaluation
-and approved artifact-to-runtime handoff remain separate unfinished acceptance.
+The existing ControlPlane JSON NativeAOT fixture now executes the production
+callback with the real source-generated runtime state registry. A fixture-local
+store and recording orchestrator check accepted approval/rejection and conflicting
+request/outcome/actor facts. The primary reviewer independently inspected the
+linux-x64 ELF and executed it: exit 0, `ActivationReviewCallbackBoundary:PASS` and
+all existing markers passed. This establishes native callback dispatch, not native
+activation-gate deployment. Existing dependency trim/build warnings remain.
+Publish and execution logs are preserved in
+`docs/review/2026-09-10-activation-review-native.log`.
+
+Commit `b75493bb` adds the native callback fixture. The full ControlPlane suite
+passed **551/551**, and the updated native publish/link/run gate passed **1/1**.
+Final-head CI is pending. Live model evaluation and approved artifact-to-runtime
+handoff remain separate unfinished acceptance.
