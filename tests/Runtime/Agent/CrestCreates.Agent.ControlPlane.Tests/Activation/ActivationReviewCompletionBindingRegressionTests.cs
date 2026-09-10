@@ -12,6 +12,7 @@ using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
 using CrestCreates.Runtime.Delivery.Abstractions.Stores;
 using CrestCreates.Runtime.Delivery.Abstractions.Registration;
+using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
@@ -50,7 +51,7 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
         var completion = await fixture.CompleteAsync(
             "Reject", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId),
             actorId: ReviewerId);
-        var outcome = await fixture.Handler.HandleAsync(completion);
+        var outcome = await fixture.DispatchAsync(completion);
         var status = await fixture.GetStatusAsync(fixture.RequestId);
         var gateCalls = fixture.ActivationGate.Invocations.Count(invocation => invocation.Method.Name == nameof(IRuntimeActivationGate.ActivateAsync));
         _output.WriteLine($"canonical-reject/typed-approve: dispatch={outcome}, requestStatus={status}, gateActivateCalls={gateCalls}");
@@ -72,7 +73,7 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
         var completion = await fixture.CompleteAsync(
             "Approve", CreateDecision(requestB, DescriptorActivationReviewOutcome.Approved, ReviewerId),
             actorId: ReviewerId);
-        var outcome = await fixture.Handler.HandleAsync(completion);
+        var outcome = await fixture.DispatchAsync(completion);
         var statusA = await fixture.GetStatusAsync(fixture.RequestId);
         var statusB = await fixture.GetStatusAsync(requestB);
         var gateCalls = fixture.ActivationGate.Invocations.Count(invocation => invocation.Method.Name == nameof(IRuntimeActivationGate.ActivateAsync));
@@ -95,7 +96,7 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
         var completion = await fixture.CompleteAsync(
             "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId),
             actorId: TestActorId);
-        var outcome = await fixture.Handler.HandleAsync(completion);
+        var outcome = await fixture.DispatchAsync(completion);
         var status = await fixture.GetStatusAsync(fixture.RequestId);
         var gateCalls = fixture.ActivationGate.Invocations.Count(invocation => invocation.Method.Name == nameof(IRuntimeActivationGate.ActivateAsync));
         _output.WriteLine($"creator-event/spoofed-actor: dispatch={outcome}, requestStatus={status}, gateActivateCalls={gateCalls}");
@@ -116,7 +117,7 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
         var completion = await fixture.CompleteAsync(
             "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId),
             actorId: ReviewerId);
-        var outcome = await fixture.Handler.HandleAsync(completion);
+        var outcome = await fixture.DispatchAsync(completion);
 
         outcome.Should().Be(ActivationReviewDispatchOutcome.Accepted);
         (await fixture.GetStatusAsync(fixture.RequestId)).Should().Be(ActivationRequestStatus.Activated);
@@ -126,13 +127,156 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task HonestAuthorizedRejectionStillUsesRequestService()
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var completion = await fixture.CompleteAsync(
+            "Reject", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Rejected, ReviewerId),
+            actorId: ReviewerId);
+
+        var outcome = await fixture.DispatchAsync(completion);
+
+        outcome.Should().Be(ActivationReviewDispatchOutcome.Accepted);
+        (await fixture.GetStatusAsync(fixture.RequestId)).Should().Be(ActivationRequestStatus.Rejected);
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CompletionForMissingTaskIsAConflictBeforeOrchestration()
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var completion = await fixture.CompleteAsync(
+            "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId),
+            actorId: ReviewerId);
+
+        var outcome = await fixture.DispatchAsync(
+            CopyEvent(completion, humanTaskKey: new RuntimeInstanceKey(TestTenantId, "missing-task")));
+
+        outcome.Should().Be(ActivationReviewDispatchOutcome.Conflict);
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task NonCompletedTaskCannotDispatchItsCompletionFact()
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var completion = await fixture.CompleteAsync(
+            "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId),
+            actorId: ReviewerId);
+        fixture.SetTaskStatus(HumanTaskInstanceStatus.Created);
+
+        var outcome = await fixture.DispatchAsync(completion);
+
+        outcome.Should().Be(ActivationReviewDispatchOutcome.Conflict);
+        (await fixture.GetStatusAsync(fixture.RequestId)).Should().Be(ActivationRequestStatus.UnderReview);
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task WrongCompletionEventIdOrPinCannotDispatchTheDecision()
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var completion = await fixture.CompleteAsync(
+            "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId),
+            actorId: ReviewerId);
+
+        var wrongEventId = await fixture.DispatchAsync(CopyEvent(completion, eventId: "wrong-completion-event"));
+        wrongEventId.Should().Be(ActivationReviewDispatchOutcome.Conflict);
+
+        var wrongPin = completion.HumanTaskPin with
+        {
+            Ref = new DescriptorRef("humantask", ReviewTaskId, 2)
+        };
+        var wrongPinOutcome = await fixture.DispatchAsync(CopyEvent(completion, pin: wrongPin));
+        wrongPinOutcome.Should().Be(ActivationReviewDispatchOutcome.Conflict);
+
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task NonMatchingTenantBindingCannotDispatchTheDecision()
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var completion = await fixture.CompleteAsync(
+            "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId, "tenant-other"),
+            actorId: ReviewerId);
+
+        var outcome = await fixture.DispatchAsync(completion);
+
+        outcome.Should().Be(ActivationReviewDispatchOutcome.Conflict);
+        (await fixture.GetStatusAsync(fixture.RequestId)).Should().Be(ActivationRequestStatus.UnderReview);
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExactCompletionReplayIsDuplicateAfterFirstApproval()
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var completion = await fixture.CompleteAsync(
+            "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId),
+            actorId: ReviewerId);
+
+        var first = await fixture.DispatchAsync(completion);
+        var duplicate = await fixture.DispatchAsync(completion);
+
+        first.Should().Be(ActivationReviewDispatchOutcome.Accepted);
+        duplicate.Should().Be(ActivationReviewDispatchOutcome.Duplicate);
+        (await fixture.GetStatusAsync(fixture.RequestId)).Should().Be(ActivationRequestStatus.Activated);
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task IndependentlyReconstructedRuntimeStateStillDispatches()
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var completion = await fixture.CompleteAsync(
+            "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId),
+            actorId: ReviewerId);
+        var reconstructedResult = completion.Result! with
+        {
+            JsonPayload = string.Concat(completion.Result.JsonPayload)
+        };
+
+        var outcome = await fixture.DispatchAsync(CopyEvent(completion, result: reconstructedResult));
+
+        outcome.Should().Be(ActivationReviewDispatchOutcome.Accepted);
+        (await fixture.GetStatusAsync(fixture.RequestId)).Should().Be(ActivationRequestStatus.Activated);
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MissingTenantAndCorrelationAreEnrichedFromTheDurableTaskInput()
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var completion = await fixture.CompleteAsync(
+            "Approve", CreateDecision(fixture.RequestId, DescriptorActivationReviewOutcome.Approved, ReviewerId, string.Empty, string.Empty),
+            actorId: ReviewerId);
+
+        var outcome = await fixture.DispatchAsync(completion);
+
+        outcome.Should().Be(ActivationReviewDispatchOutcome.Accepted);
+        (await fixture.GetStatusAsync(fixture.RequestId)).Should().Be(ActivationRequestStatus.Activated);
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.Is<AgentToolInvocationContext>(context => context.TenantId == TestTenantId && context.CorrelationId == TestCorrelationId),
+            It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private static DescriptorActivationReviewDecision CreateDecision(
-        string requestId, DescriptorActivationReviewOutcome outcome, string actorId)
+        string requestId, DescriptorActivationReviewOutcome outcome, string actorId,
+        string tenantId = TestTenantId, string correlationId = TestCorrelationId)
         => new()
         {
             ActivationRequestId = requestId,
-            TenantId = TestTenantId,
-            CorrelationId = TestCorrelationId,
+            TenantId = tenantId,
+            CorrelationId = correlationId,
             Decision = outcome,
             ActorKind = DescriptorActivationActorKind.Human,
             ActorId = actorId,
@@ -140,6 +284,24 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
             DecidedAt = DateTimeOffset.UtcNow,
             BoundEvidenceHash = TestHash("evidence-hash", CanonicalHashArtifactNames.PackageEvidence, CanonicalHashPurposeNames.AuditEvidence),
             BoundEnvelopeHash = TestHash("envelope-hash", CanonicalHashArtifactNames.PackageEvidenceEnvelope, CanonicalHashPurposeNames.AuditEvidence)
+        };
+
+    private static HumanTaskCompletedEvent CopyEvent(
+        HumanTaskCompletedEvent source,
+        string? eventId = null,
+        RuntimeInstanceKey? humanTaskKey = null,
+        RuntimeDescriptorPin? pin = null,
+        RuntimeStateValue? result = null)
+        => new()
+        {
+            EventId = eventId ?? source.EventId,
+            HumanTaskKey = humanTaskKey ?? source.HumanTaskKey,
+            WorkflowKey = source.WorkflowKey,
+            HumanTaskPin = pin ?? source.HumanTaskPin,
+            Outcome = source.Outcome,
+            ActorId = source.ActorId,
+            ActorRoles = source.ActorRoles,
+            Result = result ?? source.Result
         };
 
     private static CanonicalHash TestHash(string value, string artifactKind, string purpose)
@@ -227,6 +389,47 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
             });
             return _messageFactory!.CompletedEvent!;
         }
+
+        public async Task<ActivationReviewDispatchOutcome> DispatchAsync(HumanTaskCompletedEvent completion)
+        {
+            var result = await Handler.ConsumeAsync(
+                completion,
+                new OutboxDeliveryContext
+                {
+                    Message = new OutboxMessage
+                    {
+                        Metadata = new OutboxMessageMetadata
+                        {
+                            MessageId = completion.EventId,
+                            TenantId = completion.HumanTaskKey.TenantId,
+                            ContractId = "humantask.completed",
+                            RequiredConsumerIds = [DescriptorActivationReviewHumanTaskEventHandler.ConsumerIdValue],
+                            OccurredAt = DateTimeOffset.UtcNow,
+                            CreatedAt = DateTimeOffset.UtcNow
+                        },
+                        Payload = [],
+                        Integrity = TestHash("delivery", "Outbox", "Integrity")
+                    },
+                    Lease = new OutboxDeliveryLease
+                    {
+                        OwnerId = "activation-review-test",
+                        ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1),
+                        Attempt = 1,
+                        Fence = 1
+                    },
+                    AttemptDeadline = DateTimeOffset.UtcNow.AddMinutes(1),
+                    Services = new ServiceCollection().BuildServiceProvider()
+                });
+            return result.Outcome switch
+            {
+                OutboxDeliveryOutcome.Accepted => ActivationReviewDispatchOutcome.Accepted,
+                OutboxDeliveryOutcome.Duplicate => ActivationReviewDispatchOutcome.Duplicate,
+                _ => ActivationReviewDispatchOutcome.Conflict
+            };
+        }
+
+        public void SetTaskStatus(HumanTaskInstanceStatus status)
+            => _taskStore.SetStatus(new RuntimeInstanceKey(TestTenantId, "review-task"), status);
 
         public async Task<ActivationRequestStatus> GetStatusAsync(string requestId)
         {
@@ -355,6 +558,7 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
         public Task AddAsync(HumanTaskInstance instance, CancellationToken cancellationToken = default) { _items[instance.Key] = instance; return Task.CompletedTask; }
         public Task<HumanTaskInstance?> GetAsync(RuntimeInstanceKey key, CancellationToken cancellationToken = default) => Task.FromResult(_items.GetValueOrDefault(key));
         public Task UpdateAsync(HumanTaskInstance instance, long expectedRevision, CancellationToken cancellationToken = default) { _items[instance.Key] = instance; return Task.CompletedTask; }
+        public void SetStatus(RuntimeInstanceKey key, HumanTaskInstanceStatus status) => _items[key].Status = status;
         public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByAssigneeAsync(RuntimeTenantScope scope, string assigneeUserId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<HumanTaskInstance>>([]);
         public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByWorkflowAsync(RuntimeInstanceKey workflowKey, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<HumanTaskInstance>>([]);
         public Task<IReadOnlyList<HumanTaskInstance>> GetPendingByCandidateUserAsync(RuntimeTenantScope scope, string userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<HumanTaskInstance>>([]);

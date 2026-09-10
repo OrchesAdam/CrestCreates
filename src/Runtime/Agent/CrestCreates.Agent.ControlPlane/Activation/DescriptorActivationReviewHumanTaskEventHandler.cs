@@ -11,8 +11,8 @@ namespace CrestCreates.Agent.ControlPlane.Activation;
 /// <summary>
 /// Event handler that processes HumanTask completion events for
 /// descriptor activation review tasks. Parses the review decision
-/// from the HumanTask result, enriches it with TenantId/CorrelationId
-/// from the HumanTask instance, and routes it to the activation review orchestrator.
+/// from the HumanTask result, binds it to the durably completed HumanTask
+/// and its persisted input, and routes it to the activation review orchestrator.
 /// </summary>
 public sealed class DescriptorActivationReviewHumanTaskEventHandler
     : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
@@ -38,6 +38,9 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
 
     public async Task<ActivationReviewDispatchOutcome> HandleAsync(HumanTaskCompletedEvent @event, CancellationToken cancellationToken = default)
     {
+        if (@event.HumanTaskPin is null)
+            throw new InvalidOperationException("Activation review completion is missing its HumanTask descriptor pin.");
+
         // Only process activation review HumanTasks
         if (@event.HumanTaskPin.Ref.Id != DescriptorActivationHumanTaskIds.ActivationReview)
         {
@@ -65,14 +68,11 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
                 $"Failed to parse activation review decision from HumanTask '{@event.HumanTaskKey.InstanceId}': {error}");
         }
 
-        // Enrich the decision with TenantId/CorrelationId from the HumanTask instance
+        // Bind the untyped completion fact to the durable task before routing it. The
+        // callback payload is not an authority for task identity, tenant, outcome, or
+        // actor identity: those facts come from the completed HumanTask and its input.
         var enrichedDecision = await EnrichDecisionAsync(
-            parsedDecision!, @event.HumanTaskKey, cancellationToken);
-
-        if (enrichedDecision is null)
-        {
-            throw new InvalidOperationException($"HumanTask '{@event.HumanTaskKey.InstanceId}' is unavailable for activation review enrichment.");
-        }
+            parsedDecision!, @event, cancellationToken);
 
         // Route the enriched decision to the orchestrator
         return await _orchestrator.ProcessReviewDecisionAsync(enrichedDecision, @event.EventId, cancellationToken)
@@ -111,41 +111,85 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
         }
     }
 
-    private async Task<DescriptorActivationReviewDecision?> EnrichDecisionAsync(
+    private async Task<DescriptorActivationReviewDecision> EnrichDecisionAsync(
         DescriptorActivationReviewDecision parsedDecision,
-        RuntimeInstanceKey humanTaskKey,
+        HumanTaskCompletedEvent @event,
         CancellationToken cancellationToken)
     {
-        // If TenantId/CorrelationId are already non-empty, use them as-is
-        if (!string.IsNullOrEmpty(parsedDecision.TenantId)
-            && !string.IsNullOrEmpty(parsedDecision.CorrelationId))
-        {
-            return parsedDecision;
-        }
-
-        // Look up the HumanTask instance to obtain TenantId and the task input (CorrelationId)
-        var instance = await _humanTaskInstanceStore.GetAsync(humanTaskKey, cancellationToken);
+        var instance = await _humanTaskInstanceStore.GetAsync(@event.HumanTaskKey, cancellationToken);
         if (instance is null)
         {
-            _logger.LogError(
-                "HumanTask instance '{InstanceId}' not found — cannot enrich activation review decision.",
-                humanTaskKey.InstanceId);
-            return null;
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' is unavailable for activation review binding.");
         }
 
-        var tenantId = !string.IsNullOrEmpty(parsedDecision.TenantId)
-            ? parsedDecision.TenantId
-            : instance.TenantId ?? string.Empty;
+        if (instance.Status != HumanTaskInstanceStatus.Completed)
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' is not durably completed.");
 
-        var correlationId = !string.IsNullOrEmpty(parsedDecision.CorrelationId)
-            ? parsedDecision.CorrelationId
-            : instance.Input is null
-                ? string.Empty
-                : (_stateRegistry.Restore<DescriptorActivationReviewTaskInput>(instance.Input)).CorrelationId ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(instance.CompletionEventId)
+            || !string.Equals(instance.CompletionEventId, @event.EventId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' completion event identity does not match the durable task.");
+
+        if (!Equals(instance.Key, @event.HumanTaskKey)
+            || !Equals(instance.HumanTaskPin, @event.HumanTaskPin))
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' key or descriptor pin does not match the durable task.");
+
+        if (!string.Equals(instance.Outcome, @event.Outcome, StringComparison.OrdinalIgnoreCase)
+            || instance.Output is null
+            || @event.Result is null
+            || !Equals(instance.Output, @event.Result))
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' completion fact does not match the durable result.");
+
+        var persistedDecision = _stateRegistry.Restore<DescriptorActivationReviewDecision>(instance.Output);
+        if (!Equals(persistedDecision, parsedDecision))
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' typed decision does not match the durable result.");
+
+        if (instance.Input is null)
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' has no activation review input.");
+
+        var taskInput = _stateRegistry.Restore<DescriptorActivationReviewTaskInput>(instance.Input);
+        if (string.IsNullOrWhiteSpace(taskInput.ActivationRequestId)
+            || !string.Equals(parsedDecision.ActivationRequestId, taskInput.ActivationRequestId, StringComparison.Ordinal)
+            || (!string.IsNullOrEmpty(parsedDecision.TenantId)
+                && !string.Equals(parsedDecision.TenantId, taskInput.TenantId, StringComparison.Ordinal))
+            || !string.Equals(instance.TenantId, taskInput.TenantId, StringComparison.Ordinal)
+            || !string.Equals(@event.HumanTaskKey.TenantId, taskInput.TenantId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' activation request or tenant binding does not match the durable input.");
+
+        var correlationId = parsedDecision.CorrelationId;
+        if (string.IsNullOrEmpty(correlationId))
+            correlationId = taskInput.CorrelationId ?? string.Empty;
+        else if (!string.Equals(correlationId, taskInput.CorrelationId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' correlation binding does not match the durable input.");
+
+        var canonicalDecision = @event.Outcome switch
+        {
+            "Approve" => DescriptorActivationReviewOutcome.Approved,
+            "Reject" => DescriptorActivationReviewOutcome.Rejected,
+            _ => throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' has unsupported activation review outcome '{@event.Outcome}'.")
+        };
+        if (parsedDecision.Decision != canonicalDecision)
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' outcome does not match the typed activation review decision.");
+
+        if (string.IsNullOrWhiteSpace(@event.ActorId)
+            || string.IsNullOrWhiteSpace(parsedDecision.ActorId)
+            || !string.Equals(parsedDecision.ActorId, @event.ActorId, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"HumanTask '{@event.HumanTaskKey.InstanceId}' actor does not match the typed activation review decision.");
 
         return parsedDecision with
         {
-            TenantId = tenantId,
+            TenantId = taskInput.TenantId,
             CorrelationId = correlationId
         };
     }
