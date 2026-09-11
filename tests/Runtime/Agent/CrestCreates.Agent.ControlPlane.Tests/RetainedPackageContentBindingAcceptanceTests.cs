@@ -105,10 +105,10 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
             .Setup(builder => builder.Build(It.IsAny<DescriptorPackageBuildRequest>()))
             .Returns((DescriptorPackageBuildRequest request) => capturingBuilder.Build(request));
 
-        Draft? createdDraft = null;
+        var savedDrafts = new List<Draft>();
         DraftStoreMock
             .Setup(store => store.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
-            .Callback<Draft, CancellationToken>((saved, _) => createdDraft = saved)
+            .Callback<Draft, CancellationToken>((saved, _) => savedDrafts.Add(saved))
             .Returns(Task.CompletedTask);
 
         var createPayload = CreateTestPayloadDto(DescriptorKind.Event, "candidate.event", "TestDraft");
@@ -125,10 +125,37 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
                 Intent = "Retain package content binding"
             });
         createResult.Status.Should().Be(AgentToolResultStatus.Success);
-        createdDraft.Should().NotBeNull();
+        savedDrafts.Should().ContainSingle();
 
-        var draft = createdDraft!;
+        var draft = savedDrafts.Single();
         var proposedVersion = int.Parse(draft.ProposedVersion!, System.Globalization.CultureInfo.InvariantCulture);
+        DraftStoreMock
+            .Setup(store => store.GetAsync(TestTenantId, draft.DraftId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(draft);
+
+        var updatePayload = AgentDraftPayloadProjection.FromDomain(draft.Payload);
+        updatePayload.IsSuccess.Should().BeTrue();
+        var updateResult = await service.UpdateDescriptorDraftAsync(
+            CreateContext(AgentToolName.UpdateDescriptorDraft),
+            new UpdateDescriptorDraftRequest
+            {
+                DraftId = draft.DraftId,
+                Payload = new AgentDraftPayloadPatchDto
+                {
+                    Discriminator = DescriptorKind.Event,
+                    Event = new AgentEventDraftPayloadPatchDto
+                    {
+                        Payload = updatePayload.Value!.Event! with { Name = "UpdatedDraft" },
+                        ChangedFields = AgentEventDraftChangedField.Name
+                    }
+                }
+            });
+        updateResult.Status.Should().Be(AgentToolResultStatus.Success);
+        savedDrafts.Should().HaveCount(2);
+        var updatedDraft = savedDrafts.Last();
+        updatedDraft.Payload.GetDescriptor().Id.Should().Be(draft.DescriptorId);
+        updatedDraft.Payload.GetDescriptor().Name.Should().Be("UpdatedDraft");
+        updatedDraft.Payload.GetDescriptor().Should().BeAssignableTo<IVersionedDescriptor>().Which.Version.Should().Be(proposedVersion);
         var visibleCatalogEvent = new EventDescriptor
         {
             Id = "catalog.event",
@@ -152,7 +179,7 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
 
         DraftStoreMock
             .Setup(store => store.GetAsync(TestTenantId, draft.DraftId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(draft);
+            .ReturnsAsync(updatedDraft);
         DescriptorCatalogMock
             .Setup(catalog => catalog.GetAll())
             .Returns([visibleCatalogEvent, deniedCatalogCapability]);
@@ -184,7 +211,7 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
         var capturedPackage = capturingBuilder.Packages.Single();
         capturedRequest.Descriptors.Should().Contain(descriptor => descriptor.Id == visibleCatalogEvent.Id);
         var candidate = capturedRequest.Descriptors.Single(descriptor =>
-            descriptor.Kind == draft.DescriptorKind && descriptor.Name == "TestDraft");
+            descriptor.Kind == draft.DescriptorKind && descriptor.Name == "UpdatedDraft");
         candidate.Id.Should().Be(draft.DescriptorId,
             $"the real CreateDescriptorDraftAsync path saved payload id '{candidate.Id}', payload version '{(candidate as IVersionedDescriptor)?.Version}' while request/draft identity was '{draft.DescriptorId}' v'{draft.ProposedVersion}'");
         candidate.Should().BeAssignableTo<IVersionedDescriptor>().Which.Version.Should().Be(
@@ -227,7 +254,7 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
         rebuiltOriginal.Hashes.Should().BeEquivalentTo(claimedHashes,
             "the retained request must reproduce all three claimed package hashes");
 
-        candidate = capturedRequest.Descriptors.Single(descriptor => descriptor.Kind == draft.DescriptorKind && descriptor.Name == "TestDraft");
+        candidate = capturedRequest.Descriptors.Single(descriptor => descriptor.Kind == draft.DescriptorKind && descriptor.Name == "UpdatedDraft");
         var candidateVersion = candidate.Should().BeAssignableTo<IVersionedDescriptor>().Subject;
         candidateVersion.Version.Should().Be(proposedVersion);
         var candidateManifestEntry = capturedPackage.Manifest.DescriptorEntries

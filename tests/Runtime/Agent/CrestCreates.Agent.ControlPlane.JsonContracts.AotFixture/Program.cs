@@ -6,8 +6,15 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Activation;
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Agent.DraftContracts.Projection;
+using CrestCreates.DescriptorDraft;
+using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.Event.Abstractions;
+using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Localization.Services;
+using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
@@ -17,6 +24,8 @@ using CrestCreates.Runtime.Delivery.Abstractions.Stores;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.State;
+using CrestCreates.Schema.Abstractions;
+using CrestCreates.Workflow.Abstractions;
 using Microsoft.Extensions.Logging.Abstractions;
 
 public static class ControlPlaneJsonContractFixtureRunner
@@ -116,6 +125,7 @@ public static class ControlPlaneJsonContractFixtureRunner
             }
 
             allPassed &= RunActivationReviewCallbackBoundary();
+            allPassed &= RunDraftIdentityBinding();
 
             Console.WriteLine($"SerializeDeserialize_RepresentativeToolRoots:{(allPassed ? "PASS" : "FAIL")}");
 
@@ -133,6 +143,145 @@ public static class ControlPlaneJsonContractFixtureRunner
             return 3;
         }
     }
+
+    private static bool RunDraftIdentityBinding()
+    {
+        try
+        {
+            var payloads = new DescriptorDraftPayload[]
+            {
+                new CapabilityDescriptorDraftPayload(new CapabilityDescriptor { Name = "aot-capability", Version = 1 }),
+                new WorkflowDescriptorDraftPayload(new WorkflowDescriptor { Name = "aot-workflow", Version = 1 }),
+                new HumanTaskDescriptorDraftPayload(new HumanTaskDescriptor
+                {
+                    Name = "aot-human-task",
+                    Version = 1,
+                    Interaction = new VersionedDescriptorRef<IInteractionDescriptor>(FixtureDescriptorId("interaction"), 1)
+                }),
+                new FormDescriptorDraftPayload(new FormDescriptor
+                {
+                    Name = "aot-form",
+                    Version = 1,
+                    Schema = new VersionedDescriptorRef<SchemaDescriptor>(FixtureDescriptorId("form-schema"), 1)
+                }),
+                new EventDescriptorDraftPayload(new EventDescriptor
+                {
+                    Name = "aot-event",
+                    Version = 1,
+                    PayloadSchema = new VersionedDescriptorRef<SchemaDescriptor>(FixtureDescriptorId("event-schema"), 1)
+                }),
+                new SchemaDescriptorDraftPayload(new SchemaDescriptor { Name = "aot-schema", Version = 1 })
+            };
+
+            foreach (var payload in payloads)
+            {
+                var source = AgentDraftPayloadProjection.FromDomain(payload);
+                if (!source.IsSuccess || source.Value is null)
+                {
+                    Console.Error.WriteLine($"FAIL [DraftIdentityBinding/{payload.DescriptorKind}]: FromDomain failed.");
+                    return false;
+                }
+
+                var descriptorId = $"aot.{payload.DescriptorKind.ToString().ToLowerInvariant()}";
+                var created = AgentDraftPayloadProjection.Create(source.Value, descriptorId);
+                if (!created.IsSuccess || created.Value is null
+                    || !string.Equals(created.Value.GetDescriptor().Id, descriptorId, StringComparison.Ordinal))
+                {
+                    Console.Error.WriteLine($"FAIL [DraftIdentityBinding/{payload.DescriptorKind}]: Create did not bind '{descriptorId}'.");
+                    return false;
+                }
+
+                var createdDto = AgentDraftPayloadProjection.FromDomain(created.Value);
+                if (!createdDto.IsSuccess || createdDto.Value is null)
+                {
+                    Console.Error.WriteLine($"FAIL [DraftIdentityBinding/{payload.DescriptorKind}]: created payload projection failed.");
+                    return false;
+                }
+
+                var mergedName = created.Value.GetDescriptor().Name + "-merged";
+                var merged = AgentDraftPayloadProjection.Merge(
+                    IdentityPatch(createdDto.Value, mergedName),
+                    created.Value);
+                if (!merged.IsSuccess || merged.Value is null
+                    || !string.Equals(merged.Value.GetDescriptor().Id, descriptorId, StringComparison.Ordinal)
+                    || !string.Equals(merged.Value.GetDescriptor().Name, mergedName, StringComparison.Ordinal))
+                {
+                    Console.Error.WriteLine($"FAIL [DraftIdentityBinding/{payload.DescriptorKind}]: Merge did not retain '{descriptorId}'.");
+                    return false;
+                }
+            }
+
+            Console.WriteLine("AgentDraftIdentityBinding:PASS");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL [DraftIdentityBinding]: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static AgentDraftPayloadPatchDto IdentityPatch(AgentDraftPayloadDto dto, string mergedName)
+        => dto.Discriminator switch
+        {
+            DescriptorKind.Capability => new AgentDraftPayloadPatchDto
+            {
+                Discriminator = DescriptorKind.Capability,
+                Capability = new AgentCapabilityDraftPayloadPatchDto
+                {
+                    Payload = dto.Capability! with { Name = mergedName },
+                    ChangedFields = AgentCapabilityDraftChangedField.Name
+                }
+            },
+            DescriptorKind.Workflow => new AgentDraftPayloadPatchDto
+            {
+                Discriminator = DescriptorKind.Workflow,
+                Workflow = new AgentWorkflowDraftPayloadPatchDto
+                {
+                    Payload = dto.Workflow! with { Name = mergedName },
+                    ChangedFields = AgentWorkflowDraftChangedField.Name
+                }
+            },
+            DescriptorKind.HumanTask => new AgentDraftPayloadPatchDto
+            {
+                Discriminator = DescriptorKind.HumanTask,
+                HumanTask = new AgentHumanTaskDraftPayloadPatchDto
+                {
+                    Payload = dto.HumanTask! with { Name = mergedName },
+                    ChangedFields = AgentHumanTaskDraftChangedField.Name
+                }
+            },
+            DescriptorKind.Form => new AgentDraftPayloadPatchDto
+            {
+                Discriminator = DescriptorKind.Form,
+                Form = new AgentFormDraftPayloadPatchDto
+                {
+                    Payload = dto.Form! with { Name = mergedName },
+                    ChangedFields = AgentFormDraftChangedField.Name
+                }
+            },
+            DescriptorKind.Event => new AgentDraftPayloadPatchDto
+            {
+                Discriminator = DescriptorKind.Event,
+                Event = new AgentEventDraftPayloadPatchDto
+                {
+                    Payload = dto.Event! with { Name = mergedName },
+                    ChangedFields = AgentEventDraftChangedField.Name
+                }
+            },
+            DescriptorKind.Schema => new AgentDraftPayloadPatchDto
+            {
+                Discriminator = DescriptorKind.Schema,
+                Schema = new AgentSchemaDraftPayloadPatchDto
+                {
+                    Payload = dto.Schema! with { Name = mergedName },
+                    ChangedFields = AgentSchemaDraftChangedField.Name
+                }
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(dto.Discriminator), dto.Discriminator, "Unsupported descriptor kind.")
+        };
+
+    private static string FixtureDescriptorId(string suffix) => "aot-" + suffix;
 
     private static bool RunActivationReviewCallbackBoundary()
     {
