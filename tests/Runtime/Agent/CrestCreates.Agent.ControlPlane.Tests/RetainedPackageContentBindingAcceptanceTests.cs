@@ -1,4 +1,6 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.DraftContracts.Dto;
+using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
@@ -30,6 +32,47 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 /// </summary>
 public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlPlaneTestBase
 {
+    [Fact]
+    public void Merge_RetainsExistingDescriptorIdentity_WhenNameChanges()
+    {
+        var existing = new EventDescriptorDraftPayload(new EventDescriptor
+        {
+            Id = "existing.event",
+            Name = "OriginalEvent",
+            Version = 1,
+            State = DescriptorState.Active,
+            Category = EventCategory.Domain,
+            Semantic = EventSemantic.Fact,
+            Importance = EventImportance.Operational,
+            ChangeKind = SchemaChangeKind.Additive
+        });
+        var patch = new AgentDraftPayloadPatchDto
+        {
+            Discriminator = DescriptorKind.Event,
+            Event = new AgentEventDraftPayloadPatchDto
+            {
+                Payload = new AgentEventDraftPayloadDto
+                {
+                    Name = "RenamedEvent",
+                    Version = 1,
+                    State = DescriptorState.Active,
+                    Category = EventCategory.Domain,
+                    Semantic = EventSemantic.Fact,
+                    Importance = EventImportance.Operational,
+                    ChangeKind = SchemaChangeKind.Additive
+                },
+                ChangedFields = AgentEventDraftChangedField.Name
+            }
+        };
+
+        var result = AgentDraftPayloadProjection.Merge(patch, existing);
+        result.IsSuccess.Should().BeTrue();
+        var merged = result.Value!.GetDescriptor();
+        merged.Id.Should().Be(existing.Descriptor.Id,
+            $"Merge changed Name but produced payload identity '{merged.Id}' instead of '{existing.Descriptor.Id}'");
+        merged.Name.Should().Be("RenamedEvent");
+    }
+
     [Fact]
     public async Task ActualPreviewAndEvidenceDetectDefinitionSubstitution()
     {
@@ -68,6 +111,8 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
             .Callback<Draft, CancellationToken>((saved, _) => createdDraft = saved)
             .Returns(Task.CompletedTask);
 
+        var createPayload = CreateTestPayloadDto(DescriptorKind.Event, "candidate.event", "TestDraft");
+        createPayload = createPayload with { Event = createPayload.Event! with { Version = 1 } };
         var createResult = await service.CreateDescriptorDraftAsync(
             CreateContext(AgentToolName.CreateDescriptorDraft),
             new CreateDescriptorDraftRequest
@@ -75,7 +120,7 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
                 DescriptorKind = DescriptorKind.Event,
                 DescriptorId = "candidate.event",
                 Operation = DescriptorDraftOperation.Create,
-                Payload = CreateTestPayloadDto(DescriptorKind.Event, "candidate.event", "TestDraft"),
+                Payload = createPayload,
                 ProposedVersion = "1",
                 Intent = "Retain package content binding"
             });
