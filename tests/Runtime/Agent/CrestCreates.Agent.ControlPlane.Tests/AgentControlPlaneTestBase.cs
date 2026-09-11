@@ -258,7 +258,7 @@ public abstract class AgentControlPlaneTestBase
         DraftAbstractions.DescriptorDraftStatus status = DraftAbstractions.DescriptorDraftStatus.Created)
     {
         var payloadDto = CreateTestPayloadDto(kind, descriptorId, "TestDraft");
-        var createResult = AgentDraftPayloadProjection.Create(payloadDto);
+        var createResult = AgentDraftPayloadProjection.Create(payloadDto, descriptorId);
         var domainPayload = createResult.IsSuccess
             ? createResult.Value!
             : (DraftAbstractions.DescriptorDraftPayload)new TestDraftPayload(kind, descriptorId, "TestDraft");

@@ -46,12 +46,13 @@ public class ProjectionRoundTripTests
         var fromResult = AgentDraftPayloadProjection.FromDomain(payload);
         fromResult.IsSuccess.Should().BeTrue();
 
-        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!);
+        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!, "capability.roundtrip");
         createResult.IsSuccess.Should().BeTrue();
 
         var roundTripped = (CapabilityDescriptorDraftPayload)createResult.Value!;
         var rt = roundTripped.Descriptor;
 
+        rt.Id.Should().Be("capability.roundtrip");
         rt.Name.Should().Be("MyCapability");
         rt.State.Should().Be(DescriptorState.Active);
 //         rt.ContractHash.Should().Be("cap-ch-abc");
@@ -102,12 +103,13 @@ public class ProjectionRoundTripTests
         var fromResult = AgentDraftPayloadProjection.FromDomain(payload);
         fromResult.IsSuccess.Should().BeTrue();
 
-        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!);
+        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!, "workflow.roundtrip");
         createResult.IsSuccess.Should().BeTrue();
 
         var roundTripped = (WorkflowDescriptorDraftPayload)createResult.Value!;
         var rt = roundTripped.Descriptor;
 
+        rt.Id.Should().Be("workflow.roundtrip");
         rt.Name.Should().Be("MyWorkflow");
         rt.State.Should().Be(DescriptorState.Draft);
 //         rt.ContractHash.Should().Be("wf-ch");
@@ -143,12 +145,13 @@ public class ProjectionRoundTripTests
         var fromResult = AgentDraftPayloadProjection.FromDomain(payload);
         fromResult.IsSuccess.Should().BeTrue();
 
-        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!);
+        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!, "human-task.roundtrip");
         createResult.IsSuccess.Should().BeTrue();
 
         var roundTripped = (HumanTaskDescriptorDraftPayload)createResult.Value!;
         var rt = roundTripped.Descriptor;
 
+        rt.Id.Should().Be("human-task.roundtrip");
         rt.Name.Should().Be("MyHumanTask");
         rt.State.Should().Be(DescriptorState.Active);
 //         rt.ContractHash.Should().Be("ht-ch");
@@ -189,12 +192,13 @@ public class ProjectionRoundTripTests
         var fromResult = AgentDraftPayloadProjection.FromDomain(payload);
         fromResult.IsSuccess.Should().BeTrue();
 
-        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!);
+        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!, "form.roundtrip");
         createResult.IsSuccess.Should().BeTrue();
 
         var roundTripped = (FormDescriptorDraftPayload)createResult.Value!;
         var rt = roundTripped.Descriptor;
 
+        rt.Id.Should().Be("form.roundtrip");
         rt.Name.Should().Be("MyForm");
         rt.State.Should().Be(DescriptorState.Active);
 //         rt.ContractHash.Should().Be("form-ch");
@@ -229,12 +233,13 @@ public class ProjectionRoundTripTests
         var fromResult = AgentDraftPayloadProjection.FromDomain(payload);
         fromResult.IsSuccess.Should().BeTrue();
 
-        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!);
+        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!, "event.roundtrip");
         createResult.IsSuccess.Should().BeTrue();
 
         var roundTripped = (EventDescriptorDraftPayload)createResult.Value!;
         var rt = roundTripped.Descriptor;
 
+        rt.Id.Should().Be("event.roundtrip");
         rt.Name.Should().Be("MyEvent");
         rt.State.Should().Be(DescriptorState.Deprecated);
 //         rt.ContractHash.Should().Be("ev-ch");
@@ -268,12 +273,13 @@ public class ProjectionRoundTripTests
         var fromResult = AgentDraftPayloadProjection.FromDomain(payload);
         fromResult.IsSuccess.Should().BeTrue();
 
-        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!);
+        var createResult = AgentDraftPayloadProjection.Create(fromResult.Value!, "schema.roundtrip");
         createResult.IsSuccess.Should().BeTrue();
 
         var roundTripped = (SchemaDescriptorDraftPayload)createResult.Value!;
         var rt = roundTripped.Descriptor;
 
+        rt.Id.Should().Be("schema.roundtrip");
         rt.Name.Should().Be("MySchema");
         rt.State.Should().Be(DescriptorState.Active);
 //         rt.ContractHash.Should().Be("sc-ch");

@@ -20,6 +20,7 @@ public class MergeProjectionTests
     {
         var descriptor = new CapabilityDescriptor
         {
+            Id = "existing.capability",
             Name = "ExistingName",
             State = DescriptorState.Active,
             Version = 1,
@@ -187,7 +188,7 @@ public class MergeProjectionTests
             Discriminator = DescriptorKind.Capability,
             Capability = fullDto,
         };
-        var createResult = AgentDraftPayloadProjection.Create(createPayload);
+        var createResult = AgentDraftPayloadProjection.Create(createPayload, "capability.merge");
         createResult.IsSuccess.Should().BeTrue();
 
         var merged = (CapabilityDescriptorDraftPayload)mergeResult.Value!;

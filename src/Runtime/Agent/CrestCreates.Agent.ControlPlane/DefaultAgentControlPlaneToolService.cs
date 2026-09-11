@@ -789,7 +789,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([ConvertErrorToDiagnostic(validationError!)]));
             }
 
-            var createResult = AgentDraftPayloadProjection.Create(request.Payload);
+            var createResult = AgentDraftPayloadProjection.Create(request.Payload, request.DescriptorId);
             if (!createResult.IsSuccess)
             {
                 return await RecordAndReturn(context,
