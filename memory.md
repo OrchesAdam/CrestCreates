@@ -2952,3 +2952,16 @@ passed and was independently rerun by the primary reviewer. No production API
 was added. Approval, runtime handoff and durable artifact storage are not proven
 by this fixture; downstream review/activation collaborators remain controlled.
 See `docs/review/2026-09-10-retained-package-content-checkpoint.md`.
+
+
+### Issue #87 — Generated projection identity gap (2026-09-11)
+
+A stricter real-create baseline supersedes the earlier retained-content test's
+readiness implication. With valid payload Version=1 and ProposedVersion=1, the
+actual draft creation/preview path loses descriptor Id. Generated Merge likewise
+erases a valid existing Id while changing only Name. Primary independently
+observed 2/2 failures at 8b287175; production is not yet repaired. Id is intentionally
+excluded from editable DTOs, but the generator omitted the envelope binding and
+merge preservation. Version already has an editable contract and validator checks.
+See docs/review/2026-09-11-generated-draft-identity-binding.md and the matching plan.
+Keep approved Asset handoff pending until this prerequisite is verified.

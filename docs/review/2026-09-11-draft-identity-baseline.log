@@ -1,0 +1,52 @@
+Test run for /home/orches/workspace/CrestCreates/.worktrees/asset-approved-content-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/bin/Debug/net10.0/CrestCreates.Agent.ControlPlane.Tests.dll (.NETCoreApp,Version=v10.0)
+VSTest version 18.0.2 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.5+1b188a7b0a (64-bit .NET 10.0.11)
+[xUnit.net 00:00:00.09]   Discovering: CrestCreates.Agent.ControlPlane.Tests
+[xUnit.net 00:00:00.17]   Discovered:  CrestCreates.Agent.ControlPlane.Tests
+[xUnit.net 00:00:00.19]   Starting:    CrestCreates.Agent.ControlPlane.Tests
+     Warning:
+     The component "Fluent Assertions" is governed by the rules defined in the Xceed License Agreement and
+     the Xceed Fluent Assertions Community License. You may use Fluent Assertions free of charge for
+     non-commercial use only. An active subscription is required to use Fluent Assertions for commercial use.
+     Please contact Xceed Sales mailto:sales@xceed.com to acquire a subscription at a very low cost.
+     A paid commercial license supports the development and continued increasing support of
+     Fluent Assertions users under both commercial and community licenses. Help us
+     keep Fluent Assertions at the forefront of unit testing.
+     For more information, visit https://xceed.com/products/unit-testing/fluent-assertions/
+[xUnit.net 00:00:00.42]     CrestCreates.Agent.ControlPlane.Tests.RetainedPackageContentBindingAcceptanceTests.ActualPreviewAndEvidenceDetectDefinitionSubstitution [FAIL]
+[xUnit.net 00:00:00.43]       Expected candidate.Id to be "candidate.event" with a length of 15 because the real CreateDescriptorDraftAsync path saved payload id '', payload version '1' while request/draft identity was 'candidate.event' v'1', but "" has a length of 0, differs near "" (index 0).
+[xUnit.net 00:00:00.43]       Stack Trace:
+[xUnit.net 00:00:00.43]            at FluentAssertions.Primitives.StringAssertions`1.Be(String expected, String because, Object[] becauseArgs)
+[xUnit.net 00:00:00.43]         /home/orches/workspace/CrestCreates/.worktrees/asset-approved-content-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/RetainedPackageContentBindingAcceptanceTests.cs(188,0): at CrestCreates.Agent.ControlPlane.Tests.RetainedPackageContentBindingAcceptanceTests.ActualPreviewAndEvidenceDetectDefinitionSubstitution()
+[xUnit.net 00:00:00.43]         --- End of stack trace from previous location ---
+[xUnit.net 00:00:00.44]     CrestCreates.Agent.ControlPlane.Tests.RetainedPackageContentBindingAcceptanceTests.Merge_RetainsExistingDescriptorIdentity_WhenNameChanges [FAIL]
+[xUnit.net 00:00:00.44]       Expected merged.Id to be "existing.event" with a length of 14 because Merge changed Name but produced payload identity '' instead of 'existing.event', but "" has a length of 0, differs near "" (index 0).
+[xUnit.net 00:00:00.44]       Stack Trace:
+[xUnit.net 00:00:00.44]            at FluentAssertions.Primitives.StringAssertions`1.Be(String expected, String because, Object[] becauseArgs)
+[xUnit.net 00:00:00.44]         /home/orches/workspace/CrestCreates/.worktrees/asset-approved-content-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/RetainedPackageContentBindingAcceptanceTests.cs(71,0): at CrestCreates.Agent.ControlPlane.Tests.RetainedPackageContentBindingAcceptanceTests.Merge_RetainsExistingDescriptorIdentity_WhenNameChanges()
+[xUnit.net 00:00:00.44]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)
+[xUnit.net 00:00:00.44]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+[xUnit.net 00:00:00.44]   Finished:    CrestCreates.Agent.ControlPlane.Tests
+  Failed CrestCreates.Agent.ControlPlane.Tests.RetainedPackageContentBindingAcceptanceTests.ActualPreviewAndEvidenceDetectDefinitionSubstitution [200 ms]
+  Error Message:
+   Expected candidate.Id to be "candidate.event" with a length of 15 because the real CreateDescriptorDraftAsync path saved payload id '', payload version '1' while request/draft identity was 'candidate.event' v'1', but "" has a length of 0, differs near "" (index 0).
+  Stack Trace:
+     at FluentAssertions.Primitives.StringAssertions`1.Be(String expected, String because, Object[] becauseArgs)
+   at CrestCreates.Agent.ControlPlane.Tests.RetainedPackageContentBindingAcceptanceTests.ActualPreviewAndEvidenceDetectDefinitionSubstitution() in /home/orches/workspace/CrestCreates/.worktrees/asset-approved-content-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/RetainedPackageContentBindingAcceptanceTests.cs:line 188
+--- End of stack trace from previous location ---
+  Failed CrestCreates.Agent.ControlPlane.Tests.RetainedPackageContentBindingAcceptanceTests.Merge_RetainsExistingDescriptorIdentity_WhenNameChanges [3 ms]
+  Error Message:
+   Expected merged.Id to be "existing.event" with a length of 14 because Merge changed Name but produced payload identity '' instead of 'existing.event', but "" has a length of 0, differs near "" (index 0).
+  Stack Trace:
+     at FluentAssertions.Primitives.StringAssertions`1.Be(String expected, String because, Object[] becauseArgs)
+   at CrestCreates.Agent.ControlPlane.Tests.RetainedPackageContentBindingAcceptanceTests.Merge_RetainsExistingDescriptorIdentity_WhenNameChanges() in /home/orches/workspace/CrestCreates/.worktrees/asset-approved-content-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/RetainedPackageContentBindingAcceptanceTests.cs:line 71
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+
+Test Run Failed.
+Total tests: 2
+     Failed: 2
+ Total time: 0.9024 Seconds
