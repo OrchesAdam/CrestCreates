@@ -33,7 +33,7 @@ public class AgentDraftPayloadPatchValidationTests
                 RiskLevel = CapabilityRiskLevel.Low,
             },
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 
@@ -74,7 +74,7 @@ public class AgentDraftPayloadPatchValidationTests
                 RiskLevel = CapabilityRiskLevel.Medium,
             },
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 
@@ -116,7 +116,7 @@ public class AgentDraftPayloadPatchValidationTests
                 InputSchema = new DescriptorRef("schema", "test-schema", 1),
             },
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 
@@ -166,7 +166,7 @@ public class AgentDraftPayloadPatchValidationTests
                 PayloadSchema = new DescriptorRef("schema", "event-ps", 1),
             },
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 
@@ -212,7 +212,7 @@ public class AgentDraftPayloadPatchValidationTests
                 RiskLevel = CapabilityRiskLevel.Medium,
             },
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 

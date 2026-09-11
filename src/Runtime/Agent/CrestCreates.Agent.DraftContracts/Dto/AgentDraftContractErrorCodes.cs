@@ -39,4 +39,10 @@ public static class AgentDraftContractErrorCodes
 
     private const string InvalidReferenceValueValue = "ADPC012";
     public static DiagnosticCode InvalidReferenceValue { get; } = new(InvalidReferenceValueValue);
+
+    private const string DescriptorIdRequiredValue = "ADPC013";
+    public static DiagnosticCode DescriptorIdRequired { get; } = new(DescriptorIdRequiredValue);
+
+    private const string InvalidDescriptorIdentityValue = "ADPC014";
+    public static DiagnosticCode InvalidDescriptorIdentity { get; } = new(InvalidDescriptorIdentityValue);
 }

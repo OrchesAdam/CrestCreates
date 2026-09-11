@@ -157,10 +157,12 @@ internal sealed class AgentDraftContractProjectionWriter
 
     private static void WriteCreateMain(StringBuilder sb, ContractModel model)
     {
-        sb.AppendLine("    public static AgentDraftContractResult<DescriptorDraftPayload> Create(AgentDraftPayloadDto dto)");
+        sb.AppendLine("    public static AgentDraftContractResult<DescriptorDraftPayload> Create(AgentDraftPayloadDto dto, string descriptorId)");
         sb.AppendLine("    {");
         sb.AppendLine("        if (dto is null)");
         sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.NullPayload, Message = \"Payload is null.\" });");
+        sb.AppendLine("        if (string.IsNullOrWhiteSpace(descriptorId))");
+        sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.DescriptorIdRequired, Message = \"DescriptorId is required for draft creation.\" });");
         sb.AppendLine();
         sb.AppendLine("        var (isValid, error) = TryValidatePayload(dto);");
         sb.AppendLine("        if (!isValid)");
@@ -171,7 +173,7 @@ internal sealed class AgentDraftContractProjectionWriter
 
         foreach (var kind in model.Kinds)
         {
-            sb.AppendLine($"            DescriptorKind.{kind.KindName} => Create_{kind.KindName}(dto.{kind.KindName}!),");
+            sb.AppendLine($"            DescriptorKind.{kind.KindName} => Create_{kind.KindName}(dto.{kind.KindName}!, descriptorId),");
         }
 
         sb.AppendLine("            _ => AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.UnsupportedKind, Message = $\"Unsupported descriptor kind: {dto.Discriminator}.\" }),");
@@ -186,7 +188,7 @@ internal sealed class AgentDraftContractProjectionWriter
         var payloadTypeName = $"{kind.KindName}DescriptorDraftPayload";
         var descriptorTypeFqn = kind.DescriptorType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-        sb.AppendLine($"    private static AgentDraftContractResult<DescriptorDraftPayload> Create_{kind.KindName}({dtoName} dto)");
+        sb.AppendLine($"    private static AgentDraftContractResult<DescriptorDraftPayload> Create_{kind.KindName}({dtoName} dto, string descriptorId)");
         sb.AppendLine("    {");
 
         // Validate RequiredOnCreate
@@ -223,6 +225,7 @@ internal sealed class AgentDraftContractProjectionWriter
 
         sb.AppendLine($"        var descriptor = new {descriptorTypeFqn}");
         sb.AppendLine("        {");
+        sb.AppendLine("            Id = descriptorId,");
 
         // Editable scalar + reference fields
         foreach (var field in kind.Fields)
@@ -394,6 +397,8 @@ internal sealed class AgentDraftContractProjectionWriter
         sb.AppendLine();
 
         sb.AppendLine("        var existing = existingPayload.Descriptor;");
+        sb.AppendLine("        if (string.IsNullOrWhiteSpace(existing.Id))");
+        sb.AppendLine("            return AgentDraftContractResult<DescriptorDraftPayload>.Failure(new AgentDraftContractError { Code = AgentDraftContractErrorCodes.InvalidDescriptorIdentity, Message = \"Existing descriptor identity is required for draft merge.\" });");
         sb.AppendLine("        var dto = patch.Payload;");
         sb.AppendLine();
 
@@ -402,6 +407,7 @@ internal sealed class AgentDraftContractProjectionWriter
 
         sb.AppendLine($"        var merged = new {descriptorTypeFqn}");
         sb.AppendLine("        {");
+        sb.AppendLine("            Id = existing.Id,");
 
         foreach (var field in kind.Fields)
         {
