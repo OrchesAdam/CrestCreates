@@ -29,5 +29,14 @@ control-plane creation/preview, materialization, packaging and canonical hashing
 with controlled store/catalog/review collaborators. It does not prove full review,
 authorization, runtime handoff or durable deployment.
 
-Production repair, relevant full suites, native execution and final-head CI remain
-pending. PR #93 is ready and unmerged with final CI 34442962164 successful.
+Commit efd301fe implements the generated repair. Create now requires descriptorId
+and rejects blank IDs; Merge retains the existing ID and rejects invalid existing
+identity. The production caller passes request.DescriptorId. There is no old
+identityless overload and no new editable Id DTO field. This is a C# projection
+signature change; callers must supply identity explicitly. Version behavior is
+unchanged.
+
+DraftContracts passed 36/36 and the related ControlPlane focused set passed 36/36.
+The primary independently reran the original two regressions: 2/2 passed.
+Complete kind coverage, native execution, relevant full suites and final-head CI
+remain pending. PR #93 is ready and unmerged with final CI 34442962164 successful.
