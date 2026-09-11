@@ -2976,3 +2976,15 @@ continues under its existing editable/validator contract. DraftContracts 36/36 a
 focused ControlPlane 36/36 passed; primary independently confirmed both original
 identity regressions now pass (2/2). Remaining kind coverage, full suites, native
 execution and final-head CI are still required; PR #94 remains draft and unmerged.
+
+### Issue #87 — Identity validation after restart (2026-09-11)
+
+Validation commit 46c43cfd covers generated Create/Merge across all six kinds,
+the actual Create -> Update -> Preview path, and the existing native fixture.
+ControlPlane 553/553, CodeGenerator 283/283, focused generator 15/15 and native
+publish-link-run wrapper 1/1 passed. Primary independently reran the updated
+retained-content regressions: 2/2 passed. Local dependency boundaries passed
+165/170; two ledger checks lacked prerequisite execution evidence and three
+PostgreSQL schema checks lacked a working Docker connection. Existing CI supplies
+these prerequisites; no gate is waived. PR #94 remains draft pending final-head CI.
+Approved content handoff and real model evaluation are not yet proven.

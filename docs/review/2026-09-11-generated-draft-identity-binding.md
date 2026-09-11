@@ -38,5 +38,20 @@ unchanged.
 
 DraftContracts passed 36/36 and the related ControlPlane focused set passed 36/36.
 The primary independently reran the original two regressions: 2/2 passed.
-Complete kind coverage, native execution, relevant full suites and final-head CI
-remain pending. PR #93 is ready and unmerged with final CI 34442962164 successful.
+Validation commit 46c43cfd covers Create and name-changing Merge for Capability,
+Workflow, HumanTask, Form, Event and Schema. The retained-content regression now
+executes real Create -> Update -> Preview without fixture identity repair; the
+primary independently reran both tests successfully after restart.
+
+Full ControlPlane passed 553/553, CodeGenerator 283/283, and the focused draft
+generator suite 15/15. The existing NativeAOT wrapper passed 1/1 after publishing,
+linking and executing the fixture, including AgentDraftIdentityBinding:PASS.
+The primary also independently inspected and executed the ELF artifact.
+
+The complete local dependency-boundary run passed 165/170. Two failures require
+the preceding executed-evidence suites (581 tuples were absent), and three could
+not connect to Docker for PostgreSQL schema checks. These are unresolved local
+validation prerequisites, not waived gates. CI already runs the evidence-producing
+suites before the ledger gate and provides Docker; final-head CI remains required.
+PR #94 stays draft until that result. PR #93 is ready and unmerged with final CI
+34442962164 successful. HumanTask-approved Asset handoff remains subsequent work.
