@@ -1,5 +1,4 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
-using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
@@ -63,7 +62,28 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
             .Setup(builder => builder.Build(It.IsAny<DescriptorPackageBuildRequest>()))
             .Returns((DescriptorPackageBuildRequest request) => capturingBuilder.Build(request));
 
-        var draft = CreateTestDraft(draftId: "asset-content-draft", descriptorId: "candidate.event");
+        Draft? createdDraft = null;
+        DraftStoreMock
+            .Setup(store => store.SaveAsync(It.IsAny<Draft>(), It.IsAny<CancellationToken>()))
+            .Callback<Draft, CancellationToken>((saved, _) => createdDraft = saved)
+            .Returns(Task.CompletedTask);
+
+        var createResult = await service.CreateDescriptorDraftAsync(
+            CreateContext(AgentToolName.CreateDescriptorDraft),
+            new CreateDescriptorDraftRequest
+            {
+                DescriptorKind = DescriptorKind.Event,
+                DescriptorId = "candidate.event",
+                Operation = DescriptorDraftOperation.Create,
+                Payload = CreateTestPayloadDto(DescriptorKind.Event, "candidate.event", "TestDraft"),
+                ProposedVersion = "1",
+                Intent = "Retain package content binding"
+            });
+        createResult.Status.Should().Be(AgentToolResultStatus.Success);
+        createdDraft.Should().NotBeNull();
+
+        var draft = createdDraft!;
+        var proposedVersion = int.Parse(draft.ProposedVersion!, System.Globalization.CultureInfo.InvariantCulture);
         var visibleCatalogEvent = new EventDescriptor
         {
             Id = "catalog.event",
@@ -118,7 +138,13 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
         var capturedRequest = capturingBuilder.Requests.Single();
         var capturedPackage = capturingBuilder.Packages.Single();
         capturedRequest.Descriptors.Should().Contain(descriptor => descriptor.Id == visibleCatalogEvent.Id);
-        capturedRequest.Descriptors.Should().Contain(descriptor => descriptor.Name == "TestDraft");
+        var candidate = capturedRequest.Descriptors.Single(descriptor =>
+            descriptor.Kind == draft.DescriptorKind && descriptor.Name == "TestDraft");
+        candidate.Id.Should().Be(draft.DescriptorId,
+            $"the real CreateDescriptorDraftAsync path saved payload id '{candidate.Id}', payload version '{(candidate as IVersionedDescriptor)?.Version}' while request/draft identity was '{draft.DescriptorId}' v'{draft.ProposedVersion}'");
+        candidate.Should().BeAssignableTo<IVersionedDescriptor>().Which.Version.Should().Be(
+            proposedVersion,
+            $"the real CreateDescriptorDraftAsync path saved payload version '{(candidate as IVersionedDescriptor)?.Version}' while ProposedVersion was '{draft.ProposedVersion}'");
         capturedRequest.Descriptors.Should().NotContain(descriptor => descriptor.Id == deniedCatalogCapability.Id);
         capturedPackage.Hashes.Should().NotBeNull();
 
@@ -156,13 +182,25 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
         rebuiltOriginal.Hashes.Should().BeEquivalentTo(claimedHashes,
             "the retained request must reproduce all three claimed package hashes");
 
-        var candidate = capturedRequest.Descriptors.Single(descriptor => descriptor.Name == "TestDraft");
+        candidate = capturedRequest.Descriptors.Single(descriptor => descriptor.Kind == draft.DescriptorKind && descriptor.Name == "TestDraft");
+        var candidateVersion = candidate.Should().BeAssignableTo<IVersionedDescriptor>().Subject;
+        candidateVersion.Version.Should().Be(proposedVersion);
         var candidateManifestEntry = capturedPackage.Manifest.DescriptorEntries
-            .Single(entry => entry.Name == candidate.Name);
-        var replacementPayload = AgentDraftPayloadProjection.Create(
-            CreateTestPayloadDto(DescriptorKind.Event, "candidate.event", "CandidateEventReplaced"));
-        replacementPayload.IsSuccess.Should().BeTrue();
-        var replacement = replacementPayload.Value!.GetDescriptor();
+            .Single(entry => entry.Ref.Id == draft.DescriptorId && entry.Ref.Version == proposedVersion);
+        var candidateEvent = candidate.Should().BeOfType<EventDescriptor>().Subject;
+        var replacement = new EventDescriptor
+        {
+            Id = candidateEvent.Id,
+            Name = "CandidateEventReplaced",
+            State = candidateEvent.State,
+            SupersededById = candidateEvent.SupersededById,
+            Version = candidateEvent.Version,
+            PayloadSchema = candidateEvent.PayloadSchema,
+            Category = candidateEvent.Category,
+            Semantic = candidateEvent.Semantic,
+            Importance = candidateEvent.Importance,
+            ChangeKind = candidateEvent.ChangeKind
+        };
         var substitutedRequest = capturedRequest with
         {
             Descriptors = capturedRequest.Descriptors
