@@ -27,7 +27,7 @@ public class AgentDraftPayloadPatchMergeTests
                 RiskLevel = CapabilityRiskLevel.Medium
             }
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 
@@ -81,7 +81,7 @@ public class AgentDraftPayloadPatchMergeTests
                 RiskLevel = CapabilityRiskLevel.Low
             }
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 
@@ -141,7 +141,7 @@ public class AgentDraftPayloadPatchMergeTests
                 PayloadSchema = new DescriptorRef("schema", "event-payload", 1)
             }
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 
@@ -204,7 +204,7 @@ public class AgentDraftPayloadPatchMergeTests
                 RiskLevel = CapabilityRiskLevel.Low
             }
         };
-        var createResult = AgentDraftPayloadProjection.Create(existingDto);
+        var createResult = AgentDraftPayloadProjection.Create(existingDto, "existing.descriptor");
         createResult.IsSuccess.Should().BeTrue();
         var existingPayload = createResult.Value!;
 

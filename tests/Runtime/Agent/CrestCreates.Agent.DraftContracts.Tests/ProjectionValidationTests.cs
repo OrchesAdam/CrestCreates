@@ -89,4 +89,25 @@ public class ProjectionValidationTests
         isValid.Should().BeTrue();
         error.Should().BeNull();
     }
+
+    [Fact]
+    public void Create_RequiresNonEmptyDescriptorId()
+    {
+        var dto = new AgentDraftPayloadDto
+        {
+            Discriminator = DescriptorKind.Capability,
+            Capability = new AgentCapabilityDraftPayloadDto
+            {
+                CapabilityKind = CapabilityKind.Command,
+                RiskLevel = CapabilityRiskLevel.Medium,
+                State = DescriptorState.Active,
+            },
+        };
+
+        var result = AgentDraftPayloadProjection.Create(dto, " ");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle(error =>
+            error.Code == AgentDraftContractErrorCodes.DescriptorIdRequired);
+    }
 }

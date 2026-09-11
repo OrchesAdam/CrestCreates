@@ -2917,7 +2917,8 @@ If a future thread should resume from this state, use a prompt like:
 
 ### Issue #87 — Activation review completion binding (2026-09-10)
 
-PR #93 is stacked on ready, unmerged PR #92 and remains draft pending final-head CI.
+PR #93 is ready for review, stacked on ready, unmerged PR #92. Final-head CI
+`34442962164` passed on `cbbc18fd`; all three PRs remain unmerged.
 The real callback/request-service baseline reproduced three improperly accepted
 conflicts: canonical rejection with typed approval, task A targeting request B,
 and a spoofed result actor bypassing self-approval. Controlled test stores/evidence
@@ -2938,3 +2939,52 @@ This does not establish completion-caller authentication, authoritative ActorKin
 Outbox transport/durability, or approved package-to-runtime deployment. The next
 handoff slice must select descriptor content bound to the approved artifact through
 existing owners. #87/#88 and live DeepSeek evaluation remain open.
+
+
+### Issue #87 — Retained candidate content verification (2026-09-11)
+
+The successor branch `codex/phase-10c-approved-asset-content-87` retains actual
+preview builder input and package output via the existing interface. Test commit
+`ec2aea6d` uses real materialization, package and canonical hash owners, checks
+visibility filtering and owning preview/evidence associations, and detects a changed
+descriptor definition against unchanged claimed package hashes. Focused test 1/1
+passed and was independently rerun by the primary reviewer. No production API
+was added. Approval, runtime handoff and durable artifact storage are not proven
+by this fixture; downstream review/activation collaborators remain controlled.
+See `docs/review/2026-09-10-retained-package-content-checkpoint.md`.
+
+
+### Issue #87 — Generated projection identity gap (2026-09-11)
+
+A stricter real-create baseline supersedes the earlier retained-content test's
+readiness implication. With valid payload Version=1 and ProposedVersion=1, the
+actual draft creation/preview path loses descriptor Id. Generated Merge likewise
+erases a valid existing Id while changing only Name. Primary independently
+observed 2/2 failures at 8b287175; production is not yet repaired. Id is intentionally
+excluded from editable DTOs, but the generator omitted the envelope binding and
+merge preservation. Version already has an editable contract and validator checks.
+See docs/review/2026-09-11-generated-draft-identity-binding.md and the matching plan.
+Keep approved Asset handoff pending until this prerequisite is verified.
+
+
+### Issue #87 — Generated identity repair checkpoint (2026-09-11)
+
+PR #94 contains efd301fe: generated Create requires descriptorId and Merge keeps
+existing.Id; blank identity fails through typed contract diagnostics. Id stays out
+of editable DTOs, and the identityless C# Create overload is removed. Version
+continues under its existing editable/validator contract. DraftContracts 36/36 and
+focused ControlPlane 36/36 passed; primary independently confirmed both original
+identity regressions now pass (2/2). Remaining kind coverage, full suites, native
+execution and final-head CI are still required; PR #94 remains draft and unmerged.
+
+### Issue #87 — Identity validation after restart (2026-09-11)
+
+Validation commit 46c43cfd covers generated Create/Merge across all six kinds,
+the actual Create -> Update -> Preview path, and the existing native fixture.
+ControlPlane 553/553, CodeGenerator 283/283, focused generator 15/15 and native
+publish-link-run wrapper 1/1 passed. Primary independently reran the updated
+retained-content regressions: 2/2 passed. Local dependency boundaries passed
+165/170; two ledger checks lacked prerequisite execution evidence and three
+PostgreSQL schema checks lacked a working Docker connection. Existing CI supplies
+these prerequisites; no gate is waived. PR #94 remains draft pending final-head CI.
+Approved content handoff and real model evaluation are not yet proven.
