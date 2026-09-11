@@ -2965,3 +2965,14 @@ excluded from editable DTOs, but the generator omitted the envelope binding and
 merge preservation. Version already has an editable contract and validator checks.
 See docs/review/2026-09-11-generated-draft-identity-binding.md and the matching plan.
 Keep approved Asset handoff pending until this prerequisite is verified.
+
+
+### Issue #87 — Generated identity repair checkpoint (2026-09-11)
+
+PR #94 contains efd301fe: generated Create requires descriptorId and Merge keeps
+existing.Id; blank identity fails through typed contract diagnostics. Id stays out
+of editable DTOs, and the identityless C# Create overload is removed. Version
+continues under its existing editable/validator contract. DraftContracts 36/36 and
+focused ControlPlane 36/36 passed; primary independently confirmed both original
+identity regressions now pass (2/2). Remaining kind coverage, full suites, native
+execution and final-head CI are still required; PR #94 remains draft and unmerged.
