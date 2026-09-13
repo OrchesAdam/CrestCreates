@@ -2998,3 +2998,29 @@ PR ready for review; it remains unmerged. Continue on branch
 codex/phase-10c-asset-human-approval-87 with real Asset draft human approval and
 Outbox acceptance. Approved-content host loading and live-model evaluation remain
 pending. See docs/superpowers/plans/2026-09-11-asset-human-approval-acceptance.md.
+
+### Issue #87 — Authoring input checkpoint (2026-09-13)
+
+Draft PR #95 at b1ba1c8a records the real generated Create limitation (missing
+HumanTask outcomes) and the existing Authoring parser's complete Asset candidate
+test (1/1 passed, independently rerun). No production change is needed to represent
+this candidate through the existing Authoring parser. Full review/approval remains
+unproven. The successor worktree asset-human-approval-87 contains an uncommitted
+AssetHumanApprovalActivationHandoffAcceptanceTests.cs and test-project references.
+Its boundary is authoring -> real review/package/evidence -> Submit -> UnderReview;
+it does not complete approval or deliver Outbox messages. A fake object-cache state
+registry was rejected in review and replaced with real RuntimePersistence contracts.
+The first compile reported CC1001 for a test-side external Asset form reference;
+the narrow fix and actual execution still require review. Do not commit or report
+this fixture as passing before running it. Old unexecuted large fixture and the
+executed failing baseline are under 99_RecycleBin/asset-human-approval-87.
+
+### Issue #87 — Real UnderReview handoff verified (2026-09-13)
+
+The primary compiled and ran AssetHumanApprovalActivationHandoffAcceptanceTests:
+1/1 passed. Complete Authoring candidate -> real Review/Preview/Evidence/Submit
+creates an authoritative UnderReview request and a real request-bound HumanTask.
+The fixture uses the real runtime state contract registry and registry validator.
+Full ControlPlane passed 554/554; Authoring passed 53/53. HumanTask completion,
+real Outbox callback and approved runtime content loading remain subsequent work.
+PR #95 remains draft pending that work and final-head CI.
