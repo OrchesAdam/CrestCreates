@@ -2988,3 +2988,13 @@ retained-content regressions: 2/2 passed. Local dependency boundaries passed
 PostgreSQL schema checks lacked a working Docker connection. Existing CI supplies
 these prerequisites; no gate is waived. PR #94 remains draft pending final-head CI.
 Approved content handoff and real model evaluation are not yet proven.
+
+### Issue #87 — Generated identity repair ready (2026-09-13)
+
+PR #94 final head 9531210600be644c5f142b814402bab7ed9eb331 passed complete CI
+34569935387, including prerequisite evidence and dependency-boundary gates that
+could not complete locally. The primary verified the exact head and marked the
+PR ready for review; it remains unmerged. Continue on branch
+codex/phase-10c-asset-human-approval-87 with real Asset draft human approval and
+Outbox acceptance. Approved-content host loading and live-model evaluation remain
+pending. See docs/superpowers/plans/2026-09-11-asset-human-approval-acceptance.md.
