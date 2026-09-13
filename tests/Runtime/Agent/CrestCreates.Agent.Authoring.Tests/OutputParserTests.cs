@@ -3,6 +3,8 @@ using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Xunit;
 
@@ -122,6 +124,66 @@ public sealed class OutputParserTests
         result.Status.Should().Be(DescriptorAuthoringStatus.Succeeded);
         result.DraftSet.Drafts.Should().HaveCount(1);
         result.Plan.PlannedDescriptorRefs.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void AssetInitialHumanTaskJson_PreservesCompleteCandidateContract()
+    {
+        const string candidateId = "ht_asset_maintenance_initial_review";
+        const string interactionId = "form_asset_maintenance_review";
+
+        var json = JsonSerializer.Serialize(new
+        {
+            contractVersion = "7g.v1",
+            promptInputHash = _validContext.ExpectedPromptInputHash,
+            plan = new
+            {
+                planId = "asset-maintenance-initial-review",
+                intentText = "Create the Asset management initial human review task",
+                plannedDescriptorRefs = new[]
+                {
+                    new { @namespace = "humantask", id = candidateId, version = 1 }
+                }
+            },
+            items = new[]
+            {
+                new
+                {
+                    descriptorKind = "HumanTask",
+                    descriptorId = candidateId,
+                    operation = "Create",
+                    rationale = "Require a human reviewer before selecting the candidate Asset contract.",
+                    payload = new
+                    {
+                        id = candidateId,
+                        name = "Asset management initial human review",
+                        state = "Active",
+                        version = 1,
+                        assigneeStrategy = "CandidateGroup",
+                        interaction = new { @namespace = "form", id = interactionId, version = 1 },
+                        outcomes = new[]
+                        {
+                            new { condition = "Approve" },
+                            new { condition = "Reject" }
+                        }
+                    }
+                }
+            }
+        });
+
+        var result = _parser.Parse(json, _validContext);
+
+        result.Status.Should().Be(DescriptorAuthoringStatus.Succeeded);
+        var candidate = result.DraftSet.Drafts.Should().ContainSingle().Which.Payload
+            .GetDescriptor().Should().BeOfType<HumanTaskDescriptor>().Subject;
+        candidate.Id.Should().Be(candidateId);
+        candidate.State.Should().Be(DescriptorState.Active);
+        candidate.Version.Should().Be(1);
+        candidate.Interaction.Id.Should().Be(interactionId);
+        candidate.Interaction.Version.Should().Be(1);
+        candidate.AssigneeStrategy.Should().Be(AssigneeStrategy.CandidateGroup);
+        candidate.Outcomes.Select(outcome => outcome.Condition).Should()
+            .Equal(CompletionCondition.Approve, CompletionCondition.Reject);
     }
 
     [Fact]
