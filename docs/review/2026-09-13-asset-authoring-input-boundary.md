@@ -26,3 +26,18 @@ version, form reference, CandidateGroup assignment, Active state and both outcom
 The primary independently reran it successfully (1/1). Active is the descriptor's
 existing default; this does not prove arbitrary JSON state editing. The parser
 test proves candidate representation, not live-model quality or approval.
+
+The primary subsequently compiled and ran the actual authoring -> draft store ->
+Review -> Preview -> Evidence -> Submit acceptance: 1/1 passed. The authoritative
+request is UnderReview under an explicit require-human-review policy, and the
+real HumanTask runtime creates the request-bound activation review task. Runtime
+state uses the existing persistence contract registry; review, package, evidence,
+request service and orchestrator are real owners. The fixture retains in-memory
+audit/artifact/gate implementations and a controlled HumanTask store, and stops
+before completion/Outbox delivery. No deployment or identity-authentication proof
+is implied. Full ControlPlane 554/554 and Authoring 53/53 passed independently.
+
+The test registers the existing Asset form/schema in its baseline. CC1001 is
+suppressed only at the external form reference in the fixture's review-task
+definition; runtime baseline consistency is asserted and the registry uses its
+real DI validation engine. No global diagnostic switch is changed.

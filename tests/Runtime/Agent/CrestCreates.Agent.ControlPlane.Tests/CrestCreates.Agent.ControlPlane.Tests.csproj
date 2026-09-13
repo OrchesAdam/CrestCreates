@@ -25,8 +25,19 @@
     <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj" />
     <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema.Abstractions/CrestCreates.Schema.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Modules/CrestCreates.Form/CrestCreates.Form.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence/CrestCreates.Runtime.Persistence.csproj" />
+    <ProjectReference Include="../../../../samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Contracts/CrestCreates.Sample.AssetManagement.Contracts.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Localization/CrestCreates.Localization.csproj" />
     <ProjectReference Include="../../../Framework/Testing/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../../../samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Host/AssetDescriptorCatalog.cs" Link="AssetDescriptorCatalog.cs" />
   </ItemGroup>
 </Project>
