@@ -42,3 +42,21 @@ not by itself proof of a missing framework authoring capability. If confirmed,
 use the existing authoring result -> draft store -> real review/package/approval
 boundary as the next experiment, clearly distinguishing it from the constrained
 editing DTO. Do not introduce a new parser, fallback or editable wire contract.
+
+## Later checked-content host entry
+
+Readonly review found that AssetCandidateWebApplicationFactory currently rebuilds
+its registries from static candidate catalogs. A later acceptance fixture must
+instead accept the externally checked inventory and build HumanTask/Workflow
+registries and descriptor lookup from exactly those objects. Keep v1 pins in the
+inventory. The current runtime Workflow service consumes its injected registry,
+so no production execution API is needed for this bounded experiment.
+
+AssetMaintenanceTaskContractResolver intentionally compares task pins against
+compiled Asset task contracts. Preserve this check: the bounded initial task must
+match the compiled contract exactly, including definition hash. Do not replace the
+sealed resolver or relax pin checks to accept arbitrary approved task content.
+The later proof is approved selection of this compiled business contract and a
+governed Workflow change, not arbitrary HumanTask deployment. Static compiled
+handlers remain the execution authority. Verify the handoff with actual retained
+and rehashed package contents before introducing any fixture inventory injection.

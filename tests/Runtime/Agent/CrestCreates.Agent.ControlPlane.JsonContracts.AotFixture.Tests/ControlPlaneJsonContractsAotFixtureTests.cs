@@ -56,6 +56,7 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
         execution.Output.Should().Contain("CONTROL_PLANE_LOCALIZED_MESSAGE_NATIVEAOT_OK");
         execution.Output.Should().Contain("ActivationReviewCallbackBoundary:PASS");
         execution.Output.Should().Contain("AgentDraftIdentityBinding:PASS");
+        execution.Output.Should().Contain("AgentAuthoringOptionalReferences:PASS");
         execution.Output.Should().Contain("CONTROL_PLANE_JSON_CONTRACT_NATIVEAOT_OK");
     }
 
