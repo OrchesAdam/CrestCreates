@@ -6,6 +6,8 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Activation;
+using CrestCreates.Agent.Authoring.Abstractions.Authoring;
+using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.DescriptorDraft;
@@ -126,6 +128,7 @@ public static class ControlPlaneJsonContractFixtureRunner
 
             allPassed &= RunActivationReviewCallbackBoundary();
             allPassed &= RunDraftIdentityBinding();
+            allPassed &= RunAgentAuthoringOptionalReferences();
 
             Console.WriteLine($"SerializeDeserialize_RepresentativeToolRoots:{(allPassed ? "PASS" : "FAIL")}");
 
@@ -219,6 +222,66 @@ public static class ControlPlaneJsonContractFixtureRunner
             Console.Error.WriteLine($"FAIL [DraftIdentityBinding]: {ex.Message}");
             return false;
         }
+    }
+
+    private static bool RunAgentAuthoringOptionalReferences()
+    {
+        try
+        {
+            var parser = new JsonDescriptorAuthoringOutputParser();
+            var context = new DescriptorAuthoringParseContext
+            {
+                TenantId = "aot-authoring-tenant",
+                AuthorId = "aot-authoring-agent",
+                AuthorKind = DescriptorDraftAuthorKind.Agent,
+                CreatedAt = DateTimeOffset.UnixEpoch,
+                IntentText = "Asset maintenance initial review",
+                ExpectedPromptInputHash = "aot-authoring-prompt"
+            };
+
+            var missing = ParseAuthoringOptionalCandidate(parser, context, string.Empty);
+            var explicitNull = ParseAuthoringOptionalCandidate(
+                parser, context, ",\"inputSchema\":null,\"outputSchema\":null");
+            var valid = ParseAuthoringOptionalCandidate(
+                parser, context,
+                ",\"inputSchema\":{\"id\":\"schema_asset_input\",\"version\":2}," +
+                "\"outputSchema\":{\"id\":\"schema_asset_output\",\"version\":3}");
+
+            var missingPassed = missing.InputSchema is null && missing.OutputSchema is null;
+            var nullPassed = explicitNull.InputSchema is null && explicitNull.OutputSchema is null;
+            var validPassed = valid.InputSchema is { Id: "schema_asset_input", Version: 2 }
+                && valid.OutputSchema is { Id: "schema_asset_output", Version: 3 };
+            var passed = missingPassed && nullPassed && validPassed;
+            Console.WriteLine($"AgentAuthoringOptionalReferences:{(passed ? "PASS" : "FAIL")}");
+            return passed;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL [AgentAuthoringOptionalReferences]: {ex.Message}");
+            Console.WriteLine("AgentAuthoringOptionalReferences:FAIL");
+            return false;
+        }
+    }
+
+    private static HumanTaskDescriptor ParseAuthoringOptionalCandidate(
+        JsonDescriptorAuthoringOutputParser parser,
+        DescriptorAuthoringParseContext context,
+        string optionalSchemaProperties)
+    {
+        var json = "{" +
+            "\"contractVersion\":\"7g.v1\",\"promptInputHash\":\"aot-authoring-prompt\"," +
+            "\"plan\":{\"planId\":\"asset-maintenance\",\"intentText\":\"Asset maintenance initial review\",\"plannedDescriptorRefs\":[" +
+            "{\"namespace\":\"humantask\",\"id\":\"ht_asset_maintenance_initial_review\",\"version\":1}]}," +
+            "\"items\":[{\"descriptorKind\":\"HumanTask\",\"descriptorId\":\"ht_asset_maintenance_initial_review\",\"operation\":\"Create\",\"payload\":{" +
+            "\"id\":\"ht_asset_maintenance_initial_review\",\"name\":\"Asset maintenance initial review\",\"state\":\"Active\",\"version\":1," +
+            "\"interaction\":{\"namespace\":\"form\",\"id\":\"form_asset_maintenance_review\",\"version\":1}," +
+            "\"assigneeStrategy\":\"CandidateGroup\",\"outcomes\":[{\"condition\":\"Approve\"},{\"condition\":\"Reject\"}]" +
+            optionalSchemaProperties + "}}]}";
+        var result = parser.Parse(json, context);
+        if (result.Status != DescriptorAuthoringStatus.Succeeded || result.DraftSet.Drafts.Count != 1)
+            throw new InvalidOperationException("Authoring optional-reference candidate did not parse successfully.");
+        return result.DraftSet.Drafts[0].Payload.GetDescriptor() as HumanTaskDescriptor
+            ?? throw new InvalidOperationException("Authoring optional-reference payload was not a HumanTask.");
     }
 
     private static AgentDraftPayloadPatchDto IdentityPatch(AgentDraftPayloadDto dto, string mergedName)

@@ -342,8 +342,8 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
                 : 0,
             Permissions = element.TryGetProperty("permissions", out var permProp) ? permProp.GetString() : null,
             Interaction = ParseDescriptorRef<IInteractionDescriptor>(element, "interaction"),
-            InputSchema = ParseDescriptorRef<SchemaDescriptor>(element, "inputSchema"),
-            OutputSchema = ParseDescriptorRef<SchemaDescriptor>(element, "outputSchema"),
+            InputSchema = ParseOptionalDescriptorRef<SchemaDescriptor>(element, "inputSchema"),
+            OutputSchema = ParseOptionalDescriptorRef<SchemaDescriptor>(element, "outputSchema"),
             AssigneeStrategy = assigneeStrategy,
             Outcomes = outcomes
         };
@@ -607,6 +607,17 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             return new VersionedDescriptorRef<T>(id, version);
         }
         return default;
+    }
+
+    private static VersionedDescriptorRef<T>? ParseOptionalDescriptorRef<T>(JsonElement element, string propertyName)
+        where T : class, IVersionedDescriptor
+    {
+        if (!element.TryGetProperty(propertyName, out var refProp) || refProp.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return ParseDescriptorRef<T>(element, propertyName);
     }
 
     private static DescriptorAuthoringDiagnostic CreateDiagnostic(

@@ -2988,3 +2988,55 @@ retained-content regressions: 2/2 passed. Local dependency boundaries passed
 PostgreSQL schema checks lacked a working Docker connection. Existing CI supplies
 these prerequisites; no gate is waived. PR #94 remains draft pending final-head CI.
 Approved content handoff and real model evaluation are not yet proven.
+
+### Issue #87 — Generated identity repair ready (2026-09-13)
+
+PR #94 final head 9531210600be644c5f142b814402bab7ed9eb331 passed complete CI
+34569935387, including prerequisite evidence and dependency-boundary gates that
+could not complete locally. The primary verified the exact head and marked the
+PR ready for review; it remains unmerged. Continue on branch
+codex/phase-10c-asset-human-approval-87 with real Asset draft human approval and
+Outbox acceptance. Approved-content host loading and live-model evaluation remain
+pending. See docs/superpowers/plans/2026-09-11-asset-human-approval-acceptance.md.
+
+### Issue #87 — Authoring input checkpoint (2026-09-13)
+
+Draft PR #95 at b1ba1c8a records the real generated Create limitation (missing
+HumanTask outcomes) and the existing Authoring parser's complete Asset candidate
+test (1/1 passed, independently rerun). No production change is needed to represent
+this candidate through the existing Authoring parser. Full review/approval remains
+unproven. The successor worktree asset-human-approval-87 contains an uncommitted
+AssetHumanApprovalActivationHandoffAcceptanceTests.cs and test-project references.
+Its boundary is authoring -> real review/package/evidence -> Submit -> UnderReview;
+it does not complete approval or deliver Outbox messages. A fake object-cache state
+registry was rejected in review and replaced with real RuntimePersistence contracts.
+The first compile reported CC1001 for a test-side external Asset form reference;
+the narrow fix and actual execution still require review. Do not commit or report
+this fixture as passing before running it. Old unexecuted large fixture and the
+executed failing baseline are under 99_RecycleBin/asset-human-approval-87.
+
+### Issue #87 — Real UnderReview handoff verified (2026-09-13)
+
+The primary compiled and ran AssetHumanApprovalActivationHandoffAcceptanceTests:
+1/1 passed. Complete Authoring candidate -> real Review/Preview/Evidence/Submit
+creates an authoritative UnderReview request and a real request-bound HumanTask.
+The fixture uses the real runtime state contract registry and registry validator.
+Full ControlPlane passed 554/554; Authoring passed 53/53. HumanTask completion,
+real Outbox callback and approved runtime content loading remain subsequent work.
+PR #95 remains draft pending that work and final-head CI.
+
+### Issue #87 — Real approval/rejection and parser repair (2026-09-14)
+
+Complete Asset descriptor comparison exposed missing nullable schema references
+becoming present empty references in JsonDescriptorAuthoringOutputParser. Its
+existing parser now preserves missing/explicit-null InputSchema/OutputSchema as
+null; valid and required references keep existing behavior. Parser regressions
+passed 4/4 after failing 3/4 before repair. No new authoring protocol was added.
+
+The Asset acceptance now uses real in-memory runtime persistence, state contracts,
+HumanTask CompleteAsync and hosted Outbox consumers. Human approval reaches
+Activated with one gate call; rejection reaches Rejected with zero calls. Full
+ControlPlane passed 556/556, Authoring 56/56, and native publish-link-run 1/1 with
+the new optional-reference marker. The gate remains in-memory; approved inventory
+loading, runtime restart and live-model quality remain unproven. PR #95 is draft
+until final-head CI passes. Details: docs/review/2026-09-13-asset-authoring-input-boundary.md.

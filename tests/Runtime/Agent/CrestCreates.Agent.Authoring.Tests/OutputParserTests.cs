@@ -3,6 +3,8 @@ using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Metadata.Abstractions;
 using FluentAssertions;
 using Xunit;
 
@@ -122,6 +124,100 @@ public sealed class OutputParserTests
         result.Status.Should().Be(DescriptorAuthoringStatus.Succeeded);
         result.DraftSet.Drafts.Should().HaveCount(1);
         result.Plan.PlannedDescriptorRefs.Should().HaveCount(1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void HumanTaskOptionalSchemas_WhenMissingOrNull_AreNull(bool explicitNull)
+    {
+        var json = BuildHumanTaskOutputJsonWithOptionalSchemas(explicitNull);
+
+        var result = _parser.Parse(json, _validContext);
+
+        var candidate = result.DraftSet.Drafts.Should().ContainSingle().Which.Payload
+            .GetDescriptor().Should().BeOfType<HumanTaskDescriptor>().Subject;
+        candidate.InputSchema.Should().BeNull();
+        candidate.OutputSchema.Should().BeNull();
+    }
+
+    [Fact]
+    public void HumanTaskOptionalSchemas_WhenProvided_PreservesReferences()
+    {
+        var json = BuildHumanTaskOutputJsonWithSchemas("schema_input", 2, "schema_output", 3);
+
+        var result = _parser.Parse(json, _validContext);
+
+        var candidate = result.DraftSet.Drafts.Should().ContainSingle().Which.Payload
+            .GetDescriptor().Should().BeOfType<HumanTaskDescriptor>().Subject;
+        candidate.InputSchema.Should().NotBeNull();
+        candidate.InputSchema!.Value.Id.Should().Be("schema_input");
+        candidate.InputSchema.Value.Version.Should().Be(2);
+        candidate.OutputSchema.Should().NotBeNull();
+        candidate.OutputSchema!.Value.Id.Should().Be("schema_output");
+        candidate.OutputSchema.Value.Version.Should().Be(3);
+    }
+
+    [Fact]
+    public void AssetInitialHumanTaskJson_PreservesCompleteCandidateContract()
+    {
+        const string candidateId = "ht_asset_maintenance_initial_review";
+        const string interactionId = "form_asset_maintenance_review";
+
+        var json = JsonSerializer.Serialize(new
+        {
+            contractVersion = "7g.v1",
+            promptInputHash = _validContext.ExpectedPromptInputHash,
+            plan = new
+            {
+                planId = "asset-maintenance-initial-review",
+                intentText = "Create the Asset management initial human review task",
+                plannedDescriptorRefs = new[]
+                {
+                    new { @namespace = "humantask", id = candidateId, version = 1 }
+                }
+            },
+            items = new[]
+            {
+                new
+                {
+                    descriptorKind = "HumanTask",
+                    descriptorId = candidateId,
+                    operation = "Create",
+                    rationale = "Require a human reviewer before selecting the candidate Asset contract.",
+                    payload = new
+                    {
+                        id = candidateId,
+                        name = "Asset management initial human review",
+                        state = "Active",
+                        version = 1,
+                        assigneeStrategy = "CandidateGroup",
+                        interaction = new { @namespace = "form", id = interactionId, version = 1 },
+                        outcomes = new[]
+                        {
+                            new { condition = "Approve" },
+                            new { condition = "Reject" }
+                        }
+                    }
+                }
+            }
+        });
+
+        var result = _parser.Parse(json, _validContext);
+
+        result.Status.Should().Be(DescriptorAuthoringStatus.Succeeded);
+        var candidate = result.DraftSet.Drafts.Should().ContainSingle().Which.Payload
+            .GetDescriptor().Should().BeOfType<HumanTaskDescriptor>().Subject;
+        candidate.Id.Should().Be(candidateId);
+        candidate.State.Should().Be(DescriptorState.Active);
+        candidate.Version.Should().Be(1);
+        candidate.Interaction.Id.Should().Be(interactionId);
+        candidate.Interaction.Version.Should().Be(1);
+        candidate.InputSchema.Should().BeNull();
+        candidate.OutputSchema.Should().BeNull();
+        candidate.AssigneeStrategy.Should().Be(AssigneeStrategy.CandidateGroup);
+        candidate.Outcomes.Select(outcome => outcome.Condition).Should()
+            .Equal(CompletionCondition.Approve, CompletionCondition.Reject);
     }
 
     [Fact]
@@ -256,6 +352,69 @@ public sealed class OutputParserTests
     });
 
     private string BuildValidHumanTaskOutputJson() => BuildValidOutputJson(_validContext.ExpectedPromptInputHash);
+
+    private string BuildHumanTaskOutputJsonWithOptionalSchemas(bool explicitNull)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["id"] = "ht_optional_schema",
+            ["name"] = "Optional Schema Review",
+            ["version"] = 1,
+            ["interaction"] = new { id = "form_optional_schema", version = 1 }
+        };
+
+        if (explicitNull)
+        {
+            payload["inputSchema"] = null;
+            payload["outputSchema"] = null;
+        }
+
+        return BuildHumanTaskOutputJson(payload);
+    }
+
+    private string BuildHumanTaskOutputJsonWithSchemas(
+        string inputSchemaId,
+        int inputSchemaVersion,
+        string outputSchemaId,
+        int outputSchemaVersion)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["id"] = "ht_optional_schema",
+            ["name"] = "Optional Schema Review",
+            ["version"] = 1,
+            ["interaction"] = new { id = "form_optional_schema", version = 1 },
+            ["inputSchema"] = new { id = inputSchemaId, version = inputSchemaVersion },
+            ["outputSchema"] = new { id = outputSchemaId, version = outputSchemaVersion }
+        };
+
+        return BuildHumanTaskOutputJson(payload);
+    }
+
+    private string BuildHumanTaskOutputJson(Dictionary<string, object?> payload) => JsonSerializer.Serialize(new
+    {
+        contractVersion = "7g.v1",
+        promptInputHash = _validContext.ExpectedPromptInputHash,
+        plan = new
+        {
+            planId = "plan_optional_schema",
+            intentText = "Add optional schema review",
+            plannedDescriptorRefs = new[]
+            {
+                new { @namespace = "humantask", id = "ht_optional_schema", version = 1 }
+            }
+        },
+        items = new[]
+        {
+            new
+            {
+                descriptorKind = "HumanTask",
+                descriptorId = "ht_optional_schema",
+                operation = "Create",
+                payload
+            }
+        }
+    });
 
     private string BuildValidWorkflowOutputJson() => JsonSerializer.Serialize(new
     {
