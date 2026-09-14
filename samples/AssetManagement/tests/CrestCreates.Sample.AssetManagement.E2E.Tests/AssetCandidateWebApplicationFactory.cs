@@ -4,12 +4,15 @@ using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.HumanTask;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCapability;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Sample.AssetManagement.Host;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Schema.Abstractions;
 using CrestCreates.Sample.AssetManagement.Application.Handlers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -23,9 +26,25 @@ namespace CrestCreates.Sample.AssetManagement.E2E.Tests;
 /// Test-only candidate composition. The application keeps its default v1
 /// registry; this factory explicitly replaces only the versioned descriptor
 /// registries so the business acceptance cases can exercise a v2 candidate.
+/// The explicit inventory constructor is only a test loading mechanism; it is
+/// not evidence that the supplied content was approved.
 /// </summary>
 public sealed class AssetCandidateWebApplicationFactory : WebApplicationFactory<Program>
 {
+    private readonly IReadOnlyList<IDescriptor>? _inventory;
+
+    public AssetCandidateWebApplicationFactory()
+    {
+    }
+
+    public AssetCandidateWebApplicationFactory(IReadOnlyList<IDescriptor> inventory)
+    {
+        ArgumentNullException.ThrowIfNull(inventory);
+        var snapshot = inventory.ToArray();
+        ValidateCompiledBaseline(snapshot);
+        _inventory = snapshot;
+    }
+
     public InitialHumanTaskCompletionGate CompletionGate { get; } = new();
     public bool GateInitialCompletion { get; set; }
     public string DatabasePath { get; } = Path.Combine(Path.GetTempPath(), $"crest-assets-e2e-{Guid.NewGuid():N}.db");
@@ -42,9 +61,10 @@ public sealed class AssetCandidateWebApplicationFactory : WebApplicationFactory<
         builder.UseSetting("AssetManagement:RuntimeSchema", RuntimeSchema);
         builder.ConfigureServices(services =>
         {
+            var inventory = _inventory ?? BuildDefaultCandidateInventory();
             var humanTasks = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
             humanTasks.Build([new AssetDescriptorProvider<HumanTaskDescriptor>(
-                [AssetDescriptorCatalog.MaintenanceHumanTask, AssetDescriptorCatalog.MaintenanceInitialHumanTask])]);
+                inventory.OfType<HumanTaskDescriptor>().ToArray())]);
             services.RemoveAll<IHumanTaskRegistry>();
             services.AddSingleton<IHumanTaskRegistry>(humanTasks);
 
@@ -52,21 +72,13 @@ public sealed class AssetCandidateWebApplicationFactory : WebApplicationFactory<
             services.AddSingleton<ICapabilityHandlerRegistry>(new CandidateCapabilityHandlerRegistry());
 
             var workflows = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
-            var candidateWorkflow = AssetCandidateDescriptorCatalog.MaintenanceWorkflow;
             workflows.Build([new AssetDescriptorProvider<WorkflowDescriptor>(
-                [AssetDescriptorCatalog.MaintenanceWorkflow, candidateWorkflow])]);
+                inventory.OfType<WorkflowDescriptor>().ToArray())]);
             services.RemoveAll<IWorkflowRegistry>();
             services.AddSingleton<IWorkflowRegistry>(workflows);
 
             services.RemoveAll<IDescriptorLookup>();
-            services.AddSingleton<IDescriptorLookup>(new AssetDescriptorLookup(
-                AssetDescriptorCatalog.Schemas.Cast<IDescriptor>()
-                    .Concat(AssetDescriptorCatalog.Capabilities)
-                    .Append(AssetDescriptorCatalog.MaintenanceForm)
-                    .Append(AssetDescriptorCatalog.MaintenanceHumanTask)
-                    .Append(AssetDescriptorCatalog.MaintenanceInitialHumanTask)
-                    .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
-                    .Append(candidateWorkflow)));
+            services.AddSingleton<IDescriptorLookup>(new AssetDescriptorLookup(inventory));
 
             if (GateInitialCompletion)
             {
@@ -80,6 +92,71 @@ public sealed class AssetCandidateWebApplicationFactory : WebApplicationFactory<
         });
     }
 
+    private static IReadOnlyList<IDescriptor> BuildDefaultCandidateInventory()
+        => AssetDescriptorCatalog.Schemas.Cast<IDescriptor>()
+            .Concat(AssetDescriptorCatalog.Capabilities)
+            .Append(AssetDescriptorCatalog.MaintenanceForm)
+            .Append(AssetDescriptorCatalog.MaintenanceHumanTask)
+            .Append(AssetDescriptorCatalog.MaintenanceInitialHumanTask)
+            .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
+            .Append(AssetCandidateDescriptorCatalog.MaintenanceWorkflow)
+            .ToArray();
+
+    private static void ValidateCompiledBaseline(IReadOnlyList<IDescriptor> inventory)
+    {
+        if (inventory.Any(descriptor => descriptor is not
+                (SchemaDescriptor or FormDescriptor or CapabilityDescriptor or HumanTaskDescriptor or WorkflowDescriptor)))
+        {
+            throw new InvalidOperationException(
+                "The explicit Asset inventory may contain only Schema, Form, Capability, HumanTask, and Workflow descriptors.");
+        }
+
+        var hashBuilder = new DescriptorStableHashBuilder(new DefaultCanonicalHashComputer());
+        var expected = CompiledBaseline()
+            .Select(descriptor => CreateFingerprint(descriptor, hashBuilder))
+            .ToArray();
+        var actual = inventory
+            .Where(descriptor => descriptor is SchemaDescriptor or FormDescriptor or CapabilityDescriptor)
+            .Select(descriptor => CreateFingerprint(descriptor, hashBuilder))
+            .ToArray();
+
+        if (expected.Length != actual.Length
+            || expected.Except(actual).Any()
+            || actual.Except(expected).Any())
+        {
+            throw new InvalidOperationException(
+                "The explicit Asset inventory must contain exactly the compiled Schema, Form, and Capability baseline; only HumanTask and Workflow descriptors may vary.");
+        }
+    }
+
+    private static IEnumerable<IDescriptor> CompiledBaseline()
+        => AssetDescriptorCatalog.Schemas.Cast<IDescriptor>()
+            .Concat(AssetDescriptorCatalog.Capabilities)
+            .Append(AssetDescriptorCatalog.MaintenanceForm);
+
+    private static DescriptorFingerprint CreateFingerprint(
+        IDescriptor descriptor,
+        IDescriptorStableHashBuilder hashBuilder)
+    {
+        if (descriptor is not IVersionedDescriptor versioned)
+            throw new InvalidOperationException(
+                $"The explicit Asset inventory contains an unversioned compiled-baseline descriptor '{descriptor.FullId}'.");
+
+        var hashes = hashBuilder.Build(descriptor);
+        return new DescriptorFingerprint(
+            descriptor.Namespace,
+            descriptor.Id,
+            versioned.Version,
+            hashes.ContractHash,
+            hashes.DefinitionHash);
+    }
+
+    private sealed record DescriptorFingerprint(
+        string Namespace,
+        string Id,
+        int Version,
+        CanonicalHash ContractHash,
+        CanonicalHash DefinitionHash);
 }
 
 public sealed class InitialHumanTaskCompletionGate

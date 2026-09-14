@@ -19,6 +19,7 @@ using CrestCreates.Metadata.Registry;
 using CrestCreates.Metadata.Runtime;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.HumanTask;
+using CrestCreates.Schema.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Data.Sqlite;
 
@@ -70,6 +71,132 @@ public sealed class AssetTwoStageAcceptanceTests
         var workflow = await workflowStore.GetAsync(initial.WorkflowKey.Value);
         workflow.Should().NotBeNull();
         workflow!.Status.Should().Be(WorkflowInstanceStatus.Suspended);
+    }
+
+    [Fact]
+    public async Task CheckedInventory_LoadsRetainedCompiledTasksAndChangedWorkflow_AndRunsTwoStageFlow()
+    {
+        var workflow = new WorkflowDescriptor
+        {
+            Id = AssetContractIds.MaintenanceWorkflow,
+            Name = "Supplied asset maintenance review",
+            Version = 2,
+            State = DescriptorState.Active,
+            Steps =
+            [
+                new WorkflowStep
+                {
+                    Id = "supplied-initial-review",
+                    Name = "Supplied manager initial review",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = ((HumanTaskTarget)AssetCandidateDescriptorCatalog.MaintenanceWorkflow.Steps[0].Target).HumanTask
+                    }
+                },
+                new WorkflowStep
+                {
+                    Id = "supplied-final-review",
+                    Name = "Supplied manager final review",
+                    Condition = WorkflowConditionTokens.PreviousHumanTaskApproved,
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = ((HumanTaskTarget)AssetCandidateDescriptorCatalog.MaintenanceWorkflow.Steps[1].Target).HumanTask
+                    }
+                }
+            ]
+        };
+        var inventory = AssetDescriptorCatalog.Schemas.Cast<IDescriptor>()
+            .Concat(AssetDescriptorCatalog.Capabilities)
+            .Append(AssetDescriptorCatalog.MaintenanceForm)
+            .Append(AssetDescriptorCatalog.MaintenanceHumanTask)
+            .Append(AssetDescriptorCatalog.MaintenanceInitialHumanTask)
+            .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
+            .Append(workflow)
+            .ToArray();
+
+        using var factory = new AssetCandidateWebApplicationFactory(inventory);
+        using (var inspection = factory.Services.CreateScope())
+        {
+            var workflows = inspection.ServiceProvider.GetRequiredService<IWorkflowRegistry>();
+            var loaded = workflows.GetByVersion(AssetContractIds.MaintenanceWorkflow, 2);
+            loaded.Should().BeSameAs(workflow);
+            loaded!.Name.Should().Be(workflow.Name);
+
+            var stableHashes = inspection.ServiceProvider.GetRequiredService<IDescriptorStableHashBuilder>();
+            stableHashes.Build(loaded).DefinitionHash.Should().BeEquivalentTo(stableHashes.Build(workflow).DefinitionHash);
+            stableHashes.Build(loaded).DefinitionHash.Should().NotBeEquivalentTo(
+                stableHashes.Build(AssetCandidateDescriptorCatalog.MaintenanceWorkflow).DefinitionHash);
+
+            var humanTasks = inspection.ServiceProvider.GetRequiredService<IHumanTaskRegistry>();
+            humanTasks.GetByVersion(AssetContractIds.MaintenanceInitialHumanTask, 1)
+                .Should().BeSameAs(AssetDescriptorCatalog.MaintenanceInitialHumanTask);
+            humanTasks.GetByVersion(AssetContractIds.MaintenanceHumanTask, 1)
+                .Should().BeSameAs(AssetDescriptorCatalog.MaintenanceHumanTask);
+        }
+
+        using var client = factory.CreateClient();
+        var (asset, initial) = await StartMaintenanceAsync(client);
+        await CompleteAsync(factory, initial.HumanTaskId!, "Approve", "Initial review approved");
+
+        using (var inspection = factory.Services.CreateScope())
+        {
+            var taskStore = inspection.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+            var initialTask = await taskStore.GetAsync(new RuntimeInstanceKey("tenant-a", initial.HumanTaskId!));
+            var finalTasks = await taskStore.GetPendingByWorkflowAsync(initialTask!.WorkflowKey!.Value);
+            finalTasks.Should().ContainSingle(task => task.HumanTaskId == AssetContractIds.MaintenanceHumanTask && task.HumanTaskVersion == 1);
+        }
+
+        using (var inspection = factory.Services.CreateScope())
+        {
+            var taskStore = inspection.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>();
+            var initialTask = await taskStore.GetAsync(new RuntimeInstanceKey("tenant-a", initial.HumanTaskId!));
+            var finalTask = (await taskStore.GetPendingByWorkflowAsync(initialTask!.WorkflowKey!.Value)).Single();
+            await CompleteAsync(factory, finalTask.Id, "Approve", "Final review approved");
+        }
+
+        (await SendAsync<AssetResult>(client, HttpMethod.Get, $"/api/assets/{asset.Id}", null, HttpStatusCode.OK))
+            .Status.Should().Be(nameof(AssetStatus.Available));
+    }
+
+    [Fact]
+    public void CheckedInventory_WithChangedMissingOrExtraSchema_IsRejectedBeforeHostLoad()
+    {
+        var baseline = AssetDescriptorCatalog.Schemas[0];
+        var changed = new SchemaDescriptor
+        {
+            Id = baseline.Id,
+            Name = baseline.Name + " changed",
+            Version = baseline.Version,
+            State = baseline.State,
+            Fields = baseline.Fields
+        };
+        var extra = new SchemaDescriptor
+        {
+            Id = baseline.Id + ".extra",
+            Name = baseline.Name + " extra",
+            Version = baseline.Version,
+            State = baseline.State,
+            Fields = baseline.Fields
+        };
+
+        var invalidInventories = new IReadOnlyList<IDescriptor>[]
+        {
+            BuildInventory(AssetDescriptorCatalog.Schemas.Cast<IDescriptor>().Skip(1).Prepend(changed)),
+            BuildInventory(AssetDescriptorCatalog.Schemas.Cast<IDescriptor>().Skip(1)),
+            BuildInventory(AssetDescriptorCatalog.Schemas.Cast<IDescriptor>().Append(extra))
+        };
+
+        foreach (var inventory in invalidInventories)
+        {
+            Action create = () => new AssetCandidateWebApplicationFactory(inventory);
+            create.Should().Throw<InvalidOperationException>()
+                .WithMessage("*compiled Schema, Form, and Capability baseline*");
+        }
+
+        Action unknown = () => new AssetCandidateWebApplicationFactory(
+            BuildInventory(AssetDescriptorCatalog.Schemas).Append(new UnknownDescriptor()).ToArray());
+        unknown.Should().Throw<InvalidOperationException>()
+            .WithMessage("*only Schema, Form, Capability, HumanTask, and Workflow descriptors*");
     }
 
     [Fact]
@@ -362,6 +489,26 @@ public sealed class AssetTwoStageAcceptanceTests
         command.CommandText = "SELECT COUNT(*) FROM MaintenanceRecords WHERE Approved=$approved";
         command.Parameters.AddWithValue("$approved", approved ? 1 : 0);
         return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private static IReadOnlyList<IDescriptor> BuildInventory(IEnumerable<IDescriptor> schemas)
+        => schemas
+            .Concat(AssetDescriptorCatalog.Capabilities)
+            .Append(AssetDescriptorCatalog.MaintenanceForm)
+            .Append(AssetDescriptorCatalog.MaintenanceHumanTask)
+            .Append(AssetDescriptorCatalog.MaintenanceInitialHumanTask)
+            .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
+            .Append(AssetCandidateDescriptorCatalog.MaintenanceWorkflow)
+            .ToArray();
+
+    private sealed class UnknownDescriptor : IDescriptor
+    {
+        public string Namespace => "unknown";
+        public string Id => "unknown.descriptor";
+        public string Name => "Unknown descriptor";
+        public DescriptorKind Kind => DescriptorKind.Unknown;
+        public DescriptorState State => DescriptorState.Active;
+        public string? SupersededById => null;
     }
 
     private static async Task<T> SendAsync<T>(HttpClient client, HttpMethod method, string uri, object? input, HttpStatusCode expected)

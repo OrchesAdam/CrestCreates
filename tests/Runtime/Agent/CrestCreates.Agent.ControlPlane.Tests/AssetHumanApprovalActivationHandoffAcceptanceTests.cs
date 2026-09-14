@@ -18,10 +18,13 @@ using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorLifecycle;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.Abstractions.Registry;
 using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.Metadata.ContextPack;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.DescriptorImpact;
+using CrestCreates.Metadata.DescriptorPackage;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Runtime.Persistence;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
@@ -33,6 +36,7 @@ using CrestCreates.Sample.AssetManagement.Host;
 using CrestCreates.Schema;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -176,6 +180,20 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
         var submitted = await SubmitCandidateAsync(fixture);
         var request = submitted.Request;
         var taskInput = AssertTaskInputBinding(fixture, submitted);
+        var parsedCandidate = submitted.Draft.Payload.GetDescriptor();
+        parsedCandidate.Should().BeEquivalentTo(
+            AssetDescriptorCatalog.MaintenanceInitialHumanTask,
+            "the approved candidate must remain the descriptor produced by the real authoring parser and compiled Asset catalog");
+        var expectedInventory = BuildExpectedInventory(parsedCandidate);
+        var packagePreviewId = request.BindingSnapshot.PackagePreviewId;
+        packagePreviewId.Should().NotBeNullOrWhiteSpace();
+
+        var beforeApproval = await fixture.ApprovedInventoryValidator.ValidateAsync(
+            TenantId, request.RequestId, packagePreviewId!, expectedInventory);
+        beforeApproval.IsValid.Should().BeFalse("an UnderReview request is not approved content");
+        var wrongRequest = await fixture.ApprovedInventoryValidator.ValidateAsync(
+            TenantId, request.RequestId + "-wrong", packagePreviewId!, expectedInventory);
+        wrongRequest.IsValid.Should().BeFalse("an unknown activation request must not select approved content");
 
         var decision = new DescriptorActivationReviewDecision
         {
@@ -209,6 +227,46 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
         var activated = await WaitForActivationStatusAsync(fixture, request.RequestId, ActivationRequestStatus.Activated);
         activated.BindingSnapshot.Should().BeEquivalentTo(request.BindingSnapshot);
         fixture.ActivationGate.CallCount.Should().Be(1);
+
+        packagePreviewId = activated.BindingSnapshot.PackagePreviewId;
+        packagePreviewId.Should().NotBeNullOrWhiteSpace();
+
+        var approved = await fixture.ApprovedInventoryValidator.ValidateAsync(
+            TenantId, activated.RequestId, packagePreviewId!, expectedInventory);
+        approved.IsValid.Should().BeTrue();
+
+        var wrongTenant = await fixture.ApprovedInventoryValidator.ValidateAsync(
+            TenantId + "-wrong", activated.RequestId, packagePreviewId!, expectedInventory);
+        wrongTenant.IsValid.Should().BeFalse("an approved request must not cross tenant boundaries");
+        var wrongPreview = await fixture.ApprovedInventoryValidator.ValidateAsync(
+            TenantId, activated.RequestId, packagePreviewId + "-wrong", expectedInventory);
+        wrongPreview.IsValid.Should().BeFalse("an approved request must not accept a substituted preview");
+
+        fixture.PackageBuilder.SubstituteHumanTaskName(
+            TenantId, packagePreviewId!, parsedCandidate.Id, "Asset maintenance definition replaced");
+        var substitutedInventory = BuildExpectedInventory(
+            new HumanTaskDescriptor
+            {
+                Id = parsedCandidate.Id,
+                Name = "Asset maintenance definition replaced",
+                State = parsedCandidate.State,
+                SupersededById = parsedCandidate.SupersededById,
+                Version = ((IVersionedDescriptor)parsedCandidate).Version,
+                Interaction = ((HumanTaskDescriptor)parsedCandidate).Interaction,
+                InputSchema = ((HumanTaskDescriptor)parsedCandidate).InputSchema,
+                OutputSchema = ((HumanTaskDescriptor)parsedCandidate).OutputSchema,
+                AssigneeStrategy = ((HumanTaskDescriptor)parsedCandidate).AssigneeStrategy,
+                Timeout = ((HumanTaskDescriptor)parsedCandidate).Timeout,
+                Permissions = ((HumanTaskDescriptor)parsedCandidate).Permissions,
+                Outcomes = ((HumanTaskDescriptor)parsedCandidate).Outcomes
+            });
+        var substituted = await fixture.ApprovedInventoryValidator.ValidateAsync(
+            TenantId, activated.RequestId, packagePreviewId!, substitutedInventory);
+        substituted.InventoryMatched.Should().BeTrue(
+            "the changed retained definition must reach hash verification through the same inventory selection");
+        substituted.HashesMatched.Should().BeFalse(
+            "the changed definition must fail canonical package hash verification while claimed hashes remain unchanged");
+        substituted.IsValid.Should().BeFalse();
     }
 
     [Fact]
@@ -320,6 +378,7 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
             .Last(record => record.TouchedPackagePreviewIds is { Count: 1 }
                 && record.Context.ToolName == AgentToolName.PreviewDescriptorPackage)
             .TouchedPackagePreviewIds![0];
+        fixture.PackageBuilder.BindLast(TenantId, packagePreviewId);
         var evidence = await service.BuildPackageEvidencePreviewAsync(
             fixture.Context(AgentToolName.BuildPackageEvidencePreview), draft.DraftId);
         evidence.Status.Should().Be(AgentToolResultStatus.Success,
@@ -368,6 +427,13 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
         var task = await fixture.HumanTasks.GetAsync(new RuntimeInstanceKey(TenantId, taskId))
             ?? throw new InvalidOperationException("Activation review HumanTask was not persisted.");
         return (draft, request, task);
+    }
+
+    private static IReadOnlyList<IDescriptor> BuildExpectedInventory(IDescriptor parsedCandidate)
+    {
+        var form = AssetDescriptorCatalog.MaintenanceForm;
+        var schema = AssetDescriptorCatalog.Schemas.Single(item => item.Id == form.Schema.Id);
+        return new IDescriptor[] { schema, form, parsedCandidate };
     }
 
     private static Draft ParseAssetCandidate()
@@ -437,6 +503,7 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
         public required IHumanTaskInstanceStore HumanTasks { get; init; }
         public required CapturingActivationReviewOrchestrator ReviewOrchestrator { get; init; }
         public required CountingRuntimeActivationGate ActivationGate { get; init; }
+        public required CapturingPackageBuilder PackageBuilder { get; init; }
         public required IReadOnlyList<IHostedService> HostedServices { get; init; }
         public required IRuntimeStateContractRegistry State { get; init; }
         public IDescriptorDraftStore DraftStore => Services.GetRequiredService<IDescriptorDraftStore>();
@@ -485,6 +552,13 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
             services.AddMetadataContextPack();
             services.AddFormKernel();
             services.AddSchemaKernel();
+
+            services.RemoveAll<IDescriptorPackageBuilder>();
+            services.AddSingleton<DefaultDescriptorPackageBuilder>();
+            services.AddSingleton<IDescriptorPackageBuilder>(sp =>
+                new CapturingPackageBuilder(
+                    sp.GetRequiredService<DefaultDescriptorPackageBuilder>()));
+
             services.AddRuntimePersistence();
             services.AddCrestCreatesInMemoryRuntimePersistence();
             services.AddSingleton<IEventValidator, PassThroughEventValidator>();
@@ -516,9 +590,14 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
                     ?? throw new InvalidOperationException("Capturing activation review orchestrator was not registered."),
                 ActivationGate = provider.GetRequiredService<IRuntimeActivationGate>() as CountingRuntimeActivationGate
                     ?? throw new InvalidOperationException("Counting activation gate was not registered."),
+                PackageBuilder = provider.GetRequiredService<IDescriptorPackageBuilder>() as CapturingPackageBuilder
+                    ?? throw new InvalidOperationException("Capturing package builder was not registered."),
                 State = provider.GetRequiredService<IRuntimeStateContractRegistry>(),
                 HostedServices = hostedServices
             };
+
+            fixture.ApprovedInventoryValidator = new ApprovedInventoryValidator(
+                provider.GetRequiredService<IAgentControlPlaneToolService>(), fixture.PackageBuilder);
 
             _ = await Task.FromResult(fixture);
             return fixture;
@@ -540,6 +619,8 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
                 await HostedServices[index].StopAsync(CancellationToken.None);
             await Services.DisposeAsync();
         }
+
+        public ApprovedInventoryValidator ApprovedInventoryValidator { get; private set; } = null!;
 
         private static IHumanTaskRegistry CreateHumanTaskRegistry(
             IRegistryValidationEngine<HumanTaskDescriptor> validationEngine)
@@ -620,6 +701,224 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
         {
             Interlocked.Increment(ref _callCount);
             return await inner.ActivateAsync(context, request, ct);
+        }
+    }
+
+    private sealed class CapturingPackageBuilder : IDescriptorPackageBuilder
+    {
+        private readonly IDescriptorPackageBuilder _inner;
+        private readonly List<CapturedPackage> _captures = [];
+
+        public CapturingPackageBuilder(IDescriptorPackageBuilder inner)
+            => _inner = inner;
+
+        public DescriptorPackage Build(DescriptorPackageBuildRequest request)
+        {
+            var package = _inner.Build(request);
+            _captures.Add(new CapturedPackage(request, package));
+            return package;
+        }
+
+        public void BindLast(string tenantId, string previewId)
+        {
+            _captures.Should().HaveCount(2,
+                "this fixture invokes the real package builder serially once during review and once for PreviewDescriptorPackage");
+            _captures.Count(item => item.TenantId is null).Should().Be(2,
+                "BindLast is only a fixture-local serial association made immediately after the preview audit");
+            for (var index = _captures.Count - 1; index >= 0; index--)
+            {
+                if (_captures[index].TenantId is null)
+                {
+                    _captures[index] = _captures[index] with
+                    {
+                        TenantId = tenantId,
+                        PreviewId = previewId
+                    };
+                    return;
+                }
+            }
+
+            throw new InvalidOperationException("No unbound package build was available for the preview audit.");
+        }
+
+        public bool TryGet(string tenantId, string previewId, out CapturedPackage capture)
+        {
+            var found = _captures.LastOrDefault(item =>
+                string.Equals(item.TenantId, tenantId, StringComparison.Ordinal)
+                && string.Equals(item.PreviewId, previewId, StringComparison.Ordinal));
+            if (found is null)
+            {
+                capture = null!;
+                return false;
+            }
+
+            capture = found;
+            return true;
+        }
+
+        public DescriptorPackage Rebuild(CapturedPackage capture)
+            => _inner.Build(capture.Request);
+
+        public void SubstituteHumanTaskName(
+            string tenantId, string previewId, string descriptorId, string replacementName)
+        {
+            if (!TryGet(tenantId, previewId, out var capture))
+                throw new InvalidOperationException("The retained package capture was not found.");
+
+            var candidate = capture.Request.Descriptors.Single(descriptor => descriptor.Id == descriptorId)
+                as HumanTaskDescriptor
+                ?? throw new InvalidOperationException("The retained Asset candidate was not a HumanTask descriptor.");
+            var replacement = new HumanTaskDescriptor
+            {
+                Id = candidate.Id,
+                Name = replacementName,
+                State = candidate.State,
+                SupersededById = candidate.SupersededById,
+                Version = candidate.Version,
+                Interaction = candidate.Interaction,
+                InputSchema = candidate.InputSchema,
+                OutputSchema = candidate.OutputSchema,
+                AssigneeStrategy = candidate.AssigneeStrategy,
+                Timeout = candidate.Timeout,
+                Permissions = candidate.Permissions,
+                Outcomes = candidate.Outcomes
+            };
+            var descriptors = capture.Request.Descriptors
+                .Select(descriptor => ReferenceEquals(descriptor, candidate) ? replacement : descriptor)
+                .ToList()
+                .AsReadOnly();
+            var index = _captures.IndexOf(capture);
+            _captures[index] = capture with
+            {
+                Request = capture.Request with { Descriptors = descriptors }
+            };
+        }
+
+        public sealed record CapturedPackage(
+            DescriptorPackageBuildRequest Request,
+            DescriptorPackage Package,
+            string? TenantId = null,
+            string? PreviewId = null);
+    }
+
+    private sealed class ApprovedInventoryValidator
+    {
+        private readonly IAgentControlPlaneToolService _service;
+        private readonly CapturingPackageBuilder _packageBuilder;
+
+        public ApprovedInventoryValidator(
+            IAgentControlPlaneToolService service,
+            CapturingPackageBuilder packageBuilder)
+        {
+            _service = service;
+            _packageBuilder = packageBuilder;
+        }
+
+        public async Task<ApprovedInventoryValidationResult> ValidateAsync(
+            string tenantId,
+            string requestId,
+            string previewId,
+            IReadOnlyList<IDescriptor> expectedInventory)
+        {
+            var context = new AgentToolInvocationContext
+            {
+                TenantId = tenantId,
+                ActorId = AuthorId,
+                ActorKind = AgentToolActorKind.Agent,
+                CorrelationId = "asset-approved-inventory-validation",
+                ToolName = AgentToolName.GetActivationRequestStatus,
+                InvocationSource = AgentToolInvocationSource.Direct
+            };
+            var status = await _service.GetActivationRequestStatusAsync(context, requestId);
+            if (status.Status != AgentToolResultStatus.Success
+                || status.Value is null
+                || status.Value.Status != ActivationRequestStatus.Activated)
+            {
+                return ApprovedInventoryValidationResult.Rejected;
+            }
+
+            var request = status.Value;
+            if (!string.Equals(request.TenantId, tenantId, StringComparison.Ordinal)
+                || !string.Equals(request.BindingSnapshot.TenantId, tenantId, StringComparison.Ordinal)
+                || !string.Equals(request.BindingSnapshot.PackagePreviewId, previewId, StringComparison.Ordinal))
+            {
+                return ApprovedInventoryValidationResult.Rejected;
+            }
+
+            var packagePreview = await _service.GetPackagePreviewAsync(
+                context with { ToolName = AgentToolName.GetPackagePreview }, previewId);
+            if (packagePreview.Status != AgentToolResultStatus.Success
+                || packagePreview.Value is null
+                || packagePreview.Value.PackageManifestHash is null
+                || packagePreview.Value.PackageEvidenceHash is null
+                || packagePreview.Value.PackageEvidenceEnvelopeHash is null
+                || !_packageBuilder.TryGet(tenantId, previewId, out var capture))
+            {
+                return ApprovedInventoryValidationResult.Rejected;
+            }
+
+            var inventoryMatched = capture.Request.Descriptors
+                    .OrderBy(descriptor => descriptor.Namespace, StringComparer.Ordinal)
+                    .ThenBy(descriptor => descriptor.Id, StringComparer.Ordinal)
+                    .ThenBy(descriptor => (descriptor as IVersionedDescriptor)?.Version ?? 0)
+                    .ThenBy(descriptor => descriptor.Kind)
+                    .ThenBy(descriptor => descriptor.Name)
+                    .SequenceEqual(
+                        expectedInventory
+                            .OrderBy(descriptor => descriptor.Namespace, StringComparer.Ordinal)
+                            .ThenBy(descriptor => descriptor.Id, StringComparer.Ordinal)
+                            .ThenBy(descriptor => (descriptor as IVersionedDescriptor)?.Version ?? 0)
+                            .ThenBy(descriptor => descriptor.Kind)
+                            .ThenBy(descriptor => descriptor.Name),
+                        DescriptorDefinitionComparer.Instance);
+            if (!inventoryMatched)
+            {
+                return new ApprovedInventoryValidationResult(false, false, false);
+            }
+
+            var rebuilt = _packageBuilder.Rebuild(capture);
+            var rebuiltHashes = rebuilt.Hashes;
+            var boundHashes = request.BindingSnapshot.Hashes;
+            var hashesMatched = rebuiltHashes is not null
+                && boundHashes is not null
+                && rebuiltHashes.PackageManifestHash.Equals(boundHashes.PackageManifestHash)
+                && rebuiltHashes.PackageEvidenceHash.Equals(boundHashes.PackageEvidenceHash)
+                && rebuiltHashes.PackageEvidenceEnvelopeHash.Equals(boundHashes.PackageEvidenceEnvelopeHash)
+                && packagePreview.Value.PackageManifestHash.Equals(boundHashes.PackageManifestHash)
+                && packagePreview.Value.PackageEvidenceHash.Equals(boundHashes.PackageEvidenceHash)
+                && packagePreview.Value.PackageEvidenceEnvelopeHash.Equals(boundHashes.PackageEvidenceEnvelopeHash);
+            return new ApprovedInventoryValidationResult(hashesMatched, true, hashesMatched);
+        }
+
+        public sealed record ApprovedInventoryValidationResult(
+            bool IsValid,
+            bool InventoryMatched,
+            bool HashesMatched)
+        {
+            public static ApprovedInventoryValidationResult Rejected { get; } = new(false, false, false);
+        }
+    }
+
+    private sealed class DescriptorDefinitionComparer : IEqualityComparer<IDescriptor>
+    {
+        public static readonly DescriptorDefinitionComparer Instance = new();
+        private static readonly IDescriptorStableHashBuilder StableHashBuilder =
+            new DescriptorStableHashBuilder(new DefaultCanonicalHashComputer());
+
+        public bool Equals(IDescriptor? left, IDescriptor? right)
+        {
+            if (left is null || right is null)
+                return left is null && right is null;
+
+            var leftHashes = StableHashBuilder.Build(left);
+            var rightHashes = StableHashBuilder.Build(right);
+            return leftHashes.Equals(rightHashes);
+        }
+
+        public int GetHashCode(IDescriptor descriptor)
+        {
+            var hashes = StableHashBuilder.Build(descriptor);
+            return HashCode.Combine(hashes.ContractHash, hashes.DefinitionHash);
         }
     }
 
