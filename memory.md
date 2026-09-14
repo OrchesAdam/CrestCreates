@@ -3040,3 +3040,25 @@ ControlPlane passed 556/556, Authoring 56/56, and native publish-link-run 1/1 wi
 the new optional-reference marker. The gate remains in-memory; approved inventory
 loading, runtime restart and live-model quality remain unproven. PR #95 is draft
 until final-head CI passes. Details: docs/review/2026-09-13-asset-authoring-input-boundary.md.
+
+### Issue #87 — PR #95 verified and ready (2026-09-14)
+
+Final head 2d0dbfc8da6af5ed22b500dd2b0c7a76a2c9c374 passed complete CI
+34794889411. Primary verified the exact head and marked PR #95 ready; unmerged.
+Continue in worktree asset-approved-inventory-87, branch
+codex/phase-10c-asset-approved-inventory-87, using
+docs/superpowers/plans/2026-09-14-approved-asset-inventory-handoff.md. The next
+boundary is authoritative approved content -> checked inventory -> fresh Asset
+host. Completion of approval alone must not be reported as deployment proof.
+
+### Issue #87 — Approved content and explicit loading boundaries (2026-09-14)
+
+The fixture retains the real package builder input for the actual audited preview
+and verifies complete canonical package hashes against the authoritative Activated
+request. UnderReview, wrong request/tenant/preview and definition substitution are
+rejected. A separate Asset test factory snapshots supplied inventory, checks the
+fixed compiled Schema/Form/Capability set, and loads supplied HumanTask/Workflow
+registries. A Workflow distinct from the static candidate completes both steps.
+Primary verification: control-plane focused 3/3, full 556/556; real PostgreSQL Asset
+focused 2/2, full E2E 12/12. This does not yet combine two approved drafts with host
+loading or prove durable recovery. Final-head CI is pending.
