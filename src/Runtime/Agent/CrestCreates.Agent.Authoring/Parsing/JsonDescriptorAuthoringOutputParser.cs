@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -188,6 +189,32 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             return false;
         }
 
+        string? explicitBaseVersion = null;
+        if (item.BaseVersion is not null)
+        {
+            if (operation != DescriptorDraftOperation.Update)
+            {
+                diagnostics.Add(CreateDiagnostic(
+                    DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                    $"Item '{item.DescriptorId ?? "unknown"}' specifies baseVersion, but baseVersion is valid only for Update operations.",
+                    SeverityLevel.Error));
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(item.BaseVersion)
+                || !int.TryParse(item.BaseVersion, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedBaseVersion)
+                || parsedBaseVersion <= 0)
+            {
+                diagnostics.Add(CreateDiagnostic(
+                    DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                    $"Item '{item.DescriptorId ?? "unknown"}' has invalid baseVersion '{item.BaseVersion}'. Expected a positive invariant-culture integer string.",
+                    SeverityLevel.Error));
+                return false;
+            }
+
+            explicitBaseVersion = parsedBaseVersion.ToString(CultureInfo.InvariantCulture);
+        }
+
         // Materialize payload
         if (item.Payload is not JsonElement payloadElement || payloadElement.ValueKind != JsonValueKind.Object)
         {
@@ -239,7 +266,9 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             Rationale = item.Rationale,
             CorrelationId = Guid.NewGuid().ToString("N"),
             ProposedVersion = proposedVersion,
-            BaseVersion = operation == DescriptorDraftOperation.Update ? proposedVersion : null
+            BaseVersion = operation == DescriptorDraftOperation.Update
+                ? explicitBaseVersion ?? proposedVersion
+                : null
         };
 
         return true;

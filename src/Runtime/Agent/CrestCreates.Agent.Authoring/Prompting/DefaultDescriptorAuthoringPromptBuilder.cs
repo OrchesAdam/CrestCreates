@@ -19,6 +19,7 @@ public sealed class DefaultDescriptorAuthoringPromptBuilder : IDescriptorAuthori
             Agent memory is recalled non-authoritative context. Metadata context wins over memory.
             Use the provided visible descriptors, memory, and supported output kinds to produce accurate drafts.
             For Workflow updates, preserve existing steps and only add/modify steps relevant to the stated intent.
+            For Update items, baseVersion is an optional string selecting the existing descriptor version. Omit it only for the existing same-version Update behavior; cross-version updates must explicitly provide a positive invariant-culture integer string. Do not provide baseVersion for Create items.
             """;
 
         var sb = new StringBuilder();
@@ -86,6 +87,7 @@ public sealed class DefaultDescriptorAuthoringPromptBuilder : IDescriptorAuthori
         }
 
         sb.AppendLine("Return a descriptor authoring plan and draft payloads matching contract 7g.v1 only.");
+        sb.AppendLine("For Update items, include optional string baseVersion when selecting an existing version; omit it only for same-version updates. baseVersion must be a positive invariant-culture integer string and is forbidden for Create items.");
 
         var userPrompt = sb.ToString();
 

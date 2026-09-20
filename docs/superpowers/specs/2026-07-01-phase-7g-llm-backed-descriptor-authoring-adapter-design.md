@@ -725,3 +725,23 @@ Phase 7g is complete when:
 The success condition is not that the LLM is always correct. The success
 condition is that LLM output becomes a deterministic, diagnosable, governable
 draft artifact inside the existing descriptor lifecycle.
+
+
+## 2026-09-20 additive Update base-version input
+
+The existing `7g.v1` output item accepts optional string `baseVersion` for an
+`Update`. This selects the existing definition for deterministic materialization.
+`payload.version` continues to define the proposed version. For example, an item
+with `operation: "Update"`, `baseVersion: "1"` and `payload.version: 2` produces
+`BaseVersion="1"` and `ProposedVersion="2"`. The normal review must resolve the
+base; the parser does not look up or infer a previous version.
+
+Omitting `baseVersion` retains the established same-version Update behavior.
+Explicit values must be positive invariant-culture integer strings; blank, malformed
+and non-positive values are blocked with structured provider-output diagnostics.
+The field is forbidden on non-Update operations. No authoring output grants
+approval or activation authority.
+
+This additive field closes the executed Asset v1-to-v2 authoring case without
+rewriting parsed drafts in sample code. See the 2026-09-15 authoring update plan and
+2026-09-20 validation record; the original Phase 7g design history above is retained.
