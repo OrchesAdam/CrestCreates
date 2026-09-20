@@ -1,0 +1,17 @@
+Test run for /home/orches/workspace/CrestCreates/.worktrees/asset-approved-host-87/samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/bin/Debug/net10.0/CrestCreates.Sample.AssetManagement.E2E.Tests.dll (.NETCoreApp,Version=v10.0)
+VSTest version 18.0.2 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.89]     CrestCreates.Sample.AssetManagement.E2E.Tests.AssetApprovedInventoryHandoffAcceptanceTests.SequentialApprovedReceipts_ReplaceWorkflowVersionAndRejectForeignOrTamperedReceipt [FAIL]
+  Failed CrestCreates.Sample.AssetManagement.E2E.Tests.AssetApprovedInventoryHandoffAcceptanceTests.SequentialApprovedReceipts_ReplaceWorkflowVersionAndRejectForeignOrTamperedReceipt [84 ms]
+  Error Message:
+   Expected parsed.BaseVersion to be "1", but "2" differs near "2" (index 0).
+  Stack Trace:
+     at FluentAssertions.Primitives.StringAssertions`1.Be(String expected, String because, Object[] becauseArgs)
+   at CrestCreates.Sample.AssetManagement.E2E.Tests.AssetApprovedInventoryHandoffAcceptanceTests.ParseAndSaveWorkflowUpdateAsync(AssetControlPlaneApprovalHarness harness, String promptHash, String intent) in /home/orches/workspace/CrestCreates/.worktrees/asset-approved-host-87/samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/AssetApprovedInventoryHandoffAcceptanceTests.cs:line 180
+   at CrestCreates.Sample.AssetManagement.E2E.Tests.AssetApprovedInventoryHandoffAcceptanceTests.SequentialApprovedReceipts_ReplaceWorkflowVersionAndRejectForeignOrTamperedReceipt() in /home/orches/workspace/CrestCreates/.worktrees/asset-approved-host-87/samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/AssetApprovedInventoryHandoffAcceptanceTests.cs:line 118
+   at CrestCreates.Sample.AssetManagement.E2E.Tests.AssetApprovedInventoryHandoffAcceptanceTests.SequentialApprovedReceipts_ReplaceWorkflowVersionAndRejectForeignOrTamperedReceipt() in /home/orches/workspace/CrestCreates/.worktrees/asset-approved-host-87/samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/AssetApprovedInventoryHandoffAcceptanceTests.cs:line 157
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     1, Passed:     1, Skipped:     0, Total:     2, Duration: 724 ms - CrestCreates.Sample.AssetManagement.E2E.Tests.dll (net10.0)

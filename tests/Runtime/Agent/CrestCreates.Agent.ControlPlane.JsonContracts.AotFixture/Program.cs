@@ -129,6 +129,7 @@ public static class ControlPlaneJsonContractFixtureRunner
             allPassed &= RunActivationReviewCallbackBoundary();
             allPassed &= RunDraftIdentityBinding();
             allPassed &= RunAgentAuthoringOptionalReferences();
+            allPassed &= RunAgentAuthoringUpdateBaseVersion();
 
             Console.WriteLine($"SerializeDeserialize_RepresentativeToolRoots:{(allPassed ? "PASS" : "FAIL")}");
 
@@ -282,6 +283,94 @@ public static class ControlPlaneJsonContractFixtureRunner
             throw new InvalidOperationException("Authoring optional-reference candidate did not parse successfully.");
         return result.DraftSet.Drafts[0].Payload.GetDescriptor() as HumanTaskDescriptor
             ?? throw new InvalidOperationException("Authoring optional-reference payload was not a HumanTask.");
+    }
+
+    private static bool RunAgentAuthoringUpdateBaseVersion()
+    {
+        try
+        {
+            var parser = new JsonDescriptorAuthoringOutputParser();
+            var context = new DescriptorAuthoringParseContext
+            {
+                TenantId = "aot-authoring-tenant",
+                AuthorId = "aot-authoring-agent",
+                AuthorKind = DescriptorDraftAuthorKind.Agent,
+                CreatedAt = DateTimeOffset.UnixEpoch,
+                IntentText = "Update the asset workflow",
+                ExpectedPromptInputHash = "aot-authoring-update-base-version"
+            };
+
+            var explicitUpdate = ParseAuthoringVersionCandidate(
+                parser, context, "Update", 2, "1");
+            var missingBaseVersion = ParseAuthoringVersionCandidate(
+                parser, context, "Update", 1, null);
+
+            var explicitDraft = explicitUpdate.DraftSet.Drafts.Count == 1
+                ? explicitUpdate.DraftSet.Drafts[0]
+                : null;
+            var explicitPassed = explicitUpdate.Status == DescriptorAuthoringStatus.Succeeded
+                && explicitUpdate.Diagnostics.Count == 0
+                && explicitDraft?.BaseVersion == "1"
+                && explicitDraft?.ProposedVersion == "2";
+
+            var missingDraft = missingBaseVersion.DraftSet.Drafts.Count == 1
+                ? missingBaseVersion.DraftSet.Drafts[0]
+                : null;
+            var missingPassed = missingBaseVersion.Status == DescriptorAuthoringStatus.Succeeded
+                && missingBaseVersion.Diagnostics.Count == 0
+                && missingDraft?.BaseVersion == "1"
+                && missingDraft?.ProposedVersion == "1";
+
+            var invalidPassed = true;
+            foreach (var invalidBaseVersion in new[] { string.Empty, " ", "0", "-1", "not-a-number" })
+            {
+                var invalid = ParseAuthoringVersionCandidate(
+                    parser, context, "Update", 2, invalidBaseVersion);
+                invalidPassed &= invalid.Status == DescriptorAuthoringStatus.Blocked
+                    && invalid.DraftSet.Drafts.Count == 0
+                    && invalid.Diagnostics.Any(d =>
+                        d.Code == DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput);
+            }
+
+            var nonUpdate = ParseAuthoringVersionCandidate(
+                parser, context, "Create", 1, "1");
+            var nonUpdatePassed = nonUpdate.Status == DescriptorAuthoringStatus.Blocked
+                && nonUpdate.DraftSet.Drafts.Count == 0
+                && nonUpdate.Diagnostics.Any(d =>
+                    d.Code == DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput);
+
+            var passed = explicitPassed && missingPassed && invalidPassed && nonUpdatePassed;
+            Console.WriteLine($"AgentAuthoringUpdateBaseVersion:{(passed ? "PASS" : "FAIL")}");
+            return passed;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL [AgentAuthoringUpdateBaseVersion]: {ex.Message}");
+            Console.WriteLine("AgentAuthoringUpdateBaseVersion:FAIL");
+            return false;
+        }
+    }
+
+    private static DescriptorAuthoringResult ParseAuthoringVersionCandidate(
+        JsonDescriptorAuthoringOutputParser parser,
+        DescriptorAuthoringParseContext context,
+        string operation,
+        int payloadVersion,
+        string? baseVersion)
+    {
+        var baseVersionProperty = baseVersion is null
+            ? string.Empty
+            : $"\"baseVersion\":\"{baseVersion}\",";
+        var json = "{" +
+            "\"contractVersion\":\"7g.v1\",\"promptInputHash\":\"aot-authoring-update-base-version\"," +
+            "\"plan\":{\"planId\":\"asset-maintenance-update\",\"intentText\":\"Update the asset workflow\",\"plannedDescriptorRefs\":[" +
+            $"{{\"namespace\":\"workflow\",\"id\":\"wf_asset_maintenance\",\"version\":{payloadVersion}}}]}}" +
+            "," +
+            "\"items\":[{\"descriptorKind\":\"Workflow\",\"descriptorId\":\"wf_asset_maintenance\",\"operation\":\"" +
+            operation + "\"," + baseVersionProperty +
+            "\"payload\":{\"id\":\"wf_asset_maintenance\",\"name\":\"Asset maintenance workflow\",\"version\":" +
+            payloadVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}]}";
+        return parser.Parse(json, context);
     }
 
     private static AgentDraftPayloadPatchDto IdentityPatch(AgentDraftPayloadDto dto, string mergedName)
