@@ -8,6 +8,22 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/CrestCreates.Sample.AssetManagement.Host/CrestCreates.Sample.AssetManagement.Host.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata/CrestCreates.Metadata.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Metadata.Abstractions/CrestCreates.Metadata.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Modules/CrestCreates.Form/CrestCreates.Form.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/HumanTask/CrestCreates.HumanTask/CrestCreates.HumanTask.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence/CrestCreates.Runtime.Persistence.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory/CrestCreates.Runtime.Persistence.InMemory.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Runtime.Delivery/CrestCreates.Runtime.Delivery.csproj" />
+    <ProjectReference Include="../../../../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
