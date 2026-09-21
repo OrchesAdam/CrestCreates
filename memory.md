@@ -17,9 +17,12 @@ envelopes inside a sample to disguise an authoring defect.
 
 ## Current workspace and published evidence
 
-- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/authoring-contract-87
-- Branch: codex/phase-10c-authoring-contract-87, based on PR #98. Protocol
-  disclosure changes are uncommitted; no successor PR yet.
+- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/form-schema-context-87
+- Branch: codex/phase-10c-form-schema-context-87, based on PR #99. Bounded
+  context acceptance is uncommitted; no successor PR yet.
+- PR #99 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/99.
+  Exact head3004b888a15b70e64161ffa9d83bc22630bd4ce3 passed CI35564431378.
+  Local Authoring66, ControlPlane556 and native1 passed. Preserve its head.
 - PR #98 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/98.
   Head 1efbe693907cd41d62aa53b08ed79e4e65345a4b; CI35547798046 passed.
   Its worktree asset-live-eval-87 is clean; preserve the tested head.
@@ -159,25 +162,34 @@ Fresh quota was5h0%, weekly47%; the one-time automation crestcreates was deleted
 No active wake remains and no reset credit was used. Schedule the next wake from
 actual limits if the5h window is exhausted again.
 
-## Protocol disclosure successor — current work
+## Bounded context successor — current work
 
-Plan: docs/superpowers/plans/2026-09-21-authoring-wire-disclosure.md.
-Luna high implemented a narrow default prompt wire reference in the Authoring
-assembly. Generic envelope examples serialize via existing provider DTO/sourcegen
-context; payload examples are syntax placeholders, not Asset answers. Parser
-semantics remain unchanged. Template default v2, wire7g.v1 unchanged. Existing
-refs must be visible; same-response new descriptor refs require declared drafts.
-Unsupported runtime fields and parser fallbacks are explicit. No context expansion
-or additional live model call was made.
+Plan: docs/superpowers/plans/2026-09-21-asset-bounded-context.md.
+The real context acceptance passed1/1 after matching the active Metadata Workflow
+extractor's Uses/noRole taxonomy. FormRelationshipExtractor already exists under
+Framework/Modules and is registered by AddFormKernel; the initial missing-extractor
+claim was false and was corrected without production changes. Runtime's separate
+Workflow extractor uses Triggers/role labels; provider first-match ordering remains
+a separate consistency concern documented in the review, not silently patched.
 
-Primary reviewed and corrected example extraction plus key-value assertions.
-Full Authoring regression passed66/66 (/tmp/crest-wire-authoring-tests.log).
-Native wrapper publish/link/run passed1/1 (/tmp/crest-wire-native.log).
-Artifact artifacts/control-plane-json-aot-e6c090f4cd10467dbf2120c42be3d5a9
-contains run.log with AgentAuthoringWireDisclosure:PASS and every prior marker.
-BuildTasks bootstrap passed. Full ControlPlane regression passed556/556, log
-/tmp/crest-wire-control-plane-tests.log. Do not run concurrent builds.
+A test-owned shared RuntimeScenario recipe now selects exactly Workflow, HumanTask,
+Form and maintenance-decision Schema, with3 real edges, bounded depth/count,
+stable hashes and no unrelated descriptors. The live probe uses this recipe and
+safe fixed diagnostic categories. Full Asset PostgreSQL suite passed33/skipped1
+(/tmp/crest-bounded-context-full.log).
 
-Next: commit/push this verified successor and
-create/attach draft PR based on codex/phase-10c-asset-live-eval-87. Manually dispatch
-ci.yml for stacked PR, no auto merge. No new provider call is needed yet.
+One live call with promptv2 and this4-item context passed1/1:
+/tmp/crest-live-context-v2.log, /tmp/crest-asset-live-eval-context-v2.json.
+Real parser Succeeded, exactly one expected HumanTask Create v1, actual deterministic
+review/materialization clean, task contract checks passed. HTTP200/stop;1661 prompt
+and3304 completion tokens (2955 reasoning). Requested model deepseek-v4-flash,
+observed deepseek-flash. Evidence committed with this slice is a sanitized run
+summary, NOT the typed proposal, approval, activation or deployment. One sample
+is not a reliability guarantee. Both context and protocol changed from baseline.
+
+Next: create/attach a successor draft PR, run final-head CI, mark ready only after
+success. No further model request needed for this slice. Later #87 work still needs
+retained proposal-to-approval/replay evidence, Workflow evolution and a production
+activation owner. Do not inflate this result to full #87 completion.
+
+Most recent fresh quota check:5h1%,weekly63%. No reset card used. No active wake.

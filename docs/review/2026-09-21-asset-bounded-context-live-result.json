@@ -1,0 +1,95 @@
+{
+  "RunId": "66164fd362704e658b8672c415ba89f2",
+  "RequestedModel": "deepseek-v4-flash",
+  "Context": {
+    "focusRef": "workflow/wf_asset_maintenance_review v1",
+    "scope": "RuntimeScenario",
+    "descriptorCount": 4,
+    "relationshipCount": 3,
+    "refs": [
+      "workflow/wf_asset_maintenance_review v1",
+      "form/form_asset_maintenance_review v1",
+      "humantask/ht_asset_maintenance_review v1",
+      "schema/asset-management.schema.maintenance-decision v1"
+    ],
+    "hashes": [
+      {
+        "ref": "workflow/wf_asset_maintenance_review v1",
+        "contractHash": "3e350fc001fa1bd003d1ce0c20bcf1641f4249af617526eb37740958b12782fa",
+        "definitionHash": "0a7bcc26b1c3810907295d7b90aad79b8f3ad0ecddb2aaf4258ac2693b544c44"
+      },
+      {
+        "ref": "form/form_asset_maintenance_review v1",
+        "contractHash": "9bfb51f6b71933e4e62360dd74c529bc4ac42b0f06aa4cc45bccf0cdb5d2a770",
+        "definitionHash": "c598340b4570006718930474704653e15b729f4b6a273daad81fb12fede58d11"
+      },
+      {
+        "ref": "humantask/ht_asset_maintenance_review v1",
+        "contractHash": "b4ca44bc0d35008dca5b1a07265da86bb448d47fee179656a622d85a06b1e4b6",
+        "definitionHash": "aa46fb60a981af1d155ea2e5cd0e02d2949b9fb91f1330e0cefe6aef4a1675b8"
+      },
+      {
+        "ref": "schema/asset-management.schema.maintenance-decision v1",
+        "contractHash": "cf8ab146cfa42b0f2b269dfb02732fd720e3d69e015cf7984caf41d61c4f7686",
+        "definitionHash": "a0d6ac1af894366a2229cff6a3c5a1ea33d9bf3bc830cdb7ae9b46108cd24cbe"
+      }
+    ],
+    "diagnosticCodes": []
+  },
+  "Authoring": {
+    "status": "Succeeded",
+    "diagnosticCodes": [],
+    "diagnosticCategories": [],
+    "promptInputHash": "399680e3592070d93cb2eb7bbb0d5fe7551c3bfa274e82f5b9afe5667d33af03",
+    "promptOutputHash": "894b9856b75c56f8090893762994512b9f8ab32e624788c346e3186a32a66448",
+    "observedModel": "deepseek-flash",
+    "observedProvider": "deepseek",
+    "draftCount": 1
+  },
+  "OutputBudget": {
+    "configuredMaxOutputTokens": 16384,
+    "isValid": true,
+    "diagnosticCode": "OUTPUT_BUDGET_ACCEPTED"
+  },
+  "HttpResponse": {
+    "HttpStatus": 200,
+    "ChoicesCount": 1,
+    "FinishReason": "stop",
+    "ContentCharacterCount": 1424,
+    "ReasoningContentCharacterCount": 13793,
+    "PromptTokens": 1661,
+    "CompletionTokens": 3304,
+    "ReasoningTokens": 2955
+  },
+  "Drafts": [
+    {
+      "index": 0,
+      "descriptorKind": "HumanTask",
+      "isExpectedHumanTaskRef": true,
+      "operation": "Create",
+      "baseVersionMatchesExpected": true,
+      "proposedVersionMatchesExpected": true
+    }
+  ],
+  "Reviews": [
+    {
+      "index": 0,
+      "validationStatus": "Valid",
+      "materializationStatus": "Materialized",
+      "blockingDiagnosticObserved": false,
+      "governanceBlocked": false,
+      "reviewPassed": true,
+      "diagnosticCodes": []
+    }
+  ],
+  "Semantic": {
+    "Result": "HumanTaskDraftReviewed",
+    "OnlySingleHumanTaskCreate": true,
+    "AuthoringSucceeded": true,
+    "HumanTaskDraftObserved": true,
+    "HumanTaskContractValid": true,
+    "HumanTaskReviewMaterialized": true,
+    "ExceptionStage": null,
+    "ExceptionType": null
+  }
+}
