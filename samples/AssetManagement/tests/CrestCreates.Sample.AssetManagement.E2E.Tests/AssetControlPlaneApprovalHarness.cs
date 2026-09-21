@@ -94,7 +94,8 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
 
     public static async Task<AssetControlPlaneApprovalHarness> CreateAsync(
         string tenantId = "asset-approved-host-tenant",
-        string authorId = "asset-author-agent")
+        string authorId = "asset-author-agent",
+        Action<IServiceCollection>? configureServices = null)
     {
         var baseline = BuildDeployedBaseline();
         CurrentDescriptorDependencyGraph? currentGraph = null;
@@ -148,6 +149,7 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
             new CapturingActivationReviewOrchestrator(
                 sp.GetRequiredService<DefaultActivationReviewOrchestrator>()));
         services.AddRuntimeDelivery(options => options.PollingInterval = TimeSpan.FromMilliseconds(10));
+        configureServices?.Invoke(services);
 
         var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
         var hostedServices = provider.GetServices<IHostedService>().ToArray();
@@ -521,7 +523,7 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
         }
     }
 
-    private static IReadOnlyList<IDescriptor> BuildDeployedBaseline()
+    public static IReadOnlyList<IDescriptor> BuildDeployedBaseline()
         => AssetDescriptorCatalog.Schemas.Cast<IDescriptor>()
             .Concat(AssetDescriptorCatalog.Capabilities)
             .Append(AssetDescriptorCatalog.MaintenanceForm)

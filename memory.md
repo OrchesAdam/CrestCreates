@@ -1,6 +1,6 @@
 # CrestCreates current handoff
 
-Last updated: 2026-09-20. This summary supersedes the dated status entries in
+Last updated: 2026-09-21. This summary supersedes the dated status entries in
 [the preserved historical memory](docs/review/2026-09-20-memory-history.md).
 AGENTS.md remains the instruction entry point; history remains evidence, not a
 second source of current task status.
@@ -17,11 +17,12 @@ envelopes inside a sample to disguise an authoring defect.
 
 ## Current workspace and published evidence
 
-- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/asset-approved-host-87
-- Branch: codex/phase-10c-asset-approved-host-87, based on PR #96.
-- PR #97 is draft: https://github.com/OrchesAdam/CrestCreates/pull/97.
-  Implementation commit: 9217d79ebe43cc48d05f742b58c6ad6d75efd98d.
-  Full CI was dispatched; verify the latest head before marking ready.
+- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/asset-live-eval-87
+- Branch: codex/phase-10c-asset-live-eval-87, based on PR #97. Live evaluation
+  changes are uncommitted; no successor PR yet.
+- PR #97 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/97.
+  Final head 08fe989a1adefcc50dc0bb9a505dea6401a9204d passed full CI
+  35500739729, verified against the PR head before marking ready.
 - PR #95 is ready, unmerged: 2d0dbfc8da6af5ed22b500dd2b0c7a76a2c9c374; CI 34794889411 passed.
 - PR #96 is ready, unmerged: 9a6f9c0be08f356026f9377192595d2b33e2f7fa; CI 34836223554 passed.
 - Earlier stacked PRs #91-#94 are recorded in historical memory. Preserve their
@@ -63,7 +64,12 @@ PostgreSQL E2E 12/12 passed, followed by full CI. This is not combined deploymen
   from the first package and executes both business review stages.
 - The separate two-draft acceptance, full ControlPlane and native wrapper are
   already verified; do not repeat them unless new changes justify it.
-- Local regressions are complete. Mark PR #97 ready only after final-head CI succeeds.
+- PR #97 is complete and ready. Preserve its verified head.
+- The successor adds a default-skipped, opt-in live authoring probe. First real
+  DeepSeek request failed with ProviderUnavailable and zero drafts. See
+  docs/review/2026-09-20-asset-live-authoring-baseline.md and its JSON evidence.
+  Safe HTTP response metadata observation is being tested to distinguish empty
+  provider content from parser/review failure. No automatic retry or activation.
 - Then address restart, bounded live-model evidence and #88 decisions as demonstrated
   needs; do not declare #87 complete from a test-only Host handoff.
 
@@ -75,7 +81,9 @@ Activated therefore does not mean production deployment. Production activation
 ownership remains a concrete gap requiring a bounded business case and design.
 
 DeepSeek model choice is deepseek-v4-flash; DEEPSEEK_API_KEY was confirmed present,
-never printed. No live model evaluation has run. Reuse the existing OpenAI-compatible
+never printed. Three live model requests ran; all failed before producing drafts.
+The requested name remains deepseek-v4-flash; provider returned deepseek-flash.
+Official docs now map this legacy request name to V4.1 Flash. Reuse the existing OpenAI-compatible
 authoring client and bounded ContextPack; do not add a general agent loop.
 #50/#51/#76/#57 remain deferred; see the working gap assessment, not a final #88 closure.
 
@@ -118,5 +126,29 @@ copy may lack subsequent namespace fixes; continue from the worktree source.
 
 The 16:46 heartbeat fired, actual quota was available (0% consumed), and the
 one-time automation crestcreates was deleted. Full Asset PostgreSQL E2E passed
-14/14; all local planned checks for this PR slice are complete. Final-head CI is
-still required. No reset credit used.
+14/14; PR #97 final-head CI subsequently passed and it was marked ready.
+No reset credit used.
+
+## Live evaluation successor — 2026-09-21
+
+Source: AssetDeepSeekLiveAuthoringEvaluationTests.cs, explicit opt-in only.
+Local full Asset suite passed31/skipped1 after response-observer and budget checks.
+Default does not call DeepSeek. Requests use only public synthetic descriptor
+metadata, fixed test intent, new empty memory store. Credentials never logged.
+
+Three actual provider requests have run: initial empty-content baseline; one
+instrumented4096-budget run (HTTP200, length, all4096 completion tokens reasoning,
+no content); one16384-budget run (HTTP200, stop,3650 content chars,1687 completion
+including797 reasoning tokens), rejected by real parser as InvalidProviderOutput.
+Zero drafts, no approval/activation. A separate observer composition failure sent
+no HTTP and is recorded separately. Its typed HttpClient registration was repaired
+and tested offline. No further baseline live call is needed.
+
+Evidence and limitations: docs/review/2026-09-20-asset-live-authoring-baseline.md
+and linked JSON. The exact parser envelope rejection branch was not retained;
+do not claim a specific missing field. Default prompt names7g.v1 without complete
+wire schema; context has only workflow/task refs, no Form or descriptor bodies.
+Next design should improve bounded authoring protocol/context disclosure before
+proposing new agent orchestration. Current slice needs successor PR and full CI.
+
+Fresh quota on2026-09-21 was5h0%, weekly31%. No reset credit used; no active wake.
