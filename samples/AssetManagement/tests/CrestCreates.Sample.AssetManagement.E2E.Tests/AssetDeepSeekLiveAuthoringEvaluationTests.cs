@@ -81,22 +81,16 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
             stage = "context";
             var topology = topologyBuilder.Build(baseline);
             var focus = new DescriptorRef("workflow", AssetContractIds.MaintenanceWorkflow, 1);
+            var contextRequest = AssetAuthoringContextRequestFactory.Create(TenantId, Intent, focus);
             var contextPack = services.GetRequiredService<IMetadataContextPackBuilder>().Build(
-                new MetadataContextPackRequest
-                {
-                    Scope = MetadataContextPackScope.DirectDependencies,
-                    TenantId = TenantId,
-                    Intent = Intent,
-                    FocusDescriptors = [focus],
-                    IncludeStableHashes = true
-                },
+                contextRequest,
                 topology,
                 baseline);
 
             artifact.Context = new
             {
                 focusRef = FormatRef(focus),
-                scope = MetadataContextPackScope.DirectDependencies.ToString(),
+                scope = contextRequest.Scope.ToString(),
                 descriptorCount = contextPack.Descriptors.Count,
                 relationshipCount = contextPack.Relationships.Count,
                 refs = contextPack.Descriptors.Select(d => FormatRef(d.Ref)).ToArray(),
@@ -134,6 +128,9 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
             {
                 status = result.Status.ToString(),
                 diagnosticCodes = result.Diagnostics.Select(d => d.Code.Value).ToArray(),
+                diagnosticCategories = result.Diagnostics
+                    .Select(diagnostic => AssetAuthoringDiagnosticClassifier.Classify(diagnostic.Message))
+                    .ToArray(),
                 promptInputHash = result.PromptInputEvidence?.InputHash.Value,
                 promptOutputHash = result.PromptOutputEvidence?.OutputHash?.Value,
                 observedModel = result.PromptOutputEvidence?.ProviderObservation?.ModelName,
