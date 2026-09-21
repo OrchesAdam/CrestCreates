@@ -88,13 +88,15 @@ public sealed class DefaultDescriptorAuthoringPromptBuilder : IDescriptorAuthori
 
         sb.AppendLine("Return a descriptor authoring plan and draft payloads matching contract 7g.v1 only.");
         sb.AppendLine("For Update items, include optional string baseVersion when selecting an existing version; omit it only for same-version updates. baseVersion must be a positive invariant-culture integer string and is forbidden for Create items.");
+        sb.AppendLine();
+        sb.Append(DescriptorAuthoringWireDisclosure.BuildPromptSection());
 
         var userPrompt = sb.ToString();
 
         return new DescriptorAuthoringPromptOutput
         {
             ContractVersion = input.ContractVersion,
-            PromptTemplateVersion = "descriptor-authoring-prompt-template-v1",
+            PromptTemplateVersion = "descriptor-authoring-prompt-template-v2",
             PromptInputHash = input.PromptInputHash,
             SystemPrompt = systemPrompt,
             UserPrompt = userPrompt

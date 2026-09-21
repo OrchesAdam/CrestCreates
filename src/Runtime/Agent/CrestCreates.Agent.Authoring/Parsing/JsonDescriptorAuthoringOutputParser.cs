@@ -19,6 +19,8 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
     private static readonly DescriptorAuthoringParserJsonSerializerContext ParserContext =
         new(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
 
+    internal static DescriptorAuthoringParserJsonSerializerContext Context => ParserContext;
+
     private const string ExpectedContractVersion = "7g.v1";
 
     public DescriptorAuthoringResult Parse(
