@@ -283,7 +283,7 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.PromptInputEvidence.Should().NotBeNull();
         result.PromptOutputEvidence.Should().NotBeNull();
         result.PromptInputEvidence!.TemplateId.Value.Should().Be("descriptor-authoring");
-        result.PromptInputEvidence.TemplateVersion.Value.Should().Be("descriptor-authoring-prompt-template-v1");
+        result.PromptInputEvidence.TemplateVersion.Value.Should().Be("descriptor-authoring-prompt-template-v2");
         result.PromptInputEvidence.Purpose.Should().Be(AgentPromptPurpose.DescriptorAuthoring);
         result.PromptOutputEvidence!.InputHash.Value.Should().Be(result.PromptInputEvidence.InputHash.Value);
     }
