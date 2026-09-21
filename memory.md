@@ -19,7 +19,9 @@ envelopes inside a sample to disguise an authoring defect.
 
 - Active worktree: /home/orches/workspace/CrestCreates/.worktrees/form-schema-context-87
 - Branch: codex/phase-10c-form-schema-context-87, based on PR #99. Bounded
-  context acceptance is uncommitted; no successor PR yet.
+  context acceptance is in PR #100: https://github.com/OrchesAdam/CrestCreates/pull/100.
+  Implementation commit7c04cf9; final-head CI must pass before readiness.
+  Check GitHub for current status rather than treating this pre-CI snapshot as final.
 - PR #99 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/99.
   Exact head3004b888a15b70e64161ffa9d83bc22630bd4ce3 passed CI35564431378.
   Local Authoring66, ControlPlane556 and native1 passed. Preserve its head.
@@ -187,8 +189,7 @@ observed deepseek-flash. Evidence committed with this slice is a sanitized run
 summary, NOT the typed proposal, approval, activation or deployment. One sample
 is not a reliability guarantee. Both context and protocol changed from baseline.
 
-Next: create/attach a successor draft PR, run final-head CI, mark ready only after
-success. No further model request needed for this slice. Later #87 work still needs
+Next: verify PR #100 final-head CI, mark ready only after success. No further model request needed for this slice. Later #87 work still needs
 retained proposal-to-approval/replay evidence, Workflow evolution and a production
 activation owner. Do not inflate this result to full #87 completion.
 
