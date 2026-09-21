@@ -17,9 +17,12 @@ envelopes inside a sample to disguise an authoring defect.
 
 ## Current workspace and published evidence
 
-- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/asset-live-eval-87
-- Branch: codex/phase-10c-asset-live-eval-87, based on PR #97. Live evaluation
-  changes are uncommitted; no successor PR yet.
+- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/authoring-contract-87
+- Branch: codex/phase-10c-authoring-contract-87, based on PR #98. Protocol
+  disclosure changes are uncommitted; no successor PR yet.
+- PR #98 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/98.
+  Head 1efbe693907cd41d62aa53b08ed79e4e65345a4b; CI35547798046 passed.
+  Its worktree asset-live-eval-87 is clean; preserve the tested head.
 - PR #97 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/97.
   Final head 08fe989a1adefcc50dc0bb9a505dea6401a9204d passed full CI
   35500739729, verified against the PR head before marking ready.
@@ -149,6 +152,32 @@ and linked JSON. The exact parser envelope rejection branch was not retained;
 do not claim a specific missing field. Default prompt names7g.v1 without complete
 wire schema; context has only workflow/task refs, no Form or descriptor bodies.
 Next design should improve bounded authoring protocol/context disclosure before
-proposing new agent orchestration. Current slice needs successor PR and full CI.
+proposing new agent orchestration. PR #98 contains the live baseline; full CI passed at its exact head.
 
-Fresh quota on2026-09-21 was5h0%, weekly31%. No reset credit used; no active wake.
+The 2026-09-21 13:19 Asia/Shanghai heartbeat fired after the actual reset.
+Fresh quota was5h0%, weekly47%; the one-time automation crestcreates was deleted.
+No active wake remains and no reset credit was used. Schedule the next wake from
+actual limits if the5h window is exhausted again.
+
+## Protocol disclosure successor — current work
+
+Plan: docs/superpowers/plans/2026-09-21-authoring-wire-disclosure.md.
+Luna high implemented a narrow default prompt wire reference in the Authoring
+assembly. Generic envelope examples serialize via existing provider DTO/sourcegen
+context; payload examples are syntax placeholders, not Asset answers. Parser
+semantics remain unchanged. Template default v2, wire7g.v1 unchanged. Existing
+refs must be visible; same-response new descriptor refs require declared drafts.
+Unsupported runtime fields and parser fallbacks are explicit. No context expansion
+or additional live model call was made.
+
+Primary reviewed and corrected example extraction plus key-value assertions.
+Full Authoring regression passed66/66 (/tmp/crest-wire-authoring-tests.log).
+Native wrapper publish/link/run passed1/1 (/tmp/crest-wire-native.log).
+Artifact artifacts/control-plane-json-aot-e6c090f4cd10467dbf2120c42be3d5a9
+contains run.log with AgentAuthoringWireDisclosure:PASS and every prior marker.
+BuildTasks bootstrap passed. Full ControlPlane regression passed556/556, log
+/tmp/crest-wire-control-plane-tests.log. Do not run concurrent builds.
+
+Next: commit/push this verified successor and
+create/attach draft PR based on codex/phase-10c-asset-live-eval-87. Manually dispatch
+ci.yml for stacked PR, no auto merge. No new provider call is needed yet.
