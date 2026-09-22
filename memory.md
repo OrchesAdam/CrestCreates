@@ -20,7 +20,8 @@ envelopes inside a sample to disguise an authoring defect.
 
 - Active worktree: /home/orches/workspace/CrestCreates/.worktrees/asset-proposal-replay-87
 - Branch: codex/phase-10c-asset-proposal-replay-87, based on PR #100. Offline
-  proposal retention/review-replay acceptance is being implemented; no PR yet.
+  proposal retention/review-replay acceptance is implemented in draft PR #101:
+  https://github.com/OrchesAdam/CrestCreates/pull/101. Full CI is pending.
 - Bounded context acceptance is in PR #100: https://github.com/OrchesAdam/CrestCreates/pull/100.
   Final head02459ad1b6768cee8f6ad967188e42e105cedf0f; CI35613490902 passed (verified 2026-09-22).
   Marked ready on 2026-09-22 after exact-head success; preserve PR100 source worktree.
@@ -202,7 +203,7 @@ Most recent fresh quota check:5h1%,weekly63%. No reset card used. No active wake
 ## Offline proposal replay successor
 
 Plan: docs/superpowers/plans/2026-09-21-asset-proposal-replay.md.
-Terra high task terra_proposal_replay is implementing one offline Asset test using
+Terra high task terra_proposal_replay implemented one offline Asset test using
 existing PostgreSQL draft store and explicit one-of persistence codec. Real parser
 -> review -> save exact typed draft -> dispose provider -> fresh provider same
 isolated schema -> read/compare complete hashes and identities -> fresh review;
@@ -221,7 +222,7 @@ PostgreSQL codec/store is the chosen formal boundary; do not expose internal cod
 Fresh quota allowed work: 5h4%, weekly79%; no reset credit used.
 Previous Luna coding attempt left no implementation files. Current tool rejects
 gpt-5.6-luna as unavailable; user explicitly selected GPT-5.6 Terra, retaining high
-reasoning. terra_proposal_replay is implementing the existing bounded offline plan.
+reasoning. terra_proposal_replay completed the existing bounded offline plan.
 PR100 exact-head full CI succeeded and it is now ready, unmerged.
 
 The old /tmp runner and private credential file did not survive restart. Existing
@@ -243,5 +244,11 @@ Both persistence and review providers are rebuilt before read/review replay. Ful
 draft/concrete payload and complete contract/definition hashes match; wrong tenant
 cannot read. Only offline synthetic proposal data was used, temporary schema cleaned.
 No live model call, approval, activation or deployment occurred.
-Evidence: docs/review/2026-09-22-asset-proposal-replay.md. Successor PR/CI publication
-is next; do not mark ready until its exact final head passes the full workflow.
+Evidence: docs/review/2026-09-22-asset-proposal-replay.md. Draft PR #101 is published, stacked on PR #100. Verify the latest workflow run
+and exact PR head before marking ready; no automatic merge.
+
+Latest quota on 2026-09-22: 5h79%, weekly91%, ordinary usage still allowed.
+No reset card used. If exhausted, stop and preserve the scheduled13:40 heartbeat;
+if weekly-limited at wake, use the actual reset rather than repeatedly running.
+PR #101 CI must be verified at its final head before ready. The first dispatch
+35673791608 may be superseded by this final handoff commit; query GitHub for latest.
