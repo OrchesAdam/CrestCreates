@@ -1,6 +1,6 @@
 # CrestCreates current handoff
 
-Last updated: 2026-09-21. This summary supersedes the dated status entries in
+Last updated: 2026-09-22. This summary supersedes the dated status entries in
 [the preserved historical memory](docs/review/2026-09-20-memory-history.md).
 AGENTS.md remains the instruction entry point; history remains evidence, not a
 second source of current task status.
@@ -9,18 +9,21 @@ second source of current task status.
 
 The product goal is to let AI safely create and evolve enterprise applications.
 GitHub Issues are the roadmap. Issue #87 is active; #88 decisions remain provisional.
-The primary agent designs, reviews and executes verification; GPT-5.6 Luna high
-codes, and Luna medium handles bounded repository reconnaissance. Use GitHub PRs.
+The primary agent designs, reviews and executes verification; GPT-5.6 Terra high
+codes (user authorized replacement on 2026-09-22 because Luna is unavailable).
+The earlier Luna medium repository-reconnaissance preference has not been changed. Use GitHub PRs.
 Do not automatically merge. Keep the generated/typed NativeAOT mainline and existing
 authorization, tenant, approval and evidence authorities. Never patch parsed draft
 envelopes inside a sample to disguise an authoring defect.
 
 ## Current workspace and published evidence
 
-- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/form-schema-context-87
-- Branch: codex/phase-10c-form-schema-context-87, based on PR #99. Bounded
-  context acceptance is in PR #100: https://github.com/OrchesAdam/CrestCreates/pull/100.
-  Implementation commit7c04cf9; final-head CI must pass before readiness.
+- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/asset-proposal-replay-87
+- Branch: codex/phase-10c-asset-proposal-replay-87, based on PR #100. Offline
+  proposal retention/review-replay acceptance is being implemented; no PR yet.
+- Bounded context acceptance is in PR #100: https://github.com/OrchesAdam/CrestCreates/pull/100.
+  Final head02459ad1b6768cee8f6ad967188e42e105cedf0f; CI35613490902 passed (verified 2026-09-22).
+  Marked ready on 2026-09-22 after exact-head success; preserve PR100 source worktree.
   Check GitHub for current status rather than treating this pre-CI snapshot as final.
 - PR #99 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/99.
   Exact head3004b888a15b70e64161ffa9d83bc22630bd4ce3 passed CI35564431378.
@@ -89,7 +92,8 @@ Activated therefore does not mean production deployment. Production activation
 ownership remains a concrete gap requiring a bounded business case and design.
 
 DeepSeek model choice is deepseek-v4-flash; DEEPSEEK_API_KEY was confirmed present,
-never printed. Three live model requests ran; all failed before producing drafts.
+never printed. The first three live model requests failed before producing drafts; the fourth
+bounded-context run succeeded as recorded below.
 The requested name remains deepseek-v4-flash; provider returned deepseek-flash.
 Official docs now map this legacy request name to V4.1 Flash. Reuse the existing OpenAI-compatible
 authoring client and bounded ContextPack; do not add a general agent loop.
@@ -189,8 +193,55 @@ observed deepseek-flash. Evidence committed with this slice is a sanitized run
 summary, NOT the typed proposal, approval, activation or deployment. One sample
 is not a reliability guarantee. Both context and protocol changed from baseline.
 
-Next: verify PR #100 final-head CI, mark ready only after success. No further model request needed for this slice. Later #87 work still needs
+PR #100 final-head CI is verified successful and the PR is ready. No further model request needed for this slice. Later #87 work still needs
 retained proposal-to-approval/replay evidence, Workflow evolution and a production
 activation owner. Do not inflate this result to full #87 completion.
 
 Most recent fresh quota check:5h1%,weekly63%. No reset card used. No active wake.
+
+## Offline proposal replay successor
+
+Plan: docs/superpowers/plans/2026-09-21-asset-proposal-replay.md.
+Terra high task terra_proposal_replay is implementing one offline Asset test using
+existing PostgreSQL draft store and explicit one-of persistence codec. Real parser
+-> review -> save exact typed draft -> dispose provider -> fresh provider same
+isolated schema -> read/compare complete hashes and identities -> fresh review;
+wrong tenant cannot read. No new serializer format, production API, model call,
+approval or activation. Temporary schema cleanup means this is within-test restart
+evidence, not a retained live proposal available for future human approval.
+BuildTasks bootstrap passed (/tmp/crest-proposal-replay-bootstrap.log).
+Primary must review implementation, run appropriate PostgreSQL tests, document
+results and use successor PR. Keep live-run summary and offline fixture evidence
+distinct. DescriptorAuthoringJsonSerializerContext alone cannot round-trip concrete
+abstract DraftPayload; do not use it to claim lossless proposal retention. Existing
+PostgreSQL codec/store is the chosen formal boundary; do not expose internal codec.
+
+## Resume 2026-09-22
+
+Fresh quota allowed work: 5h4%, weekly79%; no reset credit used.
+Previous Luna coding attempt left no implementation files. Current tool rejects
+gpt-5.6-luna as unavailable; user explicitly selected GPT-5.6 Terra, retaining high
+reasoning. terra_proposal_replay is implementing the existing bounded offline plan.
+PR100 exact-head full CI succeeded and it is now ready, unmerged.
+
+The old /tmp runner and private credential file did not survive restart. Existing
+container crest-asset-approved-inventory-87 was restarted without replacing data.
+Private configuration recovered securely to /tmp/crest-asset-pg-20260922.env; runner
+/tmp/crest-run-asset-e2e.py recreated. Do not print the private configuration.
+BuildTasks bootstrap passed with 0 warnings/errors on 2026-09-22.
+One-time heartbeat crestcreates is scheduled for 2026-09-22 13:40 Asia/Shanghai,
+after the actual 5h reset13:39:25; consume/delete after it fires.
+
+## Offline replay local verification — 2026-09-22
+
+Terra high implementation is complete and reviewed. Focused PostgreSQL replay
+passed1/1 (/tmp/crest-proposal-replay-focused-r3.log); full Asset E2E passed34
+with1 opt-in live test skipped (/tmp/crest-proposal-replay-full.log).
+The initial compilation lacked namespace imports; these were corrected. A sandbox
+socket restriction blocked the first test-host launch; authorized execution passed.
+Both persistence and review providers are rebuilt before read/review replay. Full
+draft/concrete payload and complete contract/definition hashes match; wrong tenant
+cannot read. Only offline synthetic proposal data was used, temporary schema cleaned.
+No live model call, approval, activation or deployment occurred.
+Evidence: docs/review/2026-09-22-asset-proposal-replay.md. Successor PR/CI publication
+is next; do not mark ready until its exact final head passes the full workflow.
