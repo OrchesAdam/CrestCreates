@@ -279,7 +279,7 @@ public sealed class AssetApprovedInventoryHandoffAcceptanceTests
         return parsed;
     }
 
-    private static string CreateAssetCandidateJson(string promptHash, string intent)
+    internal static string CreateAssetCandidateJson(string promptHash, string intent)
         => JsonSerializer.Serialize(new
         {
             contractVersion = "7g.v1",
