@@ -62,6 +62,7 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
         execution.Output.Should().Contain("AgentAuthoringUpdateBaseVersion:PASS");
         execution.Output.Should().Contain("AgentAuthoringWireDisclosure:PASS");
         execution.Output.Should().Contain("CONTROL_PLANE_PROJECTION_SCOPE_NATIVEAOT_OK");
+        execution.Output.Should().Contain("CONTROL_PLANE_REPORT_INPUT_NATIVEAOT_OK");
         execution.Output.Should().Contain("CONTROL_PLANE_JSON_CONTRACT_NATIVEAOT_OK");
     }
 

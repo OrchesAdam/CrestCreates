@@ -1,238 +1,162 @@
-# CrestCreates current handoff
-
-Updated 2026-09-23. This summary supersedes status entries in
-[the preserved history](docs/review/2026-09-23-memory-history.md).
-AGENTS.md remains the instruction entry point.
+# CrestCreates active handoff — 2026-09-24
 
 ## Goal and working rules
 
-Let AI safely create and evolve enterprise applications. GitHub Issues are the
-roadmap; #87 remains active and #88 decisions provisional. Root designs/reviews
-and runs verification; user now authorizes GPT-6 Luna (high for coding, medium for
-bounded investigation). Use GitHub PR workflow, never automatically merge.
-Do not use reset cards. On actual quota exhaustion, stop and arrange one wake after
-the limiting reset. Preserve typed/generated/NativeAOT mainline and existing
-identity/tenant/approval authorities. No sample production shortcut or new agent loop.
+User goal: AI safely creates and evolves enterprise applications. Issue87 active;
+88 provisional. Root designs/reviews/verifies; GPT-6 Luna high codes, medium investigates.
+GitHub PR workflow, never auto-merge. Stop at actual5h limit; schedule one-time wake
+after actual reset. Do not use reset cards. DEEPSEEK_API_KEY is credential env;
+never print it. No additional model request is needed for the retained proposal.
+AGENTS.md governs single typed/generated mainline and real native publish/link/run.
+Archive files instead of deletion. Preserve root untracked docs/review/h2-mainline-closure-review.md.
 
-## Current workspaces and PRs
+History: docs/review/2026-09-24-memory-history.md preserves the previous full handoff;
+docs/review/2026-09-23-memory-history.md preserves earlier project history.
 
-- Current implementation worktree: /home/orches/workspace/CrestCreates/.worktrees/review-hash-inputs-87
-  Branch codex/phase-10c-review-hash-inputs-87, based on PR103 head
-  0d39cd2f3ad1846f2a7d64ad3bcdb93e6b8c9429. First production slice captures original
-  canonical review hash inputs. It is not yet the complete durable review artifact.
-- PR102 ready/unmerged: https://github.com/OrchesAdam/CrestCreates/pull/102
-  Source worktree: .worktrees/live-proposal-retention-87.
-  Final head5d635d8f56e3c9ae2f28ccf623c4e689dd640853.
-  Full CI35804325739 passed at that exact head; readiness verified by prior heartbeat.
-  Preserve published head.
-- PR101 ready/unmerged: https://github.com/OrchesAdam/CrestCreates/pull/101
-  Head6d83015137b79c88781eb592de650b04aab23a78; CI35673825720 success.
-- PR100 ready/unmerged: head02459ad1b6768cee8f6ad967188e42e105cedf0f,
-  CI35613490902 success. PR99/98/97 and earlier stacked PRs remain unmerged;
-  exact heads/evidence are preserved in history. Do not rewrite them incidentally.
+## Current worktree and task
 
-## Verified evidence
+/home/orches/workspace/CrestCreates/.worktrees/review-report-inputs-87
+branch codex/phase-10c-review-report-inputs-87
+base PR105 final0782ac9072d0155e9e079a44d6b2e9eef58a7965.
 
-PR101: deterministic real parser/review -> formal PostgreSQL draft store -> provider
-reconstruction -> exact draft and full canonical hashes -> fresh review. Tenant
-isolation checked. Local focused1/1, full Asset34 passed/1 live skipped; full CI passed.
-This temporary-schema test did not retain a live proposal for later approval.
+Plan: docs/superpowers/plans/2026-09-24-review-report-input-snapshot.md.
+Luna high luna6_review_hash_inputs implements finite versioned report facts +
+source-generated JSON + single report-builder core and tests. Do not duplicate it.
+Root owns memory/docs/testing. Luna high luna6_scope_native_fixture owns only the
+native fixture and wrapper, covering captured input JSON roundtrip and full report
+equality with fixed clock; do not duplicate either coding task. Bootstrap passed
+142 prior warnings/0 errors; log /tmp/crest-review-report-inputs-bootstrap.log.
 
-PR102: explicit live retention preflight validates official provider/migrations
-before model call. Save/readback use fresh PostgreSQL providers; fresh review
-checks the reloaded draft. Original draft status is preserved. Locator exposes only
-identity/full canonical hashes and prompt hashes, no private connection or raw output.
-Local focused7/7; full Asset E2E40 passed/1 opt-in live skipped. One actual DeepSeek
-retention call then passed1/1, no retry: HumanTaskDraftRetained. Requested model
- deepseek-v4-flash; observed deepseek-flash, HTTP200/stop,1661 prompt tokens,
-2448 completion tokens (1989 reasoning). This is one sample, not reliability proof.
+Snapshot captures projected report facts and review-time owner identity, never full
+IDescriptor graphs, private topology indexes or draft payload. Derive projected hash
+input from captured facts; do not store independently conflicting copies. Preserve
+lazy template/time/contract/report-ID semantics. Existing Build(request) adapts to
+same Build(snapshot) core; public interface overload requires external implementers
+to update. Original activation hashes remain separate. No durable store implemented.
 
-Actual retained proposal:
-- Container crest-asset-approved-inventory-87, port127.0.0.1:55487.
-- Persistent schema asset_live_retained_20260923. DO NOT drop it or replace container
-  data; it holds the exact typed proposal for subsequent governance.
-- Tenant asset-live-eval-tenant.
-- Draft ht_asset_maintenance_initial_review-a9a00004ca5344f6832df9c25dc5e764.
-- Locator/full hashes: docs/review/2026-09-23-asset-live-retained-result.json.
-- Separate query after test process exit confirmed row remains, status0 (Created).
-- No human approval, activation or deployment occurred.
+Next: review implementation, focused/full CP tests, real native snapshot roundtrip
+and report build, publish stacked PR and exact-head full CI. No activation or merge.
 
-Prior failed provider baselines remain intact (budget exhaustion, parser rejection),
-as does the earlier successful summary-only sample. Never rewrite them as successes
-of this retained run. No additional model request is needed for retention itself.
+## PR status (all unmerged)
 
-## Active design finding
+- PR105 ready https://github.com/OrchesAdam/CrestCreates/pull/105
+  WT review-artifact-owner-87; branch codex/phase-10c-review-artifact-owner-87.
+  Implementation9d121ed9; final0782ac9072d0155e9e079a44d6b2e9eef58a7965.
+  Full CI35889660867 passed at that final head; ready confirmed2026-09-24 04:59 wake.
+  PR body updated. Preserve this verified parent head.
+  Scope fix binds cached reviews/packages to captured policy fingerprint; mismatched
+  reads/submission fail closed, lists trim, latest report does not fall back.
+  Local focused5/5, fullCP561/561; real-service JIT passed; NativeAOT1/1 in1m29s.
+  Native marker CONTROL_PLANE_PROJECTION_SCOPE_NATIVEAOT_OK; reflection disabled.
+  Logs /tmp/crest-review-scope-full-r2.log, fixture-jit-r4.log, native.log
+  (latter two use same crest-review-scope- prefix); artifacts/control-plane-json-aot-*.
+- PR104 ready https://github.com/OrchesAdam/CrestCreates/pull/104
+  WT review-hash-inputs-87; final1d8ac231af0152d6f179380bd2ef139708c58d50.
+  Full CI35851610571 passed, ready confirmed. Typed captured review hash input;
+  v2 digests unchanged; focused18/18, Draft132/132, CP556/556, native1/1.
+- PR103 draft https://github.com/OrchesAdam/CrestCreates/pull/103
+  WT durable-review-design-87; head0d39cd2f3ad1846f2a7d64ad3bcdb93e6b8c9429.
+  Design only: docs/superpowers/plans/2026-09-23-durable-activation-review-cutover.md.
+- PR102 ready https://github.com/OrchesAdam/CrestCreates/pull/102
+  final5d635d8f56e3c9ae2f28ccf623c4e689dd640853; CI35804325739 success.
+  Real live proposal retention succeeded; see retained data below.
+- PR101 ready head6d83015137b79c88781eb592de650b04aab23a78 CI35673825720.
+  PR100 ready head02459ad1b6768cee8f6ad967188e42e105cedf0f CI35613490902.
+  Earlier PRs/head evidence in archived memory. No parent PR has been merged.
 
-DefaultDescriptorActivationRequestService owns requests in a private
-ConcurrentDictionary, including approval/completion-event markers. Its changes are
-blind dictionary assignments after status checks. Durable draft persistence does
-not make requests, review/package/evidence artifacts or audit durable. Existing
-phase9bplus reference-data spec explicitly reserves this as a separate domain cutover.
-Only InMemoryRuntimeActivationGate exists; Activated is not production installation.
+## Retained live proposal — preserve exactly
 
-Root decision: asynchronous human review in an enterprise app needs continuity
-across process restart. Design a single request authority with conditional transitions,
-explicit evidence ownership, HumanTask/outbox recovery and gate idempotency boundaries.
-Do not call an ephemeral UnderReview harness request a durable handoff. No production
-activation owner has been implemented. #87 cannot be closed yet.
-GPT6 Luna medium task luna6_next_governance_seam is gathering concrete state/transaction/
-outbox/AOT seams; root writes/reviews design before delegating bounded implementation.
+Container crest-asset-approved-inventory-87, port127.0.0.1:55487.
+Persistent schema asset_live_retained_20260923; DO NOT drop or replace container data.
+Tenant asset-live-eval-tenant.
+Draft ht_asset_maintenance_initial_review-a9a00004ca5344f6832df9c25dc5e764, Created.
+Sanitized locator/full hashes docs/review/2026-09-23-asset-live-retained-result.json.
+One live call passed1/1, outcome HumanTaskDraftRetained; requested deepseek-v4-flash,
+observed deepseek-flash. HTTP200 stop, prompt1661/completion2448/reasoning1989.
+Post-test process query confirmed retained row. No human approval/activation occurred.
+Earlier failed provider baselines remain failures, not rewritten as successful runs.
+Private config /tmp/crest-asset-pg-private.json, never print; helper
+/tmp/crest-run-asset-e2e.py injects connection internally. /tmp may disappear on reboot.
 
-## Environment and next execution order
+## Durable governance boundaries still unresolved
 
-1. Verify PR102 final-head full CI; update PR body and mark ready only on success.
-2. Finish durable-review design from code facts, existing crash/replay semantics and
-   source-generated serialization gates. Preserve boundaries and staged exit criteria.
-3. Implement reviewed smallest platform cutover through Luna high, with real race/
-   restart/tenant/authority tests and NativeAOT publish/link/run where execution changes.
+Current activation requests/private dictionaries and blind assignment transitions
+are not durable/CAS-safe. Need one provider-owned request authority and atomic
+decision+event markers; no durable side table beside authoritative dictionary.
+Request+HumanTask can use shared PG transaction; supplied task InstanceId is stable
+but CreateAsync insert-only, unknown commit requires read/verify. Explicit submission
+operation key required; CorrelationId is not idempotency. Do not wrap draft SaveAsync
+in ambient transaction (formal store requires top-level boundary).
+Full immutable review/package/evidence storage must bind captured owner and scope,
+original hashes and projected report facts. Existing sync hash resolver is not an
+async artifact store. Package serializer contains manifest/snapshot/evidence, not
+executable definitions. Authoring JSON context alone cannot serialize abstract draft
+payload; use existing formal PG six-arm codec if full payload retention is needed.
+Only in-memory activation gate exists. Approved/Activated tests do not establish
+production installation. Durable gate intent/receipt/reconciliation and real Asset
+runtime owner remain separate stages. Issue87 cannot close yet.
 
-Use serialized dotnet --disable-build-servers -m:1 -p:UseSharedCompilation=false.
-Local -p:NuGetAudit=false is an environment workaround, not a changed repo default.
-Private DB config: /tmp/crest-asset-pg-private.json, never print. Runner:
-/tmp/crest-run-asset-e2e.py LOG [dotnet-test extra args]. /tmp can disappear on reboot;
-recover credentials internally from container configuration without printing them.
-Credential env DEEPSEEK_API_KEY remains user-authorized; never print it.
-Local latest logs: /tmp/crest-retention-focused-0923-r2.log,
-/tmp/crest-retention-full-0923.log, /tmp/crest-live-retained-20260923.log.
-No active automation currently. Last fresh quota5h40%,weekly6%,ordinary usage allowed;
-query actual limits before making future scheduling decisions. No card used by root.
+## Environment and quota
 
-## Published design checkpoint
+Serialize local dotnet with --disable-build-servers -m:1 -p:UseSharedCompilation=false.
+Local -p:NuGetAudit=false is only an environment workaround, defaults unchanged.
+Latest wake2026-09-23 23:57CST restored5h0%,weekly47%; consumed heartbeat deleted.
+One-time heartbeat crestcreates now scheduled2026-09-24 04:59CST after actual5h
+reset04:57:35, pointing at this memory. No reset card used. Query actual limits
+before scheduling. Last measured quota68% used,weekly57%; coding still in progress.
 
-Draft PR103: https://github.com/OrchesAdam/CrestCreates/pull/103. Documentation only;
-no durable activation implementation exists yet. Plan:
-docs/superpowers/plans/2026-09-23-durable-activation-review-cutover.md.
-Resolved: same PG coordinator can atomically create request/task; stable task ID
-supports verification after unknown commit but CreateAsync itself is insert-only.
-Do not wrap draft SaveAsync into this ambient transaction (top-level boundary).
-Official package serializer preserves manifest/snapshot/evidence, NOT executable
-descriptor definitions. Next design task is exact immutable review artifact contract
-and async persistence ownership without losing current visibility/hash semantics.
-Luna medium investigation completed; no active coding agents or duplicate work needed.
-PR102 CI35804325739 was running Asset Management Golden Sample at last actual query;
-query live status before ready. PR103 needs contract design completion, not a claim
-of implementation. One-time heartbeat crestcreates scheduled2026-09-23 13:53 CST
-following actual5h reset13:52:15; consume/delete after firing. No reset card used.
+Early review of new snapshot: API Capture(BuildRequest), Validate, ToReviewHashInput
+implemented. Root requested preservation of empty/whitespace diagnostic messages
+(only null malformed), topology count/unique-kind consistency, governance companion
+field consistency. Primary agent may run one serialized compile only; notify root
+before further builds. Actual snapshot/behavior tests and native run not yet executed.
+No PR for this slice; uncommitted code is not yet reviewed/verified as complete.
 
-## Heartbeat continuation — 2026-09-23 13:53 CST
+Latest review checkpoint: builder now adapts Build(request) to Capture + Build(snapshot),
+derives projected hash via snapshot.ToReviewHashInput(), and consumes finite facts.
+Root inspected mapping but full diff review is pending (prior output truncated).
+Requested indentation cleanup, stable ReportId/hash regression against old semantics,
+and Capture.Validate before return if compatible. Primary agent adding tests to
+DescriptorReviewReportBuilderTests.cs; native agent adding a separate helper/marker.
+At quota89% used, neither agent had reported completed implementation or validation.
+Check collaboration statuses/messages before reassigning. Build log may appear at
+/tmp/crest-review-report-inputs-agent-build.log (one serialized compile authorized).
+No snapshot tests or native publish/run have passed yet. PR105 last observed CI stage
+was Asset Management Golden Sample; exact-head completion remains to verify.
 
-Fresh quota allowed work: 5h1%, weekly15%; no reset card used. PR102 final head
-5d635d8f56e3c9ae2f28ccf623c4e689dd640853 passed full CI35804325739. Its body was
-updated with this exact-head evidence and PR102 is now ready, unmerged. The one-time
-crestcreates heartbeat was consumed and deleted; no active wake remains. PR103 remains
-a design-only draft. Its next unresolved contract is the immutable review artifact
-and async persistence authority; production implementation has not started.
+Native coder now reports stable ReviewReportInputNativeAotFixture.cs, Program call,
+and wrapper marker CONTROL_PLANE_REPORT_INPUT_NATIVEAOT_OK. Uses real topology DI,
+rich typed facts, generated snapshot/report JSON, fixed clock, failed/null case and
+unsupported-version rejection. No build/tests run. Primary coder may still be active;
+check status before further builds. Last quota99% used; wake04:59 remains scheduled.
 
-## Active implementation — review hash inputs
+## Current verification — 2026-09-24 04:59 wake
 
-Plan: docs/superpowers/plans/2026-09-23-review-hash-input-contract.md.
-Root verified that canonical activation hashes derive from unprojected review;
-the cached review used for Get/report is visibility projected. Rehashing the display
-DTO after restore is not sufficient. GPT-6 Luna high task luna6_review_hash_inputs
-implements a versioned typed captured input using the existing source-binding
-projection and derives integrity from it. Existing v2 hash writers/values stay intact;
-source-generated JSON and real native fixture coverage are required. This is a hash
-input contract, not request persistence, approval authority or a complete review DTO.
-Prior descriptor payload serializer caveat remains: Authoring JSON context alone
-cannot round-trip the abstract typed draft payload; do not use it as another protocol.
-Fresh quota at resume: 5h4%,weekly16%,ordinary allowed. No active automation or card use.
+Quota restored5h2%,weekly63%; wake consumed/deleted, no active automation/card use.
+Report focused30/30 passed (/tmp/crest-review-report-focused.log). Root final review
+requested render-time OrderBy(kind) for topology count lists (restored valid inputs
+may be reordered), reversed-list regression, and rejecting null diagnostic Message
+while preserving empty/whitespace strings. Luna primary applying this follow-up.
+Then run full CP and actual native fixture; neither has run for this snapshot yet.
+Native helper stable; primary agent's previous turn ended at quota before compile.
 
-## Verification checkpoint — 2026-09-23 afternoon
+Final report fullCP566/566 passed (/tmp/crest-review-report-full.log). Native JIT
+preflight passed after fixture-only fixes (/tmp/crest-review-report-fixture-jit-r2.log):
+literal VersionedDescriptorRef fixture reference corrected without analyzer weakening,
+hash-service namespace imported, compatibility assertion checks actual subject/level
+instead of unused RuleId. No production workaround. Native publish/link/run now
+running session53518, log /tmp/crest-review-report-native.log. Both coding agents idle.
+Root review complete after sorting, structural validation and null-roundtrip fixes;
+only native result and then PR/final-head full CI remain for this slice.
 
-Luna high implementation and root review complete. Focused hashes18/18, full
-Draft132/132, fullControlPlane556/556, native fixture1/1 passed. Native Release
-linux-x64 publish/link/run1m36s checked complete hashes before/after sourcegen JSON,
-false review flags, diagnostics, unsupported input version and disabled reflection
-fallback. Existing v2 pinned digests unchanged. Logs /tmp/crest-review-hash-focused.log,
-/tmp/crest-review-hash-draft.log, /tmp/crest-review-hash-control-plane.log,
-/tmp/crest-review-hash-native.log; native logs under artifacts/control-plane-json-aot-*.
-Public hash-service interface expands: custom external implementations must update.
-No model request, DB mutation, approval or activation. Full CI still pending.
-One-time heartbeat crestcreates created for2026-09-23 18:55 Asia/Shanghai after
-actual5h reset18:53:54. Latest quota92% used, weekly30%, ordinary allowed. No card used.
-PR104 draft: https://github.com/OrchesAdam/CrestCreates/pull/104, stacked on PR103.
-Implementation commit cfdc5200. Continue from this worktree and verify final-head full
-CI before ready. Durable full artifact/request state remains future work; #87 open.
+Native publish/link/run passed1/1 in1m32s, session53518 exit0, log
+/tmp/crest-review-report-native.log. Report-input implementation and root review
+complete; proceeding to stacked PR on105 and final-head full CI. No retained data
+mutation, model call, approval or activation. Latest quota5h65%,weekly73%, allowed;
+actual reset epoch1790215171, no active wake or reset card use.
 
-## Resume — 2026-09-23 18:55 CST
-
-Actual quota restored (5h0%, weekly31%, allowed); no reset card used. Previous
-handoff commit/push/CI dispatch was not executed because automatic approval review
-hit the usage limit. Only memory.md remained uncommitted; PR104 implementation
-cfdc5200 was already published. The consumed one-time heartbeat was deleted.
-Resume by committing this handoff and dispatching full CI on the final PR104 head.
-
-## Current follow-up — cached projection scope
-
-PR104 final head1d8ac231af0152d6f179380bd2ef139708c58d50 is running full
-CI35851610571. Watch /tmp/crest-pr104-ci-watch.log; verify before marking ready.
-Current isolated WT /home/orches/workspace/CrestCreates/.worktrees/review-artifact-owner-87,
-branch codex/phase-10c-review-artifact-owner-87, based on that final head.
-Root/Luna review found cached review Get/List/report and direct package retrieval
-can return an earlier broader projection after policy narrows while owner kind
-stays visible. Fix plan docs/superpowers/plans/2026-09-23-review-projection-scope-binding.md.
-Luna high luna6_review_hash_inputs implements exact stored scope binding and tests;
-do not duplicate task. Root owns review/docs/testing. Submit must reject mismatched
-review/package scopes before creating requests. Native coverage required.
-Durable owner/report investigation recorded in docs/review/2026-09-23-review-projection-scope-binding.md;
-no full durable artifact/store has been implemented. Retained live DB/model data
-unchanged. Latest one-time heartbeat consumed/deleted; no active wake or card use.
-
-## Latest handoff — 2026-09-23 evening
-
-Current scope-binding changes remain uncommitted in review-artifact-owner-87.
-Luna high production/unit work complete; root reviewed it. BuildTasks bootstrap
-passed142 prior warnings/0 errors; production ControlPlane build passed0 warnings.
-Focused ReviewProjectionScopeBindingTests5/5 passed after fixing test Json namespace
-import (log /tmp/crest-review-scope-focused-r2.log). Full CP launched session48907,
-log /tmp/crest-review-scope-full.log; inspect final result. No new PR yet.
-Native helper added by luna6_scope_native_fixture exercises real DI services,
-immutable schema catalog, Event draft, broad->narrow Get/List/report/package denial,
-then broad re-review recovery. Initial JIT compile failed topology-builder namespace
-(fixed). JIT r2 compiled but failed broad review Schema topology precondition:
-/tmp/crest-review-scope-fixture-jit-r2.log. Agent diagnosing actual draft validation,
-including lowercase DescriptorRef kind vs canonical Schema; inspect latest edits and
-agent status. Do not weaken assertions or claim native success. Next: rerun JIT,
-then actual native wrapper publish/link/run; only then publish reviewed stacked PR.
-PR104 CI35851610571 still in PostgreSQL direct provider stage at last query,
-head1d8ac231af0152d6f179380bd2ef139708c58d50. Watch session7317 /tmp/crest-pr104-ci-watch.log.
-Do not mark ready unless exact-head full CI succeeds. No merge.
-Quota97% used, weekly46%, reset2026-09-23 23:55:32 CST. One-time heartbeat crestcreates
-created for23:57 CST, pointing at this worktree memory. No reset card used. Preserve
-live container/schema/proposal unchanged. Other implementation work is complete;
-do not duplicate dispatch. Root owns memory/docs; coding remains GPT-6 Luna high.
-
-Final observed results: full CP failed2/passed559 (561 total); both failures in
-Phase7dServiceIntegrationTests.PopulateReviewResult line37, whose reflection-created
-internal ReviewResourceSnapshot still uses the old constructor. Delegate fixture
-repair via formal review path or updated captured scope, then rerun full CP.
-Native agent finished: Event DTO lacked Version=1 while ProposedVersion=1; now fixed
-and failure output includes review/validation diagnostics. Lowercase DescriptorRef
-"schema" is correct per existing fixtures, unchanged. JIT/native rerun NOT done.
-All coding agents idle; no duplicate work in progress. Latest changes uncommitted.
-
-## Resume — 2026-09-23 23:57 CST
-
-Quota restored5h0%,weekly47%; no card used. Consumed heartbeat deleted. PR104 final
-head1d8ac231af0152d6f179380bd2ef139708c58d50 passed full CI35851610571;
-PR body updated and ready confirmed, unmerged. Parent head must remain unchanged.
-Luna repaired Phase7d test seeding with the captured DevelopmentDefaults fingerprint;
-full CP rerun log /tmp/crest-review-scope-full-r2.log. Native JIT r3 hit a diagnostic
-helper type mismatch (AgentToolDiagnostic vs DescriptorDraftDiagnostic); Luna native
-agent correcting it. Scope production guard logic remains reviewed and unchanged.
-
-## Verified scope fix — 2026-09-24
-
-All local validation now passed: focused5/5, fullCP561/561 (full-r2 log), real-service
-JIT preflight (fixture-jit-r4 log), NativeAOT1/1 in1m29s (scope-native log), with
-CONTROL_PLANE_PROJECTION_SCOPE_NATIVEAOT_OK and reflection fallback disabled.
-Logs share /tmp/crest-review-scope- prefix. Native logs in artifacts/control-plane-json-aot-*.
-Root reviewed stable implementation and fixture; no active coding agents. Next
-publish stacked draft PR on PR104 and dispatch exact-final-head CI before ready.
-Only cached projection scope boundaries changed; no durable store/activation claimed.
-
-Published draft PR105: https://github.com/OrchesAdam/CrestCreates/pull/105,
-implementation9d121ed9, stacked on ready/unmerged PR104. Final handoff commit follows;
-dispatch full CI on that final head, verify before ready. Next independent design
-investigation (Luna medium luna6_review_artifact_contract) maps exact finite report
-input fields for lazy rendering; no next implementation has been dispatched yet.
+PR106 https://github.com/OrchesAdam/CrestCreates/pull/106 created draft, stacked on
+PR105, implementation6dfa2a74. Focused30/30, fullCP566/566, actual native1/1 passed.
+Next verify full ci.yml dispatched on final handoff head before marking ready.
+Do not merge. Next design step is immutable owner/scope-bound review artifact storage
+and async resolver cutover; neither durable approval nor production activation exists.
