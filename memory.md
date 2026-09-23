@@ -252,3 +252,66 @@ No reset card used. If exhausted, stop and preserve the scheduled13:40 heartbeat
 if weekly-limited at wake, use the actual reset rather than repeatedly running.
 PR #101 CI must be verified at its final head before ready. The first dispatch
 35673791608 may be superseded by this final handoff commit; query GitHub for latest.
+
+## Current handoff — 2026-09-22 13:40 resume
+
+PR101 final head6d83015137b79c88781eb592de650b04aab23a78 passed full
+CI35673825720 and is ready, unmerged. Preserve that published head.
+Current worktree: /home/orches/workspace/CrestCreates/.worktrees/live-proposal-retention-87
+Branch: codex/phase-10c-live-proposal-retention-87, based on PR101.
+Next plan: docs/superpowers/plans/2026-09-22-asset-live-proposal-retention.md.
+Implement only test-owned opt-in retention through official PG draft store, with
+configuration fail-before-model, exact typed draft readback and fresh review.
+Root design/review/tests; Terra high coding. No automatic merge.
+Fresh quota5h0%,weekly93%; ordinary usage allowed. Do not redeem reset cards.
+The13:40 one-time heartbeat was consumed/deleted; no active wake remains.
+
+## Retention implementation checkpoint — 2026-09-22
+
+Terra task terra_live_retention wrote three test-owned files: new
+AssetLiveProposalRetention.cs and edits to AssetDeepSeekLiveAuthoringEvaluationTests.cs
+and AssetProposalReplayAcceptanceTests.cs. Changes are uncommitted; no successor PR.
+Bootstrap passed /tmp/crest-live-retention-bootstrap.log. Focused build/test running
+session21850, log /tmp/crest-live-retention-focused.log; do not claim success until
+verified. No new model request occurred.
+Root reviewed and requested fixes for invalid enablement erroneously treated as
+Disabled, explicit formal provider validation before migrations, and DescriptorDraft
+namespace aliases; these are applied. Latest follow-up asks Terra to replace the
+misleading fresh/unconnected HTTP-observer assertion with honest invalid-config
+preflight theory (missing connection/schema, invalid enable, unsafe schema). That
+assertion did NOT prove no model call; preflight-before-authoring ordering currently
+rests on source review. Check agent/file status before further changes.
+Before a live call: finish code review, focused and full E2E tests; ensure no secrets
+in summaries, exact typed draft preserved, actual retained schema not cleaned up.
+Fresh quota5h42%,weekly99%,ordinary usage still allowed at last query. If weekly
+exhausted: no reset card; weekly reset2026-09-27 11:45:40 Asia/Shanghai (1790480740).
+No active automation currently; arrange one wake after the actual limiting reset.
+
+## Current resume — 2026-09-23
+
+User now authorizes GPT-6 Luna subagents; coding remains high. Root dispatched
+luna6_retention_review for bounded review/fixes of the existing uncommitted slice.
+Fresh actual quota is5h0%,weekly0%,ordinary usage allowed. No card redeemed by root.
+No automation exists. Previous /tmp logs/config did not survive restart; prior
+focused run cannot be claimed passing. Existing PostgreSQL container restarted
+without replacing its data; private config restored to /tmp/crest-asset-pg-private.json
+(do not print), runner /tmp/crest-run-asset-e2e.py restored. Bootstrap passed0 errors
+(/tmp/crest-retention-bootstrap-0923.log). Focused tests executing in session53401
+with log /tmp/crest-retention-focused-0923.log. No new model call has occurred.
+Terra final correction is present: honest invalid-config theory replaces unconnected
+HTTP observer assertion. No HTTP-before-preflight regression proof is implied.
+
+## Verified retention slice — 2026-09-23
+
+GPT-6 Luna high review fixed missing SeverityLevel namespace and added third-provider
+readback after helper exit, verifying full draft and unchanged status. Focused7/7
+passed (/tmp/crest-retention-focused-0923-r2.log); full Asset E2E40 passed/1 skipped
+(/tmp/crest-retention-full-0923.log). One explicit DeepSeek retention call then
+passed1/1, no retry (/tmp/crest-live-retained-20260923.log). Result HumanTaskDraftRetained;
+requested deepseek-v4-flash, observed deepseek-flash, HTTP200/stop. Exact typed draft
+is in persistent schema asset_live_retained_20260923 on existing local container
+crest-asset-approved-inventory-87. Preserve container/data/schema. Separate query
+after test process exit confirmed the row remains. No human approval/activation.
+Locator/full hashes: docs/review/2026-09-23-asset-live-retained-result.json; review
+notes: docs/review/2026-09-23-asset-live-proposal-retention.md.
+Root must publish successor draft PR and verify exact-head CI before ready.

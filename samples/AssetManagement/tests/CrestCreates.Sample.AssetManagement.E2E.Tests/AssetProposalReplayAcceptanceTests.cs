@@ -119,6 +119,81 @@ public sealed class AssetProposalReplayAcceptanceTests : IAsyncLifetime
         replayedReviewValue.StableHashes.Should().BeEquivalentTo(expectedHashes);
     }
 
+    [Fact]
+    public async Task AcceptedAgentDraft_RetentionHelper_ShouldReplayExactDraftThroughFreshProviders()
+    {
+        const string tenantId = "asset-live-retention-offline-tenant";
+        const string authorId = "asset-live-retention-offline-agent";
+        const string promptHash = "asset-live-retention-offline-prompt";
+        const string intent = "Add the initial Asset maintenance human review.";
+        var parsed = new JsonDescriptorAuthoringOutputParser().Parse(
+            AssetApprovedInventoryHandoffAcceptanceTests.CreateAssetCandidateJson(promptHash, intent),
+            new DescriptorAuthoringParseContext
+            {
+                TenantId = tenantId,
+                AuthorId = authorId,
+                AuthorKind = DescriptorDraftAuthorKind.Agent,
+                CreatedAt = DateTimeOffset.UnixEpoch,
+                IntentText = intent,
+                ExpectedPromptInputHash = promptHash
+            });
+        var draft = parsed.DraftSet.Drafts.Should().ContainSingle().Which;
+        var baseline = AssetControlPlaneApprovalHarness.BuildDeployedBaseline();
+        await using (var reviewHarness = await AssetControlPlaneApprovalHarness.CreateAsync(tenantId, authorId))
+        {
+            var review = await reviewHarness.Services.GetRequiredService<IDescriptorDraftReviewService>()
+                .ReviewAsync(draft, baseline);
+            review.ValidationResult.IsValid.Should().BeTrue();
+            review.MaterializationResult!.IsMaterialized.Should().BeTrue();
+        }
+
+        var retention = AssetLiveProposalRetention.Create("1", _database.ConnectionString, _database.Options.Schema);
+        (await retention.PreflightAsync()).Should().Be(new AssetLiveRetentionPreflight(true, "RETENTION_READY"));
+        var retained = await retention.RetainAndReplayAsync(
+            "asset-live-retention-offline-run",
+            draft,
+            baseline,
+            authorId,
+            promptHash,
+            "asset-live-retention-offline-output");
+
+        retained.Succeeded.Should().BeTrue();
+        retained.Locator!.TenantId.Should().Be(tenantId);
+        retained.Locator.DraftId.Should().Be(draft.DraftId);
+        retained.Locator.Schema.Should().Be(_database.Options.Schema);
+        retained.Locator.Hashes.ContractHash.Value.Should().NotBeNullOrWhiteSpace();
+        retained.Locator.Hashes.DefinitionHash.Value.Should().NotBeNullOrWhiteSpace();
+        retained.Locator.PromptInputHash.Should().Be(promptHash);
+        retained.Locator.PromptOutputHash.Should().Be("asset-live-retention-offline-output");
+
+        await using var verificationProvider = BuildPersistenceProvider(_database.Options);
+        var persistedDraft = await verificationProvider.GetRequiredService<IDescriptorDraftStore>()
+            .GetAsync(tenantId, draft.DraftId);
+        persistedDraft.Should().NotBeNull();
+        persistedDraft.Should().BeEquivalentTo(draft);
+        persistedDraft!.Status.Should().Be(draft.Status);
+    }
+
+    [Theory]
+    [InlineData("1", null, "asset_live_retained", "RETENTION_CONFIGURATION_INVALID")]
+    [InlineData("1", "Host=127.0.0.1;Database=asset_retention;Username=test;Password=test", null, "RETENTION_CONFIGURATION_INVALID")]
+    [InlineData("yes", "unused", "asset_live_retained", "RETENTION_ENABLEMENT_INVALID")]
+    [InlineData("2", "unused", "asset_live_retained", "RETENTION_ENABLEMENT_INVALID")]
+    [InlineData("1", "Host=127.0.0.1;Database=asset_retention;Username=test;Password=test", "Asset-Retention", "RETENTION_CONFIGURATION_INVALID")]
+    public async Task InvalidRetentionConfiguration_ShouldRejectAtPreflight(
+        string requested,
+        string? connectionString,
+        string? schema,
+        string expectedCode)
+    {
+        var retention = AssetLiveProposalRetention.Create(requested, connectionString, schema);
+
+        var preflight = await retention.PreflightAsync();
+
+        preflight.Succeeded.Should().BeFalse();
+        preflight.Code.Should().Be(expectedCode);
+    }
+
     private static ServiceProvider BuildPersistenceProvider(PostgreSqlRuntimePersistenceOptions options)
         => new ServiceCollection()
             .AddCrestCreatesPostgreSqlRuntimePersistence(options)
