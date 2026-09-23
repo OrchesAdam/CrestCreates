@@ -5,7 +5,6 @@ using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
-using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
 using CrestCreates.Metadata.Abstractions.DescriptorImpact;
@@ -33,45 +32,44 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
     public DescriptorReviewReportDto Build(DescriptorReviewReportBuildRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return Build(DescriptorReviewReportInputSnapshot.Capture(request));
+    }
 
-        if (!request.VisibilityApplied)
-            throw new InvalidOperationException(
-                "Cannot build review report: visibility has not been applied to the review result. " +
-                "Apply visibility filtering before building the report.");
-
-        var reviewResult = request.ReviewResult;
-        var draft = request.Draft;
+    public DescriptorReviewReportDto Build(DescriptorReviewReportInputSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        snapshot.Validate();
 
         var contractVersion = AgentControlPlaneContractVersion.Current;
         var templateVersion = _templateCatalog.TemplateVersion;
-        var draftVersion = draft.ProposedVersion ?? draft.BaseVersion ?? "0";
+        var draftVersion = snapshot.Owner.ProposedVersion ?? snapshot.Owner.BaseVersion ?? "0";
 
-        var sourceReviewHash = _reviewHashService.ComputeSourceReviewHash(reviewResult);
+        var sourceReviewHash = _reviewHashService.ComputeSourceReviewHash(snapshot.ToReviewHashInput());
         var reviewResultId = sourceReviewHash.Value;
-        var reportIdRaw = $"{reviewResult.TenantId}|{reviewResult.DraftId}|{draftVersion}|{reviewResultId}|{contractVersion}|{templateVersion}";
+        var reportIdRaw = $"{snapshot.TenantId}|{snapshot.DraftId}|{draftVersion}|{reviewResultId}|{contractVersion}|{templateVersion}";
         var reportId = ComputeSha256(reportIdRaw);
 
-        var summarySection = BuildSummarySection(reviewResult);
-        var draftIdentitySection = BuildDraftIdentitySection(draft);
-        var proposedChangesSection = BuildProposedChangesSection(reviewResult);
-        var impactAnalysisSection = BuildImpactAnalysisSection(reviewResult);
-        var dependencySummarySection = BuildDependencySummarySection(reviewResult);
-        var compatibilitySection = BuildCompatibilitySection(reviewResult);
-        var governanceSection = BuildGovernanceSection(reviewResult);
-        var requiredHumanReviewSection = BuildRequiredHumanReviewSection(reviewResult);
-        var activationEligibilitySection = BuildActivationEligibilitySection(reviewResult);
-        var diagnosticsSection = BuildDiagnosticsSection(reviewResult);
-        var packagePreviewSection = BuildPackagePreviewSection(reviewResult);
-        var stableHashesSection = BuildStableHashesSection(reviewResult);
+        var summarySection = BuildSummarySection(snapshot);
+        var draftIdentitySection = BuildDraftIdentitySection(snapshot.Owner);
+        var proposedChangesSection = BuildProposedChangesSection(snapshot);
+        var impactAnalysisSection = BuildImpactAnalysisSection(snapshot);
+        var dependencySummarySection = BuildDependencySummarySection(snapshot);
+        var compatibilitySection = BuildCompatibilitySection(snapshot);
+        var governanceSection = BuildGovernanceSection(snapshot);
+        var requiredHumanReviewSection = BuildRequiredHumanReviewSection(snapshot);
+        var activationEligibilitySection = BuildActivationEligibilitySection(snapshot);
+        var diagnosticsSection = BuildDiagnosticsSection(snapshot);
+        var packagePreviewSection = BuildPackagePreviewSection(snapshot);
+        var stableHashesSection = BuildStableHashesSection(snapshot);
 
         // Build Recommendations section before computing top-level recommendations
         // so we can derive them from the rendered sections.
         var recommendationsSection = BuildRecommendationsSection(
-            reviewResult, summarySection, governanceSection,
+            snapshot, summarySection, governanceSection,
             requiredHumanReviewSection, activationEligibilitySection, diagnosticsSection);
 
         var topLevelRecommendations = DeriveTopLevelRecommendations(
-            reviewResult, recommendationsSection, governanceSection,
+            snapshot, recommendationsSection, governanceSection,
             diagnosticsSection, requiredHumanReviewSection, activationEligibilitySection);
 
         var generatedAt = _clock.GetUtcNow();
@@ -79,8 +77,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         return new DescriptorReviewReportDto
         {
             ReportId = reportId,
-            DraftId = reviewResult.DraftId,
-            TenantId = reviewResult.TenantId,
+            DraftId = snapshot.DraftId,
+            TenantId = snapshot.TenantId,
             ReviewResultId = reviewResultId,
             DraftVersion = draftVersion,
             SourceReviewHash = sourceReviewHash.Value,
@@ -106,10 +104,10 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 1: Summary ──────────────────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildSummarySection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildSummarySection(DescriptorReviewReportInputSnapshot reviewResult)
     {
-        var diagnostics = reviewResult.ValidationResult.Diagnostics;
-        var reviewDiagnostics = reviewResult.Diagnostics;
+        var diagnostics = reviewResult.ValidationDiagnostics;
+        var reviewDiagnostics = reviewResult.ReviewDiagnostics;
 
         var allDiagnostics = diagnostics.Concat(reviewDiagnostics).ToList();
 
@@ -121,7 +119,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         var items = new List<DescriptorReviewReportItemDto>();
 
         // Validation status item
-        if (reviewResult.ValidationResult.IsValid)
+        if (reviewResult.IsValid)
         {
             var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -167,7 +165,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
         else
         {
-            var blockers = (reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>())
+            var blockers = reviewResult.ReviewDiagnostics
                 .Where(d => d.Severity.Value is "Blocker" or "Error")
                 .Select(d => d.Code)
                 .ToList();
@@ -181,22 +179,21 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         // Governance summary item
-        if (reviewResult.GovernanceDecision != null)
+        if (reviewResult.GovernanceMaxDecision is { } maxDecision)
         {
-            var decision = reviewResult.GovernanceDecision;
-            var reason = decision.Decisions.FirstOrDefault()?.Decision.ToString() ?? decision.MaxDecision.ToString();
+            var reason = reviewResult.GovernanceFirstDecision?.ToString() ?? maxDecision.ToString();
             var govParams = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["Rationale"] = reason,
             };
-            var templateId = decision.MaxDecision switch
+            var templateId = maxDecision switch
             {
                 DescriptorLifecycleDecisionKind.Allowed => DescriptorReviewReportMessageTemplateIds.GovernanceApproved,
                 DescriptorLifecycleDecisionKind.Blocked => DescriptorReviewReportMessageTemplateIds.GovernanceRejected,
                 DescriptorLifecycleDecisionKind.ReviewRequired => DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequired,
                 _ => DescriptorReviewReportMessageTemplateIds.GovernanceReviewRequired,
             };
-            var severity = decision.MaxDecision switch
+            var severity = maxDecision switch
             {
                 DescriptorLifecycleDecisionKind.Allowed => SeverityLevel.Info,
                 DescriptorLifecycleDecisionKind.Blocked => SeverityLevel.Blocker,
@@ -216,7 +213,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 2: DraftIdentity ────────────────────────────────────────────
 
-    private static DescriptorReviewReportSectionDto BuildDraftIdentitySection(Draft draft)
+    private static DescriptorReviewReportSectionDto BuildDraftIdentitySection(DescriptorReviewReportOwnerInput draft)
     {
         var items = new List<DescriptorReviewReportItemDto>();
         // Build message directly since we want a structured identity summary
@@ -251,10 +248,10 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 3: ProposedChanges ──────────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildProposedChangesSection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildProposedChangesSection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
-        var materialization = reviewResult.MaterializationResult;
+        var materialization = reviewResult.Materialization;
 
         if (materialization != null)
         {
@@ -262,15 +259,15 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             {
                 var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    ["ProposedCount"] = materialization.ProposedInventory.Count.ToString(),
+                    ["ProposedCount"] = materialization.ProposedDescriptors.Count.ToString(),
                 };
                 items.Add(CreateItem("proposed_materialized", "materialized",
                     DescriptorReviewReportMessageTemplateIds.ProposedChangesMaterialized, SeverityLevel.Info, parameters));
 
                 // Add items for each proposed descriptor
-                for (int i = 0; i < materialization.ProposedInventory.Count; i++)
+                for (int i = 0; i < materialization.ProposedDescriptors.Count; i++)
                 {
-                    var desc = materialization.ProposedInventory[i];
+                    var desc = materialization.ProposedDescriptors[i];
                     var descParams = new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["DescriptorId"] = desc.Id,
@@ -305,10 +302,10 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 4: ImpactAnalysis ───────────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildImpactAnalysisSection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildImpactAnalysisSection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
-        var impact = reviewResult.ImpactAnalysisResult;
+        var impact = reviewResult.Impact;
 
         if (impact != null)
         {
@@ -354,26 +351,16 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 5: DependencySummary ───────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildDependencySummarySection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildDependencySummarySection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
-        var topology = reviewResult.TopologySnapshot;
+        var topology = reviewResult.Topology;
 
         if (topology != null)
         {
             // Count nodes by kind
-            var nodeCountsByKind = topology.Nodes.Values
-                .GroupBy(n => n.Kind)
-                .ToDictionary(g => g.Key, g => g.Count());
-
-            var nodeKindSummary = string.Join(", ", nodeCountsByKind.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
-
-            // Count edges by kind
-            var edgeCountsByKind = topology.Edges
-                .GroupBy(e => e.Kind)
-                .ToDictionary(g => g.Key, g => g.Count());
-
-            var edgeKindSummary = string.Join(", ", edgeCountsByKind.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+            var nodeKindSummary = string.Join(", ", topology.NodeCountsByKind.OrderBy(item => item.Kind).Select(item => $"{item.Kind}:{item.Count}"));
+            var edgeKindSummary = string.Join(", ", topology.EdgeCountsByKind.OrderBy(item => item.Kind).Select(item => $"{item.Kind}:{item.Count}"));
 
             var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -396,15 +383,15 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 6: Compatibility ────────────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildCompatibilitySection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildCompatibilitySection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
-        var compatibility = reviewResult.CompatibilityResult;
+        var compatibility = reviewResult.CompatibilityFindings;
 
         if (compatibility != null)
         {
-            var totalFindings = compatibility.Findings.Count;
-            var incompatibleCount = compatibility.Findings.Count(f =>
+            var totalFindings = compatibility.Count;
+            var incompatibleCount = compatibility.Count(f =>
                 f.Level != DescriptorCompatibilityLevel.Compatible);
 
             var compatibleCount = totalFindings - incompatibleCount;
@@ -431,14 +418,14 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
                     templateId, severity, parameters));
 
                 // Add items for incompatible findings
-                foreach (var finding in compatibility.Findings.Where(f =>
+                foreach (var finding in compatibility.Where(f =>
                     f.Level != DescriptorCompatibilityLevel.Compatible)
-                    .OrderBy(f => f.Level).ThenBy(f => f.Subject.Id))
+                    .OrderBy(f => f.Level).ThenBy(f => f.SubjectId))
                 {
                     var findParams = new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["Level"] = finding.Level.ToString(),
-                        ["DescriptorId"] = finding.Subject.Id,
+                        ["DescriptorId"] = finding.SubjectId,
                     };
                     items.Add(CreateItem($"compat_finding_{finding.Level}_{items.Count}",
                         "incompatible_finding", DescriptorReviewReportMessageTemplateIds.CompatibilityIncompatible,
@@ -457,21 +444,21 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 7: Governance ───────────────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildGovernanceSection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildGovernanceSection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
-        var gov = reviewResult.GovernanceDecision;
+        var gov = reviewResult.GovernanceMaxDecision;
 
         if (gov != null)
         {
-            var rationale = gov.Decisions.FirstOrDefault()?.Transition.ToString() ?? "";
+            var rationale = reviewResult.GovernanceFirstTransition?.ToString() ?? "";
             var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["Rationale"] = rationale,
-                ["MaxDecision"] = gov.MaxDecision.ToString(),
+                ["MaxDecision"] = gov.Value.ToString(),
             };
 
-            var (templateId, severity) = gov.MaxDecision switch
+            var (templateId, severity) = gov.Value switch
             {
                 DescriptorLifecycleDecisionKind.Allowed =>
                     (DescriptorReviewReportMessageTemplateIds.GovernanceApproved, SeverityLevel.Info),
@@ -485,13 +472,12 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             items.Add(CreateItem("governance_decision", "governance", templateId, severity, parameters));
 
             // Add items for package findings
-            for (int i = 0; i < gov.PackageFindings.Count; i++)
+            for (int i = 0; i < reviewResult.GovernancePackageFindingSubjectIds!.Count; i++)
             {
-                var finding = gov.PackageFindings[i];
                 var findParams = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["FindingIndex"] = i.ToString(),
-                    ["DescriptorId"] = finding.Subject?.Id ?? "",
+                    ["DescriptorId"] = reviewResult.GovernancePackageFindingSubjectIds[i],
                 };
                 items.Add(CreateItem($"governance_finding_{i}",
                     "governance_finding", templateId, severity, findParams));
@@ -508,11 +494,11 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 8: RequiredHumanReview ──────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildRequiredHumanReviewSection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildRequiredHumanReviewSection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
-        var allDiagnostics = reviewResult.ValidationResult.Diagnostics
-            .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>())
+        var allDiagnostics = reviewResult.ValidationDiagnostics
+            .Concat(reviewResult.ReviewDiagnostics)
             .OrderBy(d => d.Code)
             .ThenBy(d => d.Severity)
             .Where(d => d.Severity.Value is "Blocker"
@@ -534,7 +520,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         // Also check governance for human review requirement
-        if (reviewResult.GovernanceDecision?.RequiresReview == true)
+        if (reviewResult.GovernanceRequiresReview)
         {
             var govParams = new Dictionary<string, string>(StringComparer.Ordinal)
             {
@@ -558,7 +544,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 9: ActivationEligibility ────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildActivationEligibilitySection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildActivationEligibilitySection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
 
@@ -570,7 +556,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
         else
         {
-            var blockerDiags = (reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>())
+            var blockerDiags = reviewResult.ReviewDiagnostics
                 .Where(d => d.Severity.Value is "Blocker" or "Error")
                 .ToList();
             var blockingReasons = blockerDiags.Count > 0
@@ -597,7 +583,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             }
 
             // Also check other factors that block activation
-            if (reviewResult.GovernanceDecision?.IsBlocked == true)
+            if (reviewResult.GovernanceIsBlocked)
             {
                 var govParams = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
@@ -618,11 +604,11 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 10: Diagnostics ─────────────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildDiagnosticsSection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildDiagnosticsSection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
-        var allDiagnostics = reviewResult.ValidationResult.Diagnostics
-            .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>())
+        var allDiagnostics = reviewResult.ValidationDiagnostics
+            .Concat(reviewResult.ReviewDiagnostics)
             .OrderBy(d => d.Code)
             .ThenBy(d => d.Severity)
             .ToList();
@@ -671,7 +657,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
     // ── Section 11: Recommendations ────────────────────────────────────────
 
     private DescriptorReviewReportSectionDto BuildRecommendationsSection(
-        DescriptorDraftReviewResult reviewResult,
+        DescriptorReviewReportInputSnapshot reviewResult,
         DescriptorReviewReportSectionDto summarySection,
         DescriptorReviewReportSectionDto governanceSection,
         DescriptorReviewReportSectionDto requiredHumanReviewSection,
@@ -681,14 +667,13 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         var items = new List<DescriptorReviewReportItemDto>();
 
         // Build recommendation items based on review state
-        if (reviewResult.IsActivationEligible &&
-            reviewResult.GovernanceDecision?.IsAllowed == true)
+        if (reviewResult.IsActivationEligible && reviewResult.GovernanceIsAllowed)
         {
             items.Add(CreateItem("rec_activation_handoff", "activation_handoff",
                 DescriptorReviewReportMessageTemplateIds.RecommendationActivationHandoff, SeverityLevel.Info,
                 new Dictionary<string, string>(StringComparer.Ordinal)));
         }
-        else if (reviewResult.GovernanceDecision?.RequiresReview == true)
+        else if (reviewResult.GovernanceRequiresReview)
         {
             items.Add(CreateItem("rec_human_review", "human_review_required",
                 DescriptorReviewReportMessageTemplateIds.RecommendationHumanReview, SeverityLevel.Warning,
@@ -702,8 +687,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         // Check for blocker/error diagnostics → recommend revision
-        var hasBlockers = (reviewResult.ValidationResult.Diagnostics
-            .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>()))
+        var hasBlockers = (reviewResult.ValidationDiagnostics
+            .Concat(reviewResult.ReviewDiagnostics))
             .Any(d => d.Severity.Value is "Blocker"
                 or "Error");
 
@@ -715,8 +700,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         // Check for warnings with fix proposals available
-        var hasWarnings = (reviewResult.ValidationResult.Diagnostics
-            .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>()))
+        var hasWarnings = (reviewResult.ValidationDiagnostics
+            .Concat(reviewResult.ReviewDiagnostics))
             .Any(d => d.Severity == SeverityLevel.Warning);
 
         if (hasWarnings && !hasBlockers)
@@ -747,7 +732,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 12: PackagePreview ──────────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildPackagePreviewSection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildPackagePreviewSection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
         var preview = reviewResult.PackagePreview;
@@ -758,9 +743,9 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
             {
                 ["DescriptorCount"] = preview.DescriptorIds.Count.ToString(),
                 ["HashCount"] = "3", // ManifestHash, EvidenceHash, EnvelopeHash
-                ["ManifestHash"] = preview.PackageManifestHash?.Value ?? "",
-                ["EvidenceHash"] = preview.PackageEvidenceHash?.Value ?? "",
-                ["EnvelopeHash"] = preview.PackageEvidenceEnvelopeHash?.Value ?? "",
+                ["ManifestHash"] = preview.ManifestHash?.Value ?? "",
+                ["EvidenceHash"] = preview.EvidenceHash?.Value ?? "",
+                ["EnvelopeHash"] = preview.EnvelopeHash?.Value ?? "",
             };
             items.Add(CreateItem("package_preview_present", "package_preview_available",
                 DescriptorReviewReportMessageTemplateIds.PackagePreviewPresent, SeverityLevel.Info, parameters));
@@ -778,7 +763,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
     // ── Section 13: StableHashes ────────────────────────────────────────────
 
-    private DescriptorReviewReportSectionDto BuildStableHashesSection(DescriptorDraftReviewResult reviewResult)
+    private DescriptorReviewReportSectionDto BuildStableHashesSection(DescriptorReviewReportInputSnapshot reviewResult)
     {
         var items = new List<DescriptorReviewReportItemDto>();
         var hashes = reviewResult.StableHashes;
@@ -810,7 +795,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
     // ── Top-level Recommendations ───────────────────────────────────────────
 
     private static IReadOnlyList<DescriptorReviewRecommendationDto> DeriveTopLevelRecommendations(
-        DescriptorDraftReviewResult reviewResult,
+        DescriptorReviewReportInputSnapshot reviewResult,
         DescriptorReviewReportSectionDto recommendationsSection,
         DescriptorReviewReportSectionDto governanceSection,
         DescriptorReviewReportSectionDto diagnosticsSection,
@@ -820,8 +805,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         var recommendations = new List<DescriptorReviewRecommendationDto>();
 
         // 1. If activation eligible && governance approved → RequestActivationHandoff
-        if (reviewResult.IsActivationEligible &&
-            reviewResult.GovernanceDecision?.IsAllowed == true)
+        if (reviewResult.IsActivationEligible && reviewResult.GovernanceIsAllowed)
         {
             recommendations.Add(new DescriptorReviewRecommendationDto
             {
@@ -835,7 +819,7 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         // 2. If governance requires review → RequestHumanReview
-        if (reviewResult.GovernanceDecision?.RequiresReview == true)
+        if (reviewResult.GovernanceRequiresReview)
         {
             recommendations.Add(new DescriptorReviewRecommendationDto
             {
@@ -849,8 +833,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
         }
 
         // 3. If diagnostics contain Blocker/Error → ReviseDraft
-        var hasBlockers = (reviewResult.ValidationResult.Diagnostics
-            .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>()))
+        var hasBlockers = (reviewResult.ValidationDiagnostics
+            .Concat(reviewResult.ReviewDiagnostics))
             .Any(d => d.Severity.Value is "Blocker"
                 or "Error");
 
@@ -869,8 +853,8 @@ public sealed class DefaultDescriptorReviewReportBuilder : IDescriptorReviewRepo
 
         // 4. If diagnostics contain Warning && fix proposals available → ApplyFixProposal
         //    (Only if no blockers are present — blockers take priority)
-        var hasWarnings = (reviewResult.ValidationResult.Diagnostics
-            .Concat(reviewResult.Diagnostics ?? Array.Empty<DescriptorDraftDiagnostic>()))
+        var hasWarnings = (reviewResult.ValidationDiagnostics
+            .Concat(reviewResult.ReviewDiagnostics))
             .Any(d => d.Severity == SeverityLevel.Warning);
 
         if (hasWarnings && !hasBlockers)
