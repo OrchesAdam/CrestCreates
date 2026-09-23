@@ -24,6 +24,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
+using DescriptorDraftModel = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
+
 namespace CrestCreates.Sample.AssetManagement.E2E.Tests;
 
 /// <summary>
@@ -50,6 +52,8 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
         var artifact = new LiveEvaluationArtifact(runId, RequestedModel);
         var responseObservation = new AssetLiveResponseObservation();
         var semantic = new SemanticResult();
+        var retention = AssetLiveProposalRetention.FromEnvironment();
+        artifact.Retention = new { enabled = retention.Enabled, preflightCode = retention.PreflightCode };
         var outputBudget = ResolveOutputBudget(Environment.GetEnvironmentVariable("CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS"));
         artifact.OutputBudget = new
         {
@@ -68,7 +72,21 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
             return;
         }
 
+        var retentionPreflight = await retention.PreflightAsync();
+        if (!retentionPreflight.Succeeded)
+        {
+            semantic.Result = "RetentionPreflightFailure";
+            semantic.ExceptionStage = "retention-preflight";
+            semantic.RetentionFailureCode = retentionPreflight.Code;
+            artifact.Semantic = semantic;
+            artifact.HttpResponse = responseObservation.Snapshot();
+            WriteArtifact(artifactPath, artifact);
+            artifact.Semantic.Result.Should().Be("HumanTaskDraftReviewed", artifactPath);
+            return;
+        }
+
         var stage = "setup";
+        DescriptorDraftModel? acceptedDraft = null;
         try
         {
             stage = "composition";
@@ -211,6 +229,8 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                             && review.ProposedInventory?.Any(d =>
                                 d.Kind == DescriptorKind.HumanTask
                                 && d.Id == AssetContractIds.MaintenanceInitialHumanTask) == true;
+                        if (semantic.HumanTaskContractValid && semantic.HumanTaskReviewMaterialized)
+                            acceptedDraft = draft;
                     }
                 }
             }
@@ -223,12 +243,47 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
 
             if (semantic.AuthoringSucceeded)
             {
-                semantic.Result = semantic.HumanTaskDraftObserved
+                var semanticPassed = semantic.HumanTaskDraftObserved
                     && semantic.OnlySingleHumanTaskCreate
                     && semantic.HumanTaskContractValid
-                    && semantic.HumanTaskReviewMaterialized
-                    ? "HumanTaskDraftReviewed"
-                    : "SemanticFailure";
+                    && semantic.HumanTaskReviewMaterialized;
+                if (!semanticPassed)
+                {
+                    semantic.Result = "SemanticFailure";
+                }
+                else if (!retention.Enabled)
+                {
+                    semantic.Result = "HumanTaskDraftReviewed";
+                }
+                else if (acceptedDraft is null)
+                {
+                    semantic.Result = "SemanticFailure";
+                }
+                else
+                {
+                    stage = "retention";
+                    var retained = await retention.RetainAndReplayAsync(
+                        runId,
+                        acceptedDraft,
+                        baseline,
+                        AuthorId,
+                        result.PromptInputEvidence?.InputHash.Value,
+                        result.PromptOutputEvidence?.OutputHash?.Value,
+                        timeout.Token);
+                    artifact.Retention = retained.Succeeded
+                        ? new { enabled = true, preflightCode = retentionPreflight.Code, locator = retained.Locator }
+                        : new
+                        {
+                            enabled = true,
+                            preflightCode = retentionPreflight.Code,
+                            failureCode = retained.FailureCode,
+                            failureStage = retained.FailureStage
+                        };
+                    semantic.RetentionFailureCode = retained.FailureCode;
+                    semantic.Result = retained.Succeeded
+                        ? "HumanTaskDraftRetained"
+                        : "RetentionReplayFailure";
+                }
             }
             artifact.Semantic = semantic;
             artifact.HttpResponse = responseObservation.Snapshot();
@@ -246,7 +301,9 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
             WriteArtifact(artifactPath, artifact);
         }
 
-        artifact.Semantic.Result.Should().Be("HumanTaskDraftReviewed", artifactPath);
+        artifact.Semantic.Result.Should().Be(
+            retention.Enabled ? "HumanTaskDraftRetained" : "HumanTaskDraftReviewed",
+            artifactPath);
     }
 
     private static bool HasExpectedFormSchema(IReadOnlyList<IDescriptor> baseline)
@@ -326,6 +383,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
         public object? Context { get; set; }
         public object? Authoring { get; set; }
         public object? OutputBudget { get; set; }
+        public object? Retention { get; set; }
         public AssetLiveResponseMetadata HttpResponse { get; set; } = AssetLiveResponseMetadata.Empty;
         public List<object> Drafts { get; } = [];
         public List<object> Reviews { get; } = [];
@@ -342,6 +400,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
         public bool HumanTaskReviewMaterialized { get; set; }
         public string? ExceptionStage { get; set; }
         public string? ExceptionType { get; set; }
+        public string? RetentionFailureCode { get; set; }
     }
 }
 
