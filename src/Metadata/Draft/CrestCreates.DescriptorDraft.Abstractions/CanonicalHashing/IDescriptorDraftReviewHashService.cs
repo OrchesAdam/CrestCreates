@@ -8,6 +8,9 @@ namespace CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 /// </summary>
 public interface IDescriptorDraftReviewHashService
 {
+    DescriptorDraftReviewHashInput CaptureInput(DescriptorDraftReviewResult reviewResult);
+    CanonicalHash ComputeSourceReviewHash(DescriptorDraftReviewHashInput input);
+    CanonicalHash ComputeReviewManifestHash(DescriptorDraftReviewHashInput input);
     CanonicalHash ComputeSourceReviewHash(DescriptorDraftReviewResult reviewResult);
     CanonicalHash ComputeReviewManifestHash(DescriptorDraftReviewResult reviewResult);
 }

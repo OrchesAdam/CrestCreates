@@ -12,8 +12,11 @@ using CrestCreates.Agent.Authoring.Parsing;
 using CrestCreates.Agent.Authoring.Prompting;
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Agent.DraftContracts.Projection;
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
+using CrestCreates.DescriptorDraft.CanonicalHashing;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Form.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -21,6 +24,7 @@ using CrestCreates.Localization.Services;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.Runtime;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
@@ -130,6 +134,7 @@ public static class ControlPlaneJsonContractFixtureRunner
 
             allPassed &= RunActivationReviewCallbackBoundary();
             allPassed &= RunDraftIdentityBinding();
+            allPassed &= RunReviewHashInputRoundTrip();
             allPassed &= RunAgentAuthoringOptionalReferences();
             allPassed &= RunAgentAuthoringUpdateBaseVersion();
             allPassed &= RunAgentAuthoringWireDisclosure();
@@ -224,6 +229,81 @@ public static class ControlPlaneJsonContractFixtureRunner
         catch (Exception ex)
         {
             Console.Error.WriteLine($"FAIL [DraftIdentityBinding]: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool RunReviewHashInputRoundTrip()
+    {
+        try
+        {
+            var review = new DescriptorDraftReviewResult
+            {
+                TenantId = "aot-review-tenant",
+                DraftId = "aot-review-draft",
+                IsActivationEligible = false,
+                ValidationResult = new DescriptorDraftValidationResult
+                {
+                    IsValid = false,
+                    Diagnostics = Array.Empty<DescriptorDraftDiagnostic>()
+                },
+                Diagnostics = new[]
+                {
+                    new DescriptorDraftDiagnostic
+                    {
+                        Code = new DiagnosticCode("AOT-REVIEW"),
+                        Severity = SeverityLevel.Error,
+                        Message = "review rejected"
+                    }
+                }
+            };
+            var hashService = new DefaultDescriptorDraftReviewHashService(new DefaultCanonicalHashComputer());
+            var input = hashService.CaptureInput(review);
+            var sourceHashBefore = hashService.ComputeSourceReviewHash(input);
+            var manifestHashBefore = hashService.ComputeReviewManifestHash(input);
+            var typeInfo = DescriptorDraftReviewHashInputJsonSerializerContext.Default.DescriptorDraftReviewHashInput;
+            var json = JsonSerializer.Serialize(input, typeInfo);
+            var restored = JsonSerializer.Deserialize(json, typeInfo);
+            var sourceHashAfter = restored is null ? null : hashService.ComputeSourceReviewHash(restored);
+            var manifestHashAfter = restored is null ? null : hashService.ComputeReviewManifestHash(restored);
+
+            var unsupportedVersionRejected = false;
+            try
+            {
+                hashService.ComputeSourceReviewHash(input with
+                {
+                    Version = DescriptorDraftReviewHashInput.CurrentVersion + 1
+                });
+            }
+            catch (NotSupportedException)
+            {
+                unsupportedVersionRejected = true;
+            }
+
+            var passed = restored is not null
+                && restored.Version == DescriptorDraftReviewHashInput.CurrentVersion
+                && restored.SourceBinding.TenantId == input.SourceBinding.TenantId
+                && restored.SourceBinding.DraftId == input.SourceBinding.DraftId
+                && !restored.SourceBinding.IsActivationEligible
+                && !restored.SourceBinding.IsValid
+                && restored.SourceBinding.Diagnostics.Count == 1
+                && restored.SourceBinding.Diagnostics[0].Code == "AOT-REVIEW"
+                && restored.SourceBinding.Diagnostics[0].Severity == "Error"
+                && restored.SourceBinding.GovernanceDecision is null
+                && restored.SourceBinding.ImpactSeverity is null
+                && sourceHashAfter == sourceHashBefore
+                && manifestHashAfter == manifestHashBefore
+                && unsupportedVersionRejected;
+
+            Console.WriteLine($"ReviewHashInputSourceGeneratedRoundTrip:{(passed ? "PASS" : "FAIL")}");
+            if (passed)
+                Console.WriteLine("CONTROL_PLANE_REVIEW_HASH_INPUT_NATIVEAOT_OK");
+            return passed;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL [ReviewHashInputSourceGeneratedRoundTrip]: {ex.Message}");
+            Console.WriteLine("ReviewHashInputSourceGeneratedRoundTrip:FAIL");
             return false;
         }
     }
