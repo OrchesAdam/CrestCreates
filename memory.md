@@ -230,3 +230,9 @@ Logs share /tmp/crest-review-scope- prefix. Native logs in artifacts/control-pla
 Root reviewed stable implementation and fixture; no active coding agents. Next
 publish stacked draft PR on PR104 and dispatch exact-final-head CI before ready.
 Only cached projection scope boundaries changed; no durable store/activation claimed.
+
+Published draft PR105: https://github.com/OrchesAdam/CrestCreates/pull/105,
+implementation9d121ed9, stacked on ready/unmerged PR104. Final handoff commit follows;
+dispatch full CI on that final head, verify before ready. Next independent design
+investigation (Luna medium luna6_review_artifact_contract) maps exact finite report
+input fields for lazy rendering; no next implementation has been dispatched yet.
