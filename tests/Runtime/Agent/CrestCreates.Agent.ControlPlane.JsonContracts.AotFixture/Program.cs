@@ -138,6 +138,7 @@ public static class ControlPlaneJsonContractFixtureRunner
             allPassed &= RunAgentAuthoringOptionalReferences();
             allPassed &= RunAgentAuthoringUpdateBaseVersion();
             allPassed &= RunAgentAuthoringWireDisclosure();
+            allPassed &= ProjectionScopeNativeAotFixture.Run();
 
             Console.WriteLine($"SerializeDeserialize_RepresentativeToolRoots:{(allPassed ? "PASS" : "FAIL")}");
 
