@@ -34,7 +34,10 @@ public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
         // ReviewResourceSnapshot is internal; create via reflection
         var snapshotType = typeof(DefaultAgentControlPlaneToolService).Assembly
             .GetType("CrestCreates.Agent.ControlPlane.ReviewResourceSnapshot")!;
-        var snapshot = Activator.CreateInstance(snapshotType, reviewResult, ownerDraft, DateTimeOffset.UtcNow)!;
+        var scopeFingerprint = AgentDescriptorVisibilityScope.ComputeFingerprint(
+            AgentToolAuthorizationOptions.DevelopmentDefaults);
+        var snapshot = Activator.CreateInstance(
+            snapshotType, reviewResult, ownerDraft, DateTimeOffset.UtcNow, scopeFingerprint)!;
 
         // Access the _reviewResults ConcurrentDictionary via its non-generic IDictionary interface
         var dict = (IDictionary)ReviewResultsField.GetValue(service)!;

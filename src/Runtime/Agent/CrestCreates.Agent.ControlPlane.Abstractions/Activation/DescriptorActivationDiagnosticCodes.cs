@@ -64,6 +64,9 @@ public static class DescriptorActivationDiagnosticCodes
     private const string ReviewResultDraftMismatchValue = "ACTIVATION_REVIEW_RESULT_DRAFT_MISMATCH";
     public static DiagnosticCode ReviewResultDraftMismatch { get; } = new(ReviewResultDraftMismatchValue);
 
+    private const string ReviewResultScopeMismatchValue = "ACTIVATION_REVIEW_RESULT_SCOPE_MISMATCH";
+    public static DiagnosticCode ReviewResultScopeMismatch { get; } = new(ReviewResultScopeMismatchValue);
+
     private const string ReviewDuplicateValue = "ACTIVATION_REVIEW_DUPLICATE";
     public static DiagnosticCode ReviewDuplicate { get; } = new(ReviewDuplicateValue);
 
@@ -78,6 +81,9 @@ public static class DescriptorActivationDiagnosticCodes
 
     private const string PackagePreviewDraftMismatchValue = "ACTIVATION_PACKAGE_PREVIEW_DRAFT_MISMATCH";
     public static DiagnosticCode PackagePreviewDraftMismatch { get; } = new(PackagePreviewDraftMismatchValue);
+
+    private const string PackagePreviewScopeMismatchValue = "ACTIVATION_PACKAGE_PREVIEW_SCOPE_MISMATCH";
+    public static DiagnosticCode PackagePreviewScopeMismatch { get; } = new(PackagePreviewScopeMismatchValue);
 
     private const string EvidencePreviewNotFoundValue = "ACTIVATION_EVIDENCE_PREVIEW_NOT_FOUND";
     public static DiagnosticCode EvidencePreviewNotFound { get; } = new(EvidencePreviewNotFoundValue);

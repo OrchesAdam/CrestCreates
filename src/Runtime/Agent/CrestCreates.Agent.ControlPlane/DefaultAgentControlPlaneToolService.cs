@@ -1207,7 +1207,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             }
 
             var reviewId = Guid.NewGuid().ToString("N");
-            _reviewResults[(context.TenantId, reviewId)] = new ReviewResourceSnapshot(projectedReview, snapshot.Draft, DateTimeOffset.UtcNow);
+            _reviewResults[(context.TenantId, reviewId)] = new ReviewResourceSnapshot(
+                projectedReview, snapshot.Draft, DateTimeOffset.UtcNow, scope.ScopeFingerprint);
 
             // Store review hashes for evidence recheck
             var sourceReviewHash = _reviewHashService.ComputeSourceReviewHash(reviewResult);
@@ -1243,6 +1244,22 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var denyResult = DenyIfInvisible<AgentReviewResultDto>(context, scope, snapshot.Owner.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
+
+            if (!StringComparer.Ordinal.Equals(snapshot.ScopeFingerprint, scope.ScopeFingerprint))
+            {
+                var scopeDiag = new AgentToolDiagnostic
+                {
+                    Code = AgentToolDiagnosticCodes.ReviewResultScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Review result was captured under a different visibility scope. Run the review again."
+                };
+                var scopeAudit = BuildAudit(context, AgentToolResultStatus.Denied, [scopeDiag]) with
+                {
+                    TouchedReviewResultIds = [reviewResultId]
+                };
+                await _auditor.RecordAsync(scopeAudit, ct);
+                return AgentToolResult<AgentReviewResultDto>.Denied([scopeDiag], scopeAudit);
+            }
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []) with
             {
@@ -1290,15 +1307,20 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return await RecordAggregateFailure<ReviewResultListResult>(
                     context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
 
-            var visible = reviews
+            var ownerVisible = reviews
                 .Where(r => scope.IsVisible(owners[r.Value.Review.DraftId].DescriptorKind))
+                .ToList();
+            var scopeTrimmed = ownerVisible.Any(r =>
+                !StringComparer.Ordinal.Equals(r.Value.ScopeFingerprint, scope.ScopeFingerprint));
+            var visible = ownerVisible
+                .Where(r => StringComparer.Ordinal.Equals(r.Value.ScopeFingerprint, scope.ScopeFingerprint))
                 .OrderBy(r => r.Value.Review.DraftId, StringComparer.Ordinal)
                 .Select(r => r.Value.Review)
                 .ToList().AsReadOnly();
 
             var result = new ReviewResultListResult { Results = visible.Select(AgentReviewResultDtoProjection.Project).ToList().AsReadOnly() };
 
-            var diags = scope.IsRestricted ? SecurityTrimmedDiagnostics : [];
+            var diags = scope.IsRestricted || scopeTrimmed ? SecurityTrimmedDiagnostics : [];
             var audit = BuildAudit(context, AgentToolResultStatus.Success, diags);
             await _auditor.RecordAsync(audit, ct);
             return AgentToolResult<ReviewResultListResult>.Success(result, diags, audit);
@@ -1376,6 +1398,19 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 var noReviewAudit = BuildAudit(context, AgentToolResultStatus.Failed, [noReviewDiag]);
                 await _auditor.RecordAsync(noReviewAudit, ct);
                 return AgentToolResult<DescriptorReviewReportDto>.Failed([noReviewDiag], noReviewAudit);
+            }
+
+            if (!StringComparer.Ordinal.Equals(reviewSnapshot.ScopeFingerprint, scope.ScopeFingerprint))
+            {
+                var scopeDiag = new AgentToolDiagnostic
+                {
+                    Code = AgentToolDiagnosticCodes.ReviewResultScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "The latest review was captured under a different visibility scope. Run the review again."
+                };
+                var scopeAudit = BuildAudit(context, AgentToolResultStatus.Failed, [scopeDiag]);
+                await _auditor.RecordAsync(scopeAudit, ct);
+                return AgentToolResult<DescriptorReviewReportDto>.Failed([scopeDiag], scopeAudit);
             }
 
             var request = new DescriptorReviewReportBuildRequest
@@ -2279,6 +2314,22 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (denyResult is not null)
                 return denyResult;
 
+            if (!StringComparer.Ordinal.Equals(snapshot.ScopeFingerprint, scope.ScopeFingerprint))
+            {
+                var scopeDiag = new AgentToolDiagnostic
+                {
+                    Code = AgentToolDiagnosticCodes.PackagePreviewScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Package preview was captured under a different visibility scope. Create a new preview."
+                };
+                var scopeAudit = BuildAudit(context, AgentToolResultStatus.Denied, [scopeDiag]) with
+                {
+                    TouchedPackagePreviewIds = [previewId]
+                };
+                await _auditor.RecordAsync(scopeAudit, ct);
+                return AgentToolResult<DraftPackagePreview>.Denied([scopeDiag], scopeAudit);
+            }
+
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit = audit with { TouchedPackagePreviewIds = [previewId] };
             await _auditor.RecordAsync(audit, ct);
@@ -2357,6 +2408,15 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' belongs to draft '{reviewRef.Review.DraftId}', not '{request.DraftId}'."
                 });
             }
+            else if (!StringComparer.Ordinal.Equals(reviewRef.ScopeFingerprint, scope.ScopeFingerprint))
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
+                {
+                    Code = DescriptorActivationDiagnosticCodes.ReviewResultScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Referenced review result was captured under a different visibility scope. Run the review again."
+                });
+            }
 
             // Fail-closed: binding references must be non-empty
             if (string.IsNullOrWhiteSpace(request.BindingSnapshot.PackagePreviewId))
@@ -2384,6 +2444,15 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Code = DescriptorActivationDiagnosticCodes.PackagePreviewDraftMismatch,
                     Severity = SeverityLevel.Error,
                     Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' belongs to draft '{packageRef.Preview.DraftId}', not '{request.DraftId}'."
+                });
+            }
+            else if (!StringComparer.Ordinal.Equals(packageRef.ScopeFingerprint, scope.ScopeFingerprint))
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
+                {
+                    Code = DescriptorActivationDiagnosticCodes.PackagePreviewScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Referenced package preview was captured under a different visibility scope. Create a new preview."
                 });
             }
 

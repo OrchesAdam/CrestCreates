@@ -7,4 +7,5 @@ namespace CrestCreates.Agent.ControlPlane;
 internal sealed record ReviewResourceSnapshot(
     DraftReviewResult Review,
     Draft Owner,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string ScopeFingerprint);
