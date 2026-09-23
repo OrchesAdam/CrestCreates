@@ -161,3 +161,72 @@ handoff commit/push/CI dispatch was not executed because automatic approval revi
 hit the usage limit. Only memory.md remained uncommitted; PR104 implementation
 cfdc5200 was already published. The consumed one-time heartbeat was deleted.
 Resume by committing this handoff and dispatching full CI on the final PR104 head.
+
+## Current follow-up — cached projection scope
+
+PR104 final head1d8ac231af0152d6f179380bd2ef139708c58d50 is running full
+CI35851610571. Watch /tmp/crest-pr104-ci-watch.log; verify before marking ready.
+Current isolated WT /home/orches/workspace/CrestCreates/.worktrees/review-artifact-owner-87,
+branch codex/phase-10c-review-artifact-owner-87, based on that final head.
+Root/Luna review found cached review Get/List/report and direct package retrieval
+can return an earlier broader projection after policy narrows while owner kind
+stays visible. Fix plan docs/superpowers/plans/2026-09-23-review-projection-scope-binding.md.
+Luna high luna6_review_hash_inputs implements exact stored scope binding and tests;
+do not duplicate task. Root owns review/docs/testing. Submit must reject mismatched
+review/package scopes before creating requests. Native coverage required.
+Durable owner/report investigation recorded in docs/review/2026-09-23-review-projection-scope-binding.md;
+no full durable artifact/store has been implemented. Retained live DB/model data
+unchanged. Latest one-time heartbeat consumed/deleted; no active wake or card use.
+
+## Latest handoff — 2026-09-23 evening
+
+Current scope-binding changes remain uncommitted in review-artifact-owner-87.
+Luna high production/unit work complete; root reviewed it. BuildTasks bootstrap
+passed142 prior warnings/0 errors; production ControlPlane build passed0 warnings.
+Focused ReviewProjectionScopeBindingTests5/5 passed after fixing test Json namespace
+import (log /tmp/crest-review-scope-focused-r2.log). Full CP launched session48907,
+log /tmp/crest-review-scope-full.log; inspect final result. No new PR yet.
+Native helper added by luna6_scope_native_fixture exercises real DI services,
+immutable schema catalog, Event draft, broad->narrow Get/List/report/package denial,
+then broad re-review recovery. Initial JIT compile failed topology-builder namespace
+(fixed). JIT r2 compiled but failed broad review Schema topology precondition:
+/tmp/crest-review-scope-fixture-jit-r2.log. Agent diagnosing actual draft validation,
+including lowercase DescriptorRef kind vs canonical Schema; inspect latest edits and
+agent status. Do not weaken assertions or claim native success. Next: rerun JIT,
+then actual native wrapper publish/link/run; only then publish reviewed stacked PR.
+PR104 CI35851610571 still in PostgreSQL direct provider stage at last query,
+head1d8ac231af0152d6f179380bd2ef139708c58d50. Watch session7317 /tmp/crest-pr104-ci-watch.log.
+Do not mark ready unless exact-head full CI succeeds. No merge.
+Quota97% used, weekly46%, reset2026-09-23 23:55:32 CST. One-time heartbeat crestcreates
+created for23:57 CST, pointing at this worktree memory. No reset card used. Preserve
+live container/schema/proposal unchanged. Other implementation work is complete;
+do not duplicate dispatch. Root owns memory/docs; coding remains GPT-6 Luna high.
+
+Final observed results: full CP failed2/passed559 (561 total); both failures in
+Phase7dServiceIntegrationTests.PopulateReviewResult line37, whose reflection-created
+internal ReviewResourceSnapshot still uses the old constructor. Delegate fixture
+repair via formal review path or updated captured scope, then rerun full CP.
+Native agent finished: Event DTO lacked Version=1 while ProposedVersion=1; now fixed
+and failure output includes review/validation diagnostics. Lowercase DescriptorRef
+"schema" is correct per existing fixtures, unchanged. JIT/native rerun NOT done.
+All coding agents idle; no duplicate work in progress. Latest changes uncommitted.
+
+## Resume — 2026-09-23 23:57 CST
+
+Quota restored5h0%,weekly47%; no card used. Consumed heartbeat deleted. PR104 final
+head1d8ac231af0152d6f179380bd2ef139708c58d50 passed full CI35851610571;
+PR body updated and ready confirmed, unmerged. Parent head must remain unchanged.
+Luna repaired Phase7d test seeding with the captured DevelopmentDefaults fingerprint;
+full CP rerun log /tmp/crest-review-scope-full-r2.log. Native JIT r3 hit a diagnostic
+helper type mismatch (AgentToolDiagnostic vs DescriptorDraftDiagnostic); Luna native
+agent correcting it. Scope production guard logic remains reviewed and unchanged.
+
+## Verified scope fix — 2026-09-24
+
+All local validation now passed: focused5/5, fullCP561/561 (full-r2 log), real-service
+JIT preflight (fixture-jit-r4 log), NativeAOT1/1 in1m29s (scope-native log), with
+CONTROL_PLANE_PROJECTION_SCOPE_NATIVEAOT_OK and reflection fallback disabled.
+Logs share /tmp/crest-review-scope- prefix. Native logs in artifacts/control-plane-json-aot-*.
+Root reviewed stable implementation and fixture; no active coding agents. Next
+publish stacked draft PR on PR104 and dispatch exact-final-head CI before ready.
+Only cached projection scope boundaries changed; no durable store/activation claimed.

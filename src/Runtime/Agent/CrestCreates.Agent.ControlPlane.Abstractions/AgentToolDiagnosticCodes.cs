@@ -63,6 +63,12 @@ public static class AgentToolDiagnosticCodes
     private const string NoReviewResultValue = "NO_REVIEW_RESULT";
     public static DiagnosticCode NoReviewResult { get; } = new(NoReviewResultValue);
 
+    private const string ReviewResultScopeMismatchValue = "REVIEW_RESULT_SCOPE_MISMATCH";
+    public static DiagnosticCode ReviewResultScopeMismatch { get; } = new(ReviewResultScopeMismatchValue);
+
+    private const string PackagePreviewScopeMismatchValue = "PACKAGE_PREVIEW_SCOPE_MISMATCH";
+    public static DiagnosticCode PackagePreviewScopeMismatch { get; } = new(PackagePreviewScopeMismatchValue);
+
     private const string UnsupportedReportContractVersionValue = "UNSUPPORTED_REPORT_CONTRACT_VERSION";
     public static DiagnosticCode UnsupportedReportContractVersion { get; } = new(UnsupportedReportContractVersionValue);
 

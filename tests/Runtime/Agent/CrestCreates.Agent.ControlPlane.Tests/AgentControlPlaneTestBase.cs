@@ -351,7 +351,8 @@ public abstract class AgentControlPlaneTestBase
     /// Use this when submitting activation requests that require complete evidence binding.
     /// </summary>
     protected async Task<(DefaultAgentControlPlaneToolService Service, string ReviewResultId, string PackagePreviewId, string EvidencePreviewId)> CreateServiceWithFullBindingArtifacts(
-        string draftId = "draft-001")
+        string draftId = "draft-001",
+        Func<AgentToolAuthorizationOptions>? optionsFactory = null)
     {
         var draft = CreateTestDraft(draftId: draftId);
 
@@ -389,7 +390,9 @@ public abstract class AgentControlPlaneTestBase
         SetupPackageBuilder();
 
         // Create service AFTER mock setups (EnsureActivationRequestServiceSetup runs inside)
-        var service = CreateService();
+        var service = optionsFactory is null
+            ? CreateService()
+            : CreateServiceWithOptionsFactory(optionsFactory);
 
         // Execute review tool
         var reviewContext = CreateContext("ReviewDescriptorDraft");
