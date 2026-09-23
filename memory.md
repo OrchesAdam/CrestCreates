@@ -16,15 +16,15 @@ identity/tenant/approval authorities. No sample production shortcut or new agent
 
 ## Current workspaces and PRs
 
-- Current design worktree: /home/orches/workspace/CrestCreates/.worktrees/durable-review-design-87
-  Branch codex/phase-10c-durable-review-design-87, based on PR102 final head.
-  No implementation changes here yet. Design work addresses durable human-review
-  continuity, not another in-memory pending-request demonstration.
-- PR102 draft: https://github.com/OrchesAdam/CrestCreates/pull/102
+- Current implementation worktree: /home/orches/workspace/CrestCreates/.worktrees/review-hash-inputs-87
+  Branch codex/phase-10c-review-hash-inputs-87, based on PR103 head
+  0d39cd2f3ad1846f2a7d64ad3bcdb93e6b8c9429. First production slice captures original
+  canonical review hash inputs. It is not yet the complete durable review artifact.
+- PR102 ready/unmerged: https://github.com/OrchesAdam/CrestCreates/pull/102
   Source worktree: .worktrees/live-proposal-retention-87.
   Final head5d635d8f56e3c9ae2f28ccf623c4e689dd640853.
-  Full CI35804325739 was in progress; verify exact-head success before ready.
-  Watch log /tmp/crest-pr102-ci-watch.log (session67463). Preserve published head.
+  Full CI35804325739 passed at that exact head; readiness verified by prior heartbeat.
+  Preserve published head.
 - PR101 ready/unmerged: https://github.com/OrchesAdam/CrestCreates/pull/101
   Head6d83015137b79c88781eb592de650b04aab23a78; CI35673825720 success.
 - PR100 ready/unmerged: head02459ad1b6768cee8f6ad967188e42e105cedf0f,
@@ -122,3 +122,33 @@ updated with this exact-head evidence and PR102 is now ready, unmerged. The one-
 crestcreates heartbeat was consumed and deleted; no active wake remains. PR103 remains
 a design-only draft. Its next unresolved contract is the immutable review artifact
 and async persistence authority; production implementation has not started.
+
+## Active implementation — review hash inputs
+
+Plan: docs/superpowers/plans/2026-09-23-review-hash-input-contract.md.
+Root verified that canonical activation hashes derive from unprojected review;
+the cached review used for Get/report is visibility projected. Rehashing the display
+DTO after restore is not sufficient. GPT-6 Luna high task luna6_review_hash_inputs
+implements a versioned typed captured input using the existing source-binding
+projection and derives integrity from it. Existing v2 hash writers/values stay intact;
+source-generated JSON and real native fixture coverage are required. This is a hash
+input contract, not request persistence, approval authority or a complete review DTO.
+Prior descriptor payload serializer caveat remains: Authoring JSON context alone
+cannot round-trip the abstract typed draft payload; do not use it as another protocol.
+Fresh quota at resume: 5h4%,weekly16%,ordinary allowed. No active automation or card use.
+
+## Verification checkpoint — 2026-09-23 afternoon
+
+Luna high implementation and root review complete. Focused hashes18/18, full
+Draft132/132, fullControlPlane556/556, native fixture1/1 passed. Native Release
+linux-x64 publish/link/run1m36s checked complete hashes before/after sourcegen JSON,
+false review flags, diagnostics, unsupported input version and disabled reflection
+fallback. Existing v2 pinned digests unchanged. Logs /tmp/crest-review-hash-focused.log,
+/tmp/crest-review-hash-draft.log, /tmp/crest-review-hash-control-plane.log,
+/tmp/crest-review-hash-native.log; native logs under artifacts/control-plane-json-aot-*.
+Public hash-service interface expands: custom external implementations must update.
+No model request, DB mutation, approval or activation. Full CI still pending.
+One-time heartbeat crestcreates created for2026-09-23 18:55 Asia/Shanghai after
+actual5h reset18:53:54. Latest quota92% used, weekly30%, ordinary allowed. No card used.
+Continue from this worktree; publish stacked PR on PR103 and verify exact-head full
+CI before ready. Durable full artifact/request state remains future work; #87 open.

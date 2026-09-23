@@ -4,6 +4,7 @@ using CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 using CrestCreates.DescriptorDraft.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.CanonicalHashing;
+using System.Text.Json;
 using FluentAssertions;
 using Xunit;
 
@@ -65,6 +66,121 @@ public sealed class DescriptorDraftReviewHashServiceTests
         var second = service.ComputeReviewManifestHash(review);
 
         first.Value.Should().Be(second.Value);
+    }
+
+    [Fact]
+    public void HashInput_Computations_Preserve_Preexisting_V2_Digest_Values()
+    {
+        var service = new DefaultDescriptorDraftReviewHashService(new DefaultCanonicalHashComputer());
+        var input = service.CaptureInput(CreateReview());
+
+        service.ComputeSourceReviewHash(input).Value.Should()
+            .Be("f60d35fe1819288f66a980da68dc45e3889627c645fb443a0fbf1de4ccb7acd2");
+        service.ComputeReviewManifestHash(input).Value.Should()
+            .Be("be9a5f2d978704c9205528bdbb5391c8b13b70579c34a75423073777dc216cec");
+    }
+
+    [Fact]
+    public void HashInput_SourceGeneratedJson_RoundTrips_AndComputesSameHashes()
+    {
+        var service = new DefaultDescriptorDraftReviewHashService(new DefaultCanonicalHashComputer());
+        var review = CreateReview() with
+        {
+            IsActivationEligible = false,
+            ValidationResult = new DescriptorDraftValidationResult { IsValid = false, Diagnostics = [] },
+            Diagnostics = new List<DescriptorDraftDiagnostic>
+            {
+                new() { Code = new DiagnosticCode("ERR-01"), Severity = SeverityLevel.Error, Message = "blocked" },
+                new() { Code = new DiagnosticCode("WARN-01"), Severity = SeverityLevel.Warning, Message = "review" }
+            }
+        };
+        var input = service.CaptureInput(review);
+        var typeInfo = DescriptorDraftReviewHashInputJsonSerializerContext.Default.DescriptorDraftReviewHashInput;
+        var json = JsonSerializer.Serialize(input, typeInfo);
+        var restored = JsonSerializer.Deserialize(json, typeInfo);
+
+        restored.Should().NotBeNull();
+        restored!.Version.Should().Be(input.Version);
+        restored.SourceBinding.Should().BeEquivalentTo(input.SourceBinding);
+        restored.SourceBinding.IsActivationEligible.Should().BeFalse();
+        restored.SourceBinding.IsValid.Should().BeFalse();
+        restored.SourceBinding.Diagnostics.Should().HaveCount(2);
+        restored.SourceBinding.Diagnostics.Should().ContainSingle(diagnostic => diagnostic.Severity == "Error");
+        restored.SourceBinding.GovernanceDecision.Should().BeNull();
+        restored.SourceBinding.ImpactSeverity.Should().BeNull();
+        service.ComputeSourceReviewHash(restored).Value.Should().Be(service.ComputeSourceReviewHash(input).Value);
+        service.ComputeReviewManifestHash(restored).Value.Should().Be(service.ComputeReviewManifestHash(input).Value);
+    }
+
+    [Fact]
+    public void CaptureInput_Is_Isolated_From_Later_DiagnosticCollection_Mutation()
+    {
+        var service = new DefaultDescriptorDraftReviewHashService(new DefaultCanonicalHashComputer());
+        var diagnostics = new List<DescriptorDraftDiagnostic>
+        {
+            new() { Code = new DiagnosticCode("ERR-01"), Severity = SeverityLevel.Error, Message = "first" }
+        };
+        var review = CreateReview() with { Diagnostics = diagnostics };
+        var captured = service.CaptureInput(review);
+        var expected = service.CaptureInput(CreateReview() with { Diagnostics = diagnostics.ToArray() });
+
+        diagnostics.Add(new DescriptorDraftDiagnostic
+        {
+            Code = new DiagnosticCode("ERR-02"), Severity = SeverityLevel.Error, Message = "later"
+        });
+
+        service.ComputeSourceReviewHash(captured).Value.Should().Be(service.ComputeSourceReviewHash(expected).Value);
+        service.ComputeReviewManifestHash(captured).Value.Should().Be(service.ComputeReviewManifestHash(expected).Value);
+    }
+
+    [Fact]
+    public void HashInput_Computations_Reject_Unsupported_Version_And_Malformed_Required_Fields()
+    {
+        var service = new DefaultDescriptorDraftReviewHashService(new DefaultCanonicalHashComputer());
+        var input = service.CaptureInput(CreateReview());
+
+        var unsupported = input with { Version = DescriptorDraftReviewHashInput.CurrentVersion + 1 };
+        var unsupportedCall = () => service.ComputeSourceReviewHash(unsupported);
+        unsupportedCall.Should().Throw<NotSupportedException>();
+
+        var malformedProjection = input.SourceBinding with { Diagnostics = null! };
+        var malformed = input with { SourceBinding = malformedProjection };
+        var malformedCall = () => service.ComputeReviewManifestHash(malformed);
+        malformedCall.Should().Throw<ArgumentNullException>();
+
+        var missingDiagnosticField = input.SourceBinding with
+        {
+            Diagnostics = [new ReviewDiagnosticProjection { Code = "ERR-01", Severity = null! }]
+        };
+        var malformedDiagnostic = input with { SourceBinding = missingDiagnosticField };
+        var diagnosticCall = () => service.ComputeSourceReviewHash(malformedDiagnostic);
+        diagnosticCall.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void Captured_Original_Inputs_Preserve_Hashes_When_Visible_Review_Is_Filtered()
+    {
+        var service = new DefaultDescriptorDraftReviewHashService(new DefaultCanonicalHashComputer());
+        var original = CreateReview() with
+        {
+            Diagnostics = new List<DescriptorDraftDiagnostic>
+            {
+                new() { Code = new DiagnosticCode("ERR-01"), Severity = SeverityLevel.Error, Message = "first" },
+                new() { Code = new DiagnosticCode("ERR-02"), Severity = SeverityLevel.Warning, Message = "second" }
+            }
+        };
+        var originalInput = service.CaptureInput(original);
+        var visibleReview = original with
+        {
+            IsActivationEligible = false,
+            Diagnostics = original.Diagnostics.Take(1).ToArray()
+        };
+        var visibleInput = service.CaptureInput(visibleReview);
+
+        service.ComputeSourceReviewHash(originalInput).Value.Should().Be(service.ComputeSourceReviewHash(original).Value);
+        service.ComputeReviewManifestHash(originalInput).Value.Should().Be(service.ComputeReviewManifestHash(original).Value);
+        service.ComputeSourceReviewHash(originalInput).Value.Should().NotBe(service.ComputeSourceReviewHash(visibleInput).Value);
+        service.ComputeReviewManifestHash(originalInput).Value.Should().NotBe(service.ComputeReviewManifestHash(visibleInput).Value);
     }
 
     [Fact]
