@@ -1,325 +1,98 @@
 # CrestCreates current handoff
 
-Last updated: 2026-09-22. This summary supersedes the dated status entries in
-[the preserved historical memory](docs/review/2026-09-20-memory-history.md).
-AGENTS.md remains the instruction entry point; history remains evidence, not a
-second source of current task status.
+Updated 2026-09-23. This summary supersedes status entries in
+[the preserved history](docs/review/2026-09-23-memory-history.md).
+AGENTS.md remains the instruction entry point.
 
 ## Goal and working rules
 
-The product goal is to let AI safely create and evolve enterprise applications.
-GitHub Issues are the roadmap. Issue #87 is active; #88 decisions remain provisional.
-The primary agent designs, reviews and executes verification; GPT-5.6 Terra high
-codes (user authorized replacement on 2026-09-22 because Luna is unavailable).
-The earlier Luna medium repository-reconnaissance preference has not been changed. Use GitHub PRs.
-Do not automatically merge. Keep the generated/typed NativeAOT mainline and existing
-authorization, tenant, approval and evidence authorities. Never patch parsed draft
-envelopes inside a sample to disguise an authoring defect.
+Let AI safely create and evolve enterprise applications. GitHub Issues are the
+roadmap; #87 remains active and #88 decisions provisional. Root designs/reviews
+and runs verification; user now authorizes GPT-6 Luna (high for coding, medium for
+bounded investigation). Use GitHub PR workflow, never automatically merge.
+Do not use reset cards. On actual quota exhaustion, stop and arrange one wake after
+the limiting reset. Preserve typed/generated/NativeAOT mainline and existing
+identity/tenant/approval authorities. No sample production shortcut or new agent loop.
 
-## Current workspace and published evidence
+## Current workspaces and PRs
 
-- Active worktree: /home/orches/workspace/CrestCreates/.worktrees/asset-proposal-replay-87
-- Branch: codex/phase-10c-asset-proposal-replay-87, based on PR #100. Offline
-  proposal retention/review-replay acceptance is implemented in draft PR #101:
-  https://github.com/OrchesAdam/CrestCreates/pull/101. Full CI is pending.
-- Bounded context acceptance is in PR #100: https://github.com/OrchesAdam/CrestCreates/pull/100.
-  Final head02459ad1b6768cee8f6ad967188e42e105cedf0f; CI35613490902 passed (verified 2026-09-22).
-  Marked ready on 2026-09-22 after exact-head success; preserve PR100 source worktree.
-  Check GitHub for current status rather than treating this pre-CI snapshot as final.
-- PR #99 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/99.
-  Exact head3004b888a15b70e64161ffa9d83bc22630bd4ce3 passed CI35564431378.
-  Local Authoring66, ControlPlane556 and native1 passed. Preserve its head.
-- PR #98 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/98.
-  Head 1efbe693907cd41d62aa53b08ed79e4e65345a4b; CI35547798046 passed.
-  Its worktree asset-live-eval-87 is clean; preserve the tested head.
-- PR #97 is ready, unmerged: https://github.com/OrchesAdam/CrestCreates/pull/97.
-  Final head 08fe989a1adefcc50dc0bb9a505dea6401a9204d passed full CI
-  35500739729, verified against the PR head before marking ready.
-- PR #95 is ready, unmerged: 2d0dbfc8da6af5ed22b500dd2b0c7a76a2c9c374; CI 34794889411 passed.
-- PR #96 is ready, unmerged: 9a6f9c0be08f356026f9377192595d2b33e2f7fa; CI 34836223554 passed.
-- Earlier stacked PRs #91-#94 are recorded in historical memory. Preserve their
-  verified heads. Do not change the PR #96 worktree while working on this successor.
+- Current design worktree: /home/orches/workspace/CrestCreates/.worktrees/durable-review-design-87
+  Branch codex/phase-10c-durable-review-design-87, based on PR102 final head.
+  No implementation changes here yet. Design work addresses durable human-review
+  continuity, not another in-memory pending-request demonstration.
+- PR102 draft: https://github.com/OrchesAdam/CrestCreates/pull/102
+  Source worktree: .worktrees/live-proposal-retention-87.
+  Final head5d635d8f56e3c9ae2f28ccf623c4e689dd640853.
+  Full CI35804325739 was in progress; verify exact-head success before ready.
+  Watch log /tmp/crest-pr102-ci-watch.log (session67463). Preserve published head.
+- PR101 ready/unmerged: https://github.com/OrchesAdam/CrestCreates/pull/101
+  Head6d83015137b79c88781eb592de650b04aab23a78; CI35673825720 success.
+- PR100 ready/unmerged: head02459ad1b6768cee8f6ad967188e42e105cedf0f,
+  CI35613490902 success. PR99/98/97 and earlier stacked PRs remain unmerged;
+  exact heads/evidence are preserved in history. Do not rewrite them incidentally.
 
-PR #96 proves two separate boundaries: actual approved-package definitions are
-checked against authoritative request hashes; a test Host loads supplied Workflow
-objects and rejects invalid fixed compiled baselines. Local CP 556/556 and Asset
-PostgreSQL E2E 12/12 passed, followed by full CI. This is not combined deployment proof.
+## Verified evidence
 
-## Successor changes and verified results
+PR101: deterministic real parser/review -> formal PostgreSQL draft store -> provider
+reconstruction -> exact draft and full canonical hashes -> fresh review. Tenant
+isolation checked. Local focused1/1, full Asset34 passed/1 live skipped; full CI passed.
+This temporary-schema test did not retain a live proposal for later approval.
 
-1. AssetControlPlaneApprovalHarness composes real parser, draft review, package
-   preview/evidence, HumanTask completion and hosted Outbox with in-memory CP stores.
-   It retains executable package definitions, rechecks full CanonicalHash structures,
-   binds checked receipts to their harness/tenant, and uses current catalog topology.
-2. Authoring Update could not express base v1 with proposed payload v2. An executed
-   baseline had 1 pass/1 fail: BaseVersion expected 1, actual 2. The rejected fixture
-   workaround (manually replacing BaseVersion) has been removed.
-3. The existing 7g.v1 output item now has optional string baseVersion for Update.
-   An explicit positive integer selects the existing version; absent input preserves
-   existing same-version behavior. ProposedVersion still comes from the payload.
-   Invalid values and fields on non-Update operations are rejected.
-4. Verified after this repair: focused parser 8/8; full Authoring 64/64.
-5. Two-draft acceptance now passes 2/2 on 2026-09-20. The Stale failure was
-   caused by the harness binding DraftVersion=1 for a v2 proposal. Both bindings
-   now use the validated actual ProposedVersion; production rechecker is unchanged.
-6. Native fixture and wrapper contain AgentAuthoringUpdateBaseVersion:PASS;
-   native publish/link/run passed 1/1 on 2026-09-20 with the new marker and all
-   existing markers. ELF output was inspected. The earlier attempt had been rejected
-   because weekly quota was exhausted; the successful run occurred after recovery.
+PR102: explicit live retention preflight validates official provider/migrations
+before model call. Save/readback use fresh PostgreSQL providers; fresh review
+checks the reloaded draft. Original draft status is preserved. Locator exposes only
+identity/full canonical hashes and prompt hashes, no private connection or raw output.
+Local focused7/7; full Asset E2E40 passed/1 opt-in live skipped. One actual DeepSeek
+retention call then passed1/1, no retry: HumanTaskDraftRetained. Requested model
+ deepseek-v4-flash; observed deepseek-flash, HTTP200/stop,1661 prompt tokens,
+2448 completion tokens (1989 reasoning). This is one sample, not reliability proof.
 
-## Next execution order
+Actual retained proposal:
+- Container crest-asset-approved-inventory-87, port127.0.0.1:55487.
+- Persistent schema asset_live_retained_20260923. DO NOT drop it or replace container
+  data; it holds the exact typed proposal for subsequent governance.
+- Tenant asset-live-eval-tenant.
+- Draft ht_asset_maintenance_initial_review-a9a00004ca5344f6832df9c25dc5e764.
+- Locator/full hashes: docs/review/2026-09-23-asset-live-retained-result.json.
+- Separate query after test process exit confirmed row remains, status0 (Created).
+- No human approval, activation or deployment occurred.
 
-- Combined approved-package-to-Host test passed 2/2
-  (/tmp/crest-approved-host-combined.log). Full Asset E2E passed 14/14
-  (/tmp/crest-approved-host-e2e-full.log). PR #97 contains this reviewed change.
-  The Host uses only the checked union of both approved inventories, retains v1
-  from the first package and executes both business review stages.
-- The separate two-draft acceptance, full ControlPlane and native wrapper are
-  already verified; do not repeat them unless new changes justify it.
-- PR #97 is complete and ready. Preserve its verified head.
-- The successor adds a default-skipped, opt-in live authoring probe. First real
-  DeepSeek request failed with ProviderUnavailable and zero drafts. See
-  docs/review/2026-09-20-asset-live-authoring-baseline.md and its JSON evidence.
-  Safe HTTP response metadata observation is being tested to distinguish empty
-  provider content from parser/review failure. No automatic retry or activation.
-- Then address restart, bounded live-model evidence and #88 decisions as demonstrated
-  needs; do not declare #87 complete from a test-only Host handoff.
+Prior failed provider baselines remain intact (budget exhaustion, parser rejection),
+as does the earlier successful summary-only sample. Never rewrite them as successes
+of this retained run. No additional model request is needed for retention itself.
 
-## Material limitations
+## Active design finding
 
-Only InMemoryRuntimeActivationGate exists. It validates/records a development
-activation receipt and does not install an inventory or mutate runtime registries.
-Activated therefore does not mean production deployment. Production activation
-ownership remains a concrete gap requiring a bounded business case and design.
+DefaultDescriptorActivationRequestService owns requests in a private
+ConcurrentDictionary, including approval/completion-event markers. Its changes are
+blind dictionary assignments after status checks. Durable draft persistence does
+not make requests, review/package/evidence artifacts or audit durable. Existing
+phase9bplus reference-data spec explicitly reserves this as a separate domain cutover.
+Only InMemoryRuntimeActivationGate exists; Activated is not production installation.
 
-DeepSeek model choice is deepseek-v4-flash; DEEPSEEK_API_KEY was confirmed present,
-never printed. The first three live model requests failed before producing drafts; the fourth
-bounded-context run succeeded as recorded below.
-The requested name remains deepseek-v4-flash; provider returned deepseek-flash.
-Official docs now map this legacy request name to V4.1 Flash. Reuse the existing OpenAI-compatible
-authoring client and bounded ContextPack; do not add a general agent loop.
-#50/#51/#76/#57 remain deferred; see the working gap assessment, not a final #88 closure.
+Root decision: asynchronous human review in an enterprise app needs continuity
+across process restart. Design a single request authority with conditional transitions,
+explicit evidence ownership, HumanTask/outbox recovery and gate idempotency boundaries.
+Do not call an ephemeral UnderReview harness request a durable handoff. No production
+activation owner has been implemented. #87 cannot be closed yet.
+GPT6 Luna medium task luna6_next_governance_seam is gathering concrete state/transaction/
+outbox/AOT seams; root writes/reviews design before delegating bounded implementation.
 
-## Reproducible environment and evidence
+## Environment and next execution order
 
-- Serialize dotnet builds: --disable-build-servers -m:1 -p:UseSharedCompilation=false.
-- Local JIT commands used -p:NuGetAudit=false for prior audit-network limitations;
-  repository defaults remain unchanged. Native wrapper inner publish uses normal audit.
-- BuildTasks was bootstrapped in this worktree.
-- PostgreSQL test container crest-asset-approved-inventory-87 was restarted on
-  loopback port 55487 without replacing data. Private credentials were recovered
-  to /tmp/crest-asset-pg-20260920.env; /tmp/crest-run-asset-e2e.py was recreated.
-  Temporary files may disappear after restart; never print credentials.
-- Historical logs (temporary files may be absent after restart):
-  /tmp/crest-update-base-version-parser.log (8/8),
-  /tmp/crest-update-base-version-authoring-full.log (64/64),
-  /tmp/crest-approved-host-two-draft.log (2/2 after binding fix),
-  /tmp/crest-approved-host-version-baseline.log (original version failure).
-- Plans: docs/superpowers/plans/2026-09-14-approved-asset-host.md and
-  docs/superpowers/plans/2026-09-15-authoring-update-base-version.md.
-- docs/review/2026-09-15-authoring-update-version-baseline.log is committed evidence.
+1. Verify PR102 final-head full CI; update PR body and mark ready only on success.
+2. Finish durable-review design from code facts, existing crash/replay semantics and
+   source-generated serialization gates. Preserve boundaries and staged exit criteria.
+3. Implement reviewed smallest platform cutover through Luna high, with real race/
+   restart/tenant/authority tests and NativeAOT publish/link/run where execution changes.
 
-## Quota and wakeup
-
-At the user's explicit request, the first action on 2026-09-20 was to create a new
-one-time heartbeat, id crestcreates, for 16:46 Asia/Shanghai after actual 5-hour
-reset 16:45:40. The wake was consumed and deleted successfully. Check actual limits
-before future continuation; schedule a new wake if the 5-hour limit is reached. No reset credit has been redeemed
-by this work; do not duplicate the user's earlier manual redemption.
-
-Native evidence: artifacts/control-plane-json-aot-adeb8cb90c2c4963ad74685b846b1309
-contains the ELF executable, publish.log and run.log. PostgreSQL container was
-restarted without replacing its data; private credential file was safely recovered
-to /tmp/crest-asset-pg-20260920.env, and /tmp/crest-run-asset-e2e.py recreated.
-
-2026-09-20: fresh two-draft run passed 2/2; full ControlPlane regression passed 556/556
-(/tmp/crest-approved-host-control-plane-full.log). Parent PR #96 was rechecked
-OPEN/ready at the same verified head. The combined Host proof was reviewed, applied and passed 2/2. Its temporary
-copy may lack subsequent namespace fixes; continue from the worktree source.
-
-The 16:46 heartbeat fired, actual quota was available (0% consumed), and the
-one-time automation crestcreates was deleted. Full Asset PostgreSQL E2E passed
-14/14; PR #97 final-head CI subsequently passed and it was marked ready.
-No reset credit used.
-
-## Live evaluation successor — 2026-09-21
-
-Source: AssetDeepSeekLiveAuthoringEvaluationTests.cs, explicit opt-in only.
-Local full Asset suite passed31/skipped1 after response-observer and budget checks.
-Default does not call DeepSeek. Requests use only public synthetic descriptor
-metadata, fixed test intent, new empty memory store. Credentials never logged.
-
-Three actual provider requests have run: initial empty-content baseline; one
-instrumented4096-budget run (HTTP200, length, all4096 completion tokens reasoning,
-no content); one16384-budget run (HTTP200, stop,3650 content chars,1687 completion
-including797 reasoning tokens), rejected by real parser as InvalidProviderOutput.
-Zero drafts, no approval/activation. A separate observer composition failure sent
-no HTTP and is recorded separately. Its typed HttpClient registration was repaired
-and tested offline. No further baseline live call is needed.
-
-Evidence and limitations: docs/review/2026-09-20-asset-live-authoring-baseline.md
-and linked JSON. The exact parser envelope rejection branch was not retained;
-do not claim a specific missing field. Default prompt names7g.v1 without complete
-wire schema; context has only workflow/task refs, no Form or descriptor bodies.
-Next design should improve bounded authoring protocol/context disclosure before
-proposing new agent orchestration. PR #98 contains the live baseline; full CI passed at its exact head.
-
-The 2026-09-21 13:19 Asia/Shanghai heartbeat fired after the actual reset.
-Fresh quota was5h0%, weekly47%; the one-time automation crestcreates was deleted.
-No active wake remains and no reset credit was used. Schedule the next wake from
-actual limits if the5h window is exhausted again.
-
-## Bounded context successor — current work
-
-Plan: docs/superpowers/plans/2026-09-21-asset-bounded-context.md.
-The real context acceptance passed1/1 after matching the active Metadata Workflow
-extractor's Uses/noRole taxonomy. FormRelationshipExtractor already exists under
-Framework/Modules and is registered by AddFormKernel; the initial missing-extractor
-claim was false and was corrected without production changes. Runtime's separate
-Workflow extractor uses Triggers/role labels; provider first-match ordering remains
-a separate consistency concern documented in the review, not silently patched.
-
-A test-owned shared RuntimeScenario recipe now selects exactly Workflow, HumanTask,
-Form and maintenance-decision Schema, with3 real edges, bounded depth/count,
-stable hashes and no unrelated descriptors. The live probe uses this recipe and
-safe fixed diagnostic categories. Full Asset PostgreSQL suite passed33/skipped1
-(/tmp/crest-bounded-context-full.log).
-
-One live call with promptv2 and this4-item context passed1/1:
-/tmp/crest-live-context-v2.log, /tmp/crest-asset-live-eval-context-v2.json.
-Real parser Succeeded, exactly one expected HumanTask Create v1, actual deterministic
-review/materialization clean, task contract checks passed. HTTP200/stop;1661 prompt
-and3304 completion tokens (2955 reasoning). Requested model deepseek-v4-flash,
-observed deepseek-flash. Evidence committed with this slice is a sanitized run
-summary, NOT the typed proposal, approval, activation or deployment. One sample
-is not a reliability guarantee. Both context and protocol changed from baseline.
-
-PR #100 final-head CI is verified successful and the PR is ready. No further model request needed for this slice. Later #87 work still needs
-retained proposal-to-approval/replay evidence, Workflow evolution and a production
-activation owner. Do not inflate this result to full #87 completion.
-
-Most recent fresh quota check:5h1%,weekly63%. No reset card used. No active wake.
-
-## Offline proposal replay successor
-
-Plan: docs/superpowers/plans/2026-09-21-asset-proposal-replay.md.
-Terra high task terra_proposal_replay implemented one offline Asset test using
-existing PostgreSQL draft store and explicit one-of persistence codec. Real parser
--> review -> save exact typed draft -> dispose provider -> fresh provider same
-isolated schema -> read/compare complete hashes and identities -> fresh review;
-wrong tenant cannot read. No new serializer format, production API, model call,
-approval or activation. Temporary schema cleanup means this is within-test restart
-evidence, not a retained live proposal available for future human approval.
-BuildTasks bootstrap passed (/tmp/crest-proposal-replay-bootstrap.log).
-Primary must review implementation, run appropriate PostgreSQL tests, document
-results and use successor PR. Keep live-run summary and offline fixture evidence
-distinct. DescriptorAuthoringJsonSerializerContext alone cannot round-trip concrete
-abstract DraftPayload; do not use it to claim lossless proposal retention. Existing
-PostgreSQL codec/store is the chosen formal boundary; do not expose internal codec.
-
-## Resume 2026-09-22
-
-Fresh quota allowed work: 5h4%, weekly79%; no reset credit used.
-Previous Luna coding attempt left no implementation files. Current tool rejects
-gpt-5.6-luna as unavailable; user explicitly selected GPT-5.6 Terra, retaining high
-reasoning. terra_proposal_replay completed the existing bounded offline plan.
-PR100 exact-head full CI succeeded and it is now ready, unmerged.
-
-The old /tmp runner and private credential file did not survive restart. Existing
-container crest-asset-approved-inventory-87 was restarted without replacing data.
-Private configuration recovered securely to /tmp/crest-asset-pg-20260922.env; runner
-/tmp/crest-run-asset-e2e.py recreated. Do not print the private configuration.
-BuildTasks bootstrap passed with 0 warnings/errors on 2026-09-22.
-One-time heartbeat crestcreates is scheduled for 2026-09-22 13:40 Asia/Shanghai,
-after the actual 5h reset13:39:25; consume/delete after it fires.
-
-## Offline replay local verification — 2026-09-22
-
-Terra high implementation is complete and reviewed. Focused PostgreSQL replay
-passed1/1 (/tmp/crest-proposal-replay-focused-r3.log); full Asset E2E passed34
-with1 opt-in live test skipped (/tmp/crest-proposal-replay-full.log).
-The initial compilation lacked namespace imports; these were corrected. A sandbox
-socket restriction blocked the first test-host launch; authorized execution passed.
-Both persistence and review providers are rebuilt before read/review replay. Full
-draft/concrete payload and complete contract/definition hashes match; wrong tenant
-cannot read. Only offline synthetic proposal data was used, temporary schema cleaned.
-No live model call, approval, activation or deployment occurred.
-Evidence: docs/review/2026-09-22-asset-proposal-replay.md. Draft PR #101 is published, stacked on PR #100. Verify the latest workflow run
-and exact PR head before marking ready; no automatic merge.
-
-Latest quota on 2026-09-22: 5h79%, weekly91%, ordinary usage still allowed.
-No reset card used. If exhausted, stop and preserve the scheduled13:40 heartbeat;
-if weekly-limited at wake, use the actual reset rather than repeatedly running.
-PR #101 CI must be verified at its final head before ready. The first dispatch
-35673791608 may be superseded by this final handoff commit; query GitHub for latest.
-
-## Current handoff — 2026-09-22 13:40 resume
-
-PR101 final head6d83015137b79c88781eb592de650b04aab23a78 passed full
-CI35673825720 and is ready, unmerged. Preserve that published head.
-Current worktree: /home/orches/workspace/CrestCreates/.worktrees/live-proposal-retention-87
-Branch: codex/phase-10c-live-proposal-retention-87, based on PR101.
-Next plan: docs/superpowers/plans/2026-09-22-asset-live-proposal-retention.md.
-Implement only test-owned opt-in retention through official PG draft store, with
-configuration fail-before-model, exact typed draft readback and fresh review.
-Root design/review/tests; Terra high coding. No automatic merge.
-Fresh quota5h0%,weekly93%; ordinary usage allowed. Do not redeem reset cards.
-The13:40 one-time heartbeat was consumed/deleted; no active wake remains.
-
-## Retention implementation checkpoint — 2026-09-22
-
-Terra task terra_live_retention wrote three test-owned files: new
-AssetLiveProposalRetention.cs and edits to AssetDeepSeekLiveAuthoringEvaluationTests.cs
-and AssetProposalReplayAcceptanceTests.cs. Changes are uncommitted; no successor PR.
-Bootstrap passed /tmp/crest-live-retention-bootstrap.log. Focused build/test running
-session21850, log /tmp/crest-live-retention-focused.log; do not claim success until
-verified. No new model request occurred.
-Root reviewed and requested fixes for invalid enablement erroneously treated as
-Disabled, explicit formal provider validation before migrations, and DescriptorDraft
-namespace aliases; these are applied. Latest follow-up asks Terra to replace the
-misleading fresh/unconnected HTTP-observer assertion with honest invalid-config
-preflight theory (missing connection/schema, invalid enable, unsafe schema). That
-assertion did NOT prove no model call; preflight-before-authoring ordering currently
-rests on source review. Check agent/file status before further changes.
-Before a live call: finish code review, focused and full E2E tests; ensure no secrets
-in summaries, exact typed draft preserved, actual retained schema not cleaned up.
-Fresh quota5h42%,weekly99%,ordinary usage still allowed at last query. If weekly
-exhausted: no reset card; weekly reset2026-09-27 11:45:40 Asia/Shanghai (1790480740).
-No active automation currently; arrange one wake after the actual limiting reset.
-
-## Current resume — 2026-09-23
-
-User now authorizes GPT-6 Luna subagents; coding remains high. Root dispatched
-luna6_retention_review for bounded review/fixes of the existing uncommitted slice.
-Fresh actual quota is5h0%,weekly0%,ordinary usage allowed. No card redeemed by root.
-No automation exists. Previous /tmp logs/config did not survive restart; prior
-focused run cannot be claimed passing. Existing PostgreSQL container restarted
-without replacing its data; private config restored to /tmp/crest-asset-pg-private.json
-(do not print), runner /tmp/crest-run-asset-e2e.py restored. Bootstrap passed0 errors
-(/tmp/crest-retention-bootstrap-0923.log). Focused tests executing in session53401
-with log /tmp/crest-retention-focused-0923.log. No new model call has occurred.
-Terra final correction is present: honest invalid-config theory replaces unconnected
-HTTP observer assertion. No HTTP-before-preflight regression proof is implied.
-
-## Verified retention slice — 2026-09-23
-
-GPT-6 Luna high review fixed missing SeverityLevel namespace and added third-provider
-readback after helper exit, verifying full draft and unchanged status. Focused7/7
-passed (/tmp/crest-retention-focused-0923-r2.log); full Asset E2E40 passed/1 skipped
-(/tmp/crest-retention-full-0923.log). One explicit DeepSeek retention call then
-passed1/1, no retry (/tmp/crest-live-retained-20260923.log). Result HumanTaskDraftRetained;
-requested deepseek-v4-flash, observed deepseek-flash, HTTP200/stop. Exact typed draft
-is in persistent schema asset_live_retained_20260923 on existing local container
-crest-asset-approved-inventory-87. Preserve container/data/schema. Separate query
-after test process exit confirmed the row remains. No human approval/activation.
-Locator/full hashes: docs/review/2026-09-23-asset-live-retained-result.json; review
-notes: docs/review/2026-09-23-asset-live-proposal-retention.md.
-Root must publish successor draft PR and verify exact-head CI before ready.
-
-Draft PR102 published: https://github.com/OrchesAdam/CrestCreates/pull/102, stacked
-on ready PR101. Implementation commitc527f6fb; final handoff commit follows.
-Verify latest full CI and exact final PR head before ready; no merge.
-GPT6 Luna medium task luna6_next_governance_seam is read-only investigating the
-smallest safe subsequent resume-to-human-review-request boundary and durable versus
-ephemeral governance ownership. No successor implementation is authorized by its
-recommendation alone; root will review design against Issue87 and current evidence.
+Use serialized dotnet --disable-build-servers -m:1 -p:UseSharedCompilation=false.
+Local -p:NuGetAudit=false is an environment workaround, not a changed repo default.
+Private DB config: /tmp/crest-asset-pg-private.json, never print. Runner:
+/tmp/crest-run-asset-e2e.py LOG [dotnet-test extra args]. /tmp can disappear on reboot;
+recover credentials internally from container configuration without printing them.
+Credential env DEEPSEEK_API_KEY remains user-authorized; never print it.
+Local latest logs: /tmp/crest-retention-focused-0923-r2.log,
+/tmp/crest-retention-full-0923.log, /tmp/crest-live-retained-20260923.log.
+No active automation currently. Last fresh quota5h40%,weekly6%,ordinary usage allowed;
+query actual limits before making future scheduling decisions. No card used by root.
