@@ -150,5 +150,14 @@ Public hash-service interface expands: custom external implementations must upda
 No model request, DB mutation, approval or activation. Full CI still pending.
 One-time heartbeat crestcreates created for2026-09-23 18:55 Asia/Shanghai after
 actual5h reset18:53:54. Latest quota92% used, weekly30%, ordinary allowed. No card used.
-Continue from this worktree; publish stacked PR on PR103 and verify exact-head full
+PR104 draft: https://github.com/OrchesAdam/CrestCreates/pull/104, stacked on PR103.
+Implementation commit cfdc5200. Continue from this worktree and verify final-head full
 CI before ready. Durable full artifact/request state remains future work; #87 open.
+
+## Resume — 2026-09-23 18:55 CST
+
+Actual quota restored (5h0%, weekly31%, allowed); no reset card used. Previous
+handoff commit/push/CI dispatch was not executed because automatic approval review
+hit the usage limit. Only memory.md remained uncommitted; PR104 implementation
+cfdc5200 was already published. The consumed one-time heartbeat was deleted.
+Resume by committing this handoff and dispatching full CI on the final PR104 head.
