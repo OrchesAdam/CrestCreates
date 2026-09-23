@@ -185,3 +185,30 @@ rejects ambient transactions for its separate ownership semantics. The proposal 
 immutable governance artifacts must already be prepared under their own boundaries;
 this transaction commits the activation request, its task/link and durable audit or
 outbox intent. It must not change the draft-store contract to make nesting convenient.
+
+## Resolved package serialization scope; remaining review envelope
+
+The official IDescriptorPackageSerializer/DescriptorPackageSerializer uses the
+source-generated CrestCreatesMetadataJsonContext. Reuse this format for immutable
+package manifest/snapshot/evidence/hash-envelope retention. DescriptorSnapshot entries
+contain references, names, state and hash strings, not executable descriptor
+definitions. Never advertise package deserialization as descriptor reconstruction;
+executable proposal definitions continue through the one existing typed draft path.
+Rehash decoded package content and verify owner draft/version/full hashes instead
+of accepting persisted caller-supplied hash values as proof.
+
+Current internal preview owners contain necessary additional binding fields:
+PackagePreviewResourceSnapshot has owner, scope fingerprint, draft version and
+visible-descriptor-set hash; ReviewResourceSnapshot has the broad review result
+and owner; EvidencePreviewResourceSnapshot has evidence and owner. Persisting only
+the visible preview DTO or resolver hash slots discards these authority boundaries.
+
+The exact durable review artifact contract remains the next design task. It must
+preserve enough authoritative inputs to reproduce the original SourceReview and
+ReviewManifest canonical hashes, plus information needed for authorized review
+retrieval. A caller-provided hash or a review recomputed against a changed baseline
+must never be silently accepted under the old review ID. Decide explicitly between
+an immutable typed original-review artifact and a new review/rebinding operation;
+preserve visibility projection semantics in either case. Avoid serializing arbitrary
+internal object graphs or creating a parallel draft format as a shortcut. Any
+contract must be source-generated, versioned and native publish/link/run tested.

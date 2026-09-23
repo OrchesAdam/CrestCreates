@@ -96,3 +96,20 @@ Local latest logs: /tmp/crest-retention-focused-0923-r2.log,
 /tmp/crest-retention-full-0923.log, /tmp/crest-live-retained-20260923.log.
 No active automation currently. Last fresh quota5h40%,weekly6%,ordinary usage allowed;
 query actual limits before making future scheduling decisions. No card used by root.
+
+## Published design checkpoint
+
+Draft PR103: https://github.com/OrchesAdam/CrestCreates/pull/103. Documentation only;
+no durable activation implementation exists yet. Plan:
+docs/superpowers/plans/2026-09-23-durable-activation-review-cutover.md.
+Resolved: same PG coordinator can atomically create request/task; stable task ID
+supports verification after unknown commit but CreateAsync itself is insert-only.
+Do not wrap draft SaveAsync into this ambient transaction (top-level boundary).
+Official package serializer preserves manifest/snapshot/evidence, NOT executable
+descriptor definitions. Next design task is exact immutable review artifact contract
+and async persistence ownership without losing current visibility/hash semantics.
+Luna medium investigation completed; no active coding agents or duplicate work needed.
+PR102 CI35804325739 was running Asset Management Golden Sample at last actual query;
+query live status before ready. PR103 needs contract design completion, not a claim
+of implementation. One-time heartbeat crestcreates scheduled2026-09-23 13:53 CST
+following actual5h reset13:52:15; consume/delete after firing. No reset card used.
