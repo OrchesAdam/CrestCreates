@@ -51,7 +51,6 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly IDescriptorTopologyBuilder _topologyBuilder;
     private readonly IDescriptorPackageBuilder _packageBuilder;
     private readonly IDescriptorStableHashBuilder _hashBuilder;
-    private readonly DraftCanonicalHashing.IDescriptorDraftReviewHashService _reviewHashService;
     private readonly ILogger<DefaultAgentControlPlaneToolService> _logger;
     private readonly AgentControlPlaneResourceResolver _resourceResolver;
     private readonly AgentTopologyVisibilityProjector _topologyProjector;
@@ -63,16 +62,15 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly IDescriptorActivationRequestService _activationRequestService;
     private readonly IActivationReviewOrchestrator _activationReviewOrchestrator;
     private readonly IActivationBindingArtifactResolver _artifactResolver;
+    private readonly AgentReviewArtifactFactory _reviewArtifactFactory;
 
-    // Local stores for review results, fix proposals, package previews, activation requests
-    // Keyed by (TenantId, ArtifactId) for tenant isolation.
-    // Each entry carries the owning Draft for owner-kind visibility resolution.
-    private readonly ConcurrentDictionary<(string TenantId, string Id), ReviewResourceSnapshot> _reviewResults = new();
+    // Review artifacts use the configured artifact authority; the remaining short-lived
+    // projections stay tenant-keyed until their separate persistence cutovers.
+    private readonly IAgentReviewArtifactStore _reviewArtifactStore;
     private readonly ConcurrentDictionary<(string TenantId, string Id), FixProposalResourceSnapshot> _fixProposals = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), PackagePreviewResourceSnapshot> _packagePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string Id), EvidencePreviewResourceSnapshot> _evidencePreviews = new();
     private readonly ConcurrentDictionary<(string TenantId, string DraftId, string ScopeFingerprint), string> _latestPackageByDraft = new();
-    private readonly ConcurrentDictionary<(string TenantId, string Id), ReportResourceSnapshot> _reports = new();
 
     public DefaultAgentControlPlaneToolService(
         IAgentToolManifestProvider manifestProvider,
@@ -95,6 +93,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         IDescriptorActivationRequestService activationRequestService,
         IActivationReviewOrchestrator activationReviewOrchestrator,
         IActivationBindingArtifactResolver artifactResolver,
+        IAgentReviewArtifactStore reviewArtifactStore,
         AgentToolAuthorizationOptions? authorizationOptions = null,
         Func<AgentToolAuthorizationOptions>? optionsFactory = null)
     {
@@ -111,13 +110,14 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _topologyBuilder = topologyBuilder;
         _packageBuilder = packageBuilder;
         _hashBuilder = hashBuilder;
-        _reviewHashService = reviewHashService;
         _logger = logger;
         _reportBuilder = reportBuilder;
         _reportRenderer = reportRenderer;
         _activationRequestService = activationRequestService;
         _activationReviewOrchestrator = activationReviewOrchestrator;
         _artifactResolver = artifactResolver;
+        _reviewArtifactStore = reviewArtifactStore;
+        _reviewArtifactFactory = new AgentReviewArtifactFactory(topologyBuilder, reviewHashService);
         _resourceResolver = new AgentControlPlaneResourceResolver(draftStore, descriptorCatalog);
         _topologyProjector = new AgentTopologyVisibilityProjector();
         _artifactProjector = new AgentDraftArtifactVisibilityProjector(_topologyProjector, topologyBuilder);
@@ -1196,37 +1196,25 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             var reviewResult = await _draftReviewService.ReviewAsync(snapshot.Draft, universe.VisibleDescriptors, ct);
 
-            // Project nested review data through visibility.
-            // Null return means projection failure — caller must return
-            // Failed and NOT persist review or mutate draft state.
-            var projectedReview = _artifactProjector.ProjectReview(reviewResult, scope, universe);
-            if (projectedReview is null)
-            {
-                return await RecordAggregateFailure<AgentReviewResultDto>(
-                    context, "PACKAGE_PROJECTION_FAILURE", ct);
-            }
-
             var reviewId = Guid.NewGuid().ToString("N");
-            _reviewResults[(context.TenantId, reviewId)] = new ReviewResourceSnapshot(
-                projectedReview, snapshot.Draft, DateTimeOffset.UtcNow, scope.ScopeFingerprint);
+            var createdAt = DateTimeOffset.UtcNow;
+            if (!_reviewArtifactFactory.TryCreate(
+                    reviewId, createdAt, reviewResult, snapshot.Draft, scope, universe, out var artifact))
+                return await RecordAggregateFailure<AgentReviewResultDto>(context, "PACKAGE_PROJECTION_FAILURE", ct);
 
-            // Store review hashes for evidence recheck
-            var sourceReviewHash = _reviewHashService.ComputeSourceReviewHash(reviewResult);
-            var reviewManifestHash = _reviewHashService.ComputeReviewManifestHash(reviewResult);
-            _artifactResolver.StoreReviewHashes(context.TenantId, reviewId, sourceReviewHash, reviewManifestHash);
+            await _reviewArtifactStore.InsertAsync(artifact, ct);
 
             var reviewed = snapshot.Draft with { Status = DraftAbstractions.DescriptorDraftStatus.Reviewed };
             await _draftStore.SaveAsync(reviewed, ct);
 
-            var toolDiags = projectedReview.Diagnostics.Select(MapFromDraftDiagnostic).ToList();
+            var toolDiags = artifact.ProjectedReview.Diagnostics.Select(MapFromDraftDiagnostic).ToList();
             var audit = BuildAudit(context, AgentToolResultStatus.Success, toolDiags) with
             {
                 TouchedDraftIds = [draftId],
                 TouchedReviewResultIds = [reviewId]
             };
             await _auditor.RecordAsync(audit, ct);
-            var reviewDto = AgentReviewResultDtoProjection.Project(projectedReview);
-            return AgentToolResult<AgentReviewResultDto>.Success(reviewDto, audit);
+            return AgentToolResult<AgentReviewResultDto>.Success(artifact.ProjectedReview, audit);
         }, ct);
     }
 
@@ -1235,13 +1223,14 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     {
         return await ExecuteAsync(context, AgentToolName.GetDraftReviewResult, AgentToolPermissionNames.ReviewRead, async (scope, ct) =>
         {
-            if (!_reviewResults.TryGetValue((context.TenantId, reviewResultId), out var snapshot))
+            var snapshot = await _reviewArtifactStore.GetAsync(context.TenantId, reviewResultId, ct);
+            if (snapshot is null)
             {
                 return await RecordAndReturn(context,
                     AgentToolResult<AgentReviewResultDto>.NotFound($"Review result '{reviewResultId}' not found."));
             }
 
-            var denyResult = DenyIfInvisible<AgentReviewResultDto>(context, scope, snapshot.Owner.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentReviewResultDto>(context, scope, snapshot.ReportInput.Owner.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
 
@@ -1266,8 +1255,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 TouchedReviewResultIds = [reviewResultId]
             };
             await _auditor.RecordAsync(audit, ct);
-            var reviewDto = AgentReviewResultDtoProjection.Project(snapshot.Review);
-            return AgentToolResult<AgentReviewResultDto>.Success(reviewDto, audit);
+            return AgentToolResult<AgentReviewResultDto>.Success(snapshot.ProjectedReview, audit);
         }, ct);
     }
 
@@ -1292,33 +1280,28 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     return denyResult;
             }
 
-            var reviews = _reviewResults
-                .Where(kvp => kvp.Key.TenantId == context.TenantId)
-                .ToList();
-
-            if (draftId is not null)
-                reviews = reviews.Where(r => r.Value.Review.DraftId == draftId).ToList();
+            var reviews = await _reviewArtifactStore.ListAsync(context.TenantId, draftId, ct);
 
             // Batch-load owner drafts for all stored reviews
             var owners = await _resourceResolver.ResolveOwnersAsync(
-                context.TenantId, reviews.Select(r => r.Value.Review.DraftId), ct);
+                context.TenantId, reviews.Select(r => r.DraftId), ct);
 
-            if (reviews.Any(r => !owners.ContainsKey(r.Value.Review.DraftId)))
+            if (reviews.Any(r => !owners.ContainsKey(r.DraftId)))
                 return await RecordAggregateFailure<ReviewResultListResult>(
                     context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
 
             var ownerVisible = reviews
-                .Where(r => scope.IsVisible(owners[r.Value.Review.DraftId].DescriptorKind))
+                .Where(r => scope.IsVisible(owners[r.DraftId].DescriptorKind))
                 .ToList();
             var scopeTrimmed = ownerVisible.Any(r =>
-                !StringComparer.Ordinal.Equals(r.Value.ScopeFingerprint, scope.ScopeFingerprint));
+                !StringComparer.Ordinal.Equals(r.ScopeFingerprint, scope.ScopeFingerprint));
             var visible = ownerVisible
-                .Where(r => StringComparer.Ordinal.Equals(r.Value.ScopeFingerprint, scope.ScopeFingerprint))
-                .OrderBy(r => r.Value.Review.DraftId, StringComparer.Ordinal)
-                .Select(r => r.Value.Review)
+                .Where(r => StringComparer.Ordinal.Equals(r.ScopeFingerprint, scope.ScopeFingerprint))
+                .OrderBy(r => r.DraftId, StringComparer.Ordinal)
+                .Select(r => r.ProjectedReview)
                 .ToList().AsReadOnly();
 
-            var result = new ReviewResultListResult { Results = visible.Select(AgentReviewResultDtoProjection.Project).ToList().AsReadOnly() };
+            var result = new ReviewResultListResult { Results = visible };
 
             var diags = scope.IsRestricted || scopeTrimmed ? SecurityTrimmedDiagnostics : [];
             var audit = BuildAudit(context, AgentToolResultStatus.Success, diags);
@@ -1383,10 +1366,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (denyResult is not null) return denyResult;
 
             // Find the latest review result for this draft (most recent by timestamp)
-            var reviewSnapshot = _reviewResults.Values
-                .Where(r => r.Owner.DraftId == draftId && r.Owner.TenantId == context.TenantId)
-                .OrderByDescending(r => r.CreatedAt)
-                .FirstOrDefault();
+            var reviewSnapshot = await _reviewArtifactStore.GetLatestAsync(context.TenantId, draftId, ct);
             if (reviewSnapshot is null)
             {
                 var noReviewDiag = new AgentToolDiagnostic
@@ -1413,15 +1393,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return AgentToolResult<DescriptorReviewReportDto>.Failed([scopeDiag], scopeAudit);
             }
 
-            var request = new DescriptorReviewReportBuildRequest
-            {
-                ReviewResult = reviewSnapshot.Review,
-                Draft = reviewSnapshot.Owner,  // Use the draft snapshot captured at review time, not the current draft
-                VisibilityApplied = true
-            };
-
-            var report = _reportBuilder.Build(request);
-            _reports[(context.TenantId, report.ReportId)] = new ReportResourceSnapshot(report, reviewSnapshot.Owner);
+            var report = _reportBuilder.Build(reviewSnapshot.ReportInput);
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             await _auditor.RecordAsync(audit, ct);
@@ -2390,7 +2362,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // Validate that the binding snapshot references exist and match the draft.
             var refDiagnostics = new List<AgentToolDiagnostic>();
 
-            if (!_reviewResults.TryGetValue((context.TenantId, request.BindingSnapshot.ReviewResultId), out var reviewRef))
+            var reviewRef = await _reviewArtifactStore.GetAsync(
+                context.TenantId, request.BindingSnapshot.ReviewResultId, ct);
+            if (reviewRef is null)
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
@@ -2399,13 +2373,13 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' not found for this tenant."
                 });
             }
-            else if (reviewRef.Review.DraftId != request.DraftId)
+            else if (reviewRef.DraftId != request.DraftId)
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.ReviewResultDraftMismatch,
                     Severity = SeverityLevel.Error,
-                    Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' belongs to draft '{reviewRef.Review.DraftId}', not '{request.DraftId}'."
+                    Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' belongs to draft '{reviewRef.DraftId}', not '{request.DraftId}'."
                 });
             }
             else if (!StringComparer.Ordinal.Equals(reviewRef.ScopeFingerprint, scope.ScopeFingerprint))
@@ -2494,7 +2468,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             // Extract governance decision from review result — the review pipeline already
             // evaluated governance via IDescriptorLifecycleGovernanceService.
-            var governanceDecision = reviewRef?.Review?.GovernanceDecision?.MaxDecision;
+            var governanceDecision = reviewRef?.ReportInput.GovernanceMaxDecision;
 
             // Delegate to RequestService — single authority for activation request lifecycle.
             // Pass pre-evaluated governance decision so auto-activation is reachable.

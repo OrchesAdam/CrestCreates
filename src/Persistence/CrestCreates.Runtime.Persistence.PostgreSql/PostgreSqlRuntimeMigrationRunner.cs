@@ -193,6 +193,7 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             ,"runtime_outbox_messages"
             ,"runtime_workflow_continuation_acceptances"
             ,"organization_scope_generations"
+            ,"agent_review_artifacts"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -895,6 +896,14 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_cp_draft_contract_version", "check (state_contract_version = 1)")],
             [new("ix_cp_drafts_created", ["tenant_id", "created_at_utc_ticks", "draft_id"], "", Unique: false, KeyCollations: ["C", "", "C"]),
              new("ix_cp_drafts_combined_filter", ["tenant_id", "descriptor_kind", "operation", "author_kind", "status", "created_at_utc_ticks", "draft_id"], "", Unique: false, KeyCollations: ["C", "", "", "", "", "", "C"])], []),
+            new("agent_review_artifacts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["review_result_id"] = TextC, ["draft_id"] = TextC,
+                ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["artifact_version"] = Integer, ["state_json"] = Json
+            }, ["tenant_id", "review_result_id"],
+            [new("ck_agent_review_artifact_version", "check (artifact_version = 1)")],
+            [new("ix_agent_review_artifacts_latest", ["tenant_id", "draft_id", "created_at_utc_ticks", "review_result_id"], "", Unique: false, KeyCollations: ["C", "C", "", "C"])], []),
             new("organization_units", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["organization_unit_id"] = TextC,
@@ -1684,6 +1693,21 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                     or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
                 constraint ck_org_scope_generation_value check (generation >= 1)
             );
+            """),
+        new RuntimeMigration("V014", "agent_review_artifacts", """
+            create table {schema}.agent_review_artifacts (
+                tenant_id text collate "C" not null,
+                review_result_id text collate "C" not null,
+                draft_id text collate "C" not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                artifact_version integer not null,
+                state_json jsonb not null,
+                constraint pk_agent_review_artifacts primary key (tenant_id, review_result_id),
+                constraint ck_agent_review_artifact_version check (artifact_version = 1)
+            );
+            create index ix_agent_review_artifacts_latest
+                on {schema}.agent_review_artifacts (tenant_id, draft_id, created_at_utc_ticks, review_result_id);
             """),
     ];
 }

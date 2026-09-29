@@ -11,6 +11,8 @@
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Abstractions/CrestCreates.Agent.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
     <ProjectReference Include="../../../src/Metadata/CrestCreates.Metadata.AgentTool.Abstractions/CrestCreates.Metadata.AgentTool.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj" />

@@ -1,4 +1,5 @@
 using CrestCreates.DescriptorDraft.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Organization.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -8,6 +9,27 @@ namespace CrestCreates.Runtime.Persistence.PostgreSql;
 
 public static class PostgreSqlControlPlaneReferenceDataPersistenceServiceCollectionExtensions
 {
+    public static IServiceCollection AddCrestCreatesPostgreSqlReviewArtifactStore(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        var hasBaseProvider = services.Any(descriptor =>
+            descriptor.ServiceType == typeof(PostgreSqlRuntimeProviderRegistrationMarker));
+        var hasProviderKernel = services.Any(descriptor => descriptor.ServiceType == typeof(PostgreSqlRuntimePersistenceOptions))
+            && services.Any(descriptor => descriptor.ServiceType == typeof(NpgsqlDataSource))
+            && services.Any(descriptor => descriptor.ServiceType == typeof(PostgreSqlRuntimeMigrationRunner))
+            && services.Any(descriptor => descriptor.ServiceType == typeof(PostgreSqlRuntimeTransactionCoordinator));
+        if (!hasBaseProvider || !hasProviderKernel)
+        {
+            throw new InvalidOperationException(
+                "Review artifact persistence requires the complete base PostgreSQL Runtime persistence provider kernel. " +
+                "Call AddCrestCreatesPostgreSqlRuntimePersistence(options) before adding the review artifact store.");
+        }
+
+        services.RemoveAll<IAgentReviewArtifactStore>();
+        services.AddSingleton<IAgentReviewArtifactStore, PostgreSqlAgentReviewArtifactStore>();
+        return services;
+    }
+
     public static IServiceCollection AddCrestCreatesPostgreSqlControlPlaneAndReferenceDataPersistence(
         this IServiceCollection services)
     {

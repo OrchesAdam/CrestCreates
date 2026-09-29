@@ -125,6 +125,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
     public static IServiceCollection AddAgentControlPlaneInMemoryStubs(this IServiceCollection services)
     {
         services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.TryAddSingleton<IAgentReviewArtifactStore, InMemoryAgentReviewArtifactStore>();
         services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
         services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();

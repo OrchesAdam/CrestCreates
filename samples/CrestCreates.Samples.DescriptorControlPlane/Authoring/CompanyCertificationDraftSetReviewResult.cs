@@ -12,6 +12,8 @@ public sealed record CompanyCertificationDraftSetReviewResult
 {
     public required DescriptorDraftSet DraftSet { get; init; }
     public required IReadOnlyList<DescriptorDraftReviewResult> PerDraftReviewResults { get; init; }
+    public IReadOnlyDictionary<string, IReadOnlyList<IDescriptor>> ReviewInventoriesByDraft { get; init; }
+        = new Dictionary<string, IReadOnlyList<IDescriptor>>(StringComparer.Ordinal);
     public required IReadOnlyList<IDescriptor> FinalProposedInventory { get; init; }
     public required bool IsBlocked { get; init; }
     public required string FinalDecisionSource { get; init; }

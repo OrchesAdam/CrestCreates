@@ -1,6 +1,9 @@
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using CrestCreates.Agent.ControlPlane.Abstractions.Json;
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
@@ -17,6 +20,7 @@ using Microsoft.Extensions.Logging;
 internal static class ProjectionScopeNativeAotFixture
 {
     private const string TenantId = "projection-scope-aot-tenant";
+    private static readonly DateTimeOffset FixedNow = new(2026, 9, 24, 5, 0, 0, TimeSpan.Zero);
 
     public static bool Run()
     {
@@ -44,6 +48,7 @@ internal static class ProjectionScopeNativeAotFixture
             services.AddDescriptorPackaging();
             services.AddDescriptorDrafts();
             services.AddRuntimePersistence();
+            services.AddSingleton<TimeProvider>(new FixedTimeProvider(FixedNow));
 
             var broadOptions = AgentToolAuthorizationOptions.DevelopmentDefaults;
             services.AddAgentControlPlane(broadOptions).AddAgentControlPlaneInMemoryStubs();
@@ -91,11 +96,43 @@ internal static class ProjectionScopeNativeAotFixture
             if (string.IsNullOrWhiteSpace(reviewId))
                 return Fail("the broad review did not return its stored review identity");
 
+            var reviewStore = provider.GetRequiredService<IAgentReviewArtifactStore>();
+            var storedArtifact = reviewStore.GetAsync(TenantId, reviewId).GetAwaiter().GetResult();
+            if (storedArtifact is null || storedArtifact.CreatedAt == default
+                || !ReviewArtifactStoreNativeAotFixture.Run(storedArtifact))
+                return Fail("the in-memory store did not retain a source-generated JSON review artifact");
+
             var packagePreview = controlPlane.PreviewDescriptorPackageAsync(
                 Context("PreviewDescriptorPackage"), draftId).GetAwaiter().GetResult();
             var packagePreviewId = packagePreview.AuditRecord?.TouchedPackagePreviewIds?.SingleOrDefault();
             if (packagePreview.Status != AgentToolResultStatus.Success || string.IsNullOrWhiteSpace(packagePreviewId))
                 return Fail("the broad package preview was not stored");
+
+            var firstReport = controlPlane.BuildDescriptorReviewReportAsync(
+                Context("BuildDescriptorReviewReport"), draftId).GetAwaiter().GetResult();
+            if (firstReport.Status != AgentToolResultStatus.Success || firstReport.Value is null
+                || firstReport.Value.GeneratedAt != FixedNow)
+                return Fail("the fixed-clock report was not available from the stored review artifact");
+            var reportTypeInfo = (JsonTypeInfo<DescriptorReviewReportDto>?)
+                AgentControlPlaneToolJsonSerializerContext.Default.GetTypeInfo(typeof(DescriptorReviewReportDto));
+            if (reportTypeInfo is null)
+                return Fail("source-generated report DTO metadata was not available");
+            var firstReportJson = JsonSerializer.Serialize(firstReport.Value, reportTypeInfo);
+
+            // Construct a fresh tool service over the same explicit in-memory store.
+            // This checks the service/store contract after service recreation; it is
+            // deliberately not evidence of native PostgreSQL persistence.
+            var recreatedControlPlane = CreateService(provider, broadOptions, () => currentOptions);
+            if (!ReferenceEquals(reviewStore, provider.GetRequiredService<IAgentReviewArtifactStore>()))
+                return Fail("the recreated tool service did not resolve the configured review store");
+            var recreatedGet = recreatedControlPlane.GetDraftReviewResultAsync(
+                Context("GetDraftReviewResult"), reviewId).GetAwaiter().GetResult();
+            var recreatedReport = recreatedControlPlane.BuildDescriptorReviewReportAsync(
+                Context("BuildDescriptorReviewReport"), draftId).GetAwaiter().GetResult();
+            if (recreatedGet.Status != AgentToolResultStatus.Success
+                || recreatedReport.Status != AgentToolResultStatus.Success || recreatedReport.Value is null
+                || !StringComparer.Ordinal.Equals(firstReportJson, JsonSerializer.Serialize(recreatedReport.Value, reportTypeInfo)))
+                return Fail("recreated tool service did not recover the review and fixed-clock report from the same store");
 
             currentOptions = broadOptions with { DeniedDescriptorKinds = ["Schema"] };
             var narrowedGet = controlPlane.GetDraftReviewResultAsync(Context("GetDraftReviewResult"), reviewId)
@@ -122,10 +159,30 @@ internal static class ProjectionScopeNativeAotFixture
                 || narrowedReport.Diagnostics.All(d => d.Code != AgentToolDiagnosticCodes.ReviewResultScopeMismatch))
                 return Fail("report building reused a review captured under a broader scope");
 
+            // Use a distinct scope that leaves this draft's Schema references visible,
+            // so the test can capture a second immutable review instead of correctly
+            // rejecting a package projection that contains a hidden Schema.
+            currentOptions = broadOptions with { DeniedDescriptorKinds = ["Workflow"] };
+            var narrowReview = controlPlane.ReviewDescriptorDraftAsync(Context("ReviewDescriptorDraft"), draftId)
+                .GetAwaiter().GetResult();
+            var narrowReviewId = narrowReview.AuditRecord?.TouchedReviewResultIds?.SingleOrDefault();
+            if (narrowReview.Status != AgentToolResultStatus.Success || string.IsNullOrWhiteSpace(narrowReviewId))
+                return Fail("the narrower visibility scope did not capture a latest review artifact");
+            var narrowLatestReport = controlPlane.BuildDescriptorReviewReportAsync(
+                Context("BuildDescriptorReviewReport"), draftId).GetAwaiter().GetResult();
+            if (narrowLatestReport.Status != AgentToolResultStatus.Success)
+                return Fail("the latest narrow-scope review could not build its own report");
+
+            currentOptions = broadOptions;
+            var wrongScopeLatestReport = recreatedControlPlane.BuildDescriptorReviewReportAsync(
+                Context("BuildDescriptorReviewReport"), draftId).GetAwaiter().GetResult();
+            if (wrongScopeLatestReport.Status != AgentToolResultStatus.Failed
+                || wrongScopeLatestReport.Diagnostics.All(d => d.Code != AgentToolDiagnosticCodes.ReviewResultScopeMismatch))
+                return Fail("latest report fell back to an older broad-scope review after a newer narrow-scope review");
+
             // Restore the original scope and capture a fresh review. This proves that
             // review execution and subsequent reads still work on the real service path
             // after the narrower-scope rejection, without changing the fixture inventory.
-            currentOptions = broadOptions;
             var reReviewed = controlPlane.ReviewDescriptorDraftAsync(Context("ReviewDescriptorDraft"), draftId)
                 .GetAwaiter().GetResult();
             if (reReviewed.Status != AgentToolResultStatus.Success || reReviewed.Value?.TopologySummary is null
@@ -144,7 +201,9 @@ internal static class ProjectionScopeNativeAotFixture
             var recoveredReport = controlPlane.BuildDescriptorReviewReportAsync(Context("BuildDescriptorReviewReport"), draftId)
                 .GetAwaiter().GetResult();
             if (recoveredGet.Status != AgentToolResultStatus.Success || recoveredPackage.Status != AgentToolResultStatus.Success
-                || recoveredList.Status != AgentToolResultStatus.Success || recoveredList.Value?.Results.Count != 2
+                || recoveredList.Status != AgentToolResultStatus.Success || recoveredList.Value is null
+                || recoveredList.Value.Results.Count != 2
+                || recoveredList.Diagnostics.All(d => d.Code != AgentToolDiagnosticCodes.ResultsSecurityTrimmed)
                 || recoveredReport.Status != AgentToolResultStatus.Success)
                 return Fail("same-scope re-review did not restore review, package, list, and report reads");
 
@@ -181,6 +240,7 @@ internal static class ProjectionScopeNativeAotFixture
         provider.GetRequiredService<IDescriptorActivationRequestService>(),
         provider.GetRequiredService<IActivationReviewOrchestrator>(),
         provider.GetRequiredService<IActivationBindingArtifactResolver>(),
+        provider.GetRequiredService<IAgentReviewArtifactStore>(),
         initialOptions,
         optionsFactory);
 
@@ -205,6 +265,11 @@ internal static class ProjectionScopeNativeAotFixture
 
     private static string FormatDraftDiagnostics(IReadOnlyList<DescriptorDraftDiagnostic> diagnostics) =>
         string.Join("; ", diagnostics.Select(d => $"{d.Code.Value}: {d.Message}"));
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
 
     private sealed class FixtureDescriptorCatalog(IReadOnlyList<IDescriptor> initialDescriptors) : IDescriptorCatalog
     {

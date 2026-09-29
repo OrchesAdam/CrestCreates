@@ -110,6 +110,7 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
+        services.AddSingleton<IAgentReviewArtifactStore, InMemoryAgentReviewArtifactStore>();
         services.AddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.AddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
         services.AddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();

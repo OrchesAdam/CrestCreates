@@ -56,8 +56,16 @@ public abstract class AgentControlPlaneTestBase
     protected readonly Mock<IActivationEvidenceRechecker> EvidenceRecheckerMock = new();
     protected readonly Mock<IHumanTaskRuntime> HumanTaskRuntimeMock = new();
     protected readonly Mock<IActivationReviewOrchestrator> ActivationReviewOrchestratorMock = new();
-    protected readonly InMemoryActivationBindingArtifactResolver InMemoryArtifactResolver = new();
+    protected readonly InMemoryAgentReviewArtifactStore ReviewArtifactStore;
+    protected readonly InMemoryActivationBindingArtifactResolver InMemoryArtifactResolver;
     protected readonly InMemoryAgentToolInvocationAuditor InMemoryAuditor = new();
+
+    protected AgentControlPlaneTestBase()
+    {
+        ReviewArtifactStore = new InMemoryAgentReviewArtifactStore();
+        InMemoryArtifactResolver = new InMemoryActivationBindingArtifactResolver(
+            ReviewArtifactStore, ReviewHashServiceMock.Object);
+    }
 
     protected const string TestTenantId = "tenant-001";
     protected const string TestActorId = "actor-001";
@@ -72,6 +80,7 @@ public abstract class AgentControlPlaneTestBase
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
         EnsureHashBuilderSetup();
+        EnsureReviewHashSetup();
         EnsureActivationRequestServiceSetup();
         var options = AgentToolAuthorizationOptions.DevelopmentDefaults;
         var authzService = new DefaultAgentToolAuthorizationService(options);
@@ -98,6 +107,7 @@ public abstract class AgentControlPlaneTestBase
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
             InMemoryArtifactResolver,
+            ReviewArtifactStore,
             authorizationOptions: options);
     }
 
@@ -110,6 +120,7 @@ public abstract class AgentControlPlaneTestBase
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
         EnsureHashBuilderSetup();
+        EnsureReviewHashSetup();
         EnsureActivationRequestServiceSetup();
         var authzService = new DefaultAgentToolAuthorizationService(options);
         var actualAuditor = auditor ?? InMemoryAuditor;
@@ -135,6 +146,7 @@ public abstract class AgentControlPlaneTestBase
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
             InMemoryArtifactResolver,
+            ReviewArtifactStore,
             authorizationOptions: options);
     }
 
@@ -147,6 +159,7 @@ public abstract class AgentControlPlaneTestBase
         InMemoryAgentToolInvocationAuditor? auditor = null)
     {
         EnsureHashBuilderSetup();
+        EnsureReviewHashSetup();
         EnsureActivationRequestServiceSetup();
         var initialOptions = optionsFactory();
         var authzService = new DefaultAgentToolAuthorizationService(initialOptions);
@@ -173,6 +186,7 @@ public abstract class AgentControlPlaneTestBase
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
             InMemoryArtifactResolver,
+            ReviewArtifactStore,
             optionsFactory: optionsFactory);
     }
 
@@ -182,6 +196,7 @@ public abstract class AgentControlPlaneTestBase
     protected DefaultAgentControlPlaneToolService CreateServiceWithMocks()
     {
         EnsureHashBuilderSetup();
+        EnsureReviewHashSetup();
         EnsureActivationRequestServiceSetup();
         return new DefaultAgentControlPlaneToolService(
             ManifestProviderMock.Object,
@@ -204,6 +219,7 @@ public abstract class AgentControlPlaneTestBase
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
             InMemoryArtifactResolver,
+            ReviewArtifactStore,
             authorizationOptions: AgentToolAuthorizationOptions.DevelopmentDefaults);
     }
 
@@ -451,6 +467,13 @@ public abstract class AgentControlPlaneTestBase
                     Value = "test-definition-hash"
                 }
             });
+    }
+
+    private void EnsureReviewHashSetup()
+    {
+        ReviewHashServiceMock.Setup(x => x.CaptureInput(It.IsAny<DraftAbstractions.DescriptorDraftReviewResult>()))
+            .Returns((DraftAbstractions.DescriptorDraftReviewResult result) =>
+                DraftCanonicalHashing.DescriptorDraftReviewHashInput.Capture(result));
     }
 
     /// <summary>

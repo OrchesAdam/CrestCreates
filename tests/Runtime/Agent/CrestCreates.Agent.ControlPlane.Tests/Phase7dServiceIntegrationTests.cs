@@ -1,47 +1,44 @@
-using System.Collections;
-using System.Reflection;
 using Xunit;
 using Moq;
 using FluentAssertions;
 using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+using CrestCreates.Agent.ControlPlane.Projections;
 using CrestCreates.Metadata.Abstractions;
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
+using DraftCanonicalHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.ControlPlane.Tests;
 
 public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
 {
-    // ── Reflection helpers ──────────────────────────────────────────────────
-
-    private static readonly FieldInfo ReviewResultsField = typeof(DefaultAgentControlPlaneToolService)
-        .GetField("_reviewResults", BindingFlags.NonPublic | BindingFlags.Instance)!;
-
-    /// <summary>
-    /// Inserts a review result directly into the service's internal _reviewResults
-    /// dictionary for test setup. This avoids the need to set up the full Review
-    /// pipeline mocks when testing report building in isolation.
-    /// </summary>
-    private static void PopulateReviewResult(
-        DefaultAgentControlPlaneToolService service,
+    private async Task PopulateReviewResult(
         string tenantId,
         string reviewResultId,
         DraftAbstractions.DescriptorDraftReviewResult reviewResult,
         Draft ownerDraft)
     {
-        // ReviewResourceSnapshot is internal; create via reflection
-        var snapshotType = typeof(DefaultAgentControlPlaneToolService).Assembly
-            .GetType("CrestCreates.Agent.ControlPlane.ReviewResourceSnapshot")!;
         var scopeFingerprint = AgentDescriptorVisibilityScope.ComputeFingerprint(
             AgentToolAuthorizationOptions.DevelopmentDefaults);
-        var snapshot = Activator.CreateInstance(
-            snapshotType, reviewResult, ownerDraft, DateTimeOffset.UtcNow, scopeFingerprint)!;
-
-        // Access the _reviewResults ConcurrentDictionary via its non-generic IDictionary interface
-        var dict = (IDictionary)ReviewResultsField.GetValue(service)!;
-        dict[(tenantId, reviewResultId)] = snapshot;
+        var reportInput = DescriptorReviewReportInputSnapshot.Capture(new DescriptorReviewReportBuildRequest
+        {
+            ReviewResult = reviewResult,
+            Draft = ownerDraft,
+            VisibilityApplied = true
+        });
+        await ReviewArtifactStore.InsertAsync(new AgentReviewArtifactEnvelope
+        {
+            Version = AgentReviewArtifactEnvelope.CurrentVersion,
+            TenantId = tenantId,
+            ReviewResultId = reviewResultId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            ScopeFingerprint = scopeFingerprint,
+            ProjectedReview = AgentReviewResultDtoProjection.Project(reviewResult),
+            ReportInput = reportInput,
+            OriginalHashInput = DraftCanonicalHashing.DescriptorDraftReviewHashInput.Capture(reviewResult)
+        });
     }
 
     private static DraftAbstractions.DescriptorDraftReviewResult CreateReviewResult(
@@ -129,8 +126,8 @@ public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
         var draft = CreateTestDraft();
         var reviewResult = CreateReviewResult();
 
-        // Populate review result into the service's internal dictionary
-        PopulateReviewResult(service, TestTenantId, "rr-001", reviewResult, draft);
+        // Populate the captured review artifact used by the report path.
+        await PopulateReviewResult(TestTenantId, "rr-001", reviewResult, draft);
 
         // Set up the draft store
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
@@ -139,8 +136,9 @@ public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
         // Set up the report builder to return a known report DTO
         var expectedReport = CreateMinimalReportDto("draft-001");
         ReportBuilderMock
-            .Setup(b => b.Build(It.Is<DescriptorReviewReportBuildRequest>(r =>
-                r.ReviewResult.DraftId == "draft-001" && r.VisibilityApplied)))
+            .Setup(b => b.Build(It.Is<DescriptorReviewReportInputSnapshot>(input =>
+                input.DraftId == "draft-001" &&
+                input.Owner.Status == DraftAbstractions.DescriptorDraftStatus.Created)))
             .Returns(expectedReport);
 
         var result = await service.BuildDescriptorReviewReportAsync(context, "draft-001");
@@ -165,38 +163,51 @@ public class Phase7dServiceIntegrationTests : AgentControlPlaneTestBase
         var reviewTimeDraft = CreateTestDraft(
             draftId: "draft-001",
             descriptorId: "desc-at-review-time",
-            operation: DraftAbstractions.DescriptorDraftOperation.Create);
+            operation: DraftAbstractions.DescriptorDraftOperation.Create) with
+        {
+            Status = DraftAbstractions.DescriptorDraftStatus.Reviewed,
+            ProposedVersion = "review-proposed-v1",
+            BaseVersion = "review-base-v0"
+        };
 
         // Create a different current draft (modified after review)
         var currentDraft = CreateTestDraft(
             draftId: "draft-001",
             descriptorId: "desc-modified-after-review",
-            operation: DraftAbstractions.DescriptorDraftOperation.Update);
+            operation: DraftAbstractions.DescriptorDraftOperation.Update) with
+        {
+            Status = DraftAbstractions.DescriptorDraftStatus.Materialized,
+            ProposedVersion = "current-proposed-v2",
+            BaseVersion = "current-base-v1"
+        };
 
         var reviewResult = CreateReviewResult();
 
         // Populate review result with the review-time draft as the owner
-        PopulateReviewResult(service, TestTenantId, "rr-001", reviewResult, reviewTimeDraft);
+        await PopulateReviewResult(TestTenantId, "rr-001", reviewResult, reviewTimeDraft);
 
         // DraftStore returns the current (modified) draft
         DraftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<Draft?>(currentDraft));
 
         var expectedReport = CreateMinimalReportDto("draft-001");
-        Draft? capturedDraft = null;
+        DescriptorReviewReportInputSnapshot? capturedInput = null;
         ReportBuilderMock
-            .Setup(b => b.Build(It.IsAny<DescriptorReviewReportBuildRequest>()))
-            .Callback<DescriptorReviewReportBuildRequest>(r => capturedDraft = r.Draft)
+            .Setup(b => b.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()))
+            .Callback<DescriptorReviewReportInputSnapshot>(input => capturedInput = input)
             .Returns(expectedReport);
 
         var result = await service.BuildDescriptorReviewReportAsync(context, "draft-001");
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
-        capturedDraft.Should().NotBeNull("the builder should have been called");
-        capturedDraft!.DescriptorId.Should().Be("desc-at-review-time",
-            "builder must receive the draft from review time, not the current draft");
-        capturedDraft.Operation.Should().Be(DraftAbstractions.DescriptorDraftOperation.Create,
-            "builder must receive the draft from review time, not the current draft");
+        capturedInput.Should().NotBeNull("the builder should have been called");
+        capturedInput!.Owner.DescriptorId.Should().Be("desc-at-review-time",
+            "builder must receive owner facts from review time, not the current draft");
+        capturedInput.Owner.Operation.Should().Be(DraftAbstractions.DescriptorDraftOperation.Create,
+            "builder must receive owner facts from review time, not the current draft");
+        capturedInput.Owner.Status.Should().Be(DraftAbstractions.DescriptorDraftStatus.Reviewed);
+        capturedInput.Owner.ProposedVersion.Should().Be("review-proposed-v1");
+        capturedInput.Owner.BaseVersion.Should().Be("review-base-v0");
     }
 
     // ── Test 5: Render with invalid contract version → InvalidRequest ───────
