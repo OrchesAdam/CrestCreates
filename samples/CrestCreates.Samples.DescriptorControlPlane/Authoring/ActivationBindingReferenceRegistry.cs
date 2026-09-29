@@ -2,8 +2,8 @@ namespace CrestCreates.Samples.DescriptorControlPlane.Authoring;
 
 /// <summary>
 /// Sample-level registry for tracking activation binding references
-/// and their DraftId associations. Provides equivalent validation
-/// to Control Plane's internal _reviewResults/_packagePreviews/_evidencePreviews checks.
+/// and their DraftId associations. The Control Plane independently validates
+/// reviews through its review artifact store and previews through their stores.
 /// </summary>
 public sealed class ActivationBindingReferenceRegistry
 {

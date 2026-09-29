@@ -197,7 +197,8 @@ public class RuntimeBoundaryTests : AgentControlPlaneTestBase
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
-            InMemoryArtifactResolver
+            InMemoryArtifactResolver,
+            ReviewArtifactStore
         );
 
         var context = new AgentToolInvocationContext

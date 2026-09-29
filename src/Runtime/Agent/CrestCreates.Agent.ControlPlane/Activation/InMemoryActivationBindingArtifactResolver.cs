@@ -2,25 +2,29 @@ using System.Collections.Concurrent;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorPackage;
+using CrestCreates.Agent.ControlPlane.Abstractions;
+using DraftHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.ControlPlane.Activation;
 
 /// <summary>
-/// In-memory artifact hash resolver. Updated by the ToolService when
-/// review results, package previews, and evidence previews are created.
-/// Not for production use — persistent stores should replace this.
+/// Resolves review hashes from the configured review authority and keeps the
+/// package/evidence preview hashes in memory until their separate cutovers.
+/// Not for production use while package/evidence previews remain volatile.
 /// </summary>
 public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindingArtifactResolver
 {
-    private readonly ConcurrentDictionary<(string TenantId, string ReviewResultId), CanonicalHash> _sourceReviewHashes = new();
-    private readonly ConcurrentDictionary<(string TenantId, string ReviewResultId), CanonicalHash> _reviewManifestHashes = new();
+    private readonly IAgentReviewArtifactStore _reviewStore;
+    private readonly DraftHashing.IDescriptorDraftReviewHashService _reviewHashService;
     private readonly ConcurrentDictionary<(string TenantId, string PackagePreviewId), DescriptorPackageHashSet> _packageHashSets = new();
     private readonly ConcurrentDictionary<(string TenantId, string EvidencePreviewId), DescriptorPackageHashSet> _evidenceHashSets = new();
 
-    public void StoreReviewHashes(string tenantId, string reviewResultId, CanonicalHash sourceReviewHash, CanonicalHash reviewManifestHash)
+    public InMemoryActivationBindingArtifactResolver(
+        IAgentReviewArtifactStore reviewStore,
+        DraftHashing.IDescriptorDraftReviewHashService reviewHashService)
     {
-        _sourceReviewHashes[(tenantId, reviewResultId)] = sourceReviewHash;
-        _reviewManifestHashes[(tenantId, reviewResultId)] = reviewManifestHash;
+        _reviewStore = reviewStore;
+        _reviewHashService = reviewHashService;
     }
 
     public void StorePackageHashes(string tenantId, string packagePreviewId, DescriptorPackageHashSet packageHashes)
@@ -33,7 +37,7 @@ public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindi
         _evidenceHashSets[(tenantId, evidencePreviewId)] = evidenceHashes;
     }
 
-    public Task<ResolvedBindingArtifacts> ResolveAsync(
+    public async Task<ResolvedBindingArtifacts> ResolveAsync(
         string tenantId, ActivationBindingSnapshot bindingSnapshot, CancellationToken ct = default)
     {
         CanonicalHash? sourceReviewHash = null;
@@ -41,10 +45,12 @@ public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindi
         DescriptorPackageHashSet? packageHashes = null;
         DescriptorPackageHashSet? evidenceHashes = null;
 
-        // Review hashes are keyed by ReviewResultId
-        var reviewKey = (tenantId, bindingSnapshot.ReviewResultId);
-        _sourceReviewHashes.TryGetValue(reviewKey, out sourceReviewHash);
-        _reviewManifestHashes.TryGetValue(reviewKey, out reviewManifestHash);
+        var review = await _reviewStore.GetAsync(tenantId, bindingSnapshot.ReviewResultId, ct);
+        if (review is not null)
+        {
+            sourceReviewHash = _reviewHashService.ComputeSourceReviewHash(review.OriginalHashInput);
+            reviewManifestHash = _reviewHashService.ComputeReviewManifestHash(review.OriginalHashInput);
+        }
 
         // Package hashes are keyed by PackagePreviewId
         var packageKey = (tenantId, bindingSnapshot.PackagePreviewId);
@@ -54,7 +60,7 @@ public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindi
         var evidenceKey = (tenantId, bindingSnapshot.EvidencePreviewId);
         _evidenceHashSets.TryGetValue(evidenceKey, out evidenceHashes);
 
-        return Task.FromResult(new ResolvedBindingArtifacts
+        return new ResolvedBindingArtifacts
         {
             CurrentSourceReviewHash = sourceReviewHash,
             CurrentReviewManifestHash = reviewManifestHash,
@@ -62,7 +68,7 @@ public sealed class InMemoryActivationBindingArtifactResolver : IActivationBindi
             CurrentEvidenceHashes = evidenceHashes,
             CurrentContractHash = null, // Computed separately by rechecker via IDescriptorStableHashBuilder
             CurrentDefinitionHash = null  // Computed separately by rechecker via IDescriptorStableHashBuilder
-        });
+        };
     }
 
     // ── Test-accessible read-only views ──

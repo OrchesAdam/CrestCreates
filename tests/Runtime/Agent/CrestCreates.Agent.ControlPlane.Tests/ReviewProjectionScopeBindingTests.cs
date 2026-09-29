@@ -10,6 +10,7 @@ using Xunit;
 
 using Draft = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
+using DraftCanonicalHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
 
 namespace CrestCreates.Agent.ControlPlane.Tests;
 
@@ -45,7 +46,7 @@ public sealed class ReviewProjectionScopeBindingTests : AgentControlPlaneTestBas
         list.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Code == AgentToolDiagnosticCodes.ResultsSecurityTrimmed);
 
-        ReportBuilderMock.Setup(builder => builder.Build(It.IsAny<DescriptorReviewReportBuildRequest>()))
+        ReportBuilderMock.Setup(builder => builder.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()))
             .Returns(CreateReport(draft.DraftId));
         var blockedReport = await service.BuildDescriptorReviewReportAsync(
             CreateContext(AgentToolName.BuildDescriptorReviewReport), draft.DraftId);
@@ -53,7 +54,7 @@ public sealed class ReviewProjectionScopeBindingTests : AgentControlPlaneTestBas
         blockedReport.Value.Should().BeNull();
         blockedReport.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Code == AgentToolDiagnosticCodes.ReviewResultScopeMismatch);
-        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportBuildRequest>()), Times.Never);
+        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()), Times.Never);
 
         var newReviewId = await CreateReviewAsync(service, draft);
         newReviewId.Should().NotBe(originalReviewId);
@@ -72,7 +73,7 @@ public sealed class ReviewProjectionScopeBindingTests : AgentControlPlaneTestBas
         var recoveredReport = await service.BuildDescriptorReviewReportAsync(
             CreateContext(AgentToolName.BuildDescriptorReviewReport), draft.DraftId);
         recoveredReport.Status.Should().Be(AgentToolResultStatus.Success);
-        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportBuildRequest>()), Times.Once);
+        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()), Times.Once);
     }
 
     [Fact]
@@ -96,12 +97,12 @@ public sealed class ReviewProjectionScopeBindingTests : AgentControlPlaneTestBas
         expandedList.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Code == AgentToolDiagnosticCodes.ResultsSecurityTrimmed);
 
-        ReportBuilderMock.Setup(builder => builder.Build(It.IsAny<DescriptorReviewReportBuildRequest>()))
+        ReportBuilderMock.Setup(builder => builder.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()))
             .Returns(CreateReport(draft.DraftId));
         var expandedReport = await service.BuildDescriptorReviewReportAsync(
             CreateContext(AgentToolName.BuildDescriptorReviewReport), draft.DraftId);
         expandedReport.Status.Should().Be(AgentToolResultStatus.Failed);
-        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportBuildRequest>()), Times.Never);
+        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()), Times.Never);
 
         var broadReviewId = await CreateReviewAsync(service, draft);
         var broadRead = await service.GetDraftReviewResultAsync(
@@ -121,7 +122,7 @@ public sealed class ReviewProjectionScopeBindingTests : AgentControlPlaneTestBas
         latestMismatchReport.Status.Should().Be(AgentToolResultStatus.Failed);
         latestMismatchReport.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Code == AgentToolDiagnosticCodes.ReviewResultScopeMismatch);
-        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportBuildRequest>()), Times.Never);
+        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()), Times.Never);
     }
 
     [Fact]
@@ -133,7 +134,7 @@ public sealed class ReviewProjectionScopeBindingTests : AgentControlPlaneTestBas
         var service = CreateServiceWithOptionsFactory(() => options);
         var reviewId = await CreateReviewAsync(service, draft);
 
-        ReportBuilderMock.Setup(builder => builder.Build(It.IsAny<DescriptorReviewReportBuildRequest>()))
+        ReportBuilderMock.Setup(builder => builder.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()))
             .Returns(CreateReport(draft.DraftId));
 
         var read = await service.GetDraftReviewResultAsync(
@@ -151,7 +152,7 @@ public sealed class ReviewProjectionScopeBindingTests : AgentControlPlaneTestBas
         var report = await service.BuildDescriptorReviewReportAsync(
             CreateContext(AgentToolName.BuildDescriptorReviewReport), draft.DraftId);
         report.Status.Should().Be(AgentToolResultStatus.Success);
-        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportBuildRequest>()), Times.Once);
+        ReportBuilderMock.Verify(builder => builder.Build(It.IsAny<DescriptorReviewReportInputSnapshot>()), Times.Once);
     }
 
     [Fact]
@@ -260,9 +261,9 @@ public sealed class ReviewProjectionScopeBindingTests : AgentControlPlaneTestBas
     private void ConfigureReviewHashes()
     {
         var reviewHash = CreateHash("review-hash");
-        ReviewHashServiceMock.Setup(hashService => hashService.ComputeSourceReviewHash(It.IsAny<DescriptorDraftReviewResult>()))
+        ReviewHashServiceMock.Setup(hashService => hashService.ComputeSourceReviewHash(It.IsAny<DraftCanonicalHashing.DescriptorDraftReviewHashInput>()))
             .Returns(reviewHash);
-        ReviewHashServiceMock.Setup(hashService => hashService.ComputeReviewManifestHash(It.IsAny<DescriptorDraftReviewResult>()))
+        ReviewHashServiceMock.Setup(hashService => hashService.ComputeReviewManifestHash(It.IsAny<DraftCanonicalHashing.DescriptorDraftReviewHashInput>()))
             .Returns(reviewHash with { Value = "manifest-hash" });
     }
 
