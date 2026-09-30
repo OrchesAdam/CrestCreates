@@ -44,6 +44,10 @@ internal static class WorkflowConditionPolicy
         if (index == 0 || descriptor.Steps[index - 1].Target is not HumanTaskTarget)
             return $"Workflow step '{step.Id}' condition requires the immediately preceding step to target a HumanTask.";
 
+        if (descriptor.Steps[index - 1].Condition is not null)
+            return $"Workflow step '{step.Id}' condition requires the immediately preceding step to be unconditional; " +
+                $"a conditional predecessor may be skipped, producing non-deterministic composition.";
+
         return null;
     }
 

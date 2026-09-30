@@ -73,6 +73,33 @@ public sealed class WorkflowConditionPolicyTests
     }
 
     [Fact]
+    public void CompatibilityValidation_RejectsConditionAfterConditionalPredecessor()
+    {
+        var descriptor = Descriptor(
+            new WorkflowStep { Id = "initial", Target = HumanTaskTarget("initial") },
+            new WorkflowStep
+            {
+                Id = "conditional-h2",
+                Target = HumanTaskTarget("mid"),
+                Condition = WorkflowConditionTokens.PreviousHumanTaskApproved
+            },
+            new WorkflowStep
+            {
+                Id = "conditional-h3",
+                Target = HumanTaskTarget("final"),
+                Condition = WorkflowConditionTokens.PreviousHumanTaskRejected
+            });
+        var validator = new WorkflowCompatibilityValidator(
+            new Mock<ICapabilityRegistry>().Object,
+            HumanTaskRegistry("initial", "mid", "final"));
+
+        var act = () => validator.Validate(descriptor);
+
+        act.Should().Throw<WorkflowValidationException>()
+            .WithMessage("*unconditional*conditional predecessor*skipped*");
+    }
+
+    [Fact]
     public void BindingStatus_RejectsConditionAfterCapabilityStep()
     {
         var wfRegistry = new Mock<IWorkflowRegistry>();

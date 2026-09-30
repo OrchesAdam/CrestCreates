@@ -196,6 +196,11 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                     await PersistWithAccountabilityAsync(instance, failedEvent, ct).ConfigureAwait(false);
                     await _eventPublisher.PublishAsync(failedEvent, CancellationToken.None).ConfigureAwait(false);
                     return instance;
+
+                default:
+                    throw new InvalidOperationException(
+                        $"Workflow step executor for step '{step.Id}' returned unsupported status '{stepResult.Status}'. " +
+                        $"Skipped is owned by the Runner condition evaluation and must not be returned by executors.");
             }
         }
 

@@ -20,6 +20,7 @@ using CrestCreates.Workflow.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.Workflow.Tests;
@@ -156,6 +157,73 @@ public sealed class WorkflowOutcomeConditionReproductionTests
             for (var index = hostedServices.Length - 1; index >= 0; index--)
                 await hostedServices[index].StopAsync(CancellationToken.None);
         }
+    }
+
+    [Fact]
+    public async Task ExecutorReturnedSkipped_Should_Not_ReexecuteSameStep()
+    {
+        var initialReview = HumanTask("ht_skipped_contract_initial");
+        var workflow = new WorkflowDescriptor
+        {
+            Id = "wf_skipped_contract_reproduction",
+            Name = "Skipped executor contract reproduction",
+            Version = 1,
+            State = DescriptorState.Active,
+            Steps =
+            [
+                new WorkflowStep
+                {
+                    Id = "initial-review",
+                    Target = new HumanTaskTarget
+                    {
+                        HumanTask = new VersionedDescriptorRef<HumanTaskDescriptor>(initialReview.Id, 1)
+                    }
+                }
+            ]
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+        services.AddSingleton<LocalEventBusOptions>();
+        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
+        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
+        services.AddAccountability().AddAuditSink<InMemoryAuditSink>();
+        services.AddCapabilityRuntime();
+        services.AddRuntimePersistence();
+        services.AddCrestCreatesInMemoryRuntimePersistence();
+        services.AddRuntimeDelivery(options => options.PollingInterval = TimeSpan.FromMilliseconds(10));
+        services.AddHumanTaskRuntime();
+        services.AddWorkflowEngine();
+
+        var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
+        workflowRegistry.Build([new InlineDescriptorProvider<WorkflowDescriptor>(workflow)]);
+        services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
+        var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
+        humanTaskRegistry.Build([new InlineDescriptorProvider<HumanTaskDescriptor>(initialReview)]);
+        services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
+
+        var skippableExecutor = new Mock<IWorkflowStepExecutor>();
+        skippableExecutor.Setup(e => e.ExecuteAsync(It.IsAny<WorkflowExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StepExecutionResult(StepExecutionStatus.Skipped));
+        var executorRegistry = new Mock<IWorkflowStepExecutorRegistry>();
+        executorRegistry.Setup(r => r.Resolve(It.IsAny<InteractionTarget>()))
+            .Returns(skippableExecutor.Object);
+        services.AddSingleton(executorRegistry.Object);
+
+        await using var provider = services.BuildServiceProvider(validateScopes: true);
+        using var scope = provider.CreateScope();
+        var serviceProvider = scope.ServiceProvider;
+        var engine = serviceProvider.GetRequiredService<IWorkflowEngine>();
+
+        var act = () => engine.ExecuteAsync(new WorkflowExecutionRequest
+        {
+            WorkflowId = workflow.Id,
+            TenantId = "skipped-contract-tenant"
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*unsupported status*Skipped*must not be returned by executors*");
     }
 
     private static async Task RunScenarioAsync(
