@@ -21,12 +21,133 @@ using CrestCreates.Workflow.Abstractions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Sample.AssetManagement.Host;
 
 public static class AssetGoldenScenario
 {
+    public static async Task<int> RunCandidateV2Async(WebApplication app)
+    {
+        try
+        {
+            EnsureDurableRuntime(app);
+            using var client = CreateClient(app);
+
+            // Each case uses a distinct asset so the SQLite terminal records
+            // and the durable Workflow/HumanTask observations are independent.
+            var approvedCase = await StartCandidateMaintenanceAsync(client, "candidate-approve");
+            await CompleteCandidateAsync(app, approvedCase.HumanTaskId!, "Approve", "Initial review approved");
+            var approvedInitial = await GetCandidateTaskAsync(app, approvedCase.HumanTaskId!);
+            if (approvedInitial is null)
+                throw new InvalidOperationException("Candidate initial approval task was not persisted.");
+            EnsureInitialCandidateContract(app, approvedInitial);
+            var approvedFinalTasks = await WaitForCandidateFinalTasksAsync(app, approvedInitial!.WorkflowKey!.Value);
+            Ensure(approvedFinalTasks.Count == 1 && approvedFinalTasks[0].HumanTaskId == AssetContractIds.MaintenanceHumanTask,
+                "Initial approval must leave the asset pending with exactly one final HumanTask.");
+            var approvedWorkflowBeforeFinal = await GetCandidateWorkflowAsync(app, approvedInitial.WorkflowKey.Value);
+            Ensure(approvedWorkflowBeforeFinal is not null
+                && approvedWorkflowBeforeFinal.WorkflowPin.Ref.Id == AssetContractIds.MaintenanceWorkflow
+                && approvedWorkflowBeforeFinal.WorkflowPin.Ref.Version == 2,
+                "Candidate initial approval must use the compiled v2 Workflow pin.");
+            var pending = await GetAssetAsync(client, approvedCase.AssetId);
+            Ensure(pending.Status == "MaintenancePending", "Initial approval must leave the asset pending.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, approvedCase.AssetId, approved: true) == 0
+                && await ReadMaintenanceRecordCountAsync(app, approvedCase.AssetId, approved: false) == 0,
+                "Initial approval must not create a terminal maintenance record.");
+
+            await CompleteCandidateAsync(app, approvedFinalTasks[0].Id, "Approve", "Final review approved");
+            var approvedWorkflow = await WaitForCandidateWorkflowCompletedAsync(app, approvedInitial.WorkflowKey.Value);
+            var approvedTerminal = await GetAssetAsync(client, approvedCase.AssetId);
+            Ensure(approvedTerminal.Status == "Available" && approvedTerminal.MaintenanceWorkflowInstanceId is null,
+                "Final approval must restore the asset to Available and clear its workflow.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, approvedCase.AssetId, approved: true) == 1,
+                "Final approval must create exactly one approved maintenance record.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, approvedCase.AssetId, approved: false) == 0,
+                "Final approval must not create a rejected maintenance record.");
+            Ensure(approvedWorkflow.Status == WorkflowInstanceStatus.Completed,
+                "Final approval must complete the candidate Workflow.");
+
+            var assignedCase = await StartCandidateMaintenanceAsync(client, "candidate-assigned-approve", assigned: true);
+            await CompleteCandidateAsync(app, assignedCase.HumanTaskId!, "Approve", "Assigned initial review approved");
+            var assignedInitial = await GetCandidateTaskAsync(app, assignedCase.HumanTaskId!);
+            if (assignedInitial is null || assignedInitial.WorkflowKey is not { } assignedWorkflowKey)
+                throw new InvalidOperationException("Assigned candidate initial task was not correlated to a Workflow.");
+            EnsureInitialCandidateContract(app, assignedInitial);
+            var assignedFinalTasks = await WaitForCandidateFinalTasksAsync(app, assignedWorkflowKey);
+            Ensure(assignedFinalTasks.Count == 1, "Assigned initial approval must create exactly one final HumanTask.");
+            var assignedPending = await GetAssetAsync(client, assignedCase.AssetId);
+            Ensure(assignedPending.Status == "MaintenancePending",
+                "Assigned initial approval must leave the asset pending.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, assignedCase.AssetId, approved: true) == 0
+                && await ReadMaintenanceRecordCountAsync(app, assignedCase.AssetId, approved: false) == 0,
+                "Assigned initial approval must not create a terminal maintenance record.");
+            await CompleteCandidateAsync(app, assignedFinalTasks[0].Id, "Approve", "Assigned final review approved");
+            var assignedWorkflow = await WaitForCandidateWorkflowCompletedAsync(app, assignedWorkflowKey);
+            var assignedTerminal = await GetAssetAsync(client, assignedCase.AssetId);
+            Ensure(assignedTerminal.Status == "Assigned"
+                && assignedTerminal.AssignedUserId == "assigned-user"
+                && assignedTerminal.ActiveAssignmentId == assignedCase.ActiveAssignmentId
+                && assignedTerminal.MaintenanceWorkflowInstanceId is null,
+                "Assigned final approval must restore the prior assignment without losing its identity.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, assignedCase.AssetId, approved: true) == 1
+                && await ReadMaintenanceRecordCountAsync(app, assignedCase.AssetId, approved: false) == 0,
+                "Assigned final approval must create exactly one approved maintenance record.");
+            Ensure(assignedWorkflow.Status == WorkflowInstanceStatus.Completed,
+                "Assigned final approval must complete the candidate Workflow.");
+
+            var initialRejectedCase = await StartCandidateMaintenanceAsync(client, "candidate-initial-reject");
+            await CompleteCandidateAsync(app, initialRejectedCase.HumanTaskId!, "Reject", "Initial review rejected");
+            var initialRejected = await GetCandidateTaskAsync(app, initialRejectedCase.HumanTaskId!);
+            if (initialRejected is null || initialRejected.WorkflowKey is not { } initialRejectedWorkflow)
+                throw new InvalidOperationException("Initial rejection task was not correlated to a Workflow.");
+            EnsureInitialCandidateContract(app, initialRejected);
+            var initialRejectedWorkflowState = await WaitForCandidateWorkflowCompletedAsync(app, initialRejectedWorkflow);
+            var rejectedPending = await GetCandidatePendingTasksAsync(app, initialRejectedWorkflow);
+            Ensure(rejectedPending.Count == 0, "Initial rejection must not create a final HumanTask.");
+            Ensure(initialRejectedWorkflowState.Status == WorkflowInstanceStatus.Completed,
+                "Initial rejection must complete the candidate Workflow before terminal assertions.");
+            var rejectedFinalStep = initialRejectedWorkflowState.StepResults.SingleOrDefault(step => step.StepId == "maintenance-final-review");
+            Ensure(rejectedFinalStep?.Status == StepExecutionStatus.Skipped,
+                "Initial rejection must record the candidate final review step as Skipped.");
+            var rejectedAsset = await GetAssetAsync(client, initialRejectedCase.AssetId);
+            Ensure(rejectedAsset.Status == "Available", "Initial rejection must restore the asset to Available.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, initialRejectedCase.AssetId, approved: false) == 1,
+                "Initial rejection must create one rejected maintenance record.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, initialRejectedCase.AssetId, approved: true) == 0,
+                "Initial rejection must not create an approved maintenance record.");
+
+            var finalRejectedCase = await StartCandidateMaintenanceAsync(client, "candidate-final-reject");
+            await CompleteCandidateAsync(app, finalRejectedCase.HumanTaskId!, "Approve", "Initial review approved");
+            var finalRejectedInitial = await GetCandidateTaskAsync(app, finalRejectedCase.HumanTaskId!);
+            if (finalRejectedInitial is null || finalRejectedInitial.WorkflowKey is not { } finalRejectedWorkflow)
+                throw new InvalidOperationException("Final rejection case initial task was not correlated to a Workflow.");
+            EnsureInitialCandidateContract(app, finalRejectedInitial);
+            var finalRejectedTasks = await WaitForCandidateFinalTasksAsync(app, finalRejectedWorkflow);
+            Ensure(finalRejectedTasks.Count == 1, "Final rejection case must create exactly one final HumanTask.");
+            await CompleteCandidateAsync(app, finalRejectedTasks[0].Id, "Reject", "Final review rejected");
+            var finalRejectedWorkflowState = await WaitForCandidateWorkflowCompletedAsync(app, finalRejectedWorkflow);
+            var finalRejectedAsset = await GetAssetAsync(client, finalRejectedCase.AssetId);
+            Ensure(finalRejectedAsset.Status == "Available" && finalRejectedAsset.MaintenanceWorkflowInstanceId is null,
+                "Final rejection must restore the asset to Available and clear its workflow.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, finalRejectedCase.AssetId, approved: true) == 0,
+                "Final rejection must not create an approved maintenance record.");
+            Ensure(await ReadMaintenanceRecordCountAsync(app, finalRejectedCase.AssetId, approved: false) == 1,
+                "Final rejection must create exactly one rejected maintenance record.");
+            Ensure(finalRejectedWorkflowState.Status == WorkflowInstanceStatus.Completed,
+                "Final rejection must complete the candidate Workflow.");
+
+            Console.WriteLine("CRESTCREATES_ASSET_MANAGEMENT_CANDIDATE_V2_GOLDEN_OK");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception);
+            return 1;
+        }
+    }
+
     public static async Task<int> RunAsync(WebApplication app)
     {
         try
@@ -148,6 +269,144 @@ public static class AssetGoldenScenario
             Console.Error.WriteLine(exception);
             return 1;
         }
+    }
+
+    private static void EnsureDurableRuntime(WebApplication app)
+    {
+        var runtimeCapabilities = app.Services.GetRequiredService<IRuntimePersistenceProviderCapabilities>();
+        if (runtimeCapabilities is not PostgreSqlRuntimeProviderCapabilities
+            || runtimeCapabilities.Tier != RuntimePersistenceProviderTier.FullDurable
+            || !runtimeCapabilities.SupportsAtomicMultiStoreTransactions
+            || !runtimeCapabilities.SupportsRestartRecovery
+            || app.Services.GetRequiredService<IWorkflowInstanceStore>().GetType().Name.Contains("InMemory", StringComparison.Ordinal)
+            || app.Services.GetRequiredService<IHumanTaskInstanceStore>().GetType().Name.Contains("InMemory", StringComparison.Ordinal)
+            || app.Services.GetRequiredService<IOutboxDispatchStore>().GetType().Name.Contains("InMemory", StringComparison.Ordinal))
+            throw new InvalidOperationException("Candidate verification requires the durable PostgreSQL runtime stores.");
+    }
+
+    private static async Task<(Guid AssetId, string? HumanTaskId, Guid? ActiveAssignmentId)> StartCandidateMaintenanceAsync(HttpClient client, string suffix, bool assigned = false)
+    {
+        SetIdentity(client, "candidate-tenant", "manager-1", "asset-manager", Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "Tenant");
+        var asset = await SendAsync<AssetResult, RegisterAssetInput>(client, HttpMethod.Post, "/api/assets", new RegisterAssetInput
+        {
+            AssetTag = $"CANDIDATE-{suffix}-{Guid.NewGuid():N}",
+            Name = "Candidate verification asset",
+            Description = "Candidate native verification",
+            Category = "Equipment",
+            OrganizationId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            Location = "Shanghai"
+        }, AssetJsonContext.Default.RegisterAssetInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.Created);
+        Guid? activeAssignmentId = null;
+        if (assigned)
+        {
+            var assignment = await SendAsync<AssetResult, AssignAssetInput>(client, HttpMethod.Post,
+                $"/api/assets/{asset.Id}/assign", new AssignAssetInput
+                {
+                    AssetId = asset.Id,
+                    UserId = "assigned-user",
+                    OrganizationId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+                }, AssetJsonContext.Default.AssignAssetInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.OK);
+            Ensure(assignment.Status == "Assigned" && assignment.AssignedUserId == "assigned-user" && assignment.ActiveAssignmentId is not null,
+                "Candidate Assigned setup must persist the original assignment.");
+            activeAssignmentId = assignment.ActiveAssignmentId;
+        }
+        var operation = await SendAsync<AssetOperationResult, MaintenanceRequestInput>(client, HttpMethod.Post,
+            $"/api/assets/{asset.Id}/maintenance", new MaintenanceRequestInput { AssetId = asset.Id, Reason = suffix },
+            AssetJsonContext.Default.MaintenanceRequestInput, AssetJsonContext.Default.AssetOperationResult, HttpStatusCode.Accepted);
+        Ensure(operation.Status == "MaintenancePending" && !string.IsNullOrWhiteSpace(operation.HumanTaskId),
+            "Candidate maintenance request must suspend on an initial HumanTask.");
+        return (asset.Id, operation.HumanTaskId, activeAssignmentId);
+    }
+
+    private static async Task CompleteCandidateAsync(WebApplication app, string taskId, string outcome, string note)
+    {
+        using var scope = app.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<AssetExecutionIdentity>().Set(
+            "candidate-tenant", "manager-1", Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            CrestCreates.Domain.Shared.Enums.DataScope.Tenant, "asset-manager");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await scope.ServiceProvider.GetRequiredService<AssetMaintenanceWorkflowService>()
+            .CompleteAsync(taskId, outcome, note, timeout.Token);
+    }
+
+    private static async Task<AssetResult> GetAssetAsync(HttpClient client, Guid assetId)
+    {
+        SetIdentity(client, "candidate-tenant", "manager-1", "asset-manager", Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "Tenant");
+        return await SendAsync<AssetResult, AssetQueryInput>(client, HttpMethod.Get, $"/api/assets/{assetId}", null,
+            AssetJsonContext.Default.AssetQueryInput, AssetJsonContext.Default.AssetResult, HttpStatusCode.OK);
+    }
+
+    private static async Task<HumanTaskInstance?> GetCandidateTaskAsync(WebApplication app, string taskId)
+    {
+        using var scope = app.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>()
+            .GetAsync(new RuntimeInstanceKey("candidate-tenant", taskId));
+    }
+
+    private static async Task<IReadOnlyList<HumanTaskInstance>> GetCandidatePendingTasksAsync(WebApplication app, RuntimeInstanceKey workflowKey)
+    {
+        using var scope = app.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IHumanTaskInstanceStore>().GetPendingByWorkflowAsync(workflowKey);
+    }
+
+    private static async Task<IReadOnlyList<HumanTaskInstance>> WaitForCandidateFinalTasksAsync(WebApplication app, RuntimeInstanceKey workflowKey)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var pending = await GetCandidatePendingTasksAsync(app, workflowKey);
+            if (pending.Count == 1 && pending[0].HumanTaskId == AssetContractIds.MaintenanceHumanTask)
+                return pending;
+            await Task.Delay(20);
+        }
+        throw new TimeoutException("Candidate final maintenance HumanTask was not created.");
+    }
+
+    private static async Task<WorkflowInstance?> GetCandidateWorkflowAsync(WebApplication app, RuntimeInstanceKey workflowKey)
+    {
+        using var scope = app.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IWorkflowInstanceStore>().GetAsync(workflowKey);
+    }
+
+    private static async Task<WorkflowInstance> WaitForCandidateWorkflowCompletedAsync(WebApplication app, RuntimeInstanceKey workflowKey)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var workflow = await GetCandidateWorkflowAsync(app, workflowKey);
+            if (workflow?.Status == WorkflowInstanceStatus.Completed)
+                return workflow;
+            await Task.Delay(20);
+        }
+        throw new TimeoutException("Candidate Workflow did not reach Completed before the assertion deadline.");
+    }
+
+    private static void EnsureInitialCandidateContract(WebApplication app, HumanTaskInstance task)
+    {
+        if (task.HumanTaskId != AssetContractIds.MaintenanceInitialHumanTask || task.HumanTaskVersion != 1)
+            throw new InvalidOperationException("Candidate maintenance must begin with the compiled initial HumanTask contract.");
+        using var scope = app.Services.CreateScope();
+        if (scope.ServiceProvider.GetRequiredService<AssetMaintenanceTaskContractResolver>().Resolve(task.HumanTaskPin) != AssetMaintenanceTaskRole.Initial)
+            throw new InvalidOperationException("Candidate maintenance initial HumanTask role could not be resolved.");
+    }
+
+    private static async Task<int> ReadMaintenanceRecordCountAsync(WebApplication app, Guid assetId, bool approved)
+    {
+        var path = app.Configuration["AssetManagement:DatabasePath"]
+            ?? throw new InvalidOperationException("Candidate verification database path is unavailable.");
+        await using var connection = new SqliteConnection($"Data Source={path}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM MaintenanceRecords WHERE AssetId=$asset AND Approved=$approved";
+        command.Parameters.AddWithValue("$asset", assetId.ToString("D"));
+        command.Parameters.AddWithValue("$approved", approved ? 1 : 0);
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private static void Ensure(bool condition, string message)
+    {
+        if (!condition)
+            throw new InvalidOperationException(message);
     }
 
     private static async Task<HttpStatusCode> SendStatusAsync<TInput>(HttpClient client, HttpMethod method, string uri, TInput input, System.Text.Json.Serialization.Metadata.JsonTypeInfo<TInput> inputTypeInfo)

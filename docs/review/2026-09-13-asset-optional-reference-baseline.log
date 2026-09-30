@@ -1,0 +1,135 @@
+  CrestCreates.CodeGenerator -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Tooling/CrestCreates.CodeGenerator/bin/Debug/netstandard2.0/CrestCreates.CodeGenerator.dll
+  CrestCreates.Modularity -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Modularity/CrestCreates.Modularity/bin/Debug/net10.0/CrestCreates.Modularity.dll
+  CrestCreates.ModuleDiagnostics -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Modules/CrestCreates.ModuleDiagnostics/bin/Debug/net10.0/CrestCreates.ModuleDiagnostics.dll
+  CrestCreates.Core.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Core/CrestCreates.Core.Abstractions/bin/Debug/net10.0/CrestCreates.Core.Abstractions.dll
+  CrestCreates.Snapshot.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Snapshot.Abstractions/bin/Debug/net10.0/CrestCreates.Snapshot.Abstractions.dll
+  CrestCreates.Metadata.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Metadata.Abstractions/bin/Debug/net10.0/CrestCreates.Metadata.Abstractions.dll
+  CrestCreates.Metadata.ContextPack.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Metadata.ContextPack.Abstractions/bin/Debug/net10.0/CrestCreates.Metadata.ContextPack.Abstractions.dll
+  CrestCreates.DescriptorDraft.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/bin/Debug/net10.0/CrestCreates.DescriptorDraft.Abstractions.dll
+  CrestCreates.MultiTenancy.Abstract -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/bin/Debug/net10.0/CrestCreates.MultiTenancy.Abstract.dll
+  CrestCreates.Schema.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Schema.Abstractions/bin/Debug/net10.0/CrestCreates.Schema.Abstractions.dll
+  CrestCreates.Form.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Modules/CrestCreates.Form.Abstractions/bin/Debug/net10.0/CrestCreates.Form.Abstractions.dll
+  CrestCreates.JsonContracts.BuildTasks.Core -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/bin/Debug/net10.0/CrestCreates.JsonContracts.Tool.dll
+  CrestCreates.JsonContracts.BuildTasks -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Tooling/CrestCreates.JsonContracts.BuildTasks/bin/Debug/net10.0/CrestCreates.JsonContracts.BuildTasks.dll
+  CrestCreates.Accountability.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Audit/CrestCreates.Accountability.Abstractions/bin/Debug/net10.0/CrestCreates.Accountability.Abstractions.dll
+  CrestCreates.Capability.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Capability/CrestCreates.Capability.Abstractions/bin/Debug/net10.0/CrestCreates.Capability.Abstractions.dll
+  CrestCreates.Event.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Eventing/CrestCreates.Event.Abstractions/bin/Debug/net10.0/CrestCreates.Event.Abstractions.dll
+  CrestCreates.EventBus.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/bin/Debug/net10.0/CrestCreates.EventBus.Abstractions.dll
+  CrestCreates.Runtime.Persistence.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Persistence/CrestCreates.Runtime.Persistence.Abstractions/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.Abstractions.dll
+  CrestCreates.HumanTask.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/bin/Debug/net10.0/CrestCreates.HumanTask.Abstractions.dll
+  CrestCreates.Workflow.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/bin/Debug/net10.0/CrestCreates.Workflow.Abstractions.dll
+  CrestCreates.DescriptorDraft -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/Draft/CrestCreates.DescriptorDraft/bin/Debug/net10.0/CrestCreates.DescriptorDraft.dll
+  CrestCreates.Agent.DraftContracts -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.DraftContracts/bin/Debug/net10.0/CrestCreates.Agent.DraftContracts.dll
+  CrestCreates.Agent.ControlPlane.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/bin/Debug/net10.0/CrestCreates.Agent.ControlPlane.Abstractions.dll
+  CrestCreates.Metadata.ContextPack -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Metadata.ContextPack/bin/Debug/net10.0/CrestCreates.Metadata.ContextPack.dll
+  CrestCreates.Runtime.Delivery.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Eventing/CrestCreates.Runtime.Delivery.Abstractions/bin/Debug/net10.0/CrestCreates.Runtime.Delivery.Abstractions.dll
+  CrestCreates.Domain.Shared -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Ddd/CrestCreates.Domain.Shared/bin/Debug/net10.0/CrestCreates.Domain.Shared.dll
+  CrestCreates.Localization -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Infrastructure/CrestCreates.Localization/bin/Debug/net10.0/CrestCreates.Localization.dll
+  CrestCreates.Agent.ControlPlane -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.ControlPlane/bin/Debug/net10.0/CrestCreates.Agent.ControlPlane.dll
+  CrestCreates.Metadata.AgentTool.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Metadata.AgentTool.Abstractions/bin/Debug/net10.0/CrestCreates.Metadata.AgentTool.Abstractions.dll
+  CrestCreates.Metadata.Mcp.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Metadata.Mcp.Abstractions/bin/Debug/net10.0/CrestCreates.Metadata.Mcp.Abstractions.dll
+  CrestCreates.DynamicApi.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Api/CrestCreates.DynamicApi.Abstractions/bin/Debug/net10.0/CrestCreates.DynamicApi.Abstractions.dll
+  CrestCreates.Metadata -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Metadata/bin/Debug/net10.0/CrestCreates.Metadata.dll
+  CrestCreates.Runtime.Delivery -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Eventing/CrestCreates.Runtime.Delivery/bin/Debug/net10.0/CrestCreates.Runtime.Delivery.dll
+  CrestCreates.HumanTask -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/HumanTask/CrestCreates.HumanTask/bin/Debug/net10.0/CrestCreates.HumanTask.dll
+  CrestCreates.Agent.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.Abstractions/bin/Debug/net10.0/CrestCreates.Agent.Abstractions.dll
+  CrestCreates.Agent.Prompting.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.Prompting.Abstractions/bin/Debug/net10.0/CrestCreates.Agent.Prompting.Abstractions.dll
+  CrestCreates.Agent.Memory.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.Memory.Abstractions/bin/Debug/net10.0/CrestCreates.Agent.Memory.Abstractions.dll
+  CrestCreates.Agent.Authoring.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/bin/Debug/net10.0/CrestCreates.Agent.Authoring.Abstractions.dll
+  CrestCreates.Agent.Authoring -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.Authoring/bin/Debug/net10.0/CrestCreates.Agent.Authoring.dll
+  CrestCreates.Schema -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Metadata/CrestCreates.Schema/bin/Debug/net10.0/CrestCreates.Schema.dll
+  CrestCreates.Form -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Modules/CrestCreates.Form/bin/Debug/net10.0/CrestCreates.Form.dll
+  CrestCreates.Runtime.Persistence -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Persistence/CrestCreates.Runtime.Persistence/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.dll
+  CrestCreates.Runtime.Persistence.InMemory -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Persistence/CrestCreates.Runtime.Persistence.InMemory/bin/Debug/net10.0/CrestCreates.Runtime.Persistence.InMemory.dll
+  CrestCreates.Security.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Infrastructure/CrestCreates.Security.Abstractions/bin/Debug/net10.0/CrestCreates.Security.Abstractions.dll
+  CrestCreates.Domain -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Framework/Ddd/CrestCreates.Domain/bin/Debug/net10.0/CrestCreates.Domain.dll
+  CrestCreates.EventBus.Abstract -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Eventing/CrestCreates.EventBus.Abstract/bin/Debug/net10.0/CrestCreates.EventBus.Abstract.dll
+  CrestCreates.EventBus.Local -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Eventing/CrestCreates.EventBus.Local/bin/Debug/net10.0/CrestCreates.EventBus.Local.dll
+  CrestCreates.Event -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Eventing/CrestCreates.Event/bin/Debug/net10.0/CrestCreates.Event.dll
+  CrestCreates.Mcp.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Integrations/CrestCreates.Mcp.Abstractions/bin/Debug/net10.0/CrestCreates.Mcp.Abstractions.dll
+  CrestCreates.Agent.Tools.Abstractions -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/bin/Debug/net10.0/CrestCreates.Agent.Tools.Abstractions.dll
+  CrestCreates.Sample.AssetManagement.Contracts -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Contracts/bin/Debug/net10.0/CrestCreates.Sample.AssetManagement.Contracts.dll
+  CrestCreates.TestBase -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Framework/Testing/CrestCreates.TestBase/bin/Debug/net10.0/CrestCreates.TestBase.dll
+/home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/ToolContractCoverageTests.cs(16,49): warning CS8601: Possible null reference assignment. [/home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj]
+/home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/VisibilityClosureRegressionTests.cs(311,9): warning CS8602: Dereference of a possibly null reference. [/home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj]
+  CrestCreates.Agent.ControlPlane.Tests -> /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/bin/Debug/net10.0/CrestCreates.Agent.ControlPlane.Tests.dll
+Test run for /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/bin/Debug/net10.0/CrestCreates.Agent.ControlPlane.Tests.dll (.NETCoreApp,Version=v10.0)
+VSTest version 18.0.2 (x64)
+
+Starting test execution, please wait...
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.51]     CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.AssetCandidate_ReviewEvidenceSubmit_CreatesUnderReviewTask [FAIL]
+[xUnit.net 00:00:00.52]     CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.AssetCandidate_HumanApprove_CompletesThroughOutbox_AndActivates [FAIL]
+  Failed CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.AssetCandidate_ReviewEvidenceSubmit_CreatesUnderReviewTask [282 ms]
+  Error Message:
+   Expected property draft.Payload.GetDescriptor()[0].InputSchema to be <null>, but found CrestCreates.Metadata.Abstractions.VersionedDescriptorRef`1[[CrestCreates.Schema.Abstractions.SchemaDescriptor, CrestCreates.Schema.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]
+{
+    ExpectedContractHash = <null>,
+    Id = <null>,
+    SelectionMode = VersionSelectionMode.Exact {value: 0},
+    Version = 0
+}.
+Expected property draft.Payload.GetDescriptor()[0].OutputSchema to be <null>, but found CrestCreates.Metadata.Abstractions.VersionedDescriptorRef`1[[CrestCreates.Schema.Abstractions.SchemaDescriptor, CrestCreates.Schema.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]
+{
+    ExpectedContractHash = <null>,
+    Id = <null>,
+    SelectionMode = VersionSelectionMode.Exact {value: 0},
+    Version = 0
+}.
+
+With configuration:
+- Prefer the declared type of the members
+- Compare enums by value
+- Compare tuples by their properties
+- Compare anonymous types by their properties
+- Compare records by their members
+- Include non-browsable members
+- Match (JSON) member by name (or throw)
+- Be strict about the order of items in byte arrays
+- Without automatic conversion
+
+  Stack Trace:
+     at FluentAssertions.Primitives.ObjectAssertions`2.BeEquivalentTo[TExpectation](TExpectation expectation, Func`2 config, String because, Object[] becauseArgs)
+   at FluentAssertions.Primitives.ObjectAssertions`2.BeEquivalentTo[TExpectation](TExpectation expectation, String because, Object[] becauseArgs)
+   at CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.ParseAssetCandidate() in /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs:line 371
+   at CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.AssetCandidate_ReviewEvidenceSubmit_CreatesUnderReviewTask() in /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs:line 60
+   at CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.AssetCandidate_ReviewEvidenceSubmit_CreatesUnderReviewTask() in /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs:line 169
+--- End of stack trace from previous location ---
+  Failed CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.AssetCandidate_HumanApprove_CompletesThroughOutbox_AndActivates [12 ms]
+  Error Message:
+   Expected property draft.Payload.GetDescriptor()[0].InputSchema to be <null>, but found CrestCreates.Metadata.Abstractions.VersionedDescriptorRef`1[[CrestCreates.Schema.Abstractions.SchemaDescriptor, CrestCreates.Schema.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]
+{
+    ExpectedContractHash = <null>,
+    Id = <null>,
+    SelectionMode = VersionSelectionMode.Exact {value: 0},
+    Version = 0
+}.
+Expected property draft.Payload.GetDescriptor()[0].OutputSchema to be <null>, but found CrestCreates.Metadata.Abstractions.VersionedDescriptorRef`1[[CrestCreates.Schema.Abstractions.SchemaDescriptor, CrestCreates.Schema.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]
+{
+    ExpectedContractHash = <null>,
+    Id = <null>,
+    SelectionMode = VersionSelectionMode.Exact {value: 0},
+    Version = 0
+}.
+
+With configuration:
+- Prefer the declared type of the members
+- Compare enums by value
+- Compare tuples by their properties
+- Compare anonymous types by their properties
+- Compare records by their members
+- Include non-browsable members
+- Match (JSON) member by name (or throw)
+- Be strict about the order of items in byte arrays
+- Without automatic conversion
+
+  Stack Trace:
+     at FluentAssertions.Primitives.ObjectAssertions`2.BeEquivalentTo[TExpectation](TExpectation expectation, Func`2 config, String because, Object[] becauseArgs)
+   at FluentAssertions.Primitives.ObjectAssertions`2.BeEquivalentTo[TExpectation](TExpectation expectation, String because, Object[] becauseArgs)
+   at CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.ParseAssetCandidate() in /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs:line 371
+   at CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.SubmitCandidateAsync(Fixture fixture) in /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs:line 245
+   at CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.AssetCandidate_HumanApprove_CompletesThroughOutbox_AndActivates() in /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs:line 176
+   at CrestCreates.Agent.ControlPlane.Tests.AssetHumanApprovalActivationHandoffAcceptanceTests.AssetCandidate_HumanApprove_CompletesThroughOutbox_AndActivates() in /home/orches/workspace/CrestCreates/.worktrees/asset-human-approval-87/tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs:line 217
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     2, Passed:     0, Skipped:     0, Total:     2, Duration: 308 ms - CrestCreates.Agent.ControlPlane.Tests.dll (net10.0)

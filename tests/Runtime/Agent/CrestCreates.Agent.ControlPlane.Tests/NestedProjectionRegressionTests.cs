@@ -153,7 +153,8 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         var context = CreateContext(AgentToolName.PreviewDescriptorPackage);
         var result = await service.PreviewDescriptorPackageAsync(context, draft.DraftId);
 
-        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Status.Should().Be(AgentToolResultStatus.Success,
+            "diagnostics: {0}", string.Join(" | ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
     }
 
     // ── Finding 4: Draft comparison namespace validation ──
@@ -589,7 +590,8 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         var context = CreateContext(AgentToolName.BuildPackageEvidencePreview);
         var result = await service.BuildPackageEvidencePreviewAsync(context, draft.DraftId);
 
-        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Status.Should().Be(AgentToolResultStatus.Success,
+            "diagnostics: {0}", string.Join(" | ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         // The denied-capability finding must be filtered out
         result.Value!.Evidence.NormalizedFindings.Should().ContainSingle()
             .Which.Subject!.Value.Id.Should().Be("desc-001");
@@ -806,42 +808,15 @@ public class NestedProjectionRegressionTests : AgentControlPlaneTestBase
         PackageBuilderMock.Setup(b => b.Build(It.IsAny<DescriptorPackageBuildRequest>()))
             .Returns((DescriptorPackageBuildRequest req) =>
             {
-                var entries = req.Descriptors
-                    .Select(d => new DescriptorManifestEntry
-                    {
-                        Ref = new DescriptorRef(d.Namespace, d.Id),
-                        Kind = d.Kind,
-                        Name = d.Name,
-                        State = d.State,
-                    })
-                    .ToList().AsReadOnly();
-
-                var manifest = new DescriptorManifest
+                return BuildValidTestPackage(req, new DescriptorPackageEvidence
                 {
-                    PackageId = req.PackageId,
-                    PackageVersion = req.PackageVersion,
-                    DescriptorEntries = entries
-                };
-
-                return new DescriptorPackage
-                {
-                    Manifest = manifest,
-                    SnapshotData = new DescriptorSnapshot(),
-                    Evidence = new DescriptorPackageEvidence
-                    {
-                        NormalizedFindings = findings,
-                        BreakingFindingCount = findings.Count(f =>
-                            f.Severity == "Breaking"),
-                        SecuritySensitiveFindingCount = findings.Count(f =>
-                            f.Severity == "SecuritySensitive"),
-                        UnsupportedFindingCount = findings.Count(f =>
-                            f.Severity == "Unsupported"),
-                        RequiresReview = findings.Any(f =>
-                            f.Severity == "Breaking" ||
-                            f.Severity == "SecuritySensitive"),
-                        PackageFindingCount = findings.Count
-                    }
-                };
+                    NormalizedFindings = findings,
+                    BreakingFindingCount = findings.Count(f => f.Severity == "Breaking"),
+                    SecuritySensitiveFindingCount = findings.Count(f => f.Severity == "SecuritySensitive"),
+                    UnsupportedFindingCount = findings.Count(f => f.Severity == "Unsupported"),
+                    RequiresReview = findings.Any(f => f.Severity == "Breaking" || f.Severity == "SecuritySensitive"),
+                    PackageFindingCount = findings.Count
+                });
             });
     }
 

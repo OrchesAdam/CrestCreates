@@ -8,7 +8,7 @@ public sealed class LlmDescriptorAuthoringAgentOptions
     public const string DefaultAuthorId = "llm-descriptor-authoring-agent";
 
     public static readonly AgentPromptTemplateId DefaultPromptTemplateId = new("descriptor-authoring");
-    public static readonly AgentPromptVersion DefaultPromptTemplateVersion = new("descriptor-authoring-prompt-template-v1");
+    public static readonly AgentPromptVersion DefaultPromptTemplateVersion = new("descriptor-authoring-prompt-template-v2");
     public static readonly AgentPromptContractVersion DefaultPromptContractVersion = new("7g.v1");
 
     public string AuthorId { get; set; } = DefaultAuthorId;

@@ -453,7 +453,7 @@ public class ToolDtoBoundaryConstraintTests
             Capability = new AgentCapabilityDraftPayloadDto { CapabilityKind = CapabilityKind.Command, RiskLevel = CapabilityRiskLevel.Low, State = DescriptorState.Active },
         };
 
-        var result3 = AgentDraftPayloadProjection.Create(mismatchedPayload);
+        var result3 = AgentDraftPayloadProjection.Create(mismatchedPayload, "mismatch.descriptor");
         result3.IsSuccess.Should().BeFalse(
             "mismatched payload (Event discriminator but Capability populated) must be rejected");
         result3.Errors.Should().Contain(e => e.Code == AgentDraftContractErrorCodes.DiscriminatorMismatch);

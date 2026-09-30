@@ -217,6 +217,40 @@ public class AgentDraftPayloadPatchValidationTests
     }
 
     [Fact]
+    public void Merge_EmptyExistingIdentity_FailsClosed()
+    {
+        var existing = new CapabilityDescriptorDraftPayload(new CapabilityDescriptor
+        {
+            Name = "ExistingName",
+            State = DescriptorState.Active,
+            Version = 1,
+            CapabilityKind = CapabilityKind.Query,
+            RiskLevel = CapabilityRiskLevel.Low,
+        });
+        var patch = new AgentDraftPayloadPatchDto
+        {
+            Discriminator = DescriptorKind.Capability,
+            Capability = new AgentCapabilityDraftPayloadPatchDto
+            {
+                Payload = new AgentCapabilityDraftPayloadDto
+                {
+                    Name = "UpdatedName",
+                    State = DescriptorState.Active,
+                    CapabilityKind = CapabilityKind.Query,
+                    RiskLevel = CapabilityRiskLevel.Low,
+                },
+                ChangedFields = AgentCapabilityDraftChangedField.Name,
+            },
+        };
+
+        var result = AgentDraftPayloadProjection.Merge(patch, existing);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle(error =>
+            error.Code == AgentDraftContractErrorCodes.InvalidDescriptorIdentity);
+    }
+
+    [Fact]
     public void Merge_NullForNullableRef_OutputSchema_ClearsToNull()
     {
         var existing = CreateExistingCapability();
@@ -255,6 +289,7 @@ public class AgentDraftPayloadPatchValidationTests
     {
         var descriptor = new CapabilityDescriptor
         {
+            Id = "existing.capability",
             Name = "ExistingName",
             State = DescriptorState.Active,
             Version = 1,
@@ -271,6 +306,7 @@ public class AgentDraftPayloadPatchValidationTests
     {
         var descriptor = new EventDescriptor
         {
+            Id = "existing.event",
             Name = "ExistingEvent",
             State = DescriptorState.Active,
             Version = 1,

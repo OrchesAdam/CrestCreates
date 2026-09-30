@@ -49,7 +49,7 @@ public class AgentDraftPayloadRoundTripTests
         };
 
         // Act: DTO → domain → DTO
-        var createResult = AgentDraftPayloadProjection.Create(dto);
+        var createResult = AgentDraftPayloadProjection.Create(dto, "roundtrip.descriptor");
         createResult.IsSuccess.Should().BeTrue();
 
         var fromResult = AgentDraftPayloadProjection.FromDomain(createResult.Value!);
@@ -113,7 +113,7 @@ public class AgentDraftPayloadRoundTripTests
         };
 
         // Act: DTO → domain → DTO
-        var createResult = AgentDraftPayloadProjection.Create(dto);
+        var createResult = AgentDraftPayloadProjection.Create(dto, "roundtrip.descriptor");
         createResult.IsSuccess.Should().BeTrue();
 
         var fromResult = AgentDraftPayloadProjection.FromDomain(createResult.Value!);
@@ -160,7 +160,7 @@ public class AgentDraftPayloadRoundTripTests
         };
 
         // Act: DTO → domain → DTO
-        var createResult = AgentDraftPayloadProjection.Create(dto);
+        var createResult = AgentDraftPayloadProjection.Create(dto, "roundtrip.descriptor");
         createResult.IsSuccess.Should().BeTrue();
 
         var fromResult = AgentDraftPayloadProjection.FromDomain(createResult.Value!);
@@ -207,7 +207,7 @@ public class AgentDraftPayloadRoundTripTests
         };
 
         // Act: DTO → domain → DTO
-        var createResult = AgentDraftPayloadProjection.Create(dto);
+        var createResult = AgentDraftPayloadProjection.Create(dto, "roundtrip.descriptor");
         createResult.IsSuccess.Should().BeTrue();
 
         var fromResult = AgentDraftPayloadProjection.FromDomain(createResult.Value!);
@@ -262,7 +262,7 @@ public class AgentDraftPayloadRoundTripTests
         };
 
         // Act: DTO → domain → DTO
-        var createResult = AgentDraftPayloadProjection.Create(dto);
+        var createResult = AgentDraftPayloadProjection.Create(dto, "roundtrip.descriptor");
         createResult.IsSuccess.Should().BeTrue();
 
         var fromResult = AgentDraftPayloadProjection.FromDomain(createResult.Value!);
@@ -301,7 +301,7 @@ public class AgentDraftPayloadRoundTripTests
         };
 
         // Act: DTO → domain → DTO
-        var createResult = AgentDraftPayloadProjection.Create(dto);
+        var createResult = AgentDraftPayloadProjection.Create(dto, "roundtrip.descriptor");
         createResult.IsSuccess.Should().BeTrue();
 
         var fromResult = AgentDraftPayloadProjection.FromDomain(createResult.Value!);

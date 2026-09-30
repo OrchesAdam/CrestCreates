@@ -1,0 +1,11 @@
+ReflectionFallback_IsDisabled:PASS
+  OK [DescriptorSearchRequest]
+  OK [AgentToolResult<string>]
+  OK [DescriptorActivationReviewDecision]
+  OK [CanonicalHash]
+CONTROL_PLANE_LOCALIZED_MESSAGE_NATIVEAOT_OK
+ActivationReviewCallbackBoundary:PASS
+AgentDraftIdentityBinding:PASS
+AgentAuthoringOptionalReferences:PASS
+SerializeDeserialize_RepresentativeToolRoots:PASS
+CONTROL_PLANE_JSON_CONTRACT_NATIVEAOT_OK

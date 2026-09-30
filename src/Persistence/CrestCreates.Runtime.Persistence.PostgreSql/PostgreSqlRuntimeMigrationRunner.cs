@@ -193,6 +193,9 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             ,"runtime_outbox_messages"
             ,"runtime_workflow_continuation_acceptances"
             ,"organization_scope_generations"
+            ,"agent_review_artifacts"
+            ,"agent_package_artifacts"
+            ,"agent_evidence_artifacts"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -895,6 +898,33 @@ public sealed class PostgreSqlRuntimeMigrationRunner
              new("ck_cp_draft_contract_version", "check (state_contract_version = 1)")],
             [new("ix_cp_drafts_created", ["tenant_id", "created_at_utc_ticks", "draft_id"], "", Unique: false, KeyCollations: ["C", "", "C"]),
              new("ix_cp_drafts_combined_filter", ["tenant_id", "descriptor_kind", "operation", "author_kind", "status", "created_at_utc_ticks", "draft_id"], "", Unique: false, KeyCollations: ["C", "", "", "", "", "", "C"])], []),
+            new("agent_review_artifacts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["review_result_id"] = TextC, ["draft_id"] = TextC,
+                ["created_at_utc_ticks"] = BigInt, ["created_at"] = Timestamp,
+                ["artifact_version"] = Integer, ["state_json"] = Json
+            }, ["tenant_id", "review_result_id"],
+            [new("ck_agent_review_artifact_version", "check (artifact_version = 1)")],
+            [new("ix_agent_review_artifacts_latest", ["tenant_id", "draft_id", "created_at_utc_ticks", "review_result_id"], "", Unique: false, KeyCollations: ["C", "C", "", "C"])], []),
+            new("agent_package_artifacts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["package_preview_id"] = TextC, ["captured_at_utc_ticks"] = BigInt,
+                ["captured_at"] = Timestamp, ["artifact_version"] = Integer, ["draft_id"] = TextC,
+                ["scope_fingerprint"] = TextC, ["captured_draft_version"] = NullableTextC,
+                ["visible_catalog_fingerprint"] = TextC, ["state_json"] = Json
+            }, ["tenant_id", "package_preview_id"],
+            [new("ck_agent_package_artifact_version", "check (artifact_version = 1)")],
+            [new("ix_agent_package_artifacts_reuse", ["tenant_id", "draft_id", "captured_at_utc_ticks", "package_preview_id"], "", Unique: false, KeyCollations: ["C", "C", "", "C"])], []),
+            new("agent_evidence_artifacts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["tenant_id"] = TextC, ["evidence_preview_id"] = TextC, ["captured_at_utc_ticks"] = BigInt,
+                ["captured_at"] = Timestamp, ["artifact_version"] = Integer, ["package_preview_id"] = TextC,
+                ["draft_id"] = TextC, ["scope_fingerprint"] = TextC, ["captured_draft_version"] = NullableTextC,
+                ["state_json"] = Json
+            }, ["tenant_id", "evidence_preview_id"],
+            [new("ck_agent_evidence_artifact_version", "check (artifact_version = 1)")],
+            [new("ix_agent_evidence_artifacts_package", ["tenant_id", "package_preview_id", "captured_at_utc_ticks", "evidence_preview_id"], "", Unique: false, KeyCollations: ["C", "C", "", "C"])],
+            [new("tenant_id, package_preview_id", "agent_package_artifacts", "tenant_id, package_preview_id", Deferrable: false, InitiallyDeferred: false, DeleteAction: "RESTRICT")]),
             new("organization_units", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_scope_kind"] = TextC, ["tenant_id"] = TextC, ["organization_unit_id"] = TextC,
@@ -1684,6 +1714,57 @@ public sealed class PostgreSqlRuntimeMigrationRunner
                     or (tenant_scope_kind = 'tenant' and tenant_id <> '')),
                 constraint ck_org_scope_generation_value check (generation >= 1)
             );
+            """),
+        new RuntimeMigration("V014", "agent_review_artifacts", """
+            create table {schema}.agent_review_artifacts (
+                tenant_id text collate "C" not null,
+                review_result_id text collate "C" not null,
+                draft_id text collate "C" not null,
+                created_at_utc_ticks bigint not null,
+                created_at timestamptz not null,
+                artifact_version integer not null,
+                state_json jsonb not null,
+                constraint pk_agent_review_artifacts primary key (tenant_id, review_result_id),
+                constraint ck_agent_review_artifact_version check (artifact_version = 1)
+            );
+            create index ix_agent_review_artifacts_latest
+                on {schema}.agent_review_artifacts (tenant_id, draft_id, created_at_utc_ticks, review_result_id);
+            """),
+        new RuntimeMigration("V015", "agent_package_evidence_artifacts", """
+            create table {schema}.agent_package_artifacts (
+                tenant_id text collate "C" not null,
+                package_preview_id text collate "C" not null,
+                captured_at_utc_ticks bigint not null,
+                captured_at timestamptz not null,
+                artifact_version integer not null,
+                draft_id text collate "C" not null,
+                scope_fingerprint text collate "C" not null,
+                captured_draft_version text collate "C",
+                visible_catalog_fingerprint text collate "C" not null,
+                state_json jsonb not null,
+                constraint pk_agent_package_artifacts primary key (tenant_id, package_preview_id),
+                constraint ck_agent_package_artifact_version check (artifact_version = 1)
+            );
+            create index ix_agent_package_artifacts_reuse
+                on {schema}.agent_package_artifacts (tenant_id, draft_id, captured_at_utc_ticks, package_preview_id);
+            create table {schema}.agent_evidence_artifacts (
+                tenant_id text collate "C" not null,
+                evidence_preview_id text collate "C" not null,
+                captured_at_utc_ticks bigint not null,
+                captured_at timestamptz not null,
+                artifact_version integer not null,
+                package_preview_id text collate "C" not null,
+                draft_id text collate "C" not null,
+                scope_fingerprint text collate "C" not null,
+                captured_draft_version text collate "C",
+                state_json jsonb not null,
+                constraint pk_agent_evidence_artifacts primary key (tenant_id, evidence_preview_id),
+                constraint ck_agent_evidence_artifact_version check (artifact_version = 1),
+                constraint fk_agent_evidence_package foreign key (tenant_id, package_preview_id)
+                    references {schema}.agent_package_artifacts (tenant_id, package_preview_id) on delete restrict
+            );
+            create index ix_agent_evidence_artifacts_package
+                on {schema}.agent_evidence_artifacts (tenant_id, package_preview_id, captured_at_utc_ticks, evidence_preview_id);
             """),
     ];
 }

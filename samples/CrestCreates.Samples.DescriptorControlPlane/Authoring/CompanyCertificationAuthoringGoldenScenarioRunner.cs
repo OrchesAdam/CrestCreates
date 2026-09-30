@@ -1,6 +1,9 @@
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
+using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
+using CrestCreates.Agent.ControlPlane.Abstractions.PackageArtifacts;
+using CrestCreates.Agent.ControlPlane.PackageArtifacts;
 using CrestCreates.Agent.Memory.Abstractions;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
@@ -16,6 +19,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.Abstractions.DescriptorTopology;
 using CrestCreates.Metadata.ContextPack.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using DescriptorDraftEntity = CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft;
 
 namespace CrestCreates.Samples.DescriptorControlPlane.Authoring;
 
@@ -114,18 +118,13 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
         // ── Step 4: Sequential review (all-or-block) ──
         var currentInventory = startingInventory.ToList();
         var perDraftResults = new List<DescriptorDraftReviewResult>();
+        var reviewInventories = new Dictionary<string, IReadOnlyList<IDescriptor>>(StringComparer.Ordinal);
 
         foreach (var draft in draftSet.Drafts)
         {
+            reviewInventories[draft.DraftId] = Array.AsReadOnly(currentInventory.ToArray());
             var reviewResult = await reviewService.ReviewAsync(draft, currentInventory, ct);
             perDraftResults.Add(reviewResult);
-
-            // Register review result in reference registry at creation point
-            var referenceRegistry = _serviceProvider.GetRequiredService<ActivationBindingReferenceRegistry>();
-            referenceRegistry.RegisterReviewResult(
-                tenantId,
-                $"review-result-{draft.DraftId}",
-                draft.DraftId);
 
             // All-or-block: any failure blocks the entire set
             if (!reviewResult.ValidationResult.IsValid ||
@@ -264,6 +263,7 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
         {
             DraftSet = draftSet,
             PerDraftReviewResults = perDraftResults,
+            ReviewInventoriesByDraft = reviewInventories,
             FinalProposedInventory = finalInventory,
             IsBlocked = false,
             FinalDecisionSource = "FinalProposedInventory",
@@ -349,8 +349,14 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 
         // ── Build BindingHashes ──
         var reviewHashService = _serviceProvider.GetRequiredService<IDescriptorDraftReviewHashService>();
-        var sourceReviewHash = reviewHashService.ComputeSourceReviewHash(workflowReviewResult);
-        var reviewManifestHash = reviewHashService.ComputeReviewManifestHash(workflowReviewResult);
+        var workflowDraft = reviewReport.DraftSet.Drafts.Single(draft => draft.DraftId == workflowReviewResult.DraftId);
+        var reviewArtifact = await PersistReviewArtifactAsync(
+            workflowReviewResult,
+            workflowDraft,
+            reviewReport.ReviewInventoriesByDraft[workflowReviewResult.DraftId],
+            ct);
+        var sourceReviewHash = reviewHashService.ComputeSourceReviewHash(reviewArtifact.OriginalHashInput);
+        var reviewManifestHash = reviewHashService.ComputeReviewManifestHash(reviewArtifact.OriginalHashInput);
 
         // Compute package hashes from the final proposed inventory
         var packageBuilder = _serviceProvider.GetRequiredService<IDescriptorPackageBuilder>();
@@ -358,11 +364,11 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 
         var buildRequest = new DescriptorPackageBuildRequest
         {
-            PackageId = "pkg-phase7f-golden-scenario",
-            PackageVersion = "1.0.0",
-            CreatedBy = "phase7f-golden-scenario-runner",
-            Source = "golden-scenario",
-            CreatedAt = GoldenScenarioCreatedAt,
+            PackageId = workflowDraft.DraftId,
+            PackageVersion = workflowDraft.ProposedVersion ?? "1",
+            CreatedBy = workflowDraft.AuthorId,
+            Source = workflowDraft.Source,
+            CreatedAt = workflowDraft.CreatedAt,
             Descriptors = reviewReport.FinalProposedInventory,
             TopologySnapshot = reviewReport.FinalTopology,
             ImpactReport = reviewReport.FinalImpact!,
@@ -370,6 +376,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             GovernanceReport = reviewReport.FinalGovernance,
         };
         var descriptorPackage = packageBuilder.Build(buildRequest);
+        var packageArtifactIds = await PersistPackageArtifactsAsync(
+            reviewArtifact, workflowDraft, reviewReport.ReviewInventoriesByDraft[workflowReviewResult.DraftId], descriptorPackage, ct);
         var packageManifestHash = descriptorPackage.Hashes!.PackageManifestHash;
         var packageEvidenceHash = descriptorPackage.Hashes.PackageEvidenceHash;
         var packageEvidenceEnvelopeHash = descriptorPackage.Hashes.PackageEvidenceEnvelopeHash;
@@ -407,9 +415,9 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 
         // ── Build ActivationBindingSnapshot ──
         var tenantId = "tenant-company-certification";
-        var reviewResultId = "review-result-draft_company_certification_workflow_finance_review";
-        var packagePreviewId = "package-preview-draft_company_certification_workflow_finance_review";
-        var evidencePreviewId = "evidence-preview-draft_company_certification_workflow_finance_review";
+        var reviewResultId = reviewArtifact.ReviewResultId;
+        var packagePreviewId = packageArtifactIds.PackagePreviewId;
+        var evidencePreviewId = packageArtifactIds.EvidencePreviewId;
         var draftVersion = 1;
 
         var bindingSnapshot = new ActivationBindingSnapshot
@@ -425,24 +433,9 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             CreatedAt = GoldenScenarioCreatedAt,
         };
 
-        // ── Store hashes in artifact resolver ──
-        var artifactResolver = _serviceProvider.GetRequiredService<IActivationBindingArtifactResolver>();
-        artifactResolver.StorePackageHashes(tenantId, packagePreviewId, new DescriptorPackageHashSet
-        {
-            PackageManifestHash = packageManifestHash,
-            PackageEvidenceHash = packageEvidenceHash,
-            PackageEvidenceEnvelopeHash = packageEvidenceEnvelopeHash,
-        });
-        artifactResolver.StoreEvidenceHashes(tenantId, evidencePreviewId, new DescriptorPackageHashSet
-        {
-            PackageManifestHash = packageManifestHash,
-            PackageEvidenceHash = packageEvidenceHash,
-            PackageEvidenceEnvelopeHash = packageEvidenceEnvelopeHash,
-        });
-        artifactResolver.StoreReviewHashes(tenantId, reviewResultId, sourceReviewHash, reviewManifestHash);
-
         // ── Register binding references at artifact creation point ──
         var referenceRegistryForArtifacts = _serviceProvider.GetRequiredService<ActivationBindingReferenceRegistry>();
+        referenceRegistryForArtifacts.RegisterReviewResult(tenantId, reviewResultId, bindingSnapshot.DraftId);
         referenceRegistryForArtifacts.RegisterPackagePreview(tenantId, packagePreviewId, bindingSnapshot.DraftId);
         referenceRegistryForArtifacts.RegisterEvidencePreview(tenantId, evidencePreviewId, bindingSnapshot.DraftId);
 
@@ -649,8 +642,14 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 
         // ── Build BindingHashes ──
         var reviewHashService = _serviceProvider.GetRequiredService<IDescriptorDraftReviewHashService>();
-        var sourceReviewHash = reviewHashService.ComputeSourceReviewHash(workflowReviewResult);
-        var reviewManifestHash = reviewHashService.ComputeReviewManifestHash(workflowReviewResult);
+        var workflowDraft = reviewReport.DraftSet.Drafts.Single(draft => draft.DraftId == workflowReviewResult.DraftId);
+        var reviewArtifact = await PersistReviewArtifactAsync(
+            workflowReviewResult,
+            workflowDraft,
+            reviewReport.ReviewInventoriesByDraft[workflowReviewResult.DraftId],
+            ct);
+        var sourceReviewHash = reviewHashService.ComputeSourceReviewHash(reviewArtifact.OriginalHashInput);
+        var reviewManifestHash = reviewHashService.ComputeReviewManifestHash(reviewArtifact.OriginalHashInput);
 
         // Compute package hashes from the final proposed inventory
         var packageBuilder = _serviceProvider.GetRequiredService<IDescriptorPackageBuilder>();
@@ -658,11 +657,11 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 
         var buildRequest = new DescriptorPackageBuildRequest
         {
-            PackageId = "pkg-phase7f-golden-scenario",
-            PackageVersion = "1.0.0",
-            CreatedBy = "phase7f-golden-scenario-runner",
-            Source = "golden-scenario",
-            CreatedAt = GoldenScenarioCreatedAt,
+            PackageId = workflowDraft.DraftId,
+            PackageVersion = workflowDraft.ProposedVersion ?? "1",
+            CreatedBy = workflowDraft.AuthorId,
+            Source = workflowDraft.Source,
+            CreatedAt = workflowDraft.CreatedAt,
             Descriptors = reviewReport.FinalProposedInventory,
             TopologySnapshot = reviewReport.FinalTopology,
             ImpactReport = reviewReport.FinalImpact!,
@@ -670,6 +669,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             GovernanceReport = reviewReport.FinalGovernance,
         };
         var descriptorPackage = packageBuilder.Build(buildRequest);
+        var packageArtifactIds = await PersistPackageArtifactsAsync(
+            reviewArtifact, workflowDraft, reviewReport.ReviewInventoriesByDraft[workflowReviewResult.DraftId], descriptorPackage, ct);
         var packageManifestHash = descriptorPackage.Hashes!.PackageManifestHash;
         var packageEvidenceHash = descriptorPackage.Hashes.PackageEvidenceHash;
         var packageEvidenceEnvelopeHash = descriptorPackage.Hashes.PackageEvidenceEnvelopeHash;
@@ -707,9 +708,9 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
 
         // ── Build ActivationBindingSnapshot ──
         var tenantId = "tenant-company-certification";
-        var reviewResultId = "review-result-draft_company_certification_workflow_finance_review";
-        var packagePreviewId = "package-preview-draft_company_certification_workflow_finance_review";
-        var evidencePreviewId = "evidence-preview-draft_company_certification_workflow_finance_review";
+        var reviewResultId = reviewArtifact.ReviewResultId;
+        var packagePreviewId = packageArtifactIds.PackagePreviewId;
+        var evidencePreviewId = packageArtifactIds.EvidencePreviewId;
 
         var bindingSnapshot = new ActivationBindingSnapshot
         {
@@ -724,24 +725,9 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             CreatedAt = GoldenScenarioCreatedAt,
         };
 
-        // ── Store hashes in artifact resolver ──
-        var artifactResolver = _serviceProvider.GetRequiredService<IActivationBindingArtifactResolver>();
-        artifactResolver.StorePackageHashes(tenantId, packagePreviewId, new DescriptorPackageHashSet
-        {
-            PackageManifestHash = packageManifestHash,
-            PackageEvidenceHash = packageEvidenceHash,
-            PackageEvidenceEnvelopeHash = packageEvidenceEnvelopeHash,
-        });
-        artifactResolver.StoreEvidenceHashes(tenantId, evidencePreviewId, new DescriptorPackageHashSet
-        {
-            PackageManifestHash = packageManifestHash,
-            PackageEvidenceHash = packageEvidenceHash,
-            PackageEvidenceEnvelopeHash = packageEvidenceEnvelopeHash,
-        });
-        artifactResolver.StoreReviewHashes(tenantId, reviewResultId, sourceReviewHash, reviewManifestHash);
-
         // ── Register binding references at artifact creation point ──
         var referenceRegistryForArtifacts = _serviceProvider.GetRequiredService<ActivationBindingReferenceRegistry>();
+        referenceRegistryForArtifacts.RegisterReviewResult(tenantId, reviewResultId, bindingSnapshot.DraftId);
         referenceRegistryForArtifacts.RegisterPackagePreview(tenantId, packagePreviewId, bindingSnapshot.DraftId);
         referenceRegistryForArtifacts.RegisterEvidencePreview(tenantId, evidencePreviewId, bindingSnapshot.DraftId);
 
@@ -890,4 +876,51 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             .ToList()
             .AsReadOnly();
     }
+
+    private async Task<AgentReviewArtifactEnvelope> PersistReviewArtifactAsync(
+        DescriptorDraftReviewResult review,
+        DescriptorDraftEntity owner,
+        IReadOnlyList<IDescriptor> reviewInventory,
+        CancellationToken ct)
+    {
+        var factory = new AgentReviewArtifactFactory(
+            _serviceProvider.GetRequiredService<IDescriptorTopologyBuilder>(),
+            _serviceProvider.GetRequiredService<IDescriptorDraftReviewHashService>());
+        var artifact = factory.Create(
+            Guid.NewGuid().ToString("N"),
+            GoldenScenarioCreatedAt,
+            review,
+            owner,
+            reviewInventory,
+            _serviceProvider.GetRequiredService<AgentToolAuthorizationOptions>());
+        await _serviceProvider.GetRequiredService<IAgentReviewArtifactStore>().InsertAsync(artifact, ct);
+        return artifact;
+    }
+
+    private async Task<(string PackagePreviewId, string EvidencePreviewId)> PersistPackageArtifactsAsync(
+        AgentReviewArtifactEnvelope reviewArtifact,
+        DescriptorDraftEntity owner,
+        IReadOnlyList<IDescriptor> exactReviewInventory,
+        DescriptorPackageType package,
+        CancellationToken ct)
+    {
+        var options = _serviceProvider.GetRequiredService<AgentToolAuthorizationOptions>();
+        var packagePreviewId = Guid.NewGuid().ToString("N");
+        var evidencePreviewId = Guid.NewGuid().ToString("N");
+        var factory = _serviceProvider.GetRequiredService<IAgentPackageArtifactFactory>();
+        var pair = factory.CreateProjectedPair(
+            packagePreviewId,
+            evidencePreviewId,
+            GoldenScenarioCreatedAt,
+            owner,
+            options,
+            exactReviewInventory,
+            package);
+        if (!StringComparer.Ordinal.Equals(reviewArtifact.ScopeFingerprint, pair.Package.ScopeFingerprint))
+            throw new InvalidOperationException("Package capture authorization scope differs from the exact review artifact scope.");
+        await _serviceProvider.GetRequiredService<IAgentPackageArtifactStore>()
+            .InsertPackageAndEvidenceAsync(pair.Package, pair.Evidence, ct);
+        return (packagePreviewId, evidencePreviewId);
+    }
+
 }

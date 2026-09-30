@@ -56,6 +56,13 @@ public sealed class DescriptorAuthoringProviderItemDto
     [JsonPropertyName("operation")]
     public string? Operation { get; set; }
 
+    /// <summary>
+    /// Optional existing descriptor version selected by an Update item.
+    /// When omitted, Update retains the existing same-version behavior.
+    /// </summary>
+    [JsonPropertyName("baseVersion")]
+    public string? BaseVersion { get; set; }
+
     [JsonPropertyName("rationale")]
     public string? Rationale { get; set; }
 

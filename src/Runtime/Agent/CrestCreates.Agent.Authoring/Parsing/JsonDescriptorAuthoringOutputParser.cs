@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -17,6 +18,8 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
 {
     private static readonly DescriptorAuthoringParserJsonSerializerContext ParserContext =
         new(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+    internal static DescriptorAuthoringParserJsonSerializerContext Context => ParserContext;
 
     private const string ExpectedContractVersion = "7g.v1";
 
@@ -188,6 +191,32 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             return false;
         }
 
+        string? explicitBaseVersion = null;
+        if (item.BaseVersion is not null)
+        {
+            if (operation != DescriptorDraftOperation.Update)
+            {
+                diagnostics.Add(CreateDiagnostic(
+                    DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                    $"Item '{item.DescriptorId ?? "unknown"}' specifies baseVersion, but baseVersion is valid only for Update operations.",
+                    SeverityLevel.Error));
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(item.BaseVersion)
+                || !int.TryParse(item.BaseVersion, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedBaseVersion)
+                || parsedBaseVersion <= 0)
+            {
+                diagnostics.Add(CreateDiagnostic(
+                    DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                    $"Item '{item.DescriptorId ?? "unknown"}' has invalid baseVersion '{item.BaseVersion}'. Expected a positive invariant-culture integer string.",
+                    SeverityLevel.Error));
+                return false;
+            }
+
+            explicitBaseVersion = parsedBaseVersion.ToString(CultureInfo.InvariantCulture);
+        }
+
         // Materialize payload
         if (item.Payload is not JsonElement payloadElement || payloadElement.ValueKind != JsonValueKind.Object)
         {
@@ -239,7 +268,9 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             Rationale = item.Rationale,
             CorrelationId = Guid.NewGuid().ToString("N"),
             ProposedVersion = proposedVersion,
-            BaseVersion = operation == DescriptorDraftOperation.Update ? proposedVersion : null
+            BaseVersion = operation == DescriptorDraftOperation.Update
+                ? explicitBaseVersion ?? proposedVersion
+                : null
         };
 
         return true;
@@ -342,8 +373,8 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
                 : 0,
             Permissions = element.TryGetProperty("permissions", out var permProp) ? permProp.GetString() : null,
             Interaction = ParseDescriptorRef<IInteractionDescriptor>(element, "interaction"),
-            InputSchema = ParseDescriptorRef<SchemaDescriptor>(element, "inputSchema"),
-            OutputSchema = ParseDescriptorRef<SchemaDescriptor>(element, "outputSchema"),
+            InputSchema = ParseOptionalDescriptorRef<SchemaDescriptor>(element, "inputSchema"),
+            OutputSchema = ParseOptionalDescriptorRef<SchemaDescriptor>(element, "outputSchema"),
             AssigneeStrategy = assigneeStrategy,
             Outcomes = outcomes
         };
@@ -607,6 +638,17 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             return new VersionedDescriptorRef<T>(id, version);
         }
         return default;
+    }
+
+    private static VersionedDescriptorRef<T>? ParseOptionalDescriptorRef<T>(JsonElement element, string propertyName)
+        where T : class, IVersionedDescriptor
+    {
+        if (!element.TryGetProperty(propertyName, out var refProp) || refProp.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return ParseDescriptorRef<T>(element, propertyName);
     }
 
     private static DescriptorAuthoringDiagnostic CreateDiagnostic(

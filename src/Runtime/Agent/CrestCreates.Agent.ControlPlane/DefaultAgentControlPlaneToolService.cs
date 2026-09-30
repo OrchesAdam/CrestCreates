@@ -4,7 +4,9 @@ using System.Text.Json;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+using CrestCreates.Agent.ControlPlane.Abstractions.PackageArtifacts;
 using CrestCreates.Agent.ControlPlane.Activation;
+using CrestCreates.Agent.ControlPlane.PackageArtifacts;
 using CrestCreates.Agent.ControlPlane.Projections;
 using DraftAbstractions = CrestCreates.DescriptorDraft.Abstractions;
 using DraftCanonicalHashing = CrestCreates.DescriptorDraft.Abstractions.CanonicalHashing;
@@ -51,7 +53,6 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly IDescriptorTopologyBuilder _topologyBuilder;
     private readonly IDescriptorPackageBuilder _packageBuilder;
     private readonly IDescriptorStableHashBuilder _hashBuilder;
-    private readonly DraftCanonicalHashing.IDescriptorDraftReviewHashService _reviewHashService;
     private readonly ILogger<DefaultAgentControlPlaneToolService> _logger;
     private readonly AgentControlPlaneResourceResolver _resourceResolver;
     private readonly AgentTopologyVisibilityProjector _topologyProjector;
@@ -62,17 +63,14 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     private readonly IDescriptorReviewReportRenderer _reportRenderer;
     private readonly IDescriptorActivationRequestService _activationRequestService;
     private readonly IActivationReviewOrchestrator _activationReviewOrchestrator;
-    private readonly IActivationBindingArtifactResolver _artifactResolver;
+    private readonly AgentReviewArtifactFactory _reviewArtifactFactory;
+    private readonly IAgentPackageArtifactStore _packageArtifactStore;
+    private readonly IAgentPackageArtifactFactory _packageArtifactFactory;
+    private readonly TimeProvider _timeProvider;
 
-    // Local stores for review results, fix proposals, package previews, activation requests
-    // Keyed by (TenantId, ArtifactId) for tenant isolation.
-    // Each entry carries the owning Draft for owner-kind visibility resolution.
-    private readonly ConcurrentDictionary<(string TenantId, string Id), ReviewResourceSnapshot> _reviewResults = new();
+    // Review and package/evidence artifacts use their configured authorities.
+    private readonly IAgentReviewArtifactStore _reviewArtifactStore;
     private readonly ConcurrentDictionary<(string TenantId, string Id), FixProposalResourceSnapshot> _fixProposals = new();
-    private readonly ConcurrentDictionary<(string TenantId, string Id), PackagePreviewResourceSnapshot> _packagePreviews = new();
-    private readonly ConcurrentDictionary<(string TenantId, string Id), EvidencePreviewResourceSnapshot> _evidencePreviews = new();
-    private readonly ConcurrentDictionary<(string TenantId, string DraftId, string ScopeFingerprint), string> _latestPackageByDraft = new();
-    private readonly ConcurrentDictionary<(string TenantId, string Id), ReportResourceSnapshot> _reports = new();
 
     public DefaultAgentControlPlaneToolService(
         IAgentToolManifestProvider manifestProvider,
@@ -94,7 +92,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         IDescriptorReviewReportRenderer reportRenderer,
         IDescriptorActivationRequestService activationRequestService,
         IActivationReviewOrchestrator activationReviewOrchestrator,
-        IActivationBindingArtifactResolver artifactResolver,
+        IAgentReviewArtifactStore reviewArtifactStore,
+        IAgentPackageArtifactStore packageArtifactStore,
+        IAgentPackageArtifactFactory packageArtifactFactory,
+        TimeProvider timeProvider,
         AgentToolAuthorizationOptions? authorizationOptions = null,
         Func<AgentToolAuthorizationOptions>? optionsFactory = null)
     {
@@ -111,13 +112,16 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         _topologyBuilder = topologyBuilder;
         _packageBuilder = packageBuilder;
         _hashBuilder = hashBuilder;
-        _reviewHashService = reviewHashService;
         _logger = logger;
         _reportBuilder = reportBuilder;
         _reportRenderer = reportRenderer;
         _activationRequestService = activationRequestService;
         _activationReviewOrchestrator = activationReviewOrchestrator;
-        _artifactResolver = artifactResolver;
+        _reviewArtifactStore = reviewArtifactStore;
+        _packageArtifactStore = packageArtifactStore;
+        _packageArtifactFactory = packageArtifactFactory;
+        _timeProvider = timeProvider;
+        _reviewArtifactFactory = new AgentReviewArtifactFactory(topologyBuilder, reviewHashService);
         _resourceResolver = new AgentControlPlaneResourceResolver(draftStore, descriptorCatalog);
         _topologyProjector = new AgentTopologyVisibilityProjector();
         _artifactProjector = new AgentDraftArtifactVisibilityProjector(_topologyProjector, topologyBuilder);
@@ -789,7 +793,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     AgentToolResult<AgentDescriptorDraftDto>.InvalidRequest([ConvertErrorToDiagnostic(validationError!)]));
             }
 
-            var createResult = AgentDraftPayloadProjection.Create(request.Payload);
+            var createResult = AgentDraftPayloadProjection.Create(request.Payload, request.DescriptorId);
             if (!createResult.IsSuccess)
             {
                 return await RecordAndReturn(context,
@@ -1196,36 +1200,25 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             var reviewResult = await _draftReviewService.ReviewAsync(snapshot.Draft, universe.VisibleDescriptors, ct);
 
-            // Project nested review data through visibility.
-            // Null return means projection failure — caller must return
-            // Failed and NOT persist review or mutate draft state.
-            var projectedReview = _artifactProjector.ProjectReview(reviewResult, scope, universe);
-            if (projectedReview is null)
-            {
-                return await RecordAggregateFailure<AgentReviewResultDto>(
-                    context, "PACKAGE_PROJECTION_FAILURE", ct);
-            }
-
             var reviewId = Guid.NewGuid().ToString("N");
-            _reviewResults[(context.TenantId, reviewId)] = new ReviewResourceSnapshot(projectedReview, snapshot.Draft, DateTimeOffset.UtcNow);
+            var createdAt = DateTimeOffset.UtcNow;
+            if (!_reviewArtifactFactory.TryCreate(
+                    reviewId, createdAt, reviewResult, snapshot.Draft, scope, universe, out var artifact))
+                return await RecordAggregateFailure<AgentReviewResultDto>(context, "PACKAGE_PROJECTION_FAILURE", ct);
 
-            // Store review hashes for evidence recheck
-            var sourceReviewHash = _reviewHashService.ComputeSourceReviewHash(reviewResult);
-            var reviewManifestHash = _reviewHashService.ComputeReviewManifestHash(reviewResult);
-            _artifactResolver.StoreReviewHashes(context.TenantId, reviewId, sourceReviewHash, reviewManifestHash);
+            await _reviewArtifactStore.InsertAsync(artifact, ct);
 
             var reviewed = snapshot.Draft with { Status = DraftAbstractions.DescriptorDraftStatus.Reviewed };
             await _draftStore.SaveAsync(reviewed, ct);
 
-            var toolDiags = projectedReview.Diagnostics.Select(MapFromDraftDiagnostic).ToList();
+            var toolDiags = artifact.ProjectedReview.Diagnostics.Select(MapFromDraftDiagnostic).ToList();
             var audit = BuildAudit(context, AgentToolResultStatus.Success, toolDiags) with
             {
                 TouchedDraftIds = [draftId],
                 TouchedReviewResultIds = [reviewId]
             };
             await _auditor.RecordAsync(audit, ct);
-            var reviewDto = AgentReviewResultDtoProjection.Project(projectedReview);
-            return AgentToolResult<AgentReviewResultDto>.Success(reviewDto, audit);
+            return AgentToolResult<AgentReviewResultDto>.Success(artifact.ProjectedReview, audit);
         }, ct);
     }
 
@@ -1234,23 +1227,39 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
     {
         return await ExecuteAsync(context, AgentToolName.GetDraftReviewResult, AgentToolPermissionNames.ReviewRead, async (scope, ct) =>
         {
-            if (!_reviewResults.TryGetValue((context.TenantId, reviewResultId), out var snapshot))
+            var snapshot = await _reviewArtifactStore.GetAsync(context.TenantId, reviewResultId, ct);
+            if (snapshot is null)
             {
                 return await RecordAndReturn(context,
                     AgentToolResult<AgentReviewResultDto>.NotFound($"Review result '{reviewResultId}' not found."));
             }
 
-            var denyResult = DenyIfInvisible<AgentReviewResultDto>(context, scope, snapshot.Owner.DescriptorKind);
+            var denyResult = DenyIfInvisible<AgentReviewResultDto>(context, scope, snapshot.ReportInput.Owner.DescriptorKind);
             if (denyResult is not null)
                 return denyResult;
+
+            if (!StringComparer.Ordinal.Equals(snapshot.ScopeFingerprint, scope.ScopeFingerprint))
+            {
+                var scopeDiag = new AgentToolDiagnostic
+                {
+                    Code = AgentToolDiagnosticCodes.ReviewResultScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Review result was captured under a different visibility scope. Run the review again."
+                };
+                var scopeAudit = BuildAudit(context, AgentToolResultStatus.Denied, [scopeDiag]) with
+                {
+                    TouchedReviewResultIds = [reviewResultId]
+                };
+                await _auditor.RecordAsync(scopeAudit, ct);
+                return AgentToolResult<AgentReviewResultDto>.Denied([scopeDiag], scopeAudit);
+            }
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []) with
             {
                 TouchedReviewResultIds = [reviewResultId]
             };
             await _auditor.RecordAsync(audit, ct);
-            var reviewDto = AgentReviewResultDtoProjection.Project(snapshot.Review);
-            return AgentToolResult<AgentReviewResultDto>.Success(reviewDto, audit);
+            return AgentToolResult<AgentReviewResultDto>.Success(snapshot.ProjectedReview, audit);
         }, ct);
     }
 
@@ -1275,30 +1284,30 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     return denyResult;
             }
 
-            var reviews = _reviewResults
-                .Where(kvp => kvp.Key.TenantId == context.TenantId)
-                .ToList();
-
-            if (draftId is not null)
-                reviews = reviews.Where(r => r.Value.Review.DraftId == draftId).ToList();
+            var reviews = await _reviewArtifactStore.ListAsync(context.TenantId, draftId, ct);
 
             // Batch-load owner drafts for all stored reviews
             var owners = await _resourceResolver.ResolveOwnersAsync(
-                context.TenantId, reviews.Select(r => r.Value.Review.DraftId), ct);
+                context.TenantId, reviews.Select(r => r.DraftId), ct);
 
-            if (reviews.Any(r => !owners.ContainsKey(r.Value.Review.DraftId)))
+            if (reviews.Any(r => !owners.ContainsKey(r.DraftId)))
                 return await RecordAggregateFailure<ReviewResultListResult>(
                     context, "AUTHORIZATION_CONTEXT_UNAVAILABLE", ct);
 
-            var visible = reviews
-                .Where(r => scope.IsVisible(owners[r.Value.Review.DraftId].DescriptorKind))
-                .OrderBy(r => r.Value.Review.DraftId, StringComparer.Ordinal)
-                .Select(r => r.Value.Review)
+            var ownerVisible = reviews
+                .Where(r => scope.IsVisible(owners[r.DraftId].DescriptorKind))
+                .ToList();
+            var scopeTrimmed = ownerVisible.Any(r =>
+                !StringComparer.Ordinal.Equals(r.ScopeFingerprint, scope.ScopeFingerprint));
+            var visible = ownerVisible
+                .Where(r => StringComparer.Ordinal.Equals(r.ScopeFingerprint, scope.ScopeFingerprint))
+                .OrderBy(r => r.DraftId, StringComparer.Ordinal)
+                .Select(r => r.ProjectedReview)
                 .ToList().AsReadOnly();
 
-            var result = new ReviewResultListResult { Results = visible.Select(AgentReviewResultDtoProjection.Project).ToList().AsReadOnly() };
+            var result = new ReviewResultListResult { Results = visible };
 
-            var diags = scope.IsRestricted ? SecurityTrimmedDiagnostics : [];
+            var diags = scope.IsRestricted || scopeTrimmed ? SecurityTrimmedDiagnostics : [];
             var audit = BuildAudit(context, AgentToolResultStatus.Success, diags);
             await _auditor.RecordAsync(audit, ct);
             return AgentToolResult<ReviewResultListResult>.Success(result, diags, audit);
@@ -1361,10 +1370,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (denyResult is not null) return denyResult;
 
             // Find the latest review result for this draft (most recent by timestamp)
-            var reviewSnapshot = _reviewResults.Values
-                .Where(r => r.Owner.DraftId == draftId && r.Owner.TenantId == context.TenantId)
-                .OrderByDescending(r => r.CreatedAt)
-                .FirstOrDefault();
+            var reviewSnapshot = await _reviewArtifactStore.GetLatestAsync(context.TenantId, draftId, ct);
             if (reviewSnapshot is null)
             {
                 var noReviewDiag = new AgentToolDiagnostic
@@ -1378,15 +1384,20 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 return AgentToolResult<DescriptorReviewReportDto>.Failed([noReviewDiag], noReviewAudit);
             }
 
-            var request = new DescriptorReviewReportBuildRequest
+            if (!StringComparer.Ordinal.Equals(reviewSnapshot.ScopeFingerprint, scope.ScopeFingerprint))
             {
-                ReviewResult = reviewSnapshot.Review,
-                Draft = reviewSnapshot.Owner,  // Use the draft snapshot captured at review time, not the current draft
-                VisibilityApplied = true
-            };
+                var scopeDiag = new AgentToolDiagnostic
+                {
+                    Code = AgentToolDiagnosticCodes.ReviewResultScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "The latest review was captured under a different visibility scope. Run the review again."
+                };
+                var scopeAudit = BuildAudit(context, AgentToolResultStatus.Failed, [scopeDiag]);
+                await _auditor.RecordAsync(scopeAudit, ct);
+                return AgentToolResult<DescriptorReviewReportDto>.Failed([scopeDiag], scopeAudit);
+            }
 
-            var report = _reportBuilder.Build(request);
-            _reports[(context.TenantId, report.ReportId)] = new ReportResourceSnapshot(report, reviewSnapshot.Owner);
+            var report = _reportBuilder.Build(reviewSnapshot.ReportInput);
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             await _auditor.RecordAsync(audit, ct);
@@ -1925,17 +1936,11 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // Use the visible catalog (not proposed inventory) for the fingerprint.
             // The reuse check compares catalog snapshots to detect catalog changes;
             // draft changes are detected by DraftVersion comparison.
-            var visibleSetHash = ComputeVisibleDescriptorSetHash(universe.VisibleDescriptors);
-            _packagePreviews[(context.TenantId, previewId)] = new PackagePreviewResourceSnapshot(
-                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
-                scope.ScopeFingerprint, snapshot.Draft.ProposedVersion, visibleSetHash);
-
-            // Track latest package preview for this draft+scope (for evidence preview reuse)
-            _latestPackageByDraft[(context.TenantId, draftId, scope.ScopeFingerprint)] = previewId;
-
-            // Store package hash for evidence recheck
-            if (pkg.Hashes is not null)
-                _artifactResolver.StorePackageHashes(context.TenantId, previewId, pkg.Hashes);
+            var visibleSetHash = AgentPackageArtifactFactory.ComputeVisibleCatalogFingerprint(universe.VisibleDescriptors);
+            var packageArtifact = _packageArtifactFactory.CreatePackage(
+                previewId, _timeProvider.GetUtcNow(), snapshot.Draft, scope.ScopeFingerprint,
+                visibleSetHash, preview, pkg);
+            await _packageArtifactStore.InsertPackageAsync(packageArtifact, ct);
 
             var audit2 = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit2 = audit2 with
@@ -1981,21 +1986,16 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // draft version, and visible descriptor set, reuse its DescriptorPackage to
             // avoid redundant build and ensure hash consistency.
             // Mismatched scope, version, or visible universe forces Path B.
-            PackagePreviewResourceSnapshot? existingPkgSnapshot = null;
-            var currentVisibleSetHash = ComputeVisibleDescriptorSetHash(universe.VisibleDescriptors);
-            if (_latestPackageByDraft.TryGetValue((context.TenantId, draftId, scope.ScopeFingerprint), out var existingPreviewId)
-                && _packagePreviews.TryGetValue((context.TenantId, existingPreviewId), out var pkgSnapshot)
-                && pkgSnapshot.Package is not null
-                && StringComparer.Ordinal.Equals(pkgSnapshot.DraftVersion, draft.ProposedVersion)
-                && StringComparer.Ordinal.Equals(pkgSnapshot.VisibleDescriptorSetHash, currentVisibleSetHash))
-            {
-                existingPkgSnapshot = pkgSnapshot;
-            }
+            AgentPackageArtifactEnvelope? existingPkgSnapshot = null;
+            var currentVisibleSetHash = AgentPackageArtifactFactory.ComputeVisibleCatalogFingerprint(universe.VisibleDescriptors);
+            existingPkgSnapshot = await _packageArtifactStore.GetLatestReusablePackageAsync(
+                context.TenantId, draftId, scope.ScopeFingerprint, draft.ProposedVersion,
+                currentVisibleSetHash, ct);
 
             if (existingPkgSnapshot is not null)
             {
                 // ── Path A: Reuse existing package preview ──
-                var reusedPkg = existingPkgSnapshot.Package!;
+                var reusedPkg = _packageArtifactFactory.ReadPackageContent(existingPkgSnapshot);
 
                 var reusedPreview = new DraftPackagePreview
                 {
@@ -2026,20 +2026,17 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                 // Project evidence through visibility (filters Subject/RelatedRefs)
                 reusedResult = _artifactProjector.ProjectEvidence(reusedResult, universe);
 
-                // Store evidence preview with owner
                 var reusedEvidencePreviewId = Guid.NewGuid().ToString("N");
-                _evidencePreviews[(context.TenantId, reusedEvidencePreviewId)] = new EvidencePreviewResourceSnapshot(
-                    new EvidencePreviewEntry(draft.DraftId, context.TenantId, reusedResult), snapshot.Draft);
-
-                // Store evidence hashes using the SAME DescriptorPackageHashSet as the package preview
-                if (reusedPkg.Hashes is not null)
-                    _artifactResolver.StoreEvidenceHashes(context.TenantId, reusedEvidencePreviewId, reusedPkg.Hashes);
+                var reusedEvidenceArtifact = _packageArtifactFactory.CreateEvidence(
+                    reusedEvidencePreviewId, _timeProvider.GetUtcNow(), existingPkgSnapshot, reusedResult);
+                reusedResult = reusedEvidenceArtifact.ProjectedEvidence;
+                await _packageArtifactStore.InsertEvidenceAsync(reusedEvidenceArtifact, ct);
 
                 var reusedAudit = BuildAudit(context, AgentToolResultStatus.Success, reusedResult.Diagnostics);
                 reusedAudit = reusedAudit with
                 {
                     TouchedDraftIds = [draftId],
-                    TouchedPackagePreviewIds = [reusedEvidencePreviewId]
+                    TouchedPackagePreviewIds = [existingPkgSnapshot.PackagePreviewId, reusedEvidencePreviewId]
                 };
                 await _auditor.RecordAsync(reusedAudit, ct);
                 return AgentToolResult<PackageEvidencePreview>.Success(reusedResult, reusedAudit);
@@ -2130,15 +2127,10 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             var packagePreviewId = Guid.NewGuid().ToString("N");
             // Use the visible catalog (not filtered proposed inventory) for the fingerprint.
             // Consistent with PreviewDescriptorPackageAsync: catalog identity, not proposed identity.
-            var pathBVisibleSetHash = ComputeVisibleDescriptorSetHash(universe.VisibleDescriptors);
-            _packagePreviews[(context.TenantId, packagePreviewId)] = new PackagePreviewResourceSnapshot(
-                new PackagePreviewEntry(draftId, context.TenantId, preview), snapshot.Draft, pkg,
-                scope.ScopeFingerprint, draft.ProposedVersion, pathBVisibleSetHash);
-            _latestPackageByDraft[(context.TenantId, draftId, scope.ScopeFingerprint)] = packagePreviewId;
-
-            // Store package hashes for evidence recheck
-            if (pkg.Hashes is not null)
-                _artifactResolver.StorePackageHashes(context.TenantId, packagePreviewId, pkg.Hashes);
+            var pathBVisibleSetHash = AgentPackageArtifactFactory.ComputeVisibleCatalogFingerprint(universe.VisibleDescriptors);
+            var packageArtifact = _packageArtifactFactory.CreatePackage(
+                packagePreviewId, _timeProvider.GetUtcNow(), snapshot.Draft, scope.ScopeFingerprint,
+                pathBVisibleSetHash, preview, pkg);
 
             var result = new PackageEvidencePreview
             {
@@ -2152,14 +2144,11 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // Project evidence through visibility (filters Subject/RelatedRefs)
             result = _artifactProjector.ProjectEvidence(result, universe);
 
-            // Store evidence preview with owner for later retrieval and activation reference validation
             var evidencePreviewId = Guid.NewGuid().ToString("N");
-            _evidencePreviews[(context.TenantId, evidencePreviewId)] = new EvidencePreviewResourceSnapshot(
-                new EvidencePreviewEntry(draft.DraftId, context.TenantId, result), snapshot.Draft);
-
-            // Store evidence hashes using the SAME DescriptorPackageHashSet as the package preview
-            if (pkg.Hashes is not null)
-                _artifactResolver.StoreEvidenceHashes(context.TenantId, evidencePreviewId, pkg.Hashes);
+            var evidenceArtifact = _packageArtifactFactory.CreateEvidence(
+                evidencePreviewId, _timeProvider.GetUtcNow(), packageArtifact, result);
+            result = evidenceArtifact.ProjectedEvidence;
+            await _packageArtifactStore.InsertPackageAndEvidenceAsync(packageArtifact, evidenceArtifact, ct);
 
             var audit = BuildAudit(context, AgentToolResultStatus.Success, result.Diagnostics);
             audit = audit with
@@ -2269,7 +2258,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
         // Complete — Indirect: owner-kind visibility resolution
         return await ExecuteAsync(context, AgentToolName.GetPackagePreview, AgentToolPermissionNames.PackagePreview, async (scope, ct) =>
         {
-            if (!_packagePreviews.TryGetValue((context.TenantId, previewId), out var snapshot))
+            var snapshot = await _packageArtifactStore.GetPackageAsync(
+                new AgentPackageArtifactKey(context.TenantId, previewId), ct);
+            if (snapshot is null)
             {
                 return await RecordAndReturn(context,
                     AgentToolResult<DraftPackagePreview>.NotFound($"Package preview '{previewId}' not found."));
@@ -2279,10 +2270,26 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             if (denyResult is not null)
                 return denyResult;
 
+            if (!StringComparer.Ordinal.Equals(snapshot.ScopeFingerprint, scope.ScopeFingerprint))
+            {
+                var scopeDiag = new AgentToolDiagnostic
+                {
+                    Code = AgentToolDiagnosticCodes.PackagePreviewScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Package preview was captured under a different visibility scope. Create a new preview."
+                };
+                var scopeAudit = BuildAudit(context, AgentToolResultStatus.Denied, [scopeDiag]) with
+                {
+                    TouchedPackagePreviewIds = [previewId]
+                };
+                await _auditor.RecordAsync(scopeAudit, ct);
+                return AgentToolResult<DraftPackagePreview>.Denied([scopeDiag], scopeAudit);
+            }
+
             var audit = BuildAudit(context, AgentToolResultStatus.Success, []);
             audit = audit with { TouchedPackagePreviewIds = [previewId] };
             await _auditor.RecordAsync(audit, ct);
-            return AgentToolResult<DraftPackagePreview>.Success(snapshot.Preview.Preview, audit);
+            return AgentToolResult<DraftPackagePreview>.Success(snapshot.ProjectedPreview, audit);
         }, ct);
     }
 
@@ -2339,7 +2346,9 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
             // Validate that the binding snapshot references exist and match the draft.
             var refDiagnostics = new List<AgentToolDiagnostic>();
 
-            if (!_reviewResults.TryGetValue((context.TenantId, request.BindingSnapshot.ReviewResultId), out var reviewRef))
+            var reviewRef = await _reviewArtifactStore.GetAsync(
+                context.TenantId, request.BindingSnapshot.ReviewResultId, ct);
+            if (reviewRef is null)
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
@@ -2348,17 +2357,27 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' not found for this tenant."
                 });
             }
-            else if (reviewRef.Review.DraftId != request.DraftId)
+            else if (reviewRef.DraftId != request.DraftId)
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.ReviewResultDraftMismatch,
                     Severity = SeverityLevel.Error,
-                    Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' belongs to draft '{reviewRef.Review.DraftId}', not '{request.DraftId}'."
+                    Message = $"Referenced review result '{request.BindingSnapshot.ReviewResultId}' belongs to draft '{reviewRef.DraftId}', not '{request.DraftId}'."
+                });
+            }
+            else if (!StringComparer.Ordinal.Equals(reviewRef.ScopeFingerprint, scope.ScopeFingerprint))
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
+                {
+                    Code = DescriptorActivationDiagnosticCodes.ReviewResultScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Referenced review result was captured under a different visibility scope. Run the review again."
                 });
             }
 
             // Fail-closed: binding references must be non-empty
+            AgentPackageArtifactEnvelope? packageRef = null;
             if (string.IsNullOrWhiteSpace(request.BindingSnapshot.PackagePreviewId))
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
@@ -2368,7 +2387,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Message = "PackagePreviewId is required for activation request submission."
                 });
             }
-            else if (!_packagePreviews.TryGetValue((context.TenantId, request.BindingSnapshot.PackagePreviewId), out var packageRef))
+            else if ((packageRef = await _packageArtifactStore.GetPackageAsync(
+                new AgentPackageArtifactKey(context.TenantId, request.BindingSnapshot.PackagePreviewId), ct)) is null)
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
@@ -2377,17 +2397,28 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' not found for this tenant."
                 });
             }
-            else if (packageRef.Preview.DraftId != request.DraftId)
+            else if (!StringComparer.Ordinal.Equals(packageRef.Owner.DraftId, request.DraftId))
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.PackagePreviewDraftMismatch,
                     Severity = SeverityLevel.Error,
-                    Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' belongs to draft '{packageRef.Preview.DraftId}', not '{request.DraftId}'."
+                    Message = $"Referenced package preview '{request.BindingSnapshot.PackagePreviewId}' belongs to draft '{packageRef.Owner.DraftId}', not '{request.DraftId}'."
+                });
+            }
+            else if (!StringComparer.Ordinal.Equals(packageRef.ScopeFingerprint, scope.ScopeFingerprint) ||
+                !scope.IsVisible(packageRef.Owner.DescriptorKind))
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
+                {
+                    Code = DescriptorActivationDiagnosticCodes.PackagePreviewScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Referenced package preview was captured under a different visibility scope. Create a new preview."
                 });
             }
 
             // Fail-closed: binding references must be non-empty
+            AgentEvidenceArtifactEnvelope? evidenceRef = null;
             if (string.IsNullOrWhiteSpace(request.BindingSnapshot.EvidencePreviewId))
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
@@ -2397,7 +2428,8 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Message = "EvidencePreviewId is required for activation request submission."
                 });
             }
-            else if (!_evidencePreviews.TryGetValue((context.TenantId, request.BindingSnapshot.EvidencePreviewId), out var evidenceRef))
+            else if ((evidenceRef = await _packageArtifactStore.GetEvidenceAsync(
+                new AgentEvidenceArtifactKey(context.TenantId, request.BindingSnapshot.EvidencePreviewId), ct)) is null)
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
@@ -2406,13 +2438,32 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
                     Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' not found for this tenant."
                 });
             }
-            else if (evidenceRef.Evidence.DraftId != request.DraftId)
+            else if (!StringComparer.Ordinal.Equals(evidenceRef.Owner.DraftId, request.DraftId))
             {
                 refDiagnostics.Add(new AgentToolDiagnostic
                 {
                     Code = DescriptorActivationDiagnosticCodes.EvidencePreviewDraftMismatch,
                     Severity = SeverityLevel.Error,
-                    Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' belongs to draft '{evidenceRef.Evidence.DraftId}', not '{request.DraftId}'."
+                    Message = $"Referenced evidence preview '{request.BindingSnapshot.EvidencePreviewId}' belongs to draft '{evidenceRef.Owner.DraftId}', not '{request.DraftId}'."
+                });
+            }
+            else if (!StringComparer.Ordinal.Equals(evidenceRef.ScopeFingerprint, scope.ScopeFingerprint) ||
+                !scope.IsVisible(evidenceRef.Owner.DescriptorKind))
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
+                {
+                    Code = DescriptorActivationDiagnosticCodes.EvidencePreviewScopeMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Referenced evidence preview was captured under a different visibility scope. Create a new evidence preview."
+                });
+            }
+            else if (!StringComparer.Ordinal.Equals(evidenceRef.PackagePreviewId, request.BindingSnapshot.PackagePreviewId))
+            {
+                refDiagnostics.Add(new AgentToolDiagnostic
+                {
+                    Code = DescriptorActivationDiagnosticCodes.EvidencePackageMismatch,
+                    Severity = SeverityLevel.Error,
+                    Message = "Referenced evidence preview is bound to a different package preview. Build package evidence again."
                 });
             }
 
@@ -2425,7 +2476,7 @@ public sealed class DefaultAgentControlPlaneToolService : IAgentControlPlaneTool
 
             // Extract governance decision from review result — the review pipeline already
             // evaluated governance via IDescriptorLifecycleGovernanceService.
-            var governanceDecision = reviewRef?.Review?.GovernanceDecision?.MaxDecision;
+            var governanceDecision = reviewRef?.ReportInput.GovernanceMaxDecision;
 
             // Delegate to RequestService — single authority for activation request lifecycle.
             // Pass pre-evaluated governance decision so auto-activation is reachable.

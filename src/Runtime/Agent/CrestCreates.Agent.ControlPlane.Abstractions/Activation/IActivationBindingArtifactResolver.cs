@@ -4,9 +4,7 @@ using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 namespace CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 
 /// <summary>
-/// Resolves current artifact hashes for activation evidence recheck.
-/// Implementations store hash snapshots that are updated when artifacts
-/// are created or modified in the control plane.
+/// Resolves current artifact hashes for activation evidence recheck from immutable stores.
 /// </summary>
 public interface IActivationBindingArtifactResolver
 {
@@ -19,23 +17,6 @@ public interface IActivationBindingArtifactResolver
         ActivationBindingSnapshot bindingSnapshot,
         CancellationToken ct = default);
 
-    /// <summary>
-    /// Stores source review hash and review manifest hash for a review result.
-    /// Called by the ToolService when a review result is created.
-    /// </summary>
-    void StoreReviewHashes(string tenantId, string reviewResultId, CanonicalHash sourceReviewHash, CanonicalHash reviewManifestHash);
-
-    /// <summary>
-    /// Stores the package hash set (manifest, evidence, envelope) for a package preview.
-    /// Called by the ToolService when a package preview is created.
-    /// </summary>
-    void StorePackageHashes(string tenantId, string packagePreviewId, DescriptorPackageHashSet packageHashes);
-
-    /// <summary>
-    /// Stores the evidence hash set (manifest, evidence, envelope) for an evidence preview.
-    /// Called by the ToolService when an evidence preview is created.
-    /// </summary>
-    void StoreEvidenceHashes(string tenantId, string evidencePreviewId, DescriptorPackageHashSet evidenceHashes);
 }
 
 /// <summary>
