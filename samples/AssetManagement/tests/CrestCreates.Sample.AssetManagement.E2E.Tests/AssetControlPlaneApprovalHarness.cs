@@ -58,7 +58,7 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
     private readonly GlobalDescriptorRegistry _globalRegistry;
     private readonly CapturingPackageBuilder _packageBuilder;
     private readonly InMemoryAgentToolInvocationAuditor _auditor;
-    private readonly InMemoryActivationBindingArtifactResolver _artifactResolver;
+    private readonly DefaultActivationBindingArtifactResolver _artifactResolver;
     private readonly IRuntimeStateContractRegistry _state;
     private readonly object _ownerToken = new();
     private readonly IDescriptorStableHashBuilder _stableHashBuilder =
@@ -73,7 +73,7 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
         GlobalDescriptorRegistry globalRegistry,
         CapturingPackageBuilder packageBuilder,
         InMemoryAgentToolInvocationAuditor auditor,
-        InMemoryActivationBindingArtifactResolver artifactResolver,
+        DefaultActivationBindingArtifactResolver artifactResolver,
         IRuntimeStateContractRegistry state)
     {
         TenantId = tenantId;
@@ -111,7 +111,6 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
         services.AddLogging();
         services.AddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
         services.AddSingleton<IAgentReviewArtifactStore, InMemoryAgentReviewArtifactStore>();
-        services.AddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
         services.AddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
         services.AddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
         services.AddSingleton<IGlobalDescriptorRegistry>(globalRegistry);
@@ -145,6 +144,7 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
         services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
         services.AddHumanTaskRuntime();
         services.AddAgentControlPlane(AgentToolAuthorizationOptions.DevelopmentDefaults);
+        services.AddAgentControlPlaneInMemoryStubs();
         services.AddSingleton<DefaultActivationReviewOrchestrator>();
         services.AddSingleton<IActivationReviewOrchestrator>(sp =>
             new CapturingActivationReviewOrchestrator(
@@ -168,7 +168,7 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
                 ?? throw new InvalidOperationException("Capturing package builder was not registered."),
             provider.GetRequiredService<IAgentToolInvocationAuditor>() as InMemoryAgentToolInvocationAuditor
                 ?? throw new InvalidOperationException("In-memory auditor was not registered."),
-            provider.GetRequiredService<IActivationBindingArtifactResolver>() as InMemoryActivationBindingArtifactResolver
+            provider.GetRequiredService<IActivationBindingArtifactResolver>() as DefaultActivationBindingArtifactResolver
                 ?? throw new InvalidOperationException("In-memory artifact resolver was not registered."),
             provider.GetRequiredService<IRuntimeStateContractRegistry>());
     }

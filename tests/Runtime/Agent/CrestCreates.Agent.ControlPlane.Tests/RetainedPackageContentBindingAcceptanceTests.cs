@@ -1,4 +1,5 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.PackageArtifacts;
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Capability.Abstractions;
@@ -233,14 +234,15 @@ public sealed class RetainedPackageContentBindingAcceptanceTests : AgentControlP
         evidence.Status.Should().Be(AgentToolResultStatus.Success);
         evidence.Value.Should().NotBeNull();
 
-        var evidencePreviewId = InMemoryAuditor
-            .GetRecordsByToolName(AgentToolName.BuildPackageEvidencePreview)
-            .Single(record => record.TouchedPackagePreviewIds is { Count: 1 })
-            .TouchedPackagePreviewIds![0];
+        var evidencePreviewId = evidence.Value!.EvidencePreviewId;
 
         var claimedHashes = capturedPackage.Hashes!;
-        var packageHashes = InMemoryArtifactResolver.GetPackageHashSet(TestTenantId, packagePreviewId);
-        var evidenceHashes = InMemoryArtifactResolver.GetEvidenceHashSet(TestTenantId, evidencePreviewId);
+        var packageArtifact = await PackageArtifactStore.GetPackageAsync(new(TestTenantId, packagePreviewId));
+        var evidenceArtifact = await PackageArtifactStore.GetEvidenceAsync(new(TestTenantId, evidencePreviewId));
+        var packageHashes = PackageArtifactFactory.ReadPackageContent(packageArtifact!).Hashes;
+        var evidenceHashes = PackageArtifactFactory.ReadPackageContent(packageArtifact!).Hashes;
+        evidenceArtifact.Should().NotBeNull();
+        evidenceArtifact!.PackagePreviewId.Should().Be(packagePreviewId);
         packageHashes.Should().BeEquivalentTo(claimedHashes);
         evidenceHashes.Should().BeEquivalentTo(claimedHashes);
         storedPreview.Value!.PackageManifestHash.Should().Be(claimedHashes.PackageManifestHash);

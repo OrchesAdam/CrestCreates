@@ -1,6 +1,7 @@
 using Xunit;
 using Moq;
 using CrestCreates.Agent.ControlPlane.Abstractions;
+using CrestCreates.Agent.ControlPlane.Abstractions.PackageArtifacts;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.Abstractions.DescriptorCompatibility;
@@ -330,22 +331,17 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
             b => b.Build(It.IsAny<DescriptorPackageBuildRequest>()), Times.Once);
 
         // Evidence hashes should match package hashes (same DescriptorPackageHashSet)
-        var previewAudit = InMemoryAuditor.GetAllRecords().First(r =>
-            r.Context.ToolName == "PreviewDescriptorPackage" &&
-            r.TouchedPackagePreviewIds != null);
-        var packagePreviewId = previewAudit.TouchedPackagePreviewIds!.First();
-
-        var evidenceAudit = InMemoryAuditor.GetAllRecords().First(r =>
-            r.Context.ToolName == "BuildPackageEvidencePreview" &&
-            r.TouchedPackagePreviewIds != null);
-        var evidencePreviewId = evidenceAudit.TouchedPackagePreviewIds!.First();
-
-        var packageHashSet = InMemoryArtifactResolver.GetPackageHashSet(TestTenantId, packagePreviewId);
-        var evidenceHashSet = InMemoryArtifactResolver.GetEvidenceHashSet(TestTenantId, evidencePreviewId);
-
-        packageHashSet.Should().NotBeNull();
-        evidenceHashSet.Should().NotBeNull();
-        evidenceHashSet.Should().BeEquivalentTo(packageHashSet);
+        var packagePreviewId = evidenceResult.Value.PackagePreviewId;
+        var evidencePreviewId = evidenceResult.Value.EvidencePreviewId;
+        packagePreviewId.Should().NotBeNullOrWhiteSpace();
+        evidencePreviewId.Should().NotBeNullOrWhiteSpace();
+        var packageArtifact = await PackageArtifactStore.GetPackageAsync(new(TestTenantId, packagePreviewId));
+        var evidenceArtifact = await PackageArtifactStore.GetEvidenceAsync(new(TestTenantId, evidencePreviewId));
+        packageArtifact.Should().NotBeNull();
+        evidenceArtifact.Should().NotBeNull();
+        evidenceArtifact!.PackagePreviewId.Should().Be(packagePreviewId);
+        evidenceArtifact.ProjectedEvidence.PackagePreview.Should().BeEquivalentTo(packageArtifact!.ProjectedPreview);
+        PackageArtifactFactory.ReadPackageContent(packageArtifact).Hashes.Should().NotBeNull();
     }
 
     [Fact]
@@ -389,22 +385,15 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
             b => b.Build(It.IsAny<DescriptorPackageBuildRequest>()), Times.Once);
 
         // Audit should contain both package preview ID and evidence preview ID
-        var evidenceAudit = InMemoryAuditor.GetAllRecords().First(r =>
-            r.Context.ToolName == "BuildPackageEvidencePreview" &&
-            r.TouchedPackagePreviewIds != null &&
-            r.TouchedPackagePreviewIds.Count >= 2);
-        var packagePreviewId = evidenceAudit.TouchedPackagePreviewIds![0];
-        var evidencePreviewId = evidenceAudit.TouchedPackagePreviewIds![1];
-
-        // Both package and evidence hash sets should be stored
-        InMemoryArtifactResolver.PackageHashSetCount.Should().Be(1);
-        InMemoryArtifactResolver.EvidenceHashSetCount.Should().Be(1);
-
-        var packageHashSet = InMemoryArtifactResolver.GetPackageHashSet(TestTenantId, packagePreviewId);
-        var evidenceHashSet = InMemoryArtifactResolver.GetEvidenceHashSet(TestTenantId, evidencePreviewId);
-        packageHashSet.Should().NotBeNull();
-        evidenceHashSet.Should().NotBeNull();
-        evidenceHashSet.Should().BeEquivalentTo(packageHashSet);
+        var packagePreviewId = evidenceResult.Value!.PackagePreviewId;
+        var evidencePreviewId = evidenceResult.Value.EvidencePreviewId;
+        var packageArtifact = await PackageArtifactStore.GetPackageAsync(new(TestTenantId, packagePreviewId));
+        var evidenceArtifact = await PackageArtifactStore.GetEvidenceAsync(new(TestTenantId, evidencePreviewId));
+        packageArtifact.Should().NotBeNull();
+        evidenceArtifact.Should().NotBeNull();
+        evidenceArtifact!.PackagePreviewId.Should().Be(packagePreviewId);
+        evidenceArtifact.ProjectedEvidence.PackagePreview.Should().BeEquivalentTo(packageArtifact!.ProjectedPreview);
+        PackageArtifactFactory.ReadPackageContent(packageArtifact).Hashes.Should().NotBeNull();
 
         // _latestPackageByDraft must have been updated: calling PreviewDescriptorPackageAsync
         // is NOT needed — BuildPackageEvidencePreviewAsync itself creates the package preview.
@@ -424,56 +413,7 @@ public class Wave5PackagePreviewTests : AgentControlPlaneTestBase
 
     private void SetupPackageBuilderWithHashes()
     {
-        var hashes = new DescriptorPackageHashSet
-        {
-            PackageManifestHash = new CanonicalHash
-            {
-                Algorithm = "SHA-256",
-                AlgorithmVersion = "sha256-canonical-json-v1",
-                ArtifactKind = CanonicalHashArtifactNames.Package,
-                Scope = CanonicalHashScopeNames.InternalFull,
-                Purpose = CanonicalHashPurposeNames.Integrity,
-                ContractVersion = "canonical-hash-v1",
-                CanonicalShapeVersion = "test-manifest-hash-v1",
-                Value = "test-manifest-hash-value"
-            },
-            PackageEvidenceHash = new CanonicalHash
-            {
-                Algorithm = "SHA-256",
-                AlgorithmVersion = "sha256-canonical-json-v1",
-                ArtifactKind = CanonicalHashArtifactNames.Package,
-                Scope = CanonicalHashScopeNames.InternalFull,
-                Purpose = CanonicalHashPurposeNames.Integrity,
-                ContractVersion = "canonical-hash-v1",
-                CanonicalShapeVersion = "test-evidence-hash-v1",
-                Value = "test-evidence-hash-value"
-            },
-            PackageEvidenceEnvelopeHash = new CanonicalHash
-            {
-                Algorithm = "SHA-256",
-                AlgorithmVersion = "sha256-canonical-json-v1",
-                ArtifactKind = CanonicalHashArtifactNames.Package,
-                Scope = CanonicalHashScopeNames.InternalFull,
-                Purpose = CanonicalHashPurposeNames.Integrity,
-                ContractVersion = "canonical-hash-v1",
-                CanonicalShapeVersion = "test-envelope-hash-v1",
-                Value = "test-envelope-hash-value"
-            }
-        };
-
-        PackageBuilderMock.Setup(b => b.Build(It.IsAny<DescriptorPackageBuildRequest>()))
-            .Returns(new DescriptorPackage
-            {
-                Manifest = new DescriptorManifest
-                {
-                    PackageId = "pkg-001",
-                    PackageVersion = "1",
-                    DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
-                },
-                SnapshotData = new DescriptorSnapshot(),
-                Evidence = new DescriptorPackageEvidence(),
-                Hashes = hashes
-            });
+        SetupPackageBuilder();
     }
 
     [Fact]

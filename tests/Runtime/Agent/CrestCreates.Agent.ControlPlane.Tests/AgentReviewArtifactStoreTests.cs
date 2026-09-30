@@ -94,7 +94,13 @@ public sealed class AgentReviewArtifactStoreTests : AgentControlPlaneTestBase
             .Callback<DraftCanonicalHashing.DescriptorDraftReviewHashInput>(input => manifestInputSeen = input)
             .Returns(expectedManifest);
 
-        var resolver = new InMemoryActivationBindingArtifactResolver(store, hashService.Object);
+        var resolver = new DefaultActivationBindingArtifactResolver(
+            store,
+            PackageArtifactStore,
+            hashService.Object,
+            new CrestCreates.Metadata.DescriptorPackage.DescriptorPackageSerializer(),
+            new CrestCreates.Metadata.DescriptorPackage.CanonicalHashing.DefaultDescriptorPackageCanonicalHashComputer(
+                new DefaultCanonicalHashComputer()));
         var resolved = await resolver.ResolveAsync(TestTenantId, new ActivationBindingSnapshot
         {
             TenantId = TestTenantId,

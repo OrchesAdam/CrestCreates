@@ -94,10 +94,7 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
             string.Join(" | ", evidence.Diagnostics.Select(d => d.Message)));
         evidence.Value.Should().NotBeNull();
 
-        var evidencePreviewId = fixture.Auditor.GetAllRecords()
-            .Last(record => record.TouchedPackagePreviewIds is { Count: 1 }
-                && record.Context.ToolName == AgentToolName.BuildPackageEvidencePreview)
-            .TouchedPackagePreviewIds![0];
+        var evidencePreviewId = evidence.Value!.EvidencePreviewId;
 
         var resolved = await fixture.ArtifactResolver.ResolveAsync(
             TenantId,
@@ -383,10 +380,7 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
             fixture.Context(AgentToolName.BuildPackageEvidencePreview), draft.DraftId);
         evidence.Status.Should().Be(AgentToolResultStatus.Success,
             string.Join(" | ", evidence.Diagnostics.Select(d => d.Message)));
-        var evidencePreviewId = fixture.Auditor.GetAllRecords()
-            .Last(record => record.TouchedPackagePreviewIds is { Count: 1 }
-                && record.Context.ToolName == AgentToolName.BuildPackageEvidencePreview)
-            .TouchedPackagePreviewIds![0];
+        var evidencePreviewId = evidence.Value!.EvidencePreviewId;
 
         var resolved = await fixture.ArtifactResolver.ResolveAsync(TenantId, new ActivationBindingSnapshot
         {
@@ -499,7 +493,7 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
     {
         public required ServiceProvider Services { get; init; }
         public required InMemoryAgentToolInvocationAuditor Auditor { get; init; }
-        public required InMemoryActivationBindingArtifactResolver ArtifactResolver { get; init; }
+        public required DefaultActivationBindingArtifactResolver ArtifactResolver { get; init; }
         public required IHumanTaskInstanceStore HumanTasks { get; init; }
         public required CapturingActivationReviewOrchestrator ReviewOrchestrator { get; init; }
         public required CountingRuntimeActivationGate ActivationGate { get; init; }
@@ -530,7 +524,6 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
             services.AddLogging();
             services.AddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
             services.AddSingleton<IAgentReviewArtifactStore, InMemoryAgentReviewArtifactStore>();
-            services.AddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
             services.AddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
             services.AddSingleton<InMemoryRuntimeActivationGate>();
             services.AddSingleton<IRuntimeActivationGate>(sp =>
@@ -568,6 +561,7 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
             services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
             services.AddHumanTaskRuntime();
             services.AddAgentControlPlane(AgentToolAuthorizationOptions.DevelopmentDefaults);
+            services.AddAgentControlPlaneInMemoryStubs();
             services.AddSingleton<DefaultActivationReviewOrchestrator>();
             services.AddSingleton<IActivationReviewOrchestrator>(sp =>
                 new CapturingActivationReviewOrchestrator(
@@ -584,7 +578,7 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
                 Services = provider,
                 Auditor = provider.GetRequiredService<IAgentToolInvocationAuditor>() as InMemoryAgentToolInvocationAuditor
                     ?? throw new InvalidOperationException("In-memory auditor was not registered."),
-                ArtifactResolver = provider.GetRequiredService<IActivationBindingArtifactResolver>() as InMemoryActivationBindingArtifactResolver
+                ArtifactResolver = provider.GetRequiredService<IActivationBindingArtifactResolver>() as DefaultActivationBindingArtifactResolver
                     ?? throw new InvalidOperationException("In-memory artifact resolver was not registered."),
                 HumanTasks = provider.GetRequiredService<IHumanTaskInstanceStore>(),
                 ReviewOrchestrator = provider.GetRequiredService<IActivationReviewOrchestrator>() as CapturingActivationReviewOrchestrator
