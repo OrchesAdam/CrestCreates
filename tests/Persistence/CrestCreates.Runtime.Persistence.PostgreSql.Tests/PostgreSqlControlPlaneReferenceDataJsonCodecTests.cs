@@ -50,6 +50,23 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
         restored.Should().BeEquivalentTo(draft);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskApproved)]
+    [InlineData(WorkflowConditionTokens.PreviousHumanTaskRejected)]
+    public void Draft_codec_round_trips_nullable_workflow_condition_through_generated_json(string? condition)
+    {
+        var draft = CreateWorkflowDraft(PostgreSqlWorkflowTargetType.HumanTask, condition);
+
+        var restored = PostgreSqlControlPlaneReferenceDataJsonCodec.Deserialize(
+            PostgreSqlControlPlaneReferenceDataJsonCodec.Serialize(draft));
+
+        var restoredWorkflow = restored.Payload.Should().BeOfType<WorkflowDescriptorDraftPayload>()
+            .Subject.Descriptor;
+        restoredWorkflow.Steps.Should().ContainSingle();
+        restoredWorkflow.Steps[0].Condition.Should().Be(condition);
+    }
+
     [Fact]
     public void Draft_codec_rejects_missing_payload_arm_with_typed_exception()
     {
@@ -219,7 +236,9 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
         };
     }
 
-    internal static DescriptorDraftModel CreateWorkflowDraft(PostgreSqlWorkflowTargetType targetType)
+    internal static DescriptorDraftModel CreateWorkflowDraft(
+        PostgreSqlWorkflowTargetType targetType,
+        string? condition = "ready")
     {
         InteractionTarget target = targetType switch
         {
@@ -260,7 +279,7 @@ public sealed class PostgreSqlControlPlaneReferenceDataJsonCodecTests
                         Id = "step-1",
                         Name = "Step",
                         Target = target,
-                        Condition = "ready",
+                        Condition = condition,
                         Transitions = new[] { "step-2" },
                         InputMapping = "input",
                         OutputMapping = "output",

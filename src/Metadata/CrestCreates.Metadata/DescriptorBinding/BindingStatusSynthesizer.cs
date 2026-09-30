@@ -17,6 +17,9 @@ public static class BindingStatusSynthesizer
         if (issues.Any(i => i.Severity == SeverityLevel.Error && i.Code.RequireValue().StartsWith("REF_")))
             return DescriptorBindingStatus.Invalid;
 
+        if (issues.Any(i => i.Severity == SeverityLevel.Error && i.Code.RequireValue().StartsWith("INVALID_")))
+            return DescriptorBindingStatus.Invalid;
+
         if (issues.Any(i => i.Severity == SeverityLevel.Error && i.Code.RequireValue().StartsWith("BIND_")))
             return DescriptorBindingStatus.Unbound;
 

@@ -4,5 +4,6 @@ public enum StepExecutionStatus
 {
     Completed,
     Suspended,
-    Failed
+    Failed,
+    Skipped
 }

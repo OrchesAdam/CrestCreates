@@ -72,6 +72,10 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
         string? parentAuditId,
         CancellationToken ct)
     {
+        var conditionErrors = WorkflowConditionPolicy.ValidateDescriptor(descriptor);
+        if (conditionErrors.Count != 0)
+            throw new WorkflowValidationException(conditionErrors[0]);
+
         var steps = descriptor.Steps;
 
         while (instance.StepIndex < steps.Count)
@@ -82,12 +86,26 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
             instance.CurrentStepId = step.Id;
             var startedAt = DateTimeOffset.UtcNow;
 
-            var executor = _executorRegistry.Resolve(step.Target);
-            var context = new WorkflowExecutionContext(descriptor, instance, step, runOperationId);
-
             StepExecutionResult stepResult;
             try
             {
+                if (step.Condition is not null && !WorkflowConditionPolicy.Evaluate(
+                    descriptor, instance, instance.StepIndex, _stateRegistry))
+                {
+                    instance.StepResults.Add(new WorkflowStepResult
+                    {
+                        StepId = step.Id,
+                        StepName = step.Name,
+                        Status = StepExecutionStatus.Skipped,
+                        ExecutedAt = DateTimeOffset.UtcNow,
+                        Duration = DateTimeOffset.UtcNow - startedAt
+                    });
+                    instance.StepIndex++;
+                    continue;
+                }
+
+                var executor = _executorRegistry.Resolve(step.Target);
+                var context = new WorkflowExecutionContext(descriptor, instance, step, runOperationId);
                 stepResult = await executor.ExecuteAsync(context, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -178,6 +196,11 @@ internal sealed class WorkflowExecutionRunner : IWorkflowExecutionRunner
                     await PersistWithAccountabilityAsync(instance, failedEvent, ct).ConfigureAwait(false);
                     await _eventPublisher.PublishAsync(failedEvent, CancellationToken.None).ConfigureAwait(false);
                     return instance;
+
+                default:
+                    throw new InvalidOperationException(
+                        $"Workflow step executor for step '{step.Id}' returned unsupported status '{stepResult.Status}'. " +
+                        $"Skipped is owned by the Runner condition evaluation and must not be returned by executors.");
             }
         }
 

@@ -79,6 +79,10 @@ public sealed class WorkflowEngine : IWorkflowEngine
         if (descriptor == null)
             throw new InvalidOperationException($"Workflow '{workflowId}' not found.");
 
+        var conditionErrors = WorkflowConditionPolicy.ValidateDescriptor(descriptor);
+        if (conditionErrors.Count != 0)
+            throw new WorkflowValidationException(conditionErrors[0]);
+
         var ambient = _contexts.Current;
         if (requestedOperationId is not null && string.IsNullOrWhiteSpace(requestedOperationId))
             throw new ArgumentException("Workflow operation identity cannot be blank when supplied.", nameof(requestedOperationId));

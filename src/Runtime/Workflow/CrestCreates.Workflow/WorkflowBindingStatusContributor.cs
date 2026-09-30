@@ -54,8 +54,15 @@ public sealed class WorkflowBindingStatusContributor : IDescriptorBindingStatusC
             }
         }
 
-        foreach (var step in wf.Steps)
+        for (var index = 0; index < wf.Steps.Count; index++)
         {
+            var step = wf.Steps[index];
+            if (WorkflowConditionPolicy.GetValidationError(wf, index) is { } conditionError)
+            {
+                issues.Add(new DescriptorBindingIssue(SeverityLevel.Error, new DiagnosticCode("INVALID_CONDITION"),
+                    conditionError, fullId, DescriptorKind.Workflow, $"Steps[{step.Id}].Condition"));
+            }
+
             switch (step.Target)
             {
                 case CapabilityTarget capTarget:
