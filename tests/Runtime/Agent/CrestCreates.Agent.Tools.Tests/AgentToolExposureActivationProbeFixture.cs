@@ -186,13 +186,20 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
         var tools = catalog.ListAsync().AsTask().GetAwaiter().GetResult();
 
         tools.Count.Should().Be(5,
-            "Only authorized tools should be visible; unauthorized tool must be excluded");
+            "Only role-matching tools should be catalog-visible; unauthorized tool must be excluded");
         tools.Should().NotContain(t => t.ToolName == unauthorizedEntry.DiscoveryContract.ToolName,
-            "Unauthorized tool must never become model-visible");
+            "Tool outside Agent authority must never become catalog-visible");
     }
 
+    /// <summary>
+    /// Verifies that catalog-visible tools carry governance metadata required for
+    /// execution-time enforcement. This is a metadata projection check, not a runtime
+    /// enforcement test. For execution-time governance denial evidence, see:
+    /// - AgentToolInvokerTests.Invoke_RoleDeniedToolBehavesAsUnknownAndRecordsGovernanceDecision
+    /// - GoldenSampleAcceptanceTests.BudgetDenied_DoesNotEnterDispatcher
+    /// </summary>
     [Fact]
-    public void ModelVisibleTool_Should_Still_Require_ExecutionTimeGovernance()
+    public void CatalogVisibleTool_Should_Carry_GovernanceMetadata_ForExecutionTimeEnforcement()
     {
         const int toolCount = 10;
         var context = CreateContext();
@@ -204,11 +211,11 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
         tools.Should().AllSatisfy(tool =>
         {
             tool.Governance.Should().NotBeNull(
-                "Every model-visible tool must carry governance metadata");
+                "Every catalog-visible tool must carry governance metadata for downstream enforcement");
             tool.Governance.SelectionPolicy.Should().NotBe(AgentToolSelectionPolicy.Unknown,
-                "Selection policy must be explicitly set");
+                "Selection policy must be explicitly projected for execution-time filtering");
             tool.Governance.Budget.Should().NotBeNull(
-                "Budget requirement must be present for execution-time governance");
+                "Budget requirement must be projected for execution-time budget gate");
             tool.Governance.Budget.Category.Should().NotBeNullOrWhiteSpace(
                 "Budget category must be identifiable");
             tool.Governance.EffectiveApprovalMode.Should().NotBe(AgentToolApprovalMode.Unknown,
