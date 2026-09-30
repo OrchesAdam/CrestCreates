@@ -1,14 +1,17 @@
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.ControlPlane;
+using CrestCreates.Agent.ControlPlane.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
+using CrestCreates.Agent.ControlPlane.Abstractions.PackageArtifacts;
 using CrestCreates.Agent.DraftContracts.Dto;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorPackage;
 using CrestCreates.Metadata.Abstractions.DescriptorRelationship;
 using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.Metadata.ContextPack;
@@ -108,6 +111,49 @@ internal static class ProjectionScopeNativeAotFixture
             if (packagePreview.Status != AgentToolResultStatus.Success || string.IsNullOrWhiteSpace(packagePreviewId))
                 return Fail("the broad package preview was not stored");
 
+            var firstBuild = controlPlane.BuildPackageEvidencePreviewAsync(
+                Context("BuildPackageEvidencePreview"), draftId).GetAwaiter().GetResult();
+            if (firstBuild.Status != AgentToolResultStatus.Success || firstBuild.Value is null
+                || string.IsNullOrWhiteSpace(firstBuild.Value.PackagePreviewId)
+                || string.IsNullOrWhiteSpace(firstBuild.Value.EvidencePreviewId))
+                return Fail("the first package/evidence build did not return its exact stored identities");
+
+            // A catalog change forces a second immutable package build for the same
+            // draft, version, and authorization scope. Its evidence must remain linked
+            // to that second package even when callers later mix the two builds.
+            catalog.Add(new SchemaDescriptor
+            {
+                Id = "aot-event-schema-v2",
+                Name = "AOT event schema v2",
+                Version = 1,
+                ChangeKind = SchemaChangeKind.Additive
+            });
+            var secondBuild = controlPlane.BuildPackageEvidencePreviewAsync(
+                Context("BuildPackageEvidencePreview"), draftId).GetAwaiter().GetResult();
+            if (secondBuild.Status != AgentToolResultStatus.Success || secondBuild.Value is null
+                || string.IsNullOrWhiteSpace(secondBuild.Value.PackagePreviewId)
+                || string.IsNullOrWhiteSpace(secondBuild.Value.EvidencePreviewId)
+                || StringComparer.Ordinal.Equals(firstBuild.Value.PackagePreviewId, secondBuild.Value.PackagePreviewId)
+                || StringComparer.Ordinal.Equals(firstBuild.Value.EvidencePreviewId, secondBuild.Value.EvidencePreviewId))
+                return Fail("the changed visible catalog did not produce a distinct package/evidence build");
+
+            var packageArtifactStore = provider.GetRequiredService<IAgentPackageArtifactStore>();
+            var packageArtifactValidator = provider.GetRequiredService<IAgentPackageArtifactValidator>();
+            var packageArtifact = packageArtifactStore.GetPackageAsync(
+                new AgentPackageArtifactKey(TenantId, firstBuild.Value.PackagePreviewId)).GetAwaiter().GetResult();
+            var secondPackageArtifact = packageArtifactStore.GetPackageAsync(
+                new AgentPackageArtifactKey(TenantId, secondBuild.Value.PackagePreviewId)).GetAwaiter().GetResult();
+            var evidenceArtifact = packageArtifactStore.GetEvidenceAsync(
+                new AgentEvidenceArtifactKey(TenantId, secondBuild.Value.EvidencePreviewId)).GetAwaiter().GetResult();
+            if (packageArtifact is null || secondPackageArtifact is null || evidenceArtifact is null
+                || !StringComparer.Ordinal.Equals(evidenceArtifact.PackagePreviewId, secondBuild.Value.PackagePreviewId))
+                return Fail("the artifact store did not retain the exact package/evidence identities");
+
+            if (!PackageEvidenceArtifactNativeAotFixture.Run(
+                    packageArtifact, secondPackageArtifact, evidenceArtifact, packageArtifactValidator,
+                    provider.GetRequiredService<IDescriptorPackageSerializer>()))
+                return false;
+
             var firstReport = controlPlane.BuildDescriptorReviewReportAsync(
                 Context("BuildDescriptorReviewReport"), draftId).GetAwaiter().GetResult();
             if (firstReport.Status != AgentToolResultStatus.Success || firstReport.Value is null
@@ -125,6 +171,71 @@ internal static class ProjectionScopeNativeAotFixture
             var recreatedControlPlane = CreateService(provider, broadOptions, () => currentOptions);
             if (!ReferenceEquals(reviewStore, provider.GetRequiredService<IAgentReviewArtifactStore>()))
                 return Fail("the recreated tool service did not resolve the configured review store");
+            if (!ReferenceEquals(packageArtifactStore, provider.GetRequiredService<IAgentPackageArtifactStore>()))
+                return Fail("the recreated tool service did not resolve the configured package/evidence store");
+            var recreatedPackage = recreatedControlPlane.GetPackagePreviewAsync(
+                Context("GetPackagePreview"), firstBuild.Value.PackagePreviewId).GetAwaiter().GetResult();
+            var recreatedEvidence = recreatedControlPlane.BuildPackageEvidencePreviewAsync(
+                Context("BuildPackageEvidencePreview"), draftId).GetAwaiter().GetResult();
+            if (recreatedPackage.Status != AgentToolResultStatus.Success
+                || recreatedEvidence.Status != AgentToolResultStatus.Success || recreatedEvidence.Value is null
+                || !StringComparer.Ordinal.Equals(recreatedEvidence.Value.PackagePreviewId, secondBuild.Value.PackagePreviewId)
+                || StringComparer.Ordinal.Equals(recreatedEvidence.Value.EvidencePreviewId, secondBuild.Value.EvidencePreviewId))
+                return Fail("a recreated tool service did not read the stored package and reuse its exact parent package");
+            var recreatedEvidenceArtifact = packageArtifactStore.GetEvidenceAsync(
+                new AgentEvidenceArtifactKey(TenantId, recreatedEvidence.Value.EvidencePreviewId)).GetAwaiter().GetResult();
+            if (recreatedEvidenceArtifact is null
+                || !StringComparer.Ordinal.Equals(recreatedEvidenceArtifact.PackagePreviewId, secondBuild.Value.PackagePreviewId))
+                return Fail("the recreated service did not persist evidence linked to the exact reused package artifact");
+
+            var bindingSnapshotForHashes = new ActivationBindingSnapshot
+            {
+                TenantId = TenantId,
+                DraftId = draftId,
+                DraftVersion = 1,
+                ReviewResultId = reviewId,
+                PackagePreviewId = firstBuild.Value.PackagePreviewId,
+                EvidencePreviewId = firstBuild.Value.EvidencePreviewId,
+                Hashes = null!,
+                CreatedAt = FixedNow
+            };
+            var resolvedBindingHashes = provider.GetRequiredService<IActivationBindingArtifactResolver>()
+                .ResolveAsync(TenantId, bindingSnapshotForHashes).GetAwaiter().GetResult();
+            if (resolvedBindingHashes.CurrentSourceReviewHash is null
+                || resolvedBindingHashes.CurrentReviewManifestHash is null
+                || resolvedBindingHashes.CurrentPackageHashes is null
+                || reviewed.Value.StableHashes is null)
+                return Fail("the exact first build did not resolve its review and package hashes");
+
+            var activationAuditor = provider.GetRequiredService<IDescriptorActivationAuditor>() as InMemoryDescriptorActivationAuditor;
+            if (activationAuditor is null)
+                return Fail("the fixture did not resolve its explicit in-memory activation auditor");
+            var activationAuditCountBeforeMismatch = activationAuditor.GetAllRecords().Count;
+            var mismatchedSubmit = recreatedControlPlane.SubmitActivationRequestAsync(
+                Context("SubmitActivationRequest"),
+                new SubmitActivationRequestRequest
+                {
+                    DraftId = draftId,
+                    BindingSnapshot = bindingSnapshotForHashes with
+                    {
+                        EvidencePreviewId = recreatedEvidence.Value.EvidencePreviewId,
+                        Hashes = new BindingHashes
+                        {
+                            SourceReviewHash = resolvedBindingHashes.CurrentSourceReviewHash,
+                            ReviewManifestHash = resolvedBindingHashes.CurrentReviewManifestHash,
+                            PackageManifestHash = resolvedBindingHashes.CurrentPackageHashes.PackageManifestHash,
+                            PackageEvidenceHash = resolvedBindingHashes.CurrentPackageHashes.PackageEvidenceHash,
+                            PackageEvidenceEnvelopeHash = resolvedBindingHashes.CurrentPackageHashes.PackageEvidenceEnvelopeHash,
+                            ContractHash = reviewed.Value.StableHashes.ContractHash,
+                            DefinitionHash = reviewed.Value.StableHashes.DefinitionHash
+                        }
+                    }
+                }).GetAwaiter().GetResult();
+            if (mismatchedSubmit.Status != AgentToolResultStatus.InvalidRequest
+                || mismatchedSubmit.Diagnostics.All(d => d.Code != DescriptorActivationDiagnosticCodes.EvidencePackageMismatch)
+                || activationAuditor.GetAllRecords().Count != activationAuditCountBeforeMismatch
+                || mismatchedSubmit.AuditRecord?.TouchedActivationRequestIds is not null)
+                return Fail("cross-build evidence was not rejected before activation request or review-task creation");
             var recreatedGet = recreatedControlPlane.GetDraftReviewResultAsync(
                 Context("GetDraftReviewResult"), reviewId).GetAwaiter().GetResult();
             var recreatedReport = recreatedControlPlane.BuildDescriptorReviewReportAsync(
@@ -208,6 +319,7 @@ internal static class ProjectionScopeNativeAotFixture
                 return Fail("same-scope re-review did not restore review, package, list, and report reads");
 
             Console.WriteLine("CONTROL_PLANE_PROJECTION_SCOPE_NATIVEAOT_OK");
+            Console.WriteLine("CONTROL_PLANE_PACKAGE_EVIDENCE_ARTIFACT_MEMORY_NATIVEAOT_OK");
             return true;
         }
         catch (Exception ex)
@@ -239,8 +351,10 @@ internal static class ProjectionScopeNativeAotFixture
         provider.GetRequiredService<IDescriptorReviewReportRenderer>(),
         provider.GetRequiredService<IDescriptorActivationRequestService>(),
         provider.GetRequiredService<IActivationReviewOrchestrator>(),
-        provider.GetRequiredService<IActivationBindingArtifactResolver>(),
         provider.GetRequiredService<IAgentReviewArtifactStore>(),
+        provider.GetRequiredService<IAgentPackageArtifactStore>(),
+        provider.GetRequiredService<IAgentPackageArtifactFactory>(),
+        provider.GetRequiredService<TimeProvider>(),
         initialOptions,
         optionsFactory);
 
@@ -273,7 +387,9 @@ internal static class ProjectionScopeNativeAotFixture
 
     private sealed class FixtureDescriptorCatalog(IReadOnlyList<IDescriptor> initialDescriptors) : IDescriptorCatalog
     {
-        private IReadOnlyList<IDescriptor> _descriptors = initialDescriptors;
+        private readonly List<IDescriptor> _descriptors = initialDescriptors.ToList();
+
+        public void Add(IDescriptor descriptor) => _descriptors.Add(descriptor);
 
         public IDescriptor? Get(string id) => _descriptors.LastOrDefault(d => d.Id == id);
         public IEnumerable<IDescriptor> GetAll() => _descriptors;

@@ -569,26 +569,16 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                     }
                 };
 
-                return new DescriptorPackage
+                return BuildValidTestPackage(req, new DescriptorPackageEvidence
                 {
-                    Manifest = new DescriptorManifest
-                    {
-                        PackageId = "pkg-001",
-                        PackageVersion = "1",
-                        DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
-                    },
-                    SnapshotData = new DescriptorSnapshot(),
-                    Evidence = new DescriptorPackageEvidence
-                    {
-                        NormalizedFindings = findings.AsReadOnly(),
-                        MaxImpactSeverity = DescriptorImpactSeverity.Critical, // from full inventory
-                        BreakingFindingCount = 0,
-                        SecuritySensitiveFindingCount = 0,
-                        UnsupportedFindingCount = 0,
-                        RequiresReview = false,
-                        PackageFindingCount = findings.Count
-                    }
-                };
+                    NormalizedFindings = findings.AsReadOnly(),
+                    MaxImpactSeverity = DescriptorImpactSeverity.Critical,
+                    BreakingFindingCount = 0,
+                    SecuritySensitiveFindingCount = 0,
+                    UnsupportedFindingCount = 0,
+                    RequiresReview = false,
+                    PackageFindingCount = findings.Count
+                });
             });
 
         var options = AgentToolAuthorizationOptions.DevelopmentDefaults with
@@ -600,7 +590,8 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
         var context = CreateContext(AgentToolName.BuildPackageEvidencePreview);
         var result = await service.BuildPackageEvidencePreviewAsync(context, draft.DraftId);
 
-        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Status.Should().Be(AgentToolResultStatus.Success,
+            "diagnostics: {0}", string.Join(" | ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         // After projection, the Critical finding from denied subject is filtered out,
         // so MaxImpactSeverity must reflect only the visible Info finding
         result.Value!.Evidence.MaxImpactSeverity.Should().Be(DescriptorImpactSeverity.Info,
@@ -688,26 +679,16 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
                     }
                 };
 
-                return new DescriptorPackage
+                return BuildValidTestPackage(req, new DescriptorPackageEvidence
                 {
-                    Manifest = new DescriptorManifest
-                    {
-                        PackageId = "pkg-001",
-                        PackageVersion = "1",
-                        DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
-                    },
-                    SnapshotData = new DescriptorSnapshot(),
-                    Evidence = new DescriptorPackageEvidence
-                    {
-                        NormalizedFindings = findings.AsReadOnly(),
-                        MaxCompatibilityLevel = DescriptorCompatibilityLevel.Breaking, // from full inventory
-                        BreakingFindingCount = 1,
-                        SecuritySensitiveFindingCount = 0,
-                        UnsupportedFindingCount = 0,
-                        RequiresReview = true,
-                        PackageFindingCount = findings.Count
-                    }
-                };
+                    NormalizedFindings = findings.AsReadOnly(),
+                    MaxCompatibilityLevel = DescriptorCompatibilityLevel.Breaking,
+                    BreakingFindingCount = 1,
+                    SecuritySensitiveFindingCount = 0,
+                    UnsupportedFindingCount = 0,
+                    RequiresReview = true,
+                    PackageFindingCount = findings.Count
+                });
             });
 
         var options = AgentToolAuthorizationOptions.DevelopmentDefaults with
@@ -719,7 +700,8 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
         var context = CreateContext(AgentToolName.BuildPackageEvidencePreview);
         var result = await service.BuildPackageEvidencePreviewAsync(context, draft.DraftId);
 
-        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Status.Should().Be(AgentToolResultStatus.Success,
+            "diagnostics: {0}", string.Join(" | ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         // After projection, the Breaking finding from denied subject is filtered out,
         // so MaxCompatibilityLevel must reflect only the visible Compatible finding
         result.Value!.Evidence.MaxCompatibilityLevel.Should().Be(DescriptorCompatibilityLevel.Compatible,
@@ -786,30 +768,20 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
 
         // Package builder returns evidence with non-zero topology/impact counts
         PackageBuilderMock.Setup(b => b.Build(It.IsAny<DescriptorPackageBuildRequest>()))
-            .Returns((DescriptorPackageBuildRequest _) =>
-                new DescriptorPackage
+            .Returns((DescriptorPackageBuildRequest req) =>
+                BuildValidTestPackage(req, new DescriptorPackageEvidence
                 {
-                    Manifest = new DescriptorManifest
-                    {
-                        PackageId = "pkg-001",
-                        PackageVersion = "1",
-                        DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
-                    },
-                    SnapshotData = new DescriptorSnapshot(),
-                    Evidence = new DescriptorPackageEvidence
-                    {
-                        NormalizedFindings = Array.Empty<EvidenceFinding>(),
-                        TopologyNodeCount = 100,  // From full inventory
-                        TopologyEdgeCount = 50,   // From full inventory
-                        ImpactPathCount = 25,     // From full inventory
-                        MaxImpactSeverity = DescriptorImpactSeverity.Low,
-                        BreakingFindingCount = 0,
-                        SecuritySensitiveFindingCount = 0,
-                        UnsupportedFindingCount = 0,
-                        RequiresReview = false,
-                        PackageFindingCount = 0
-                    }
-                });
+                    NormalizedFindings = Array.Empty<EvidenceFinding>(),
+                    TopologyNodeCount = 100,
+                    TopologyEdgeCount = 50,
+                    ImpactPathCount = 25,
+                    MaxImpactSeverity = DescriptorImpactSeverity.Low,
+                    BreakingFindingCount = 0,
+                    SecuritySensitiveFindingCount = 0,
+                    UnsupportedFindingCount = 0,
+                    RequiresReview = false,
+                    PackageFindingCount = 0
+                }));
 
         var options = AgentToolAuthorizationOptions.DevelopmentDefaults with
         {
@@ -820,7 +792,8 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
         var context = CreateContext(AgentToolName.BuildPackageEvidencePreview);
         var result = await service.BuildPackageEvidencePreviewAsync(context, draft.DraftId);
 
-        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Status.Should().Be(AgentToolResultStatus.Success,
+            "diagnostics: {0}", string.Join(" | ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         // These fields cannot be reliably recomputed from flat findings,
         // so they must be set to safe defaults (0), not copied from source
         result.Value!.Evidence.TopologyNodeCount.Should().Be(0,
@@ -915,7 +888,8 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
         var context = CreateContext(AgentToolName.PreviewDescriptorPackage);
         var result = await service.PreviewDescriptorPackageAsync(context, draft.DraftId);
 
-        result.Status.Should().Be(AgentToolResultStatus.Success);
+        result.Status.Should().Be(AgentToolResultStatus.Success,
+            "diagnostics: {0}", string.Join(" | ", result.Diagnostics.Select(d => $"{d.Code}: {d.Message}")));
         capturedInventory.Should().NotBeNull();
         capturedInventory!.Should().OnlyContain(d => d.Kind != DescriptorKind.Capability,
             "materializer must receive only visible descriptors, not the full catalog");
@@ -1098,18 +1072,7 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
 
     private new void SetupPackageBuilder()
     {
-        PackageBuilderMock.Setup(b => b.Build(It.IsAny<DescriptorPackageBuildRequest>()))
-            .Returns(new DescriptorPackage
-            {
-                    Manifest = new DescriptorManifest
-                    {
-                        PackageId = "pkg-001",
-                        PackageVersion = "1",
-                        DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
-                    },
-                SnapshotData = new DescriptorSnapshot(),
-                Evidence = new DescriptorPackageEvidence()
-            });
+        base.SetupPackageBuilder();
     }
 
     private void SetupTopologySnapshot()

@@ -3,6 +3,11 @@ using CrestCreates.Agent.ControlPlane;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
+using CrestCreates.Agent.ControlPlane.PackageArtifacts;
+using CrestCreates.Agent.ControlPlane.Abstractions.PackageArtifacts;
+using CrestCreates.Metadata.CanonicalHashing;
+using CrestCreates.Metadata.DescriptorPackage;
+using CrestCreates.Metadata.DescriptorPackage.CanonicalHashing;
 using CrestCreates.Agent.DraftContracts.Projection;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -57,14 +62,22 @@ public abstract class AgentControlPlaneTestBase
     protected readonly Mock<IHumanTaskRuntime> HumanTaskRuntimeMock = new();
     protected readonly Mock<IActivationReviewOrchestrator> ActivationReviewOrchestratorMock = new();
     protected readonly InMemoryAgentReviewArtifactStore ReviewArtifactStore;
-    protected readonly InMemoryActivationBindingArtifactResolver InMemoryArtifactResolver;
+    protected readonly DefaultActivationBindingArtifactResolver InMemoryArtifactResolver;
+    protected readonly InMemoryAgentPackageArtifactStore PackageArtifactStore;
+    protected readonly IAgentPackageArtifactFactory PackageArtifactFactory;
     protected readonly InMemoryAgentToolInvocationAuditor InMemoryAuditor = new();
 
     protected AgentControlPlaneTestBase()
     {
         ReviewArtifactStore = new InMemoryAgentReviewArtifactStore();
-        InMemoryArtifactResolver = new InMemoryActivationBindingArtifactResolver(
-            ReviewArtifactStore, ReviewHashServiceMock.Object);
+        var canonicalHashComputer = new DefaultCanonicalHashComputer();
+        var packageSerializer = new DescriptorPackageSerializer();
+        var packageHashComputer = new DefaultDescriptorPackageCanonicalHashComputer(canonicalHashComputer);
+        var packageArtifactValidator = new AgentPackageArtifactValidator(packageSerializer, packageHashComputer, canonicalHashComputer);
+        PackageArtifactStore = new InMemoryAgentPackageArtifactStore(packageArtifactValidator);
+        PackageArtifactFactory = new AgentPackageArtifactFactory(packageSerializer, packageArtifactValidator, TopologyBuilderMock.Object);
+        InMemoryArtifactResolver = new DefaultActivationBindingArtifactResolver(
+            ReviewArtifactStore, PackageArtifactStore, ReviewHashServiceMock.Object, packageSerializer, packageHashComputer);
     }
 
     protected const string TestTenantId = "tenant-001";
@@ -106,8 +119,10 @@ public abstract class AgentControlPlaneTestBase
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
-            InMemoryArtifactResolver,
             ReviewArtifactStore,
+            PackageArtifactStore,
+            PackageArtifactFactory,
+            TimeProvider.System,
             authorizationOptions: options);
     }
 
@@ -145,8 +160,10 @@ public abstract class AgentControlPlaneTestBase
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
-            InMemoryArtifactResolver,
             ReviewArtifactStore,
+            PackageArtifactStore,
+            PackageArtifactFactory,
+            TimeProvider.System,
             authorizationOptions: options);
     }
 
@@ -185,8 +202,10 @@ public abstract class AgentControlPlaneTestBase
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
-            InMemoryArtifactResolver,
             ReviewArtifactStore,
+            PackageArtifactStore,
+            PackageArtifactFactory,
+            TimeProvider.System,
             optionsFactory: optionsFactory);
     }
 
@@ -218,8 +237,10 @@ public abstract class AgentControlPlaneTestBase
             ReportRendererMock.Object,
             ActivationRequestServiceMock.Object,
             ActivationReviewOrchestratorMock.Object,
-            InMemoryArtifactResolver,
             ReviewArtifactStore,
+            PackageArtifactStore,
+            PackageArtifactFactory,
+            TimeProvider.System,
             authorizationOptions: AgentToolAuthorizationOptions.DevelopmentDefaults);
     }
 
@@ -347,18 +368,80 @@ public abstract class AgentControlPlaneTestBase
 
     protected void SetupPackageBuilder()
     {
+        var hashComputer = new DefaultDescriptorPackageCanonicalHashComputer(new DefaultCanonicalHashComputer());
+        var builder = new CrestCreates.Metadata.DescriptorPackage.DefaultDescriptorPackageBuilder(HashBuilderMock.Object, hashComputer);
         PackageBuilderMock.Setup(b => b.Build(It.IsAny<DescriptorPackageBuildRequest>()))
-            .Returns(new DescriptorPackage
+            .Returns((DescriptorPackageBuildRequest request) => builder.Build(request));
+    }
+
+    protected static DescriptorPackage BuildValidTestPackage(
+        DescriptorPackageBuildRequest request,
+        DescriptorPackageEvidence evidence)
+    {
+        var createdAt = request.CreatedAt ?? DateTimeOffset.UtcNow;
+        var manifestEntries = request.Descriptors.Select(descriptor => new DescriptorManifestEntry
+        {
+            Ref = new DescriptorRef(descriptor.Namespace, descriptor.Id),
+            Kind = descriptor.Kind,
+            Name = descriptor.Name,
+            State = descriptor.State,
+            ContractHash = string.Empty,
+            DefinitionHash = string.Empty
+        }).ToArray();
+        var manifest = new DescriptorManifest
+        {
+            PackageId = request.PackageId,
+            PackageVersion = request.PackageVersion,
+            CreatedAt = createdAt,
+            CreatedBy = request.CreatedBy,
+            Source = request.Source,
+            DescriptorCount = manifestEntries.Length,
+            DescriptorEntries = manifestEntries
+        };
+        var envelopeMetadata = new DescriptorPackageEvidenceEnvelopeMetadata
+        {
+            PackageId = request.PackageId,
+            PackageVersion = request.PackageVersion,
+            CreatedAt = createdAt,
+            CreatedBy = request.CreatedBy,
+            Source = request.Source
+        };
+        var hashComputer = new DefaultDescriptorPackageCanonicalHashComputer(new DefaultCanonicalHashComputer());
+        var hashes = hashComputer.ComputeHashSet(manifest, evidence, envelopeMetadata);
+        var snapshotEntries = manifestEntries.Select(entry => new SnapshotEntry
+        {
+            Ref = entry.Ref,
+            DescriptorName = entry.Name,
+            Kind = entry.Kind,
+            State = entry.State,
+            ContractHash = entry.ContractHash,
+            DefinitionHash = entry.DefinitionHash,
+            SupersededById = entry.SupersededById
+        }).ToArray();
+        return new DescriptorPackage
+        {
+            Manifest = manifest,
+            SnapshotData = new DescriptorSnapshot
             {
-                Manifest = new DescriptorManifest
-                {
-                    PackageId = "pkg-001",
-                    PackageVersion = "1",
-                    DescriptorEntries = Array.Empty<DescriptorManifestEntry>()
-                },
-                SnapshotData = new DescriptorSnapshot(),
-                Evidence = new DescriptorPackageEvidence()
-            });
+                SnapshotId = $"snapshot_{hashes.PackageManifestHash.Value[..16]}",
+                PackageId = request.PackageId,
+                PackageVersion = request.PackageVersion,
+                CreatedAt = createdAt,
+                Descriptors = snapshotEntries
+            },
+            Evidence = evidence,
+            Hashes = hashes,
+            EvidenceEnvelope = new DescriptorPackageEvidenceEnvelope
+            {
+                PackageId = request.PackageId,
+                PackageVersion = request.PackageVersion,
+                CreatedAt = createdAt,
+                CreatedBy = request.CreatedBy,
+                Source = request.Source,
+                PackageManifestHash = hashes.PackageManifestHash,
+                PackageEvidenceHash = hashes.PackageEvidenceHash
+            }
+        };
     }
 
     /// <summary>
@@ -426,10 +509,8 @@ public abstract class AgentControlPlaneTestBase
 
         // Execute evidence preview tool
         var evidenceContext = CreateContext("BuildPackageEvidencePreview");
-        await service.BuildPackageEvidencePreviewAsync(evidenceContext, draftId);
-        var evidencePreviewId = InMemoryAuditor.GetAllRecords().First(r =>
-            r.Context.ToolName == "BuildPackageEvidencePreview" &&
-            r.TouchedPackagePreviewIds != null).TouchedPackagePreviewIds!.First();
+        var evidenceResult = await service.BuildPackageEvidencePreviewAsync(evidenceContext, draftId);
+        var evidencePreviewId = evidenceResult.Value!.EvidencePreviewId;
 
         return (service, reviewResultId, packagePreviewId, evidencePreviewId);
     }

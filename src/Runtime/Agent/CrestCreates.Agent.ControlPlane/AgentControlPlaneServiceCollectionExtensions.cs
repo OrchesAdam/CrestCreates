@@ -1,6 +1,8 @@
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Activation;
+using CrestCreates.Agent.ControlPlane.Abstractions.PackageArtifacts;
+using CrestCreates.Agent.ControlPlane.PackageArtifacts;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
@@ -26,6 +28,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
     public static IServiceCollection AddAgentControlPlane(this IServiceCollection services)
     {
         var options = AgentToolAuthorizationOptions.ProductionDefaults;
+        AddPackageArtifactServices(services);
         services.TryAddSingleton<IAgentToolManifestProvider, StaticAgentToolManifestProvider>();
         services.TryAddSingleton(options);
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
@@ -55,6 +58,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         this IServiceCollection services,
         AgentToolAuthorizationOptions options)
     {
+        AddPackageArtifactServices(services);
         services.TryAddSingleton<IAgentToolManifestProvider, StaticAgentToolManifestProvider>();
         services.TryAddSingleton(options);
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
@@ -92,6 +96,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
         // and the visibility scope share a single policy truth.
         var options = PolicyToOptions(policy);
 
+        AddPackageArtifactServices(services);
         services.TryAddSingleton<IAgentToolManifestProvider, StaticAgentToolManifestProvider>();
         services.TryAddSingleton(options);
         services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
@@ -126,10 +131,19 @@ public static class AgentControlPlaneServiceCollectionExtensions
     {
         services.TryAddSingleton<IAgentToolInvocationAuditor, InMemoryAgentToolInvocationAuditor>();
         services.TryAddSingleton<IAgentReviewArtifactStore, InMemoryAgentReviewArtifactStore>();
-        services.TryAddSingleton<IActivationBindingArtifactResolver, InMemoryActivationBindingArtifactResolver>();
+        services.TryAddSingleton<IAgentPackageArtifactStore, InMemoryAgentPackageArtifactStore>();
+        services.TryAddSingleton<IActivationBindingArtifactResolver, DefaultActivationBindingArtifactResolver>();
         services.TryAddSingleton<IDescriptorActivationAuditor, InMemoryDescriptorActivationAuditor>();
         services.TryAddSingleton<IRuntimeActivationGate, InMemoryRuntimeActivationGate>();
         return services;
+    }
+
+    private static void AddPackageArtifactServices(IServiceCollection services)
+    {
+        services.TryAddSingleton<AgentPackageArtifactValidator>();
+        services.TryAddSingleton<IAgentPackageArtifactValidator>(sp => sp.GetRequiredService<AgentPackageArtifactValidator>());
+        services.TryAddSingleton<IAgentPackageArtifactFactory, AgentPackageArtifactFactory>();
+        services.TryAddSingleton<IActivationBindingArtifactResolver, DefaultActivationBindingArtifactResolver>();
     }
 
     private static void AddActivationReviewConsumer(IServiceCollection services)
