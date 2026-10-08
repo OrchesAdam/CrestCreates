@@ -134,6 +134,7 @@ public sealed class AuditEnvelopeValidator
                 CheckIdentifier(reference.Id, "Runtime.References.Id", issues);
             }
             AddDuplicateIssues(envelope.Runtime.References.Where(x => x is not null).Select(x => x.Kind + "\u001f" + x.Id), "Runtime.References", issues);
+            CheckInvocationLineage(envelope.Runtime, issues);
         }
         if (envelope.Descriptors is not null)
         {
@@ -179,6 +180,34 @@ public sealed class AuditEnvelopeValidator
         ValidateHash(envelope.Integrity, "Integrity", issues);
         if (envelope.Sanitization is { PolicyId: null })
             issues.Add(new("AUDIT_REQUIRED_FIELD_MISSING", "Sanitization.PolicyId"));
+    }
+
+    private static void CheckInvocationLineage(AuditRuntimeContext runtime, ImmutableArray<AuditRecordIssue>.Builder issues)
+    {
+        if (runtime.InvocationLineage is null)
+            return;
+
+        var lineage = runtime.InvocationLineage;
+        switch (lineage.Kind)
+        {
+            case InvocationLineageKind.Root:
+                if (!string.IsNullOrEmpty(lineage.ParentInvocationId))
+                    issues.Add(new("AUDIT_INVALID_LINEAGE_COMBINATION", "InvocationLineage.RootWithParent"));
+                break;
+            case InvocationLineageKind.Child:
+                if (string.IsNullOrWhiteSpace(lineage.ParentInvocationId))
+                    issues.Add(new("AUDIT_INVALID_LINEAGE_COMBINATION", "InvocationLineage.ChildWithoutParent"));
+                else
+                    CheckOptionalIdentifier(lineage.ParentInvocationId, "InvocationLineage.ParentInvocationId", issues);
+                break;
+            case InvocationLineageKind.Unknown:
+                if (!string.IsNullOrEmpty(lineage.ParentInvocationId))
+                    issues.Add(new("AUDIT_INVALID_LINEAGE_COMBINATION", "InvocationLineage.UnknownWithParent"));
+                break;
+            default:
+                issues.Add(new("AUDIT_UNKNOWN_LINEAGE_KIND", "InvocationLineage.Kind"));
+                break;
+        }
     }
 
     private static void CheckCollections(AuditEnvelope envelope, ImmutableArray<AuditRecordIssue>.Builder issues)

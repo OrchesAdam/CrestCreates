@@ -53,7 +53,16 @@ public static class AuditProtectedFactComparer
             && string.Equals(left.TraceId, right.TraceId, StringComparison.Ordinal)
             && string.Equals(left.SpanId, right.SpanId, StringComparison.Ordinal)
             && left.Duration == right.Duration
-            && left.References.SequenceEqual(right.References);
+            && left.References.SequenceEqual(right.References)
+            && InvocationLineageEquals(left.InvocationLineage, right.InvocationLineage);
+
+    private static bool InvocationLineageEquals(AuditInvocationLineage? left, AuditInvocationLineage? right)
+    {
+        if (left is null && right is null) return true;
+        if (left is null || right is null) return false;
+        return left.Kind == right.Kind
+            && string.Equals(left.ParentInvocationId, right.ParentInvocationId, StringComparison.Ordinal);
+    }
 
     private static bool DescriptorContextEquals(AuditDescriptorContext left, AuditDescriptorContext right)
         => string.Equals(left.SnapshotId, right.SnapshotId, StringComparison.Ordinal)

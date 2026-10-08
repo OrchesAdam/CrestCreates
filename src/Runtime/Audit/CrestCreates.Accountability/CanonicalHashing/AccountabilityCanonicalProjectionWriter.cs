@@ -13,7 +13,7 @@ public sealed class AccountabilityCanonicalProjectionWriter
 {
     public const string AlgorithmVersion = "sha256-canonical-json-v1";
     public const string ContractVersion = "canonical-hash-v1";
-    public const string CanonicalShapeVersion = "accountability-record-hash-v1";
+    public const string CanonicalShapeVersion = "accountability-record-hash-v2";
 
     public CanonicalHashProjectionResult CreateProjection(AuditEnvelope envelope)
     {
@@ -129,6 +129,7 @@ public sealed class AccountabilityCanonicalProjectionWriter
         if (runtime.Duration is { } duration) writer.WriteString("duration", duration.ToString("c", System.Globalization.CultureInfo.InvariantCulture));
         else writer.WriteNull("duration");
         WriteRuntimeReferences(writer, runtime.References);
+        WriteInvocationLineage(writer, runtime.InvocationLineage);
         writer.WriteEndObject();
     }
 
@@ -144,6 +145,16 @@ public sealed class AccountabilityCanonicalProjectionWriter
             writer.WriteEndObject();
         }
         writer.WriteEndArray();
+    }
+
+    private static void WriteInvocationLineage(Utf8JsonWriter writer, AuditInvocationLineage? lineage)
+    {
+        writer.WritePropertyName("invocationLineage");
+        if (lineage is null) { writer.WriteNullValue(); return; }
+        writer.WriteStartObject();
+        writer.WriteString("kind", lineage.Kind.ToString());
+        WriteNullableString(writer, "parentInvocationId", lineage.ParentInvocationId);
+        writer.WriteEndObject();
     }
 
     private static void WriteDescriptors(Utf8JsonWriter writer, AuditDescriptorContext descriptors)

@@ -11,8 +11,20 @@ public sealed record AuditRuntimeContext
     public string? SpanId { get; init; }
     public TimeSpan? Duration { get; init; }
     public ImmutableArray<AuditRuntimeReference> References { get; init; } = [];
+    public AuditInvocationLineage? InvocationLineage { get; init; }
 
     public static AuditRuntimeContext Empty { get; } = new();
 }
 
 public sealed record AuditRuntimeReference(string Kind, string Id);
+
+public enum InvocationLineageKind
+{
+    Unknown,
+    Root,
+    Child
+}
+
+public sealed record AuditInvocationLineage(
+    InvocationLineageKind Kind,
+    string? ParentInvocationId);
