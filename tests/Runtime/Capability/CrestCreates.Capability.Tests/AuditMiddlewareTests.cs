@@ -328,6 +328,45 @@ public class AuditMiddlewareTests
     }
 
     [Fact]
+    public async Task CarriesInvocationLineageIntoAuditEnvelope_Runtime()
+    {
+        var recorder = new CaptureRecorder();
+        var context = Context();
+        context.InvocationLineage = new AuditInvocationLineage(InvocationLineageKind.Child, "invocation-parent");
+        await CreateMiddleware(recorder).InvokeAsync(context, _ =>
+            Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero)));
+        recorder.Envelope!.Runtime.Should().NotBeNull();
+        recorder.Envelope.Runtime!.InvocationLineage.Should().NotBeNull();
+        recorder.Envelope.Runtime.InvocationLineage!.Kind.Should().Be(InvocationLineageKind.Child);
+        recorder.Envelope.Runtime.InvocationLineage.ParentInvocationId.Should().Be("invocation-parent");
+    }
+
+    [Fact]
+    public async Task NullInvocationLineage_Produces_NullInAuditEnvelope()
+    {
+        var recorder = new CaptureRecorder();
+        var context = Context();
+        context.InvocationLineage = null;
+        await CreateMiddleware(recorder).InvokeAsync(context, _ =>
+            Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero)));
+        recorder.Envelope!.Runtime!.InvocationLineage.Should().BeNull(
+            "null lineage on context must produce null lineage in AuditEnvelope (canonical Unknown)");
+    }
+
+    [Fact]
+    public async Task RootInvocationLineage_Produces_RootInAuditEnvelope()
+    {
+        var recorder = new CaptureRecorder();
+        var context = Context();
+        context.InvocationLineage = new AuditInvocationLineage(InvocationLineageKind.Root, null);
+        await CreateMiddleware(recorder).InvokeAsync(context, _ =>
+            Task.FromResult(CapabilityExecutionResult.Success(null, TimeSpan.Zero)));
+        recorder.Envelope!.Runtime!.InvocationLineage.Should().NotBeNull();
+        recorder.Envelope.Runtime.InvocationLineage!.Kind.Should().Be(InvocationLineageKind.Root);
+        recorder.Envelope.Runtime.InvocationLineage.ParentInvocationId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task CarriesStructuredDescriptorContractHash()
     {
         var recorder = new CaptureRecorder();

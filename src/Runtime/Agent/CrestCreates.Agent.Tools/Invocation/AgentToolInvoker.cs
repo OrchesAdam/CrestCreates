@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text.Json;
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Validation;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
@@ -687,14 +688,15 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
     internal static AuditInvocationLineage? BuildInvocationLineage(AgentExecutionContext execution)
     {
         var isRoot = execution.IsRootInvocation == true;
-        var hasParent = !string.IsNullOrWhiteSpace(execution.ParentInvocationId);
+        var rawParent = execution.ParentInvocationId;
+        var hasParent = !string.IsNullOrWhiteSpace(rawParent);
 
         if (isRoot && hasParent)
             throw new ArgumentException(
                 "IsRootInvocation=true contradicts non-empty ParentInvocationId.",
                 nameof(execution));
 
-        if (hasParent && string.Equals(execution.ParentInvocationId, execution.InvocationId, StringComparison.Ordinal))
+        if (hasParent && string.Equals(rawParent, execution.InvocationId, StringComparison.Ordinal))
             throw new ArgumentException(
                 "ParentInvocationId must not equal InvocationId (self-parent).",
                 nameof(execution));
@@ -704,11 +706,21 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 "IsRootInvocation=false requires a non-empty ParentInvocationId.",
                 nameof(execution));
 
+        if (rawParent is not null && !hasParent)
+            throw new ArgumentException(
+                "ParentInvocationId must not be whitespace-only.",
+                nameof(execution));
+
+        if (hasParent && rawParent!.Length > AuditContractLimits.MaxIdentifierLength)
+            throw new ArgumentException(
+                $"ParentInvocationId must not exceed {AuditContractLimits.MaxIdentifierLength} characters.",
+                nameof(execution));
+
         if (isRoot)
             return new AuditInvocationLineage(InvocationLineageKind.Root, null);
 
         if (hasParent)
-            return new AuditInvocationLineage(InvocationLineageKind.Child, execution.ParentInvocationId);
+            return new AuditInvocationLineage(InvocationLineageKind.Child, rawParent);
 
         return null;
     }

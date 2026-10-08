@@ -4,6 +4,7 @@ using System.Text.Json;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Accountability.Abstractions.Semantics;
+using CrestCreates.Accountability.Abstractions.Validation;
 using CrestCreates.Accountability.CanonicalHashing;
 using CrestCreates.Accountability.Sanitization;
 using CrestCreates.Accountability.Validation;
@@ -294,6 +295,69 @@ public sealed class InvocationLineageContractTests
         act.Should().Throw<ArgumentException>();
     }
 
+    [Fact]
+    public void NullRootWithWhitespaceParent_Should_Throw()
+    {
+        var execution = new AgentExecutionContext
+        {
+            ExecutionId = "execution-1",
+            InvocationId = "invocation-1",
+            AgentId = "agent-1",
+            AgentRoles = new HashSet<string>(StringComparer.Ordinal) { "operator" },
+            CallOrigin = AgentToolCallOrigin.ExplicitRequest,
+            IsRootInvocation = null,
+            ParentInvocationId = "   "
+        };
+
+        var act = () => AgentToolInvoker.BuildInvocationLineage(execution);
+
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*whitespace*");
+    }
+
+    [Fact]
+    public void OversizedParent_Should_Throw_AtTrustedBoundary()
+    {
+        var oversizedParent = new string('x', AuditContractLimits.MaxIdentifierLength + 1);
+        var execution = new AgentExecutionContext
+        {
+            ExecutionId = "execution-1",
+            InvocationId = "invocation-1",
+            AgentId = "agent-1",
+            AgentRoles = new HashSet<string>(StringComparer.Ordinal) { "operator" },
+            CallOrigin = AgentToolCallOrigin.ExplicitRequest,
+            IsRootInvocation = false,
+            ParentInvocationId = oversizedParent
+        };
+
+        var act = () => AgentToolInvoker.BuildInvocationLineage(execution);
+
+        act.Should().Throw<ArgumentException>()
+            .WithMessage($"*{AuditContractLimits.MaxIdentifierLength}*");
+    }
+
+    [Fact]
+    public void MaxLengthParent_Should_BeAccepted()
+    {
+        var maxParent = new string('p', AuditContractLimits.MaxIdentifierLength);
+        var execution = new AgentExecutionContext
+        {
+            ExecutionId = "execution-1",
+            InvocationId = "invocation-1",
+            AgentId = "agent-1",
+            AgentRoles = new HashSet<string>(StringComparer.Ordinal) { "operator" },
+            CallOrigin = AgentToolCallOrigin.ExplicitRequest,
+            IsRootInvocation = false,
+            ParentInvocationId = maxParent
+        };
+
+        var lineage = AgentToolInvoker.BuildInvocationLineage(execution);
+
+        lineage.Should().NotBeNull();
+        lineage!.Kind.Should().Be(InvocationLineageKind.Child);
+        lineage.ParentInvocationId.Should().Be(maxParent);
+    }
+
     // ──────────────────────────────────────────────────────────────
     // Blocking 2 — Validator rejects contradictory AuditEnvelope lineage
     // ──────────────────────────────────────────────────────────────
@@ -470,6 +534,80 @@ public sealed class InvocationLineageContractTests
 
         AuditProtectedFactComparer.AreEqual(envelopeNull, envelopeRoot)
             .Should().BeFalse("null lineage and explicit Root must differ in protected-fact comparison");
+    }
+
+    [Fact]
+    public void FrozenHistoricalV1_FixtureJson_Should_DeserializeCorrectly()
+    {
+        var frozenV1Json = """
+        {
+          "contractVersion": 1,
+          "auditId": "frozen-audit-1",
+          "occurredAt": "2026-07-15T12:00:00+00:00",
+          "correlationId": "frozen-correlation-1",
+          "actor": { "kind": "user", "id": "user-1" },
+          "action": { "kind": "http.request", "name": "GET /items" },
+          "target": { "kind": "http-route", "id": "GET /items" },
+          "outcome": { "status": "succeeded" },
+          "runtime": {
+            "invocationSource": "internal",
+            "executionId": "frozen-exec-1",
+            "duration": "00:00:01.0000000",
+            "references": []
+          },
+          "descriptors": { "items": [] },
+          "evidence": [],
+          "tags": {}
+        }
+        """;
+
+        var restored = JsonSerializer.Deserialize(frozenV1Json, AccountabilityJsonSerializerContext.Default.AuditEnvelope);
+
+        restored.Should().NotBeNull("frozen v1 fixture must deserialize");
+        restored!.AuditId.Should().Be("frozen-audit-1");
+        restored.Runtime.Should().NotBeNull();
+        restored.Runtime!.InvocationLineage.Should().BeNull(
+            "frozen v1 fixture has no lineage field — must decode as null (canonical Unknown)");
+        restored.Runtime.ExecutionId.Should().Be("frozen-exec-1");
+    }
+
+    [Fact]
+    public void FrozenHistoricalV1_FixtureCanonicalHash_Should_BeReadable()
+    {
+        var frozenV1Json = """
+        {
+          "contractVersion": 1,
+          "auditId": "frozen-audit-1",
+          "occurredAt": "2026-07-15T12:00:00+00:00",
+          "correlationId": "frozen-correlation-1",
+          "actor": { "kind": "user", "id": "user-1" },
+          "action": { "kind": "http.request", "name": "GET /items" },
+          "target": { "kind": "http-route", "id": "GET /items" },
+          "outcome": { "status": "succeeded" },
+          "runtime": {
+            "invocationSource": "internal",
+            "executionId": "frozen-exec-1",
+            "duration": "00:00:01.0000000",
+            "references": []
+          },
+          "descriptors": { "items": [] },
+          "evidence": [],
+          "tags": {}
+        }
+        """;
+
+        var restored = JsonSerializer.Deserialize(frozenV1Json, AccountabilityJsonSerializerContext.Default.AuditEnvelope);
+        restored.Should().NotBeNull();
+
+        var writer = new AccountabilityCanonicalProjectionWriter();
+        var projection = writer.CreateProjection(restored!);
+
+        projection.Metadata.CanonicalShapeVersion.Should().Be("accountability-record-hash-v2");
+        projection.Metadata.AlgorithmVersion.Should().Be("sha256-canonical-json-v1");
+
+        var canonicalJson = WriteCanonicalJson(writer, restored!);
+        canonicalJson.Should().Contain("invocationLineage",
+            "canonical projection must include lineage field (as null) even for v1 fixtures");
     }
 
     // ──────────────────────────────────────────────────────────────
