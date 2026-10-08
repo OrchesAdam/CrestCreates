@@ -74,12 +74,12 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
     }
 
     /// <summary>
-    /// Case: Happy — Post-hoc reconstructed normalized input recomputes to recorded PromptInputHash.
-    /// Phase 2 independently builds the prompt input from known parameters and computes hash.
-    /// Classification: B (deterministically derivable) for hash recomputation.
+    /// Case: Happy — Post-hoc reviewer can supply a candidate normalized input and verify it against the recorded hash.
+    /// Phase 2 supplies known parameters and confirms they hash to the recorded PromptInputHash.
+    /// Classification: C (hash-verifiable: candidate can be verified against recorded hash, not reconstructed from summary).
     /// </summary>
     [Fact]
-    public async Task Reconstructed_NormalizedInput_Should_Recompute_Recorded_PromptInputHash()
+    public async Task CandidateNormalizedInput_Should_Verify_Against_RecordedHash()
     {
         var result = await ExecutePhase1Async();
         var recordedHash = result.PromptInputEvidence!.InputHash.Value;
@@ -88,7 +88,7 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
         var hashService = services.GetRequiredService<IAgentPromptHashService>();
         var optionsAccessor = BuildOptions();
 
-        var reconstructedInput = BuildPromptInputFromKnownParameters();
+        var candidateInput = BuildPromptInputFromKnownParameters();
 
         var recomputedHash = hashService.ComputeInputHash(
             new AgentPromptEvidenceCreationRequest<DescriptorAuthoringPromptInput>
@@ -99,19 +99,19 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
                 ContractVersion = optionsAccessor.Value.PromptContractVersion,
                 ModelProfileRef = new AgentPromptModelProfileRef(optionsAccessor.Value.ModelProfile.ProfileName),
                 ProviderProfileRef = optionsAccessor.Value.ProviderProfileRef,
-                Payload = reconstructedInput,
+                Payload = candidateInput,
                 TenantId = ProbeTenant
             });
 
-        recomputedHash.Should().NotBeNull("Hash service must produce a hash [B]");
+        recomputedHash.Should().NotBeNull("Hash service must produce a hash [C]");
         recomputedHash!.Value.Should().Be(recordedHash,
-            "Independently reconstructed input must recompute to the recorded historical hash [B]");
+            "Candidate normalized input must verify against the recorded historical hash [C]");
     }
 
     /// <summary>
     /// Case: Happy — Metadata projection with real descriptor is covered by input hash.
     /// Phase 2 confirms hash covers metadata; content is C (hash-verifiable, not payload-reconstructable from summary).
-    /// Classification: C for content; A for hash coverage.
+    /// Classification: C for content verification; A for hash coverage.
     /// </summary>
     [Fact]
     public async Task MetadataProjection_Should_Be_Identifiable_From_Effective_PromptInput()
@@ -158,13 +158,13 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
         hashWithMetadata!.Value.Should().NotBe(hashWithoutMetadata!.Value,
             "Metadata contribution must change the input hash [C]");
         hashWithMetadata.Value.Should().Be(result.PromptInputEvidence.InputHash.Value,
-            "Reconstructed input with metadata must match recorded hash [C]");
+            "Candidate input with metadata must verify against recorded hash [C]");
     }
 
     /// <summary>
     /// Case: Happy — Memory projection is covered by input hash.
-    /// Phase 2 confirms hash distinguishes memory presence; content is C.
-    /// Classification: C for content; A for hash coverage.
+    /// Phase 2 confirms hash distinguishes memory presence; content is C (verifiable, not reconstructable from summary).
+    /// Classification: C for content verification; A for hash coverage.
     /// </summary>
     [Fact]
     public async Task MemoryProjection_Should_Be_Identifiable_From_Effective_PromptInput()
@@ -255,7 +255,7 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
         hashWithMemory!.Value.Should().NotBe(hashWithoutMemory!.Value,
             "Memory contribution must change the input hash [C]");
         hashWithMemory.Value.Should().Be(result.PromptInputEvidence.InputHash.Value,
-            "Reconstructed input with memory must match recorded hash [C]");
+            "Candidate input with memory must verify against recorded hash [C]");
     }
 
     /// <summary>
