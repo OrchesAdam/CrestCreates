@@ -684,21 +684,32 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         context.Items[AgentCapabilityContextItemNames.OutputPreflightReceiptSink] = preflightReceipts;
     }
 
-    private static AuditInvocationLineage? BuildInvocationLineage(AgentExecutionContext execution)
+    internal static AuditInvocationLineage? BuildInvocationLineage(AgentExecutionContext execution)
     {
-        // Explicit root invocation
-        if (execution.IsRootInvocation == true)
-        {
+        var isRoot = execution.IsRootInvocation == true;
+        var hasParent = !string.IsNullOrWhiteSpace(execution.ParentInvocationId);
+
+        if (isRoot && hasParent)
+            throw new ArgumentException(
+                "IsRootInvocation=true contradicts non-empty ParentInvocationId.",
+                nameof(execution));
+
+        if (hasParent && string.Equals(execution.ParentInvocationId, execution.InvocationId, StringComparison.Ordinal))
+            throw new ArgumentException(
+                "ParentInvocationId must not equal InvocationId (self-parent).",
+                nameof(execution));
+
+        if (execution.IsRootInvocation == false && !hasParent)
+            throw new ArgumentException(
+                "IsRootInvocation=false requires a non-empty ParentInvocationId.",
+                nameof(execution));
+
+        if (isRoot)
             return new AuditInvocationLineage(InvocationLineageKind.Root, null);
-        }
 
-        // Explicit child invocation with parent
-        if (!string.IsNullOrWhiteSpace(execution.ParentInvocationId))
-        {
+        if (hasParent)
             return new AuditInvocationLineage(InvocationLineageKind.Child, execution.ParentInvocationId);
-        }
 
-        // No lineage information provided - return null (maps to Unknown in AuditRuntimeContext)
         return null;
     }
 

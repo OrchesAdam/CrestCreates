@@ -17,5 +17,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CrestCreates.Agent.Tools.Tests" />
     <InternalsVisibleTo Include="CrestCreates.Agent.Tools.Persistence.Testing" />
+    <InternalsVisibleTo Include="CrestCreates.Agent.Tools.LineageProbe.Tests" />
   </ItemGroup>
 </Project>
