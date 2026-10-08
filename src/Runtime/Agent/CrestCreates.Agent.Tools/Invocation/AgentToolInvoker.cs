@@ -81,6 +81,16 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         if (!AgentToolCatalog.IsValid(execution) || !TryGetTrustedIdentity(out var tenantId, out var userId))
             return Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_INVALID_CONTEXT", "A valid trusted execution context is required.");
 
+        AuditInvocationLineage? lineage;
+        try
+        {
+            lineage = BuildInvocationLineage(execution!);
+        }
+        catch (ArgumentException)
+        {
+            return Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_INVALID_LINEAGE", "The invocation lineage context is invalid.");
+        }
+
         var entry = _snapshots.GetRequired().Find(request.ToolName);
         if (entry is null)
             return Outcome(AgentToolInvocationOutcomeKind.UnknownTool, "AGENT_TOOL_UNKNOWN", "The requested tool is unavailable.");
@@ -320,7 +330,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 InvocationSource.Agent,
                 input,
                 context => ConfigureCapabilityContext(
-                    context, entry, execution, arguments, fingerprint, lease, approval, reservation, factBuffer, preflightReceipts),
+                    context, entry, execution, arguments, fingerprint, lease, approval, reservation, factBuffer, preflightReceipts, lineage),
                 cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -622,10 +632,11 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolApprovalResult approval,
         AgentToolBudgetReservation reservation,
         IAgentToolInvocationFactBufferOwner factBuffer,
-        AgentToolOutputPreflightReceiptSink preflightReceipts)
+        AgentToolOutputPreflightReceiptSink preflightReceipts,
+        AuditInvocationLineage? lineage)
     {
         context.CausationId = execution.CausationId;
-        context.InvocationLineage = BuildInvocationLineage(execution);
+        context.InvocationLineage = lineage;
         context.AccountabilityActor = new AuditActor
         {
             Kind = "agent",

@@ -15,7 +15,9 @@ using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Metadata.AgentTool;
+using CrestCreates.Metadata.CanonicalHashing;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Schema;
 using FluentAssertions;
@@ -358,6 +360,25 @@ public sealed class InvocationLineageContractTests
         lineage.ParentInvocationId.Should().Be(maxParent);
     }
 
+    [Fact]
+    public async Task InvalidLineage_Should_BeRejected_BeforeDispatchFence()
+    {
+        var dispatcher = new LineageRecordingDispatcher();
+        var gate = new DevelopmentInMemoryAgentToolInvocationGate();
+
+        var result = await InvokeWithLineageAndFakes(
+            dispatcher,
+            gate,
+            isRoot: true,
+            parentInvocationId: "invocation-parent");
+
+        result.Kind.Should().Be(AgentToolInvocationOutcomeKind.InvalidRequest,
+            "contradictory lineage must produce a deterministic invalid-context result");
+        result.Code.Should().Be("AGENT_TOOL_INVALID_LINEAGE");
+        dispatcher.DispatchCalled.Should().BeFalse(
+            "dispatcher must not be entered when lineage is invalid");
+    }
+
     // ──────────────────────────────────────────────────────────────
     // Blocking 2 — Validator rejects contradictory AuditEnvelope lineage
     // ──────────────────────────────────────────────────────────────
@@ -480,17 +501,26 @@ public sealed class InvocationLineageContractTests
     public void ParentChange_Should_AlterCanonicalHash()
     {
         var writer = new AccountabilityCanonicalProjectionWriter();
+        var hasher = new DefaultAuditIntegrityHasher(new DefaultCanonicalHashComputer(), writer);
 
-        var envelopeRoot = CreateMinimalEnvelope(
-            new AuditInvocationLineage(InvocationLineageKind.Root, null));
-        var envelopeChild = CreateMinimalEnvelope(
-            new AuditInvocationLineage(InvocationLineageKind.Child, "invocation-parent"));
+        var envelopeChildA = CreateMinimalEnvelope(
+            new AuditInvocationLineage(InvocationLineageKind.Child, "invocation-parent-A"));
+        var envelopeChildB = CreateMinimalEnvelope(
+            new AuditInvocationLineage(InvocationLineageKind.Child, "invocation-parent-B"));
 
-        var jsonRoot = WriteCanonicalJson(writer, envelopeRoot);
-        var jsonChild = WriteCanonicalJson(writer, envelopeChild);
+        var projectionA = writer.CreateProjection(envelopeChildA);
+        var projectionB = writer.CreateProjection(envelopeChildB);
 
-        jsonRoot.Should().NotBe(jsonChild,
-            "changing lineage from Root to Child must alter the canonical hash");
+        projectionA.Metadata.CanonicalShapeVersion.Should().Be("accountability-record-hash-v2",
+            "current canonical shape must be v2");
+
+        var hashA = hasher.Compute(envelopeChildA);
+        var hashB = hasher.Compute(envelopeChildB);
+
+        hashA.Value.Should().NotBe(hashB.Value,
+            "changing ParentInvocationId from parent-A to parent-B must alter the integrity hash");
+        hashA.CanonicalShapeVersion.Should().Be("accountability-record-hash-v2");
+        hashB.CanonicalShapeVersion.Should().Be("accountability-record-hash-v2");
     }
 
     [Fact]
@@ -555,6 +585,16 @@ public sealed class InvocationLineageContractTests
             "duration": "00:00:01.0000000",
             "references": []
           },
+          "integrity": {
+            "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "algorithm": "SHA-256",
+            "algorithmVersion": "sha256-canonical-json-v1",
+            "artifactKind": "AccountabilityRecord",
+            "scope": "InternalFull",
+            "purpose": "AuditEvidence",
+            "contractVersion": "canonical-hash-v1",
+            "canonicalShapeVersion": "accountability-record-hash-v1"
+          },
           "descriptors": { "items": [] },
           "evidence": [],
           "tags": {}
@@ -569,6 +609,11 @@ public sealed class InvocationLineageContractTests
         restored.Runtime!.InvocationLineage.Should().BeNull(
             "frozen v1 fixture has no lineage field — must decode as null (canonical Unknown)");
         restored.Runtime.ExecutionId.Should().Be("frozen-exec-1");
+        restored.Integrity.Should().NotBeNull("frozen v1 fixture must preserve its integrity object");
+        restored.Integrity!.ContractVersion.Should().Be("canonical-hash-v1");
+        restored.Integrity.CanonicalShapeVersion.Should().Be("accountability-record-hash-v1");
+        restored.Integrity.Algorithm.Should().Be("SHA-256");
+        restored.Integrity.Purpose.Should().Be("AuditEvidence");
     }
 
     [Fact]
@@ -589,6 +634,16 @@ public sealed class InvocationLineageContractTests
             "executionId": "frozen-exec-1",
             "duration": "00:00:01.0000000",
             "references": []
+          },
+          "integrity": {
+            "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "algorithm": "SHA-256",
+            "algorithmVersion": "sha256-canonical-json-v1",
+            "artifactKind": "AccountabilityRecord",
+            "scope": "InternalFull",
+            "purpose": "AuditEvidence",
+            "contractVersion": "canonical-hash-v1",
+            "canonicalShapeVersion": "accountability-record-hash-v1"
           },
           "descriptors": { "items": [] },
           "evidence": [],
@@ -709,6 +764,64 @@ public sealed class InvocationLineageContractTests
         return new LineageE2EHarness(dispatcher.CapturedContext!);
     }
 
+    private static async Task<AgentToolInvocationOutcome> InvokeWithLineageAndFakes(
+        LineageRecordingDispatcher dispatcher,
+        DevelopmentInMemoryAgentToolInvocationGate gate,
+        bool? isRoot,
+        string? parentInvocationId)
+    {
+        var capability = AgentToolRuntimeTestFixture.Capability(
+            $"lineage-fence-cap-{Guid.NewGuid():N}");
+        var tool = AgentToolRuntimeTestFixture.Tool(
+            $"lineage-fence-tool-{Guid.NewGuid():N}",
+            capability.Id,
+            $"lineage.fence.tool.{Guid.NewGuid():N}");
+        AgentToolRuntimeTestFixture.RegisterNoPayloadBinding(tool);
+
+        var snapshot = AgentToolRuntimeTestFixture.SnapshotBuilder(
+            AgentToolRuntimeTestFixture.BuildToolRegistry(tool),
+            AgentToolRuntimeTestFixture.BuildCapabilityRegistry(capability),
+            AgentToolRuntimeTestFixture.BuildSchemaRegistry())
+            .Build();
+        var snapshots = new AgentToolRuntimeSnapshotProvider();
+        snapshots.Publish(snapshot);
+
+        var execution = new MutableExecutionContextAccessor
+        {
+            CurrentValue = new AgentExecutionContext
+            {
+                ExecutionId = "execution-1",
+                InvocationId = "invocation-1",
+                AgentId = "agent-1",
+                AgentRoles = new HashSet<string>(StringComparer.Ordinal) { "operator" },
+                CallOrigin = AgentToolCallOrigin.ExplicitRequest,
+                IsRootInvocation = isRoot,
+                ParentInvocationId = parentInvocationId
+            }
+        };
+
+        var budget = new LineageRecordingBudgetGate();
+        var auditor = new DevelopmentInMemoryAgentToolGovernanceAuditor();
+
+        var invoker = new AgentToolInvoker(
+            snapshots,
+            execution,
+            new LineageTestCurrentUser(),
+            new LineageTestTenantContext(),
+            gate,
+            gate,
+            new FailClosedAgentToolApprovalGate(),
+            budget,
+            auditor,
+            dispatcher,
+            new SchemaValidator(),
+            new AgentToolInvocationFingerprintBuilder(),
+            new AgentCapabilityIdempotencyKeyBuilder(),
+            new AgentToolResultMapper());
+
+        return await invoker.InvokeAsync(new AgentToolInvocationRequest(tool.ToolName));
+    }
+
     private sealed record LineageE2EHarness(CapabilityExecutionContext Context);
 
     private sealed class MutableExecutionContextAccessor : IAgentExecutionContextAccessor
@@ -742,6 +855,7 @@ public sealed class InvocationLineageContractTests
     private sealed class LineageRecordingDispatcher : ICapabilityDispatcher
     {
         public CapabilityExecutionContext? CapturedContext { get; private set; }
+        public bool DispatchCalled { get; private set; }
 
         public Task<CapabilityExecutionResult> DispatchAsync(
             CapabilityDescriptor descriptor,
@@ -750,6 +864,7 @@ public sealed class InvocationLineageContractTests
             Action<CapabilityExecutionContext>? configureContext = null,
             CancellationToken ct = default)
         {
+            DispatchCalled = true;
             var context = new CapabilityExecutionContext
             {
                 ServiceProvider = LineageEmptyServiceProvider.Instance,
