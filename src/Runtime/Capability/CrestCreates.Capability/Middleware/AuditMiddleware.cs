@@ -140,7 +140,8 @@ internal sealed class AuditMiddleware : ICapabilityPipelineMiddleware
                 InvocationSource = MapSource(context.InvocationSource),
                 ExecutionId = executionId,
                 Duration = duration,
-                References = context.AccountabilityRuntimeReferences.IsDefault ? [] : context.AccountabilityRuntimeReferences
+                References = context.AccountabilityRuntimeReferences.IsDefault ? [] : context.AccountabilityRuntimeReferences,
+                InvocationLineage = context.InvocationLineage
             },
             Descriptors = new AuditDescriptorContext
             {

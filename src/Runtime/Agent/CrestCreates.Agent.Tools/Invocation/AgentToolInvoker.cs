@@ -624,6 +624,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolOutputPreflightReceiptSink preflightReceipts)
     {
         context.CausationId = execution.CausationId;
+        context.InvocationLineage = BuildInvocationLineage(execution);
         context.AccountabilityActor = new AuditActor
         {
             Kind = "agent",
@@ -681,6 +682,24 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             };
         context.Items[AgentCapabilityContextItemNames.InvocationFactBuffer] = (IAgentToolInvocationFactSink)factBuffer;
         context.Items[AgentCapabilityContextItemNames.OutputPreflightReceiptSink] = preflightReceipts;
+    }
+
+    private static AuditInvocationLineage? BuildInvocationLineage(AgentExecutionContext execution)
+    {
+        // Explicit root invocation
+        if (execution.IsRootInvocation == true)
+        {
+            return new AuditInvocationLineage(InvocationLineageKind.Root, null);
+        }
+
+        // Explicit child invocation with parent
+        if (!string.IsNullOrWhiteSpace(execution.ParentInvocationId))
+        {
+            return new AuditInvocationLineage(InvocationLineageKind.Child, execution.ParentInvocationId);
+        }
+
+        // No lineage information provided - return null (maps to Unknown in AuditRuntimeContext)
+        return null;
     }
 
     private static AgentToolGovernanceContext CreateGovernanceContext(
