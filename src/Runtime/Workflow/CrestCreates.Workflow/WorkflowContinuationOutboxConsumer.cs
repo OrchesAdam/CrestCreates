@@ -7,7 +7,7 @@ using CrestCreates.Workflow.Abstractions;
 namespace CrestCreates.Workflow;
 
 [GenerateOutboxConsumerActivation]
-internal sealed partial class WorkflowContinuationOutboxConsumer : IOutboxRequiredConsumer<HumanTaskCompletedEvent>, IOutboxConsumerActivation<WorkflowContinuationOutboxConsumer>
+internal sealed partial class WorkflowContinuationOutboxConsumer : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
     private readonly IWorkflowContinuationService _continuation;
     public WorkflowContinuationOutboxConsumer(IWorkflowContinuationService continuation) => _continuation = continuation;

@@ -177,7 +177,7 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
 }
 
 [GenerateOutboxConsumerActivation]
-public sealed partial class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Delivery.Abstractions.Handlers.IOutboxRequiredConsumer<HumanTaskCompletedEvent>, IOutboxConsumerActivation<AssetMaintenanceDecisionConsumer>
+public sealed partial class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Delivery.Abstractions.Handlers.IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
     private readonly IHumanTaskInstanceStore _tasks;
     private readonly IRuntimeStateContractRegistry _stateRegistry;

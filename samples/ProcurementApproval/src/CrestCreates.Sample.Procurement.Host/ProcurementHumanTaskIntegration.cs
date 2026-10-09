@@ -185,7 +185,7 @@ public sealed class ProcurementLocalEventBus(
 }
 
 [GenerateOutboxConsumerActivation]
-public sealed partial class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsumer<HumanTaskCompletedEvent>, IOutboxConsumerActivation<ProcurementHumanTaskDecisionHandler>
+public sealed partial class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
     private readonly IHumanTaskInstanceStore _tasks;
     private readonly ICapabilityDispatcher _dispatcher;
