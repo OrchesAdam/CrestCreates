@@ -14,6 +14,7 @@ using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
+using CrestCreates.Runtime.Delivery.Abstractions.Activation;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using System.Collections.Concurrent;
 using System.Security.Claims;
@@ -183,7 +184,8 @@ public sealed class ProcurementLocalEventBus(
     }
 }
 
-public sealed class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
+[GenerateOutboxConsumerActivation]
+public sealed partial class ProcurementHumanTaskDecisionHandler : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
     private readonly IHumanTaskInstanceStore _tasks;
     private readonly ICapabilityDispatcher _dispatcher;

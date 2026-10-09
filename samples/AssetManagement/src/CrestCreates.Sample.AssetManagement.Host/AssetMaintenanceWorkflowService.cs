@@ -1,3 +1,4 @@
+using CrestCreates.Runtime.Delivery.Abstractions.Activation;
 using System.Security.Claims;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
@@ -175,7 +176,8 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
             : throw new InvalidOperationException("Maintenance workflow variables are unavailable.");
 }
 
-public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Delivery.Abstractions.Handlers.IOutboxRequiredConsumer<HumanTaskCompletedEvent>
+[GenerateOutboxConsumerActivation]
+public sealed partial class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Delivery.Abstractions.Handlers.IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
     private readonly IHumanTaskInstanceStore _tasks;
     private readonly IRuntimeStateContractRegistry _stateRegistry;
