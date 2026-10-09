@@ -658,6 +658,69 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
     }
 
     [Fact]
+    public async Task AuditSink_PreservesInvocationLineage_OnWriteAndRead()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var driver = new PostgreSqlAuditSinkContractDriver(
+            provider.GetRequiredService<NpgsqlDataSource>(), lease.Options);
+        var sink = driver.CreateSink();
+
+        var childLineage = new AuditInvocationLineage(InvocationLineageKind.Child, "invocation-parent-1");
+        var baseEnvelope = driver.CreateEnvelope("lineage-rt-1", "hash-1");
+        var envelope = baseEnvelope with
+        {
+            Runtime = new AuditRuntimeContext
+            {
+                InvocationSource = "internal",
+                ExecutionId = "exec-lineage-1",
+                References = [],
+                InvocationLineage = childLineage
+            }
+        };
+
+        var writeResult = await sink.WriteAsync(envelope);
+        writeResult.Status.Should().Be(CrestCreates.Accountability.Abstractions.Sinks.AuditSinkWriteStatus.Accepted);
+
+        var restored = await driver.ReadAsync(sink, "lineage-rt-1");
+        restored.Should().NotBeNull("PostgreSQL round-trip must preserve the envelope");
+        restored!.Runtime.Should().NotBeNull();
+        restored.Runtime!.InvocationLineage.Should().NotBeNull("lineage must survive PostgreSQL write/read");
+        restored.Runtime.InvocationLineage!.Kind.Should().Be(InvocationLineageKind.Child);
+        restored.Runtime.InvocationLineage.ParentInvocationId.Should().Be("invocation-parent-1");
+    }
+
+    [Fact]
+    public async Task AuditSink_PreservesNullLineage_OnWriteAndRead()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = BuildProvider(lease.Options);
+        var driver = new PostgreSqlAuditSinkContractDriver(
+            provider.GetRequiredService<NpgsqlDataSource>(), lease.Options);
+        var sink = driver.CreateSink();
+
+        var baseEnvelope = driver.CreateEnvelope("lineage-null-1", "hash-2");
+        var envelope = baseEnvelope with
+        {
+            Runtime = new AuditRuntimeContext
+            {
+                InvocationSource = "internal",
+                ExecutionId = "exec-null-1",
+                References = [],
+                InvocationLineage = null
+            }
+        };
+
+        var writeResult = await sink.WriteAsync(envelope);
+        writeResult.Status.Should().Be(CrestCreates.Accountability.Abstractions.Sinks.AuditSinkWriteStatus.Accepted);
+
+        var restored = await driver.ReadAsync(sink, "lineage-null-1");
+        restored.Should().NotBeNull();
+        restored!.Runtime!.InvocationLineage.Should().BeNull(
+            "null lineage (Unknown) must survive PostgreSQL round-trip as null");
+    }
+
+    [Fact]
     public async Task ConcurrentUseOfAmbientSession_ShouldFailClosed()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
