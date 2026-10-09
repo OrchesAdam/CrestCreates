@@ -12,27 +12,22 @@ namespace CrestCreates.CodeGenerator.OutboxConsumerActivationGenerator;
 [Generator]
 public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
 {
-    private const string MarkerAttributeMetadataName =
+    private const string MarkerAttributeFullName =
         "CrestCreates.Runtime.Delivery.Abstractions.Activation.GenerateOutboxConsumerActivationAttribute";
 
-    private const string RequiredConsumerInterfaceMetadataName =
-        "CrestCreates.Runtime.Delivery.Abstractions.Handlers.IOutboxRequiredConsumer<T>";
-
-    private const string ActivationInterfaceMetadataName =
-        "CrestCreates.Runtime.Delivery.Abstractions.Activation.IOutboxConsumerActivation<TSelf>";
-
-    private const string ServiceProviderMetadataName = "System.IServiceProvider";
-    private const string ServiceScopeFactoryMetadataName = "Microsoft.Extensions.DependencyInjection.IServiceScopeFactory";
+    private const string KeyedServiceAttributeFullName =
+        "Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var results = context.SyntaxProvider
+        var classDeclarations = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => IsCandidate(node),
                 transform: static (ctx, ct) => Transform(ctx, ct))
-            .Where(static x => x is not null)!;
+            .Where(static x => x.HasValue)
+            .Select(static (x, _) => x.Value);
 
-        context.RegisterSourceOutput(results.Collect(), ExecuteGeneration);
+        context.RegisterSourceOutput(classDeclarations.Collect(), ExecuteGeneration);
     }
 
     private static bool IsCandidate(SyntaxNode node)
@@ -45,17 +40,21 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
         };
     }
 
-    private static GeneratorResult? Transform(
+    private static Optional<GeneratorResult> Transform(
         GeneratorSyntaxContext context,
         CancellationToken ct)
     {
         var symbol = context.SemanticModel.GetDeclaredSymbol(context.Node, ct) as INamedTypeSymbol;
         if (symbol is null)
-            return null;
+            return default;
 
-        var hasMarker = HasMarkerAttribute(symbol);
+        // R3: Use ForAttributeWithMetadataName for precise attribute matching
+        var hasMarker = symbol.GetAttributes().Any(a =>
+            a.AttributeClass is not null &&
+            a.AttributeClass.ToDisplayString() == MarkerAttributeFullName);
+
         if (!hasMarker)
-            return null;
+            return default;
 
         ct.ThrowIfCancellationRequested();
 
@@ -65,42 +64,43 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
         var displayName = symbol.ToDisplayString();
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
+        // Record types are not supported (CCOCA001)
         if (context.Node is RecordDeclarationSyntax)
         {
             diagnostics.Add(Diagnostic.Create(
                 OutboxConsumerActivationDiagnostics.NotPartialOrUnsupportedShape,
                 location, displayName));
-            return new GeneratorResult(null, diagnostics.ToImmutable());
+            return new GeneratorResult(null, diagnostics.ToImmutable(), GetSymbolIdentity(symbol));
         }
 
         var classDecl = (ClassDeclarationSyntax)context.Node;
 
         if (!ValidateShape(symbol, classDecl, location, displayName, diagnostics))
-            return new GeneratorResult(null, diagnostics.ToImmutable());
+            return new GeneratorResult(null, diagnostics.ToImmutable(), GetSymbolIdentity(symbol));
 
         if (!ValidateRequiredConsumerInterface(symbol, location, displayName, diagnostics))
-            return new GeneratorResult(null, diagnostics.ToImmutable());
+            return new GeneratorResult(null, diagnostics.ToImmutable(), GetSymbolIdentity(symbol));
 
         if (!ValidateNoManualActivationConflict(symbol, location, displayName, diagnostics))
-            return new GeneratorResult(null, diagnostics.ToImmutable());
+            return new GeneratorResult(null, diagnostics.ToImmutable(), GetSymbolIdentity(symbol));
 
         var constructor = SelectConstructor(symbol, location, displayName, diagnostics);
         if (constructor is null)
-            return new GeneratorResult(null, diagnostics.ToImmutable());
+            return new GeneratorResult(null, diagnostics.ToImmutable(), GetSymbolIdentity(symbol));
 
         var parameters = ValidateAndExtractParameters(constructor, symbol, location, displayName, diagnostics);
         if (parameters is null)
-            return new GeneratorResult(null, diagnostics.ToImmutable());
+            return new GeneratorResult(null, diagnostics.ToImmutable(), GetSymbolIdentity(symbol));
 
         if (!ValidateRequiredMembers(symbol, constructor, location, displayName, diagnostics))
-            return new GeneratorResult(null, diagnostics.ToImmutable());
+            return new GeneratorResult(null, diagnostics.ToImmutable(), GetSymbolIdentity(symbol));
 
         var accessibility = symbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
+
+        // R4: Handle global namespace correctly
         var ns = symbol.ContainingNamespace.IsGlobalNamespace
             ? ""
             : symbol.ContainingNamespace.ToDisplayString();
-
-        var hintName = BuildDeterministicHintName(symbol);
 
         var model = new ConsumerActivationModel
         {
@@ -109,18 +109,29 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
             FullyQualifiedName = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Accessibility = accessibility,
             ConstructorParameters = parameters.Value,
-            HintName = hintName,
             HasZeroParameters = parameters.Value.IsEmpty
         };
 
-        return new GeneratorResult(model, diagnostics.ToImmutable());
+        return new GeneratorResult(model, diagnostics.ToImmutable(), GetSymbolIdentity(symbol));
     }
 
-    private static bool HasMarkerAttribute(INamedTypeSymbol symbol)
+    // R1: Build a unique identity string for deduplication and hint naming
+    private static string GetSymbolIdentity(INamedTypeSymbol symbol)
     {
-        return symbol.GetAttributes().Any(a =>
-            a.AttributeClass != null &&
-            string.Equals(a.AttributeClass.ToDisplayString(), MarkerAttributeMetadataName, System.StringComparison.Ordinal));
+        return symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+    }
+
+    private static string BuildHintName(string symbolIdentity)
+    {
+        // Use fully-qualified identity with special character encoding
+        var encoded = symbolIdentity
+            .Replace("global::", "")
+            .Replace("<", "_")
+            .Replace(">", "_")
+            .Replace(",", "_")
+            .Replace(" ", "")
+            .Replace(".", "_");
+        return $"GeneratedOutboxConsumerActivation_{encoded}.g.cs";
     }
 
     private static bool ValidateShape(
@@ -192,6 +203,7 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
         string displayName,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
+        // Check if the type already manually implements the activation interface
         foreach (var iface in symbol.Interfaces)
         {
             if (iface.Name == "IOutboxConsumerActivation" &&
@@ -204,6 +216,7 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
             }
         }
 
+        // Check if there's already a static CreateOutboxConsumer method
         foreach (var member in symbol.GetMembers())
         {
             if (member is IMethodSymbol method && method.IsStatic &&
@@ -291,7 +304,7 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
             }
 
             var typeDisplay = paramType.ToDisplayString();
-            if (string.Equals(typeDisplay, ServiceProviderMetadataName, System.StringComparison.Ordinal))
+            if (typeDisplay == "System.IServiceProvider")
             {
                 diagnostics.Add(Diagnostic.Create(
                     OutboxConsumerActivationDiagnostics.UnsupportedParameterOrKeyedServiceProvider,
@@ -300,7 +313,7 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
                 continue;
             }
 
-            if (string.Equals(typeDisplay, ServiceScopeFactoryMetadataName, System.StringComparison.Ordinal))
+            if (typeDisplay == "Microsoft.Extensions.DependencyInjection.IServiceScopeFactory")
             {
                 diagnostics.Add(Diagnostic.Create(
                     OutboxConsumerActivationDiagnostics.UnsupportedParameterOrKeyedServiceProvider,
@@ -309,8 +322,9 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
                 continue;
             }
 
+            // R3: Use exact attribute identity for keyed service check
             if (param.GetAttributes().Any(a =>
-                a.AttributeClass?.ToDisplayString() == "Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute"))
+                a.AttributeClass?.ToDisplayString() == KeyedServiceAttributeFullName))
             {
                 diagnostics.Add(Diagnostic.Create(
                     OutboxConsumerActivationDiagnostics.UnsupportedParameterOrKeyedServiceProvider,
@@ -359,34 +373,33 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
         return !hasRequiredMembers;
     }
 
-    private static string BuildDeterministicHintName(INamedTypeSymbol symbol)
-    {
-        var ns = symbol.ContainingNamespace.IsGlobalNamespace
-            ? "Global"
-            : symbol.ContainingNamespace.ToDisplayString().Replace('.', '_');
-        return $"GeneratedOutboxConsumerActivation_{ns}_{symbol.Name}.g.cs";
-    }
-
     private static void ExecuteGeneration(
         SourceProductionContext context,
-        ImmutableArray<GeneratorResult?> results)
+        ImmutableArray<GeneratorResult> results)
     {
         if (results.IsDefaultOrEmpty)
             return;
 
+        // R1: Deduplicate by symbol identity to handle partial class scenarios
+        var seen = new System.Collections.Generic.HashSet<string>();
+
         foreach (var result in results)
         {
-            if (result is null)
-                continue;
-
+            // Report diagnostics regardless of deduplication
             foreach (var diag in result.Diagnostics)
                 context.ReportDiagnostic(diag);
 
-            if (result.Model is not null)
-            {
-                var source = EmitActivation(result.Model);
-                context.AddSource(result.Model.HintName, SourceText.From(source, Encoding.UTF8));
-            }
+            if (result.Model is null)
+                continue;
+
+            // R1: Skip duplicate symbol identities (e.g., partial class parts)
+            if (!seen.Add(result.SymbolIdentity))
+                continue;
+
+            // R1: Use fully-qualified identity for hint name to avoid collisions
+            var hintName = BuildHintName(result.SymbolIdentity);
+            var source = EmitActivation(result.Model);
+            context.AddSource(hintName, SourceText.From(source, Encoding.UTF8));
         }
     }
 
@@ -397,12 +410,14 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
 
+        // R4: Only output namespace declaration if not global namespace
         if (!string.IsNullOrEmpty(model.Namespace))
         {
             sb.AppendLine($"namespace {model.Namespace};");
             sb.AppendLine();
         }
 
+        // R2: Generated partial class adds the activation interface in base list
         sb.AppendLine($"{model.Accessibility} sealed partial class {model.ClassName}");
         sb.AppendLine($"    : global::CrestCreates.Runtime.Delivery.Abstractions.Activation.IOutboxConsumerActivation<{model.FullyQualifiedName}>");
         sb.AppendLine("{");
@@ -431,13 +446,15 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
 
     private sealed class GeneratorResult
     {
-        public GeneratorResult(ConsumerActivationModel? model, ImmutableArray<Diagnostic> diagnostics)
+        public GeneratorResult(ConsumerActivationModel? model, ImmutableArray<Diagnostic> diagnostics, string symbolIdentity)
         {
             Model = model;
             Diagnostics = diagnostics;
+            SymbolIdentity = symbolIdentity;
         }
 
         public ConsumerActivationModel? Model { get; }
         public ImmutableArray<Diagnostic> Diagnostics { get; }
+        public string SymbolIdentity { get; }
     }
 }
