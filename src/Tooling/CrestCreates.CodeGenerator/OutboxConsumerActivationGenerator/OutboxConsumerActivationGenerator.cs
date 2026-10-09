@@ -37,60 +37,76 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
 
     private static bool IsCandidate(SyntaxNode node)
     {
-        return node is ClassDeclarationSyntax classDecl && classDecl.AttributeLists.Count > 0;
+        return node switch
+        {
+            ClassDeclarationSyntax { AttributeLists.Count: > 0 } => true,
+            RecordDeclarationSyntax { AttributeLists.Count: > 0 } => true,
+            _ => false
+        };
     }
 
     private static GeneratorResult? Transform(
         GeneratorSyntaxContext context,
         CancellationToken ct)
     {
-        var classDecl = (ClassDeclarationSyntax)context.Node;
-        var symbol = context.SemanticModel.GetDeclaredSymbol(classDecl, ct);
-        if (symbol is not INamedTypeSymbol typeSymbol)
+        var symbol = context.SemanticModel.GetDeclaredSymbol(context.Node, ct) as INamedTypeSymbol;
+        if (symbol is null)
             return null;
 
-        var hasMarker = HasMarkerAttribute(typeSymbol);
+        var hasMarker = HasMarkerAttribute(symbol);
         if (!hasMarker)
             return null;
 
         ct.ThrowIfCancellationRequested();
 
-        var location = classDecl.Identifier.GetLocation();
-        var displayName = typeSymbol.ToDisplayString();
+        var location = context.Node is TypeDeclarationSyntax typeDecl
+            ? typeDecl.Identifier.GetLocation()
+            : symbol.Locations.FirstOrDefault() ?? Location.None;
+        var displayName = symbol.ToDisplayString();
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
-        if (!ValidateShape(typeSymbol, classDecl, location, displayName, diagnostics))
+        if (context.Node is RecordDeclarationSyntax)
+        {
+            diagnostics.Add(Diagnostic.Create(
+                OutboxConsumerActivationDiagnostics.NotPartialOrUnsupportedShape,
+                location, displayName));
+            return new GeneratorResult(null, diagnostics.ToImmutable());
+        }
+
+        var classDecl = (ClassDeclarationSyntax)context.Node;
+
+        if (!ValidateShape(symbol, classDecl, location, displayName, diagnostics))
             return new GeneratorResult(null, diagnostics.ToImmutable());
 
-        if (!ValidateRequiredConsumerInterface(typeSymbol, location, displayName, diagnostics))
+        if (!ValidateRequiredConsumerInterface(symbol, location, displayName, diagnostics))
             return new GeneratorResult(null, diagnostics.ToImmutable());
 
-        if (!ValidateNoManualActivationConflict(typeSymbol, location, displayName, diagnostics))
+        if (!ValidateNoManualActivationConflict(symbol, location, displayName, diagnostics))
             return new GeneratorResult(null, diagnostics.ToImmutable());
 
-        var constructor = SelectConstructor(typeSymbol, location, displayName, diagnostics);
+        var constructor = SelectConstructor(symbol, location, displayName, diagnostics);
         if (constructor is null)
             return new GeneratorResult(null, diagnostics.ToImmutable());
 
-        var parameters = ValidateAndExtractParameters(constructor, typeSymbol, location, displayName, diagnostics);
+        var parameters = ValidateAndExtractParameters(constructor, symbol, location, displayName, diagnostics);
         if (parameters is null)
             return new GeneratorResult(null, diagnostics.ToImmutable());
 
-        if (!ValidateRequiredMembers(typeSymbol, constructor, location, displayName, diagnostics))
+        if (!ValidateRequiredMembers(symbol, constructor, location, displayName, diagnostics))
             return new GeneratorResult(null, diagnostics.ToImmutable());
 
-        var accessibility = typeSymbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
-        var ns = typeSymbol.ContainingNamespace.IsGlobalNamespace
+        var accessibility = symbol.DeclaredAccessibility == Accessibility.Public ? "public" : "internal";
+        var ns = symbol.ContainingNamespace.IsGlobalNamespace
             ? ""
-            : typeSymbol.ContainingNamespace.ToDisplayString();
+            : symbol.ContainingNamespace.ToDisplayString();
 
-        var hintName = BuildDeterministicHintName(typeSymbol);
+        var hintName = BuildDeterministicHintName(symbol);
 
         var model = new ConsumerActivationModel
         {
             Namespace = ns,
-            ClassName = typeSymbol.Name,
-            FullyQualifiedName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            ClassName = symbol.Name,
+            FullyQualifiedName = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Accessibility = accessibility,
             ConstructorParameters = parameters.Value,
             HintName = hintName,
@@ -108,13 +124,13 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
     }
 
     private static bool ValidateShape(
-        INamedTypeSymbol typeSymbol,
+        INamedTypeSymbol symbol,
         ClassDeclarationSyntax classDecl,
         Location location,
         string displayName,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
-        if (typeSymbol.IsAbstract)
+        if (symbol.IsAbstract)
         {
             diagnostics.Add(Diagnostic.Create(
                 OutboxConsumerActivationDiagnostics.NotPartialOrUnsupportedShape,
@@ -122,7 +138,7 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
             return false;
         }
 
-        if (typeSymbol.IsGenericType || typeSymbol.TypeParameters.Length > 0)
+        if (symbol.IsGenericType || symbol.TypeParameters.Length > 0)
         {
             diagnostics.Add(Diagnostic.Create(
                 OutboxConsumerActivationDiagnostics.NotPartialOrUnsupportedShape,
@@ -130,7 +146,7 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
             return false;
         }
 
-        if (typeSymbol.ContainingType != null)
+        if (symbol.ContainingType != null)
         {
             diagnostics.Add(Diagnostic.Create(
                 OutboxConsumerActivationDiagnostics.NotPartialOrUnsupportedShape,
@@ -150,12 +166,12 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
     }
 
     private static bool ValidateRequiredConsumerInterface(
-        INamedTypeSymbol typeSymbol,
+        INamedTypeSymbol symbol,
         Location location,
         string displayName,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
-        var implements = typeSymbol.AllInterfaces.Any(i =>
+        var implements = symbol.AllInterfaces.Any(i =>
             i.Name == "IOutboxRequiredConsumer" &&
             i.ContainingNamespace?.ToDisplayString() == "CrestCreates.Runtime.Delivery.Abstractions.Handlers");
 
@@ -171,12 +187,12 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
     }
 
     private static bool ValidateNoManualActivationConflict(
-        INamedTypeSymbol typeSymbol,
+        INamedTypeSymbol symbol,
         Location location,
         string displayName,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
-        foreach (var iface in typeSymbol.Interfaces)
+        foreach (var iface in symbol.Interfaces)
         {
             if (iface.Name == "IOutboxConsumerActivation" &&
                 iface.ContainingNamespace?.ToDisplayString() == "CrestCreates.Runtime.Delivery.Abstractions.Activation")
@@ -188,7 +204,7 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
             }
         }
 
-        foreach (var member in typeSymbol.GetMembers())
+        foreach (var member in symbol.GetMembers())
         {
             if (member is IMethodSymbol method && method.IsStatic &&
                 string.Equals(method.Name, "CreateOutboxConsumer", System.StringComparison.Ordinal))
@@ -204,12 +220,12 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
     }
 
     private static IMethodSymbol? SelectConstructor(
-        INamedTypeSymbol typeSymbol,
+        INamedTypeSymbol symbol,
         Location location,
         string displayName,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
-        var publicConstructors = typeSymbol.InstanceConstructors
+        var publicConstructors = symbol.InstanceConstructors
             .Where(c => c.DeclaredAccessibility == Accessibility.Public)
             .ToImmutableArray();
 
@@ -226,7 +242,7 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
 
     private static ImmutableArray<ConstructorParameterInfo>? ValidateAndExtractParameters(
         IMethodSymbol constructor,
-        INamedTypeSymbol typeSymbol,
+        INamedTypeSymbol symbol,
         Location location,
         string displayName,
         ImmutableArray<Diagnostic>.Builder diagnostics)
@@ -315,14 +331,14 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
     }
 
     private static bool ValidateRequiredMembers(
-        INamedTypeSymbol typeSymbol,
+        INamedTypeSymbol symbol,
         IMethodSymbol constructor,
         Location location,
         string displayName,
         ImmutableArray<Diagnostic>.Builder diagnostics)
     {
         var hasRequiredMembers = false;
-        foreach (var member in typeSymbol.GetMembers())
+        foreach (var member in symbol.GetMembers())
         {
             if (member is IFieldSymbol field && field.IsRequired)
             {
@@ -343,12 +359,12 @@ public sealed class OutboxConsumerActivationGenerator : IIncrementalGenerator
         return !hasRequiredMembers;
     }
 
-    private static string BuildDeterministicHintName(INamedTypeSymbol typeSymbol)
+    private static string BuildDeterministicHintName(INamedTypeSymbol symbol)
     {
-        var ns = typeSymbol.ContainingNamespace.IsGlobalNamespace
+        var ns = symbol.ContainingNamespace.IsGlobalNamespace
             ? "Global"
-            : typeSymbol.ContainingNamespace.ToDisplayString().Replace('.', '_');
-        return $"GeneratedOutboxConsumerActivation_{ns}_{typeSymbol.Name}.g.cs";
+            : symbol.ContainingNamespace.ToDisplayString().Replace('.', '_');
+        return $"GeneratedOutboxConsumerActivation_{ns}_{symbol.Name}.g.cs";
     }
 
     private static void ExecuteGeneration(
