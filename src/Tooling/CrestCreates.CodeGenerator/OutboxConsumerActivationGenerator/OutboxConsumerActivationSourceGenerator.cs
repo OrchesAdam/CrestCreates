@@ -161,7 +161,7 @@ public sealed class OutboxConsumerActivationSourceGenerator : IIncrementalGenera
             SymbolIdentity = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
         };
 
-        // CCOCA001: Must be a partial class, non-generic, top-level or nested but not open generic
+        // CCOCA001: Must be a partial class, non-generic, top-level (not nested), not abstract
         if (!classDecl.Modifiers.Any(SyntaxKind.PartialKeyword))
         {
             model.Diagnostics.Add(Diagnostic.Create(
@@ -171,7 +171,7 @@ public sealed class OutboxConsumerActivationSourceGenerator : IIncrementalGenera
             return model;
         }
 
-        if (symbol.IsGenericType || symbol.IsAbstract)
+        if (symbol.IsGenericType || symbol.IsAbstract || symbol.ContainingType is not null)
         {
             model.Diagnostics.Add(Diagnostic.Create(
                 DiagnosticDescriptors.CCOCA001_NonPartialOrUnsupportedShape,
@@ -245,9 +245,8 @@ public sealed class OutboxConsumerActivationSourceGenerator : IIncrementalGenera
         // CCOCA005: Check for required members
         // P2 fix: Honor [SetsRequiredMembers] attribute on the constructor
         var requiredMembers = symbol.GetMembers()
-            .Where(m => m.GetAttributes().Any(a =>
-                a.AttributeClass?.Name == "RequiredMemberAttribute" ||
-                a.AttributeClass?.ToDisplayString() == "System.Runtime.CompilerServices.RequiredMemberAttribute"))
+            .OfType<IPropertySymbol>()
+            .Where(p => p.IsRequired)
             .Select(m => m.Name)
             .ToArray();
 

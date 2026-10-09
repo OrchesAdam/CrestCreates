@@ -628,11 +628,8 @@ namespace TestNs
     }
 
     [Fact]
-    public void PR120_P2_RequiredMember_Without_SetsRequiredMembers_Should_ProduceCodeWithCS9035()
+    public void PR120_P2_RequiredMember_Without_SetsRequiredMembers_Should_ReportCCOCA005()
     {
-        // Note: In the test environment, RequiredMemberAttribute may not be fully resolved,
-        // so the generator produces code that has CS9035 error instead of reporting CCOCA005.
-        // This test documents the actual behavior.
         var source = FrameworkContracts + @"
 namespace TestNs
 {
@@ -656,9 +653,8 @@ namespace TestNs
 
         var result = SourceGeneratorTestHelper.RunGenerator<OutboxConsumerActivationSourceGenerator>(source);
 
-        // Generator produces output, but it has CS9035 error
-        result.GeneratedSources.Should().HaveCount(1);
-        result.CompilationSuccess.Should().BeFalse("generated code should have CS9035");
-        result.Diagnostics.Should().Contain(d => d.Id == "CS9035");
+        // Generator reports CCOCA005 and produces no output
+        result.Diagnostics.Should().Contain(d => d.Id == "CCOCA005");
+        result.GeneratedSources.Should().BeEmpty();
     }
 }
