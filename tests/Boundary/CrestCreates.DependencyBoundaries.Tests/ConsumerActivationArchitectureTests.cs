@@ -149,10 +149,26 @@ public sealed class ConsumerActivationArchitectureTests
             for (var i = 0; i < lines.Length; i++)
             {
                 var line = lines[i];
+                // Detect hand-written consumer/handler factory replacements like:
+                // builder.Services.Replace(ServiceDescriptor.Scoped<ProcurementHumanTaskDecisionHandler>(sp => ...
+                // The pattern is Replace( + ServiceDescriptor.Scoped<SingleType> (one type param, not two)
+                // Legitimate replacements like Replace(ServiceDescriptor.Singleton<IService, Impl>()) have two type params
                 if (line.Contains("Replace(", StringComparison.Ordinal) &&
-                    line.Contains("Consumer", StringComparison.Ordinal))
+                    line.Contains("ServiceDescriptor.Scoped<", StringComparison.Ordinal))
                 {
-                    violations.Add($"{programPath}:{i + 1}: {line.Trim()}");
+                    // Check if it's a single-type parameter (consumer factory) vs two-type parameter (legitimate)
+                    var scopedStart = line.IndexOf("ServiceDescriptor.Scoped<", StringComparison.Ordinal);
+                    if (scopedStart >= 0)
+                    {
+                        var afterScoped = line.Substring(scopedStart + "ServiceDescriptor.Scoped<".Length);
+                        var commaPos = afterScoped.IndexOf(',');
+                        var closePos = afterScoped.IndexOf('>');
+                        // If close comes before comma (or no comma), it's a single-type parameter
+                        if (closePos >= 0 && (commaPos < 0 || closePos < commaPos))
+                        {
+                            violations.Add($"{programPath}:{i + 1}: {line.Trim()}");
+                        }
+                    }
                 }
             }
         }
@@ -161,6 +177,23 @@ public sealed class ConsumerActivationArchitectureTests
             violations.Count == 0,
             "Host Program.cs files still contain consumer concrete factory Replace patches:" + Environment.NewLine
             + string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
+    public void HostFactoryDetector_Should_Catch_ProcurementHandlerPattern()
+    {
+        // Verify the detector would catch the actual Procurement pattern that was removed
+        var procurementPattern = "builder.Services.Replace(ServiceDescriptor.Scoped<ProcurementHumanTaskDecisionHandler>(sp =>";
+        Assert.True(procurementPattern.Contains("Replace(", StringComparison.Ordinal), "pattern must contain Replace(");
+        Assert.True(procurementPattern.Contains("ServiceDescriptor.Scoped<", StringComparison.Ordinal), "pattern must contain ServiceDescriptor.Scoped<");
+
+        // Verify it's a single-type parameter (not two-type like IService, Impl)
+        var scopedStart = procurementPattern.IndexOf("ServiceDescriptor.Scoped<", StringComparison.Ordinal);
+        var afterScoped = procurementPattern.Substring(scopedStart + "ServiceDescriptor.Scoped<".Length);
+        var commaPos = afterScoped.IndexOf(',');
+        var closePos = afterScoped.IndexOf('>');
+        Assert.True(closePos >= 0 && (commaPos < 0 || closePos < commaPos),
+            "detector must identify single-type ServiceDescriptor.Scoped pattern even when type name lacks 'Consumer' suffix");
     }
 
     private static string FindRepoRoot()

@@ -1,8 +1,10 @@
 using CrestCreates.Runtime.Delivery.Abstractions.Activation;
+using CrestCreates.Runtime.Delivery.Abstractions.Composition;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using CrestCreates.Runtime.Delivery.Abstractions.Registration;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace CrestCreates.Runtime.Delivery.Tests;
@@ -152,15 +154,14 @@ public sealed class OutboxConsumerActivationTests
         services.AddOutboxRequiredConsumer<TestActivationPayload, WellFormedActivationConsumer>("duplicate-id");
         services.AddOutboxRequiredConsumer<TestActivationPayload, IdMismatchActivationConsumer>("duplicate-id");
 
-        var metadata = services
-            .Where(d => d.ServiceType == typeof(OutboxRequiredConsumerMetadata))
-            .Select(d => (OutboxRequiredConsumerMetadata)d.ImplementationInstance!)
-            .ToList();
+        // Register the validator so we can execute the composition validation path
+        services.AddSingleton<CrestCreates.Runtime.Delivery.Registration.OutboxCompositionValidator>();
 
-        metadata.Should().HaveCount(2);
-        metadata.Select(m => m.ConsumerId).Distinct(StringComparer.Ordinal).Count()
-            .Should().BeLessThan(metadata.Count,
-                because: "duplicate consumer IDs should be detectable in metadata registrations");
+        using var sp = services.BuildServiceProvider();
+        var validator = sp.GetRequiredService<CrestCreates.Runtime.Delivery.Registration.OutboxCompositionValidator>();
+
+        var act = () => validator.Validate();
+        act.Should().Throw<OutboxCompositionException>("duplicate consumer IDs must fail the composition validator, not just register duplicate metadata");
     }
 
     [Fact]
