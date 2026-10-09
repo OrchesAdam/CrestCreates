@@ -1,3 +1,4 @@
+using CrestCreates.Runtime.Delivery.Abstractions.Activation;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
 using CrestCreates.Runtime.Delivery.Abstractions.Registration;
@@ -45,10 +46,10 @@ public static class DeliveryServiceCollectionExtensions
     }
 
     public static IServiceCollection AddOutboxRequiredConsumer<TPayload, TConsumer>(this IServiceCollection services, string consumerId)
-        where TConsumer : class, IOutboxRequiredConsumer<TPayload>
+        where TConsumer : class, IOutboxRequiredConsumer<TPayload>, IOutboxConsumerActivation<TConsumer>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(consumerId);
-        services.AddScoped<TConsumer>();
+        services.AddScoped<TConsumer>(static sp => TConsumer.CreateOutboxConsumer(sp));
         services.AddSingleton(new OutboxRequiredConsumerRegistration<TPayload>(consumerId, sp => sp.GetRequiredService<TConsumer>()));
         services.AddSingleton(new OutboxRequiredConsumerMetadata(consumerId));
         services.AddSingleton(new OutboxRequiredConsumerValidationRegistration(consumerId, sp =>

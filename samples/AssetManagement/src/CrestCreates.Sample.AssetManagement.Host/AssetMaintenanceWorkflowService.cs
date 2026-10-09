@@ -14,6 +14,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.Keys;
 using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
+using CrestCreates.Runtime.Delivery.Abstractions.Activation;
 
 namespace CrestCreates.Sample.AssetManagement.Host;
 
@@ -175,7 +176,8 @@ public sealed class AssetMaintenanceWorkflowService : IAssetMaintenanceWorkflowS
             : throw new InvalidOperationException("Maintenance workflow variables are unavailable.");
 }
 
-public sealed class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Delivery.Abstractions.Handlers.IOutboxRequiredConsumer<HumanTaskCompletedEvent>
+[GenerateOutboxConsumerActivation]
+public sealed partial class AssetMaintenanceDecisionConsumer : CrestCreates.Runtime.Delivery.Abstractions.Handlers.IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
     private readonly IHumanTaskInstanceStore _tasks;
     private readonly IRuntimeStateContractRegistry _stateRegistry;

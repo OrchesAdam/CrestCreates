@@ -1,11 +1,13 @@
 using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.Runtime.Delivery.Abstractions.Activation;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
 using CrestCreates.Workflow.Abstractions;
 
 namespace CrestCreates.Workflow;
 
-internal sealed class WorkflowContinuationOutboxConsumer : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
+[GenerateOutboxConsumerActivation]
+internal sealed partial class WorkflowContinuationOutboxConsumer : IOutboxRequiredConsumer<HumanTaskCompletedEvent>
 {
     private readonly IWorkflowContinuationService _continuation;
     public WorkflowContinuationOutboxConsumer(IWorkflowContinuationService continuation) => _continuation = continuation;

@@ -131,18 +131,6 @@ builder.Services.AddSingleton<AssetMaintenanceTaskContractResolver>();
 builder.Services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
 builder.Services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceInitialHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
 builder.Services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, AssetMaintenanceDecisionConsumer>(AssetContractIds.MaintenanceDecisionConsumer);
-// Keep concrete consumer activation explicit for the NativeAOT host. The
-// generic registration above owns delivery metadata and resolution; this
-// factory owns the concrete composition without runtime constructor discovery.
-builder.Services.Replace(ServiceDescriptor.Scoped<AssetMaintenanceDecisionConsumer>(sp =>
-    new AssetMaintenanceDecisionConsumer(
-        sp.GetRequiredService<IHumanTaskInstanceStore>(),
-        sp.GetRequiredService<IRuntimeStateContractRegistry>(),
-        sp.GetRequiredService<AssetMaintenanceTaskContractResolver>(),
-        sp.GetRequiredService<ICapabilityDispatcher>(),
-        sp.GetRequiredService<AssetExecutionIdentity>(),
-        sp.GetRequiredService<ICurrentPrincipalAccessor>(),
-        sp.GetRequiredService<ILogger<AssetMaintenanceDecisionConsumer>>())));
 builder.Services.AddWorkflowEngine();
 builder.Services.AddScoped<IAssetMaintenanceWorkflowStarter, AssetMaintenanceWorkflowService>();
 builder.Services.AddScoped<AssetMaintenanceWorkflowService>();
