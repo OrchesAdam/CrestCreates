@@ -243,6 +243,7 @@ public sealed class OutboxConsumerActivationSourceGenerator : IIncrementalGenera
         var ctor = publicConstructors[0];
 
         // CCOCA005: Check for required members
+        // P2 fix: Honor [SetsRequiredMembers] attribute on the constructor
         var requiredMembers = symbol.GetMembers()
             .Where(m => m.GetAttributes().Any(a =>
                 a.AttributeClass?.Name == "RequiredMemberAttribute" ||
@@ -252,12 +253,20 @@ public sealed class OutboxConsumerActivationSourceGenerator : IIncrementalGenera
 
         if (requiredMembers.Length > 0)
         {
-            model.Diagnostics.Add(Diagnostic.Create(
-                DiagnosticDescriptors.CCOCA005_RequiredMembersNotSatisfied,
-                classDecl.GetLocation(),
-                symbol.Name,
-                string.Join(", ", requiredMembers)));
-            return model;
+            // Check if the constructor has [SetsRequiredMembers]
+            var hasSetsRequiredMembers = ctor.GetAttributes().Any(a =>
+                a.AttributeClass?.Name == "SetsRequiredMembersAttribute" ||
+                a.AttributeClass?.ToDisplayString() == "System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute");
+
+            if (!hasSetsRequiredMembers)
+            {
+                model.Diagnostics.Add(Diagnostic.Create(
+                    DiagnosticDescriptors.CCOCA005_RequiredMembersNotSatisfied,
+                    classDecl.GetLocation(),
+                    symbol.Name,
+                    string.Join(", ", requiredMembers)));
+                return model;
+            }
         }
 
         // CCOCA004: Check constructor parameters
@@ -362,8 +371,8 @@ public sealed class OutboxConsumerActivationSourceGenerator : IIncrementalGenera
     }
 
     /// <summary>
-    /// R1 fix: Build a collision-free hint name from the fully-qualified type identity.
-    /// Uses namespace + type name with dots replaced by underscores.
+    /// P1 fix: Build a collision-free hint name from the fully-qualified type identity.
+    /// Preserves dots as namespace separators to avoid A_B vs A.B collision.
     /// </summary>
     private static string BuildHintName(ConsumerActivationModel model)
     {
@@ -371,8 +380,7 @@ public sealed class OutboxConsumerActivationSourceGenerator : IIncrementalGenera
             .Replace("global::", "")
             .Replace('<', '_')
             .Replace('>', '_')
-            .Replace(',', '_')
-            .Replace(' ', '_');
+            .Replace(',', '_');
         return $"{identity}.OutboxConsumerActivation.g.cs";
     }
 
