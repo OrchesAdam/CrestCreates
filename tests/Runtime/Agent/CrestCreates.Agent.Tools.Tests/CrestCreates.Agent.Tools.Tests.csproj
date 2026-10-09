@@ -9,6 +9,9 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Agent.Tools.LineageProbe.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />

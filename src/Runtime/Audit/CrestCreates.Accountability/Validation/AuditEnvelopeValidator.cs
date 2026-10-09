@@ -201,8 +201,8 @@ public sealed class AuditEnvelopeValidator
                     CheckOptionalIdentifier(lineage.ParentInvocationId, "InvocationLineage.ParentInvocationId", issues);
                 break;
             case InvocationLineageKind.Unknown:
-                if (!string.IsNullOrEmpty(lineage.ParentInvocationId))
-                    issues.Add(new("AUDIT_INVALID_LINEAGE_COMBINATION", "InvocationLineage.UnknownWithParent"));
+                // Unknown must be represented as null, not as explicit Kind.Unknown
+                issues.Add(new("AUDIT_INVALID_LINEAGE_KIND", "InvocationLineage.UnknownMustBeNull"));
                 break;
             default:
                 issues.Add(new("AUDIT_UNKNOWN_LINEAGE_KIND", "InvocationLineage.Kind"));

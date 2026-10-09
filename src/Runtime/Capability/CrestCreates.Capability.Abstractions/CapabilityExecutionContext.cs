@@ -19,6 +19,7 @@ public sealed class CapabilityExecutionContext
     public string? ParentAuditId { get; set; }
     public AuditActor? AccountabilityActor { get; set; }
     public ImmutableArray<AuditRuntimeReference> AccountabilityRuntimeReferences { get; set; } = [];
+    public AuditInvocationLineage? InvocationLineage { get; set; }
     public string? AuditRecordId { get; internal set; }
     public string? ExecutionId { get; internal set; }
     public string? TenantId { get; set; }

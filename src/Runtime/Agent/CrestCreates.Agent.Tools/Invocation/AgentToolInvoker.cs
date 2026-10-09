@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text.Json;
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Validation;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
@@ -79,6 +80,16 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         var execution = _execution.Current;
         if (!AgentToolCatalog.IsValid(execution) || !TryGetTrustedIdentity(out var tenantId, out var userId))
             return Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_INVALID_CONTEXT", "A valid trusted execution context is required.");
+
+        AuditInvocationLineage? lineage;
+        try
+        {
+            lineage = BuildInvocationLineage(execution!);
+        }
+        catch (ArgumentException)
+        {
+            return Outcome(AgentToolInvocationOutcomeKind.InvalidRequest, "AGENT_TOOL_INVALID_LINEAGE", "The invocation lineage context is invalid.");
+        }
 
         var entry = _snapshots.GetRequired().Find(request.ToolName);
         if (entry is null)
@@ -319,7 +330,7 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
                 InvocationSource.Agent,
                 input,
                 context => ConfigureCapabilityContext(
-                    context, entry, execution, arguments, fingerprint, lease, approval, reservation, factBuffer, preflightReceipts),
+                    context, entry, execution, arguments, fingerprint, lease, approval, reservation, factBuffer, preflightReceipts, lineage),
                 cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -621,9 +632,11 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
         AgentToolApprovalResult approval,
         AgentToolBudgetReservation reservation,
         IAgentToolInvocationFactBufferOwner factBuffer,
-        AgentToolOutputPreflightReceiptSink preflightReceipts)
+        AgentToolOutputPreflightReceiptSink preflightReceipts,
+        AuditInvocationLineage? lineage)
     {
         context.CausationId = execution.CausationId;
+        context.InvocationLineage = lineage;
         context.AccountabilityActor = new AuditActor
         {
             Kind = "agent",
@@ -681,6 +694,46 @@ public sealed class AgentToolInvoker : IAgentToolInvoker
             };
         context.Items[AgentCapabilityContextItemNames.InvocationFactBuffer] = (IAgentToolInvocationFactSink)factBuffer;
         context.Items[AgentCapabilityContextItemNames.OutputPreflightReceiptSink] = preflightReceipts;
+    }
+
+    internal static AuditInvocationLineage? BuildInvocationLineage(AgentExecutionContext execution)
+    {
+        var isRoot = execution.IsRootInvocation == true;
+        var rawParent = execution.ParentInvocationId;
+        var hasParent = !string.IsNullOrWhiteSpace(rawParent);
+
+        if (isRoot && hasParent)
+            throw new ArgumentException(
+                "IsRootInvocation=true contradicts non-empty ParentInvocationId.",
+                nameof(execution));
+
+        if (hasParent && string.Equals(rawParent, execution.InvocationId, StringComparison.Ordinal))
+            throw new ArgumentException(
+                "ParentInvocationId must not equal InvocationId (self-parent).",
+                nameof(execution));
+
+        if (execution.IsRootInvocation == false && !hasParent)
+            throw new ArgumentException(
+                "IsRootInvocation=false requires a non-empty ParentInvocationId.",
+                nameof(execution));
+
+        if (rawParent is not null && !hasParent)
+            throw new ArgumentException(
+                "ParentInvocationId must not be whitespace-only.",
+                nameof(execution));
+
+        if (hasParent && rawParent!.Length > AuditContractLimits.MaxIdentifierLength)
+            throw new ArgumentException(
+                $"ParentInvocationId must not exceed {AuditContractLimits.MaxIdentifierLength} characters.",
+                nameof(execution));
+
+        if (isRoot)
+            return new AuditInvocationLineage(InvocationLineageKind.Root, null);
+
+        if (hasParent)
+            return new AuditInvocationLineage(InvocationLineageKind.Child, rawParent);
+
+        return null;
     }
 
     private static AgentToolGovernanceContext CreateGovernanceContext(

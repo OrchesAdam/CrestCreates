@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Agent.Tools.Tests\CrestCreates.Agent.Tools.Tests.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Runtime\Agent\CrestCreates.Agent.Tools\CrestCreates.Agent.Tools.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Runtime\Audit\CrestCreates.Accountability\CrestCreates.Accountability.csproj" />
   </ItemGroup>
 
 </Project>
