@@ -144,6 +144,18 @@ public class UnitOfWorkDiRegistrationTests
     }
 
     [Fact]
+    public void Mixing_binding_and_custom_factory_registration_fails_deterministically()
+    {
+        var services = new ServiceCollection();
+        services.AddUnitOfWork();
+
+        var act = () => services.AddUnitOfWork<ProbeUnitOfWorkFactory>();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Conflicting unit-of-work registrations*provider-bindings*custom-factory*");
+    }
+
+    [Fact]
     public void RequiresNew_uses_child_scope_and_restores_parent_state()
     {
         var services = new ServiceCollection();
@@ -239,6 +251,12 @@ public class UnitOfWorkDiRegistrationTests
     private sealed class ScopeMarker
     {
         public Guid Id { get; } = Guid.NewGuid();
+    }
+
+    private sealed class ProbeUnitOfWorkFactory : IUnitOfWorkFactory
+    {
+        public IUnitOfWork Create(OrmProvider provider)
+            => new ProbeUnitOfWork(Guid.NewGuid(), provider);
     }
 
     private sealed class ProbeUnitOfWork : IUnitOfWork

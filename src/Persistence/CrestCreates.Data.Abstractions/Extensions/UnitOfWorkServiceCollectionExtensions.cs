@@ -27,6 +27,7 @@ namespace CrestCreates.Data.Abstractions
             OrmProvider? defaultProvider = null)
         {
             var state = GetOrCreateRegistrationState(services);
+            state.SetAssemblyMode("provider-bindings", $"{nameof(AddUnitOfWork)}(...)");
             if (defaultProvider is not null)
             {
                 state.SetExplicitDefault(defaultProvider.Value, $"{nameof(AddUnitOfWork)}(defaultProvider)");
@@ -62,6 +63,7 @@ namespace CrestCreates.Data.Abstractions
             where TFactory : class, IUnitOfWorkFactory
         {
             var state = GetOrCreateRegistrationState(services);
+            state.SetAssemblyMode("custom-factory", $"{nameof(AddUnitOfWork)}<{typeof(TFactory).Name}>(...)");
             if (defaultProvider is not null)
             {
                 state.SetExplicitDefault(defaultProvider.Value, $"{nameof(AddUnitOfWork)}<{typeof(TFactory).Name}>(defaultProvider)");

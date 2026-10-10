@@ -111,7 +111,7 @@
 | --- | --- |
 | `dotnet build CrestCreates.slnx` | 0 错误（迁移后全仓编译） |
 | `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 56/56（含新增 19 个 UoW 用例） |
-| ├─ `UnitOfWorkDiRegistrationTests`（10 用例） | 单绑定默认 / 显式默认 / 显式参数优先 / 多绑定无默认诊断 / 缺绑定诊断 / 重复绑定诊断 / 冲突默认诊断 / 幂等 / requiresNew 子 scope 隔离与父恢复 / 不支持 requiresNew 诊断 / 依赖失败不污染 Current |
+| ├─ `UnitOfWorkDiRegistrationTests`（11 用例） | 单绑定默认 / 显式默认 / 显式参数优先 / 多绑定无默认诊断 / 缺绑定诊断 / 重复绑定诊断 / 冲突默认诊断 / 幂等 / 混用装配模式诊断（套件 vs 自定义工厂不允许 first/last-wins）/ requiresNew 子 scope 隔离与父恢复 / 不支持 requiresNew 诊断 / 依赖失败不污染 Current |
 | ├─ `EfCoreUnitOfWorkDatabaseTests`（4 用例，真实 SQLite 文件库） | 提交持久化 / 回滚无残留 / requiresNew 独立 DbContext 与独立事务（含内层不关闭外层事务、父恢复）/ 领域事件在提交持久化之后发布 |
 | └─ `UnitOfWorkManagerTests`（4 用例，手动构造路径） | 既有 3 用例保持 + 回滚失败不替换原始业务异常 |
 | UoW native 门禁（本分支新 fixture） | `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`；publish/link/run 40s（本地热缓存） |
