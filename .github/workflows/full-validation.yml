@@ -60,7 +60,9 @@ jobs:
       - name: Test — Framework / API (DynamicApi + Capability)
         run: |
           dotnet test tests/Framework/Api/CrestCreates.DynamicApi.Tests --no-build
-          dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --no-build
+          # NativeAotGate tests publish and execute a native binary and run in
+          # the native-aot-gates job below; keep this step JIT-fast.
+          dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --no-build --filter "Category!=NativeAotGate"
           dotnet test tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests --no-build
 
       - name: Test — Framework / Web
@@ -157,9 +159,12 @@ jobs:
       - name: Test — Dependency Boundaries
         run: dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --no-build
 
-  # AOT fixture publish — validates Tier 2 NativeAOT-verified mainline
-  aot-fixture-publish:
+  # NativeAOT execute gates — publish/link/run the original native binaries.
+  native-aot-gates:
     runs-on: ubuntu-latest
+    # Bounded job budget: the native publish/link/run gates must fail explicitly
+    # instead of hanging indefinitely.
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
@@ -174,14 +179,27 @@ jobs:
       - name: Bootstrap BuildTasks
         run: dotnet build src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj
 
-      - name: Publish — CapabilityEndpoint AotFixture (NativeAOT)
-        run: dotnet publish tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+      # Native AOT gates write evidence into tests/artifacts/aot-native-evidence/.
+      - name: Reset native AOT gate evidence directory
+        run: rm -rf tests/artifacts/aot-native-evidence
 
-      - name: Publish — MCP AotFixture (NativeAOT)
-        run: dotnet publish tests/Integrations/CrestCreates.Mcp.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+      - name: Test — CapabilityEndpoint native HTTP gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --filter "Category=NativeAotGate"
 
-      - name: Publish — Agent.Tools AotFixture (NativeAOT)
-        run: dotnet publish tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot
+      - name: Test — MCP native pipeline gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Integrations/CrestCreates.Mcp.AotFixture.Tests
+
+      - name: Test — Agent.Tools native pipeline gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture.Tests
 
       - name: Test — Memory JSON contract AotFixtures (NativeAOT publish/link/run)
         run: bash .github/scripts/run-json-contract-aot-gates.sh
+
+      - name: Upload native AOT gate evidence (publish/stdout/stderr/request transcripts)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aot-native-evidence-${{ github.sha }}
+          path: tests/artifacts/aot-native-evidence/
+          if-no-files-found: warn
+          retention-days: 7

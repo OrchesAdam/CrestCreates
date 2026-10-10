@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using FluentAssertions;
 using Xunit;
 
@@ -19,14 +20,25 @@ public sealed class AgentToolAotFixtureTests
         var root = FindRepoRoot();
         var output = Path.Combine(Path.GetTempPath(), "crest-agent-tool-aot-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(output);
+        var evidence = new Dictionary<string, object?>
+        {
+            ["gate"] = "agent-tools-native-pipeline",
+            ["sha"] = ResolveSha(root),
+            ["rid"] = "linux-x64"
+        };
+        string? failure = null;
         try
         {
             var project = Path.Combine(
                 root,
                 "tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture/CrestCreates.Agent.Tools.AotFixture.csproj");
+            var publishCommand = $"publish \"{project}\" -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot --disable-build-servers -o \"{output}\"";
+            evidence["publishCommand"] = "dotnet " + publishCommand;
             var publish = await RunAsync(
                 "dotnet",
-                $"publish \"{project}\" -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot --disable-build-servers -o \"{output}\"");
+                publishCommand);
+            evidence["publishExitCode"] = publish.ExitCode;
+            evidence["publishLog"] = publish.Output;
             publish.ExitCode.Should().Be(0, publish.Output);
             publish.Output.Should().NotContain("warning IL2026");
             publish.Output.Should().NotContain("warning IL3050");
@@ -39,11 +51,19 @@ public sealed class AgentToolAotFixtureTests
                 | UnixFileMode.GroupExecute
                 | UnixFileMode.OtherExecute);
             var execution = await RunAsync(executable, string.Empty);
+            evidence["executionExitCode"] = execution.ExitCode;
+            evidence["executionOutput"] = execution.Output;
             execution.ExitCode.Should().Be(0, execution.Output);
             execution.Output.Should().Contain("AGENT_TOOL_NATIVEAOT_PIPELINE_OK");
         }
+        catch (Exception exception)
+        {
+            failure = $"{exception.GetType().Name}: {exception.Message}";
+            throw;
+        }
         finally
         {
+            WriteEvidence(root, evidence, failure is null ? "passed" : "failed", failure);
             if (Directory.Exists(output))
                 Directory.Delete(output, recursive: true);
         }
@@ -66,7 +86,9 @@ public sealed class AgentToolAotFixtureTests
         process.Start();
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        // Bounded budget sized for a cold CI publish (Release rebuild + IL link);
+        // the whole gate must fail explicitly instead of waiting forever.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(12));
         try
         {
             await process.WaitForExitAsync(timeout.Token);
@@ -74,9 +96,55 @@ public sealed class AgentToolAotFixtureTests
         catch (OperationCanceledException)
         {
             process.Kill(entireProcessTree: true);
-            throw new TimeoutException($"Process '{fileName} {arguments}' exceeded the five-minute fixture timeout.");
+            await process.WaitForExitAsync();
+            throw new TimeoutException($"Process '{fileName} {arguments}' exceeded the bounded fixture timeout.");
         }
         return (process.ExitCode, await stdout + await stderr);
+    }
+
+    private static void WriteEvidence(
+        string root, Dictionary<string, object?> fields, string result, string? failure)
+    {
+        try
+        {
+            var directory = Path.Combine(root, "tests", "artifacts", "aot-native-evidence");
+            Directory.CreateDirectory(directory);
+            fields["result"] = result;
+            fields["failure"] = failure;
+            fields["writtenUtc"] = DateTime.UtcNow.ToString("o");
+            File.WriteAllText(
+                Path.Combine(directory, "agent-tools-native-pipeline.json"),
+                JsonSerializer.Serialize(fields, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private static string ResolveSha(string root)
+    {
+        var sha = Environment.GetEnvironmentVariable("GITHUB_SHA");
+        if (!string.IsNullOrWhiteSpace(sha))
+            return sha!;
+
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("git", "rev-parse HEAD")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                WorkingDirectory = root
+            });
+            if (process is null)
+                return "unknown";
+            var output = process.StandardOutput.ReadToEnd().Trim();
+            process.WaitForExit(10_000);
+            return output.Length > 0 ? output : "unknown";
+        }
+        catch (Exception)
+        {
+            return "unknown";
+        }
     }
 
     private static string FindRepoRoot()

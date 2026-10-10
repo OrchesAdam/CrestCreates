@@ -83,12 +83,13 @@ CrestCreates Core:
     NativeAOT-first（独立证据矩阵待明确；当前经组合 Host 原生执行覆盖）
 
 第一方 Runtime（逐项声明，不整体背书）:
-    Workflow / HumanTask / Outbox / AgentTool / Memory:
-        经 PG AotHost 与 Golden App fixture 原生 publish/link/run 覆盖
+    Workflow / HumanTask / Outbox / Memory / AgentTool:
+        经 PG AotHost、主 Agent.Tools fixture 与 Golden App fixture 原生 publish/link/run 覆盖
     HTTP (CapabilityEndpoint):
-        active CI 仅 publish/link；原生请求执行门禁未建立 → 未验证/待确认
+        active CI 原生 publish/link/run，含 loopback 请求断言（成功/负例/进程回收），
+        仅 linux-x64；认证/权限/租户/bootstrap 全链不在该 fixture 覆盖内
     MCP:
-        Mcp.Memory fixture 有原生 run 门禁；主 MCP fixture 仅 publish/link → 未验证/待确认
+        主 MCP fixture 与 Mcp.Memory fixture 均有原生 run 门禁（linux-x64）
 
 EF Core 和部分 Integrations:
     AOT capability separately declared
@@ -370,7 +371,7 @@ TestBase
 - ObjectMapping：SourceGenerator，支持多种转换、自定义转换器和导航路径。
 - Metadata / Descriptor 治理链路：Topology、Impact、Compatibility、Package、Stable Hash、Canonical Hash profile、Agent Control Plane 等属于严肃治理面，不应把复杂性下放给普通 Runtime Handler。
 - Agent 治理面与工件持久化：Authoring → review → package/evidence → approval 链路的契约与边界见「平台能力」；activation request/gate 仍为内存实现，durable activation 按 #88 判为应用侧范围，不重开。
-- 支持声明规则：`NativeAOT-verified` 必须指向原生 publish/link/run 证据；未验证项写「未验证/待确认」。当前证据边界与待补门禁（HTTP 原生请求门禁等）随 #121 轨道维护在 `memory.md`。
+- 支持声明规则：`NativeAOT-verified` 必须指向原生 publish/link/run 证据；未验证项写「未验证/待确认」。当前逐项证据边界与覆盖限制见 `docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md`，状态随 #121 轨道同步在 `memory.md`。
 
 ---
 
