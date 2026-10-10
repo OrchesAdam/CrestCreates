@@ -359,6 +359,8 @@
     <Project Path="tests/Persistence/CrestCreates.Database.Migrations.Tests/CrestCreates.Database.Migrations.Tests.csproj" />
     <Project Path="tests/Persistence/CrestCreates.MongoDB.Tests/CrestCreates.MongoDB.Tests.csproj" />
     <Project Path="tests/Persistence/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj" />
+    <Project Path="tests/Persistence/CrestCreates.Data.Abstractions.AotFixture/CrestCreates.Data.Abstractions.AotFixture.csproj" />
+    <Project Path="tests/Persistence/CrestCreates.Data.Abstractions.AotFixture.Tests/CrestCreates.Data.Abstractions.AotFixture.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Tooling/">
     <Project Path="tests/Tooling/CrestCreates.BuildTasks.Tests/CrestCreates.BuildTasks.Tests.csproj" />

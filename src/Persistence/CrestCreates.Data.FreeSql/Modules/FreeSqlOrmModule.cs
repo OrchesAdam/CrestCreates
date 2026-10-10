@@ -49,15 +49,11 @@ namespace CrestCreates.Data.FreeSql.Modules
             
             // 注册 FreeSql 工作单元
             services.AddScoped<FreeSqlUnitOfWork>();
-        }
 
-        /// <summary>
-        /// 获取 ORM 提供者类型
-        /// </summary>
-        /// <returns>ORM 提供者类型</returns>
-        protected override OrmProvider GetOrmProvider()
-        {
-            return OrmProvider.FreeSql;
+            // FreeSql 的 IFreeSql/连接按作用域解析，支持 requiresNew 子作用域隔离。
+            services.AddUnitOfWorkProvider(
+                OrmProvider.FreeSql,
+                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>());
         }
     }
 }

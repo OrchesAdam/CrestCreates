@@ -24,6 +24,7 @@ using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
@@ -381,9 +382,7 @@ public sealed class HelpdeskWebApplicationFactory
 
             // Unit of Work
             services.AddUnitOfWork(OrmProvider.EfCore);
-            services.AddScoped<EfCoreUnitOfWork>(sp => new EfCoreUnitOfWork(
-                sp.GetRequiredService<IDataBaseContext>(),
-                sp.GetRequiredService<IDomainEventPublisher>()));
+            services.AddEfCoreUnitOfWork();
 
             // Framework repositories
             services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();

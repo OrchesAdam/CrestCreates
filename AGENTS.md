@@ -368,6 +368,7 @@ TestBase
 - CRUD 主链：SourceGenerator 全生成方向。
 - 权限系统：授予、撤销、缓存、租户边界、SuperAdmin、AOP 已收口。
 - 后台作业：ISchedulerService + Quartz + 重试策略 + 租户上下文。
+- UnitOfWork：唯一装配（`AddUnitOfWork` + Provider 包 typed `AddUnitOfWorkProvider` binding，无反射/程序集扫描）；requiresNew 经子 DI scope 隔离；重复/缺失/冲突绑定为确定性诊断；旧 Infrastructure 双轨实现已归档（99_RecycleBin）。
 - ObjectMapping：SourceGenerator，支持多种转换、自定义转换器和导航路径。
 - Metadata / Descriptor 治理链路：Topology、Impact、Compatibility、Package、Stable Hash、Canonical Hash profile、Agent Control Plane 等属于严肃治理面，不应把复杂性下放给普通 Runtime Handler。
 - Agent 治理面与工件持久化：Authoring → review → package/evidence → approval 链路的契约与边界见「平台能力」；activation request/gate 仍为内存实现，durable activation 按 #88 判为应用侧范围，不重开。

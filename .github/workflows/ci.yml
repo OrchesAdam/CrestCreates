@@ -260,6 +260,9 @@ jobs:
       - name: Test — Agent.Tools native pipeline gate (NativeAOT publish/link/run)
         run: dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture.Tests --no-build
 
+      - name: Test — UnitOfWork native pipeline gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Persistence/CrestCreates.Data.Abstractions.AotFixture.Tests --no-build
+
       - name: Test — Memory JSON contract AotFixtures (NativeAOT publish/link/run)
         run: bash .github/scripts/run-json-contract-aot-gates.sh
 

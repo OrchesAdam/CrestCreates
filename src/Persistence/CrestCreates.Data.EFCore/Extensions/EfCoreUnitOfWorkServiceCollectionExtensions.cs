@@ -1,0 +1,34 @@
+using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore.UnitOfWork;
+using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Domain.DomainEvents;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace CrestCreates.Data.EFCore.Extensions
+{
+    /// <summary>
+    /// EF Core 工作单元注册扩展：声明具体工作单元与 Provider 强类型绑定的唯一位置。
+    /// </summary>
+    public static class EfCoreUnitOfWorkServiceCollectionExtensions
+    {
+        /// <summary>
+        /// 注册 EF Core 工作单元（scoped）及其工作单元绑定。
+        /// </summary>
+        /// <param name="services">服务集合</param>
+        /// <returns>服务集合</returns>
+        /// <remarks>
+        /// 配合 <see cref="UnitOfWorkServiceCollectionExtensions.AddUnitOfWork"/> 使用。
+        /// EF Core Provider 支持 requiresNew 隔离（独立作用域解析独立 DbContext）。
+        /// </remarks>
+        public static IServiceCollection AddEfCoreUnitOfWork(this IServiceCollection services)
+        {
+            services.AddScoped(sp => new EfCoreUnitOfWork(
+                sp.GetRequiredService<IDataBaseContext>(),
+                sp.GetRequiredService<IDomainEventPublisher>()));
+            services.AddUnitOfWorkProvider(
+                OrmProvider.EfCore,
+                static sp => sp.GetRequiredService<EfCoreUnitOfWork>());
+            return services;
+        }
+    }
+}

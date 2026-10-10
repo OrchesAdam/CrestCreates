@@ -1,49 +1,126 @@
+using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using CrestCreates.Domain.UnitOfWork;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace CrestCreates.Data.Abstractions
 {
     /// <summary>
-    /// 工作单元依赖注入扩展
+    /// 工作单元依赖注入扩展：唯一装配入口。
     /// </summary>
     public static class UnitOfWorkServiceCollectionExtensions
     {
         /// <summary>
-        /// 注册工作单元服务
+        /// 注册工作单元服务（工厂 + 管理器）与默认 Provider 声明。
         /// </summary>
         /// <param name="services">服务集合</param>
-        /// <param name="defaultProvider">默认 ORM 提供者</param>
+        /// <param name="defaultProvider">
+        /// 应用显式声明的默认 ORM 提供者。为 null 时按装配规则解析：
+        /// 恰好注册一个 Provider 绑定时该 Provider 即默认；多绑定且无声明时，未显式传入 provider 的调用会确定性失败。
+        /// 重复调用相同值幂等；不同值立即抛出确定性异常（不允许 last-wins）。
+        /// </param>
         /// <returns>服务集合</returns>
         public static IServiceCollection AddUnitOfWork(
             this IServiceCollection services,
-            OrmProvider defaultProvider = OrmProvider.EfCore)
+            OrmProvider? defaultProvider = null)
         {
-            services.AddScoped<IUnitOfWorkFactory, UnitOfWorkFactory>();
-            services.AddScoped<IUnitOfWorkManager>(sp =>
-                new UnitOfWorkManager(sp.GetRequiredService<IUnitOfWorkFactory>(), defaultProvider));
+            var state = GetOrCreateRegistrationState(services);
+            if (defaultProvider is not null)
+            {
+                state.SetExplicitDefault(defaultProvider.Value, $"{nameof(AddUnitOfWork)}(defaultProvider)");
+            }
+
+            services.TryAddSingleton(sp =>
+                new UnitOfWorkProviderBindingRegistry(sp.GetServices<UnitOfWorkProviderBinding>()));
+            services.TryAddScoped<IUnitOfWorkFactory>(sp => new UnitOfWorkFactory(
+                sp,
+                sp.GetRequiredService<UnitOfWorkProviderBindingRegistry>()));
+            services.TryAddScoped<IUnitOfWorkManager>(sp => new UnitOfWorkManager(
+                sp.GetRequiredService<IUnitOfWorkFactory>(),
+                sp.GetRequiredService<UnitOfWorkProviderBindingRegistry>(),
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                state.ExplicitDefault));
 
             return services;
         }
 
         /// <summary>
-        /// 注册工作单元服务（使用自定义工厂）
+        /// 注册工作单元服务（使用自定义工厂）。
         /// </summary>
         /// <typeparam name="TFactory">工作单元工厂类型</typeparam>
         /// <param name="services">服务集合</param>
-        /// <param name="defaultProvider">默认 ORM 提供者</param>
+        /// <param name="defaultProvider">默认 ORM 提供者；为 null 时使用 EfCore（自定义工厂自行解释 Provider 语义）</param>
         /// <returns>服务集合</returns>
-        [UnconditionalSuppressMessage("Trimming", "IL2091:RequiresUnreferencedCode",
-            Justification = "Tier 3 (Data.Abstractions): AOT capability separately declared. Generic factory registration requires public constructors.")]
-        public static IServiceCollection AddUnitOfWork<TFactory>(
+        /// <remarks>
+        /// 自定义工厂扩展点：不经过 Provider 绑定索引，由 <typeparamref name="TFactory"/> 自行解析 Provider。
+        /// </remarks>
+        public static IServiceCollection AddUnitOfWork<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TFactory>(
             this IServiceCollection services,
-            OrmProvider defaultProvider = OrmProvider.EfCore)
+            OrmProvider? defaultProvider = null)
             where TFactory : class, IUnitOfWorkFactory
         {
-            services.AddScoped<IUnitOfWorkFactory, TFactory>();
-            services.AddScoped<IUnitOfWorkManager>(sp =>
-                new UnitOfWorkManager(sp.GetRequiredService<IUnitOfWorkFactory>(), defaultProvider));
+            var state = GetOrCreateRegistrationState(services);
+            if (defaultProvider is not null)
+            {
+                state.SetExplicitDefault(defaultProvider.Value, $"{nameof(AddUnitOfWork)}<{typeof(TFactory).Name}>(defaultProvider)");
+            }
+
+            services.TryAddScoped<IUnitOfWorkFactory, TFactory>();
+            services.TryAddScoped<IUnitOfWorkManager>(sp => new UnitOfWorkManager(
+                sp.GetRequiredService<IUnitOfWorkFactory>(),
+                state.ExplicitDefault ?? OrmProvider.EfCore));
 
             return services;
+        }
+
+        /// <summary>
+        /// 注册 Provider 的强类型工作单元绑定。
+        /// </summary>
+        /// <param name="services">服务集合</param>
+        /// <param name="provider">ORM 提供者类型</param>
+        /// <param name="factory">在当前作用域解析工作单元的强类型委托（不得使用反射或类型名字符串）</param>
+        /// <param name="supportsRequiresNew">该 Provider 是否支持 requiresNew 隔离（默认 true）</param>
+        /// <returns>服务集合</returns>
+        /// <remarks>
+        /// 由 Provider 包/模块声明。同一 Provider 出现多个绑定会在装配完成时给出确定性异常，不允许 last-wins。
+        /// </remarks>
+        public static IServiceCollection AddUnitOfWorkProvider(
+            this IServiceCollection services,
+            OrmProvider provider,
+            Func<IServiceProvider, IUnitOfWork> factory,
+            bool supportsRequiresNew = true)
+        {
+            if (factory is null)
+            {
+                throw new ArgumentNullException(nameof(factory));
+            }
+
+            services.AddSingleton(new UnitOfWorkProviderBinding(provider, factory, supportsRequiresNew));
+            return services;
+        }
+
+        private static UnitOfWorkRegistrationState GetOrCreateRegistrationState(IServiceCollection services)
+        {
+            var descriptor = services.FirstOrDefault(
+                service => service.ServiceType == typeof(UnitOfWorkRegistrationState));
+
+            if (descriptor?.ImplementationInstance is UnitOfWorkRegistrationState existing)
+            {
+                return existing;
+            }
+
+            if (descriptor is not null)
+            {
+                throw new InvalidOperationException(
+                    "UnitOfWorkRegistrationState is registered with an unsupported factory; " +
+                    "remove the custom registration before calling AddUnitOfWork.");
+            }
+
+            var state = new UnitOfWorkRegistrationState();
+            services.AddSingleton(state);
+            return state;
         }
     }
 }

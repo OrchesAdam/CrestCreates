@@ -12,6 +12,7 @@ using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.DataSeed;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
 using CrestCreates.Data.EFCore.MultiTenancy;
 using CrestCreates.Data.EFCore.PostgreSql.Configuration;
 using CrestCreates.Data.EFCore.Repositories;
@@ -47,9 +48,7 @@ public class EntityFrameworkCoreModule : ModuleBase
         services.AddCrestCreatesEfCorePostgreSql();
 
         services.AddUnitOfWork(OrmProvider.EfCore);
-        services.AddScoped(sp => new EfCoreUnitOfWork(
-            sp.GetRequiredService<IDataBaseContext>(),
-            sp.GetRequiredService<CrestCreates.Domain.DomainEvents.IDomainEventPublisher>()));
+        services.AddEfCoreUnitOfWork();
         services.AddScoped<DbContext>(sp => sp.GetRequiredService<HelpdeskDbContext>());
         services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
             new EfCoreDbContextAdapter(sp.GetRequiredService<HelpdeskDbContext>()));
