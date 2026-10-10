@@ -1,11 +1,11 @@
 # Issue #137 UnitOfWork 事务传播、资源归属与业务参与主链 — 设计记录与现状清单
 
-日期：2026-10-10
+日期：2026-10-10（rev.2：吸收 Spec 审计 S137-01…07 与文稿整理，见文末第八节）
 实施基线：master `988bfd2f`（PR #136 merge，即 #124 闭环后的真实主链）
-关联：[Issue #137](https://github.com/OrchesAdam/CrestCreates/issues/137)、[Issue #121](https://github.com/OrchesAdam/CrestCreates/issues/121)、[#124 设计记录](../../review/2026-10-10-issue-124-unitofwork-unified-registration.md)、[#123 证据矩阵](../../review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md)
+关联：[Issue #137](https://github.com/OrchesAdam/CrestCreates/issues/137)、[Issue #121](https://github.com/OrchesAdam/CrestCreates/issues/121)、[#124 设计记录](../../review/2026-10-10-issue-124-unitofwork-unified-registration.md)、[#123 证据矩阵](../../review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md)、[Spec 审计记录](../../review/2026-10-10-issue-137-uow-spec-review.md)
 下游：#125（CAP）必须在本项验收并合并后实施；#130 复用本项的 Provider 能力边界。
 
-本文档是 #137 的第 1 项交付（Issue §1「先交付设计与现状清单，再实施」）：真实调用链、公开契约清点与处置、资源所有权表、状态/传播表、设计裁定与测试推导。实施按第 9 节拆分为多个 PR，每个 PR 基于前项合并后的 master。
+本文档是 #137 的第 1 项交付（Issue §1「先交付设计与现状清单，再实施」）：真实调用链、公开契约清点与处置、资源所有权表、状态/传播表、设计裁定与测试推导。实施按配套计划文件 `docs/superpowers/plans/2026-10-10-issue-137-uow-transaction-propagation-implementation.md` 拆分为多个 PR，每个 PR 基于前项合并后的 master。
 
 ---
 
@@ -66,13 +66,13 @@ UnitOfWorkManager.BeginScope
 | G3 | 无状态机：重复完成、终态后操作、乱序释放未定义（部分由 Provider 抛异常，部分静默） | Manager/EfCoreUnitOfWork 无状态字段 |
 | G4 | Required 复用无 rollback-only：内层失败被业务捕获后，外层照常提交（部分失败静默提交） | AOP OnException 只处理 owner |
 | G5 | 复用参数不诊断：Required 时 provider/isTransactional 参数被**静默忽略** | `UnitOfWorkManager.BeginScope` 复用分支 |
-| G6 | 无取消/超时：`IUnitOfWork` 无 CancellationToken；Begin 不传隔离级别；ExecuteAsync 不接收 CT | `Domain.UnitOfWork.IUnitOfWork`、`EfCoreUnitOfWork` |
-| G7 | 未完成退出不丢弃跟踪写入；连续顶层 UoW 可能带入上一逻辑 UoW 的残留 | `AbortPendingTransaction` 仅回滚事务 |
-| G8 | Ambient 契约为 `public static object? Current` + `Push(object)`（非强类型、可被任意调用方操作） | `UnitOfWorkAmbientContext.cs` |
-| G9 | 故障结果不可检查：TryRollback/TryAbort 吞清理异常；通知失败「先吞后写控制台」；发布阶段异常（如 CT 取消）会被 `catch → Rollback` 包装成「回滚」——**提交已成功后的通知失败可能被报告为失败/回滚** | `EfCoreUnitOfWork.CommitTransactionAsync`、Manager TryRollback |
-| G10 | Provider 能力只有 `SupportsRequiresNew` 一个布尔；隔离级别/超时/及时终止/丢弃能力未声明，无法「执行前失败」 | `UnitOfWorkProviderBinding` |
-| G11 | 无事务资源身份模型：Provider 相同即视为可复用；同一 EF Core 的不同 Context/连接/租户库无法区分 | 复用判定只看 ambient 有无 |
-| G12 | CAP 交接面不存在：`RegisterWithDistributedTransaction` 扩展无消费者；无「当前 Connection/Transaction 身份、所有权、存活范围」契约 | `UnitOfWorkIntegrationExtensions.cs` |
+| G6 | 无取消/超时且无异步开始阶段：`IUnitOfWork` 无 CancellationToken；Begin 不传隔离级别；ExecuteAsync 不接收 CT；入口为同步 BeginScope + sync-over-async | `Domain.UnitOfWork.IUnitOfWork`、`EfCoreUnitOfWork` |
+| G7 | 未完成退出不丢弃未 flush 跟踪写入；连续顶层 UoW 可能带入上一逻辑 UoW 的残留 | `AbortPendingTransaction` 仅回滚事务 |
+| G8 | Ambient 契约为 `public static object? Current` + `Push(object)`（非强类型、可被任意调用方操作）；且无受管链/宿主身份——同一执行流内独立 DI scope 的读方可能读到他人帧，跨 scope 污染无机制阻止 | `UnitOfWorkAmbientContext.cs` |
+| G9 | 故障结果四分混淆：TryRollback/TryAbort 吞清理异常；通知失败「先吞后写控制台」；发布阶段异常（如 CT 取消）会被 `catch → Rollback` 包装成「回滚」——**提交已成功后的通知失败可能被报告为失败/回滚**；提交结果未知无法表达；释放后无结果可读 | `EfCoreUnitOfWork.CommitTransactionAsync`、Manager TryRollback |
+| G10 | Provider 能力只有 `SupportsRequiresNew` 一个布尔；隔离级别/超时/及时终止/丢弃能力未声明，无法「执行前失败」；Provider Begin 无强类型有效选项（隔离级别无传递通道） | `UnitOfWorkProviderBinding` |
+| G11 | 无事务资源身份模型：Provider 相同即视为可复用；同一 EF Core 的不同 Context/连接/租户库无法区分；校验点不存在（更谈不上独立于 ambient 路由） | 复用判定只看 ambient 有无 |
+| G12 | CAP 交接面不存在：`RegisterWithDistributedTransaction` 扩展无消费者；无「当前 Connection/Transaction 身份、所有权、存活范围」契约；`IDataBaseTransaction` 公开暴露 Commit/Rollback/Dispose，消费端仍可自行完成事务 | `UnitOfWorkIntegrationExtensions.cs`、`IDataBaseTransaction.cs` |
 
 ---
 
@@ -80,16 +80,16 @@ UnitOfWorkManager.BeginScope
 
 | 契约/类型 | 当前实现/消费者 | 处置 |
 | --- | --- | --- |
-| `Domain.UnitOfWork.IUnitOfWork`（Begin/Commit/Rollback/SaveChanges/Dispose） | 三个入口、Provider 实现、测试 | **保留**。保持最小（Provider 级句柄操作）；生命周期/状态由平台 scope 承担，不在此接口堆语义 |
-| `IUnitOfWorkManager` | AOP、生成运行时、测试、AOT fixture | **保留并收口**：执行内核唯一入口（ExecuteAsync/同步包装 + BeginScope）；签名迁移为 options 形态（见 §4.1） |
-| `IUnitOfWorkScope` | AOP、生成运行时、测试 | **保留并升级为状态化 scope**：新增 `State`、`CompleteAsync`、`RollbackAsync`；完成/回滚/释放语义全部经此对象（见 §4.2） |
-| `IUnitOfWorkFactory` + `UnitOfWorkProviderBinding` + `Registry` | Provider 包声明、Manager | **保留**；Binding 扩展能力声明与资源身份（见 §4.4） |
+| `Domain.UnitOfWork.IUnitOfWork`（Begin/Commit/Rollback/SaveChanges/Dispose） | 三个入口、Provider 实现、测试 | **保留并迁移签名**。保持最小（Provider 级句柄操作）；Begin 改为接收**强类型有效选项 + CT**（隔离级别/截止时间由内核解析后传入）；生命周期/状态由平台 scope 承担 |
+| `IUnitOfWorkManager` | AOP、生成运行时、测试、AOT fixture | **保留并收口**：`BeginScopeAsync`（唯一异步开始阶段）+ `Execute/ExecuteAsync`（内核）；删除同步 `BeginScope`（消除 sync-over-async begin）；签名迁移为 options 形态（见 §4.1） |
+| `IUnitOfWorkScope` | AOP、生成运行时、测试 | **保留并升级为状态化 scope**：`State`、`TransactionOutcome`、`NotificationOutcome`、`IsReleased`、`ExecutionToken`、`CompleteAsync`、`RollbackAsync`；join 成功完成 = 记录参与者成功（见 §4.2） |
+| `IUnitOfWorkFactory` + `UnitOfWorkProviderBinding` + `Registry` | Provider 包声明、Manager | **保留**；Binding 扩展能力声明、资源键委托与 CAP lease 提供者（见 §4.4/§4.5） |
 | `UnitOfWorkRegistrationState` | 注册扩展 | 保留（内部装配状态） |
-| `UnitOfWorkAmbientContext`（`public static object` Current/Push） | 写方仅 Manager；读方 EF 适配器/默认 DbContext/测试 | **替换为强类型受管访问器**：`Current` 强类型只读公开；写方内部化（见 §4.3）。旧公开 Push 归档 |
-| `IUnitOfWorkTransactionAbortable` | Manager 调用、EF 实现 | **迁移**为「未完成退出终结 + 丢弃未提交跟踪状态」契约（见 §4.3） |
+| `UnitOfWorkAmbientContext`（`public static object` Current/Push） | 写方仅 Manager；读方 EF 适配器/默认 DbContext/测试 | **替换为强类型受管访问器 + 受管链身份**（链节点 descendant-or-self 可见性，见 §4.3）。旧公开 Push 归档 |
+| `IUnitOfWorkTransactionAbortable` | Manager 调用、EF 实现 | **迁移**为「未完成退出终结 + 丢弃未 flush 跟踪写入」契约（见 §4.3） |
 | `UnitOfWorkMoAttribute` | 手写服务、生成 CRUD、DynamicApi 生成器读取 | **契约保留**（属性签名与语义不变）；实现迁移到内核（AOP 只保留传递 scope 句柄的最小栈） |
 | `DynamicApiGeneratedRuntime.ExecuteAsync` | 生成端点（生成器契约） | **签名保留**（生成器测试依赖）；实现迁移到内核 |
-| `Data.Abstractions.UnitOfWorkOptions` | **零消费者** | **替换**为唯一生效的 options 类型（同名同位置，见 §4.1）；过滤器开关/软删除等成员删除 |
+| `Data.Abstractions.UnitOfWorkOptions` | **零消费者** | **替换**为唯一生效的 options 类型（同名同位置，含 null 继承规则，见 §4.1）；过滤器开关/软删除等成员删除 |
 | `IUnitOfWorkEnhanced`（GetRepository/EnableSoftDeleteFilter/SetTenantId 等） | **无实现、无消费者** | **归档**（`99_RecycleBin/issue-137-...`）。仓储获取走 DI 注入；TenantId 走 `ICurrentTenant` 平台能力；过滤开关走现有过滤注册/IgnoreQueryFilters |
 | `Aop.Abstractions.Options.UnitOfWorkOptions` + `AopOptions.UnitOfWork` | 零读取 | **归档**（不迁移；AOP 不再持有独立 UoW 配置） |
 | `Data.Abstractions.RepositoryBase.Repository<,>`（构造期捕获 DbSet/QueryableBuilder） | **零消费者**（生成仓储走 `CrestRepositoryBase`） | **归档**（跨 UoW 缓存资源对象的反面样本，防止被误用） |
@@ -111,43 +111,58 @@ UnitOfWorkManager.BeginScope
 | requiresNew 子 UoW + 子 DI scope | 内核（受管子 scope） | 子 DI scope（内核释放子 scope 一次） | scope 退出（正常/异常/未完成统一） | 内核幂等 | 子 scope 释放即回收对象与 context |
 | 手动构造路径 UoW（自定义工厂/单测） | Manager（经 factory） | Manager | scope 退出 | 幂等 | Manager 直接 Dispose（既有语义保留） |
 | 事务句柄（IDbContextTransaction 等） | UoW | UoW 实例 | Commit/Rollback/Abandon 任一，一次 | no-op | Abandon 回滚并释放句柄 |
-| Ambient 帧（当前资源上下文） | 内核（隔离 scope 开始时 Push） | 内核 | 隔离 scope 退出，**先于**资源释放恢复 | 仅栈顶可恢复；乱序不允许回退他人环境 | 异常路径与正常路径同一恢复点 |
-| 未提交跟踪状态（ChangeTracker/pending writes） | context | UoW/context | 提交后自然持久化；未完成退出必须**丢弃**（新增能力，见 §4.3） | 丢弃幂等 | 与 Abandon 一体 |
-| 域事件队列（实体 DomainEvents） | 实体/UoW | UoW | 发布成功后清除；发布失败**不得静默吞掉**（见 §4.5） | — | 回滚路径不发布 |
+| Ambient 帧（Context + 资源键 + 链节点 + 租户键） | 内核（隔离 scope 开始时 Push） | 内核 | 隔离 scope 退出，**先于**资源释放恢复 | 仅栈顶可恢复；乱序不允许回退他人环境 | 异常路径与正常路径同一恢复点 |
+| 未 flush 跟踪状态（ChangeTracker/pending writes） | context | UoW/context | 提交后自然持久化；未完成退出必须**丢弃未 flush 部分**（新增能力，见 §4.3） | 丢弃幂等 | 与 Abandon 一体；**已 flush 的写入不在丢弃范围**（§4.5 非事务语义） |
+| 域事件队列（实体 DomainEvents） | 实体/UoW | UoW | 发布成功后清除；发布失败保留至可检查结果（不得静默吞掉） | — | 回滚路径不发布 |
+| 事务结果 / 通知结果记录（不可改写） | 内核 scope | 内核 scope（对象生命周期内可读） | scope 对象回收；**释放后仍可读最终结果** | 只读 | `Unknown` 不因回滚尝试改写（§3.2） |
+| CAP 参与 lease（受限借用视图） | Provider（内核窗口内按需签发） | 内核 scope（窗口所有权） | scope 终态/释放即失效 | 幂等失效 | 失效后拒绝继续参与（§4.5） |
 
-### 3.2 状态表（平台 scope 状态机）
+### 3.2 状态模型（参与者完成 × 事务结果 × 通知结果 × 释放，四维分开记录）
+
+公共 `State`（参与状态）：
 
 | 状态 | 含义 | 允许的后续操作 | 重复/越界行为（裁定） |
 | --- | --- | --- | --- |
 | `Active` | 已开始；事务（若声明）已打开或按非事务模式运行 | `CompleteAsync`、`RollbackAsync`、`Dispose` | — |
-| `Committed` | flush + 数据库 commit 成功（非事务：flush 成功） | 只读 `State`；`Dispose` | 再次 `CompleteAsync` = **幂等 no-op**；`RollbackAsync` = 确定性拒绝（不得谎称可回滚） |
-| `RolledBack` | 显式回滚或失败路径回滚完成 | 只读 `State`；`Dispose` | 再次 `RollbackAsync` = 幂等 no-op；`CompleteAsync` = 确定性拒绝 |
-| `Failed` | 完成过程自身失败且回滚/清理未能到达确定终态（如 commit 失败且回滚也失败） | 只读 `State`；`Dispose` | 一切完成/回滚调用 = 确定性拒绝并携带诊断 |
-| `Disposed` | 资源已释放（对象/子 scope/事务句柄），环境已恢复 | 只读 `State` | 任何操作 = 确定性拒绝（`ObjectDisposedException` 语义） |
+| `Completed` | 成功完成**已记录**：owner = 数据库 commit 已确认（非事务 = flush 成功）后**立即**记录；join = 参与者成功已记录 | 只读；`Dispose` | 再次 `CompleteAsync` = **幂等 no-op**；`RollbackAsync` = 确定性拒绝 |
+| `RolledBack` | 确定回滚完成（仅来自未提交状态） | 只读；`Dispose` | 再次 `RollbackAsync` = 幂等 no-op；`CompleteAsync` = 确定性拒绝 |
+| `Failed` | 终态结果**不确定**（如提交结果未知、回滚自身失败）；携带可检查诊断 | 只读；`Dispose` | 一切完成/回滚调用 = 确定性拒绝 |
+| `Disposed`（释放标志，与上述终态正交） | 资源已释放（对象/子 scope/事务句柄），环境已恢复；**最终事务结果与通知结果仍可读** | 只读 | 任何操作 = 确定性拒绝（`ObjectDisposedException` 语义） |
 
+事务结果（owner 专用，**不可被后续操作改写**）：`NotStarted → Committed | RolledBack | Unknown`。
+- `Committed` 在数据库 commit 确认时**立即置位（早于通知与清理）**；之后的通知/清理/释放失败均保留已提交事实。
+- `Unknown`（提交派发期失败、响应丢失等）：允许尝试回滚以清理本地状态，但**回滚尝试不得把结果改写为 `RolledBack`**；结果持续为 `Unknown` 直到有新证据。
+
+通知结果（独立可查）：`None | Succeeded | Failed`。通知失败不改变事务结果，不触发回滚，不自动业务重试。
+
+规则：
+- **join 完成 = 记录参与者成功**（不 flush、不 commit、不释放外层）；join 成功完成后的 Dispose 不污染外层。
+- **join 未完成退出**（Active + Dispose，或显式 `RollbackAsync`）= 标记 owner rollback-only；owner 完成时**确定性拒绝并回滚**（附原因），不得静默提交部分失败。
+- **rollback-only 校验在任何完成期 flush 之前**执行；被标记后不得再 flush。
 - **乱序释放**：非栈顶 scope 释放 = 确定性拒绝（保留 #136 既有 `The unit of work scope was disposed out of order` 语义）。
-- `Active + Dispose`（未完成退出）：owner scope → 回滚 + 丢弃未提交状态 + 释放（终态 `RolledBack`）；join scope → 标记外层 rollback-only（§3.3）。
+- **显式 Dispose 的清理失败（无原始业务异常）**：产生专门的可检查结果（含清理阶段信息），不以「仅日志」作结。
+- 事务结果与参与状态分开读取：`Completed + TransactionOutcome=Committed + NotificationOutcome=Failed` 是一个合法且必须可表达的终态组合。
 
 ### 3.3 传播表
 
 | # | 环境 | 请求 | 结果 | 诊断/裁定 |
 | --- | --- | --- | --- | --- |
-| 1 | 无 | Required + 事务 | 新顶层 scope；Begin；Complete = flush+commit | — |
-| 2 | 无 | Required + 非事务 | 新顶层 scope；无事务；Complete = flush（+通知条件 §4.5） | — |
-| 3 | 无 | RequiresNew | 与 #1/#2 相同的顶层新建（requiresNew 无环境时退化为新建，确定性，不报错） | — |
-| 4 | 有 | Required + 参数一致 | **join**：IsOwner=false；内层不得提交/释放外层；内层 Complete = no-op | — |
-| 5 | 有 | Required + 参数冲突（provider / 隔离级别 / 事务开关不同） | **执行前确定性失败**，不静默降级 | 消息含内外参数与修正指引 |
+| 1 | 无 | Required + 事务 | 新顶层 scope；Begin；Complete = 校验→flush→commit（确认即记录）→通知→清理 | — |
+| 2 | 无 | Required + 非事务 | 新顶层 scope；无事务；Complete = 校验→flush→通知→清理 | 逐写自动 flush、已落库写入不可撤销（§4.5 非事务语义） |
+| 3 | 无 | RequiresNew | 与 #1/#2 相同的顶层新建（无环境时退化新建，确定性） | — |
+| 4 | 有 | Required + 参数一致 | **join**：IsOwner=false；Complete **记录参与者成功**；不 flush/commit/释放外层；成功后 Dispose 不污染外层 | null 参数继承规则见 §4.1 |
+| 5 | 有 | Required + 参数冲突（事务开关 / 显式 provider / 显式隔离级别 / 显式截止时间超出外层剩余） | **执行前确定性失败**，不静默降级 | 消息含内外参数与修正指引 |
 | 6 | 有 | RequiresNew + Provider 不支持 | 执行前 `NotSupportedException`（保持 #124 fail closed） | — |
 | 7 | 有 | RequiresNew + 支持 | 子 scope 隔离：独立资源/事务；内层 Complete 独立提交；外层回滚**不撤销**已提交内层 | 文档明确 |
-| 8 | join | 内层 action 失败（无论外层是否捕获） | 外层标记 rollback-only；外层 Complete = **确定性拒绝 + 回滚**（不静默提交部分失败） | 终态异常携带原因 |
-| 9 | 任意 | 取消（CT 触发） | action 获 `OperationCanceledException` → 回滚（清理用独立 token）→ 原 OCE 上抛；**不得报告成功** | 清理不被取消跳过 |
-| 10 | 任意 | 超时（Options.Timeout 到期） | 内核级截止时间：begin/flush/commit 前到期 = 取消语义 + 回滚；commit 派发期间失败 = 「提交结果未知」诊断（§4.5） | 超时不得报告成功 |
+| 8 | join | 失败（无论外层是否捕获）或未完成退出 | 外层标记 rollback-only；外层 Complete = **确定性拒绝 + 回滚**（不静默提交部分失败）；已 flush 的写入不被声称撤销 | 终态异常携带原因 |
+| 9 | 任意 | 取消（CT 触发） | 合作式取消：action 获 `OperationCanceledException` → 未提交状态回滚（清理用独立 token）→ 原 OCE 上抛；**不得报告成功**。非事务模式：已落库写入保持，结果不得声称全部丢弃 | 清理不被取消跳过 |
+| 10 | 任意 | 超时（Options.Timeout 到期） | 内核合作式截止时间：commit 前到期 = 取消语义 + 回滚；commit 派发期失败 = `Unknown`（§3.2）；不得报告成功 | join 只能收紧（min），不得延长 |
 
 ---
 
 ## 四、设计裁定（To-Be）
 
-### 4.1 统一 Options 与唯一执行内核
+### 4.1 统一 Options、唯一异步执行内核与 token 通道
 
 - 唯一 options 类型（替换 `Data.Abstractions.UnitOfWorkOptions` 死定义）：
 
@@ -155,44 +170,70 @@ UnitOfWorkManager.BeginScope
   UnitOfWorkOptions {
       bool IsTransactional = true;                    // 事务开关
       UnitOfWorkPropagation Propagation = Required;   // Required | RequiresNew（其他值 fail closed）
-      IsolationLevel? IsolationLevel;                 // null=默认；显式值必须与 Provider 能力/外层一致
-      TimeSpan? Timeout;                              // 内核截止时间（禁止声明未生效）
-      OrmProvider? Provider;                          // null=按默认解析规则
+      IsolationLevel? IsolationLevel;                 // null=继承/默认（见下表）
+      TimeSpan? Timeout;                              // 内核合作式截止时间（禁止声明未生效）
+      OrmProvider? Provider;                          // null=继承/按默认解析规则（见下表）
   }
   ```
 
-- `CancellationToken` 是执行方法的参数（不是 option）。扩展 `IUnitOfWork`（Domain）为带 CT 的异步签名属本项配套（同步兼容入口只做包装）。
-- 唯一内核：`IUnitOfWorkManager` 的 `ExecuteAsync<T>(Func<Task<T>>, UnitOfWorkOptions?, CancellationToken)` 与 `BeginScope(UnitOfWorkOptions?)` 返回的状态化 scope 共享同一实现；AOP、生成运行时、`Execute/ExecuteAsync`、同步包装全部经内核。**任何入口不得自实现 begin/commit/flush/rollback 顺序。**
-- 同步 `Execute<T>` = 异步内核的同步等待包装（唯一实现；`ExecuteAsync(...).GetAwaiter().GetResult()`，不是第二套逻辑）。
-- 迁移方式：`BeginScope(bool, bool, OrmProvider?)`、`Execute(Async)(provider)` 旧签名的调用方全部在仓库内（AOP、生成运行时、测试、AOT fixture），**直接迁移不保留双签名**（唯一主链；避免过渡 shim 被误用）。`[UnitOfWorkMo]` 属性签名不变，生成器不受影响。
+- **null 与显式参数的继承/校验规则**（消除普通嵌套误判，同时禁止忽略参数）：
 
-### 4.2 状态机与完成语义
+  | 参数 | join（有环境） | 新建（无环境） |
+  | --- | --- | --- |
+  | `Provider = null` | **继承外层**（不重新解析宿主默认） | 按 #124 默认解析规则选择 |
+  | `Provider` 显式 | 必须与外层解析结果一致，否则执行前诊断 | 使用指定值（受能力校验） |
+  | `IsolationLevel = null` | **继承外层实际级别** | Provider 默认（记录为「未指定」） |
+  | `IsolationLevel` 显式 | 必须等于外层实际级别，否则执行前诊断 | 能力校验通过后使用 |
+  | `Timeout = null` | 继承外层剩余期限 | 无额外截止 |
+  | `Timeout` 显式 | ≤ 外层剩余：收紧生效（取 min）；> 外层剩余：**确定性诊断**（不可延长） | 作为本次截止 |
+  | `IsTransactional` | 必须与外层一致，否则执行前诊断 | 按声明 |
+
+- **唯一异步开始阶段**：`BeginScopeAsync(UnitOfWorkOptions?, CancellationToken)` 为唯一开始入口（Provider Begin 本为异步；不提供同步截断 begin，消除 sync-over-async）。`ExecuteAsync` 是内核语法糖。
+- **token 通道**：`ExecuteAsync<TResult>(Func<CancellationToken, Task<TResult>> action, UnitOfWorkOptions?, CancellationToken)`——action 接收内核联动 token（调用方 CT + 截止时间）。入口 token 来源：
+
+  | 入口 | 调用方 CT 来源 |
+  | --- | --- |
+  | 管理 API / 测试 / fixture | 参数传入 |
+  | AOP `[UnitOfWorkMo]` | 方法参数中的 CT（存在即绑定）；否则以 `scope.ExecutionToken` 暴露给业务 |
+  | 生成 Dynamic API 运行时 | `HttpContext.RequestAborted` + 内核截止时间 |
+
+- **Provider begin 的强类型有效选项**：内核把 options 解析为 effective begin options（`IsolationLevel`、截止时间）随 CT 传入 Provider `BeginTransactionAsync(effective, ct)`；Provider 不从环境读取配置。
+- **合作式语义声明**：截止时间/取消是**合作式**的——内核不强行中断不观察 token 的 Provider 操作；`Task.WhenAny` 超时后直接释放资源不构成取消保证（禁止该实现方式）。commit 已确认与取消竞态的判定按 §3.2/§4.5（可能 `Unknown`）。
+- 同步 `Execute<T>` = 异步内核的同步等待包装（唯一实现）；AOP/生成运行时/管理 API/同步包装全部经内核，**任何入口不得自实现 begin/commit/flush/rollback 顺序**。
+- 迁移方式：旧签名调用方全部在仓库内（AOP、生成运行时、测试、AOT fixture），**直接迁移不保留双签名**。`[UnitOfWorkMo]` 属性签名不变，生成器不受影响。
+
+### 4.2 完成语义（与 §3.2 状态模型逐一对应）
 
 - 状态机由平台 scope 承载（§3.2）；Provider UoW 保留句柄级确定性拒绝（重复 Begin、终态后 Commit 等）。
-- `CompleteAsync`（owner 且事务）：flush（`SaveChanges`）→ **rollback-only 校验**（join 标记透传）→ 数据库 commit → 已提交通知 → 清理（释放事务句柄）→ `Committed`。
-- `CompleteAsync`（owner 非事务）：flush → 通知（条件见 §4.5）→ `Committed`。
-- `CompleteAsync`（join）：no-op 返回；内层失败由内核在异常路径标记外层 rollback-only。
-- `RollbackAsync`：仅 owner 生效；回滚 + 丢弃未提交状态 + 清理；join 调用 = 标记外层 rollback-only（由内核异常路径调用）。
-- `SaveChanges`（flush）与事务成功完成分开定义：flush 不结束事务、不发布通知；commit 内含 flush。
-- 顶层 scope 未完成退出：回滚 + 丢弃 + 释放（不等请求 DI scope 结束）；**未提交跟踪状态不得带入同一请求内的下一个顶层 UoW**（§4.3 能力）。
-- 原业务异常保留：回滚/释放失败仅作诊断（附带数据/日志），不得替换根因；异步释放纳入正式契约（`DisposeAsync` 语义，同步 Dispose 保留兼容）。
+- `CompleteAsync`（owner 且事务）：**rollback-only 校验（先于任何 flush）** → flush/校验 → 数据库 commit → **立即记录 `Committed`** → 通知 → 清理（释放事务句柄）→ 释放后结果仍可读。
+- `CompleteAsync`（owner 非事务）：rollback-only 校验 → flush → 通知 → 清理；已落库写入不可撤销（§4.5）。
+- `CompleteAsync`（join）：**记录参与者成功**（幂等）；不触碰外层；join 失败由内核在异常路径标记外层 rollback-only。
+- `RollbackAsync`：仅 owner 生效；未提交状态回滚 + 丢弃未 flush 跟踪写入 + 清理；join 调用 = 标记外层 rollback-only（由内核异常路径调用）。对 `Committed` 结果调用 = 确定性拒绝（保留已提交事实）。
+- `SaveChanges`（flush）与事务成功完成分开定义：flush 不结束事务、不发布通知；commit 内含 flush；**rollback-only 校验先于任何完成期 flush**。
+- 顶层 scope 未完成退出：回滚 + 丢弃 + 释放（不等请求 DI scope 结束）；**未 flush 跟踪状态不得带入同一请求内的下一个顶层 UoW**（§4.3 能力）。
+- 原业务异常保留：回滚/释放失败作为**可检查次级结果**（专门异常/诊断对象，含阶段信息），不得替换根因；无原始异常时的清理失败同样必须可检查。
+- 异步释放纳入正式契约（`DisposeAsync` 语义，同步 Dispose 保留兼容）。
 
-### 4.3 资源归属与仓储参与
+### 4.3 资源归属、受管链身份与仓储参与
 
 - **强类型受管 Ambient 访问器**（替换 `public static object? Current/Push`）：
-  - 公开只读：`Current` 返回强类型 `IDataBaseContext?`（EF 适配器/默认 DbContext/测试读路径不变语义）。
-  - 写路径（Push/Restore）内部化：仅平台内核可操作；帧携带资源身份与所有者 scope（§4.4），乱序恢复不允许回退他人环境（保留既有语义）。
-  - 对外「当前资源」的消费统一经该访问器 + `IDataBaseContext`；不再暴露 object。
+  - 公开只读：强类型 `IDataBaseContext?`；写路径（Push/Restore）内部化（仅内核可操作）。
+  - 帧内容：Context、资源键（§4.4）、owner 链节点、租户键。
+- **受管链身份（跨 DI scope 污染的可实现机制）**：
+  - 内核为每个**受管 scope** 创建链节点（唯一 ID + 父节点引用）；内核创建的隔离子 scope 节点挂到当前节点下；**非内核创建的普通 DI scope 是独立根**（无父链）。
+  - **读方可见性 = descendant-or-self**：读方（适配器/DbContext）以其所在 scope 的链节点解析 ambient；仅当帧 owner 节点等于读方节点或是其后代时帧可见。这同时满足两个方向：
+    - 子树内预注入父仓储**跟随**隔离子 UoW（子节点是父节点后代）；
+    - 同一执行流内独立 scope（宿主 B / 兄弟 scope）**绝不**看到 A 的帧（非后代）——不依赖「新执行流」假定；`CreateScope` 不创建新执行上下文也不影响该规则。
+  - **Manager 与访问器共享权威**：内核 push/restore 时校验帧 owner == 当前受管 scope；受管链内 `Manager.Current` 与仓储实际资源必须同源；不一致 → 确定性诊断（不得静默）。
+  - 独立 scope 进入/退出不遮蔽他人帧（其读不到）；内核子 scope 退出按帧链恢复；乱序恢复不允许回退他人环境。
+  - `Task.Run` 等执行上下文继承：可见性仍由读方链节点决定；同一受管链内「不支持并行数据库操作」的边界不变（不因 AsyncLocal 检查放宽）。
+- **资源键与校验时点（独立于 ambient 路由）**：资源键 =（Provider 绑定身份，连接/上下文身份，租户键）。内核在创建 scope 时以**请求方当前上下文**（重定向前）计算请求身份并与外层比对；读方（适配器）在解析帧时**先校验后路由**：当前租户键与帧记录不一致 → 确定性拒绝并指引新建 UoW。需要第二资源（第二 Context/连接/租户库）→ 确定性拒绝，必须新建 UoW。
 - **构造不变量**（保留 #136）：隔离层先 Push 再构造 UoW；新建 UoW 绝不因父环境路由被重定向到旧 Context/连接。
-- **未完成退出 = 事务终结 + 跟踪状态丢弃**：迁移 `IUnitOfWorkTransactionAbortable` 语义（回滚句柄 + 丢弃未提交跟踪写入；EF 实现 `ChangeTracker.Clear()`）。不支持该能力的 Provider 必须在绑定中声明，并按 Provider 矩阵落位（实现或明确拒绝），不得静默残留。
+- **未完成退出 = 事务终结 + 丢弃未 flush 跟踪写入**：迁移 `IUnitOfWorkTransactionAbortable` 语义（回滚句柄 + 丢弃未 flush 跟踪写入；EF 实现 `ChangeTracker.Clear()`）。已 flush 的写入不在丢弃范围。不支持该能力的 Provider 必须在绑定中声明，并按 Provider 矩阵落位（实现或明确拒绝），不得静默残留。
 - **仓储参与规则**：
   - 正式仓储在**操作时**解析当前上下文（现状已满足）；构造期缓存 DbSet/Queryable/原生 Context 的仓储基类已归档（§二）。
   - 直接注入原生 DbContext（非 `IDataBaseContext` 通道）与预缓存的 DbSet/IQueryable 不承诺跟随 requiresNew——限制写入文档与测试断言（负例）。
-  - 一个 UoW 内不支持并行数据库操作（单 context/事务，非线程安全）；AsyncLocal 为执行流语义——不得据此声称 DbContext 并发安全。文档 + 覆盖 await 续接用例。
-- **跨 manager / 子 scope / 宿主行为**（一致性裁定）：
-  - `Manager.Current` 与 Ambient `Current` 的作用域不同且都必须指向同一资源：Manager 的当前 scope 是 per-manager（scoped 实例 + AsyncLocal 执行流）；Ambient 是执行流级、仅在隔离窗口内有值、由内核受管——两者在任何 owner scope 内不得互相矛盾（仓储读 Ambient，业务读 Manager，必须同源）。
-  - 不同 DI scope/不同宿主（后台作业的独立 scope、测试工厂重建容器）各自持有 manager 实例与执行流：跨 scope 不共享 UoW/资源；子 scope 内解析的 manager 不继承父 scope 的 Current（隔离资源归属始终由创建者 scope 承担）。
-  - 跨宿主/跨执行流不存在隐式事务共享；任何「跨 scope 复用」都必须显式经过内核并产生新资源。
+  - 一个 UoW 内不支持并行数据库操作（单 context/事务，非线程安全）；AsyncLocal 为执行流语义——不得据此声称 DbContext 并发安全。
 - **覆盖要求**：多层 RequiresNew、await 续接、成功/异常退出后的父环境恢复（既有 2 层用例 + 新增续接与恢复矩阵）。
 
 ### 4.4 Provider 能力与资源身份
@@ -203,48 +244,54 @@ UnitOfWorkManager.BeginScope
   | --- | --- | --- | --- | --- |
   | SupportsTransactions | 本地事务 | 是 | 是（SDK） | 是（SDK Ado） |
   | SupportsRequiresNew | 隔离子 scope + 环境跟随 | 是（已验证） | 否（fail closed） | 否（fail closed） |
-  | SupportedIsolationLevels | 显式隔离级别集合 | 标准级别（透传） | 按实现声明或拒绝 | 按实现声明或拒绝 |
-  | SupportsTimeout | 内核截止时间之外的 Provider 级超时（如有） | 无额外声明（内核截止时间生效） | 声明或拒绝 | 声明或拒绝 |
-  | PromptTerminationOnAbandon | 未完成退出及时终结事务 | 是（#136） | 实现或声明拒绝（§9 切片 3） | 实现或声明拒绝（§9 切片 3） |
-  | DiscardUncommittedOnAbandon | 未完成退出丢弃未提交状态 | 是（新增） | 声明或拒绝 | 声明或拒绝 |
+  | SupportedIsolationLevels | 显式隔离级别集合 | **逐项由实际数据库/驱动判定**（SQLite/PG 各自矩阵，验收实测），不笼统宣称「标准级别透传」 | 按实现声明或拒绝 | 按实现声明或拒绝 |
+  | SupportsTimeout | 内核截止时间之外的 Provider 级超时（如有） | 无额外声明（内核合作式截止时间生效） | 声明或拒绝 | 声明或拒绝 |
+  | PromptTerminationOnAbandon | 未完成退出及时终结事务 | 是（#136） | 实现或声明拒绝（计划切片 3） | 实现或声明拒绝（计划切片 3） |
+  | DiscardUncommittedOnAbandon | 未完成退出丢弃未 flush 跟踪状态 | 是（新增） | 声明或拒绝 | 声明或拒绝 |
+  | CAP lease 提供者 | §4.5 最小参与的 Provider 所有实现 | 是（计划切片 5） | 声明或拒绝 | 声明或拒绝 |
 
-- **资源身份**：复用判定不使用「OrmProvider 相同」作为唯一依据；Binding 提供资源身份标记（effective Context/连接实例），join 时校验显式参数与外层资源身份一致，冲突 → 执行前确定性诊断。跨租户库/跨连接切换必须新建 UoW。
+- **资源身份**：复用判定以资源键（§4.3）为准，不以 `OrmProvider` 相同作为唯一依据；校验在 ambient 重定向**之前**完成（内核侧以请求方当前上下文计算；读方侧先校验后路由）；未指定参数按 §4.1 继承规则处理，不因 null 误判冲突；第二资源（第二 Context/连接/租户库）确定性拒绝。
 - **不支持的能力在业务执行前失败**：显式 isolation/requiresNew/timeout 与能力不符 → 确定性异常（含 Provider 与能力矩阵摘要），不静默降级。
 - **范围裁定**：只承诺单数据库资源的本地事务；多 DbContext 共享事务（如纳入）需真实数据库证明；跨库/跨 ORM 原子提交**明确拒绝**——不提供「依次 Commit 即原子」的聚合器。
-- EF Core 用真实 PostgreSQL（Testcontainers、独立 schema，CI 覆盖）+ SQLite 快速回归验收；FreeSql/SqlSugar「实现已声明能力或明确拒绝」；外部 SDK AOT 边界留 #130。
+- EF Core 用真实 PostgreSQL（Testcontainers、独立 schema，CI 覆盖）+ SQLite 快速回归验收，隔离级别按实测过项逐项声明；FreeSql/SqlSugar「实现已声明能力或明确拒绝」；外部 SDK AOT 边界留 #130。
 - 装配仍为显式强类型绑定；能力校验失败在同一次装配/执行路径确定性诊断。
 
-### 4.5 职责收口、生命周期顺序与 CAP 交接
+### 4.5 职责收口、生命周期顺序、故障语义与 CAP 交接
 
 - `IUnitOfWorkEnhanced` 职责收口（档案化，§二）：仓储获取（DI 注入）、TenantId 切换（`ICurrentTenant`）、数据过滤开关（现有过滤注册/`IgnoreQueryFilters`）不进入 UoW；无兼容 shim（零消费者）。
-- **固定生命周期顺序**：`flush/校验 → 数据库 commit → 已提交通知 → 清理`。回滚路径不发布成功事件。非事务模式：flush 成功后再通知。
-- **故障分层（结果可检查）**：
+- **固定生命周期顺序**：`rollback-only 校验（flush 前）→ flush/校验 → 数据库 commit →【立即记录已提交】→ 已提交通知 → 清理`。回滚路径不发布成功事件。非事务模式：flush 成功后再通知。
+- **非事务模式语义（裁定）**：
+  - 保留正式仓储**逐写自动 flush**（现状行为）；因此非事务模式**不提供整体原子性**：已持久化写入不可回滚；失败/取消结果**不得声称全部丢弃**。
+  - 需要原子回滚的业务必须请求受支持的事务模式；rollback-only 标记在非事务 join 中同样生效（外层拒绝继续完成），但拒绝只阻止后续完成期 flush，不撤销已落库写入。
+- **故障分层（结果可检查，与 §3.2 四维对应）**：
 
-  | 故障点 | 结果 | 规则 |
-  | --- | --- | --- |
-  | 提交前 flush/校验失败 | 回滚（owner）；原异常上抛 | 状态 `RolledBack`；清理失败仅诊断 |
-  | 数据库 commit 失败 | 回滚尝试；原 commit 异常上抛（附回滚失败诊断） | commit 派发期失败 = 「提交结果未知」显式标记，不得谎称已回滚 |
-  | 提交后通知失败 | 状态 `Committed`；抛出/记录**提交后通知失败**（携带「事务已提交」事实） | **不回滚**、不自动重试整个业务（防重复写入） |
-  | 回滚/释放失败 | 原业务异常保留；失败作为次级诊断 | 不得替换根因 |
-  | 域事件发布失败 | 通知阶段失败（同上） | 不再静默吞掉（移除 Console 吞异常）；事件队列清空条件 = 发布成功 |
+  | 故障点 | 事务结果 | 参与状态 | 规则 |
+  | --- | --- | --- | --- |
+  | 提交前 flush/校验失败 | NotStarted → 回滚尝试 | `RolledBack`（回滚成功）/`Failed`（回滚失败） | 原异常上抛；非事务模式：已落库写入保持 |
+  | 数据库 commit 派发失败/响应丢失 | **`Unknown`**（回滚尝试成功也不改写） | `Failed` | 原异常上抛 + 「提交结果未知」可检查标记；不得谎称已回滚 |
+  | 数据库 commit 已确认 | **`Committed` 立即记录** | `Completed` | 后续任何失败不改变该事实 |
+  | 提交后通知失败 | `Committed` 保持 | `Completed` | 通知结果 `Failed`；可抛/记录「提交后通知失败」（携带已提交事实）；**不回滚、不谎称、不自动重试业务** |
+  | 回滚/清理/Dispose 失败 | 保留现状位 | 视情形 `Failed` | 原业务异常保留；失败作为可检查次级结果（专门异常，含阶段）；无原始异常时同样可检查 |
+  | 域事件发布失败 | 同「提交后通知失败」 | 同上 | 不再静默吞掉（移除 Console 吞异常）；事件队列清空条件 = 发布成功 |
 
-- **CAP 最小交接契约**（本项设计 + §9 切片 5 实现，SDK 适配留 #125）：
+- **CAP 最小交接契约**（本项设计 + 计划切片 5 实现，SDK 适配留 #125）：
 
   ```
-  IUnitOfWorkResourceAccessor {
-      bool TryGetCurrent(out UnitOfWorkResourceHandle handle);
+  IUnitOfWorkTransactionLeaseProvider {          // Provider 所有；绑定内声明
+      bool TryAcquireCurrentLease(out UnitOfWorkTransactionLease lease);
   }
-  UnitOfWorkResourceHandle {
+  UnitOfWorkTransactionLease {                   // 受限「借用」视图，不是万能扩展点
       OrmProvider Provider;
-      object ResourceIdentity;          // 同一事务资源的身份（Context/连接实例标记）
-      IDataBaseTransaction? Transaction; // 本地事务句柄（TransactionId/IsCompleted）
-      bool OwnsTransaction;             // 谁负责 begin/commit/rollback（内核）
-      UnitOfWorkState ScopeState;       // 存活范围（Active→终态）
+      string ResourceKey;                        // 与 §4.3 同一资源键（连接/上下文/租户身份）
+      IUnitOfWorkTransactionIdentity Transaction; // 只读身份/状态视图：TransactionId/IsCompleted 等
+      bool IsValid;                              // live view：仅在活跃 scope 窗口内为 true
   }
   ```
 
-  - Provider 所有：访问器由 Provider 绑定声明，业务/CAP 不构造、不伪造。
-  - 规则（交接文档约束）：CAP 消息记录必须使用**同一资源/事务**在 commit 前落库；谁负责开始/提交/回滚 = UoW 内核；提交后通知**不证明**消息持久化原子性；不得从生命周期 hook 推导 exactly-once/2PC/durable outbox；不新增万能公开扩展点。
+  - **同一 Connection/Transaction 关联必须可确认**：lease 由 Provider 在受管链当前窗口内签发；资源键与事务身份一致才可参与；错资源 → 拒绝。
+  - **生命周期操作仍由内核唯一掌握**：公开参与契约**不暴露** Commit/Rollback/Dispose；若原生 SDK 必须取底层事务对象，限定在 Provider 适配边界内借用，明确「不得 Dispose/Commit」，且该借用不经由公共契约。
+  - **live view 语义**：lease 是实时视图（非快照），仅在所属 scope `Active` 且未释放时有效；scope 终态/释放后 `IsValid=false`，继续参与 → 确定性拒绝；不允许持有到 scope 之外。
+  - 规则（交接文档约束）：CAP 消息记录必须使用**同一资源/事务**在 commit 前落库；谁负责开始/提交/回滚 = UoW 内核；提交后通知**不证明**消息持久化原子性；不得从生命周期 hook 推导 exactly-once/2PC/durable outbox；不新增万能公开扩展点、不引入 CAP 依赖。
   - `RegisterWithDistributedTransaction` 死扩展的处置记录在交接文档中交 #125。
 
 ### 4.6 不做的事（与 Issue「不在本项范围」一致）
@@ -259,19 +306,23 @@ CAP storage/transport 配置与 SDK 原子发布验证（#125）；ORM SDK 全�
 
 | 契约（§三/§四） | 测试计划 | 判别力验证 |
 | --- | --- | --- |
-| 状态机（3.2） | 重复 Complete 幂等；终态后 Rollback/Complete 确定性拒绝；乱序释放拒绝；Active+Dispose（owner）终态与释放 | 去除状态守卫 → 对应用例红 |
-| 传播表（3.3 #4/#5/#8） | join 不提交不释放（可查 DB 证外层未提交）；参数冲突诊断；内层失败被捕获 → 外层拒绝提交并回滚（DB 无部分写入） | 去除 rollback-only 标记 → 部分写入用例红 |
-| 传播表（#6/#7） | 不支持 requiresNew 诊断（保留）；两层 RequiresNew 内层提交持久化、外层回滚不影响（保留）+ await 续接变体 | 回退 push-first/ambient 恢复 → 红 |
-| 资源表（3.1） | 事务释放恰好一次（句柄计数）；子 scope 释放一次；连续两个顶层 UoW：正常/异常/未完成退出均无残留事务、**无残留跟踪写入**、第二个可独立提交 | 去除 discard → 残留写入用例红 |
-| Options 生效（4.1） | 非事务模式不提交只 flush；隔离级别透传断言（真实 DB：读现象/或 Provider 调用参数检查）；取消：OCE 保留 + 清理执行（token 已取消仍回滚）+ 不报成功；超时：到期回滚 | 移除 CT 传递 → 取消用例红 |
+| join 参与者模型（3.2/3.3 #4/#8） | 外层 → 两个成功 join 各 Complete+Dispose → 外层成功提交；join 未 Complete 即 Dispose → 外层拒绝并回滚；join 失败被捕获 → 外层拒绝并回滚（DB 无部分写入） | 去除参与者成功记录/rollback-only 标记 → 对应用例红 |
+| 事务结果四维（3.2/4.5） | commit 成功但响应失败（注入）→ 结果 `Unknown` 且回滚尝试不改写；通知失败 → `Committed+Completed` 保持且可检查；提交后 Dispose 失败 → 可检查次级结果；**释放后仍可读取最终事务结果** | 将 Committed 记录放回通知之后 → 通知失败用例红 |
+| 非事务语义（3.3 #2/#8/#9） | 正式仓储非事务写 A → 后续失败/取消：检查 A 的真实数据库可见性与结果声明（不声称丢弃）；Complete 前 rollback-only → 不触发 flush（以写入探针断言） | 把非事务描述回「回滚」→ 用例红 |
+| 状态机（3.2） | 重复 Complete 幂等；终态后 Rollback/Complete 确定性拒绝；乱序释放拒绝；Active+Dispose（owner/join 分化行为） | 去除状态守卫 → 对应用例红 |
+| 受管链隔离（4.3） | 同执行流 host A / host B：A.RequiresNew 内新 DI scope 的 B.Manager/Repository（Current 与仓储资源一致、无串用）；执行上下文继承任务（Task.Run）；受管子 UoW 仍服务预注入父仓储 | 去掉 descendant 校验 → 串用用例红 |
+| 资源键与选项继承（4.3/4.4） | 外层 tenant A 内切 tenant B 后首次仓储访问（拒绝）；同 Provider 第二 Context（拒绝）；外层显式非默认 Provider/隔离 + 内层未指定参数（继承，不误判）；第二资源确定性拒绝 | 校验移到路由后 → 换租户用例红 |
+| 取消/超时通道（4.1/3.3 #9/#10） | 阻塞直到 token 取消的数据库动作（合作式取消生效）；join 更短 deadline 生效、更长被诊断；commit 前/派发中/成功后取消（成功后取消不得报告失败回滚）；取消后仍完成资源清理 | 移除 CT 传递/截止时间 → 对应用例红 |
+| Options 生效（4.1） | 非事务模式不提交只 flush；显式隔离级别按实测矩阵生效（真实 DB）；能力不符执行前失败（动作未执行断言） | 跳过校验 → 对应用例红 |
 | 入口统一（4.1） | `[UnitOfWorkMo]` 成功提交/失败回滚集成用例（真实 DB）；生成 DynamicAPI 端点事务用例；两入口复用同一内核（AOP/生成运行时不出现自己的 begin/commit 实现——源码守卫测试） | 让 AOP 绕开内核 → 守卫测试红 |
-| 故障分层（4.5） | 提交前失败/commit 失败/提交后通知失败分别断言：原异常保留、状态正确、提交后通知失败**不得**声称回滚、无自动业务重试；生命周期顺序（flush→commit→notify→cleanup）观测用例 | 各故障注入分支判别力验证 |
-| Provider 能力/身份（4.4） | 能力不符 → 业务执行前失败（动作未执行断言）；同 Provider 异资源冲突诊断；FreeSql/SqlSugar 声明矩阵用例 | 跳过校验 → 对应红 |
-| PostgreSQL 真实验证 | Testcontainers PG（独立 schema）：外层事务开始后的嵌套隔离与提交后可见性（CI） | — |
+| 故障分层（4.5） | 提交前失败/commit 失败/提交后通知失败分别断言：原异常保留、四维结果正确、提交后通知失败**不得**声称回滚、无自动业务重试；生命周期顺序（校验→flush→commit→notify→cleanup）观测用例 | 各故障注入分支判别力验证 |
+| Provider 能力/身份（4.4） | FreeSql/SqlSugar 声明矩阵用例；执行前拒绝；EF 隔离级别逐项实测 | 跳过校验 → 对应红 |
+| PostgreSQL 真实验证 | Testcontainers PG（独立 schema）：外层事务开始后的嵌套隔离、提交后可见性、隔离级别行为（CI） | — |
+| CAP lease（4.5） | 同一 Connection+Transaction 身份断言（**不止 TransactionId+bool**）；错资源拒绝；完成后/释放后失效拒绝；消费者不能经普通参与契约完成外层事务 | 去掉有效性校验 → 失效用例红 |
 | 原生门禁 | 更新 `CrestCreates.Data.Abstractions.AotFixture`：传播/状态/资源身份/诊断场景；publish→native link→执行原生产物；证据含 SHA/RID/命令/日志 | 门禁失败传播保留 |
 | 依赖边界/文档 | Boundary 测试保留；AGENTS.md/memory.md/Provider 矩阵/迁移说明同步 | — |
 
-基线既有测试（28 项 OrmProviders + AOT fixture 6 场景 + Web.Tests 1 项）全部保留并按新契约迁移断言对象（状态机/内核 API）；`ErrorOnLegacy` 测试替换不删除。
+基线既有测试（28 项 OrmProviders + AOT fixture 6 场景 + Web.Tests 1 项）全部保留并按新契约迁移断言对象（状态机/内核 API）；不删除既有用例。
 
 ---
 
@@ -280,12 +331,13 @@ CAP storage/transport 配置与 SDK 原子发布验证（#125）；ORM SDK 全�
 | Issue 验收判据 | 对应设计 | 切片 |
 | --- | --- | --- |
 | 默认 EF 装配 + 自定义 Adapter 由预注入正式 Repository 验证提交/回滚 | §4.3；既有 2 用例保留升级 | 2 |
-| Required 复用/rollback-only/冲突参数 | §3.3 #4/#5/#8 | 1 |
+| Required 复用/rollback-only/join 参与者完成/冲突参数 | §3.2/§3.3 #4/#5/#8 | 1 |
 | 多层 RequiresNew | §3.3 #7（既有用例 + 续接变体） | 2 |
 | 连续顶层 UoW 无残留 | §3.2、§4.3（含 discard 能力） | 1（状态）+ 2（discard） |
 | 释放一次、事务及时结束 | §3.1 | 1 + 2 |
-| 非事务/隔离/取消/超时/故障结果 | §4.1、§4.5 | 3 + 4 |
-| 多 Context 错误复用拒绝 / Provider 能力执行前拒绝 | §4.4 | 3 |
+| 受管链隔离（跨 scope 不串用） | §4.3 | 2 |
+| 非事务/隔离/取消/超时/故障结果 | §4.1、§4.5 | 1（内核）+ 3（Provider）+ 4（故障注入） |
+| 多 Context / 换租户错误复用拒绝、Provider 能力执行前拒绝 | §4.3/§4.4 | 3 |
 | 真实 PostgreSQL 嵌套隔离与提交后可见性 | §五 | 3 |
 | `[UnitOfWorkMo]` + 生成 CRUD 成功/失败集成 | §4.1 | 1（机制）+ 4（集成） |
 | commit 前后故障通知顺序与结果 | §4.5 | 4 |
@@ -297,7 +349,25 @@ CAP storage/transport 配置与 SDK 原子发布验证（#125）；ORM SDK 全�
 
 ## 七、风险与开放项
 
-1. **FreeSql/SqlSugar 及时终止与丢弃能力**：切片 3 落位「实现或明确拒绝」；若拒绝，矩阵与迁移说明必须显式（不得默认残留事务）。
-2. **CAP 契约命名与最终形态**（`IUnitOfWorkResourceAccessor` 等）在切片 5 由评审确认后定型；本设计只固定职责与规则。
-3. **通知失败语义**：提供「提交后通知失败」异常/诊断类型的具体命名在切片 4 定型；本设计固定「不回滚、不谎称、不自动重试」三原则。
-4. 旧测试/AOT fixture 的迁移面（`Begin()`、双入口实现）在切片 1/4 内完成，迁移说明入 `99_RecycleBin` 记录。
+1. **FreeSql/SqlSugar 及时终止、丢弃与 lease 能力**：计划切片 3/5 落位「实现或明确拒绝」；若拒绝，矩阵与迁移说明必须显式（不得默认残留事务）。
+2. **CAP lease 具体类型命名与形态**（`UnitOfWorkTransactionLease` 等）在计划切片 5 由评审确认后定型；本设计固定职责、所有权、live view 与失效语义。
+3. **通知失败/清理失败的具体异常类型命名**在计划切片 4 定型；本设计固定「不回滚、不谎称、不自动重试、可检查」四原则。
+4. **受管链节点的承载方式**（scoped 身份服务 vs 帧内嵌节点对象）在计划切片 2 定型；本设计固定 descendant-or-self 可见性与一致性校验语义。
+5. 旧测试/AOT fixture 的迁移面（`Begin()`、双入口实现、同步 BeginScope）在切片 1/4 内完成，迁移说明入 `99_RecycleBin` 记录。
+
+---
+
+## 八、审计响应记录（rev.2，2026-10-10）
+
+对照 [Spec 审计记录](../../review/2026-10-10-issue-137-uow-spec-review.md) 的逐项修订：
+
+| 审计项 | 修订位置 |
+| --- | --- |
+| S137-01 [P1] join 完成必须记录成功 | §3.2（join = 参与者成功记录，与物理提交分开）+ §3.3 #4/#8 + §4.2 + §五（双成功 join / 未完成退出 / 失败被捕获三向用例） |
+| S137-02 [P1] commit 结果、通知结果、释放状态混用 | §3.2 四维模型（参与状态/事务结果/通知结果/释放正交）；`Committed` 在 commit 确认时立即记录；`Unknown` 不被回滚尝试改写；释放后结果可读；§3.1 结果记录行 + §4.5 故障表 + §五 对应用例 |
+| S137-03 [P1] 非事务路径不能承诺回滚已落库写入 | §3.3 #2/#8/#9 + §4.5「非事务模式语义」（保留逐写自动 flush、已持久化写入不可撤销、rollback-only 校验先于完成期 flush）+ §五 用例（A 的真实可见性、不触发 flush） |
+| S137-04 [P1] DI scope 隔离缺少机制 | §4.3 受管链身份（链节点 + descendant-or-self 可见性 + Manager/访问器一致权威 + 独立 scope 为根）+ §五 用例（host A/B、Task.Run 继承、预注入父仓储跟随） |
+| S137-05 [P2] 资源身份校验独立于 ambient 路由 | §4.3 资源键 + 重定向前校验时点 + 读方先校验后路由；§4.1 null/显式参数继承与校验表；§4.4 资源身份段落 + §五 用例 |
+| S137-06 [P2] 异步开始、取消传递与 Provider 选项通道 | §4.1 `BeginScopeAsync` 唯一异步开始阶段、`Func<CancellationToken, Task<T>>` 通道、入口 token 来源表、强类型 effective begin options、合作式语义声明；§3.3 #10 join 只能收紧 + §五 用例 |
+| S137-07 [P2] CAP handle 不可信 | §4.5 lease 契约重写（Provider 所有、同一连接/事务关联、不暴露生命周期操作、live view 失效、适配边界借用）+ §3.1 lease 行 + §五 用例 |
+| 文稿整理 | 移除「第 9 节」悬空引用（改为准确链接配套计划文件）；EF Core 隔离级别改为按实际数据库/驱动逐项实测声明；实施计划切片 1 纳入 Provider flush/commit/notify 职责拆分（每个可合并切片保持完整正确主链） |
