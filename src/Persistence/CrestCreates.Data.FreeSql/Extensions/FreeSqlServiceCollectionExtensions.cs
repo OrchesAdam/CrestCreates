@@ -58,9 +58,11 @@ namespace CrestCreates.Data.FreeSql.Extensions
 
             // 5. 注册 FreeSql 工作单元与其 Provider 绑定
             services.AddScoped<FreeSqlUnitOfWork>();
+            // ambient 上下文跟随未接入：requiresNew 明确诊断（交 #130 评估扩展）。
             services.AddUnitOfWorkProvider(
                 OrmProvider.FreeSql,
-                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>());
+                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>(),
+                supportsRequiresNew: false);
 
             return services;
         }
@@ -92,9 +94,11 @@ namespace CrestCreates.Data.FreeSql.Extensions
 
             // 注册 FreeSql 工作单元与其 Provider 绑定
             services.AddScoped<FreeSqlUnitOfWork>();
+            // ambient 上下文跟随未接入：requiresNew 明确诊断（交 #130 评估扩展）。
             services.AddUnitOfWorkProvider(
                 OrmProvider.FreeSql,
-                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>());
+                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>(),
+                supportsRequiresNew: false);
 
             return services;
         }

@@ -12,10 +12,12 @@ namespace CrestCreates.Data.Abstractions
     /// <remarks>
     /// <para>Provider 选择规则：调用方显式 provider → 应用显式默认（AddUnitOfWork(defaultProvider)）→
     /// 恰好一个绑定即默认 → 多绑定无默认时确定性失败。</para>
-    /// <para>requiresNew（存在环境时）：通过受管子 DI scope 获取独立工作单元/DbContext/连接，
-    /// 子 scope 结束恢复父 Current；Provider 声明不支持时给出确定性诊断。</para>
-    /// <para>Dispose owner：manager 对自身创建的工作单元调用 Dispose 释放事务资源；
-    /// requiresNew 的子 scope 由 manager 释放；复用的内层 scope 不释放、不提交外层。</para>
+    /// <para>requiresNew（存在环境时）：通过受管子 DI scope 获取独立工作单元/DbContext/连接；期间把绑定的
+    /// 当前上下文推入 <see cref="UnitOfWorkAmbientContext"/>，使已注入的业务依赖（仓储/DbContext 适配器）
+    /// 跟随当前 UoW；子 scope 结束恢复父 Current 与环境上下文。声明不支持 requiresNew 的 Provider 给出确定性诊断。</para>
+    /// <para>Dispose owner：绑定注册路径下工作单元由 DI 作用域持有，manager 只释放自己创建的受管子作用域
+    /// （容器随作用域释放其中的 UoW 一次）；手动构造路径（自定义工厂/单测）下 manager 直接释放其创建的工作单元。
+    /// 复用的内层 scope 不释放、不提交外层。</para>
     /// </remarks>
     public class UnitOfWorkManager : IUnitOfWorkManager
     {
@@ -23,6 +25,7 @@ namespace CrestCreates.Data.Abstractions
         private readonly UnitOfWorkProviderBindingRegistry? _bindings;
         private readonly IServiceScopeFactory? _scopeFactory;
         private readonly OrmProvider? _explicitDefault;
+        private readonly bool _ownsResolvedUnitOfWorks;
         private readonly AsyncLocal<AmbientUnitOfWorkScope?> _currentScope = new();
 
         /// <summary>
@@ -42,6 +45,7 @@ namespace CrestCreates.Data.Abstractions
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _explicitDefault = explicitDefault;
+            _ownsResolvedUnitOfWorks = false;
         }
 
         /// <summary>
@@ -54,6 +58,7 @@ namespace CrestCreates.Data.Abstractions
         {
             _factory = factory ?? throw new ArgumentNullException(nameof(factory));
             _explicitDefault = defaultProvider;
+            _ownsResolvedUnitOfWorks = true;
         }
 
         /// <summary>
@@ -84,7 +89,9 @@ namespace CrestCreates.Data.Abstractions
             if (current != null && !requiresNew)
             {
                 return new UnitOfWorkScope(
-                    this, current, _currentScope.Value, isOwner: false, isTransactional, ownedScope: null);
+                    this, current, _currentScope.Value,
+                    isOwner: false, isTransactional,
+                    ownedScope: null, ambientToken: null, ownsUnitOfWorkDirectly: false);
             }
 
             var parentScope = _currentScope.Value;
@@ -100,7 +107,10 @@ namespace CrestCreates.Data.Abstractions
             var unitOfWork = _factory.Create(ResolveProvider(provider));
             _currentScope.Value = new AmbientUnitOfWorkScope(unitOfWork, parentScope);
             return new UnitOfWorkScope(
-                this, unitOfWork, parentScope, isOwner: true, isTransactional, ownedScope: null);
+                this, unitOfWork, parentScope,
+                isOwner: true, isTransactional,
+                ownedScope: null, ambientToken: null,
+                ownsUnitOfWorkDirectly: _ownsResolvedUnitOfWorks);
         }
 
         /// <summary>
@@ -173,12 +183,13 @@ namespace CrestCreates.Data.Abstractions
             OrmProvider? provider)
         {
             var resolvedProvider = ResolveProvider(provider);
+            var binding = _bindings?.GetRequired(resolvedProvider);
 
-            if (_bindings is not null && !_bindings.GetRequired(resolvedProvider).SupportsRequiresNew)
+            if (binding is not null && !binding.SupportsRequiresNew)
             {
                 throw new NotSupportedException(
                     $"The registered '{resolvedProvider}' provider does not support requiresNew isolation: " +
-                    "it shares a single client/connection and cannot provide an independent transaction context. " +
+                    "it cannot bind already-injected business dependencies to an independent transaction context. " +
                     "Do not request requiresNew for this provider.");
             }
 
@@ -189,20 +200,35 @@ namespace CrestCreates.Data.Abstractions
                 var fallback = _factory.Create(resolvedProvider);
                 _currentScope.Value = new AmbientUnitOfWorkScope(fallback, parentScope);
                 return new UnitOfWorkScope(
-                    this, fallback, parentScope, isOwner: true, isTransactional, ownedScope: null);
+                    this, fallback, parentScope,
+                    isOwner: true, isTransactional,
+                    ownedScope: null, ambientToken: null,
+                    ownsUnitOfWorkDirectly: _ownsResolvedUnitOfWorks);
             }
 
             var childScope = _scopeFactory.CreateScope();
+            IDisposable? ambientToken = null;
             try
             {
                 var childFactory = childScope.ServiceProvider.GetRequiredService<IUnitOfWorkFactory>();
                 var unitOfWork = childFactory.Create(resolvedProvider);
+
+                if (binding!.AmbientContextFactory is not null)
+                {
+                    ambientToken = UnitOfWorkAmbientContext.Push(
+                        binding.AmbientContextFactory(childScope.ServiceProvider));
+                }
+
                 _currentScope.Value = new AmbientUnitOfWorkScope(unitOfWork, parentScope);
                 return new UnitOfWorkScope(
-                    this, unitOfWork, parentScope, isOwner: true, isTransactional, ownedScope: childScope);
+                    this, unitOfWork, parentScope,
+                    isOwner: true, isTransactional,
+                    ownedScope: childScope, ambientToken: ambientToken,
+                    ownsUnitOfWorkDirectly: false);
             }
             catch
             {
+                ambientToken?.Dispose();
                 childScope.Dispose();
                 throw;
             }
@@ -255,12 +281,21 @@ namespace CrestCreates.Data.Abstractions
             }
 
             _currentScope.Value = scope.ParentScope;
+
+            // Restore the ambient context first so code observing it after the
+            // scope never sees a context that is about to be disposed.
+            scope.AmbientToken?.Dispose();
             try
             {
-                scope.UnitOfWork.Dispose();
+                if (scope.OwnsUnitOfWorkDirectly)
+                {
+                    scope.UnitOfWork.Dispose();
+                }
             }
             finally
             {
+                // DI-tracked unit of work instances (binding path) are released
+                // exactly once by the scope that created them, never by both.
                 scope.OwnedScope?.Dispose();
             }
         }
@@ -289,7 +324,9 @@ namespace CrestCreates.Data.Abstractions
                 AmbientUnitOfWorkScope? parentScope,
                 bool isOwner,
                 bool isTransactional,
-                IServiceScope? ownedScope)
+                IServiceScope? ownedScope,
+                IDisposable? ambientToken,
+                bool ownsUnitOfWorkDirectly)
             {
                 _manager = manager;
                 UnitOfWork = unitOfWork;
@@ -297,6 +334,8 @@ namespace CrestCreates.Data.Abstractions
                 IsOwner = isOwner;
                 IsTransactional = isTransactional;
                 OwnedScope = ownedScope;
+                AmbientToken = ambientToken;
+                OwnsUnitOfWorkDirectly = ownsUnitOfWorkDirectly;
             }
 
             public IUnitOfWork UnitOfWork { get; }
@@ -308,6 +347,10 @@ namespace CrestCreates.Data.Abstractions
             public bool IsTransactional { get; }
 
             public IServiceScope? OwnedScope { get; }
+
+            public IDisposable? AmbientToken { get; }
+
+            public bool OwnsUnitOfWorkDirectly { get; }
 
             public void Dispose()
             {

@@ -54,19 +54,24 @@
 ### 2) Provider 构造责任与 typed binding
 
 - 构造责任在 **provider 包/模块**：provider 注册 `Func<IServiceProvider, IUnitOfWork>` **静态强类型委托**（通常为 `sp => sp.GetRequiredService<EfCoreUnitOfWork>()`），不出现反射、`Type.GetType`、字符串类型名。
-- 新增 `UnitOfWorkProviderBinding`（provider、typed factory、`SupportsRequiresNew` 能力声明）与 `AddUnitOfWorkProvider(...)` 扩展；bindings 在装配期收集为单例，factory（scoped）构造时一次性建索引，之后不再被每个 scoped factory 修改。
+- 新增 `UnitOfWorkProviderBinding`（provider、typed factory、`SupportsRequiresNew`、`AmbientContextFactory`）与 `AddUnitOfWorkProvider(...)` 扩展；bindings 在装配期收集为单例，factory（scoped）构造时一次性建索引，之后不再被每个 scoped factory 修改。
+  **构造不变量**：声明 `supportsRequiresNew: true` 必须同时提供 `ambientContextFactory`（隔离期间业务依赖可跟随当前 UoW 的上下文对象）；否则注册期直接抛出，禁止“声称支持但业务依赖不跟随”的绑定。
 - factory/binding 不捕获 root `IServiceProvider`：scoped factory 使用调用方 scope 的 SP；子 scope 场景由子 scope 内的 factory 解析。业务 Handler 不接触 factory/registry（service locator 不外泄）。
 - `Create` 失败语义：缺 binding → 确定性异常（列出已注册 provider 与指引）；不返回 null、不跳过、不自动换默认 Provider。
+- 自定义 factory 扩展点（`AddUnitOfWork<TFactory>`）记录 **TFactory 类型身份**：同一类型重复启用幂等；不同自定义 factory、或与绑定路径混用 → 注册期确定性冲突（与注册顺序无关）。
 
 ### 3) scope / Dispose 责任
 
-| 实例 | 创建者 | Dispose owner | 说明 |
+| 实例 | 创建者 | Dispose owner（审查 R136-2 修正） | 说明 |
 | --- | --- | --- | --- |
-| 调用方 scope UoW（无环境首个 / `Begin`） | 从调用方 scope 解析 | manager 在 scope 结束时 `UoW.Dispose()`（释放事务资源） | DbContext/连接等仍归 DI 容器；`EfCoreUnitOfWork.Dispose` 仅释放事务对象 |
-| requiresNew UoW | manager 创建的子 scope | manager：`UoW.Dispose()` + 子 scope `Dispose()` | 一次性释放；子 scope 结束恢复父 Current |
+| 绑定路径：调用方 scope UoW（无环境首个 / `Begin`） | 从调用方 scope 解析（DI 跟踪） | **DI 容器**（调用方 scope 结束时一次） | manager 不再直接 Dispose，避免与容器双重释放；事务由 Commit/Rollback 显式释放 |
+| 绑定路径：requiresNew UoW | manager 创建的子 DI scope | **子 scope**（其内跟踪实例随 scope 释放一次） | manager 只释放自身创建的 scope（含环境恢复令牌）；不再额外 `UoW.Dispose()` |
+| 手动构造路径（自定义工厂 / 单测）的 UoW | manager 经 factory 创建 | **manager**（scope 结束时 `UoW.Dispose()`） | 无容器跟踪时的既有语义保留 |
 | 复用 scope（isOwner=false） | — | 不释放、不提交外层 | 保持现状 |
-| 构建失败（factory.Create 抛） | — | 不污染 Current | `BeginScope` 先 Create 后入栈 |
+| 环境上下文令牌 | manager（Push） | manager（EndScope 最先恢复） | 先恢复上下文再释放 UoW/scope，避免观测到已释放上下文 |
+| 构建失败（factory.Create 抛） | — | 不污染 Current；子 scope 与环境令牌在失败路径回收 | `BeginScope` 先 Create 后入栈 |
 
+- 绑定契约：binding 的 factory/ambientContextFactory 应从所在 scope 解析 **DI 跟踪的服务实例**（如 `sp.GetRequiredService<Concrete>()`），而非 `new` 出未跟踪实例；管理器的释放责任依赖该约定（XML 文档注明）。
 - 异常语义：提交/回滚失败或依赖解析失败 → 恢复父 Current；原始业务异常不被清理异常替换（清理失败仅记录后再抛原异常）——保持并测试。
 - 生命周期/领域事件保持“提交成功后发布”（`EfCoreUnitOfWork.CommitTransactionAsync` 现有顺序不回改）。
 
@@ -84,11 +89,19 @@
 - `CrestCreates.Domain.Shared.Enums.OrmProvider`：**元数据/Attribute 面**（`[GenerateRepository]`/`[GenerateEntity]` 等声明，供生成器读取），保持独立、不合并、不互转。
 - 两者成员序一致（EfCore=0/SqlSugar=1/FreeSql=2），文档记录以避免选错。
 
-### 6) requiresNew 与 Provider 能力
+### 6) requiresNew 与 Provider 能力（审查 R136-1 修正：业务上下文跟随）
 
-- `requiresNew` 在有环境时通过**子 DI scope** 获取独立 UoW/DbContext/连接；子 scope 结束恢复父 Current。
-- binding 声明 `SupportsRequiresNew`；不支持者（SqlSugar：共享 singleton `ISqlSugarClient`）在使用 `requiresNew` 时给出**确定性 `NotSupportedException` 诊断**（不扩大 Provider 承诺、不静默共享事务）。
-- 无子 scope factory 的手动构造（单测/自定义场景）：回退为 `factory.Create`（记录为手动路径语义；DI 主链始终有子 scope 能力）。
+- `requiresNew`（存在环境时）通过**受管子 DI scope** 获取独立 UoW/DbContext/连接；期间把绑定声明的
+  `ambientContextFactory`（EF：该子 scope 的 `IDataBaseContext`）推入 `UnitOfWorkAmbientContext`，
+  **已注入的业务依赖（仓储/DbContext 适配器）在操作时解析到内层上下文**——不要求业务转型 UoW、
+  手工解析子 scope 或手工选择 DbContext。子 scope 结束先恢复环境上下文与父 Current，再释放资源。
+- EF Core 的 `EfCoreDbContextAdapter` 所有数据访问成员经 ambient 感知的 `EffectiveDbContext` 路由；
+  未处于隔离期间时行为与之前完全一致（返回本作用域上下文）。
+- 不支持上下文跟随的 Provider **fail closed**：`supportsRequiresNew: false`（SqlSugar 共享 singleton 客户端；
+  FreeSql 仓储经 SDK `UnitOfWorkManager.Binding` 绑定连接、ambient 跟随未接入）在使用 `requiresNew` 时给出
+  **确定性 `NotSupportedException` 诊断**，不静默共享事务上下文；扩展支持交 #130 评估。
+- 无子 scope factory 的手动构造（单测/自定义场景）：回退为 `factory.Create`（记录为手动路径语义；
+  DI 主链始终有子 scope 能力与环境跟随）。
 
 ### 7) 兼容与归档
 
@@ -97,7 +110,7 @@
 
 ## 三、归档清单
 
-1. `src/Framework/Infrastructure/CrestCreates.Infrastructure/UnitOfWork/UnitOfWorkFactory.cs` → `99_RecycleBin/issue-124-infrastructure-unitofwork/`（附迁移说明：改用 `CrestCreates.Data.Abstractions` 契约与 `AddUnitOfWork`；配置来源语义去除）。
+1. `src/Framework/Infrastructure/CrestCreates.Infrastructure/UnitOfWork/UnitOfWorkFactory.cs` → `99_RecycleBin/issue-124-infrastructure-unitofwork/`（附迁移说明：改用 `CrestCreates.Data.Abstractions` 契约与 `AddUnitOfWork`；配置来源语义去除）。**该目录随 PR 提交**（对忽略规则单文件 force-add，正文与被删原文件逐字节一致，见目录内 README）。
 2. 因反射路径消除而失去理由的 suppression：
    - `Data.Abstractions/UnitOfWorkBase/UnitOfWorkFactory.cs` 的 `IL2026/IL3050` suppression（随实现替换删除）。
    - `Extensions/UnitOfWorkServiceCollectionExtensions.cs` 的 `IL2091` suppression（泛型注册经评估：`AddUnitOfWork<TFactory>` 为显式泛型注册，重写为 `TryAddScoped(typeof(TFactory))` 后判断；若仍需要则保留并注明原因）。
@@ -110,11 +123,12 @@
 | 命令/场景 | 结果 |
 | --- | --- |
 | `dotnet build CrestCreates.slnx` | 0 错误（迁移后全仓编译） |
-| `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 56/56（含新增 19 个 UoW 用例） |
-| ├─ `UnitOfWorkDiRegistrationTests`（11 用例） | 单绑定默认 / 显式默认 / 显式参数优先 / 多绑定无默认诊断 / 缺绑定诊断 / 重复绑定诊断 / 冲突默认诊断 / 幂等 / 混用装配模式诊断（套件 vs 自定义工厂不允许 first/last-wins）/ requiresNew 子 scope 隔离与父恢复 / 不支持 requiresNew 诊断 / 依赖失败不污染 Current |
-| ├─ `EfCoreUnitOfWorkDatabaseTests`（4 用例，真实 SQLite 文件库） | 提交持久化 / 回滚无残留 / requiresNew 独立 DbContext 与独立事务（含内层不关闭外层事务、父恢复）/ 领域事件在提交持久化之后发布 |
-| └─ `UnitOfWorkManagerTests`（4 用例，手动构造路径） | 既有 3 用例保持 + 回滚失败不替换原始业务异常 |
-| UoW native 门禁（本分支新 fixture） | `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`；publish/link/run 40s（本地热缓存） |
+| `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 62/62（含新增 UoW 用例） |
+| ├─ `UnitOfWorkDiRegistrationTests`（15 用例） | 单绑定默认 / 显式默认 / 显式参数优先 / 多绑定无默认诊断 / 缺绑定诊断 / 重复绑定诊断 / 冲突默认诊断 / 幂等 / 套件与自定义工厂混用诊断 / 不同自定义工厂冲突（两个方向）/ 同工厂幂等 / 同工厂冲突默认诊断 / requiresNew 子 scope 隔离与父恢复（含环境上下文与非双重释放断言）/ 不支持 requiresNew 诊断 / 依赖失败不污染 Current |
+| ├─ `EfCoreUnitOfWorkDatabaseTests`（5 用例，真实 SQLite 文件库） | 提交持久化 / 回滚无残留 / **requiresNew 预注入依赖跟随内层 UoW（内层提交持久化、外层回滚不影响；环境恢复断言）** / **嵌套 ExecuteAsync 隔离提交与父恢复** / 领域事件在提交持久化之后发布 |
+| ├─ `UnitOfWorkManagerTests`（4 用例，手动构造路径） | 既有 3 用例保持 + 回滚失败不替换原始业务异常 |
+| └─ `UnitOfWorkReflectionGuardTests`（1 用例） | 装配主链源码无运行时类型解析/程序集扫描 |
+| UoW native 门禁（本分支新 fixture） | `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`；publish/link/run 40s（本地热缓存）；容器单次释放断言（DI-owned）与环境上下文 Push/Restore 断言 |
 | `dotnet test tests/Framework/Api/CrestCreates.DynamicApi.Tests` | 73/73（生成运行时 `ExecuteAsync` 契约未变） |
 | `dotnet test tests/Framework/Infrastructure/CrestCreates.Infrastructure.Tests` | 2/2（AOP 契约未变） |
 | `dotnet test tests/Framework/Web/CrestCreates.Web.Tests` | 107/111；4 个 `CapabilityEndpointBoundaryTests` 失败为 worktree 环境性（查找 `.git` 目录，worktree 中为文件），与本项无关且未触碰相关文件 |
@@ -126,9 +140,9 @@
 
 | Provider | 本轮验证范围 | 未验证项（交接） |
 | --- | --- | --- |
-| EF Core | 统一装配路径 + 默认/显式选择 + requiresNew 子 scope 独立 DbContext/事务 + 真实 SQLite 提交/回滚 + 事件顺序 + native 装配门禁（静态 UoW） | PostgreSQL 真实库下的嵌套隔离由 CI 集成套件间接覆盖；EF Core 自身 AOT/trim 能力边界交 #130 |
-| FreeSql | 绑定登记（`supportsRequiresNew: true`，作用域内 IFreeSql/连接隔离）+ 编译/发布通过 | 绑定路径下的运行级事务/隔离用例、SDK AOT 边界交 #130；既有 FreeSql 仓储测试仍走 SDK adapter 直连路径 |
-| SqlSugar | 绑定登记（共享单例客户端 → `requiresNew` 确定性 NotSupportedException 诊断，含单测） | 运行级事务用例、SDK AOT 边界交 #130 |
+| EF Core | 统一装配路径 + 默认/显式选择 + requiresNew（子 scope 独立 DbContext/事务 + **预注入依赖跟随内层 UoW + 环境恢复**，真实 SQLite 验收）+ 嵌套 ExecuteAsync + 提交/回滚/事件顺序 + native 装配门禁（静态 UoW，含容器单次释放断言） | PostgreSQL 真实库下的嵌套隔离由 CI 集成套件间接覆盖（SQLite 单写者限制：并发双写场景未在本套件覆盖）；EF Core 自身 AOT/trim 能力边界交 #130 |
+| FreeSql | 绑定登记（`supportsRequiresNew: false` → `requiresNew` 确定性 NotSupportedException 诊断）+ 编译/发布通过 | 绑定路径下的运行级事务用例、ambient 跟随扩展、SDK AOT 边界交 #130；既有 FreeSql 仓储测试仍走 SDK adapter 直连路径 |
+| SqlSugar | 绑定登记（共享单例客户端，`supportsRequiresNew: false` → 确定性诊断，含单测） | 运行级事务用例、SDK AOT 边界交 #130 |
 | MongoDB | 无 UoW 能力（维持 `ModuleBase`），未变 | 无 |
 
 本 native fixture 只证明**生产装配机制**（同一正式 `AddUnitOfWork`/`AddUnitOfWorkProvider` API），不证明 EFCore/FreeSql/SqlSugar SDK、数据库驱动或完整仓储 AOT 已验证；真实 ORM 集成证据独立记录（JIT-only/未验证按实声明）。
@@ -144,3 +158,14 @@
 | `Extensions/UnitOfWorkServiceCollectionExtensions.cs` 的 IL2091 suppression | 替换为 `DynamicallyAccessedMembers(PublicConstructors)` 注解 | `AddUnitOfWork<TFactory>` |
 | `AddUnitOfWork(OrmProvider defaultProvider = OrmProvider.EfCore)` 的隐式 EfCore 默认 | 参数改为可空（显式声明语义）；单绑定自动默认保持短路径 | 同上 |
 
+## 七、审查修复记录（PR #136 review，2026-10-10）
+
+| 发现 | 修复 |
+| --- | --- |
+| R136-1 [P1] requiresNew 未把普通业务仓储切换到内层事务上下文 | 新增 `UnitOfWorkAmbientContext` 平台环境上下文；绑定声明 `ambientContextFactory`（EF：子 scope 的 `IDataBaseContext`）；`EfCoreDbContextAdapter` 全体数据访问成员经 ambient 感知路由，已注入依赖在隔离期间跟随当前 UoW；绑定构造不变量禁止“声明支持但无上下文跟随”；FreeSql/SqlSugar `supportsRequiresNew: false` fail closed；验收测试：预注入依赖 → requiresNew 内层写入提交 → 外层回滚 → 内层记录仍在（真实 SQLite；SQLite 单写者限制使并发双写场景转入顺序证明，语义判据一致）；嵌套 `ExecuteAsync` 正式用法 + 父 Current/环境恢复覆盖 |
+| R136-2 [P2] child scope UoW 双重 Dispose owner | 所有权规则重构：绑定路径下 UoW 归 DI 作用域（manager 只释放自身创建的子 scope）；手动构造路径保持 manager 直接释放；EndScope 先恢复环境再释放；测试改用真实 scoped 注册（`GetRequiredService`）并断言子实例恰好释放一次、父实例在容器释放前为 0、释放后恰为 1（不以内部幂等去重代替验证） |
+| R136-3 [P2] 不同自定义 factory 仍按顺序静默选择 | 装配模式记录 `custom-factory:<TFactory FullName>` 身份；不同 factory（两个方向）确定性冲突、同 factory 幂等、同 factory 冲突默认诊断；测试覆盖 |
+| R136-4 [P2] 旧实现与迁移 README 未实际纳入提交 | 对 `99_RecycleBin/issue-124-infrastructure-unitofwork/` 两个文件单文件 force-add（未批量添加回收站）；`git show <base>:<原路径> | diff -` 验证正文逐字节一致；README 说明行尾空白保留原因；设计记录 EOF 空行修正 |
+
+补充说明：R136-1 的最小复现（`repository resource matches inner UoW: False`）现由验收测试的两个判据直接覆盖——
+环境上下文身份在内层必须不同于父上下文、且内层经预注入依赖的写入在外层回滚后仍持久化；若回退到修复前行为，两项断言均会失败。

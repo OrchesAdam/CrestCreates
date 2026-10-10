@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Extensions;
-using CrestCreates.Data.EFCore.UnitOfWork;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
@@ -21,7 +20,8 @@ namespace CrestCreates.OrmProviders.Tests;
 
 /// <summary>
 /// 唯一装配路径在真实数据库（SQLite 文件库）上的生命周期验证：
-/// 提交持久化、回滚丢弃、requiresNew 独立上下文/事务、提交后事件顺序。
+/// 提交持久化、回滚丢弃、requiresNew 将预注入业务依赖绑定到内层 UoW、
+/// 嵌套 ExecuteAsync 正式用法、提交后事件顺序。
 /// </summary>
 public class EfCoreUnitOfWorkDatabaseTests : IDisposable
 {
@@ -100,13 +100,12 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
     }
 
     [Fact]
-    public async Task RequiresNew_provides_independent_context_and_transaction()
+    public async Task RequiresNew_binds_preinjected_dependencies_to_the_inner_unit_of_work()
     {
-        // SQLite file databases serialize write transactions (BEGIN IMMEDIATE),
-        // so isolation is proven sequentially: distinct DbContext per child
-        // scope, independent commit/rollback outcomes, parent transaction
-        // untouched by inner scope disposal, and parent state restoration.
-        var (provider, _) = BuildProvider(useTrackingBinding: true);
+        // 验收（审查 R136-1）：预先注入的依赖（模拟仓储构造时捕获的 IDataBaseContext）
+        // 在 requiresNew 内层必须跟随当前 UoW；内层提交独立持久化，外层回滚不影响内层记录。
+        // SQLite 串行化写事务（BEGIN IMMEDIATE），因此按顺序证明语义而不是并发双写。
+        var (provider, _) = BuildProvider();
         Guid innerEntityId;
         Guid outerEntityId;
 
@@ -114,42 +113,37 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
         {
             var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
 
+            // 与仓储构造函数相同的方式预先捕获依赖
+            var preInjectedContext = scope.ServiceProvider.GetRequiredService<IDataBaseContext>();
+            var parentNativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
+
             using (var outerScope = manager.BeginScope())
             {
-                var outerUnitOfWork = (ContextTrackingUnitOfWork)outerScope.UnitOfWork;
+                var outerUnitOfWork = outerScope.UnitOfWork;
 
                 using (var innerScope = manager.BeginScope(requiresNew: true))
                 {
-                    var innerUnitOfWork = (ContextTrackingUnitOfWork)innerScope.UnitOfWork;
-                    innerUnitOfWork.Context.Should().NotBeSameAs(
-                        outerUnitOfWork.Context,
-                        "requiresNew must isolate the DbContext/connection, not wrap a shared one");
+                    var innerNativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
+                    innerNativeContext.Should().NotBeSameAs(parentNativeContext,
+                        "the pre-injected dependency must follow the current unit of work during requiresNew");
 
-                    await innerUnitOfWork.BeginTransactionAsync();
+                    await innerScope.UnitOfWork.BeginTransactionAsync();
                     var innerEntity = new UowTestEntity(Guid.NewGuid(), "inner");
                     innerEntityId = innerEntity.Id;
-                    innerUnitOfWork.Context.Entities.Add(innerEntity);
-                    await innerUnitOfWork.CommitTransactionAsync();
+                    await preInjectedContext.Set<UowTestEntity>().AddAsync(innerEntity);
+                    await innerScope.UnitOfWork.CommitTransactionAsync();
                 }
 
-                manager.Current.Should().BeSameAs(outerUnitOfWork,
-                    "disposing the inner scope must restore the parent unit of work");
+                ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(parentNativeContext,
+                    "the ambient context must be restored after the inner scope");
 
                 await outerUnitOfWork.BeginTransactionAsync();
                 var outerEntity = new UowTestEntity(Guid.NewGuid(), "outer");
                 outerEntityId = outerEntity.Id;
-                outerUnitOfWork.Context.Entities.Add(outerEntity);
+                await preInjectedContext.Set<UowTestEntity>().AddAsync(outerEntity);
 
-                using (var secondInnerScope = manager.BeginScope(requiresNew: true))
-                {
-                    ((ContextTrackingUnitOfWork)secondInnerScope.UnitOfWork).Context.Should().NotBeSameAs(
-                        outerUnitOfWork.Context);
-                }
-
-                outerUnitOfWork.Context.Database.CurrentTransaction.Should().NotBeNull(
-                    "inner scope creation/disposal must not close or release the outer transaction");
-                manager.Current.Should().BeSameAs(outerUnitOfWork);
-
+                manager.Current.Should().BeSameAs(outerUnitOfWork,
+                    "the inner scope must not replace or close the outer unit of work");
                 await outerUnitOfWork.RollbackTransactionAsync();
             }
         }
@@ -158,9 +152,52 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
         {
             var verifyContext = verifyScope.ServiceProvider.GetRequiredService<UowTestDbContext>();
             (await verifyContext.Entities.FindAsync(innerEntityId)).Should().NotBeNull(
-                "the inner committed transaction must be independent of the outer one");
+                "the inner unit of work must persist its own committed write");
             (await verifyContext.Entities.FindAsync(outerEntityId)).Should().BeNull(
                 "the outer rollback must discard only the outer transaction's changes");
+        }
+    }
+
+    [Fact]
+    public async Task Nested_execute_async_commits_inner_and_restores_parent()
+    {
+        var (provider, _) = BuildProvider();
+        var innerEntityId = Guid.Empty;
+
+        using (var scope = provider.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var preInjectedContext = scope.ServiceProvider.GetRequiredService<IDataBaseContext>();
+            var parentNativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
+
+            using (var outerScope = manager.BeginScope())
+            {
+                var committed = await manager.ExecuteAsync(async _ =>
+                {
+                    ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().NotBeSameAs(
+                        parentNativeContext,
+                        "nested ExecuteAsync must isolate the ambient context for the callback");
+                    var innerEntity = new UowTestEntity(Guid.NewGuid(), "execute-async-inner");
+                    innerEntityId = innerEntity.Id;
+                    await preInjectedContext.Set<UowTestEntity>().AddAsync(innerEntity);
+                    return true;
+                });
+
+                committed.Should().BeTrue();
+                manager.Current.Should().BeSameAs(outerScope.UnitOfWork,
+                    "the nested ExecuteAsync scope must restore the parent unit of work");
+                ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(parentNativeContext,
+                    "the nested ExecuteAsync scope must restore the parent ambient context");
+            }
+
+            manager.CurrentOrNull.Should().BeNull();
+        }
+
+        using (var verifyScope = provider.CreateScope())
+        {
+            var verifyContext = verifyScope.ServiceProvider.GetRequiredService<UowTestDbContext>();
+            (await verifyContext.Entities.FindAsync(innerEntityId)).Should().NotBeNull(
+                "the nested ExecuteAsync unit of work must commit independently");
         }
     }
 
@@ -168,7 +205,7 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
     public async Task Domain_events_publish_after_the_commit_is_persisted()
     {
         var publisher = new RecordingDomainEventPublisher();
-        var (provider, _) = BuildProvider(useTrackingBinding: false, publisher: publisher);
+        var (provider, _) = BuildProvider(publisher: publisher);
 
         using (var scope = provider.CreateScope())
         {
@@ -198,7 +235,6 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
     }
 
     private (ServiceProvider Provider, RecordingDomainEventPublisher Publisher) BuildProvider(
-        bool useTrackingBinding = false,
         RecordingDomainEventPublisher? publisher = null)
     {
         publisher ??= new RecordingDomainEventPublisher();
@@ -213,18 +249,7 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
         services.AddSingleton<IDomainEventPublisher>(capturedPublisher);
         services.AddUnitOfWork();
-
-        if (useTrackingBinding)
-        {
-            services.AddScoped<ContextTrackingUnitOfWork>();
-            services.AddUnitOfWorkProvider(
-                OrmProvider.EfCore,
-                static sp => sp.GetRequiredService<ContextTrackingUnitOfWork>());
-        }
-        else
-        {
-            services.AddEfCoreUnitOfWork();
-        }
+        services.AddEfCoreUnitOfWork();
 
         var provider = services.BuildServiceProvider();
         using (var scope = provider.CreateScope())
@@ -263,29 +288,6 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
     public sealed class UowTestDomainEvent : IDomainEvent
     {
         public DateTime OccurredOn { get; init; }
-    }
-
-    private sealed class ContextTrackingUnitOfWork : IUnitOfWork
-    {
-        private readonly EfCoreUnitOfWork _inner;
-
-        public ContextTrackingUnitOfWork(UowTestDbContext context, IDomainEventPublisher domainEventPublisher)
-        {
-            Context = context;
-            _inner = new EfCoreUnitOfWork(context, domainEventPublisher);
-        }
-
-        public UowTestDbContext Context { get; }
-
-        public Task BeginTransactionAsync() => _inner.BeginTransactionAsync();
-
-        public Task CommitTransactionAsync() => _inner.CommitTransactionAsync();
-
-        public Task RollbackTransactionAsync() => _inner.RollbackTransactionAsync();
-
-        public Task<int> SaveChangesAsync() => _inner.SaveChangesAsync();
-
-        public void Dispose() => _inner.Dispose();
     }
 
     private sealed class RecordingDomainEventPublisher : IDomainEventPublisher

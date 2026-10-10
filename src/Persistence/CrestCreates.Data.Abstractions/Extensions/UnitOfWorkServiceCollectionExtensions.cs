@@ -63,7 +63,9 @@ namespace CrestCreates.Data.Abstractions
             where TFactory : class, IUnitOfWorkFactory
         {
             var state = GetOrCreateRegistrationState(services);
-            state.SetAssemblyMode("custom-factory", $"{nameof(AddUnitOfWork)}<{typeof(TFactory).Name}>(...)");
+            state.SetAssemblyMode(
+                $"custom-factory:{typeof(TFactory).FullName}",
+                $"{nameof(AddUnitOfWork)}<{typeof(TFactory).Name}>(...)");
             if (defaultProvider is not null)
             {
                 state.SetExplicitDefault(defaultProvider.Value, $"{nameof(AddUnitOfWork)}<{typeof(TFactory).Name}>(defaultProvider)");
@@ -83,7 +85,14 @@ namespace CrestCreates.Data.Abstractions
         /// <param name="services">服务集合</param>
         /// <param name="provider">ORM 提供者类型</param>
         /// <param name="factory">在当前作用域解析工作单元的强类型委托（不得使用反射或类型名字符串）</param>
-        /// <param name="supportsRequiresNew">该 Provider 是否支持 requiresNew 隔离（默认 true）</param>
+        /// <param name="supportsRequiresNew">
+        /// 该 Provider 是否支持 requiresNew 隔离。为 true 时必须同时提供
+        /// <paramref name="ambientContextFactory"/>：requiresNew 期间平台把内层上下文推入
+        /// <see cref="UnitOfWorkAmbientContext"/>，已注入的业务依赖据此跟随当前 UoW。
+        /// </param>
+        /// <param name="ambientContextFactory">
+        /// 在隔离子作用域内解析“当前上下文对象”的强类型委托（例如 EF 的 <c>IDataBaseContext</c>）。
+        /// </param>
         /// <returns>服务集合</returns>
         /// <remarks>
         /// 由 Provider 包/模块声明。同一 Provider 出现多个绑定会在装配完成时给出确定性异常，不允许 last-wins。
@@ -92,14 +101,16 @@ namespace CrestCreates.Data.Abstractions
             this IServiceCollection services,
             OrmProvider provider,
             Func<IServiceProvider, IUnitOfWork> factory,
-            bool supportsRequiresNew = true)
+            bool supportsRequiresNew = true,
+            Func<IServiceProvider, object?>? ambientContextFactory = null)
         {
             if (factory is null)
             {
                 throw new ArgumentNullException(nameof(factory));
             }
 
-            services.AddSingleton(new UnitOfWorkProviderBinding(provider, factory, supportsRequiresNew));
+            services.AddSingleton(new UnitOfWorkProviderBinding(
+                provider, factory, supportsRequiresNew, ambientContextFactory));
             return services;
         }
 

@@ -43,8 +43,9 @@ to 99_RecycleBin, never deleted; never output credentials.
   Data.Abstractions authority (`AddUnitOfWork` + provider-side typed
   `AddUnitOfWorkProvider` bindings; no reflection/assembly scanning; deterministic
   duplicate/missing/conflict diagnostics), requiresNew isolated through child DI
-  scopes; legacy Infrastructure dual factory/manager archived; native gate
-  `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`.
+  scopes with ambient context following (pre-injected EF dependencies bind to the
+  current UoW; other providers fail closed); legacy Infrastructure dual
+  factory/manager archived; native gate `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`.
 - Review scores (8.5/10, ~70%) are subjective single-review estimates, not
   production-readiness guarantees; support claims must point to per-item evidence.
 

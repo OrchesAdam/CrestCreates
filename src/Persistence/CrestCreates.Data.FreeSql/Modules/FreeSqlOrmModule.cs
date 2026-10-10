@@ -50,10 +50,13 @@ namespace CrestCreates.Data.FreeSql.Modules
             // 注册 FreeSql 工作单元
             services.AddScoped<FreeSqlUnitOfWork>();
 
-            // FreeSql 的 IFreeSql/连接按作用域解析，支持 requiresNew 子作用域隔离。
+            // FreeSql 仓储经 SDK 的 UnitOfWorkManager.Binding 绑定连接，当前未接入
+            // ambient 上下文跟随；requiresNew 请求将得到确定性 NotSupportedException
+            // 诊断，而不是静默共享事务上下文（扩展支持交 #130 评估）。
             services.AddUnitOfWorkProvider(
                 OrmProvider.FreeSql,
-                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>());
+                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>(),
+                supportsRequiresNew: false);
         }
     }
 }

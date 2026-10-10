@@ -43,25 +43,37 @@ internal static class Program
         using var provider = BuildProvider(services =>
             services.AddUnitOfWorkProvider(
                 OrmProvider.EfCore,
-                static sp => sp.GetRequiredService<StaticUnitOfWork>()));
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false));
 
-        using var scope = provider.CreateScope();
-        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
-
+        var scope = provider.CreateScope();
         StaticUnitOfWork unitOfWork;
-        using (var unitOfWorkScope = manager.BeginScope())
+        try
         {
-            unitOfWork = unitOfWorkScope.UnitOfWork as StaticUnitOfWork
-                ?? throw new InvalidOperationException("The single binding must supply the default provider.");
-            Check(unitOfWorkScope.IsOwner, "first BeginScope must own the unit of work");
-            await unitOfWorkScope.UnitOfWork.BeginTransactionAsync();
-            await unitOfWorkScope.UnitOfWork.CommitTransactionAsync();
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+            using (var unitOfWorkScope = manager.BeginScope())
+            {
+                unitOfWork = unitOfWorkScope.UnitOfWork as StaticUnitOfWork
+                    ?? throw new InvalidOperationException("The single binding must supply the default provider.");
+                Check(unitOfWorkScope.IsOwner, "first BeginScope must own the unit of work");
+                await unitOfWorkScope.UnitOfWork.BeginTransactionAsync();
+                await unitOfWorkScope.UnitOfWork.CommitTransactionAsync();
+            }
+
+            Check(manager.CurrentOrNull is null, "ambient state must be cleared after dispose");
+            Check(unitOfWork.BeginCount == 1, "begin transaction must reach the bound unit of work");
+            Check(unitOfWork.CommitCount == 1, "commit transaction must reach the bound unit of work");
+            Check(unitOfWork.DisposeCount == 0,
+                "the DI container owns the scoped unit of work while the scope is alive");
+        }
+        finally
+        {
+            scope.Dispose();
         }
 
-        Check(manager.CurrentOrNull is null, "ambient state must be cleared after dispose");
-        Check(unitOfWork.BeginCount == 1, "begin transaction must reach the bound unit of work");
-        Check(unitOfWork.CommitCount == 1, "commit transaction must reach the bound unit of work");
-        Check(unitOfWork.DisposeCount == 1, "the owning scope must dispose the unit of work exactly once");
+        Check(unitOfWork.DisposeCount == 1,
+            "the container must dispose the scoped unit of work exactly once (no double owner)");
     }
 
     private static async Task VerifyRequiresNewIsolationAsync()
@@ -69,7 +81,9 @@ internal static class Program
         using var provider = BuildProvider(services =>
             services.AddUnitOfWorkProvider(
                 OrmProvider.FreeSql,
-                static sp => new StaticUnitOfWork(sp.GetRequiredService<ScopeToken>().Id)));
+                static sp => new StaticUnitOfWork(sp.GetRequiredService<ScopeToken>().Id),
+                supportsRequiresNew: true,
+                ambientContextFactory: static sp => sp.GetRequiredService<ScopeToken>()));
 
         using var scope = provider.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
@@ -83,10 +97,14 @@ internal static class Program
                 Check(innerUnitOfWork != outerUnitOfWork, "requiresNew must create a distinct unit of work");
                 Check(innerUnitOfWork.ScopeId != outerUnitOfWork.ScopeId,
                     "requiresNew must isolate through a child DI scope");
+                Check(!ReferenceEquals(UnitOfWorkAmbientContext.Current, null),
+                    "requiresNew must push the provider-declared ambient context");
                 Check(manager.Current == innerUnitOfWork, "inner scope must become current while active");
             }
 
             Check(manager.Current == outerUnitOfWork, "disposing the inner scope must restore the parent");
+            Check(UnitOfWorkAmbientContext.Current is null,
+                "the ambient context must be restored after the inner scope");
         }
 
         await Task.CompletedTask;
@@ -97,7 +115,8 @@ internal static class Program
         using var provider = BuildProvider(services =>
             services.AddUnitOfWorkProvider(
                 OrmProvider.EfCore,
-                static sp => sp.GetRequiredService<StaticUnitOfWork>()));
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false));
 
         using var scope = provider.CreateScope();
         var factory = scope.ServiceProvider.GetRequiredService<IUnitOfWorkFactory>();
@@ -115,10 +134,12 @@ internal static class Program
         {
             services.AddUnitOfWorkProvider(
                 OrmProvider.EfCore,
-                static sp => sp.GetRequiredService<StaticUnitOfWork>());
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false);
             services.AddUnitOfWorkProvider(
                 OrmProvider.EfCore,
-                static sp => sp.GetRequiredService<StaticUnitOfWork>());
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false);
         });
 
         using var scope = provider.CreateScope();
@@ -134,10 +155,12 @@ internal static class Program
         {
             services.AddUnitOfWorkProvider(
                 OrmProvider.EfCore,
-                static sp => sp.GetRequiredService<StaticUnitOfWork>());
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false);
             services.AddUnitOfWorkProvider(
                 OrmProvider.SqlSugar,
-                static sp => sp.GetRequiredService<StaticUnitOfWork>());
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false);
         });
 
         using var scope = provider.CreateScope();
@@ -153,7 +176,8 @@ internal static class Program
         using var provider = BuildProvider(services =>
             services.AddUnitOfWorkProvider(
                 OrmProvider.EfCore,
-                static sp => sp.GetRequiredService<StaticUnitOfWork>()));
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false));
 
         using var scope = provider.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();

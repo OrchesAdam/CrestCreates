@@ -18,7 +18,9 @@ namespace CrestCreates.Data.EFCore.Extensions
         /// <returns>服务集合</returns>
         /// <remarks>
         /// 配合 <see cref="UnitOfWorkServiceCollectionExtensions.AddUnitOfWork"/> 使用。
-        /// EF Core Provider 支持 requiresNew 隔离（独立作用域解析独立 DbContext）。
+        /// EF Core Provider 支持 requiresNew 隔离：子作用域解析独立 DbContext/连接，
+        /// 并把该作用域的 <see cref="IDataBaseContext"/> 作为环境上下文推入，
+        /// 使已注入的仓储/适配器在隔离期间跟随当前 UoW。
         /// </remarks>
         public static IServiceCollection AddEfCoreUnitOfWork(this IServiceCollection services)
         {
@@ -27,7 +29,9 @@ namespace CrestCreates.Data.EFCore.Extensions
                 sp.GetRequiredService<IDomainEventPublisher>()));
             services.AddUnitOfWorkProvider(
                 OrmProvider.EfCore,
-                static sp => sp.GetRequiredService<EfCoreUnitOfWork>());
+                static sp => sp.GetRequiredService<EfCoreUnitOfWork>(),
+                supportsRequiresNew: true,
+                ambientContextFactory: static sp => sp.GetRequiredService<IDataBaseContext>());
             return services;
         }
     }

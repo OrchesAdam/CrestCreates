@@ -21,7 +21,7 @@ public class UnitOfWorkDiRegistrationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
         services.AddUnitOfWork();
-        services.AddUnitOfWorkProvider(OrmProvider.FreeSql, CreateProbeBinding(OrmProvider.FreeSql));
+        AddProbeBinding(services, OrmProvider.FreeSql);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -38,8 +38,8 @@ public class UnitOfWorkDiRegistrationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
         services.AddUnitOfWork(OrmProvider.SqlSugar);
-        services.AddUnitOfWorkProvider(OrmProvider.EfCore, CreateProbeBinding(OrmProvider.EfCore));
-        services.AddUnitOfWorkProvider(OrmProvider.SqlSugar, CreateProbeBinding(OrmProvider.SqlSugar));
+        AddProbeBinding(services, OrmProvider.EfCore);
+        AddProbeBinding(services, OrmProvider.SqlSugar);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -55,8 +55,8 @@ public class UnitOfWorkDiRegistrationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
         services.AddUnitOfWork(OrmProvider.SqlSugar);
-        services.AddUnitOfWorkProvider(OrmProvider.EfCore, CreateProbeBinding(OrmProvider.EfCore));
-        services.AddUnitOfWorkProvider(OrmProvider.SqlSugar, CreateProbeBinding(OrmProvider.SqlSugar));
+        AddProbeBinding(services, OrmProvider.EfCore);
+        AddProbeBinding(services, OrmProvider.SqlSugar);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -72,8 +72,8 @@ public class UnitOfWorkDiRegistrationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
         services.AddUnitOfWork();
-        services.AddUnitOfWorkProvider(OrmProvider.EfCore, CreateProbeBinding(OrmProvider.EfCore));
-        services.AddUnitOfWorkProvider(OrmProvider.SqlSugar, CreateProbeBinding(OrmProvider.SqlSugar));
+        AddProbeBinding(services, OrmProvider.EfCore);
+        AddProbeBinding(services, OrmProvider.SqlSugar);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -92,7 +92,7 @@ public class UnitOfWorkDiRegistrationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
         services.AddUnitOfWork();
-        services.AddUnitOfWorkProvider(OrmProvider.EfCore, CreateProbeBinding(OrmProvider.EfCore));
+        AddProbeBinding(services, OrmProvider.EfCore);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -110,8 +110,8 @@ public class UnitOfWorkDiRegistrationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
         services.AddUnitOfWork();
-        services.AddUnitOfWorkProvider(OrmProvider.EfCore, CreateProbeBinding(OrmProvider.EfCore));
-        services.AddUnitOfWorkProvider(OrmProvider.EfCore, CreateProbeBinding(OrmProvider.EfCore));
+        AddProbeBinding(services, OrmProvider.EfCore);
+        AddProbeBinding(services, OrmProvider.EfCore);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -156,40 +156,103 @@ public class UnitOfWorkDiRegistrationTests
     }
 
     [Fact]
+    public void Different_custom_factories_fail_deterministically_in_both_orders()
+    {
+        var services = new ServiceCollection();
+        services.AddUnitOfWork<ProbeUnitOfWorkFactory>();
+
+        var act = () => services.AddUnitOfWork<SecondProbeUnitOfWorkFactory>();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Conflicting unit-of-work registrations*ProbeUnitOfWorkFactory*SecondProbeUnitOfWorkFactory*");
+
+        var reversedServices = new ServiceCollection();
+        reversedServices.AddUnitOfWork<SecondProbeUnitOfWorkFactory>();
+
+        var reversedAct = () => reversedServices.AddUnitOfWork<ProbeUnitOfWorkFactory>();
+        reversedAct.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Conflicting unit-of-work registrations*SecondProbeUnitOfWorkFactory*ProbeUnitOfWorkFactory*");
+    }
+
+    [Fact]
+    public void Same_custom_factory_repeated_is_idempotent()
+    {
+        var services = new ServiceCollection();
+        services.AddUnitOfWork<ProbeUnitOfWorkFactory>();
+        services.AddUnitOfWork<ProbeUnitOfWorkFactory>();
+
+        services.Count(descriptor => descriptor.ServiceType == typeof(IUnitOfWorkFactory)).Should().Be(1);
+    }
+
+    [Fact]
+    public void Same_custom_factory_with_conflicting_defaults_fails()
+    {
+        var services = new ServiceCollection();
+        services.AddUnitOfWork<ProbeUnitOfWorkFactory>(OrmProvider.EfCore);
+
+        var act = () => services.AddUnitOfWork<ProbeUnitOfWorkFactory>(OrmProvider.SqlSugar);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Conflicting default ORM providers*");
+    }
+
+    [Fact]
     public void RequiresNew_uses_child_scope_and_restores_parent_state()
     {
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
+        services.AddScoped<ProbeUnitOfWork>(sp =>
+            new ProbeUnitOfWork(sp.GetRequiredService<ScopeMarker>().Id, OrmProvider.EfCore));
         services.AddUnitOfWork();
-        services.AddUnitOfWorkProvider(OrmProvider.EfCore, CreateProbeBinding(OrmProvider.EfCore));
+        services.AddUnitOfWorkProvider(
+            OrmProvider.EfCore,
+            static sp => sp.GetRequiredService<ProbeUnitOfWork>(),
+            supportsRequiresNew: true,
+            ambientContextFactory: static sp => sp.GetRequiredService<ScopeMarker>());
 
         using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
-
+        var scope = provider.CreateScope();
         ProbeUnitOfWork outerUnitOfWork;
         ProbeUnitOfWork innerUnitOfWork;
-        using (var outerScope = manager.BeginScope())
+        try
         {
-            outerUnitOfWork = (ProbeUnitOfWork)outerScope.UnitOfWork;
-            using (var innerScope = manager.BeginScope(requiresNew: true))
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+            using (var outerScope = manager.BeginScope())
             {
-                innerScope.IsOwner.Should().BeTrue();
-                innerUnitOfWork = (ProbeUnitOfWork)innerScope.UnitOfWork;
-                innerUnitOfWork.Should().NotBeSameAs(outerUnitOfWork,
-                    "requiresNew must not hand back the same scoped instance");
-                innerUnitOfWork.ScopeId.Should().NotBe(outerUnitOfWork.ScopeId,
-                    "requiresNew must isolate through a child DI scope with its own DbContext/connection");
-                manager.Current.Should().BeSameAs(innerUnitOfWork);
+                outerUnitOfWork = (ProbeUnitOfWork)outerScope.UnitOfWork;
+                using (var innerScope = manager.BeginScope(requiresNew: true))
+                {
+                    innerScope.IsOwner.Should().BeTrue();
+                    innerUnitOfWork = (ProbeUnitOfWork)innerScope.UnitOfWork;
+                    innerUnitOfWork.Should().NotBeSameAs(outerUnitOfWork,
+                        "requiresNew must not hand back the same scoped instance");
+                    innerUnitOfWork.ScopeId.Should().NotBe(outerUnitOfWork.ScopeId,
+                        "requiresNew must isolate through a child DI scope with its own DbContext/connection");
+                    UnitOfWorkAmbientContext.Current.Should().NotBeNull(
+                        "requiresNew must push the provider-declared ambient context for injected dependencies");
+                    manager.Current.Should().BeSameAs(innerUnitOfWork);
+                }
+
+                manager.Current.Should().BeSameAs(outerUnitOfWork,
+                    "disposing the inner scope must restore the parent unit of work");
+                UnitOfWorkAmbientContext.Current.Should().BeNull(
+                    "disposing the inner scope must restore the previous ambient context");
+
+                innerUnitOfWork.DisposeCount.Should().Be(1,
+                    "the child DI scope must dispose its tracked instance exactly once");
+                outerUnitOfWork.DisposeCount.Should().Be(0,
+                    "the caller scope still owns the outer instance while it is alive");
             }
 
-            manager.Current.Should().BeSameAs(outerUnitOfWork,
-                "disposing the inner scope must restore the parent unit of work");
+            manager.CurrentOrNull.Should().BeNull();
+        }
+        finally
+        {
+            scope.Dispose();
         }
 
-        manager.CurrentOrNull.Should().BeNull();
-        innerUnitOfWork.DisposeCount.Should().Be(1);
-        outerUnitOfWork.DisposeCount.Should().Be(1);
+        outerUnitOfWork.DisposeCount.Should().Be(1,
+            "the caller DI scope must dispose its tracked instance exactly once");
     }
 
     [Fact]
@@ -198,8 +261,7 @@ public class UnitOfWorkDiRegistrationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
         services.AddUnitOfWork();
-        services.AddUnitOfWorkProvider(
-            OrmProvider.SqlSugar, CreateProbeBinding(OrmProvider.SqlSugar), supportsRequiresNew: false);
+        AddProbeBinding(services, OrmProvider.SqlSugar);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -221,15 +283,19 @@ public class UnitOfWorkDiRegistrationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopeMarker>();
         services.AddUnitOfWork();
-        services.AddUnitOfWorkProvider(OrmProvider.EfCore, sp =>
-        {
-            if (failNextCreation)
+        services.AddUnitOfWorkProvider(
+            OrmProvider.EfCore,
+            sp =>
             {
-                throw new InvalidOperationException("probe dependency failure");
-            }
+                if (failNextCreation)
+                {
+                    throw new InvalidOperationException("probe dependency failure");
+                }
 
-            return new ProbeUnitOfWork(sp.GetRequiredService<ScopeMarker>().Id, OrmProvider.EfCore);
-        });
+                return new ProbeUnitOfWork(sp.GetRequiredService<ScopeMarker>().Id, OrmProvider.EfCore);
+            },
+            supportsRequiresNew: true,
+            ambientContextFactory: static sp => sp.GetRequiredService<ScopeMarker>());
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -245,8 +311,15 @@ public class UnitOfWorkDiRegistrationTests
             "a failed dependency construction must leave the ambient state untouched");
     }
 
-    private static Func<IServiceProvider, IUnitOfWork> CreateProbeBinding(OrmProvider provider)
-        => sp => new ProbeUnitOfWork(sp.GetRequiredService<ScopeMarker>().Id, provider);
+    private static void AddProbeBinding(IServiceCollection services, OrmProvider provider)
+    {
+        // Selection/diagnostic probes: no ambient context, so requiresNew is
+        // declared unsupported (mirrors an honest provider capability statement).
+        services.AddUnitOfWorkProvider(
+            provider,
+            sp => new ProbeUnitOfWork(sp.GetRequiredService<ScopeMarker>().Id, provider),
+            supportsRequiresNew: false);
+    }
 
     private sealed class ScopeMarker
     {
@@ -254,6 +327,12 @@ public class UnitOfWorkDiRegistrationTests
     }
 
     private sealed class ProbeUnitOfWorkFactory : IUnitOfWorkFactory
+    {
+        public IUnitOfWork Create(OrmProvider provider)
+            => new ProbeUnitOfWork(Guid.NewGuid(), provider);
+    }
+
+    private sealed class SecondProbeUnitOfWorkFactory : IUnitOfWorkFactory
     {
         public IUnitOfWork Create(OrmProvider provider)
             => new ProbeUnitOfWork(Guid.NewGuid(), provider);
