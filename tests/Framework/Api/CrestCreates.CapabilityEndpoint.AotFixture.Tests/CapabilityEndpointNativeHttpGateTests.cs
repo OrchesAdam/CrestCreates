@@ -30,6 +30,7 @@ public sealed class CapabilityEndpointNativeHttpGateTests
         var outcome = await RunGateAsync(correctContentExpectation: true);
 
         outcome.PublishExitCode.Should().Be(0, outcome.PublishLog);
+        outcome.PublishTimedOut.Should().BeFalse("the bounded publish budget must not be exhausted");
         // Scope the IL warning assertion to the fixture's own compilation: the
         // fixture project treats IL2026/IL3050 as errors. Pre-existing warnings
         // from dependency projects (Application.Contracts, Aop) stay visible in
@@ -62,43 +63,103 @@ public sealed class CapabilityEndpointNativeHttpGateTests
             .And.Contain("\"expectationMode\": \"deliberately-wrong\"");
     }
 
-    private static IEnumerable<string> FixtureTaggedIlWarnings(string publishLog)
-        => publishLog
-            .Split('\n')
-            .Where(line =>
-                (line.Contains("warning IL2026", StringComparison.Ordinal)
-                 || line.Contains("warning IL3050", StringComparison.Ordinal))
-                && line.Contains("CrestCreates.CapabilityEndpoint.AotFixture.csproj", StringComparison.Ordinal));
-
-    private static async Task<GateRunOutcome> RunGateAsync(bool correctContentExpectation)
+    [Fact]
+    public async Task Gate_records_failure_evidence_when_publish_throws()
     {
-        var fixture = await Published.Value;
-        var evidence = new EvidenceCollector(
+        var outcome = await RunGateCoreAsync(
+            acquireFixture: () => Task.FromException<PublishedFixture>(
+                new NativeFixtureStartupException(
+                    "simulated dotnet start failure: executable not found",
+                    standardOutput: string.Empty,
+                    standardError: string.Empty)),
+            correctContentExpectation: true,
+            evidenceName: "capability-endpoint-native-http-fault-publish-throws");
+
+        outcome.Passed.Should().BeFalse();
+        outcome.Failure.Should().Contain("simulated dotnet start failure");
+        var evidence = File.ReadAllText(outcome.EvidencePath);
+        evidence.Should().Contain("\"result\": \"failed\"")
+            .And.Contain("simulated dotnet start failure")
+            .And.Contain(NativeAotGateSupport.ResolveSha());
+    }
+
+    [Fact]
+    public async Task Gate_records_partial_publish_log_when_publish_times_out()
+    {
+        var outcome = await RunGateCoreAsync(
+            acquireFixture: () => Task.FromResult(new PublishedFixture(
+                OutputDirectory: Path.GetTempPath(),
+                ExecutablePath: Path.Combine(Path.GetTempPath(), "crest-missing-fixture"),
+                Command: "dotnet publish simulated-project",
+                PublishExitCode: -1,
+                PublishTimedOut: true,
+                PublishLog: "partial publish output captured before the bounded timeout",
+                PublishDuration: TimeSpan.FromMinutes(20))),
+            correctContentExpectation: true,
+            evidenceName: "capability-endpoint-native-http-fault-publish-timeout");
+
+        outcome.Passed.Should().BeFalse();
+        outcome.Failure.Should().Contain("timed out");
+        var evidence = File.ReadAllText(outcome.EvidencePath);
+        evidence.Should().Contain("\"result\": \"failed\"")
+            .And.Contain("partial publish output captured before the bounded timeout")
+            .And.Contain("\"publishTimedOut\": true")
+            .And.Contain("\"publishCommand\": \"dotnet publish simulated-project\"");
+    }
+
+    private static Task<GateRunOutcome> RunGateAsync(bool correctContentExpectation)
+        => RunGateCoreAsync(
+            () => Published.Value,
+            correctContentExpectation,
             correctContentExpectation
                 ? "capability-endpoint-native-http"
                 : "capability-endpoint-native-http-negative");
+
+    internal static async Task<GateRunOutcome> RunGateCoreAsync(
+        Func<Task<PublishedFixture>> acquireFixture,
+        bool correctContentExpectation,
+        string evidenceName)
+    {
+        // Evidence collection starts before the shared publish task is awaited:
+        // a publish timeout or start failure must still produce a failure JSON
+        // with the partial command/transcript instead of leaving the gate
+        // without evidence.
+        var evidence = new EvidenceCollector(evidenceName);
         var transcript = new List<Dictionary<string, object?>>();
 
         evidence.Add("gate", "capability-endpoint-native-http");
         evidence.Add("expectationMode", correctContentExpectation ? "correct" : "deliberately-wrong");
         evidence.Add("sha", NativeAotGateSupport.ResolveSha());
         evidence.Add("rid", Rid);
-        evidence.Add("publishCommand", fixture.Command);
-        evidence.Add("publishExitCode", fixture.PublishExitCode);
-        evidence.Add("publishDurationSeconds", Math.Round(fixture.PublishDuration.TotalSeconds, 1));
-        evidence.Add("publishLog", fixture.PublishLog);
 
         string? failure = null;
         var processReaped = false;
         NativeServerProcess? server = null;
-        var baseUrl = string.Empty;
+        PublishedFixture? fixture = null;
 
         try
         {
-            if (fixture.PublishExitCode != 0)
-                throw new InvalidOperationException("NativeAOT publish failed; see publishLog for details.");
+            fixture = await acquireFixture();
+            evidence.Add("publishCommand", fixture.Command);
+            evidence.Add("publishExitCode", fixture.PublishExitCode);
+            evidence.Add("publishTimedOut", fixture.PublishTimedOut);
+            evidence.Add("publishDurationSeconds", Math.Round(fixture.PublishDuration.TotalSeconds, 1));
+            evidence.Add("publishLog", fixture.PublishLog);
 
-            (server, baseUrl) = await StartWithBoundedBindRetryAsync(fixture);
+            if (fixture.PublishTimedOut)
+            {
+                throw new InvalidOperationException(
+                    "NativeAOT publish timed out before producing the fixture executable; see publishLog for the partial transcript.");
+            }
+
+            if (fixture.PublishExitCode != 0)
+            {
+                throw new InvalidOperationException("NativeAOT publish failed; see publishLog for details.");
+            }
+
+            var baseUrl = string.Empty;
+            (server, baseUrl) = await NativeServerLauncher.StartWithBoundedBindRetryAsync(
+                fixture.ExecutablePath, fixture.OutputDirectory, TimeSpan.FromSeconds(30));
             evidence.Add("processId", server.ProcessId);
             evidence.Add("baseUrl", baseUrl);
 
@@ -137,46 +198,10 @@ public sealed class CapabilityEndpointNativeHttpGateTests
             Passed: failure is null,
             Failure: failure,
             ProcessReaped: processReaped,
-            PublishExitCode: fixture.PublishExitCode,
-            PublishLog: fixture.PublishLog,
+            PublishExitCode: fixture?.PublishExitCode ?? -1,
+            PublishTimedOut: fixture?.PublishTimedOut ?? false,
+            PublishLog: fixture?.PublishLog ?? string.Empty,
             EvidencePath: evidence.FilePath);
-    }
-
-    private static async Task<(NativeServerProcess Server, string BaseUrl)> StartWithBoundedBindRetryAsync(
-        PublishedFixture fixture)
-    {
-        const int maxAttempts = 3;
-        string? lastOutput = null;
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            var port = NativeAotGateSupport.ReserveLoopbackPort();
-            var baseUrl = $"http://127.0.0.1:{port}";
-            var server = NativeServerProcess.Start(
-                fixture.ExecutablePath, fixture.OutputDirectory, baseUrl);
-            try
-            {
-                await NativeGateWaiter.WaitForListeningLineAsync(server, TimeSpan.FromSeconds(30));
-                server.StandardOutput.Should().Contain(
-                    $"Now listening on: {baseUrl}",
-                    "the listening line must come from this child process on the port reserved for this run");
-                return (server, baseUrl);
-            }
-            catch (NativeFixtureStartupException ex)
-            {
-                lastOutput = ex.StandardOutput + Environment.NewLine + ex.StandardError;
-                var lostBindRace = lastOutput.Contains(
-                    "address already in use", StringComparison.OrdinalIgnoreCase);
-                await server.DisposeAsync();
-                if (!lostBindRace || attempt == maxAttempts)
-                    throw;
-            }
-        }
-
-        throw new NativeFixtureStartupException(
-            $"Native fixture failed to bind a loopback port after {maxAttempts} bounded attempts.",
-            lastOutput ?? string.Empty,
-            string.Empty);
     }
 
     private static async Task RunHttpMatrixAsync(
@@ -276,25 +301,22 @@ public sealed class CapabilityEndpointNativeHttpGateTests
             $"publish \"{project}\" -c Release -r {Rid} --self-contained true " +
             $"-p:CrestCreatesPublishMode=aot --disable-build-servers -o \"{outputDirectory}\"";
 
-        ProcessResult publish;
-        try
-        {
-            publish = await NativeAotGateSupport.RunProcessAsync(
-                "dotnet", command, TimeSpan.FromMinutes(20));
-        }
-        catch (TimeoutException)
-        {
-            TryDelete(outputDirectory);
-            throw;
-        }
+        var publish = await NativeAotGateSupport.RunProcessAsync(
+            "dotnet", command, TimeSpan.FromMinutes(20));
 
         var executable = Path.Combine(outputDirectory, "CrestCreates.CapabilityEndpoint.AotFixture");
-        if (publish.ExitCode == 0 && !OperatingSystem.IsWindows() && File.Exists(executable))
+        if (publish.ExitCode == 0 && !publish.TimedOut && !OperatingSystem.IsWindows() && File.Exists(executable))
         {
             File.SetUnixFileMode(
                 executable,
                 File.GetUnixFileMode(executable)
                 | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+        }
+        else if (publish.TimedOut || publish.ExitCode != 0)
+        {
+            // Partial publish artifacts are discarded; the captured transcript is
+            // retained on the fixture result so failure evidence survives.
+            TryDelete(outputDirectory);
         }
 
         return new PublishedFixture(
@@ -302,6 +324,7 @@ public sealed class CapabilityEndpointNativeHttpGateTests
             ExecutablePath: executable,
             Command: "dotnet " + command,
             PublishExitCode: publish.ExitCode,
+            PublishTimedOut: publish.TimedOut,
             PublishLog: publish.Output,
             PublishDuration: publish.Duration);
     }
@@ -318,6 +341,14 @@ public sealed class CapabilityEndpointNativeHttpGateTests
         }
     }
 
+    private static IEnumerable<string> FixtureTaggedIlWarnings(string publishLog)
+        => publishLog
+            .Split('\n')
+            .Where(line =>
+                (line.Contains("warning IL2026", StringComparison.Ordinal)
+                 || line.Contains("warning IL3050", StringComparison.Ordinal))
+                && line.Contains("CrestCreates.CapabilityEndpoint.AotFixture.csproj", StringComparison.Ordinal));
+
     private static void RequireLinuxX64()
     {
         if (!OperatingSystem.IsLinux()
@@ -328,19 +359,21 @@ public sealed class CapabilityEndpointNativeHttpGateTests
         }
     }
 
-    private sealed record PublishedFixture(
+    internal sealed record PublishedFixture(
         string OutputDirectory,
         string ExecutablePath,
         string Command,
         int PublishExitCode,
+        bool PublishTimedOut,
         string PublishLog,
         TimeSpan PublishDuration);
 
-    private sealed record GateRunOutcome(
+    internal sealed record GateRunOutcome(
         bool Passed,
         string? Failure,
         bool ProcessReaped,
         int PublishExitCode,
+        bool PublishTimedOut,
         string PublishLog,
         string EvidencePath);
 

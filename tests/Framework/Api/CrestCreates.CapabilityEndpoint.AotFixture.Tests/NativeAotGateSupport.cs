@@ -88,30 +88,41 @@ internal static class NativeAotGateSupport
         };
         process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         process.Start();
+        var processId = process.Id;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         using var timeoutSource = new CancellationTokenSource(timeout);
+        var timedOut = false;
         try
         {
             await process.WaitForExitAsync(timeoutSource.Token);
         }
         catch (OperationCanceledException)
         {
+            timedOut = true;
             process.Kill(entireProcessTree: true);
             await process.WaitForExitAsync();
-            throw new TimeoutException(
-                $"Process '{fileName} {arguments}' exceeded the bounded timeout of {timeout}.");
         }
 
         var duration = DateTime.UtcNow - startedAt;
+        // Drain captured output even on timeout so the partial publish transcript
+        // is preserved for the failure evidence instead of being discarded.
+        var output = string.Concat(await stdout, Environment.NewLine, await stderr);
         return new ProcessResult(
-            process.ExitCode,
-            string.Concat(await stdout, Environment.NewLine, await stderr),
-            duration);
+            timedOut ? -1 : process.ExitCode,
+            output,
+            duration,
+            timedOut,
+            processId);
     }
 }
 
-internal sealed record ProcessResult(int ExitCode, string Output, TimeSpan Duration);
+internal sealed record ProcessResult(
+    int ExitCode,
+    string Output,
+    TimeSpan Duration,
+    bool TimedOut = false,
+    int ProcessId = 0);
 
 internal sealed class EvidenceCollector
 {
@@ -149,14 +160,27 @@ internal sealed class EvidenceCollector
 
 internal sealed class NativeFixtureStartupException : Exception
 {
-    public NativeFixtureStartupException(string message, string standardOutput, string standardError)
+    public NativeFixtureStartupException(
+        string message,
+        string standardOutput,
+        string standardError,
+        int? processId = null,
+        int? processExitCode = null)
         : base(message)
     {
         StandardOutput = standardOutput;
         StandardError = standardError;
+        ProcessId = processId;
+        ProcessExitCode = processExitCode;
     }
 
     public string StandardOutput { get; }
 
     public string StandardError { get; }
+
+    /// <summary>本次启动的子进程 PID（清理后保留，用于证明进程已回收）。</summary>
+    public int? ProcessId { get; }
+
+    /// <summary>清理后的子进程退出码（null 表示无法回收）。</summary>
+    public int? ProcessExitCode { get; }
 }

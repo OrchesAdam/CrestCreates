@@ -49,6 +49,7 @@
   `WaitForExitAsync`，只操作本次启动的进程句柄。
 - 证据（成功与失败均写）：`tests/artifacts/aot-native-evidence/*.json`，含 SHA、RID、publish 命令/exit code/日志、
   进程 PID/退出码、stdout/stderr、请求/响应 transcript（case、method、path、request body、status、response body、耗时）、result/failure。
+  evidence 收集先于共享 publish 任务创建：publish 抛异常或超时也会落盘失败 JSON 与 partial publish transcript。
   CI 以 `if: always()` 上传 `aot-native-evidence-<sha>`；无 token/连接串等敏感内容。
 
 ### 1.3 HTTP 用例矩阵（全部在原生进程中执行）
@@ -69,6 +70,9 @@
 | --- | --- | --- |
 | 进程提前退出 | `/bin/bash -c "exit 7"` + readiness 等待 | `NativeFixtureStartupException` 包含 exit code 7；进程已回收（契约测试） |
 | readiness 超时 | `/bin/bash -c "sleep 30"` + 1.5s deadline | `TimeoutException` 含 deadline；进程已回收（契约测试） |
+| 监听超时（真实启动 helper） | 受控子进程不输出监听行（`echo starting; sleep 30`）+ 1.5s 有界等待 | helper 在 rethrow 前完成回收：`NativeFixtureStartupException` 含 attempt 编号、PID、退出码与保留输出；断言进程已消失（契约测试） |
+| 监听行不匹配（真实启动 helper） | 子进程输出其它端口的 `Now listening on:` | 归属断言失败被包装为 `NativeFixtureStartupException`（含 PID/退出码/输出）；进程已回收（契约测试） |
+| publish/进程超时 | `RunProcessAsync` 有界超时返回 `TimedOut=true` + partial transcript；门禁侧故障注入（publish 抛异常、publish 超时） | 失败 JSON 落盘（command、partial publishLog、SHA/RID、`publishTimedOut` 标志）；超时进程已回收（契约测试 + 门禁故障注入测试） |
 | HTTP 内容断言失败 | 复用同一原生产物，对唯一值故意断言错误值（负例门禁测试） | `XunitException` 传播、证据 `result=failed`、`expectationMode=deliberately-wrong`、进程已回收 |
 | 缺失可执行文件 | 指向不存在的路径 | 启动前即 `FileNotFoundException`（契约测试） |
 | 旧产物误用 | 每次发布到唯一 GUID 目录并只执行该目录内文件 | 结构上不可能执行旧产物 |
@@ -138,8 +142,9 @@ linux-x64 上 CI 必跑（`Category=NativeAotGate` 过滤）；非 linux-x64 环
 
 | 命令 | 结果 |
 | --- | --- |
-| `dotnet test .../CapabilityEndpoint.AotFixture.Tests --filter "FullyQualifiedName~CapabilityEndpointNativeHttpGateTests"` | 2/2 通过（含发布+原生运行，≈1m31s） |
-| 同上 `--filter "FullyQualifiedName~NativeGateRunnerContractTests"` | 3/3 通过（1s） |
+| `dotnet test .../CapabilityEndpoint.AotFixture.Tests`（整项目） | 13/13 通过（含发布+原生运行，≈1m32s） |
+| 同上 `--filter "FullyQualifiedName~CapabilityEndpointNativeHttpGateTests"` | 4/4 通过（正例 + 负例 + 2 个 publish 故障注入） |
+| 同上 `--filter "FullyQualifiedName~NativeGateRunnerContractTests"` | 6/6 通过（含启动 helper 监听超时/监听行不匹配回收、RunProcess 超时保留 partial output） |
 | 同上 `--filter "Category!=NativeAotGate"` | 3/3 JIT 集成测试通过（268ms） |
 | `dotnet test tests/Integrations/CrestCreates.Mcp.AotFixture.Tests` | 1/1 通过（28s，热缓存） |
 | `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture.Tests` | 1/1 通过（31s，热缓存） |
@@ -147,6 +152,12 @@ linux-x64 上 CI 必跑（`Category=NativeAotGate` 过滤）；非 linux-x64 环
 | `dotnet test tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests` | 9/9 通过 |
 | `dotnet build CrestCreates.slnx` | 0 错误 |
 | 基线缺口复现（修复前） | 500 NotSupportedException（`DynamicApiResponse` object envelope），见 §结论摘要 2 |
+
+审查修复（2026-10-10，PR #135 review）：
+- R135-1：启动逻辑提取为 `NativeServerLauncher`，成功交付前由 helper 承担完整所有权；所有异常路径先回收再抛出，
+  仅“address already in use”决定是否重试；异常携带 PID/退出码/输出。回归经真实 helper（非 waiter 直调）验证。
+- R135-2：`EvidenceCollector` 先于共享 publish 任务创建；`RunProcessAsync` 超时返回 `TimedOut=true` 并保留 partial
+  transcript；新增 publish 抛异常/超时的故障注入测试断言失败 JSON 与 partial logs 落盘。
 
 CI 有效性以 PR 最终 head 的 `ci.yml`/`full-validation.yml` 运行为准；关闭要求中的“有效 CI 的 native 门禁通过”
 以该 run 为最终证据。

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using Xunit;
 using Xunit.Sdk;
@@ -6,9 +7,11 @@ namespace CrestCreates.CapabilityEndpoint.AotFixture.Tests;
 
 /// <summary>
 /// Bounded contract tests for the native gate runner itself: startup failure,
-/// readiness timeout and process reclamation must propagate as failures, and a
-/// missing executable must never produce a green signal. These tests never
-/// publish; they prove failure propagation with fast, reproducible stubs.
+/// readiness timeout, listening-line mismatch, publish/process timeouts and
+/// process reclamation must propagate as failures, and a missing executable
+/// must never produce a green signal. These tests never publish a real
+/// fixture; they prove failure propagation and cleanup with fast,
+/// reproducible stubs through the same helpers the gate uses.
 /// </summary>
 [Trait("Category", "NativeAotGate")]
 public sealed class NativeGateRunnerContractTests
@@ -81,6 +84,79 @@ public sealed class NativeGateRunnerContractTests
             exitCode.Should().NotBeNull();
             await server.DisposeAsync();
         }
+    }
+
+    [Fact]
+    public async Task Startup_helper_reaps_child_when_listen_wait_times_out()
+    {
+        RequireLinuxX64();
+
+        var act = async () => await NativeServerLauncher.StartWithBoundedBindRetryAsync(
+            "/bin/bash",
+            Path.GetTempPath(),
+            listenTimeout: TimeSpan.FromSeconds(1.5),
+            maxAttempts: 1,
+            runArguments: new[] { "-c", "echo starting; sleep 30" });
+
+        var exception = await act.Should().ThrowAsync<NativeFixtureStartupException>(
+            "a child that never reports its listening endpoint must fail the bounded startup");
+        exception.Which.Message.Should().Contain("attempt 1/1");
+        exception.Which.Message.Should().Contain("did not report a listening endpoint");
+        exception.Which.ProcessExitCode.Should().NotBeNull(
+            "the startup helper must reap the child before rethrowing");
+        exception.Which.StandardOutput.Should().Contain("starting",
+            "captured output must be preserved on the failure path");
+
+        AssertProcessGone(exception.Which.ProcessId,
+            "the child must be gone after the listen-wait timeout");
+    }
+
+    [Fact]
+    public async Task Startup_helper_reaps_child_when_listening_line_does_not_match()
+    {
+        RequireLinuxX64();
+
+        var act = async () => await NativeServerLauncher.StartWithBoundedBindRetryAsync(
+            "/bin/bash",
+            Path.GetTempPath(),
+            listenTimeout: TimeSpan.FromSeconds(15),
+            maxAttempts: 1,
+            runArguments: new[] { "-c", "echo 'Now listening on: http://127.0.0.1:1'; sleep 30" });
+
+        var exception = await act.Should().ThrowAsync<NativeFixtureStartupException>(
+            "a listening line from a different endpoint must fail closed");
+        exception.Which.Message.Should().Contain("attempt 1/1");
+        exception.Which.ProcessExitCode.Should().NotBeNull(
+            "the startup helper must reap the child before rethrowing");
+        exception.Which.StandardOutput.Should().Contain("Now listening on: http://127.0.0.1:1");
+
+        AssertProcessGone(exception.Which.ProcessId,
+            "the child must be gone after the listening-line mismatch");
+    }
+
+    [Fact]
+    public async Task RunProcess_timeout_preserves_partial_output_and_reaps_child()
+    {
+        RequireLinuxX64();
+
+        var result = await NativeAotGateSupport.RunProcessAsync(
+            "/bin/bash", "-c \"echo partial-transcript; sleep 30\"", TimeSpan.FromSeconds(1.5));
+
+        result.TimedOut.Should().BeTrue();
+        result.ExitCode.Should().Be(-1);
+        result.Output.Should().Contain("partial-transcript",
+            "the transcript captured before the timeout must not be discarded");
+        result.Duration.Should().BeGreaterThanOrEqualTo(TimeSpan.FromSeconds(1));
+
+        AssertProcessGone(result.ProcessId,
+            "the timed-out process must be reaped instead of being left behind");
+    }
+
+    private static void AssertProcessGone(int? processId, string because)
+    {
+        processId.Should().NotBeNull();
+        var probe = () => Process.GetProcessById(processId!.Value);
+        probe.Should().Throw<ArgumentException>(because);
     }
 
     private static void RequireLinuxX64()
