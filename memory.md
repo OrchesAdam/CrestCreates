@@ -46,19 +46,27 @@ archived to 99_RecycleBin, never deleted; never output credentials.
   scopes with ambient context following (pre-injected EF dependencies bind to the
   current UoW; other providers fail closed); legacy Infrastructure dual
   factory/manager archived; native gate `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`.
-- UnitOfWork kernel/state (delivered by #137 slice 1, PR in review): unified
-  `UnitOfWorkOptions` (transaction toggle / Required+RequiresNew / isolation / timeout /
-  provider with null-inheritance rules), caller-frame activation protocol
-  (`BeginScope` sync carrier + `StartAsync`; AOP non-async callbacks + OnExit sync
-  restore), four orthogonal result dimensions (participation state / transaction
-  outcome / notification outcome / released), join participant completion with
-  rollback-only rejection, `Committed` recorded immediately at commit confirmation,
-  `Unknown` never rewritten by rollback attempts, post-commit notification failure
-  preserved as committed, operation-layer token composition (official repositories/
-  providers combine incoming CT with the managed execution token), provider
-  flush/commit/notify split; dead contracts archived
-  (`99_RecycleBin/issue-137-contracts-state`). Slices 2-5 (typed ambient chain,
-  provider capabilities/resource keys, failure/native evidence, CAP lease) pending.
+- UnitOfWork kernel/state (delivered by #137 slices 1-5, PR #139 pending unified
+  review): unified `UnitOfWorkOptions` (transaction toggle / Required+RequiresNew /
+  isolation / timeout / provider with null-inheritance rules), caller-frame
+  activation protocol (`BeginScope` sync carrier + `StartAsync`; AOP non-async
+  callbacks + OnExit sync restore), four orthogonal result dimensions
+  (participation state / transaction outcome / notification outcome / released),
+  join participant completion with rollback-only rejection, `Committed` recorded
+  immediately at commit confirmation, `Unknown` never rewritten by rollback
+  attempts, post-commit notification failure preserved as committed,
+  operation-layer token composition (official repositories/providers combine
+  incoming CT with the managed execution token), provider flush/commit/notify
+  split; managed-chain ambient routing (descendant-or-self visibility + tenant/
+  declaration/connection validation before routing), abandonment terminates AND
+  discards uncommitted tracking; provider capability declarations with
+  pre-execution gate (SQLite={Serializable}, PostgreSQL={ReadCommitted,
+  RepeatableRead, Serializable} measured; FreeSql/SqlSugar declare termination/
+  discard, no isolation levels); CAP participation lease (provider-owned live
+  view, read-only identity, borrow rules; handoff doc
+  `docs/superpowers/specs/2026-10-10-issue-137-cap-handoff.md`); dead contracts
+  archived (`99_RecycleBin/issue-137-contracts-state`); implementation issue log
+  `docs/superpowers/plans/2026-10-10-issue-137-implementation-issues-log.md`.
 - Review scores (8.5/10, ~70%) are subjective single-review estimates, not
   production-readiness guarantees; support claims must point to per-item evidence.
 
@@ -67,7 +75,8 @@ archived to 99_RecycleBin, never deleted; never output credentials.
 - Wave 0: #122 baseline calibration (merged via PR #134).
 - Wave 1: #123 native gates / evidence matrix (merged via PR #135); #124 UnitOfWork
   (merged via PR #136); #137 UnitOfWork follow-up (design+plans merged via PR #138;
-  slice 1 kernel/state PR pending; slices 2-5 before #125); #125 CAP (blocked on #137).
+  slices 1-5 implemented on PR #139, unified review pending); #125 CAP (blocked on
+  #137 acceptance).
 - Wave 2: #126 LocalEvent / #127 RabbitMQ / #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
