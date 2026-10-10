@@ -55,7 +55,12 @@ namespace CrestCreates.Data.SqlSugar.Modules
             services.AddUnitOfWorkProvider(
                 OrmProvider.SqlSugar,
                 static sp => sp.GetRequiredService<SqlSugarUnitOfWork>(),
-                supportsRequiresNew: false);
+                supportsRequiresNew: false,
+                capabilities: new UnitOfWorkProviderCapabilities
+                {
+                    PromptTerminationOnAbandon = true,
+                    DiscardUncommittedOnAbandon = true
+                });
         }
     }
 }

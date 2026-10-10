@@ -13,7 +13,7 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
     /// <summary>
     /// FreeSql 工作单元实现：flush / commit / 提交后通知职责分离（内核负责顺序）。
     /// </summary>
-    public class FreeSqlUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkCommittedNotifier
+    public class FreeSqlUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkCommittedNotifier, IUnitOfWorkAbandonable
     {
         private readonly FreeSqlUnitOfWorkManager _unitOfWorkManager;
         private global::FreeSql.IUnitOfWork? _unitOfWork;
@@ -161,6 +161,27 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
             {
                 _unitOfWork.Dispose();
                 _unitOfWork = null;
+            }
+        }
+
+        /// <summary>
+        /// 未完成退出的终结：回滚并释放 SDK 工作单元，清空已跟踪实体的域事件队列；可重复调用。
+        /// </summary>
+        public void AbandonPendingWork()
+        {
+            try
+            {
+                _unitOfWork?.Rollback();
+            }
+            catch (Exception)
+            {
+                // Best effort: the handle is released below regardless, and the
+                // failure that triggered scope unwinding must not be replaced.
+            }
+            finally
+            {
+                DisposeUnitOfWork();
+                _trackedEntities.Clear();
             }
         }
 

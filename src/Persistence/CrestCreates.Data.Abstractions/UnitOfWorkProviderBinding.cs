@@ -30,12 +30,16 @@ namespace CrestCreates.Data.Abstractions
         /// 读取当前租户键的委托（隔离帧记录该键；读方在路由前校验租户一致性）。
         /// 为 null 表示该 Provider 不参与租户身份校验。
         /// </param>
+        /// <param name="capabilities">
+        /// Provider 能力声明（隔离级别集合、终结/丢弃能力等）；内核在执行业务前校验。null 使用默认声明（无显式隔离级别）。
+        /// </param>
         public UnitOfWorkProviderBinding(
             OrmProvider provider,
             Func<IServiceProvider, IUnitOfWork> factory,
             bool supportsRequiresNew = true,
             Func<IServiceProvider, IDataBaseContext?>? ambientContextFactory = null,
-            Func<IServiceProvider, string?>? tenantKeyFactory = null)
+            Func<IServiceProvider, string?>? tenantKeyFactory = null,
+            UnitOfWorkProviderCapabilities? capabilities = null)
         {
             if (supportsRequiresNew && ambientContextFactory is null)
             {
@@ -50,6 +54,7 @@ namespace CrestCreates.Data.Abstractions
             SupportsRequiresNew = supportsRequiresNew;
             AmbientContextFactory = ambientContextFactory;
             TenantKeyFactory = tenantKeyFactory;
+            Capabilities = capabilities ?? UnitOfWorkProviderCapabilities.Default;
         }
 
         /// <summary>
@@ -77,5 +82,10 @@ namespace CrestCreates.Data.Abstractions
         /// 当前租户键读取委托；null 表示该绑定不参与租户身份校验。
         /// </summary>
         public Func<IServiceProvider, string?>? TenantKeyFactory { get; }
+
+        /// <summary>
+        /// Provider 能力声明（内核在执行业务前校验；未声明即不支持）。
+        /// </summary>
+        public UnitOfWorkProviderCapabilities Capabilities { get; }
     }
 }

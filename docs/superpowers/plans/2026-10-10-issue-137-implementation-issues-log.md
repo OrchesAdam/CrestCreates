@@ -22,5 +22,7 @@
 | I-07 | 流程 | `dotnet build` 管道给 `tail` 会吞退出码；本仓库 CI 等价本地构建需：solution restore → 遗留 fixture restore → BuildTasks bootstrap → `--no-restore` 构建 | 误判构建结果 | 已写入项目记忆；PR 验证记录用重定向 + `$?` | 已记录 |
 | I-08 | 遗留（切片 2） | 受管执行 token 的**链校验**已贯穿适配器构造的 builder/set 与 `EfCoreRepository`（可注入节点）；平台派生仓储基类 `EfCoreRepositoryBase` 的原始 IQueryable 终结路径仍用顶层帧语义（其派生仓储 ctor 未向基类传递节点）。期限污染的窗口仅限「独立 scope 在同一异步流 + 派生仓储原始 IQueryable 路径」 | 极端场景下独立 scope 可能读到他人截止时间（不含资源/事务路由） | 后续切片或 ORM 轨道：为派生仓储 ctor 传递节点（或基类经 DI 解析节点） | 待处理 |
 | I-09 | 环境/测试 | InMemory 等非关系型 Provider 没有连接配置：ambient 日志键与读方连接校验对非关系型 Provider 自动退化为「声明类型」比较（读取连接串带保护）；无环境帧时快速返回不计算逻辑键 | 无（行为已定义） | 保持该保护；新增非关系型 Provider 时复核 | 已处理 |
+| I-10 | 声明裁定（切片 3） | FreeSql/SqlSugar 能力声明：`PromptTerminationOnAbandon=true`、`DiscardUncommittedOnAbandon=true`（已实现 `IUnitOfWorkAbandonable`）；**未声明隔离级别**（SDK 隔离能力未实测，显式请求由内核执行前拒绝） | 这两个 Provider 不支持显式隔离级别直到有实测证据 | 交 #130 ORM 矩阵：实测 SDK 隔离能力后再逐项声明 | 已裁定 |
+| I-11 | 证据边界（切片 3） | 隔离级别矩阵按 ProviderName 探测声明：SQLite={Serializable}（本地实测接受/拒绝双向）；PG={ReadCommitted,RepeatableRead,Serializable}（CI Testcontainers 实测，本地无 Docker 不运行）；未知提供者按透传声明 | 本地无法运行 PG 用例 | 以 CI 为 PG 证据来源；文档矩阵在切片 4 同步 | 已知/接受 |
 
 （后续切片发现问题将追加到本表。）

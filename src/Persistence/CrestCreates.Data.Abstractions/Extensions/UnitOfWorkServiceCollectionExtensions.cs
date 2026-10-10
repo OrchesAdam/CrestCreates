@@ -45,7 +45,8 @@ namespace CrestCreates.Data.Abstractions
                 sp.GetRequiredService<UnitOfWorkProviderBindingRegistry>(),
                 sp.GetRequiredService<IServiceScopeFactory>(),
                 state.ExplicitDefault,
-                sp.GetRequiredService<UnitOfWorkChainNode>()));
+                sp.GetRequiredService<UnitOfWorkChainNode>(),
+                sp));
 
             return services;
         }
@@ -99,6 +100,9 @@ namespace CrestCreates.Data.Abstractions
         /// <param name="tenantKeyFactory">
         /// 读取当前租户键的委托（隔离帧记录该键；读方在路由前校验租户一致性）。为 null 表示不参与租户身份校验。
         /// </param>
+        /// <param name="capabilities">
+        /// Provider 能力声明（隔离级别集合、终结/丢弃能力等）；内核在执行业务前校验。null 使用默认声明。
+        /// </param>
         /// <returns>服务集合</returns>
         /// <remarks>
         /// 由 Provider 包/模块声明。同一 Provider 出现多个绑定会在装配完成时给出确定性异常，不允许 last-wins。
@@ -109,7 +113,8 @@ namespace CrestCreates.Data.Abstractions
             Func<IServiceProvider, IUnitOfWork> factory,
             bool supportsRequiresNew = true,
             Func<IServiceProvider, IDataBaseContext?>? ambientContextFactory = null,
-            Func<IServiceProvider, string?>? tenantKeyFactory = null)
+            Func<IServiceProvider, string?>? tenantKeyFactory = null,
+            UnitOfWorkProviderCapabilities? capabilities = null)
         {
             if (factory is null)
             {
@@ -117,7 +122,7 @@ namespace CrestCreates.Data.Abstractions
             }
 
             services.AddSingleton(new UnitOfWorkProviderBinding(
-                provider, factory, supportsRequiresNew, ambientContextFactory, tenantKeyFactory));
+                provider, factory, supportsRequiresNew, ambientContextFactory, tenantKeyFactory, capabilities));
             return services;
         }
 

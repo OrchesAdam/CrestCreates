@@ -14,7 +14,7 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
     /// <summary>
     /// SqlSugar 工作单元实现：flush / commit / 提交后通知职责分离（内核负责顺序）。
     /// </summary>
-    public class SqlSugarUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkCommittedNotifier
+    public class SqlSugarUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkCommittedNotifier, IUnitOfWorkAbandonable
     {
         private readonly ISqlSugarClient _sqlSugarClient;
         private bool _isTransactionStarted;
@@ -160,6 +160,30 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
         {
             Dispose(true);
             GC.SuppressFinalize(this);
+        }
+
+        /// <summary>
+        /// 未完成退出的终结：未完成事务回滚，清空已跟踪实体的域事件队列；可重复调用。
+        /// </summary>
+        public void AbandonPendingWork()
+        {
+            try
+            {
+                if (_isTransactionStarted)
+                {
+                    _sqlSugarClient.Ado.RollbackTran();
+                }
+            }
+            catch (Exception)
+            {
+                // Best effort: state is reset below regardless, and the failure
+                // that triggered scope unwinding must not be replaced.
+            }
+            finally
+            {
+                _isTransactionStarted = false;
+                _trackedEntities.Clear();
+            }
         }
 
         protected virtual void Dispose(bool disposing)

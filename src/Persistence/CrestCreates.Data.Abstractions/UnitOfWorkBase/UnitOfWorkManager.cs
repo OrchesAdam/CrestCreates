@@ -1,5 +1,6 @@
 using System;
 using System.Data;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.UnitOfWork;
@@ -29,6 +30,7 @@ namespace CrestCreates.Data.Abstractions
         private readonly IServiceScopeFactory? _scopeFactory;
         private readonly OrmProvider? _explicitDefault;
         private readonly UnitOfWorkChainNode? _chainNode;
+        private readonly IServiceProvider? _serviceProvider;
         private readonly bool _ownsResolvedUnitOfWorks;
         private readonly AsyncLocal<AmbientFrame?> _currentFrame = new();
 
@@ -40,13 +42,15 @@ namespace CrestCreates.Data.Abstractions
             UnitOfWorkProviderBindingRegistry bindings,
             IServiceScopeFactory scopeFactory,
             OrmProvider? explicitDefault = null,
-            UnitOfWorkChainNode? chainNode = null)
+            UnitOfWorkChainNode? chainNode = null,
+            IServiceProvider? serviceProvider = null)
         {
             _factory = factory ?? throw new ArgumentNullException(nameof(factory));
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _explicitDefault = explicitDefault;
             _chainNode = chainNode;
+            _serviceProvider = serviceProvider;
             _ownsResolvedUnitOfWorks = false;
         }
 
@@ -153,6 +157,7 @@ namespace CrestCreates.Data.Abstractions
         private UnitOfWorkScope BeginRootScope(AmbientFrame? frame, UnitOfWorkOptions options)
         {
             var provider = ResolveProvider(options.Provider);
+            ValidateIsolationCapability(provider, options);
             var unitOfWork = _factory.Create(provider);
             var node = new UnitOfWorkChainNode();
             node.AttachTo(frame?.Scope.Node ?? _chainNode);
@@ -171,6 +176,7 @@ namespace CrestCreates.Data.Abstractions
         private UnitOfWorkScope BeginIsolatedScope(AmbientFrame parentFrame, UnitOfWorkOptions options)
         {
             var provider = ResolveProvider(options.Provider);
+            ValidateIsolationCapability(provider, options);
             var binding = _bindings?.GetRequired(provider);
 
             if (binding is not null && !binding.SupportsRequiresNew)
@@ -249,6 +255,39 @@ namespace CrestCreates.Data.Abstractions
             }
 
             return requested ?? _explicitDefault ?? OrmProvider.EfCore;
+        }
+
+        /// <summary>
+        /// 执行前能力校验：显式隔离级别必须在 Provider 声明集合内（未声明即不支持，fail closed）。
+        /// </summary>
+        private void ValidateIsolationCapability(OrmProvider provider, UnitOfWorkOptions options)
+        {
+            if (options.IsolationLevel is not { } level)
+            {
+                return;
+            }
+
+            var binding = _bindings?.GetRequired(provider);
+            if (binding is null)
+            {
+                // 自定义工厂路径：Provider 语义由自定义工厂自行解释（不经过能力索引）。
+                return;
+            }
+
+            var supported = _serviceProvider is not null
+                ? binding.Capabilities.ResolveSupportedIsolationLevels(_serviceProvider)
+                : binding.Capabilities.SupportedIsolationLevels;
+
+            if (!supported.Contains(level))
+            {
+                var declared = supported.Count == 0
+                    ? "<none declared>"
+                    : string.Join(", ", supported);
+                throw new NotSupportedException(
+                    $"The '{provider}' provider does not declare support for isolation level '{level}'. " +
+                    $"Declared levels: {declared}. The request was rejected before executing any business code; " +
+                    "do not request isolation levels the provider does not declare.");
+            }
         }
 
         /// <summary>
