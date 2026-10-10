@@ -11,6 +11,15 @@ using Rougamo.Context;
 
 namespace CrestCreates.Aop.Interceptors;
 
+/// <summary>
+/// 工作单元拦截器：把被拦截方法委托给唯一执行内核。
+/// </summary>
+/// <remarks>
+/// 激活协议（见设计 §4.1）：回调实现**不得使用 async 关键字**——OnEntryAsync 的同步前缀在织入帧内
+/// 完成 <see cref="IUnitOfWorkManager.BeginScope"/> 激活（async 方法体内的 AsyncLocal 写入不会传播到
+/// 织入帧的方法体）；OnExitAsync 在织入帧内同步恢复（Pop + Dispose）。事务开始/完成/回滚/通知全部由
+/// 内核按固定顺序执行，本拦截器不再自实现 begin/commit/flush/rollback。
+/// </remarks>
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = false)]
 public class UnitOfWorkMoAttribute : AsyncMoAttribute
 {
@@ -24,9 +33,9 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
         _requiresTransaction = requiresTransaction;
     }
 
-    public override async ValueTask OnEntryAsync(MethodContext context)
+    public override ValueTask OnEntryAsync(MethodContext context)
     {
-        IUnitOfWorkScope? scope = null;
+        // 同步前缀（织入帧内执行，激活对方法体可见）。
         GetScopeStack().Push(null);
 
         try
@@ -36,87 +45,97 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
             {
                 var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
                 logger?.LogWarning("IUnitOfWorkManager 未注册，跳过工作单元");
-                return;
+                return default;
             }
 
-            scope = uowManager.BeginScope(isTransactional: _requiresTransaction);
+            var options = new UnitOfWorkOptions { IsTransactional = _requiresTransaction };
+            var scope = uowManager.BeginScope(options);
             ReplaceTopScope(scope);
-
-            try
-            {
-                if (scope.IsOwner && scope.IsTransactional)
-                {
-                    await scope.UnitOfWork.BeginTransactionAsync();
-                }
-            }
-            catch
-            {
-                PopScope()?.Dispose();
-                throw;
-            }
+            return new ValueTask(StartScopeAsync(scope, ResolveCallerToken(context)));
         }
         catch
         {
-            if (scope == null)
-            {
-                PopScope();
-            }
-
+            PopScope()?.Dispose();
             throw;
         }
     }
 
-    public override async ValueTask OnSuccessAsync(MethodContext context)
+    public override ValueTask OnSuccessAsync(MethodContext context)
     {
-        var scope = PopScope();
-        if (scope != null)
+        var scope = PeekScope();
+        if (scope is null)
         {
-            try
-            {
-                if (scope.IsOwner && scope.IsTransactional)
-                {
-                    await scope.UnitOfWork.CommitTransactionAsync();
-                }
-                else if (scope.IsOwner)
-                {
-                    await scope.UnitOfWork.SaveChangesAsync();
-                }
-            }
-            catch (Exception exception)
-            {
-                var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
-                logger?.LogError(exception, "工作单元提交失败");
-                throw;
-            }
-            finally
-            {
-                scope.Dispose();
-            }
+            return default;
+        }
+
+        return new ValueTask(CompleteScopeAsync(scope));
+    }
+
+    public override ValueTask OnExceptionAsync(MethodContext context)
+    {
+        var scope = PeekScope();
+        if (scope is null)
+        {
+            return default;
+        }
+
+        return new ValueTask(RollbackScopeAsync(scope, context));
+    }
+
+    public override ValueTask OnExitAsync(MethodContext context)
+    {
+        // 同步恢复段（织入帧内可见）：环境恢复与资源释放恰好一次。
+        try
+        {
+            PopScope()?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
+            logger?.LogError(exception, "工作单元环境恢复失败");
+        }
+
+        return default;
+    }
+
+    private static async Task StartScopeAsync(IUnitOfWorkScope scope, CancellationToken callerToken)
+    {
+        await scope.StartAsync(callerToken).ConfigureAwait(false);
+    }
+
+    private static async Task CompleteScopeAsync(IUnitOfWorkScope scope)
+    {
+        await scope.CompleteAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private static async Task RollbackScopeAsync(IUnitOfWorkScope scope, MethodContext context)
+    {
+        try
+        {
+            await scope.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // 回滚失败不得替换原始业务异常；结果可由 scope 状态检查。
+            var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
+            logger?.LogError(exception, "工作单元回滚失败");
         }
     }
 
-    public override async ValueTask OnExceptionAsync(MethodContext context)
+    private static CancellationToken ResolveCallerToken(MethodContext context)
     {
-        var scope = PopScope();
-        if (scope != null)
+        if (context.Arguments is { } arguments)
         {
-            try
+            foreach (var argument in arguments)
             {
-                if (scope.IsOwner)
+                if (argument is CancellationToken token)
                 {
-                    await scope.UnitOfWork.RollbackTransactionAsync();
+                    return token;
                 }
             }
-            catch (Exception exception)
-            {
-                var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
-                logger?.LogError(exception, "工作单元回滚失败");
-            }
-            finally
-            {
-                scope.Dispose();
-            }
         }
+
+        return default;
     }
 
     private static Stack<IUnitOfWorkScope?> GetScopeStack()
@@ -134,6 +153,12 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
 
         scopes.Pop();
         scopes.Push(scope);
+    }
+
+    private static IUnitOfWorkScope? PeekScope()
+    {
+        var scopes = CurrentScopes.Value;
+        return scopes == null || scopes.Count == 0 ? null : scopes.Peek();
     }
 
     private static IUnitOfWorkScope? PopScope()

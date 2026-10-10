@@ -1,9 +1,9 @@
 # CrestCreates platform status — 2026-10-10
 
-Baseline: master `e27aaf77` (PR #135 merge; prior #134 merge 85bdbb01). Remote verified
-2026-10-10. In flight: #124 UnitOfWork unification (this branch; PR #136 in review) and
-its follow-up #137. Workflow: GitHub PR flow, never auto-merge; replaced files archived
-to 99_RecycleBin, never deleted; never output credentials.
+Baseline: master `1fcf1ab8` (PR #138 merge: #137 design + plans; PR #136/#135 merged
+before). Remote verified 2026-10-10. In flight: #137 UnitOfWork slice 1 (kernel/state,
+this branch; PR in review). Workflow: GitHub PR flow, never auto-merge; replaced files
+archived to 99_RecycleBin, never deleted; never output credentials.
 
 ## Delivered capabilities (master)
 
@@ -39,13 +39,34 @@ to 99_RecycleBin, never deleted; never output credentials.
   `docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md`.
 - HTTP gate scope limits: linux-x64 only; no auth/permission/tenant/bootstrap chain;
   dependency-project IL2026/IL3050 warnings remain visible but are not this gate's signal.
-- UnitOfWork unified registration (delivered by #124, PR pending): single
+- UnitOfWork unified registration (delivered by #124 via PR #136): single
   Data.Abstractions authority (`AddUnitOfWork` + provider-side typed
   `AddUnitOfWorkProvider` bindings; no reflection/assembly scanning; deterministic
   duplicate/missing/conflict diagnostics), requiresNew isolated through child DI
   scopes with ambient context following (pre-injected EF dependencies bind to the
   current UoW; other providers fail closed); legacy Infrastructure dual
   factory/manager archived; native gate `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`.
+- UnitOfWork kernel/state (delivered by #137 slices 1-5, PR #139 pending unified
+  review): unified `UnitOfWorkOptions` (transaction toggle / Required+RequiresNew /
+  isolation / timeout / provider with null-inheritance rules), caller-frame
+  activation protocol (`BeginScope` sync carrier + `StartAsync`; AOP non-async
+  callbacks + OnExit sync restore), four orthogonal result dimensions
+  (participation state / transaction outcome / notification outcome / released),
+  join participant completion with rollback-only rejection, `Committed` recorded
+  immediately at commit confirmation, `Unknown` never rewritten by rollback
+  attempts, post-commit notification failure preserved as committed,
+  operation-layer token composition (official repositories/providers combine
+  incoming CT with the managed execution token), provider flush/commit/notify
+  split; managed-chain ambient routing (descendant-or-self visibility + tenant/
+  declaration/connection validation before routing), abandonment terminates AND
+  discards uncommitted tracking; provider capability declarations with
+  pre-execution gate (SQLite={Serializable}, PostgreSQL={ReadCommitted,
+  RepeatableRead, Serializable} measured; FreeSql/SqlSugar declare termination/
+  discard, no isolation levels); CAP participation lease (provider-owned live
+  view, read-only identity, borrow rules; handoff doc
+  `docs/superpowers/specs/2026-10-10-issue-137-cap-handoff.md`); dead contracts
+  archived (`99_RecycleBin/issue-137-contracts-state`); implementation issue log
+  `docs/superpowers/plans/2026-10-10-issue-137-implementation-issues-log.md`.
 - Review scores (8.5/10, ~70%) are subjective single-review estimates, not
   production-readiness guarantees; support claims must point to per-item evidence.
 
@@ -53,7 +74,9 @@ to 99_RecycleBin, never deleted; never output credentials.
 
 - Wave 0: #122 baseline calibration (merged via PR #134).
 - Wave 1: #123 native gates / evidence matrix (merged via PR #135); #124 UnitOfWork
-  (PR #136 in review); #137 UnitOfWork follow-up (blocked on #124, before #125); #125 CAP.
+  (merged via PR #136); #137 UnitOfWork follow-up (design+plans merged via PR #138;
+  slices 1-5 implemented on PR #139, unified review pending); #125 CAP (blocked on
+  #137 acceptance).
 - Wave 2: #126 LocalEvent / #127 RabbitMQ / #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
@@ -71,7 +94,9 @@ to 99_RecycleBin, never deleted; never output credentials.
 ## Known gaps
 
 - B12 unsupported-intent negative case missing (#133, bounded).
-- UnitOfWork unification (#124, PR #136 in review);
+- UnitOfWork #137 slices 2-5 pending (typed managed ambient + logical resource keys,
+  provider capability declarations + real PG matrices, failure taxonomy/native
+  evidence, CAP participation lease);
   CAP entry split (#125); LocalEvent/RabbitMQ reflection bridges (#126/#127);
   CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
   (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).

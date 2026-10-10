@@ -81,7 +81,7 @@ public class LegacyGeneratedDynamicApiRuntimeTests
             RequestServices = services.BuildServiceProvider()
         };
 
-        await DynamicApiGeneratedRuntime.ExecuteAsync(context, requiresTransaction: true, () => Task.CompletedTask);
+        await DynamicApiGeneratedRuntime.ExecuteAsync(context, new UnitOfWorkOptions(), _ => Task.CompletedTask);
 
         unitOfWorkManager.Scope.Should().NotBeNull();
         unitOfWorkManager.Scope!.UnitOfWork.BeginTransactionCount.Should().Be(1);
@@ -175,26 +175,30 @@ public sealed class TestUnitOfWorkManager : IUnitOfWorkManager
 
     public IUnitOfWork Current => Scope?.UnitOfWork ?? throw new InvalidOperationException("No active unit of work.");
 
-    public IUnitOfWorkScope BeginScope(bool isTransactional = true, bool requiresNew = false, OrmProvider? provider = null)
+    public IUnitOfWorkScope BeginScope(UnitOfWorkOptions? options = null)
     {
-        Scope = new TestUnitOfWorkScope(new TestUnitOfWork(), isOwner: true, isTransactional: isTransactional);
+        options ??= new UnitOfWorkOptions();
+        Scope = new TestUnitOfWorkScope(new TestUnitOfWork(), isOwner: true, isTransactional: options.IsTransactional);
         return Scope;
     }
 
-    public IUnitOfWork Begin(OrmProvider? provider = null)
+    public async Task<TResult> ExecuteAsync<TResult>(
+        Func<System.Threading.CancellationToken, Task<TResult>> action,
+        UnitOfWorkOptions? options = null,
+        System.Threading.CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException();
+        await using var scope = BeginScope(options);
+        await scope.StartAsync(cancellationToken);
+        var result = await action(scope.ExecutionToken);
+        await scope.CompleteAsync(System.Threading.CancellationToken.None);
+        return result;
     }
 
-    public TResult Execute<TResult>(Func<IUnitOfWork, TResult> action, OrmProvider? provider = null)
-    {
-        throw new NotSupportedException();
-    }
-
-    public Task<TResult> ExecuteAsync<TResult>(Func<IUnitOfWork, Task<TResult>> action, OrmProvider? provider = null)
-    {
-        throw new NotSupportedException();
-    }
+    public TResult Execute<TResult>(
+        Func<TResult> action,
+        UnitOfWorkOptions? options = null,
+        System.Threading.CancellationToken cancellationToken = default)
+        => ExecuteAsync(_ => Task.FromResult(action()), options, cancellationToken).GetAwaiter().GetResult();
 }
 
 public sealed class TestUnitOfWorkScope : IUnitOfWorkScope
@@ -214,8 +218,55 @@ public sealed class TestUnitOfWorkScope : IUnitOfWorkScope
 
     public bool IsTransactional { get; }
 
+    public UnitOfWorkState State { get; private set; } = UnitOfWorkState.Active;
+
+    public UnitOfWorkTransactionOutcome TransactionOutcome { get; private set; } = UnitOfWorkTransactionOutcome.NotStarted;
+
+    public UnitOfWorkNotificationOutcome NotificationOutcome { get; private set; } = UnitOfWorkNotificationOutcome.None;
+
+    public bool IsReleased { get; private set; }
+
+    public System.Threading.CancellationToken ExecutionToken { get; private set; }
+
+    public Task StartAsync(System.Threading.CancellationToken cancellationToken = default)
+    {
+        ExecutionToken = cancellationToken;
+        if (IsOwner && IsTransactional)
+        {
+            return UnitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions(), cancellationToken);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task CompleteAsync(System.Threading.CancellationToken cancellationToken = default)
+    {
+        if (IsOwner && IsTransactional)
+        {
+            TransactionOutcome = UnitOfWorkTransactionOutcome.Committed;
+            State = UnitOfWorkState.Completed;
+            return UnitOfWork.CommitTransactionAsync(cancellationToken);
+        }
+
+        State = UnitOfWorkState.Completed;
+        return Task.CompletedTask;
+    }
+
+    public Task RollbackAsync(System.Threading.CancellationToken cancellationToken = default)
+    {
+        State = UnitOfWorkState.RolledBack;
+        return UnitOfWork.RollbackTransactionAsync(cancellationToken);
+    }
+
     public void Dispose()
     {
+        DisposeAsync().GetAwaiter().GetResult();
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        IsReleased = true;
+        return default;
     }
 }
 
@@ -229,25 +280,25 @@ public sealed class TestUnitOfWork : IUnitOfWork
 
     public int SaveChangesCount { get; private set; }
 
-    public Task BeginTransactionAsync()
+    public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, System.Threading.CancellationToken cancellationToken = default)
     {
         BeginTransactionCount++;
         return Task.CompletedTask;
     }
 
-    public Task CommitTransactionAsync()
+    public Task CommitTransactionAsync(System.Threading.CancellationToken cancellationToken = default)
     {
         CommitTransactionCount++;
         return Task.CompletedTask;
     }
 
-    public Task RollbackTransactionAsync()
+    public Task RollbackTransactionAsync(System.Threading.CancellationToken cancellationToken = default)
     {
         RollbackTransactionCount++;
         return Task.CompletedTask;
     }
 
-    public Task<int> SaveChangesAsync()
+    public Task<int> SaveChangesAsync(System.Threading.CancellationToken cancellationToken = default)
     {
         SaveChangesCount++;
         return Task.FromResult(0);

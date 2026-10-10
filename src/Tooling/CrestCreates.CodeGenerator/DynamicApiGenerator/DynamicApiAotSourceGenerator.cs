@@ -1079,19 +1079,21 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                     }
                 }
 
-                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "kernelToken" : parameter.Name));
+                var uowOptions = BuildUnitOfWorkOptionsLiteral(action.RequiresTransaction);
                 if (action.ReturnModel.IsVoid)
                 {
                     if (action.RequiresUnitOfWork)
                     {
-                        builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ExecuteAsync(context, {ToBooleanLiteral(action.RequiresTransaction)}, async () =>");
+                        builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ExecuteAsync(context, {uowOptions}, async kernelToken =>");
                         builder.AppendLine("                    {");
                         builder.AppendLine($"                        await service.{action.ServiceMethodName}({callArguments});");
                         builder.AppendLine("                    });");
                     }
                     else
                     {
-                        builder.AppendLine($"                    await service.{action.ServiceMethodName}({callArguments});");
+                        var plainArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                        builder.AppendLine($"                    await service.{action.ServiceMethodName}({plainArguments});");
                     }
                     builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapVoidResult();");
                 }
@@ -1099,11 +1101,12 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 {
                     if (action.RequiresUnitOfWork)
                     {
-                        builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, {ToBooleanLiteral(action.RequiresTransaction)}, () => service.{action.ServiceMethodName}({callArguments}));");
+                        builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, {uowOptions}, kernelToken => service.{action.ServiceMethodName}({callArguments}));");
                     }
                     else
                     {
-                        builder.AppendLine($"                    var result = await service.{action.ServiceMethodName}({callArguments});");
+                        var plainArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                        builder.AppendLine($"                    var result = await service.{action.ServiceMethodName}({plainArguments});");
                     }
                     builder.AppendLine(action.HttpMethod == "GET"
                         ? "                    return DynamicApiGeneratedRuntime.WrapGetResult(result);"
@@ -1166,19 +1169,21 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                     }
                 }
 
-                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "kernelToken" : parameter.Name));
+                var uowOptions = BuildUnitOfWorkOptionsLiteral(action.RequiresTransaction);
                 if (action.ReturnModel.IsVoid)
                 {
                     if (action.RequiresUnitOfWork)
                     {
-                        builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ExecuteAsync(context, {ToBooleanLiteral(action.RequiresTransaction)}, async () =>");
+                        builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ExecuteAsync(context, {uowOptions}, async kernelToken =>");
                         builder.AppendLine("                    {");
                         builder.AppendLine($"                        await controller.{action.ServiceMethodName}({callArguments});");
                         builder.AppendLine("                    });");
                     }
                     else
                     {
-                        builder.AppendLine($"                    await controller.{action.ServiceMethodName}({callArguments});");
+                        var plainArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                        builder.AppendLine($"                    await controller.{action.ServiceMethodName}({plainArguments});");
                     }
                     builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapVoidResult();");
                 }
@@ -1186,11 +1191,12 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                 {
                     if (action.RequiresUnitOfWork)
                     {
-                        builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, {ToBooleanLiteral(action.RequiresTransaction)}, () => controller.{action.ServiceMethodName}({callArguments}));");
+                        builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, {uowOptions}, kernelToken => controller.{action.ServiceMethodName}({callArguments}));");
                     }
                     else
                     {
-                        builder.AppendLine($"                    var result = await controller.{action.ServiceMethodName}({callArguments});");
+                        var plainArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                        builder.AppendLine($"                    var result = await controller.{action.ServiceMethodName}({plainArguments});");
                     }
                     builder.AppendLine(action.HttpMethod == "GET"
                         ? "                    return DynamicApiGeneratedRuntime.WrapGetResult(result);"
@@ -1605,6 +1611,13 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     private static string ToBooleanLiteral(bool value)
     {
         return value ? "true" : "false";
+    }
+
+    private static string BuildUnitOfWorkOptionsLiteral(bool requiresTransaction)
+    {
+        return requiresTransaction
+            ? "new global::CrestCreates.Data.Abstractions.UnitOfWorkOptions()"
+            : "new global::CrestCreates.Data.Abstractions.UnitOfWorkOptions { IsTransactional = false }";
     }
 
     private static string ResolveRequestTypeFromAction(ActionModel action)
