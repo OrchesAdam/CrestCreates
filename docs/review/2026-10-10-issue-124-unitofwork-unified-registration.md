@@ -129,7 +129,7 @@
 | `dotnet build CrestCreates.slnx` | 0 错误（迁移后全仓编译） |
 | `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 65/65（含新增 UoW 用例） |
 | ├─ `UnitOfWorkDiRegistrationTests`（15 用例） | 单绑定默认 / 显式默认 / 显式参数优先 / 多绑定无默认诊断 / 缺绑定诊断 / 重复绑定诊断 / 冲突默认诊断 / 幂等 / 套件与自定义工厂混用诊断 / 不同自定义工厂冲突（两个方向）/ 同工厂幂等 / 同工厂冲突默认诊断 / requiresNew 子 scope 隔离与父恢复（含环境上下文与非双重释放断言）/ 不支持 requiresNew 诊断 / 依赖失败不污染 Current |
-| ├─ `EfCoreUnitOfWorkDatabaseTests`（8 用例，真实 SQLite 文件库） | 提交持久化 / 回滚无残留 / requiresNew 预注入依赖跟随内层 UoW（内层提交持久化、外层回滚不影响；环境恢复断言）/ 嵌套 ExecuteAsync 隔离提交与父恢复 / **默认装配路径（CrestCreatesDbContext 直绑）+ 正式注入仓储的内层提交持久化** / **两层 requiresNew 逐层独立上下文与最内层独立提交** / **未完成退出及时终结事务且同一请求后续 UoW 可提交** / 领域事件在提交持久化之后发布 |
+| ├─ `EfCoreUnitOfWorkDatabaseTests`（8 用例，真实 SQLite 文件库） | 提交持久化 / 回滚无残留 / requiresNew 预注入依赖跟随内层 UoW（内层提交持久化、外层回滚不影响；环境恢复断言）/ 嵌套 ExecuteAsync 隔离提交与父恢复 / **默认装配路径（CrestCreatesDbContext 直绑）+ 正式注入仓储的内层提交持久化与回滚丢弃** / **两层 requiresNew 逐层独立上下文与最内层独立提交** / **未完成退出及时终结事务且同一请求后续 UoW 可提交** / 领域事件在提交持久化之后发布 |
 | ├─ `UnitOfWorkManagerTests`（4 用例，手动构造路径） | 既有 3 用例保持 + 回滚失败不替换原始业务异常 |
 | └─ `UnitOfWorkReflectionGuardTests`（1 用例） | 装配主链源码无运行时类型解析/程序集扫描 |
 | UoW native 门禁（本分支新 fixture） | `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`；publish/link/run（本地热缓存 ≈40s）；容器单次释放断言（DI-owned）与环境上下文 Push/Restore 断言 |

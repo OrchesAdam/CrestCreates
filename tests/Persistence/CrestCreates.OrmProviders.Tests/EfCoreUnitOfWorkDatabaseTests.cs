@@ -357,6 +357,33 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             (await verifyContext.Tenants.FindAsync(tenantId)).Should().NotBeNull(
                 "the repository write through the default registration must be committed by the inner unit of work");
         }
+
+        // Rollback phase: a requiresNew write through the same default
+        // registration must be discarded when the inner unit of work rolls back.
+        var rollbackTenantId = Guid.NewGuid();
+        using (var rollbackScope = provider.CreateScope())
+        {
+            var manager = rollbackScope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var injectionContext = rollbackScope.ServiceProvider.GetRequiredService<IDataBaseContext>();
+            var repository = new EfCoreRepository<Tenant, Guid>(injectionContext);
+
+            using (var outerScope = manager.BeginScope())
+            {
+                using (var innerScope = manager.BeginScope(requiresNew: true))
+                {
+                    await innerScope.UnitOfWork.BeginTransactionAsync();
+                    await repository.InsertAsync(new Tenant(rollbackTenantId, "Rolled Back Tenant"));
+                    await innerScope.UnitOfWork.RollbackTransactionAsync();
+                }
+            }
+        }
+
+        using (var verifyScope = provider.CreateScope())
+        {
+            var verifyContext = verifyScope.ServiceProvider.GetRequiredService<CrestCreatesDbContext>();
+            (await verifyContext.Tenants.FindAsync(rollbackTenantId)).Should().BeNull(
+                "an inner requiresNew rollback must discard repository writes made through the default registration");
+        }
     }
 
     [Fact]
