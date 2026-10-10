@@ -24,5 +24,7 @@
 | I-09 | 环境/测试 | InMemory 等非关系型 Provider 没有连接配置：ambient 日志键与读方连接校验对非关系型 Provider 自动退化为「声明类型」比较（读取连接串带保护）；无环境帧时快速返回不计算逻辑键 | 无（行为已定义） | 保持该保护；新增非关系型 Provider 时复核 | 已处理 |
 | I-10 | 声明裁定（切片 3） | FreeSql/SqlSugar 能力声明：`PromptTerminationOnAbandon=true`、`DiscardUncommittedOnAbandon=true`（已实现 `IUnitOfWorkAbandonable`）；**未声明隔离级别**（SDK 隔离能力未实测，显式请求由内核执行前拒绝） | 这两个 Provider 不支持显式隔离级别直到有实测证据 | 交 #130 ORM 矩阵：实测 SDK 隔离能力后再逐项声明 | 已裁定 |
 | I-11 | 证据边界（切片 3） | 隔离级别矩阵按 ProviderName 探测声明：SQLite={Serializable}（本地实测接受/拒绝双向）；PG={ReadCommitted,RepeatableRead,Serializable}（CI Testcontainers 实测，本地无 Docker 不运行）；未知提供者按透传声明 | 本地无法运行 PG 用例 | 以 CI 为 PG 证据来源；文档矩阵在切片 4 同步 | 已知/接受 |
+| I-12 | 交付整理（切片 4） | 生命周期顺序（begin→flush→commit→notify→dispose 顺序观测）、非事务 flush 后通知、放弃失败可检查（State=Failed）用例补齐；原生 fixture 新增 deadline 取消、join rollback-only 拒绝、通知失败保留已提交、能力门禁四场景（JIT 与原生 link/run 同步验证）；Spec §4.4 矩阵与 AGENTS.md UoW 行同步为实施结果 | 无 | 保持四场景随原生门禁回归 | 已处理 |
+| I-13 | 流程 | 「生成 CRUD 集成用例」的生成服务经 [UnitOfWorkMo] 走同一内核：本地由 Web/Generator 套件与 AOP 织入验收覆盖；完整生成 CRUD 端到端在 CI 集成套件（PG）执行 | 本地无 PG 完整链 | 以 CI 集成套件为端到端证据；如审查需要可补 SQLite 端到端 harness | 已知/接受 |
 
 （后续切片发现问题将追加到本表。）

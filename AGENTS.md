@@ -368,7 +368,7 @@ TestBase
 - CRUD 主链：SourceGenerator 全生成方向。
 - 权限系统：授予、撤销、缓存、租户边界、SuperAdmin、AOP 已收口。
 - 后台作业：ISchedulerService + Quartz + 重试策略 + 租户上下文。
-- UnitOfWork：唯一装配（`AddUnitOfWork` + Provider 包 typed `AddUnitOfWorkProvider` binding，无反射/程序集扫描）；requiresNew 经子 DI scope 隔离，EF 业务依赖随 ambient 上下文跟随（预注入仓储绑定当前 UoW），不支持的 Provider fail closed；重复/缺失/冲突绑定为确定性诊断；旧 Infrastructure 双轨实现已归档（99_RecycleBin）。
+- UnitOfWork：唯一装配（`AddUnitOfWork` + Provider 包 typed `AddUnitOfWorkProvider` binding + 能力声明，无反射/程序集扫描）；唯一执行内核（`UnitOfWorkOptions`、`BeginScope + StartAsync` 调用方帧激活协议、四维结果：参与状态/事务结果/通知结果/释放；join 完成=参与者成功、rollback-only 拒绝部分提交；提交确认即记录 Committed、Unknown 不被回滚改写、提交后通知失败不回滚且保留已提交事实）；受管链 ambient 路由（descendant-or-self 可见性 + 租户/声明/连接先校验后路由）与未完成退出「终结 + 丢弃未 flush 跟踪写入」；操作层 token 组合（正式仓储/Provider 组合传入 CT ⊕ 受管执行 token，AOP/生成端点 deadline 覆盖）；Provider 能力（隔离级别实测矩阵、及时终止、丢弃）执行业务前 fail closed；requiresNew 经子 DI scope 隔离，不支持的 Provider 确定性诊断；旧双轨与死契约已归档（99_RecycleBin）。状态：#137 切片 1-4 在 PR 分支（统一审查前），切片 5（CAP 交接契约）随最终 PR。
 - ObjectMapping：SourceGenerator，支持多种转换、自定义转换器和导航路径。
 - Metadata / Descriptor 治理链路：Topology、Impact、Compatibility、Package、Stable Hash、Canonical Hash profile、Agent Control Plane 等属于严肃治理面，不应把复杂性下放给普通 Runtime Handler。
 - Agent 治理面与工件持久化：Authoring → review → package/evidence → approval 链路的契约与边界见「平台能力」；activation request/gate 仍为内存实现，durable activation 按 #88 判为应用侧范围，不重开。

@@ -32,6 +32,9 @@ internal static class Program
             VerifyDuplicateBindingDiagnostic();
             VerifyMissingDefaultDiagnostic();
             await VerifyExecuteRollbackPreservesOriginalExceptionAsync();
+            await VerifyDeadlineAndCompletionSemanticsAsync();
+            await VerifyNotificationFailureSemanticsAsync();
+            VerifyIsolationCapabilityGate();
 
             Console.WriteLine("CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK");
             return 0;
@@ -212,6 +215,107 @@ internal static class Program
         Check(manager.CurrentOrNull is null, "the failed execution must restore ambient state");
     }
 
+    private static async Task VerifyDeadlineAndCompletionSemanticsAsync()
+    {
+        using var provider = BuildProvider(services =>
+            services.AddUnitOfWorkProvider(
+                OrmProvider.EfCore,
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false));
+
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        await using (var deadlineScope = manager.BeginScope(new UnitOfWorkOptions
+        {
+            Timeout = TimeSpan.FromMilliseconds(60)
+        }))
+        {
+            await deadlineScope.StartAsync();
+            await Task.Delay(150);
+            Check(deadlineScope.ExecutionToken.IsCancellationRequested,
+                "the kernel deadline must cancel the execution token without caller cancellation");
+            await deadlineScope.RollbackAsync();
+            Check(deadlineScope.State == UnitOfWorkState.RolledBack, "an expired deadline must not report success");
+        }
+
+        await using (var outer = manager.BeginScope())
+        {
+            await outer.StartAsync();
+            await using (var inner = manager.BeginScope())
+            {
+                await inner.StartAsync();
+                await inner.RollbackAsync();
+            }
+
+            try
+            {
+                await outer.CompleteAsync();
+                throw new InvalidOperationException("rollback-only rejection expected.");
+            }
+            catch (UnitOfWorkRollbackOnlyException)
+            {
+            }
+
+            Check(outer.TransactionOutcome == UnitOfWorkTransactionOutcome.RolledBack,
+                "a rollback-only owner must roll back instead of committing a partial failure");
+        }
+    }
+
+    private static async Task VerifyNotificationFailureSemanticsAsync()
+    {
+        using var provider = BuildProvider(services =>
+            services.AddUnitOfWorkProvider(
+                OrmProvider.EfCore,
+                static sp => new StaticUnitOfWork { NotifyThrows = true },
+                supportsRequiresNew: false));
+
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        await using var unitOfWorkScope = manager.BeginScope();
+        await unitOfWorkScope.StartAsync();
+
+        try
+        {
+            await unitOfWorkScope.CompleteAsync();
+            throw new InvalidOperationException("post-commit notification failure expected.");
+        }
+        catch (UnitOfWorkPostCommitNotificationException)
+        {
+        }
+
+        Check(unitOfWorkScope.TransactionOutcome == UnitOfWorkTransactionOutcome.Committed,
+            "the committed fact must be preserved when notifications fail");
+        Check(unitOfWorkScope.NotificationOutcome == UnitOfWorkNotificationOutcome.Failed,
+            "notification failure must be recorded without rewinding the transaction outcome");
+    }
+
+    private static void VerifyIsolationCapabilityGate()
+    {
+        using var provider = BuildProvider(services =>
+            services.AddUnitOfWorkProvider(
+                OrmProvider.FreeSql,
+                static sp => new StaticUnitOfWork(),
+                supportsRequiresNew: false));
+
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        try
+        {
+            manager.BeginScope(new UnitOfWorkOptions { IsolationLevel = System.Data.IsolationLevel.Serializable });
+            throw new InvalidOperationException("capability gate rejection expected.");
+        }
+        catch (NotSupportedException exception)
+        {
+            Check(exception.Message.Contains("<none declared>", StringComparison.Ordinal),
+                "the gate must reject undeclared isolation levels before execution");
+        }
+
+        Check(manager.CurrentOrNull is null, "the rejected request must not create a unit of work");
+    }
+
     private static ServiceProvider BuildProvider(Action<IServiceCollection> configureProviders)
     {
         var services = new ServiceCollection();
@@ -284,7 +388,7 @@ internal static class Program
         }
     }
 
-    private sealed class StaticUnitOfWork : IUnitOfWork
+    private sealed class StaticUnitOfWork : IUnitOfWork, IUnitOfWorkCommittedNotifier
     {
         private bool _disposed;
 
@@ -298,6 +402,8 @@ internal static class Program
         }
 
         public Guid ScopeId { get; }
+
+        public bool NotifyThrows { get; set; }
 
         public int BeginCount { get; private set; }
 
@@ -326,6 +432,16 @@ internal static class Program
         }
 
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+
+        public Task PublishCommittedNotificationsAsync(CancellationToken cancellationToken = default)
+        {
+            if (NotifyThrows)
+            {
+                throw new InvalidOperationException("fixture-notification-failure");
+            }
+
+            return Task.CompletedTask;
+        }
 
         public void Dispose()
         {

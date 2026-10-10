@@ -256,10 +256,11 @@ UnitOfWorkManager.BeginScope
   | --- | --- | --- | --- | --- |
   | SupportsTransactions | 本地事务 | 是 | 是（SDK） | 是（SDK Ado） |
   | SupportsRequiresNew | 隔离子 scope + 环境跟随 | 是（已验证） | 否（fail closed） | 否（fail closed） |
-  | SupportedIsolationLevels | 显式隔离级别集合 | **逐项由实际数据库/驱动判定**（SQLite/PG 各自矩阵，验收实测），不笼统宣称「标准级别透传」 | 按实现声明或拒绝 | 按实现声明或拒绝 |
-  | SupportsTimeout | 内核截止时间之外的 Provider 级超时（如有） | 无额外声明（内核合作式截止时间生效） | 声明或拒绝 | 声明或拒绝 |
-  | PromptTerminationOnAbandon | 未完成退出及时终结事务 | 是（#136） | 实现或声明拒绝（计划切片 3） | 实现或声明拒绝（计划切片 3） |
-  | DiscardUncommittedOnAbandon | 未完成退出丢弃未 flush 跟踪状态 | 是（新增） | 声明或拒绝 | 声明或拒绝 |
+  | SupportedIsolationLevels | 显式隔离级别集合 | **实测矩阵**：SQLite={Serializable}（本地实测：接受并通过、ReadCommitted 执行前拒绝）；PostgreSQL={ReadCommitted, RepeatableRead, Serializable}（CI Testcontainers 实测接受）；未知提供者按透传声明 | **未声明**（SDK 隔离未实测）：显式请求执行前拒绝（`<none declared>`） | **未声明**：显式请求执行前拒绝 |
+  | SupportsTimeout | 内核截止时间之外的 Provider 级超时（如有） | 无额外声明（内核合作式截止时间生效，原生门禁覆盖 deadline 取消） | 无额外声明 | 无额外声明 |
+  | PromptTerminationOnAbandon | 未完成退出及时终结事务 | 是（#136；`IUnitOfWorkAbandonable` + ChangeTracker 丢弃） | 是（切片 3：`AbandonPendingWork` 回滚 SDK 工作单元，实测随后可再次开始） | 是（切片 3：`AbandonPendingWork` 回滚 Ado 事务） |
+  | DiscardUncommittedOnAbandon | 未完成退出丢弃未 flush 跟踪状态 | 是（`ChangeTracker.Clear()`；连续顶层 UoW 无残留用例） | 是（跟踪队列清空；立即执行模式下即事务回滚） | 是（跟踪队列清空；立即执行模式下即事务回滚） |
+  | CAP lease 提供者 | §4.5 最小参与的 Provider 所有实现 | 是（切片 5） | 声明或拒绝 | 声明或拒绝 |
   | CAP lease 提供者 | §4.5 最小参与的 Provider 所有实现 | 是（计划切片 5） | 声明或拒绝 | 声明或拒绝 |
 
 - **资源身份**：准入判定以**逻辑资源键**（§4.3：绑定身份/Context 声明/连接配置/租户）为准，不以 `OrmProvider` 相同作为唯一依据；**物理实例身份独立记录**（Context/Connection/Transaction 实例，供诊断与 CAP 使用，不被逻辑键替代）；校验在 ambient 重定向**之前**完成（内核侧以请求方当前上下文计算；读方侧先校验后路由）；未指定参数按 §4.1 继承规则处理，不因 null 误判冲突；第二资源（第二 Context 声明/连接配置/租户库）确定性拒绝。

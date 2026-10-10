@@ -117,6 +117,127 @@ public class UnitOfWorkKernelStateTests
         outer.ExecutionToken.IsCancellationRequested.Should().BeFalse("the outer budget is unchanged");
     }
 
+    [Fact]
+    public async Task Lifecycle_order_is_flush_commit_notify_cleanup()
+    {
+        var unitOfWork = new RecordingUnitOfWork();
+        var manager = new UnitOfWorkManager(new SingletonUnitOfWorkFactory(unitOfWork));
+
+        var scope = manager.BeginScope();
+        await scope.StartAsync();
+        await scope.CompleteAsync();
+
+        unitOfWork.Events.Should().ContainInOrder("begin", "flush", "commit", "notify");
+        unitOfWork.Events.Should().NotContain("dispose");
+
+        scope.Dispose();
+        unitOfWork.Events.Should().ContainInOrder("begin", "flush", "commit", "notify", "dispose");
+    }
+
+    [Fact]
+    public async Task Non_transactional_completion_notifies_after_flush()
+    {
+        var unitOfWork = new RecordingUnitOfWork();
+        var manager = new UnitOfWorkManager(new SingletonUnitOfWorkFactory(unitOfWork));
+
+        await using var scope = manager.BeginScope(new UnitOfWorkOptions { IsTransactional = false });
+        await scope.StartAsync();
+        await scope.CompleteAsync();
+
+        unitOfWork.Events.Should().ContainInOrder("flush", "notify");
+        unitOfWork.Events.Should().NotContain("commit");
+        scope.NotificationOutcome.Should().Be(UnitOfWorkNotificationOutcome.Succeeded);
+    }
+
+    [Fact]
+    public async Task Abandonment_with_failing_rollback_records_failed_state_without_throwing()
+    {
+        var unitOfWork = new FailingAbandonUnitOfWork();
+        var manager = new UnitOfWorkManager(new SingletonUnitOfWorkFactory(unitOfWork));
+
+        var scope = manager.BeginScope();
+        await scope.StartAsync();
+
+        scope.Dispose();
+
+        scope.IsReleased.Should().BeTrue();
+        scope.State.Should().Be(UnitOfWorkState.Failed,
+            "a failed termination is recorded as a checkable result instead of being swallowed");
+    }
+
+    private sealed class FailingAbandonUnitOfWork : IUnitOfWork, IUnitOfWorkAbandonable
+    {
+        public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task CommitTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task RollbackTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+
+        public void AbandonPendingWork()
+        {
+            throw new InvalidOperationException("abandon-failure");
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class SingletonUnitOfWorkFactory : IUnitOfWorkFactory
+    {
+        private readonly IUnitOfWork _unitOfWork;
+
+        public SingletonUnitOfWorkFactory(IUnitOfWork unitOfWork)
+        {
+            _unitOfWork = unitOfWork;
+        }
+
+        public IUnitOfWork Create(OrmProvider provider) => _unitOfWork;
+    }
+
+    private sealed class RecordingUnitOfWork : IUnitOfWork, IUnitOfWorkCommittedNotifier
+    {
+        public List<string> Events { get; } = new();
+
+        public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
+        {
+            Events.Add("begin");
+            return Task.CompletedTask;
+        }
+
+        public Task CommitTransactionAsync(CancellationToken cancellationToken = default)
+        {
+            Events.Add("commit");
+            return Task.CompletedTask;
+        }
+
+        public Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
+        {
+            Events.Add("rollback");
+            return Task.CompletedTask;
+        }
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            Events.Add("flush");
+            return Task.FromResult(0);
+        }
+
+        public Task PublishCommittedNotificationsAsync(CancellationToken cancellationToken = default)
+        {
+            Events.Add("notify");
+            return Task.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+            Events.Add("dispose");
+        }
+    }
+
     private sealed class FakeUnitOfWorkFactory : IUnitOfWorkFactory
     {
         public List<FakeUnitOfWork> CreatedUnitOfWorks { get; } = new();
