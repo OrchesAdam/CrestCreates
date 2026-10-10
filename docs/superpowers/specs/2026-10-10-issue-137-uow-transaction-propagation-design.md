@@ -1,8 +1,8 @@
 # Issue #137 UnitOfWork 事务传播、资源归属与业务参与主链 — 设计记录与现状清单
 
-日期：2026-10-10（rev.2：吸收 Spec 审计 S137-01…07 与文稿整理，见文末第八节）
+日期：2026-10-10（rev.3：吸收第一轮审计 S137-01…07 与第二轮审计 R2-S137-01…03 及文稿整理，见文末第八节）
 实施基线：master `988bfd2f`（PR #136 merge，即 #124 闭环后的真实主链）
-关联：[Issue #137](https://github.com/OrchesAdam/CrestCreates/issues/137)、[Issue #121](https://github.com/OrchesAdam/CrestCreates/issues/121)、[#124 设计记录](../../review/2026-10-10-issue-124-unitofwork-unified-registration.md)、[#123 证据矩阵](../../review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md)、[Spec 审计记录](../../review/2026-10-10-issue-137-uow-spec-review.md)
+关联：[Issue #137](https://github.com/OrchesAdam/CrestCreates/issues/137)、[Issue #121](https://github.com/OrchesAdam/CrestCreates/issues/121)、[#124 设计记录](../../review/2026-10-10-issue-124-unitofwork-unified-registration.md)、[#123 证据矩阵](../../review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md)、[第一轮 Spec 审计](../../review/2026-10-10-issue-137-uow-spec-review.md)、[第二轮 Spec 审计](../../review/2026-10-10-issue-137-uow-spec-review-round2.md)
 下游：#125（CAP）必须在本项验收并合并后实施；#130 复用本项的 Provider 能力边界。
 
 本文档是 #137 的第 1 项交付（Issue §1「先交付设计与现状清单，再实施」）：真实调用链、公开契约清点与处置、资源所有权表、状态/传播表、设计裁定与测试推导。实施按配套计划文件 `docs/superpowers/plans/2026-10-10-issue-137-uow-transaction-propagation-implementation.md` 拆分为多个 PR，每个 PR 基于前项合并后的 master。
@@ -81,8 +81,8 @@ UnitOfWorkManager.BeginScope
 | 契约/类型 | 当前实现/消费者 | 处置 |
 | --- | --- | --- |
 | `Domain.UnitOfWork.IUnitOfWork`（Begin/Commit/Rollback/SaveChanges/Dispose） | 三个入口、Provider 实现、测试 | **保留并迁移签名**。保持最小（Provider 级句柄操作）；Begin 改为接收**强类型有效选项 + CT**（隔离级别/截止时间由内核解析后传入）；生命周期/状态由平台 scope 承担 |
-| `IUnitOfWorkManager` | AOP、生成运行时、测试、AOT fixture | **保留并收口**：`BeginScopeAsync`（唯一异步开始阶段）+ `Execute/ExecuteAsync`（内核）；删除同步 `BeginScope`（消除 sync-over-async begin）；签名迁移为 options 形态（见 §4.1） |
-| `IUnitOfWorkScope` | AOP、生成运行时、测试 | **保留并升级为状态化 scope**：`State`、`TransactionOutcome`、`NotificationOutcome`、`IsReleased`、`ExecutionToken`、`CompleteAsync`、`RollbackAsync`；join 成功完成 = 记录参与者成功（见 §4.2） |
+| `IUnitOfWorkManager` | AOP、生成运行时、测试、AOT fixture | **保留并收口**：`BeginScope`（同步建立受管载体/激活）+ `StartAsync`（异步开始）+ `Execute/ExecuteAsync`（内核）；不提供异步返回 scope 的单步开始（违反调用方帧激活协议，见 §4.1）；签名迁移为 options 形态 |
+| `IUnitOfWorkScope` | AOP、生成运行时、测试 | **保留并升级为状态化 scope**：`State`、`TransactionOutcome`、`NotificationOutcome`、`IsReleased`、`ExecutionToken`、`StartAsync`、`CompleteAsync`、`RollbackAsync`；join 成功完成 = 记录参与者成功（见 §4.2） |
 | `IUnitOfWorkFactory` + `UnitOfWorkProviderBinding` + `Registry` | Provider 包声明、Manager | **保留**；Binding 扩展能力声明、资源键委托与 CAP lease 提供者（见 §4.4/§4.5） |
 | `UnitOfWorkRegistrationState` | 注册扩展 | 保留（内部装配状态） |
 | `UnitOfWorkAmbientContext`（`public static object` Current/Push） | 写方仅 Manager；读方 EF 适配器/默认 DbContext/测试 | **替换为强类型受管访问器 + 受管链身份**（链节点 descendant-or-self 可见性，见 §4.3）。旧公开 Push 归档 |
@@ -93,7 +93,7 @@ UnitOfWorkManager.BeginScope
 | `IUnitOfWorkEnhanced`（GetRepository/EnableSoftDeleteFilter/SetTenantId 等） | **无实现、无消费者** | **归档**（`99_RecycleBin/issue-137-...`）。仓储获取走 DI 注入；TenantId 走 `ICurrentTenant` 平台能力；过滤开关走现有过滤注册/IgnoreQueryFilters |
 | `Aop.Abstractions.Options.UnitOfWorkOptions` + `AopOptions.UnitOfWork` | 零读取 | **归档**（不迁移；AOP 不再持有独立 UoW 配置） |
 | `Data.Abstractions.RepositoryBase.Repository<,>`（构造期捕获 DbSet/QueryableBuilder） | **零消费者**（生成仓储走 `CrestRepositoryBase`） | **归档**（跨 UoW 缓存资源对象的反面样本，防止被误用） |
-| `IUnitOfWorkManager.Begin(OrmProvider?)` + `ScopedUnitOfWorkProxy` | 测试、AOT fixture（旧式单 UoW API） | **归档**；调用方迁移到 `BeginScope`（测试/fixture 同步迁移） |
+| `IUnitOfWorkManager.Begin(OrmProvider?)` + `ScopedUnitOfWorkProxy` | 测试、AOT fixture（旧式单 UoW API） | **归档**；调用方迁移到 `BeginScope + StartAsync`（测试/fixture 同步迁移） |
 | `UnitOfWorkIntegrationExtensions` / 内部 `UnitOfWorkTransactionParticipant`（DistributedTransaction 包） | 零消费者 | 不在 #137 重开；由 §4.5 CAP 最小契约替代，处置记录交 #125（本项负责交接文档与最小契约） |
 | FreeSql `TransactionalAttribute` / `FreeSqlUnitOfWorkManager` | FreeSql 包内部 | 保留（Provider 内部路径），能力声明进 Provider 矩阵 |
 | `UnitOfWorkWithEvents`（Provider 基类） | EF/FreeSql UoW | 保留；生命周期顺序与故障语义按 §4.5 固定 |
@@ -127,7 +127,10 @@ UnitOfWorkManager.BeginScope
 | `Completed` | 成功完成**已记录**：owner = 数据库 commit 已确认（非事务 = flush 成功）后**立即**记录；join = 参与者成功已记录 | 只读；`Dispose` | 再次 `CompleteAsync` = **幂等 no-op**；`RollbackAsync` = 确定性拒绝 |
 | `RolledBack` | 确定回滚完成（仅来自未提交状态） | 只读；`Dispose` | 再次 `RollbackAsync` = 幂等 no-op；`CompleteAsync` = 确定性拒绝 |
 | `Failed` | 终态结果**不确定**（如提交结果未知、回滚自身失败）；携带可检查诊断 | 只读；`Dispose` | 一切完成/回滚调用 = 确定性拒绝 |
-| `Disposed`（释放标志，与上述终态正交） | 资源已释放（对象/子 scope/事务句柄），环境已恢复；**最终事务结果与通知结果仍可读** | 只读 | 任何操作 = 确定性拒绝（`ObjectDisposedException` 语义） |
+
+释放标志（**独立于 `State` 存储**，实现按 `IsReleased` 处理；释放不覆盖已记录的参与状态与事务结果）：
+- 资源已释放（对象/子 scope/事务句柄），环境已恢复；**最终事务结果与通知结果仍可读**（如 `Completed+Committed+NotificationFailed` 组合释后仍可读）。
+- `IsReleased=true` 后任何完成/回滚/使用操作 = 确定性拒绝（`ObjectDisposedException` 语义）。
 
 事务结果（owner 专用，**不可被后续操作改写**）：`NotStarted → Committed | RolledBack | Unknown`。
 - `Committed` 在数据库 commit 确认时**立即置位（早于通知与清理）**；之后的通知/清理/释放失败均保留已提交事实。
@@ -188,14 +191,18 @@ UnitOfWorkManager.BeginScope
   | `Timeout` 显式 | ≤ 外层剩余：收紧生效（取 min）；> 外层剩余：**确定性诊断**（不可延长） | 作为本次截止 |
   | `IsTransactional` | 必须与外层一致，否则执行前诊断 | 按声明 |
 
-- **唯一异步开始阶段**：`BeginScopeAsync(UnitOfWorkOptions?, CancellationToken)` 为唯一开始入口（Provider Begin 本为异步；不提供同步截断 begin，消除 sync-over-async）。`ExecuteAsync` 是内核语法糖。
-- **token 通道**：`ExecuteAsync<TResult>(Func<CancellationToken, Task<TResult>> action, UnitOfWorkOptions?, CancellationToken)`——action 接收内核联动 token（调用方 CT + 截止时间）。入口 token 来源：
-
-  | 入口 | 调用方 CT 来源 |
-  | --- | --- |
-  | 管理 API / 测试 / fixture | 参数传入 |
-  | AOP `[UnitOfWorkMo]` | 方法参数中的 CT（存在即绑定）；否则以 `scope.ExecutionToken` 暴露给业务 |
-  | 生成 Dynamic API 运行时 | `HttpContext.RequestAborted` + 内核截止时间 |
+- **环境激活/恢复协议（调用方可见性，R2-S137-01）**：AsyncLocal 写入不会从 async 方法体内反向传播到调用方（.NET 10 最小复现：`await BeginScopeAsync()` 返回后调用方仍见旧值）。因此：
+  - **激活与恢复必须发生在调用方同步帧**。受支持的开始形态为「同步建立受管载体 + 异步 start」：`var scope = manager.BeginScope(options)`（同步方法，在调用方帧内完成链节点/受管载体登记与 ambient 激活；本身不做 I/O、不做 sync-over-async）→ `await scope.StartAsync(ct)`（异步打开 Provider 事务）。标准写法：
+    `await using var scope = manager.BeginScope(options); await scope.StartAsync(ct);`
+  - `Task`-返回的方法只有**非 async 实现**（同步段在调用方帧执行）才满足协议；`Dispose/DisposeAsync` 的**环境恢复段必须同步完成于调用方帧**（`DisposeAsync` 以非 async 方法返回异步清理 Task；清理不得被跳过）。
+  - **委托式入口**：`ExecuteAsync` 把 action 运行在**内核异步帧内**（执行上下文向下继承生效），是普通业务的首选入口；AOP 采用**包裹式拦截**（被拦截方法体在内核帧内执行；Rougamo RawMo 或等价机制，切片 1 确认具体 API），禁止「OnEntry 写 AsyncLocal 后依赖调用方继承」的旧假设。
+  - **构造/开始失败恢复**：失败路径由 using 语义触发调用方帧恢复；内核同时兜底清理资源并登记结构化诊断。调用方遗漏 Dispose 时，残留帧进入终态：读方/内核对终态帧一律**确定性拒绝**（不得静默路由），给出明确诊断与修复指引。
+  - 载体是执行流帧（per-EC），不引入可变共享对象重新造成跨调用串用；`Task.Run` 等继承执行上下文的任务仍受 descendant-or-self 读方校验约束。
+- **联动 token 通道（R2-S137-03）**：
+  - 委托式入口：`ExecuteAsync<TResult>(Func<CancellationToken, Task<TResult>> action, UnitOfWorkOptions?, CancellationToken)`——action 接收内核联动 token（调用方 CT + 截止时间）。
+  - 生成端点的调用方 CT = `HttpContext.RequestAborted`；生成器把**内核联动 token** 传入服务方法的 CT 参数（RequestAborted 作为调用方 CT 参与联动，不再被直接透传）。
+  - AOP 与手写路径（方法签名不可重写的边界）：**操作层组合为主机制**——正式仓储/Provider 操作在发起数据库动作时，把「传入 CT」与「当前受管执行 token（链校验后）」组合为有效 token（`CreateLinkedTokenSource` 语义），使 AOP 方法、无 CT 参数调用与 RequestAborted 场景都获得内核截止时间覆盖；编译期、无反射、业务无额外仪式。
+  - 支持边界（文档明确）：方法体内**非仓储/Provider 的等待**（如 `Task.Delay`）仅观察其入参 CT；缺少 CT 参数时不承诺被单独取消，但经正式仓储/Provider 的数据库动作始终受组合 token 覆盖。不把「存在公开 `ExecutionToken`」当作业务操作已接通。
 
 - **Provider begin 的强类型有效选项**：内核把 options 解析为 effective begin options（`IsolationLevel`、截止时间）随 CT 传入 Provider `BeginTransactionAsync(effective, ct)`；Provider 不从环境读取配置。
 - **合作式语义声明**：截止时间/取消是**合作式**的——内核不强行中断不观察 token 的 Provider 操作；`Task.WhenAny` 超时后直接释放资源不构成取消保证（禁止该实现方式）。commit 已确认与取消竞态的判定按 §3.2/§4.5（可能 `Unknown`）。
@@ -212,13 +219,13 @@ UnitOfWorkManager.BeginScope
 - `SaveChanges`（flush）与事务成功完成分开定义：flush 不结束事务、不发布通知；commit 内含 flush；**rollback-only 校验先于任何完成期 flush**。
 - 顶层 scope 未完成退出：回滚 + 丢弃 + 释放（不等请求 DI scope 结束）；**未 flush 跟踪状态不得带入同一请求内的下一个顶层 UoW**（§4.3 能力）。
 - 原业务异常保留：回滚/释放失败作为**可检查次级结果**（专门异常/诊断对象，含阶段信息），不得替换根因；无原始异常时的清理失败同样必须可检查。
-- 异步释放纳入正式契约（`DisposeAsync` 语义，同步 Dispose 保留兼容）。
+- 释放协议（与 §4.1 激活协议成对）：环境恢复段在**调用方帧同步完成**；`DisposeAsync` 以非 async 方法返回异步清理 Task（清理不跳过）；未完成 Dispose 的残留帧为终态（读方确定性拒绝，不静默串用）；异步释放纳入正式契约（同步 Dispose 保留兼容）。
 
 ### 4.3 资源归属、受管链身份与仓储参与
 
 - **强类型受管 Ambient 访问器**（替换 `public static object? Current/Push`）：
   - 公开只读：强类型 `IDataBaseContext?`；写路径（Push/Restore）内部化（仅内核可操作）。
-  - 帧内容：Context、资源键（§4.4）、owner 链节点、租户键。
+  - 帧内容：Context、逻辑资源键与物理实例身份（见下）、owner 链节点。
 - **受管链身份（跨 DI scope 污染的可实现机制）**：
   - 内核为每个**受管 scope** 创建链节点（唯一 ID + 父节点引用）；内核创建的隔离子 scope 节点挂到当前节点下；**非内核创建的普通 DI scope 是独立根**（无父链）。
   - **读方可见性 = descendant-or-self**：读方（适配器/DbContext）以其所在 scope 的链节点解析 ambient；仅当帧 owner 节点等于读方节点或是其后代时帧可见。这同时满足两个方向：
@@ -227,7 +234,11 @@ UnitOfWorkManager.BeginScope
   - **Manager 与访问器共享权威**：内核 push/restore 时校验帧 owner == 当前受管 scope；受管链内 `Manager.Current` 与仓储实际资源必须同源；不一致 → 确定性诊断（不得静默）。
   - 独立 scope 进入/退出不遮蔽他人帧（其读不到）；内核子 scope 退出按帧链恢复；乱序恢复不允许回退他人环境。
   - `Task.Run` 等执行上下文继承：可见性仍由读方链节点决定；同一受管链内「不支持并行数据库操作」的边界不变（不因 AsyncLocal 检查放宽）。
-- **资源键与校验时点（独立于 ambient 路由）**：资源键 =（Provider 绑定身份，连接/上下文身份，租户键）。内核在创建 scope 时以**请求方当前上下文**（重定向前）计算请求身份并与外层比对；读方（适配器）在解析帧时**先校验后路由**：当前租户键与帧记录不一致 → 确定性拒绝并指引新建 UoW。需要第二资源（第二 Context/连接/租户库）→ 确定性拒绝，必须新建 UoW。
+- **逻辑资源键与物理实例身份（R2-S137-02）**：
+  - **逻辑资源键**（选择/准入，稳定声明）：（Provider 绑定身份，Context 声明/连接配置身份，TenantId）。
+  - **物理实例身份**（本次 UoW 实际对象）：Context 实例 / Connection 实例 / Transaction 实例——记录在帧内，用于诊断与 CAP 事务身份，**不得被逻辑键替代**。
+  - **准入规则（同一校验机制，不做特殊分支）**：读方仅可跟随「帧 owner 在受管链上为自身后代（descendant-or-self）**且**帧的逻辑资源键 == 自身逻辑资源键」的帧。受管 RequiresNew 是**同一逻辑资源的新物理实例**（子 scope 按相同绑定/声明/租户构造新 Context/Connection），父仓储因此合法跟随；同链同租户但**不同 Context 声明/连接配置**（第二资源）→ 确定性拒绝；TenantId 不一致 → 确定性拒绝。
+  - **校验时点**：内核在创建 scope 时以请求方当前上下文（重定向前）计算逻辑键并与外层比对；读方（适配器）解析帧时**先校验后路由**。需要第二资源必须新建 UoW。
 - **构造不变量**（保留 #136）：隔离层先 Push 再构造 UoW；新建 UoW 绝不因父环境路由被重定向到旧 Context/连接。
 - **未完成退出 = 事务终结 + 丢弃未 flush 跟踪写入**：迁移 `IUnitOfWorkTransactionAbortable` 语义（回滚句柄 + 丢弃未 flush 跟踪写入；EF 实现 `ChangeTracker.Clear()`）。已 flush 的写入不在丢弃范围。不支持该能力的 Provider 必须在绑定中声明，并按 Provider 矩阵落位（实现或明确拒绝），不得静默残留。
 - **仓储参与规则**：
@@ -250,7 +261,7 @@ UnitOfWorkManager.BeginScope
   | DiscardUncommittedOnAbandon | 未完成退出丢弃未 flush 跟踪状态 | 是（新增） | 声明或拒绝 | 声明或拒绝 |
   | CAP lease 提供者 | §4.5 最小参与的 Provider 所有实现 | 是（计划切片 5） | 声明或拒绝 | 声明或拒绝 |
 
-- **资源身份**：复用判定以资源键（§4.3）为准，不以 `OrmProvider` 相同作为唯一依据；校验在 ambient 重定向**之前**完成（内核侧以请求方当前上下文计算；读方侧先校验后路由）；未指定参数按 §4.1 继承规则处理，不因 null 误判冲突；第二资源（第二 Context/连接/租户库）确定性拒绝。
+- **资源身份**：准入判定以**逻辑资源键**（§4.3：绑定身份/Context 声明/连接配置/租户）为准，不以 `OrmProvider` 相同作为唯一依据；**物理实例身份独立记录**（Context/Connection/Transaction 实例，供诊断与 CAP 使用，不被逻辑键替代）；校验在 ambient 重定向**之前**完成（内核侧以请求方当前上下文计算；读方侧先校验后路由）；未指定参数按 §4.1 继承规则处理，不因 null 误判冲突；第二资源（第二 Context 声明/连接配置/租户库）确定性拒绝。
 - **不支持的能力在业务执行前失败**：显式 isolation/requiresNew/timeout 与能力不符 → 确定性异常（含 Provider 与能力矩阵摘要），不静默降级。
 - **范围裁定**：只承诺单数据库资源的本地事务；多 DbContext 共享事务（如纳入）需真实数据库证明；跨库/跨 ORM 原子提交**明确拒绝**——不提供「依次 Commit 即原子」的聚合器。
 - EF Core 用真实 PostgreSQL（Testcontainers、独立 schema，CI 覆盖）+ SQLite 快速回归验收，隔离级别按实测过项逐项声明；FreeSql/SqlSugar「实现已声明能力或明确拒绝」；外部 SDK AOT 边界留 #130。
@@ -282,7 +293,7 @@ UnitOfWorkManager.BeginScope
   }
   UnitOfWorkTransactionLease {                   // 受限「借用」视图，不是万能扩展点
       OrmProvider Provider;
-      string ResourceKey;                        // 与 §4.3 同一资源键（连接/上下文/租户身份）
+      PhysicalResourceIdentity Resource;         // 物理实例身份：Context/Connection/Transaction 实例（§4.3；CAP 不得用逻辑键替代）
       IUnitOfWorkTransactionIdentity Transaction; // 只读身份/状态视图：TransactionId/IsCompleted 等
       bool IsValid;                              // live view：仅在活跃 scope 窗口内为 true
   }
@@ -310,9 +321,11 @@ CAP storage/transport 配置与 SDK 原子发布验证（#125）；ORM SDK 全�
 | 事务结果四维（3.2/4.5） | commit 成功但响应失败（注入）→ 结果 `Unknown` 且回滚尝试不改写；通知失败 → `Committed+Completed` 保持且可检查；提交后 Dispose 失败 → 可检查次级结果；**释放后仍可读取最终事务结果** | 将 Committed 记录放回通知之后 → 通知失败用例红 |
 | 非事务语义（3.3 #2/#8/#9） | 正式仓储非事务写 A → 后续失败/取消：检查 A 的真实数据库可见性与结果声明（不声称丢弃）；Complete 前 rollback-only → 不触发 flush（以写入探针断言） | 把非事务描述回「回滚」→ 用例红 |
 | 状态机（3.2） | 重复 Complete 幂等；终态后 Rollback/Complete 确定性拒绝；乱序释放拒绝；Active+Dispose（owner/join 分化行为） | 去除状态守卫 → 对应用例红 |
+| 异步激活协议（4.1/R2-S137-01） | 强制 Provider Begin 真正异步挂起（Task.Yield/Delay）后：调用方 `await` 返回后 Current、预注入仓储、事务物理身份一致；两层 RequiresNew；异步 Dispose 后父环境恢复；begin 失败恢复；**AOP 返回后的业务体实测**（不只 callback 场景）；遗漏 Dispose → 终态帧确定性拒绝 | 回退为「async 方法内写 AsyncLocal」→ 直接开始用例红 |
 | 受管链隔离（4.3） | 同执行流 host A / host B：A.RequiresNew 内新 DI scope 的 B.Manager/Repository（Current 与仓储资源一致、无串用）；执行上下文继承任务（Task.Run）；受管子 UoW 仍服务预注入父仓储 | 去掉 descendant 校验 → 串用用例红 |
-| 资源键与选项继承（4.3/4.4） | 外层 tenant A 内切 tenant B 后首次仓储访问（拒绝）；同 Provider 第二 Context（拒绝）；外层显式非默认 Provider/隔离 + 内层未指定参数（继承，不误判）；第二资源确定性拒绝 | 校验移到路由后 → 换租户用例红 |
-| 取消/超时通道（4.1/3.3 #9/#10） | 阻塞直到 token 取消的数据库动作（合作式取消生效）；join 更短 deadline 生效、更长被诊断；commit 前/派发中/成功后取消（成功后取消不得报告失败回滚）；取消后仍完成资源清理 | 移除 CT 传递/截止时间 → 对应用例红 |
+| 逻辑/物理资源身份（4.3/4.4/R2-S137-02） | **同一校验机制四向**：受管子 UoW 中父仓储使用新物理实例 B 成功；同链同租户不同 Context 声明 C 拒绝；不同连接配置拒绝；独立 DI 根不可见帧 | 逻辑键含物理实例 → B 跟随用例红 |
+| 选项继承（4.1） | 外层显式非默认 Provider/隔离 + 内层未指定参数 → 继承（不误判冲突）；外层 tenant A 内切 tenant B 后首次仓储访问 → 拒绝 | 继承规则改「重新解析默认」→ 误判用例红 |
+| 取消/超时通道（4.1/3.3 #9/#10/R2-S137-03） | AOP 方法：调用方 CT 不取消、UoW deadline 到期、方法把 CT 参数传给等待取消的数据库动作 → 收到取消 + 清理完成；无 CT 参数的正式仓储同样受组合 token 覆盖；RequestAborted 与 deadline 并存；join 更短 deadline 生效、更长被诊断；commit 前/派发中/成功后取消（成功后取消不得报告失败回滚） | 移除操作层 token 组合 → AOP 用例红 |
 | Options 生效（4.1） | 非事务模式不提交只 flush；显式隔离级别按实测矩阵生效（真实 DB）；能力不符执行前失败（动作未执行断言） | 跳过校验 → 对应用例红 |
 | 入口统一（4.1） | `[UnitOfWorkMo]` 成功提交/失败回滚集成用例（真实 DB）；生成 DynamicAPI 端点事务用例；两入口复用同一内核（AOP/生成运行时不出现自己的 begin/commit 实现——源码守卫测试） | 让 AOP 绕开内核 → 守卫测试红 |
 | 故障分层（4.5） | 提交前失败/commit 失败/提交后通知失败分别断言：原异常保留、四维结果正确、提交后通知失败**不得**声称回滚、无自动业务重试；生命周期顺序（校验→flush→commit→notify→cleanup）观测用例 | 各故障注入分支判别力验证 |
@@ -352,14 +365,16 @@ CAP storage/transport 配置与 SDK 原子发布验证（#125）；ORM SDK 全�
 1. **FreeSql/SqlSugar 及时终止、丢弃与 lease 能力**：计划切片 3/5 落位「实现或明确拒绝」；若拒绝，矩阵与迁移说明必须显式（不得默认残留事务）。
 2. **CAP lease 具体类型命名与形态**（`UnitOfWorkTransactionLease` 等）在计划切片 5 由评审确认后定型；本设计固定职责、所有权、live view 与失效语义。
 3. **通知失败/清理失败的具体异常类型命名**在计划切片 4 定型；本设计固定「不回滚、不谎称、不自动重试、可检查」四原则。
-4. **受管链节点的承载方式**（scoped 身份服务 vs 帧内嵌节点对象）在计划切片 2 定型；本设计固定 descendant-or-self 可见性与一致性校验语义。
+4. **受管链节点的承载方式**（scoped 身份服务 vs 帧内嵌节点对象）在计划切片 2 定型；本设计固定 descendant-or-self 可见性与一致性校验语义。**激活协议的具体 API 形态**（`BeginScope` 返回未启动 scope + `StartAsync` vs 其他等价形态）在计划切片 1 定型；本设计固定「调用方帧同步激活/恢复」语义。
 5. 旧测试/AOT fixture 的迁移面（`Begin()`、双入口实现、同步 BeginScope）在切片 1/4 内完成，迁移说明入 `99_RecycleBin` 记录。
 
 ---
 
-## 八、审计响应记录（rev.2，2026-10-10）
+## 八、审计响应记录（2026-10-10）
 
-对照 [Spec 审计记录](../../review/2026-10-10-issue-137-uow-spec-review.md) 的逐项修订：
+### 8.1 第一轮（rev.2）
+
+对照 [第一轮 Spec 审计](../../review/2026-10-10-issue-137-uow-spec-review.md) 的逐项修订：
 
 | 审计项 | 修订位置 |
 | --- | --- |
@@ -368,6 +383,17 @@ CAP storage/transport 配置与 SDK 原子发布验证（#125）；ORM SDK 全�
 | S137-03 [P1] 非事务路径不能承诺回滚已落库写入 | §3.3 #2/#8/#9 + §4.5「非事务模式语义」（保留逐写自动 flush、已持久化写入不可撤销、rollback-only 校验先于完成期 flush）+ §五 用例（A 的真实可见性、不触发 flush） |
 | S137-04 [P1] DI scope 隔离缺少机制 | §4.3 受管链身份（链节点 + descendant-or-self 可见性 + Manager/访问器一致权威 + 独立 scope 为根）+ §五 用例（host A/B、Task.Run 继承、预注入父仓储跟随） |
 | S137-05 [P2] 资源身份校验独立于 ambient 路由 | §4.3 资源键 + 重定向前校验时点 + 读方先校验后路由；§4.1 null/显式参数继承与校验表；§4.4 资源身份段落 + §五 用例 |
-| S137-06 [P2] 异步开始、取消传递与 Provider 选项通道 | §4.1 `BeginScopeAsync` 唯一异步开始阶段、`Func<CancellationToken, Task<T>>` 通道、入口 token 来源表、强类型 effective begin options、合作式语义声明；§3.3 #10 join 只能收紧 + §五 用例 |
+| S137-06 [P2] 异步开始、取消传递与 Provider 选项通道 | §4.1 `BeginScopeAsync` 唯一异步开始阶段（rev.3 已按 R2-S137-01 修订为「同步激活 + StartAsync」协议）、`Func<CancellationToken, Task<T>>` 通道、强类型 effective begin options、合作式语义声明；§3.3 #10 join 只能收紧 + §五 用例 |
 | S137-07 [P2] CAP handle 不可信 | §4.5 lease 契约重写（Provider 所有、同一连接/事务关联、不暴露生命周期操作、live view 失效、适配边界借用）+ §3.1 lease 行 + §五 用例 |
 | 文稿整理 | 移除「第 9 节」悬空引用（改为准确链接配套计划文件）；EF Core 隔离级别改为按实际数据库/驱动逐项实测声明；实施计划切片 1 纳入 Provider flush/commit/notify 职责拆分（每个可合并切片保持完整正确主链） |
+
+### 8.2 第二轮（rev.3）
+
+对照 [第二轮 Spec 审计](../../review/2026-10-10-issue-137-uow-spec-review-round2.md) 的逐项修订：
+
+| 审计项 | 修订位置 |
+| --- | --- |
+| R2-S137-01 [P1] BeginScopeAsync 调用方可见性 | §4.1 环境激活/恢复协议：**调用方帧同步激活 + 异步 StartAsync 组合**（Task 返回须非 async 实现；Dispose/DisposeAsync 恢复段同步完成于调用方帧）；AOP 改为**包裹式拦截**（方法体运行在内核帧内）；失败恢复与终态帧确定性拒绝；§二 Manager/Scope/Proxy 行 + §4.2 释放协议 + §五 激活协议用例（强制异步挂起、await 后身份一致、两层、异步 Dispose、begin 失败、AOP 业务体、遗漏 Dispose） |
+| R2-S137-02 [P2] 逻辑/物理资源身份 | §4.3 逻辑资源键（绑定/声明/租户）与物理实例身份（Context/Connection/Transaction）分离；同一准入机制（descendant 链 + 逻辑键匹配；受管 RequiresNew = 同一逻辑资源的新物理实例）；§4.4 身份段 + §4.5 lease 使用物理身份 + §五 四向同机制用例 |
+| R2-S137-03 [P2] AOP 联动 token | §4.1 联动 token 通道：生成端点传联动 token 入方法参数；**操作层组合为主机制**（正式仓储/Provider 组合「传入 CT ⊕ 受管执行 token」）；支持边界文档化（非仓储等待仅观察入参 CT）；§五 AOP 用例（调用方 CT 不取消、deadline 到期、等待取消的数据库动作收到取消） |
+| 文稿整理 | 契约清点 Begin/Proxy 归档行改为 `BeginScope + StartAsync`；`Disposed` 不再列为 State 行（释放标志 `IsReleased` 与 State/事务结果独立存储、互不覆盖）；计划切片 1/2 同步落位激活协议、资源键与 token 组合 |
