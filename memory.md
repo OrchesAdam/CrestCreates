@@ -1,104 +1,81 @@
-# CrestCreates active handoff — 2026-09-30
+# CrestCreates platform status — 2026-10-10
 
-## Current objective and rules
+Baseline: master `cd4d7208751d4578c673ffd4a04d1e694c94dd7a` (PR #119 merge; remote
+identical at check time 2026-10-10 09:32 +08:00). Open PRs: 0. Workflow: GitHub PR
+flow, never auto-merge; replaced files archived to 99_RecycleBin, never deleted;
+never output credentials.
 
-Issue87: AI safely creates and evolves enterprise applications;88 provisional.
-Root designs/reviews/verifies. GPT-6 Luna high codes; medium investigates.
-GitHub PR workflow, never auto-merge. Stop at actual5h limit; one-time wake after
-actual reset; no reset cards. No new model requests. Never output credentials.
-AGENTS.md: single typed/generated authority; actual native publish/link/run evidence;
-archive replaced files, never delete. Preserve root user untracked
-`docs/review/h2-mainline-closure-review.md`.
+## Delivered capabilities (master)
 
-## Active worktree and state
+- Core platform mainlines: Tenant / Setting / Feature / Permission / BackgroundJobs /
+  ObjectMapping / Dynamic API (compile-time generated) / Workflow + HumanTask /
+  Audit (write-redact-query). Audit retention (cleanup/governance) not delivered.
+- Module system: compile-time aggregation only (BuildTasks + generator), closed.
+- Agent governance plane (Authoring -> deterministic review -> Control Plane):
+  review artifact store and package/evidence artifact store with InMemory +
+  PostgreSQL providers (additive migrations); activation request/review/gate
+  present but in-memory (`InMemoryRuntimeActivationGate`,
+  `InMemoryDescriptorActivationAuditor`).
+- JsonContracts build-time toolchain: `src/Tooling/CrestCreates.JsonContracts.BuildTasks`
+  (+ `.BuildTasks.Core`, `.Tool`) generates deterministic JSON contract roots consumed
+  by the official STJ source generator; no runtime reflection/scanner fallback.
+- `src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql`: durable runtime state,
+  Control Plane reference data, review/package artifact persistence, native AotHost
+  evidence.
 
-Path `/home/orches/workspace/CrestCreates/.worktrees/package-evidence-store-87`.
-Branch `codex/phase-10c-package-evidence-store-87`.
-Base PR107 final `d2e68d65fe9c42ac19e41a3783afd5f4e79aacec`.
-PR107 READY; fullCI36532381060 success at that head, unmerged. Do not alter parent.
-PR108 https://github.com/OrchesAdam/CrestCreates/pull/108 DRAFT stacked on107;
-implementation45ea74f3 committed/pushed; attached. Exact five replaced source files
-archived under99_RecycleBin/2026-09-29-package-evidence-store and committed.
-Plan `docs/superpowers/plans/2026-09-29-package-evidence-artifact-cutover.md`.
-Evidence `docs/review/2026-09-30-package-evidence-artifacts.md`.
-Complete prior handoff preserved in `docs/review/2026-09-30-package-evidence-handoff-history.md`;
-older histories Sep29/Sep24/Sep23 remain.
+## Evidence boundaries
 
-## Implementation and review constraints
+- Active CI native publish+link+run gates: PG AotHost sentinels
+  (incl. `CRESTCREATES_WORKFLOW_CONDITION_AOT_OK`), Memory JSON contracts,
+  ControlPlane JsonContracts, Asset/Procurement Golden App fixtures.
+- CapabilityEndpoint HTTP fixture: publish/link only in active CI; native HTTP
+  request execution gate missing (#123). MCP/Agent.Tools main fixtures publish-only.
+- Review scores (8.5/10, ~70%) are subjective single-review estimates, not
+  production-readiness guarantees; support claims must point to per-item evidence.
 
-One async IAgentPackageArtifactStore replaces ToolService package/evidence dictionaries,
-latest pointer and independent resolver scalar hash writers. Explicit memory and PG
-providers. Exact evidence-parent ID, tenant/owner/scope/version checks before submission.
-Atomic new-pair insertion, existing-parent evidence insertion, detached snapshots,
-deterministic latest query on scope/version/catalog. No failure fallback.
-PG additiveV015, FK, strict schema manifest and structured-column/payload comparison.
-Official package serializer and original3hash profiles unchanged. Separate canonical
-content profile covers exact PackageJson, entire projection and immutable metadata;
-old3hashes omit snapshot relationships/diagnostics. This is integrity, not approval or
-privileged-writer authenticity. Resolver derives hashes from validated same-store content.
+## Open work entry (#121 orchestration)
 
-Latest addition: shared factory CreateProjectedPair with actual authorization options,
-exact catalog, owner, package, IDs/time. Requires topology builder, reuses platform
-projectors, rejects hidden owner/package kinds, creates digest-owning envelopes.
-CompanyCertification sample uses it and atomic store insertion. New2 narrow-scope
-factory tests; constructor callers in CP and PG tests updated. This addition and its consumers are now verified locally. Root requested semantic review of proposed
-references absent from pre-review catalog; preserve catalog fingerprint semantics.
-Do not fix test fixtures by weakening production scope/integrity.
+- Wave 0: #122 baseline calibration (this update; PR pending review).
+- Wave 1: #123 NativeAOT gate / #124 UnitOfWork / #125 CAP.
+- Wave 2: #126 LocalEvent / #127 RabbitMQ / #128 CRUD JSON.
+- Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
+- Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
+- At most 2 implementation PRs in flight; verify at current head before merge.
 
-## Verified results and next commands
+## Decided boundaries (do not reopen without new evidence)
 
-Local final checks all passed:
-- PG463/463 in5m36 `/tmp/crest-package-pg-final-r2.log`, includes large catalog index case.
-- CP575/575 `/tmp/crest-package-cp-final.log`, includes7new tests.
-- CompanyCertification34/34 `/tmp/crest-package-sample-r2.log`.
-- Boundary168/168 `/tmp/crest-package-boundary-r2.log`, excludes CI ledger aggregation.
-- Actual NativeAOT1/1 in1m29 `/tmp/crest-package-native-final.log`; output
-  artifacts/control-plane-json-aot-8bb8b0d9d3f54b239b6edafac6fb9606/run.log.
-  Memory service/native evidence only, NOT PostgreSQL-native support.
-- All5 replaced source files verified archived identically. No old scalar writer/cache
-  type references in live src/tests/samples. git diff --check clean.
+- #87/#88 closed. Durable activation aggregate/CAS/replay, submission identity and
+  request+HumanTask transaction are D-class (application-specific, #88 decision).
+  Review/package artifact persistence does NOT prove durable activation.
+- C88-01 outbox consumer activation: delivered by #118/#119 (generated
+  `[GenerateOutboxConsumerActivation]` mainline; hand-written factories removed).
+- #50/#51 rejected, #76/#57 deferred; do not start without a failing acceptance case.
 
-Root caught unbounded scope/catalog strings in PG reuse btree; fixed to bounded
-lookup keys tenant/draft/time/id, exact scope/version/catalog remain SQL predicates.
-Earlier compile/test failures preserved in logs/history; do not repeat resolved work.
-No local test process running. Next: handoff/final commit, dispatch fullCI and
-verify exact head; ready only
-on complete success, never merge. FullCI includes JSON ownership/aggregate ledger.
+## Known gaps
 
-## Agents
+- B12 unsupported-intent negative case missing (#133, bounded).
+- HTTP native request gate (#123); UnitOfWork dual factory + runtime scans (#124);
+  CAP entry split (#125); LocalEvent/RabbitMQ reflection bridges (#126/#127);
+  CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
+  (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).
 
-/root/package_evidence_store_runtime completed runtime/contracts/tests/sample.
-/root/package_evidence_pg and /root/package_evidence_native completed and idle.
-Do not duplicate assignments. Root serializes local builds/tests.
+## Preserved assets
 
-## Test environment
+- Retained proposal container `crest-asset-approved-inventory-87` exists (exited;
+  not started or re-verified this check): schema `asset_live_retained_20260923`,
+  tenant `asset-live-eval-tenant`; locator
+  `docs/review/2026-09-23-asset-live-retained-result.json`. No more DeepSeek calls,
+  no replacement/cleanup/schema changes without approval; no approval/activation.
+- Review-store test container `crest-review-store-tests-87` exists (exited); do not
+  use retained live containers for new tests.
 
-Use --disable-build-servers -m:1 -p:UseSharedCompilation=false -p:NuGetAudit=false.
-Last flag local environment workaround; never change package defaults.
-Independent container crest-review-store-tests-87,127.0.0.1:55488,crest_runtime_tests.
-Private `/tmp/crest-review-store-pg-private.json` contains connection; inject internally
-as CREST_RUNTIME_PG_CONNECTION, never print. Tests create isolated itest schemas.
-No Docker socket; existing Docker wrapper works. Do not use retained live container.
+## History
 
-## Preserve real proposal
-
-Container crest-asset-approved-inventory-87 (stopped after reboot, preserved),port55487;
-schema asset_live_retained_20260923; tenant asset-live-eval-tenant;
-draft ht_asset_maintenance_initial_review-a9a00004ca5344f6832df9c25dc5e764,Created.
-Locator docs/review/2026-09-23-asset-live-retained-result.json. One successful DeepSeek
-retention call already independently verified; no more calls, replacement, cleanup
-or schema changes. No approval/activation. Older failures remain failures.
-
-## Remaining platform scope
-
-Only review/package artifacts are addressed. Durable activation aggregate/CAS/replay,
-submission operation identity, request+HumanTask transaction, activation intent/receipt
-and actual runtime installation are separate work. Gate is in memory, no production
-deployment or complete durable approval claim. Issue87 cannot close.
-PR106 and earlier ready PRs remain unmerged; PR103 design-only draft.
-
-## Quota and automation
-
-Sep30 10:43 wake restored5h0%,weekly79%, actual reset1790754200.
-Consumed crestcreates wake deleted; no active wake currently. No reset cards used.
-Schedule future wake only from actual quota/reset and latest handoff.
+- Predecessor handoff (2026-09-30) archived verbatim:
+  `docs/review/2026-10-10-memory-handoff-archive.md`.
+- Older histories: `docs/review/2026-09-20/23/24/29-memory-history.md`,
+  `docs/review/2026-09-30-package-evidence-handoff-history.md`.
+- Calibration record (#122): `docs/review/2026-10-10-framework-architecture-review-follow-up.md`
+  (revision table, #103–#108 absorption mapping, B12 verdict).
+- Old quota/wake automation, worktree/agent dispatch instructions and private
+  connection material are intentionally not carried forward; see the archive.
