@@ -11,28 +11,30 @@ using CrestCreates.Data.Abstractions;
 namespace CrestCreates.Data.EFCore.DbContexts
 {
     /// <summary>
-    /// EF Core 实体集：数据动作把「传入 CT」与「受管执行 token」组合为有效 token
-    /// （操作层 token 组合，见设计 §4.1 R2-S137-03）。
+    /// EF Core 实体集：数据动作把「传入 CT」与「读方可见的受管执行 token」组合为有效 token
+    /// （操作层 token 组合 + 受管链校验，见设计 §4.1 R2-S137-03）。
     /// </summary>
     public class EfCoreDataBaseSet<TEntity> : IDataBaseSet<TEntity> where TEntity : class
     {
         private readonly DbSet<TEntity> _dbSet;
+        private readonly UnitOfWorkChainNode? _chainNode;
 
-        public EfCoreDataBaseSet(DbSet<TEntity> dbSet)
+        public EfCoreDataBaseSet(DbSet<TEntity> dbSet, UnitOfWorkChainNode? chainNode = null)
         {
             _dbSet = dbSet;
+            _chainNode = chainNode;
         }
 
         public async Task<TEntity> AddAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             var result = await _dbSet.AddAsync(entity, effective);
             return result.Entity;
         }
 
         public async Task AddRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             await _dbSet.AddRangeAsync(entities, effective);
         }
 
@@ -82,20 +84,20 @@ namespace CrestCreates.Data.EFCore.DbContexts
 
         public async Task<int> RemoveRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             var enumerable = await _dbSet.Where(predicate).ToListAsync(effective);
             return await RemoveRangeAsync(enumerable, effective);
         }
 
         public async Task<TEntity?> FindAsync(params object[] keyValues)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(default, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(default, _chainNode, out var effective);
             return await _dbSet.FindAsync(keyValues, effective);
         }
 
         public async Task<TEntity?> FindAsync(CancellationToken cancellationToken, params object[] keyValues)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _dbSet.FindAsync(keyValues, effective);
         }
 

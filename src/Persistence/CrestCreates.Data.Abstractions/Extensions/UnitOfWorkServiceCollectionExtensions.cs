@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.UnitOfWork;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -35,6 +36,7 @@ namespace CrestCreates.Data.Abstractions
 
             services.TryAddSingleton(sp =>
                 new UnitOfWorkProviderBindingRegistry(sp.GetServices<UnitOfWorkProviderBinding>()));
+            services.TryAddScoped<UnitOfWorkChainNode>();
             services.TryAddScoped<IUnitOfWorkFactory>(sp => new UnitOfWorkFactory(
                 sp,
                 sp.GetRequiredService<UnitOfWorkProviderBindingRegistry>()));
@@ -42,7 +44,8 @@ namespace CrestCreates.Data.Abstractions
                 sp.GetRequiredService<IUnitOfWorkFactory>(),
                 sp.GetRequiredService<UnitOfWorkProviderBindingRegistry>(),
                 sp.GetRequiredService<IServiceScopeFactory>(),
-                state.ExplicitDefault));
+                state.ExplicitDefault,
+                sp.GetRequiredService<UnitOfWorkChainNode>()));
 
             return services;
         }
@@ -91,7 +94,10 @@ namespace CrestCreates.Data.Abstractions
         /// <see cref="UnitOfWorkAmbientContext"/>，已注入的业务依赖据此跟随当前 UoW。
         /// </param>
         /// <param name="ambientContextFactory">
-        /// 在隔离子作用域内解析“当前上下文对象”的强类型委托（例如 EF 的 <c>IDataBaseContext</c>）。
+        /// 在隔离子作用域内解析“当前资源上下文”的强类型委托（例如 EF 的 <c>IDataBaseContext</c>）。
+        /// </param>
+        /// <param name="tenantKeyFactory">
+        /// 读取当前租户键的委托（隔离帧记录该键；读方在路由前校验租户一致性）。为 null 表示不参与租户身份校验。
         /// </param>
         /// <returns>服务集合</returns>
         /// <remarks>
@@ -102,7 +108,8 @@ namespace CrestCreates.Data.Abstractions
             OrmProvider provider,
             Func<IServiceProvider, IUnitOfWork> factory,
             bool supportsRequiresNew = true,
-            Func<IServiceProvider, object?>? ambientContextFactory = null)
+            Func<IServiceProvider, IDataBaseContext?>? ambientContextFactory = null,
+            Func<IServiceProvider, string?>? tenantKeyFactory = null)
         {
             if (factory is null)
             {
@@ -110,7 +117,7 @@ namespace CrestCreates.Data.Abstractions
             }
 
             services.AddSingleton(new UnitOfWorkProviderBinding(
-                provider, factory, supportsRequiresNew, ambientContextFactory));
+                provider, factory, supportsRequiresNew, ambientContextFactory, tenantKeyFactory));
             return services;
         }
 

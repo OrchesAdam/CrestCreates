@@ -12,21 +12,24 @@ using CrestCreates.Data.Abstractions;
 namespace CrestCreates.Data.EFCore.DbContexts
 {
     /// <summary>
-    /// EF Core 查询构建器：数据动作把「传入 CT」与「受管执行 token」组合为有效 token
-    /// （操作层 token 组合，见设计 §4.1 R2-S137-03）。
+    /// EF Core 查询构建器：数据动作把「传入 CT」与「读方可见的受管执行 token」组合为有效 token
+    /// （操作层 token 组合 + 受管链校验，见设计 §4.1 R2-S137-03）。
     /// </summary>
     public class EfCoreQueryableBuilder<TEntity> : IQueryableBuilder<TEntity> where TEntity : class
     {
         private IQueryable<TEntity> _queryable;
+        private readonly UnitOfWorkChainNode? _chainNode;
 
-        public EfCoreQueryableBuilder(DbSet<TEntity> dbSet)
+        public EfCoreQueryableBuilder(DbSet<TEntity> dbSet, UnitOfWorkChainNode? chainNode = null)
         {
             _queryable = dbSet;
+            _chainNode = chainNode;
         }
 
-        public EfCoreQueryableBuilder(IQueryable<TEntity> queryable)
+        public EfCoreQueryableBuilder(IQueryable<TEntity> queryable, UnitOfWorkChainNode? chainNode = null)
         {
             _queryable = queryable;
+            _chainNode = chainNode;
         }
 
         public IQueryableBuilder<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
@@ -126,7 +129,7 @@ namespace CrestCreates.Data.EFCore.DbContexts
         public IQueryableBuilder<TResult> Select<TResult>(Expression<Func<TEntity, TResult>> selector) where TResult : class
         {
             var newQueryable = _queryable.Select(selector);
-            return new EfCoreQueryableBuilder<TResult>(newQueryable);
+            return new EfCoreQueryableBuilder<TResult>(newQueryable, _chainNode);
         }
 
         public IQueryableBuilder<TEntity> Distinct()
@@ -137,61 +140,61 @@ namespace CrestCreates.Data.EFCore.DbContexts
 
         public async Task<List<TEntity>> ToListAsync(CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.ToListAsync(effective);
         }
 
         public async Task<TEntity> FirstAsync(CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.FirstAsync(effective);
         }
 
         public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.FirstOrDefaultAsync(effective);
         }
 
         public async Task<TEntity> SingleAsync(CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.SingleAsync(effective);
         }
 
         public async Task<TEntity?> SingleOrDefaultAsync(CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.SingleOrDefaultAsync(effective);
         }
 
         public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.AnyAsync(effective);
         }
 
         public async Task<bool> AnyAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.AnyAsync(predicate, effective);
         }
 
         public async Task<int> CountAsync(CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.CountAsync(effective);
         }
 
         public async Task<long> LongCountAsync(CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             return await _queryable.LongCountAsync(effective);
         }
 
         public async Task<PagedResult<TEntity>> ToPagedResultAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default)
         {
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
             var totalCount = await _queryable.LongCountAsync(effective);
             var items = await _queryable.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(effective);
 

@@ -93,7 +93,7 @@ internal static class Program
                 OrmProvider.FreeSql,
                 static sp => new StaticUnitOfWork(sp.GetRequiredService<ScopeToken>().Id),
                 supportsRequiresNew: true,
-                ambientContextFactory: static sp => sp.GetRequiredService<ScopeToken>()));
+                ambientContextFactory: static sp => new FixtureDataBaseContext(sp.GetRequiredService<ScopeToken>().Id)));
 
         using var scope = provider.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
@@ -247,6 +247,41 @@ internal static class Program
     private sealed class ScopeToken
     {
         public Guid Id { get; } = Guid.NewGuid();
+    }
+
+    /// <summary>最小 IDataBaseContext 探针（仅 ambient 身份用途）。</summary>
+    private sealed class FixtureDataBaseContext : CrestCreates.DbContextProvider.Abstract.IDataBaseContext
+    {
+        public FixtureDataBaseContext(Guid scopeId)
+        {
+            ScopeId = scopeId;
+        }
+
+        public Guid ScopeId { get; }
+
+        public OrmProvider Provider => OrmProvider.EfCore;
+
+        public CrestCreates.DbContextProvider.Abstract.IDataBaseTransaction? CurrentTransaction => null;
+
+        public string? ConnectionString => null;
+
+        public CrestCreates.DbContextProvider.Abstract.IDataBaseSet<TEntity> Set<TEntity>() where TEntity : class
+            => throw new NotSupportedException();
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<CrestCreates.DbContextProvider.Abstract.IDataBaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public CrestCreates.DbContextProvider.Abstract.IQueryableBuilder<TEntity> Queryable<TEntity>() where TEntity : class
+            => throw new NotSupportedException();
+
+        public object GetNativeContext() => this;
+
+        public void Dispose()
+        {
+        }
     }
 
     private sealed class StaticUnitOfWork : IUnitOfWork

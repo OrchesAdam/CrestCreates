@@ -28,6 +28,7 @@ namespace CrestCreates.Data.Abstractions
         private readonly UnitOfWorkProviderBindingRegistry? _bindings;
         private readonly IServiceScopeFactory? _scopeFactory;
         private readonly OrmProvider? _explicitDefault;
+        private readonly UnitOfWorkChainNode? _chainNode;
         private readonly bool _ownsResolvedUnitOfWorks;
         private readonly AsyncLocal<AmbientFrame?> _currentFrame = new();
 
@@ -38,12 +39,14 @@ namespace CrestCreates.Data.Abstractions
             IUnitOfWorkFactory factory,
             UnitOfWorkProviderBindingRegistry bindings,
             IServiceScopeFactory scopeFactory,
-            OrmProvider? explicitDefault = null)
+            OrmProvider? explicitDefault = null,
+            UnitOfWorkChainNode? chainNode = null)
         {
             _factory = factory ?? throw new ArgumentNullException(nameof(factory));
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _explicitDefault = explicitDefault;
+            _chainNode = chainNode;
             _ownsResolvedUnitOfWorks = false;
         }
 
@@ -151,11 +154,14 @@ namespace CrestCreates.Data.Abstractions
         {
             var provider = ResolveProvider(options.Provider);
             var unitOfWork = _factory.Create(provider);
+            var node = new UnitOfWorkChainNode();
+            node.AttachTo(frame?.Scope.Node ?? _chainNode);
             return UnitOfWorkScope.CreateOwner(
                 this,
                 unitOfWork,
                 provider,
                 options,
+                node,
                 parentFrame: frame,
                 ownedScope: null,
                 ambientToken: null,
@@ -180,11 +186,14 @@ namespace CrestCreates.Data.Abstractions
                 // Manual construction without DI scope support (unit tests / custom hosts).
                 // The custom factory is expected to return an independent instance per call.
                 var fallback = _factory.Create(provider);
+                var manualNode = new UnitOfWorkChainNode();
+                manualNode.AttachTo(parentFrame.Scope.Node);
                 return UnitOfWorkScope.CreateOwner(
                     this,
                     fallback,
                     provider,
                     options,
+                    manualNode,
                     parentFrame: parentFrame,
                     ownedScope: null,
                     ambientToken: null,
@@ -200,8 +209,14 @@ namespace CrestCreates.Data.Abstractions
                 // never be redirected to a parent context via ambient routing.
                 if (binding!.AmbientContextFactory is not null)
                 {
-                    ambientToken = UnitOfWorkAmbientContext.Push(
-                        binding.AmbientContextFactory(childScope.ServiceProvider));
+                    var ambientContext = binding.AmbientContextFactory(childScope.ServiceProvider)
+                        ?? throw new InvalidOperationException(
+                            $"The '{provider}' ambient context factory returned null; requiresNew isolation " +
+                            "requires a resolvable resource context.");
+                    var childNode = childScope.ServiceProvider.GetRequiredService<UnitOfWorkChainNode>();
+                    childNode.AttachTo(parentFrame.Scope.Node);
+                    var tenantKey = binding.TenantKeyFactory?.Invoke(childScope.ServiceProvider);
+                    ambientToken = UnitOfWorkAmbientContext.Push(ambientContext, childNode, tenantKey);
                 }
 
                 var childFactory = childScope.ServiceProvider.GetRequiredService<IUnitOfWorkFactory>();
@@ -212,6 +227,7 @@ namespace CrestCreates.Data.Abstractions
                     unitOfWork,
                     provider,
                     options,
+                    childScope.ServiceProvider.GetRequiredService<UnitOfWorkChainNode>(),
                     parentFrame: parentFrame,
                     ownedScope: childScope,
                     ambientToken: ambientToken,
@@ -275,6 +291,7 @@ namespace CrestCreates.Data.Abstractions
             private readonly UnitOfWorkManager _manager;
             private readonly IUnitOfWork _unitOfWork;
             private readonly OrmProvider _provider;
+            private readonly UnitOfWorkChainNode? _node;
             private readonly bool _isOwner;
             private readonly bool _isTransactional;
             private readonly IsolationLevel? _requestedIsolation;
@@ -300,6 +317,7 @@ namespace CrestCreates.Data.Abstractions
                 UnitOfWorkManager manager,
                 IUnitOfWork unitOfWork,
                 OrmProvider provider,
+                UnitOfWorkChainNode? node,
                 UnitOfWorkOptions options,
                 bool isOwner,
                 bool isTransactional,
@@ -312,6 +330,7 @@ namespace CrestCreates.Data.Abstractions
                 _manager = manager;
                 _unitOfWork = unitOfWork;
                 _provider = provider;
+                _node = node;
                 _isOwner = isOwner;
                 _isTransactional = isTransactional;
                 _requestedIsolation = options.IsolationLevel;
@@ -321,7 +340,7 @@ namespace CrestCreates.Data.Abstractions
                 _ownedScope = ownedScope;
                 _ambientToken = ambientToken;
                 _ownsUnitOfWorkDirectly = ownsUnitOfWorkDirectly;
-                _tokenRestorer = UnitOfWorkExecutionContext.Push(_tokenSource);
+                _tokenRestorer = UnitOfWorkExecutionContext.Push(_tokenSource, node);
                 if (isOwner)
                 {
                     manager._currentFrame.Value = new AmbientFrame(this, parentFrame);
@@ -335,6 +354,7 @@ namespace CrestCreates.Data.Abstractions
                 IUnitOfWork unitOfWork,
                 OrmProvider provider,
                 UnitOfWorkOptions options,
+                UnitOfWorkChainNode? node,
                 AmbientFrame? parentFrame,
                 IServiceScope? ownedScope,
                 IDisposable? ambientToken,
@@ -344,6 +364,7 @@ namespace CrestCreates.Data.Abstractions
                     manager,
                     unitOfWork ?? throw new InvalidOperationException("The unit-of-work factory returned null."),
                     provider,
+                    node,
                     options,
                     isOwner: true,
                     isTransactional: options.IsTransactional,
@@ -395,6 +416,7 @@ namespace CrestCreates.Data.Abstractions
                     manager,
                     owner._unitOfWork,
                     owner._provider,
+                    owner._node,
                     options,
                     isOwner: false,
                     isTransactional: owner._isTransactional,
@@ -404,6 +426,9 @@ namespace CrestCreates.Data.Abstractions
                     ambientToken: null,
                     ownsUnitOfWorkDirectly: false);
             }
+
+            /// <summary>受管链节点（诊断与读方链校验）。</summary>
+            internal UnitOfWorkChainNode? Node => _node;
 
             public IUnitOfWork UnitOfWork => _unitOfWork;
 
@@ -799,13 +824,13 @@ namespace CrestCreates.Data.Abstractions
             {
                 try
                 {
-                    if (_unitOfWork is IUnitOfWorkTransactionAbortable abortable)
+                    if (_unitOfWork is IUnitOfWorkAbandonable abandonable)
                     {
-                        // DI 路径：容器负责对象释放，内核只终结未完成事务（#136 R2-136-3）。
-                        abortable.AbortPendingTransaction();
+                        // DI 路径：容器负责对象释放，内核终结未完成事务并丢弃未 flush 跟踪写入。
+                        abandonable.AbandonPendingWork();
                     }
 
-                    // 无同步终结能力的 Provider：依赖其容器释放语义（见 Provider 矩阵）。
+                    // 无终结能力的 Provider：依赖其容器释放语义（见 Provider 矩阵）。
                     _transactionOutcome = _isTransactional
                         ? UnitOfWorkTransactionOutcome.RolledBack
                         : UnitOfWorkTransactionOutcome.NotStarted;

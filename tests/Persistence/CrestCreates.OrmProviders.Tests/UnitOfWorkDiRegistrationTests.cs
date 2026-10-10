@@ -207,7 +207,7 @@ public class UnitOfWorkDiRegistrationTests
             OrmProvider.EfCore,
             static sp => sp.GetRequiredService<ProbeUnitOfWork>(),
             supportsRequiresNew: true,
-            ambientContextFactory: static sp => sp.GetRequiredService<ScopeMarker>());
+            ambientContextFactory: static sp => new TestDataBaseContext(sp.GetRequiredService<ScopeMarker>().Id));
 
         using var provider = services.BuildServiceProvider();
         var scope = provider.CreateScope();
@@ -295,7 +295,7 @@ public class UnitOfWorkDiRegistrationTests
                 return new ProbeUnitOfWork(sp.GetRequiredService<ScopeMarker>().Id, OrmProvider.EfCore);
             },
             supportsRequiresNew: true,
-            ambientContextFactory: static sp => sp.GetRequiredService<ScopeMarker>());
+            ambientContextFactory: static sp => new TestDataBaseContext(sp.GetRequiredService<ScopeMarker>().Id));
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();

@@ -22,7 +22,7 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
     /// 提交后通知（<see cref="IUnitOfWorkCommittedNotifier"/>）由内核按
     /// 「校验→flush→commit（确认即记录）→通知→清理」调用。
     /// </remarks>
-    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkTransactionAbortable, IUnitOfWorkCommittedNotifier
+    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkAbandonable, IUnitOfWorkCommittedNotifier
     {
         private readonly DbContext _dbContext;
         private IDbContextTransaction? _currentTransaction;
@@ -151,10 +151,10 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
         }
 
         /// <summary>
-        /// 逻辑工作单元的事务终结：scope 未完成退出时回滚并释放未提交事务，
-        /// 只终结事务句柄，不释放 DI 持有的上下文对象；可重复调用。
+        /// 未完成退出的终结：回滚并释放未完成事务，并丢弃未 flush 的跟踪写入
+        /// （已 flush 的写入不在丢弃范围；跨 UoW 不残留跟踪状态）；可重复调用。
         /// </summary>
-        public void AbortPendingTransaction()
+        public void AbandonPendingWork()
         {
             try
             {
@@ -168,6 +168,7 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             finally
             {
                 DisposeTransaction();
+                _dbContext.ChangeTracker.Clear();
             }
         }
 

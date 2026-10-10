@@ -27,15 +27,18 @@ namespace CrestCreates.Data.EFCore.Repositories
         where TKey : IEquatable<TKey>
     {
         protected readonly IDbContextProvider.IDataBaseContext _dbContext;
+        private readonly UnitOfWorkChainNode? _chainNode;
 
         public EfCoreRepositoryBase(
             IDbContextProvider.IDataBaseContext dbContext,
             ICurrentTenant currentTenant,
-            DataFilterState dataFilterState)
+            DataFilterState dataFilterState,
+            UnitOfWorkChainNode? chainNode = null)
         {
             _dbContext = dbContext;
             CurrentTenant = currentTenant;
             DataFilterState = dataFilterState;
+            _chainNode = chainNode;
         }
 
         public override IQueryable<TEntity> GetQueryableUnfiltered()
@@ -262,7 +265,7 @@ namespace CrestCreates.Data.EFCore.Repositories
         {
             if (_dbContext.CurrentTransaction == null)
             {
-                using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+                using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
                 await _dbContext.SaveChangesAsync(effective);
             }
         }
