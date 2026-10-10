@@ -1,6 +1,6 @@
 # Issue #137 UnitOfWork 事务传播、资源归属与业务参与主链 — 设计记录与现状清单
 
-日期：2026-10-10（rev.3：吸收第一轮审计 S137-01…07 与第二轮审计 R2-S137-01…03 及文稿整理，见文末第八节）
+日期：2026-10-10（rev.3.1：设计经第三轮审计通过；含第一轮 S137-01…07、第二轮 R2-S137-01…03 修订与第三轮计划/文稿修正，见文末第八节）
 实施基线：master `988bfd2f`（PR #136 merge，即 #124 闭环后的真实主链）
 关联：[Issue #137](https://github.com/OrchesAdam/CrestCreates/issues/137)、[Issue #121](https://github.com/OrchesAdam/CrestCreates/issues/121)、[#124 设计记录](../../review/2026-10-10-issue-124-unitofwork-unified-registration.md)、[#123 证据矩阵](../../review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md)、[第一轮 Spec 审计](../../review/2026-10-10-issue-137-uow-spec-review.md)、[第二轮 Spec 审计](../../review/2026-10-10-issue-137-uow-spec-review-round2.md)
 下游：#125（CAP）必须在本项验收并合并后实施；#130 复用本项的 Provider 能力边界。
@@ -202,12 +202,13 @@ UnitOfWorkManager.BeginScope
   - 委托式入口：`ExecuteAsync<TResult>(Func<CancellationToken, Task<TResult>> action, UnitOfWorkOptions?, CancellationToken)`——action 接收内核联动 token（调用方 CT + 截止时间）。
   - 生成端点的调用方 CT = `HttpContext.RequestAborted`；生成器把**内核联动 token** 传入服务方法的 CT 参数（RequestAborted 作为调用方 CT 参与联动，不再被直接透传）。
   - AOP 与手写路径（方法签名不可重写的边界）：**操作层组合为主机制**——正式仓储/Provider 操作在发起数据库动作时，把「传入 CT」与「当前受管执行 token（链校验后）」组合为有效 token（`CreateLinkedTokenSource` 语义），使 AOP 方法、无 CT 参数调用与 RequestAborted 场景都获得内核截止时间覆盖；编译期、无反射、业务无额外仪式。
+  - 读取「受管执行 token」必须经受管载体（调用方帧激活、终态帧拒绝），不得用未校验的全局静态。落地分阶段：**切片 1 随激活协议落地支撑 AOP deadline 的最小操作层组合与安全读取校验（该主链能力在切片 1 独立成立）**；切片 2 把读取升级为受管链校验访问器并完善资源准入与仓储覆盖。
   - 支持边界（文档明确）：方法体内**非仓储/Provider 的等待**（如 `Task.Delay`）仅观察其入参 CT；缺少 CT 参数时不承诺被单独取消，但经正式仓储/Provider 的数据库动作始终受组合 token 覆盖。不把「存在公开 `ExecutionToken`」当作业务操作已接通。
 
 - **Provider begin 的强类型有效选项**：内核把 options 解析为 effective begin options（`IsolationLevel`、截止时间）随 CT 传入 Provider `BeginTransactionAsync(effective, ct)`；Provider 不从环境读取配置。
 - **合作式语义声明**：截止时间/取消是**合作式**的——内核不强行中断不观察 token 的 Provider 操作；`Task.WhenAny` 超时后直接释放资源不构成取消保证（禁止该实现方式）。commit 已确认与取消竞态的判定按 §3.2/§4.5（可能 `Unknown`）。
 - 同步 `Execute<T>` = 异步内核的同步等待包装（唯一实现）；AOP/生成运行时/管理 API/同步包装全部经内核，**任何入口不得自实现 begin/commit/flush/rollback 顺序**。
-- 迁移方式：旧签名调用方全部在仓库内（AOP、生成运行时、测试、AOT fixture），**直接迁移不保留双签名**。`[UnitOfWorkMo]` 属性签名不变，生成器不受影响。
+- 迁移方式：旧签名调用方全部在仓库内（AOP、生成运行时、测试、AOT fixture），**直接迁移不保留双签名**。`[UnitOfWorkMo]` 属性**声明方式**不变；**生成器/生成调用胶水需要按联动 token 协议迁移并回归验证**（生成端点调用代码改传内核联动 token；生成器测试同步更新），不得漏改生成端点。
 
 ### 4.2 完成语义（与 §3.2 状态模型逐一对应）
 
@@ -397,3 +398,11 @@ CAP storage/transport 配置与 SDK 原子发布验证（#125）；ORM SDK 全�
 | R2-S137-02 [P2] 逻辑/物理资源身份 | §4.3 逻辑资源键（绑定/声明/租户）与物理实例身份（Context/Connection/Transaction）分离；同一准入机制（descendant 链 + 逻辑键匹配；受管 RequiresNew = 同一逻辑资源的新物理实例）；§4.4 身份段 + §4.5 lease 使用物理身份 + §五 四向同机制用例 |
 | R2-S137-03 [P2] AOP 联动 token | §4.1 联动 token 通道：生成端点传联动 token 入方法参数；**操作层组合为主机制**（正式仓储/Provider 组合「传入 CT ⊕ 受管执行 token」）；支持边界文档化（非仓储等待仅观察入参 CT）；§五 AOP 用例（调用方 CT 不取消、deadline 到期、等待取消的数据库动作收到取消） |
 | 文稿整理 | 契约清点 Begin/Proxy 归档行改为 `BeginScope + StartAsync`；`Disposed` 不再列为 State 行（释放标志 `IsReleased` 与 State/事务结果独立存储、互不覆盖）；计划切片 1/2 同步落位激活协议、资源键与 token 组合 |
+
+### 8.3 第三轮（rev.3.1）
+
+对照 [第三轮 Spec 审计](../../review/2026-10-10-issue-137-uow-spec-review-round3.md)：
+
+- **Spec 设计通过**；R2-S137-01…03 关闭，无新增 P1 设计阻塞。
+- R3-S137-01 [P2]（实施计划切片依赖）：支撑 AOP deadline 的**最小操作层 token 组合与安全读取校验前移至切片 1**——切片 1 独立验收「实际 Attribute 方法 → 正式仓储/Provider → 等待取消的数据库动作」（调用方 CT 未取消、仅 UoW deadline 到期、收到取消且完成清理；不依赖切片 2 代码、不向测试动作注入 ExecutionToken）；切片 2 将读取升级为链校验访问器并完善资源准入与仓储覆盖。
+- 文稿统一（非阻塞）：`[UnitOfWorkMo]` 属性**声明方式**不变；生成器/生成调用胶水按联动 token 协议迁移并回归（§4.1 与计划切片 1/3 同步修正）。

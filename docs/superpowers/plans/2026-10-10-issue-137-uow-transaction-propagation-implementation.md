@@ -1,7 +1,7 @@
 # Issue #137 实施计划 — 统一执行内核、资源归属与 CAP 交接
 
 日期：2026-10-10
-设计依据：`docs/superpowers/specs/2026-10-10-issue-137-uow-transaction-propagation-design.md`（rev.3，已吸收两轮 Spec 审计 S137-01…07 / R2-S137-01…03 与文稿整理；本仓库同 PR 交付）
+设计依据：`docs/superpowers/specs/2026-10-10-issue-137-uow-transaction-propagation-design.md`（rev.3.1，已吸收三轮 Spec 审计 S137-01…07 / R2-S137-01…03 / R3-S137-01 与文稿整理；本仓库同 PR 交付）
 基线：master `988bfd2f`；本计划从设计合并后的 master 起执行。
 纪律：每个切片一个 PR、基于前项合并后的 master；本地测试全绿后再推送跑 CI；不自动合并；移除文件进 `99_RecycleBin/`（force-add 单文件，正文逐字节一致，附 README 迁移说明）。
 
@@ -27,6 +27,7 @@
   - `UnitOfWorkBase/UnitOfWorkManager.cs`：内核重构（校验→获取→打开→执行→完成/失败路径→释放；激活/恢复只在调用方帧同步完成；join 参与者成功记录；rollback-only 标记；null 继承与冲突诊断；token/截止时间联动；同步 Execute 包装异步内核）
   - Domain `IUnitOfWork`：Begin 改为接收强类型有效选项（隔离级别/截止时间）+ CT；`Domain.UnitOfWork` 签名与 `UnitOfWorkWithEvents` 同步
 - `src/Persistence/CrestCreates.Data.EFCore/UnitOfWork/EfCoreUnitOfWork.cs`：拆分 flush / commit / 通知职责——**commit 确认后立即记录 `Committed`**，通知在其后独立执行；移除 Console 吞异常路径；`Unknown` 判定入口（提交派发期失败不回写为 RolledBack）
+- `src/Persistence/CrestCreates.Data.EFCore/Repositories/EfCoreRepository.cs`（及基类）与 `DbContexts/EfCoreDbContextAdapter.cs`：**最小操作层 token 组合**（传入 CT ⊕ 受管执行 token，`CreateLinkedTokenSource`）与安全读取校验（经受管载体读取，不得全局裸读）——支撑本切片 AOP deadline 验收独立成立
 - `src/Framework/Infrastructure/CrestCreates.Aop/Interceptors/UnitOfWorkMoAttribute.cs`：改为**包裹式拦截**（被拦截方法体运行在内核异步帧内；Rougamo RawMo 或等价机制），删除「OnEntry 写 ambient 后依赖继承」路径；回调栈与 `ExecutionToken` 同步收口
 - `src/Framework/Api/CrestCreates.DynamicApi/DynamicApiGeneratedRuntime.cs`：两个重载改为内核调用（签名保留）；生成器把**内核联动 token** 传入服务方法 CT 参数（`RequestAborted` 作为调用方 CT 参与联动）
 - 归档：`IUnitOfWorkEnhanced.cs`、`Aop.Abstractions/Options/UnitOfWorkOptions.cs` + `AopOptions.UnitOfWork`、`Data.Abstractions/RepositoryBase/Repository.cs`、`ScopedUnitOfWorkProxy` → `99_RecycleBin/issue-137-contracts-state/`
@@ -34,7 +35,7 @@
 
 新增测试（判别力验证）：
 - 激活协议：**强制 Provider Begin 真正异步挂起**（Task.Yield/Delay）后，调用方 `await` 返回后 Current、预注入仓储、事务物理身份一致；两层 RequiresNew；异步 Dispose 后父环境恢复；begin 失败恢复；遗漏 Dispose → 终态帧确定性拒绝
-- AOP：被拦截方法体（包裹式）内 ambient/Current 实测可见（不只 callback 场景）；AOP 方法把 CT 传给等待取消的数据库动作时 deadline 生效
+- AOP（**本切片独立验收，不依赖切片 2、不向测试动作注入 ExecutionToken**）：被拦截方法体（包裹式）内 ambient/Current 实测可见（不只 callback 场景）；实际 Attribute 方法 → 正式仓储/Provider → 等待取消的数据库动作：调用方 CT 保持未取消、仅 UoW deadline 到期 → 操作收到取消且完成清理
 - join 参与者模型：两个成功 join 各 Complete+Dispose → 外层提交；join 未 Complete 即 Dispose → 外层拒绝回滚；join 失败被捕获 → 外层拒绝回滚（DB 无部分写入）
 - 四维状态：重复 Complete 幂等；终态后操作/乱序释放确定性拒绝；`Committed` 在通知之前记录（通知失败不改变）；`Unknown` 不被回滚尝试改写
 - 冲突参数（事务开关/显式 provider/显式隔离/超时延长）执行前诊断
@@ -52,7 +53,7 @@
 - `UnitOfWorkAmbientContext.cs`：强类型只读 `Current`；Push/Restore 内部化（帧带逻辑资源键 + 物理实例身份 + 链节点）；
 - `UnitOfWorkManager.cs`：受管链节点创建/挂接（隔离子 scope 节点挂当前节点；非内核 scope 为独立根）；push/restore 一致性校验；读方 descendant-or-self + 逻辑键匹配的**同一准入校验**；隔离 push/restore 走内部写路径；
 - `IUnitOfWorkTransactionAbortable.cs` → 迁移为「终结 + 丢弃」契约（EF 实现 `ChangeTracker.Clear()`；命名与形态实现时定）；
-- `EfCoreUnitOfWork.cs`、`EfCoreDbContextAdapter.cs`、`CrestCreatesDbContext.cs`：读路径改强类型 + 链节点/逻辑键解析 + 先校验后路由；`EfCoreRepository`/适配器落位**有效 token 组合**（传入 CT ⊕ 受管执行 token）；
+- `EfCoreUnitOfWork.cs`、`EfCoreDbContextAdapter.cs`、`CrestCreatesDbContext.cs`：读路径改强类型 + 链节点/逻辑键解析 + 先校验后路由；**token 组合读取升级为链校验访问器**（切片 1 已落最小实现与校验）；
 - EF 绑定：声明 discard/termination 能力（切片 3 完整能力表的前置）。
 
 新增测试：
@@ -77,7 +78,7 @@
 - `UnitOfWorkManager.cs`：执行前能力校验（显式 option × 能力 × 外层；null 继承不误判；join 超时只收紧）与资源键校验；
 - `EfCoreUnitOfWork.cs`：Begin 透传 isolation + CT；flush/commit/rollback CT 语义（清理独立 token）；内核截止时间联动；
 - FreeSql/SqlSugar：`supportsRequiresNew: false` 保留；隔离/终止/丢弃「实现或明确拒绝」并写入 Provider 矩阵；
-- 生成器/入口：确认无生成产物需要改（`[UnitOfWorkMo]` 契约不变；生成器测试回归即可）。
+- 生成器/入口：联动 token 协议迁移已在切片 1 完成（生成调用胶水传联动 token；`[UnitOfWorkMo]` 属性声明不变）；本切片回归生成器测试与生成端点行为一致性。
 
 新增测试：
 - 非事务模式：只 flush 不 commit、通知条件；写 A 后失败/取消 → 检查 A 的真实数据库可见性与结果声明（不声称丢弃）
