@@ -80,10 +80,15 @@ Handler 不应承担治理判断，不应拼字符串协议，不应使用 servi
 
 ```text
 CrestCreates Core:
-    NativeAOT-first / verified
+    NativeAOT-first（独立证据矩阵待明确；当前经组合 Host 原生执行覆盖）
 
-HTTP、MCP、Workflow 等第一方 Runtime:
-    NativeAOT-verified
+第一方 Runtime（逐项声明，不整体背书）:
+    Workflow / HumanTask / Outbox / AgentTool / Memory:
+        经 PG AotHost 与 Golden App fixture 原生 publish/link/run 覆盖
+    HTTP (CapabilityEndpoint):
+        active CI 仅 publish/link；原生请求执行门禁未建立 → 未验证/待确认
+    MCP:
+        Mcp.Memory fixture 有原生 run 门禁；主 MCP fixture 仅 publish/link → 未验证/待确认
 
 EF Core 和部分 Integrations:
     AOT capability separately declared
@@ -95,6 +100,7 @@ Legacy compatibility:
 规则：
 
 - `NativeAOT-verified` 必须有真实 `PublishAot` fixture，完成 native link 并执行原生产物；仅通过 trim analyzer、`PublishTrimmed` 或 source-generated JSON 测试不够。
+- 支持声明逐项匹配真实证据：无原生执行门禁的入口不得标 `NativeAOT-verified`；尚未验证的写“未验证/待确认”，不得直接写成 trimming-verified（除非有对应 trim 证据）。
 - 第一方 Runtime 新增或修改执行主链时，应同步维护其 NativeAOT publish-and-run 门禁。
 - EF Core、ORM Provider、Plugin、消息中间件和外部 SDK 集成必须分别声明支持级别，不能从 Core 或上层 Host 的验证结果推导。
 - Legacy compatibility 可以保留 reflection、trimming/JIT-only 路径，但必须隔离、明确标注且不得成为正式主链 fallback。
@@ -164,9 +170,9 @@ CrestCreates/
 │   ├── Metadata/                # Metadata.Abstractions, Metadata, ContextPack, Schema, Snapshot
 │   ├── Metadata/Draft/          # DescriptorDraft, Draft
 │   ├── Runtime/                 # Capability, Workflow, HumanTask, Agent, Eventing, Audit 等
-│   ├── Persistence/             # Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB 等
+│   ├── Persistence/             # Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB, Runtime.Persistence.PostgreSql 等
 │   ├── Platform/                # Web, Platform, Platform.AspNetCore, Platform.All
-│   ├── Tooling/                 # CodeGenerator, Metadata.Analyzers, BuildTasks
+│   ├── Tooling/                 # CodeGenerator, Metadata.Analyzers, BuildTasks, JsonContracts
 │   └── Integrations/            # PluginSystem, ExternalApi, LegacyDatabase
 ├── tests/                       # 按 src 分层镜像组织
 ├── samples/                     # LibraryManagement, SaaSHelpdesk
@@ -273,6 +279,9 @@ BuildTasks 编译前链：
 - 多租户统一使用 `TenantId` 作为上下文主键，不要混用 `TenantName`。
 - 认证授权不要引入新的真相来源，不要复制 token / claims / permission 逻辑，优先复用现有身份、权限、租户上下文主链。
 - Agent Control Plane 是治理面，不是运行时执行面。它可以审查、预览、提交激活请求，但不能绕过授权、批准自身变更、直接执行 runtime handler 或突变 runtime registry。
+- Agent 治理面主链是 Authoring → deterministic review → Control Plane：authoring 只产出候选草稿；正式契约在 `src/Runtime/Agent/CrestCreates.Agent.Authoring*`、`CrestCreates.Agent.ControlPlane*` 与 `Metadata/Draft/CrestCreates.DescriptorDraft*`。review artifact 与 package/evidence artifact 持久化只提供完整性与证据绑定，不构成批准；activation request/gate 当前为内存实现，不等于 durable activation。
+- JsonContracts 工具链（`src/Tooling/CrestCreates.JsonContracts.BuildTasks`、`.BuildTasks.Core`、`.Tool`）：构建期生成确定性 JSON contract roots，由官方 STJ Source Generator 消费；禁止 runtime reflection / scanner fallback。属构建期 Tooling，不是运行时组件。
+- `src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql`：承载 runtime state、Control Plane reference data、review/package artifact 持久化与 additive migrations，并提供原生 AotHost 证据。目录位置在 Persistence 依赖层，实际职责跨运行时与控制面持久化；引用仍受依赖边界测试约束。
 
 ---
 
@@ -360,6 +369,8 @@ TestBase
 - 后台作业：ISchedulerService + Quartz + 重试策略 + 租户上下文。
 - ObjectMapping：SourceGenerator，支持多种转换、自定义转换器和导航路径。
 - Metadata / Descriptor 治理链路：Topology、Impact、Compatibility、Package、Stable Hash、Canonical Hash profile、Agent Control Plane 等属于严肃治理面，不应把复杂性下放给普通 Runtime Handler。
+- Agent 治理面与工件持久化：Authoring → review → package/evidence → approval 链路的契约与边界见「平台能力」；activation request/gate 仍为内存实现，durable activation 按 #88 判为应用侧范围，不重开。
+- 支持声明规则：`NativeAOT-verified` 必须指向原生 publish/link/run 证据；未验证项写「未验证/待确认」。当前证据边界与待补门禁（HTTP 原生请求门禁等）随 #121 轨道维护在 `memory.md`。
 
 ---
 
@@ -383,4 +394,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-06-26
+**最后更新**: 2026-10-10
