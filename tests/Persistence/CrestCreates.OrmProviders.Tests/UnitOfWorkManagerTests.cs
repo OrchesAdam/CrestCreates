@@ -71,13 +71,29 @@ public class UnitOfWorkManagerTests
         factory.CreatedUnitOfWorks[0].DisposeCount.Should().Be(1);
     }
 
+    [Fact]
+    public void Execute_Should_Preserve_Original_Exception_When_Rollback_Fails()
+    {
+        var factory = new FakeUnitOfWorkFactory { RollbackThrows = true };
+        var manager = new UnitOfWorkManager(factory);
+
+        var act = () => manager.Execute<bool>(_ => throw new InvalidOperationException("business-failure"));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("business-failure");
+        manager.CurrentOrNull.Should().BeNull();
+        factory.CreatedUnitOfWorks.Should().ContainSingle();
+        factory.CreatedUnitOfWorks[0].DisposeCount.Should().Be(1);
+    }
+
     private sealed class FakeUnitOfWorkFactory : IUnitOfWorkFactory
     {
         public List<FakeUnitOfWork> CreatedUnitOfWorks { get; } = new();
 
+        public bool RollbackThrows { get; set; }
+
         public IUnitOfWork Create(OrmProvider provider)
         {
-            var unitOfWork = new FakeUnitOfWork();
+            var unitOfWork = new FakeUnitOfWork { RollbackThrows = RollbackThrows };
             CreatedUnitOfWorks.Add(unitOfWork);
             return unitOfWork;
         }
@@ -86,6 +102,8 @@ public class UnitOfWorkManagerTests
     private sealed class FakeUnitOfWork : IUnitOfWork
     {
         public int DisposeCount { get; private set; }
+
+        public bool RollbackThrows { get; set; }
 
         public Task BeginTransactionAsync()
         {
@@ -99,6 +117,11 @@ public class UnitOfWorkManagerTests
 
         public Task RollbackTransactionAsync()
         {
+            if (RollbackThrows)
+            {
+                throw new InvalidOperationException("rollback-failure");
+            }
+
             return Task.CompletedTask;
         }
 

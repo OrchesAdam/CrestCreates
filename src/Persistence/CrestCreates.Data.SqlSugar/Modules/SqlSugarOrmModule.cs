@@ -49,15 +49,13 @@ namespace CrestCreates.Data.SqlSugar.Modules
             
             // 注册 SqlSugar 工作单元
             services.AddScoped<SqlSugarUnitOfWork>();
-        }
 
-        /// <summary>
-        /// 获取 ORM 提供者类型
-        /// </summary>
-        /// <returns>ORM 提供者类型</returns>
-        protected override OrmProvider GetOrmProvider()
-        {
-            return OrmProvider.SqlSugar;
+            // SqlSugar 共享单例客户端，无法提供独立的嵌套事务上下文：
+            // requiresNew 请求将得到确定性 NotSupportedException 诊断，而不是静默共享事务。
+            services.AddUnitOfWorkProvider(
+                OrmProvider.SqlSugar,
+                static sp => sp.GetRequiredService<SqlSugarUnitOfWork>(),
+                supportsRequiresNew: false);
         }
     }
 }

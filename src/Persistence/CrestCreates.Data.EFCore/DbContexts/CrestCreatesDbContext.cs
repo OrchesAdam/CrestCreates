@@ -302,49 +302,66 @@ namespace CrestCreates.Data.EFCore.DbContexts
         }
 
         // IEntityFrameworkCoreDbContext implementation
+        // 数据访问成员经 <see cref="EffectiveDataContext"/> 路由：requiresNew 隔离期间
+        // 平台推入的内层上下文优先，默认装配下的预注入仓储/上下文跟随当前 UoW；
+        // 非隔离期间行为与之前完全一致（返回本实例）。
         public OrmProvider Provider => OrmProvider.EfCore;
 
         public IDataBaseSet<TEntity> Set<TEntity>() where TEntity : class
         {
-            return new EfCoreDataBaseSet<TEntity>(base.Set<TEntity>());
+            var effective = EffectiveDataContext;
+            return new EfCoreDataBaseSet<TEntity>(
+                ReferenceEquals(effective, this) ? base.Set<TEntity>() : effective.Set<TEntity>());
         }
 
         public new Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            return base.SaveChangesAsync(cancellationToken);
+            var effective = EffectiveDataContext;
+            return ReferenceEquals(effective, this)
+                ? base.SaveChangesAsync(cancellationToken)
+                : effective.SaveChangesAsync(cancellationToken);
         }
 
         public async Task<IDataBaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         {
-            var transaction = await Database.BeginTransactionAsync(cancellationToken);
-            // 传入 this 引用，让 Transaction 可以访问 DbContext 的属性
-            return new EfCoreDataBaseTransaction(transaction, this);
+            var effective = EffectiveDataContext;
+            var transaction = await effective.Database.BeginTransactionAsync(cancellationToken);
+            return new EfCoreDataBaseTransaction(transaction, effective);
         }
 
-        public IDataBaseTransaction? CurrentTransaction => 
-            Database.CurrentTransaction != null 
-                ? new EfCoreDataBaseTransaction(Database.CurrentTransaction, this) 
+        public IDataBaseTransaction? CurrentTransaction =>
+            EffectiveDataContext.Database.CurrentTransaction != null
+                ? new EfCoreDataBaseTransaction(
+                    EffectiveDataContext.Database.CurrentTransaction!, EffectiveDataContext)
                 : null;
 
-        public string? ConnectionString => Database.GetConnectionString();
+        public string? ConnectionString => EffectiveDataContext.Database.GetConnectionString();
 
-        public object GetNativeContext() => this;
+        public object GetNativeContext() => EffectiveDataContext;
 
         public string? CurrentTenantId => _currentTenant?.Id;
 
         public IQueryableBuilder<TEntity> Queryable<TEntity>() where TEntity : class
         {
-            return new EfCoreQueryableBuilder<TEntity>(base.Set<TEntity>());
+            var effective = EffectiveDataContext;
+            return new EfCoreQueryableBuilder<TEntity>(
+                ReferenceEquals(effective, this) ? base.Set<TEntity>() : effective.Set<TEntity>());
         }
 
         public Task<int> ExecuteSqlRawAsync(string sql, IEnumerable<object>? parameters = null, CancellationToken cancellationToken = default)
         {
-            return Database.ExecuteSqlRawAsync(sql, parameters ?? new object[0], cancellationToken);
+            return EffectiveDataContext.Database.ExecuteSqlRawAsync(
+                sql, parameters ?? new object[0], cancellationToken);
         }
 
         public new void Dispose()
         {
             base.Dispose();
         }
+
+        /// <summary>
+        /// requiresNew 隔离期间返回环境推入的内层上下文；否则返回本实例。
+        /// </summary>
+        private DbContext EffectiveDataContext => EfCoreAmbientContext.Resolve(this, this);
     }
 }

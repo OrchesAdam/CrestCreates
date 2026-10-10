@@ -8,6 +8,7 @@ using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
 using CrestCreates.Data.EFCore.DataSeed;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.UnitOfWork;
@@ -38,9 +39,7 @@ public class EntityFrameworkCoreModule : ModuleBase
         });
 
         services.AddUnitOfWork(OrmProvider.EfCore);
-        services.AddScoped(sp => new EfCoreUnitOfWork(
-            sp.GetRequiredService<IDataBaseContext>(),
-            sp.GetRequiredService<CrestCreates.Domain.DomainEvents.IDomainEventPublisher>()));
+        services.AddEfCoreUnitOfWork();
         services.AddScoped<DbContext>(sp => sp.GetRequiredService<LibraryDbContext>());
         services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
             new EfCoreDbContextAdapter(sp.GetRequiredService<LibraryDbContext>()));

@@ -28,7 +28,6 @@ using CrestCreates.Infrastructure.Authorization;
 using CrestCreates.Infrastructure.Localization;
 using CrestCreates.Infrastructure.Permission;
 using CrestCreates.Infrastructure.Settings;
-using CrestCreates.Infrastructure.UnitOfWork;
 using CrestCreates.Logging.Extensions;
 using CrestCreates.ModuleDiagnostics.Modules;
 using CrestCreates.Modularity;
@@ -39,6 +38,7 @@ using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore;
 using CrestCreates.Data.EFCore.Configuration;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.DataSeed;
@@ -136,9 +136,7 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
         services.AddUnitOfWork(OrmProvider.EfCore);
-        services.AddScoped(sp => new CrestCreates.Data.EFCore.UnitOfWork.EfCoreUnitOfWork(
-            sp.GetRequiredService<IDataBaseContext>(),
-            sp.GetRequiredService<IDomainEventPublisher>()));
+        services.AddEfCoreUnitOfWork();
         services.AddDataFilterServices();
         services.AddCrestAuthorization();
         services.AddCrestIdentityAuthentication(configuration);

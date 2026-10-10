@@ -22,6 +22,7 @@ using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.Settings;
@@ -346,9 +347,7 @@ public sealed class LibraryManagementWebApplicationFactory
             services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
             services.AddUnitOfWork(OrmProvider.EfCore);
-            services.AddScoped<EfCoreUnitOfWork>(sp => new EfCoreUnitOfWork(
-                sp.GetRequiredService<IDataBaseContext>(),
-                sp.GetRequiredService<IDomainEventPublisher>()));
+            services.AddEfCoreUnitOfWork();
 
             // Sample-specific repositories
             services.AddScoped<IBookRepository, BookRepository>();

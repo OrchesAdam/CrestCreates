@@ -9,6 +9,7 @@ using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.Abstractions.Modules;
 using CrestCreates.Data.EFCore.Configuration;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
 using CrestCreates.Data.EFCore.Interceptors;
 using CrestCreates.Data.EFCore.MultiTenancy;
 using CrestCreates.Data.EFCore.Repositories;
@@ -42,11 +43,9 @@ namespace CrestCreates.Data.EFCore.Modules
             services.TryAddScoped<AuditInterceptor>();
             services.TryAddScoped<MultiTenancyInterceptor>();
             services.TryAddSingleton<TenantAwareModelCacheKeyFactory>();
-            
-            // 注册 EF Core 工作单元
-            services.AddScoped(sp => new EfCoreUnitOfWork(
-                sp.GetRequiredService<IDataBaseContext>(),
-                sp.GetRequiredService<CrestCreates.Domain.DomainEvents.IDomainEventPublisher>()));
+
+            // 注册 EF Core 工作单元与 Provider 绑定（具体构造责任在 Data.EFCore 包）
+            services.AddEfCoreUnitOfWork();
             services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
             services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
@@ -59,15 +58,6 @@ namespace CrestCreates.Data.EFCore.Modules
             services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
             services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
             services.TryAddScoped<IAuditLogRepository, EfCoreAuditLogRepository>();
-        }
-
-        /// <summary>
-        /// 获取 ORM 提供者类型
-        /// </summary>
-        /// <returns>ORM 提供者类型</returns>
-        protected override OrmProvider GetOrmProvider()
-        {
-            return OrmProvider.EfCore;
         }
     }
 }
