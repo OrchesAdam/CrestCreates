@@ -1,9 +1,10 @@
 # CrestCreates platform status — 2026-10-10
 
-Baseline: master `cd4d7208751d4578c673ffd4a04d1e694c94dd7a` (PR #119 merge; remote
-identical at check time 2026-10-10 09:32 +08:00). Open PRs: 0. Workflow: GitHub PR
-flow, never auto-merge; replaced files archived to 99_RecycleBin, never deleted;
-never output credentials.
+Baseline: master `85bdbb017a479503d250b6edd174a05daf620a7b` (PR #134 merge; remote
+identical at check time 2026-10-10 10:34 +08:00). In flight: issue #123 native
+execution gates (PR pending), issue #124 UnitOfWork unification (branch in progress).
+Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
+never deleted; never output credentials.
 
 ## Delivered capabilities (master)
 
@@ -27,16 +28,26 @@ never output credentials.
 
 - Active CI native publish+link+run gates: PG AotHost sentinels
   (incl. `CRESTCREATES_WORKFLOW_CONDITION_AOT_OK`), Memory JSON contracts,
-  ControlPlane JsonContracts, Asset/Procurement Golden App fixtures.
-- CapabilityEndpoint HTTP fixture: publish/link only in active CI; native HTTP
-  request execution gate missing (#123). MCP/Agent.Tools main fixtures publish-only.
+  ControlPlane JsonContracts, Asset/Procurement Golden App fixtures, and (delivered
+  by #123, PR pending) the CapabilityEndpoint native HTTP request gate
+  (loopback requests, success/400/404 negative cases, process reaping, evidence
+  artifact `aot-native-evidence-<sha>`); MCP/Agent.Tools main fixtures now run
+  their existing publish-and-run tests in active CI.
+- #123 baseline finding (recorded, fixed): native HTTP success requests returned
+  500 because `DynamicApiResponse<object>` was not declared by the fixture's
+  JsonSerializerContext; fixed by declaring the envelope root (golden-host pattern),
+  not by disabling AOT JSON constraints. Per-item matrix:
+  `docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md`.
+- HTTP gate scope limits: linux-x64 only; no auth/permission/tenant/bootstrap chain;
+  dependency-project IL2026/IL3050 warnings remain visible but are not this gate's signal.
 - Review scores (8.5/10, ~70%) are subjective single-review estimates, not
   production-readiness guarantees; support claims must point to per-item evidence.
 
 ## Open work entry (#121 orchestration)
 
-- Wave 0: #122 baseline calibration (this update; PR pending review).
-- Wave 1: #123 NativeAOT gate / #124 UnitOfWork / #125 CAP.
+- Wave 0: #122 baseline calibration (merged via PR #134).
+- Wave 1: #123 native gates / evidence matrix (PR pending), #124 UnitOfWork (in progress),
+  #125 CAP.
 - Wave 2: #126 LocalEvent / #127 RabbitMQ / #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
@@ -54,7 +65,7 @@ never output credentials.
 ## Known gaps
 
 - B12 unsupported-intent negative case missing (#133, bounded).
-- HTTP native request gate (#123); UnitOfWork dual factory + runtime scans (#124);
+- UnitOfWork dual factory + runtime scans (#124, in progress);
   CAP entry split (#125); LocalEvent/RabbitMQ reflection bridges (#126/#127);
   CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
   (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).
