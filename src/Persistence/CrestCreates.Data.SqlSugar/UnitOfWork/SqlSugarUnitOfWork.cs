@@ -6,45 +6,56 @@ using SqlSugar;
 using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.Abstractions.UnitOfWorkBase;
 
 namespace CrestCreates.Data.SqlSugar.UnitOfWork
 {
     /// <summary>
-    /// SqlSugar 工作单元实现
-    /// 提供事务管理、变更追踪和领域事件发布功能
+    /// SqlSugar 工作单元实现：flush / commit / 提交后通知职责分离（内核负责顺序）。
     /// </summary>
-    public class SqlSugarUnitOfWork : UnitOfWorkWithEvents
+    public class SqlSugarUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkCommittedNotifier
     {
         private readonly ISqlSugarClient _sqlSugarClient;
         private bool _isTransactionStarted;
         private bool _disposed;
         private readonly List<object> _trackedEntities = new List<object>();
 
-        public SqlSugarUnitOfWork(ISqlSugarClient sqlSugarClient, IDomainEventPublisher domainEventPublisher) 
+        public SqlSugarUnitOfWork(ISqlSugarClient sqlSugarClient, IDomainEventPublisher domainEventPublisher)
             : base(domainEventPublisher)
         {
             _sqlSugarClient = sqlSugarClient ?? throw new ArgumentNullException(nameof(sqlSugarClient));
         }
 
         /// <summary>
-        /// 开始事务
+        /// 开始事务（显式隔离级别未声明支持，执行前拒绝，不静默降级）。
         /// </summary>
-        public override async Task BeginTransactionAsync()
+        public override async Task BeginTransactionAsync(
+            UnitOfWorkBeginOptions options,
+            CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(options);
+
+            if (options.IsolationLevel is not null)
+            {
+                throw new NotSupportedException(
+                    "The SqlSugar unit of work does not declare support for explicit isolation levels. " +
+                    "Do not request an isolation level for this provider.");
+            }
+
             if (_isTransactionStarted)
             {
                 throw new InvalidOperationException("Transaction already in progress");
             }
 
-            await Task.Run(() => _sqlSugarClient.Ado.BeginTran());
+            await Task.Run(() => _sqlSugarClient.Ado.BeginTran(), cancellationToken);
             _isTransactionStarted = true;
         }
 
         /// <summary>
-        /// 提交事务
+        /// 数据库提交（不含 flush 与通知）。
         /// </summary>
-        public override async Task CommitTransactionAsync()
+        public override async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
         {
             if (!_isTransactionStarted)
             {
@@ -53,34 +64,7 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
 
             try
             {
-                var entities = new List<object>(_trackedEntities);
-                await SaveChangesAsync();
-                await Task.Run(() => _sqlSugarClient.Ado.CommitTran());
-                _isTransactionStarted = false;
-
-                await PublishDomainEventsAsync(entities);
-                _trackedEntities.Clear();
-            }
-            catch
-            {
-                await RollbackTransactionAsync();
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// 回滚事务
-        /// </summary>
-        public override async Task RollbackTransactionAsync()
-        {
-            if (!_isTransactionStarted)
-            {
-                return;
-            }
-
-            try
-            {
-                await Task.Run(() => _sqlSugarClient.Ado.RollbackTran());
+                await Task.Run(() => _sqlSugarClient.Ado.CommitTran(), cancellationToken);
             }
             finally
             {
@@ -89,98 +73,83 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
         }
 
         /// <summary>
-        /// 保存变更（SqlSugar不需要显式调用SaveChanges）
+        /// 回滚事务
         /// </summary>
-        /// <returns>影响的行数（对于SqlSugar，返回0表示成功）</returns>
-        public override Task<int> SaveChangesAsync()
+        public override async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
-            // SqlSugar 是立即执行模式，不需要显式保存
-            // 但为了与接口兼容，返回成功状态
+            if (!_isTransactionStarted)
+            {
+                return;
+            }
+
+            try
+            {
+                await Task.Run(() => _sqlSugarClient.Ado.RollbackTran(), CancellationToken.None);
+            }
+            finally
+            {
+                _isTransactionStarted = false;
+            }
+        }
+
+        /// <summary>
+        /// 保存变更（SqlSugar 立即执行模式：无显式 flush；返回 0 表示成功）。
+        /// </summary>
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
             return Task.FromResult(0);
         }
 
         /// <summary>
-        /// 保存变更并发布领域事件
+        /// 保存变更并发布领域事件（兼容入口；提交后通知由内核按顺序调用）。
         /// </summary>
-        /// <param name="cancellationToken">取消令牌</param>
-        /// <returns>影响的行数</returns>
         public async Task<int> SaveChangesWithEventsAsync(CancellationToken cancellationToken = default)
         {
-            var result = await SaveChangesAsync();
-            await PublishDomainEventsAsync(_trackedEntities, cancellationToken);
-            _trackedEntities.Clear();
+            var result = await SaveChangesAsync(cancellationToken);
+            await PublishCommittedNotificationsAsync(cancellationToken);
             return result;
+        }
+
+        /// <summary>
+        /// 提交后通知：发布已跟踪实体的域事件；失败不吞掉、不清空未成功发布的事件队列。
+        /// </summary>
+        public async Task PublishCommittedNotificationsAsync(CancellationToken cancellationToken = default)
+        {
+            foreach (var entity in new List<object>(_trackedEntities))
+            {
+                var entityType = entity.GetType();
+                var domainEventsProperty = entityType.GetProperty("DomainEvents");
+                var clearDomainEventsMethod = entityType.GetMethod("ClearDomainEvents");
+
+                if (domainEventsProperty == null || clearDomainEventsMethod == null)
+                {
+                    continue;
+                }
+
+                if (domainEventsProperty.GetValue(entity) is IReadOnlyCollection<IDomainEvent> domainEvents)
+                {
+                    foreach (var domainEvent in domainEvents)
+                    {
+                        await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
+                    }
+
+                    clearDomainEventsMethod.Invoke(entity, null);
+                }
+            }
+
+            _trackedEntities.Clear();
         }
 
         /// <summary>
         /// 跟踪实体以发布领域事件
         /// </summary>
-        /// <typeparam name="TEntity">实体类型</typeparam>
-        /// <typeparam name="TId">实体ID类型</typeparam>
-        /// <param name="entity">要跟踪的实体</param>
-        public void TrackEntity<TEntity, TId>(TEntity entity) 
-            where TEntity : Entity<TId> 
+        public void TrackEntity<TEntity, TId>(TEntity entity)
+            where TEntity : Entity<TId>
             where TId : IEquatable<TId>
         {
             if (entity != null && entity.DomainEvents.Count > 0)
             {
                 _trackedEntities.Add(entity);
-            }
-        }
-
-        /// <summary>
-        /// 发布领域事件
-        /// </summary>
-        private async Task PublishDomainEventsAsync(List<object> entities, CancellationToken cancellationToken = default)
-        {
-            foreach (var entity in entities)
-            {
-                var entityType = entity.GetType();
-                var domainEventsProperty = entityType.GetProperty("DomainEvents");
-                var clearDomainEventsMethod = entityType.GetMethod("ClearDomainEvents");
-                
-                if (domainEventsProperty != null && clearDomainEventsMethod != null)
-                {
-                    var domainEvents = domainEventsProperty.GetValue(entity) as System.Collections.Generic.IReadOnlyCollection<IDomainEvent>;
-                    if (domainEvents != null)
-                    {
-                        foreach (var domainEvent in domainEvents)
-                        {
-                            await PublishWithRetryAsync(domainEvent, cancellationToken);
-                        }
-                        clearDomainEventsMethod.Invoke(entity, null);
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// 带重试机制的事件发布
-        /// </summary>
-        private async Task PublishWithRetryAsync(IDomainEvent domainEvent, CancellationToken cancellationToken = default, int maxRetries = 3)
-        {
-            int retryCount = 0;
-            while (true)
-            {
-                try
-                {
-                    await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    retryCount++;
-                    if (retryCount >= maxRetries)
-                    {
-                        // 记录错误但不影响事务
-                        // 实际应用中应该使用日志系统
-                        Console.WriteLine($"Failed to publish event after {maxRetries} retries: {ex.Message}");
-                        break;
-                    }
-                    
-                    // 指数退避
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, retryCount)), cancellationToken);
-                }
             }
         }
 
@@ -216,7 +185,7 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
                         _isTransactionStarted = false;
                     }
                 }
-                
+
                 _trackedEntities.Clear();
             }
 

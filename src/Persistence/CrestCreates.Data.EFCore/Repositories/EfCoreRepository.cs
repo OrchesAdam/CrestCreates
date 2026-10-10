@@ -226,7 +226,8 @@ namespace CrestCreates.Data.EFCore.Repositories
         {
             if (_dbContext.CurrentTransaction == null)
             {
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                using var linked = CrestCreates.Data.Abstractions.UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+                await _dbContext.SaveChangesAsync(effective);
             }
         }
 

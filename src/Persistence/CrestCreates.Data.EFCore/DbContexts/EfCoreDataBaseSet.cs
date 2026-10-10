@@ -6,9 +6,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Data.Abstractions;
 
 namespace CrestCreates.Data.EFCore.DbContexts
 {
+    /// <summary>
+    /// EF Core 实体集：数据动作把「传入 CT」与「受管执行 token」组合为有效 token
+    /// （操作层 token 组合，见设计 §4.1 R2-S137-03）。
+    /// </summary>
     public class EfCoreDataBaseSet<TEntity> : IDataBaseSet<TEntity> where TEntity : class
     {
         private readonly DbSet<TEntity> _dbSet;
@@ -20,13 +25,15 @@ namespace CrestCreates.Data.EFCore.DbContexts
 
         public async Task<TEntity> AddAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
-            var result = await _dbSet.AddAsync(entity, cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            var result = await _dbSet.AddAsync(entity, effective);
             return result.Entity;
         }
 
         public async Task AddRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
-            await _dbSet.AddRangeAsync(entities, cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            await _dbSet.AddRangeAsync(entities, effective);
         }
 
         public void Update(TEntity entity)
@@ -75,18 +82,21 @@ namespace CrestCreates.Data.EFCore.DbContexts
 
         public async Task<int> RemoveRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            var enumerable = await _dbSet.Where(predicate).ToListAsync(cancellationToken);
-            return await RemoveRangeAsync(enumerable, cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            var enumerable = await _dbSet.Where(predicate).ToListAsync(effective);
+            return await RemoveRangeAsync(enumerable, effective);
         }
 
         public async Task<TEntity?> FindAsync(params object[] keyValues)
         {
-            return await _dbSet.FindAsync(keyValues);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(default, out var effective);
+            return await _dbSet.FindAsync(keyValues, effective);
         }
 
         public async Task<TEntity?> FindAsync(CancellationToken cancellationToken, params object[] keyValues)
         {
-            return await _dbSet.FindAsync(keyValues, cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _dbSet.FindAsync(keyValues, effective);
         }
 
         public void Attach(TEntity entity)

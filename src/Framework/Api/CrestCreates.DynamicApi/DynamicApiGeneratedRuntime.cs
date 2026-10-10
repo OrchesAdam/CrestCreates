@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Validation.Modules;
@@ -83,90 +85,53 @@ public static class DynamicApiGeneratedRuntime
     public static IResult WrapGetResult<T>(T? value)
         => CompatibilityHttpResultMapper.WrapGetResult(value);
 
-    public static async Task ExecuteAsync(HttpContext context, bool requiresTransaction, Func<Task> action)
+    /// <summary>
+    /// 委托内核执行；生成端点把内核联动 token 传入业务方法的 CT 参数。
+    /// </summary>
+    public static async Task ExecuteAsync(
+        HttpContext context,
+        UnitOfWorkOptions options,
+        Func<CancellationToken, Task> action)
     {
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(action);
 
         var unitOfWorkManager = context.RequestServices.GetService<IUnitOfWorkManager>();
         if (unitOfWorkManager is null)
         {
-            await action();
+            await action(context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
-        using var scope = unitOfWorkManager.BeginScope(isTransactional: requiresTransaction);
-
-        try
-        {
-            if (scope.IsOwner && scope.IsTransactional)
+        await unitOfWorkManager.ExecuteAsync(
+            async kernelToken =>
             {
-                await scope.UnitOfWork.BeginTransactionAsync();
-            }
-
-            await action();
-
-            if (scope.IsOwner && scope.IsTransactional)
-            {
-                await scope.UnitOfWork.CommitTransactionAsync();
-            }
-            else if (scope.IsOwner)
-            {
-                await scope.UnitOfWork.SaveChangesAsync();
-            }
-        }
-        catch
-        {
-            if (scope.IsOwner)
-            {
-                await scope.UnitOfWork.RollbackTransactionAsync();
-            }
-
-            throw;
-        }
+                await action(kernelToken).ConfigureAwait(false);
+                return true;
+            },
+            options,
+            context.RequestAborted).ConfigureAwait(false);
     }
 
-    public static async Task<T?> ExecuteAsync<T>(HttpContext context, bool requiresTransaction, Func<Task<T>> action)
+    /// <summary>
+    /// 委托内核执行；生成端点把内核联动 token 传入业务方法的 CT 参数。
+    /// </summary>
+    public static async Task<T?> ExecuteAsync<T>(
+        HttpContext context,
+        UnitOfWorkOptions options,
+        Func<CancellationToken, Task<T>> action)
     {
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(action);
 
         var unitOfWorkManager = context.RequestServices.GetService<IUnitOfWorkManager>();
         if (unitOfWorkManager is null)
         {
-            return await action();
+            return await action(context.RequestAborted).ConfigureAwait(false);
         }
 
-        using var scope = unitOfWorkManager.BeginScope(isTransactional: requiresTransaction);
-
-        try
-        {
-            if (scope.IsOwner && scope.IsTransactional)
-            {
-                await scope.UnitOfWork.BeginTransactionAsync();
-            }
-
-            var result = await action();
-
-            if (scope.IsOwner && scope.IsTransactional)
-            {
-                await scope.UnitOfWork.CommitTransactionAsync();
-            }
-            else if (scope.IsOwner)
-            {
-                await scope.UnitOfWork.SaveChangesAsync();
-            }
-
-            return result;
-        }
-        catch
-        {
-            if (scope.IsOwner)
-            {
-                await scope.UnitOfWork.RollbackTransactionAsync();
-            }
-
-            throw;
-        }
+        return await unitOfWorkManager.ExecuteAsync(action, options, context.RequestAborted).ConfigureAwait(false);
     }
 }

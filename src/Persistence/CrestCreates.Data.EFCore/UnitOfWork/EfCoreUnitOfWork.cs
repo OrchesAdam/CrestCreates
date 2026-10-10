@@ -1,18 +1,28 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Domain.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.Abstractions.UnitOfWorkBase;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Data.EFCore.UnitOfWork
 {
-    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkTransactionAbortable
+    /// <summary>
+    /// EF Core 工作单元：flush / commit / 提交后通知职责分离（内核负责顺序）。
+    /// </summary>
+    /// <remarks>
+    /// <c>CommitTransactionAsync</c> 只做数据库提交并释放句柄；flush（SaveChanges）与
+    /// 提交后通知（<see cref="IUnitOfWorkCommittedNotifier"/>）由内核按
+    /// 「校验→flush→commit（确认即记录）→通知→清理」调用。
+    /// </remarks>
+    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkTransactionAbortable, IUnitOfWorkCommittedNotifier
     {
         private readonly DbContext _dbContext;
         private IDbContextTransaction? _currentTransaction;
@@ -36,45 +46,50 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
                     $"The configured {nameof(IDataBaseContext)} does not wrap an Entity Framework Core {nameof(DbContext)}.");
         }
 
-        public override async Task BeginTransactionAsync()
+        public override async Task BeginTransactionAsync(
+            UnitOfWorkBeginOptions options,
+            CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(options);
+
             if (_currentTransaction != null)
             {
                 throw new InvalidOperationException("Transaction already in progress");
             }
 
-            _currentTransaction = await _dbContext.Database.BeginTransactionAsync();
+            _currentTransaction = options.IsolationLevel is { } isolationLevel
+                ? await _dbContext.Database.BeginTransactionAsync(isolationLevel, cancellationToken)
+                : await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         }
 
-        public override async Task CommitTransactionAsync()
+        /// <summary>
+        /// 数据库提交（不含 flush 与通知）；句柄在成功或失败后都恰好释放一次。
+        /// 提交派发期失败/响应丢失由内核判定为「提交结果未知」。
+        /// </summary>
+        public override async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
+        {
+            if (_currentTransaction == null)
+            {
+                throw new InvalidOperationException("No transaction has been started");
+            }
+
+            try
+            {
+                await _currentTransaction.CommitAsync(cancellationToken);
+            }
+            finally
+            {
+                DisposeTransaction();
+            }
+        }
+
+        public override async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
             try
             {
-                var entities = GetEntitiesWithDomainEvents();
-                await SaveChangesAsync();
-
                 if (_currentTransaction != null)
                 {
-                    await _currentTransaction.CommitAsync();
-                    DisposeTransaction();
-                }
-
-                await PublishDomainEventsAsync(entities);
-            }
-            catch
-            {
-                await RollbackTransactionAsync();
-                throw;
-            }
-        }
-
-        public override async Task RollbackTransactionAsync()
-        {
-            try
-            {
-                if (_currentTransaction != null)
-                {
-                    await _currentTransaction.RollbackAsync();
+                    await _currentTransaction.RollbackAsync(cancellationToken);
                 }
             }
             finally
@@ -83,17 +98,32 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             }
         }
 
-        public override async Task<int> SaveChangesAsync()
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            return await _dbContext.SaveChangesAsync();
+            return _dbContext.SaveChangesAsync(cancellationToken);
         }
 
         public async Task<int> SaveChangesWithEventsAsync(CancellationToken cancellationToken = default)
         {
-            var entities = GetEntitiesWithDomainEvents();
-            var result = await SaveChangesAsync();
-            await PublishDomainEventsAsync(entities, cancellationToken);
+            var result = await SaveChangesAsync(cancellationToken);
+            await PublishCommittedNotificationsAsync(cancellationToken);
             return result;
+        }
+
+        /// <summary>
+        /// 提交后通知：发布待发域事件。失败不吞掉、不清空未成功发布的实体事件队列（清空条件 = 发布成功）。
+        /// </summary>
+        public async Task PublishCommittedNotificationsAsync(CancellationToken cancellationToken = default)
+        {
+            foreach (var entity in GetEntitiesWithDomainEvents())
+            {
+                foreach (var domainEvent in entity.DomainEvents.ToArray())
+                {
+                    await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
+                }
+
+                entity.ClearDomainEvents();
+            }
         }
 
         private List<IHasDomainEvents> GetEntitiesWithDomainEvents()
@@ -109,46 +139,6 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             }
 
             return entities;
-        }
-
-        private async Task PublishDomainEventsAsync(List<IHasDomainEvents> entities, CancellationToken cancellationToken = default)
-        {
-            foreach (var entity in entities)
-            {
-                foreach (var domainEvent in entity.DomainEvents)
-                {
-                    await PublishWithRetryAsync(domainEvent, cancellationToken);
-                }
-
-                entity.ClearDomainEvents();
-            }
-        }
-
-        private async Task PublishWithRetryAsync(IDomainEvent domainEvent, CancellationToken cancellationToken = default, int maxRetries = 3)
-        {
-            int retryCount = 0;
-            while (true)
-            {
-                try
-                {
-                    await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    retryCount++;
-                    if (retryCount >= maxRetries)
-                    {
-                        // 记录错误但不影响事务
-                        // 实际应用中应该使用日志系统
-                        Console.WriteLine($"Failed to publish event after {maxRetries} retries: {ex.Message}");
-                        break;
-                    }
-                    
-                    // 指数退避
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, retryCount)), cancellationToken);
-                }
-            }
         }
 
         private void DisposeTransaction()

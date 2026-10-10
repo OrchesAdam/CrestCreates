@@ -11,6 +11,10 @@ using CrestCreates.Data.Abstractions;
 
 namespace CrestCreates.Data.EFCore.DbContexts
 {
+    /// <summary>
+    /// EF Core 查询构建器：数据动作把「传入 CT」与「受管执行 token」组合为有效 token
+    /// （操作层 token 组合，见设计 §4.1 R2-S137-03）。
+    /// </summary>
     public class EfCoreQueryableBuilder<TEntity> : IQueryableBuilder<TEntity> where TEntity : class
     {
         private IQueryable<TEntity> _queryable;
@@ -133,53 +137,63 @@ namespace CrestCreates.Data.EFCore.DbContexts
 
         public async Task<List<TEntity>> ToListAsync(CancellationToken cancellationToken = default)
         {
-            return await _queryable.ToListAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.ToListAsync(effective);
         }
 
         public async Task<TEntity> FirstAsync(CancellationToken cancellationToken = default)
         {
-            return await _queryable.FirstAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.FirstAsync(effective);
         }
 
         public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
         {
-            return await _queryable.FirstOrDefaultAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.FirstOrDefaultAsync(effective);
         }
 
         public async Task<TEntity> SingleAsync(CancellationToken cancellationToken = default)
         {
-            return await _queryable.SingleAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.SingleAsync(effective);
         }
 
         public async Task<TEntity?> SingleOrDefaultAsync(CancellationToken cancellationToken = default)
         {
-            return await _queryable.SingleOrDefaultAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.SingleOrDefaultAsync(effective);
         }
 
         public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
         {
-            return await _queryable.AnyAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.AnyAsync(effective);
         }
 
         public async Task<bool> AnyAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await _queryable.AnyAsync(predicate, cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.AnyAsync(predicate, effective);
         }
 
         public async Task<int> CountAsync(CancellationToken cancellationToken = default)
         {
-            return await _queryable.CountAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.CountAsync(effective);
         }
 
         public async Task<long> LongCountAsync(CancellationToken cancellationToken = default)
         {
-            return await _queryable.LongCountAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await _queryable.LongCountAsync(effective);
         }
 
         public async Task<PagedResult<TEntity>> ToPagedResultAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default)
         {
-            var totalCount = await _queryable.LongCountAsync(cancellationToken);
-            var items = await _queryable.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            var totalCount = await _queryable.LongCountAsync(effective);
+            var items = await _queryable.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(effective);
 
             return new PagedResult<TEntity>
             {

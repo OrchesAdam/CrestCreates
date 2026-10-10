@@ -4,6 +4,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Domain.DataFilter;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Exceptions;
@@ -17,6 +18,10 @@ using IDbContextProvider = CrestCreates.DbContextProvider.Abstract;
 
 namespace CrestCreates.Data.EFCore.Repositories
 {
+    /// <summary>
+    /// 平台仓储基类：数据动作把「传入 CT」与「受管执行 token」组合为有效 token
+    /// （操作层 token 组合，见设计 §4.1 R2-S137-03）。
+    /// </summary>
     public abstract class EfCoreRepositoryBase<TEntity, TKey> : CrestRepositoryBase<TEntity, TKey>
         where TEntity : class, IEntity<TKey>
         where TKey : IEquatable<TKey>
@@ -42,29 +47,34 @@ namespace CrestCreates.Data.EFCore.Repositories
 
         public override async Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().ToListAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().ToListAsync(effective);
         }
 
         public override async Task<List<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().Where(predicate).ToListAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().Where(predicate).ToListAsync(effective);
         }
 
         public override async Task<List<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             var query = GetQueryable().Where(predicate);
             query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
-            return await query.ToListAsync(cancellationToken);
+            return await query.ToListAsync(effective);
         }
 
         public override async Task<TEntity?> GetAsync(TKey id, CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().Where(e => e.Id.Equals(id)).FirstOrDefaultAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().Where(e => e.Id.Equals(id)).FirstOrDefaultAsync(effective);
         }
 
         public override async Task<TEntity?> GetAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().Where(predicate).FirstOrDefaultAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().Where(predicate).FirstOrDefaultAsync(effective);
         }
 
         public override async Task<TEntity> InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
@@ -159,9 +169,10 @@ namespace CrestCreates.Data.EFCore.Repositories
                 return;
             }
             var dbContext = (DbContext)_dbContext.GetNativeContext();
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             var rows = await dbContext.Set<TEntity>()
                 .Where(e => e.Id.Equals(id) && EF.Property<string>(e, "ConcurrencyStamp") == expectedStamp)
-                .ExecuteDeleteAsync(cancellationToken);
+                .ExecuteDeleteAsync(effective);
             if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
         }
 
@@ -173,75 +184,86 @@ namespace CrestCreates.Data.EFCore.Repositories
 
         public override async Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            var entities = await GetQueryable().Where(predicate).ToListAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            var entities = await GetQueryable().Where(predicate).ToListAsync(effective);
             _dbContext.Set<TEntity>().RemoveRange(entities);
-            await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
+            await SaveChangesIfNoActiveTransactionAsync(effective);
         }
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             var query = GetQueryable();
-            var totalCount = await query.LongCountAsync(cancellationToken);
-            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            var totalCount = await query.LongCountAsync(effective);
+            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(effective);
             return new PagedResult<TEntity>(items, (int)totalCount, pageIndex, pageSize);
         }
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             var query = GetQueryable().Where(predicate);
-            var totalCount = await query.LongCountAsync(cancellationToken);
-            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            var totalCount = await query.LongCountAsync(effective);
+            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(effective);
             return new PagedResult<TEntity>(items, (int)totalCount, pageIndex, pageSize);
         }
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             var query = GetQueryable().Where(predicate);
             query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
-            var totalCount = await query.LongCountAsync(cancellationToken);
-            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            var totalCount = await query.LongCountAsync(effective);
+            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(effective);
             return new PagedResult<TEntity>(items, (int)totalCount, pageIndex, pageSize);
         }
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             var query = GetQueryable();
             query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
-            var totalCount = await query.LongCountAsync(cancellationToken);
-            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            var totalCount = await query.LongCountAsync(effective);
+            var items = await query.Skip(pageIndex * pageSize).Take(pageSize).ToListAsync(effective);
             return new PagedResult<TEntity>(items, (int)totalCount, pageIndex, pageSize);
         }
 
         public override async Task<long> GetCountAsync(CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().LongCountAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().LongCountAsync(effective);
         }
 
         public override async Task<long> GetCountAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().Where(predicate).LongCountAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().Where(predicate).LongCountAsync(effective);
         }
 
         public override async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().AnyAsync(cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().AnyAsync(effective);
         }
 
         public override async Task<bool> AnyAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().AnyAsync(predicate, cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().AnyAsync(predicate, effective);
         }
 
         public override async Task<bool> ExistsAsync(TKey id, CancellationToken cancellationToken = default)
         {
-            return await GetQueryable().AnyAsync(e => e.Id.Equals(id), cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            return await GetQueryable().AnyAsync(e => e.Id.Equals(id), effective);
         }
 
         private async Task SaveChangesIfNoActiveTransactionAsync(CancellationToken cancellationToken)
         {
             if (_dbContext.CurrentTransaction == null)
             {
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+                await _dbContext.SaveChangesAsync(effective);
             }
         }
 

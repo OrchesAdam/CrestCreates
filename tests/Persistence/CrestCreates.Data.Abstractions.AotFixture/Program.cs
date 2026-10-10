@@ -15,6 +15,11 @@ namespace CrestCreates.Data.Abstractions.AotFixture;
 /// </summary>
 internal static class Program
 {
+    private static readonly UnitOfWorkOptions RequiresNewOptions = new()
+    {
+        Propagation = UnitOfWorkPropagation.RequiresNew
+    };
+
     private static int Main() => RunAsync().GetAwaiter().GetResult();
 
     private static async Task<int> RunAsync()
@@ -52,13 +57,18 @@ internal static class Program
         {
             var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
 
-            using (var unitOfWorkScope = manager.BeginScope())
+            await using (var unitOfWorkScope = manager.BeginScope())
             {
                 unitOfWork = unitOfWorkScope.UnitOfWork as StaticUnitOfWork
                     ?? throw new InvalidOperationException("The single binding must supply the default provider.");
                 Check(unitOfWorkScope.IsOwner, "first BeginScope must own the unit of work");
-                await unitOfWorkScope.UnitOfWork.BeginTransactionAsync();
-                await unitOfWorkScope.UnitOfWork.CommitTransactionAsync();
+                await unitOfWorkScope.StartAsync();
+                await unitOfWorkScope.CompleteAsync();
+                Check(unitOfWorkScope.State == UnitOfWorkState.Completed,
+                    "a completed scope must record the completed participation state");
+                Check(unitOfWorkScope.TransactionOutcome == UnitOfWorkTransactionOutcome.Committed,
+                    "a committed scope must record the committed transaction outcome");
+                Check(!unitOfWorkScope.IsReleased, "results must be readable before release");
             }
 
             Check(manager.CurrentOrNull is null, "ambient state must be cleared after dispose");
@@ -88,11 +98,13 @@ internal static class Program
         using var scope = provider.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
 
-        using (var outerScope = manager.BeginScope())
+        await using (var outerScope = manager.BeginScope())
         {
+            await outerScope.StartAsync();
             var outerUnitOfWork = (StaticUnitOfWork)outerScope.UnitOfWork;
-            using (var innerScope = manager.BeginScope(requiresNew: true))
+            await using (var innerScope = manager.BeginScope(RequiresNewOptions))
             {
+                await innerScope.StartAsync();
                 var innerUnitOfWork = (StaticUnitOfWork)innerScope.UnitOfWork;
                 Check(innerUnitOfWork != outerUnitOfWork, "requiresNew must create a distinct unit of work");
                 Check(innerUnitOfWork.ScopeId != outerUnitOfWork.ScopeId,
@@ -260,25 +272,25 @@ internal static class Program
 
         public int DisposeCount { get; private set; }
 
-        public Task BeginTransactionAsync()
+        public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
         {
             BeginCount++;
             return Task.CompletedTask;
         }
 
-        public Task CommitTransactionAsync()
+        public Task CommitTransactionAsync(CancellationToken cancellationToken = default)
         {
             CommitCount++;
             return Task.CompletedTask;
         }
 
-        public Task RollbackTransactionAsync()
+        public Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
             RollbackCount++;
             return Task.CompletedTask;
         }
 
-        public Task<int> SaveChangesAsync() => Task.FromResult(0);
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
         public void Dispose()
         {
