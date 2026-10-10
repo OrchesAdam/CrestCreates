@@ -77,19 +77,6 @@ public class EfCoreDbContextAdapter : IEntityFrameworkCoreDbContext
 
     /// <summary>
     /// requiresNew 隔离期间返回环境推入的内层上下文；否则返回本作用域上下文。
-    /// 环境对象是本适配器自身时不递归（返回自身上下文）。
     /// </summary>
-    private DbContext EffectiveDbContext
-    {
-        get
-        {
-            var ambient = UnitOfWorkAmbientContext.Current as IDataBaseContext;
-            if (ambient is null || ReferenceEquals(ambient, this))
-            {
-                return _dbContext;
-            }
-
-            return ambient.GetNativeContext() as DbContext ?? _dbContext;
-        }
-    }
+    private DbContext EffectiveDbContext => EfCoreAmbientContext.Resolve(this, _dbContext);
 }

@@ -210,14 +210,17 @@ namespace CrestCreates.Data.Abstractions
             IDisposable? ambientToken = null;
             try
             {
-                var childFactory = childScope.ServiceProvider.GetRequiredService<IUnitOfWorkFactory>();
-                var unitOfWork = childFactory.Create(resolvedProvider);
-
+                // Push the isolated ambient context BEFORE constructing the unit of
+                // work: construction must capture the child scope's own resources,
+                // never be redirected to a parent context via ambient routing.
                 if (binding!.AmbientContextFactory is not null)
                 {
                     ambientToken = UnitOfWorkAmbientContext.Push(
                         binding.AmbientContextFactory(childScope.ServiceProvider));
                 }
+
+                var childFactory = childScope.ServiceProvider.GetRequiredService<IUnitOfWorkFactory>();
+                var unitOfWork = childFactory.Create(resolvedProvider);
 
                 _currentScope.Value = new AmbientUnitOfWorkScope(unitOfWork, parentScope);
                 return new UnitOfWorkScope(
@@ -291,12 +294,31 @@ namespace CrestCreates.Data.Abstractions
                 {
                     scope.UnitOfWork.Dispose();
                 }
+                else if (scope.UnitOfWork is IUnitOfWorkTransactionAbortable abortable)
+                {
+                    // DI owns the object; the manager only terminates a pending
+                    // transaction so an abandoned scope cannot leave an open
+                    // transaction behind in the same request scope.
+                    TryAbortPendingTransaction(abortable);
+                }
             }
             finally
             {
                 // DI-tracked unit of work instances (binding path) are released
                 // exactly once by the scope that created them, never by both.
                 scope.OwnedScope?.Dispose();
+            }
+        }
+
+        private static void TryAbortPendingTransaction(IUnitOfWorkTransactionAbortable abortable)
+        {
+            try
+            {
+                abortable.AbortPendingTransaction();
+            }
+            catch (Exception)
+            {
+                // Scope unwinding must not be masked by cleanup failures.
             }
         }
 

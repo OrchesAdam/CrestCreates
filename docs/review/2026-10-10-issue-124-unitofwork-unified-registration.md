@@ -69,6 +69,7 @@
 | 手动构造路径（自定义工厂 / 单测）的 UoW | manager 经 factory 创建 | **manager**（scope 结束时 `UoW.Dispose()`） | 无容器跟踪时的既有语义保留 |
 | 复用 scope（isOwner=false） | — | 不释放、不提交外层 | 保持现状 |
 | 环境上下文令牌 | manager（Push） | manager（EndScope 最先恢复） | 先恢复上下文再释放 UoW/scope，避免观测到已释放上下文 |
+| DI 持有 UoW 的未完成事务（R2-136-3） | manager（`IUnitOfWorkTransactionAbortable.AbortPendingTransaction`） | 只终结事务句柄（回滚+释放），不释放容器持有对象 | scope 未完成退出（未 Commit/Rollback）时立即回滚，避免同一请求内后续 UoW 遇到 “Transaction already in progress”；可重复调用、清理失败不替换原始异常 |
 | 构建失败（factory.Create 抛） | — | 不污染 Current；子 scope 与环境令牌在失败路径回收 | `BeginScope` 先 Create 后入栈 |
 
 - 绑定契约：binding 的 factory/ambientContextFactory 应从所在 scope 解析 **DI 跟踪的服务实例**（如 `sp.GetRequiredService<Concrete>()`），而非 `new` 出未跟踪实例；管理器的释放责任依赖该约定（XML 文档注明）。
@@ -89,17 +90,20 @@
 - `CrestCreates.Domain.Shared.Enums.OrmProvider`：**元数据/Attribute 面**（`[GenerateRepository]`/`[GenerateEntity]` 等声明，供生成器读取），保持独立、不合并、不互转。
 - 两者成员序一致（EfCore=0/SqlSugar=1/FreeSql=2），文档记录以避免选错。
 
-### 6) requiresNew 与 Provider 能力（审查 R136-1 修正：业务上下文跟随）
+### 6) requiresNew 与 Provider 能力（审查 R136-1 / R2-136-1 / R2-136-2 修正：业务上下文跟随）
 
 - `requiresNew`（存在环境时）通过**受管子 DI scope** 获取独立 UoW/DbContext/连接；期间把绑定声明的
   `ambientContextFactory`（EF：该子 scope 的 `IDataBaseContext`）推入 `UnitOfWorkAmbientContext`，
   **已注入的业务依赖（仓储/DbContext 适配器）在操作时解析到内层上下文**——不要求业务转型 UoW、
-  手工解析子 scope 或手工选择 DbContext。子 scope 结束先恢复环境上下文与父 Current，再释放资源。
-- EF Core 的 `EfCoreDbContextAdapter` 所有数据访问成员经 ambient 感知的 `EffectiveDbContext` 路由；
-  未处于隔离期间时行为与之前完全一致（返回本作用域上下文）。
+  手工解析子 scope 或手工选择 DbContext。
+- **构造顺序（R2-136-2）**：先推入内层 ambient，再构造该层 UoW——UoW 构造必须捕获自身作用域资源，
+  不能因 ambient 路由被重定向到上一层上下文；两层 requiresNew 逐层独立、逐层恢复。
+- **默认装配一致（R2-136-1）**：`EfCoreDbContextAdapter` 与框架默认 `CrestCreatesDbContext` 共用
+  `EfCoreAmbientContext.Resolve` 解析当前上下文；正式默认注册（DbContext 直绑 `IDataBaseContext`）
+  与自定义适配器装配行为一致，不需要用户更改注册方式。
 - 不支持上下文跟随的 Provider **fail closed**：`supportsRequiresNew: false`（SqlSugar 共享 singleton 客户端；
   FreeSql 仓储经 SDK `UnitOfWorkManager.Binding` 绑定连接、ambient 跟随未接入）在使用 `requiresNew` 时给出
-  **确定性 `NotSupportedException` 诊断**，不静默共享事务上下文；扩展支持交 #130 评估。
+  **确定性 `NotSupportedException` 诊断**，不静默共享事务上下文；扩展支持交 #130/#137 评估。
 - 无子 scope factory 的手动构造（单测/自定义场景）：回退为 `factory.Create`（记录为手动路径语义；
   DI 主链始终有子 scope 能力与环境跟随）。
 
@@ -123,12 +127,13 @@
 | 命令/场景 | 结果 |
 | --- | --- |
 | `dotnet build CrestCreates.slnx` | 0 错误（迁移后全仓编译） |
-| `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 62/62（含新增 UoW 用例） |
+| `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 65/65（含新增 UoW 用例） |
 | ├─ `UnitOfWorkDiRegistrationTests`（15 用例） | 单绑定默认 / 显式默认 / 显式参数优先 / 多绑定无默认诊断 / 缺绑定诊断 / 重复绑定诊断 / 冲突默认诊断 / 幂等 / 套件与自定义工厂混用诊断 / 不同自定义工厂冲突（两个方向）/ 同工厂幂等 / 同工厂冲突默认诊断 / requiresNew 子 scope 隔离与父恢复（含环境上下文与非双重释放断言）/ 不支持 requiresNew 诊断 / 依赖失败不污染 Current |
-| ├─ `EfCoreUnitOfWorkDatabaseTests`（5 用例，真实 SQLite 文件库） | 提交持久化 / 回滚无残留 / **requiresNew 预注入依赖跟随内层 UoW（内层提交持久化、外层回滚不影响；环境恢复断言）** / **嵌套 ExecuteAsync 隔离提交与父恢复** / 领域事件在提交持久化之后发布 |
+| ├─ `EfCoreUnitOfWorkDatabaseTests`（8 用例，真实 SQLite 文件库） | 提交持久化 / 回滚无残留 / requiresNew 预注入依赖跟随内层 UoW（内层提交持久化、外层回滚不影响；环境恢复断言）/ 嵌套 ExecuteAsync 隔离提交与父恢复 / **默认装配路径（CrestCreatesDbContext 直绑）+ 正式注入仓储的内层提交持久化** / **两层 requiresNew 逐层独立上下文与最内层独立提交** / **未完成退出及时终结事务且同一请求后续 UoW 可提交** / 领域事件在提交持久化之后发布 |
 | ├─ `UnitOfWorkManagerTests`（4 用例，手动构造路径） | 既有 3 用例保持 + 回滚失败不替换原始业务异常 |
 | └─ `UnitOfWorkReflectionGuardTests`（1 用例） | 装配主链源码无运行时类型解析/程序集扫描 |
-| UoW native 门禁（本分支新 fixture） | `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`；publish/link/run 40s（本地热缓存）；容器单次释放断言（DI-owned）与环境上下文 Push/Restore 断言 |
+| UoW native 门禁（本分支新 fixture） | `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`；publish/link/run（本地热缓存 ≈40s）；容器单次释放断言（DI-owned）与环境上下文 Push/Restore 断言 |
+| 判别力验证（round 2） | 分别临时回退 push-first、EndScope 事务终结、默认 DbContext ambient 三项机制，对应回归测试均按预期失败后恢复；三测均具备回归判别力 |
 | `dotnet test tests/Framework/Api/CrestCreates.DynamicApi.Tests` | 73/73（生成运行时 `ExecuteAsync` 契约未变） |
 | `dotnet test tests/Framework/Infrastructure/CrestCreates.Infrastructure.Tests` | 2/2（AOP 契约未变） |
 | `dotnet test tests/Framework/Web/CrestCreates.Web.Tests` | 107/111；4 个 `CapabilityEndpointBoundaryTests` 失败为 worktree 环境性（查找 `.git` 目录，worktree 中为文件），与本项无关且未触碰相关文件 |
@@ -140,7 +145,7 @@
 
 | Provider | 本轮验证范围 | 未验证项（交接） |
 | --- | --- | --- |
-| EF Core | 统一装配路径 + 默认/显式选择 + requiresNew（子 scope 独立 DbContext/事务 + **预注入依赖跟随内层 UoW + 环境恢复**，真实 SQLite 验收）+ 嵌套 ExecuteAsync + 提交/回滚/事件顺序 + native 装配门禁（静态 UoW，含容器单次释放断言） | PostgreSQL 真实库下的嵌套隔离由 CI 集成套件间接覆盖（SQLite 单写者限制：并发双写场景未在本套件覆盖）；EF Core 自身 AOT/trim 能力边界交 #130 |
+| EF Core | 统一装配路径 + 默认/显式选择 + requiresNew（子 scope 独立 DbContext/事务 + 预注入依赖跟随内层 UoW + 环境恢复，真实 SQLite 验收）+ **默认装配路径（CrestCreatesDbContext 直绑，R2-136-1）** + **两层 requiresNew 逐层独立（R2-136-2）** + **未完成退出事务及时终结（R2-136-3，`IUnitOfWorkTransactionAbortable`）** + 嵌套 ExecuteAsync + 提交/回滚/事件顺序 + native 装配门禁（静态 UoW，含容器单次释放断言） | PostgreSQL 真实库下的嵌套隔离由 CI 集成套件间接覆盖（SQLite 单写者限制：并发双写场景按顺序语义证明）；EF Core 自身 AOT/trim 能力边界交 #130；FreeSql/SqlSugar 的未完成退出中止依赖其容器释放语义（接口为 #137 留出统一接缝） |
 | FreeSql | 绑定登记（`supportsRequiresNew: false` → `requiresNew` 确定性 NotSupportedException 诊断）+ 编译/发布通过 | 绑定路径下的运行级事务用例、ambient 跟随扩展、SDK AOT 边界交 #130；既有 FreeSql 仓储测试仍走 SDK adapter 直连路径 |
 | SqlSugar | 绑定登记（共享单例客户端，`supportsRequiresNew: false` → 确定性诊断，含单测） | 运行级事务用例、SDK AOT 边界交 #130 |
 | MongoDB | 无 UoW 能力（维持 `ModuleBase`），未变 | 无 |
@@ -169,3 +174,13 @@
 
 补充说明：R136-1 的最小复现（`repository resource matches inner UoW: False`）现由验收测试的两个判据直接覆盖——
 环境上下文身份在内层必须不同于父上下文、且内层经预注入依赖的写入在外层回滚后仍持久化；若回退到修复前行为，两项断言均会失败。
+
+## 八、审查修复记录（PR #136 round 2，2026-10-10）
+
+| 发现 | 修复 |
+| --- | --- |
+| R2-136-1 [P1] 默认框架 DbContext 没有进入 ambient 跟随链 | 抽取共享解析 `EfCoreAmbientContext.Resolve(IDataBaseContext self, DbContext own)`；框架默认 `CrestCreatesDbContext` 的数据访问成员（Set/Queryable/SaveChanges/Begin/CurrentTransaction/ConnectionString/ExecuteSqlRaw/GetNativeContext）与 `EfCoreDbContextAdapter` 走同一 ambient 路由；默认注册（DbContext 直绑 `IDataBaseContext`）无需用户改注册即获得声明语义。新增默认装配 + 正式 `EfCoreRepository` 预注入的 requiresNew 实际提交验收（判别力已验证：禁用 ambient 路由后该测试失败） |
+| R2-136-2 [P1] 第二层 requiresNew 构造时捕获上一层 DbContext | `BeginIsolatedScope` 调整为先推入内层 ambient、再构造该层 UoW：构造必须捕获自身作用域资源，ambient 路由不得改变新 UoW 的资源归属。新增两层 requiresNew 回归（逐层上下文独立、逐层恢复、最内层经预注入依赖提交持久化；判别力已验证：回退为先构造后推入时该测试失败） |
+| R2-136-3 [P2] 顶层 UoW 退出没有及时结束未完成事务 | 新增可选接口 `IUnitOfWorkTransactionAbortable`（同步、幂等、容忍清理失败）；`EfCoreUnitOfWork` 实现（回滚 `_currentTransaction` 并释放句柄，不释放 DI 持有对象）；`EndScope` 对 DI 持有路径调用 abort——容器负责对象释放、管理器负责事务终结。新增未完成退出回归：事务即刻终结且同一请求后续 UoW 可正常 Begin/Commit（判别力已验证：禁用 abort 调用后该测试失败） |
+
+GitHub 编排说明（审查方）：#137 已创建并依赖 #124，承接 Options/传播/完成状态统一、强类型当前资源访问、Provider 能力与资源身份、CAP 最小事务交接契约；本记录中的修复不依赖 #137。

@@ -7,13 +7,17 @@ using System.Threading.Tasks;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Extensions;
+using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.UnitOfWork;
+using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.OrmProviders.Tests;
@@ -198,6 +202,160 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var verifyContext = verifyScope.ServiceProvider.GetRequiredService<UowTestDbContext>();
             (await verifyContext.Entities.FindAsync(innerEntityId)).Should().NotBeNull(
                 "the nested ExecuteAsync unit of work must commit independently");
+        }
+    }
+
+    [Fact]
+    public async Task Second_level_requires_new_commits_the_context_used_by_business()
+    {
+        // 验收（审查 R2-136-2）：两层 requiresNew 时，最内层 UoW 必须持有自身
+        // 作用域的资源；构造最内层 UoW 时不能被上一层 ambient 重定向。
+        var (provider, _) = BuildProvider();
+        var level2EntityId = Guid.Empty;
+
+        using (var scope = provider.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var preInjectedContext = scope.ServiceProvider.GetRequiredService<IDataBaseContext>();
+            var parentNativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
+
+            using (var outerScope = manager.BeginScope())
+            {
+                using (var level1Scope = manager.BeginScope(requiresNew: true))
+                {
+                    var level1NativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
+                    level1NativeContext.Should().NotBeSameAs(parentNativeContext,
+                        "the first isolated level must use its own context");
+
+                    using (var level2Scope = manager.BeginScope(requiresNew: true))
+                    {
+                        var level2NativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
+                        level2NativeContext.Should().NotBeSameAs(level1NativeContext,
+                            "the second isolated level must use its own context");
+
+                        await level2Scope.UnitOfWork.BeginTransactionAsync();
+                        var entity = new UowTestEntity(Guid.NewGuid(), "level2");
+                        level2EntityId = entity.Id;
+                        await preInjectedContext.Set<UowTestEntity>().AddAsync(entity);
+                        await level2Scope.UnitOfWork.CommitTransactionAsync();
+                    }
+
+                    ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(
+                        level1NativeContext, "the first level's ambient context must be restored");
+                    manager.Current.Should().BeSameAs(level1Scope.UnitOfWork);
+                }
+
+                ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(
+                    parentNativeContext, "the parent ambient context must be restored");
+                manager.Current.Should().BeSameAs(outerScope.UnitOfWork);
+            }
+        }
+
+        using (var verifyScope = provider.CreateScope())
+        {
+            var verifyContext = verifyScope.ServiceProvider.GetRequiredService<UowTestDbContext>();
+            (await verifyContext.Entities.FindAsync(level2EntityId)).Should().NotBeNull(
+                "the innermost unit of work must commit the context that business actually used");
+        }
+    }
+
+    [Fact]
+    public async Task Abandoned_root_scope_ends_its_transaction_before_next_uow()
+    {
+        // 验收（审查 R2-136-3）：顶层 scope 未 commit/rollback 就退出时，
+        // 管理器必须及时终结其未完成事务（不释放 DI 持有对象），
+        // 同一请求内随后开始的新 UoW 不得遇到 “Transaction already in progress”。
+        var (provider, _) = BuildProvider();
+        var nextEntityId = Guid.Empty;
+
+        using (var scope = provider.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var dbContext = scope.ServiceProvider.GetRequiredService<UowTestDbContext>();
+
+            using (var abandonedScope = manager.BeginScope())
+            {
+                await abandonedScope.UnitOfWork.BeginTransactionAsync();
+            }
+
+            manager.CurrentOrNull.Should().BeNull();
+            dbContext.Database.CurrentTransaction.Should().BeNull(
+                "an abandoned scope must terminate its pending transaction immediately");
+
+            using (var nextScope = manager.BeginScope())
+            {
+                await nextScope.UnitOfWork.BeginTransactionAsync();
+                var nextEntity = new UowTestEntity(Guid.NewGuid(), "after-abandon");
+                nextEntityId = nextEntity.Id;
+                dbContext.Entities.Add(nextEntity);
+                await nextScope.UnitOfWork.CommitTransactionAsync();
+            }
+        }
+
+        using (var verifyScope = provider.CreateScope())
+        {
+            var verifyContext = verifyScope.ServiceProvider.GetRequiredService<UowTestDbContext>();
+            (await verifyContext.Entities.FindAsync(nextEntityId)).Should().NotBeNull(
+                "the same request must be able to begin and commit a new unit of work afterwards");
+        }
+    }
+
+    [Fact]
+    public async Task Default_framework_context_follows_requires_new_and_commits_via_injected_repository()
+    {
+        // 验收（审查 R2-136-1）：正式默认装配（CrestCreatesDbContext 直接绑定
+        // IEntityFrameworkCoreDbContext / IDataBaseContext）也必须进入 ambient 链路；
+        // 预先注入的正式仓储在内层提交必须真正持久化。
+        var services = new ServiceCollection();
+        services.AddDbContext<CrestCreatesDbContext>(options =>
+            options.UseSqlite($"Data Source={_databasePath}"));
+        services.AddScoped<IEntityFrameworkCoreDbContext>(sp => sp.GetRequiredService<CrestCreatesDbContext>());
+        services.AddScoped<IDataBaseContext>(sp => sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
+        services.AddSingleton(Mock.Of<ICurrentTenant>());
+        services.AddSingleton<IDomainEventPublisher>(new RecordingDomainEventPublisher());
+        services.AddUnitOfWork();
+        services.AddEfCoreUnitOfWork();
+
+        using var provider = services.BuildServiceProvider();
+        using (var initScope = provider.CreateScope())
+        {
+            initScope.ServiceProvider.GetRequiredService<CrestCreatesDbContext>().Database.EnsureCreated();
+        }
+
+        var tenantId = Guid.NewGuid();
+
+        using (var scope = provider.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+            // 与仓库构造函数相同的方式预先捕获依赖，并用正式仓储执行写入
+            var preInjectedContext = scope.ServiceProvider.GetRequiredService<IDataBaseContext>();
+            var parentNativeContext = (DbContext)preInjectedContext.GetNativeContext();
+            var repository = new EfCoreRepository<Tenant, Guid>(preInjectedContext);
+
+            using (var outerScope = manager.BeginScope())
+            {
+                using (var innerScope = manager.BeginScope(requiresNew: true))
+                {
+                    ((DbContext)preInjectedContext.GetNativeContext()).Should().NotBeSameAs(
+                        parentNativeContext,
+                        "the default framework DbContext must follow the current unit of work through the platform ambient mechanism");
+
+                    await innerScope.UnitOfWork.BeginTransactionAsync();
+                    await repository.InsertAsync(new Tenant(tenantId, "Ambient Tenant"));
+                    await innerScope.UnitOfWork.CommitTransactionAsync();
+                }
+
+                ((DbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(
+                    parentNativeContext, "the ambient context must be restored after the inner scope");
+            }
+        }
+
+        using (var verifyScope = provider.CreateScope())
+        {
+            var verifyContext = verifyScope.ServiceProvider.GetRequiredService<CrestCreatesDbContext>();
+            (await verifyContext.Tenants.FindAsync(tenantId)).Should().NotBeNull(
+                "the repository write through the default registration must be committed by the inner unit of work");
         }
     }
 

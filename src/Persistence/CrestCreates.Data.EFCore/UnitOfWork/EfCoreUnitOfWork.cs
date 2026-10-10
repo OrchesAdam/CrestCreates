@@ -6,12 +6,13 @@ using CrestCreates.DbContextProvider.Abstract;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.Abstractions.UnitOfWorkBase;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Data.EFCore.UnitOfWork
 {
-    public class EfCoreUnitOfWork : UnitOfWorkWithEvents
+    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkTransactionAbortable
     {
         private readonly DbContext _dbContext;
         private IDbContextTransaction? _currentTransaction;
@@ -156,6 +157,27 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             {
                 _currentTransaction.Dispose();
                 _currentTransaction = null;
+            }
+        }
+
+        /// <summary>
+        /// 逻辑工作单元的事务终结：scope 未完成退出时回滚并释放未提交事务，
+        /// 只终结事务句柄，不释放 DI 持有的上下文对象；可重复调用。
+        /// </summary>
+        public void AbortPendingTransaction()
+        {
+            try
+            {
+                _currentTransaction?.Rollback();
+            }
+            catch (Exception)
+            {
+                // Best effort: the handle is released below regardless, and the
+                // failure that triggered scope unwinding must not be replaced.
+            }
+            finally
+            {
+                DisposeTransaction();
             }
         }
 
