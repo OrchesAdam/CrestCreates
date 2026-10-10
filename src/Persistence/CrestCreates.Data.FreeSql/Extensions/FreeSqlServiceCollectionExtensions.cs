@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using FreeSql;
 using Microsoft.Extensions.DependencyInjection;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.FreeSql.UnitOfWork;
 
 namespace CrestCreates.Data.FreeSql.Extensions
@@ -55,6 +56,12 @@ namespace CrestCreates.Data.FreeSql.Extensions
             services.AddScoped<IFreeSql>(sp => 
                 sp.GetRequiredService<FreeSqlUnitOfWorkManager>().Orm);
 
+            // 5. 注册 FreeSql 工作单元与其 Provider 绑定
+            services.AddScoped<FreeSqlUnitOfWork>();
+            services.AddUnitOfWorkProvider(
+                OrmProvider.FreeSql,
+                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>());
+
             return services;
         }
 
@@ -82,6 +89,12 @@ namespace CrestCreates.Data.FreeSql.Extensions
             // 注册 IFreeSql（从 UowManager.Orm 获取）
             services.AddScoped<IFreeSql>(sp => 
                 sp.GetRequiredService<FreeSqlUnitOfWorkManager>().Orm);
+
+            // 注册 FreeSql 工作单元与其 Provider 绑定
+            services.AddScoped<FreeSqlUnitOfWork>();
+            services.AddUnitOfWorkProvider(
+                OrmProvider.FreeSql,
+                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>());
 
             return services;
         }
