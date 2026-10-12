@@ -44,4 +44,20 @@
 | R2-CAP-03 [P2] Unknown 未进入提交派发阶段 | flush 阶段用例更名 `Flush_stage_failure_after_publish_records_unknown_without_rows`（准确表述）；新增提交阶段注入：`Commit_dispatch_failure_records_unknown_without_commit_fact`（派发失败、计数=1、无提交事实、零行零投递）与 `Confirmation_lost_after_commit_recovers_by_database_fact`（真实提交+确认丢失 → Unknown 保持、行与业务行一致、按数据库事实扫描恢复投递）；broker 用例补「提交期离线→恢复」变体；拒绝矩阵补 `ResourceMismatch`（窗口内切租户，真实宿主）与 `NoTransactionAssociation`（无受管资源曝光的 owner，集成级）；生命周期计数以 `IRelationalTransactionFactory` 装饰实现（正式绑定路径：Commit=1、Rollback=0、Dispose=1；注：EF Core 10 拦截器已无 Dispose 事件，故用工厂装饰，见实现注释）|
 | 说明（Released 拒绝） | 「已释放 owner 帧可见」在公开 API 下不可构造（释放即恢复环境）；该拒绝分支由内核 `EvaluateParticipation` 覆盖并随三值判定单测保护，不在集成层强行构造 |
 
+
+## 实现复审修复轮（第三轮，2026-10-12，R3-CAP-01…03）
+
+对照 `docs/review/2026-10-12-pr-140-cap-implementation-review-round3.md`：
+
+| 审查项 | 修复 |
+| --- | --- |
+| R3-CAP-01 [P2] 待删除实体被数据库结果带回 | 仓储读取统一为**最终视图** `QueryFinalViewAsync`：本地跟踪视图（Added/Modified/Unchanged）优先，**Deleted 为显式排除覆盖**（不再与「未跟踪」混同）；数据库候选经 identity resolution 后复核删除状态与谓词，旧快照不得复活待删除行。回归（真实 PG）：同一 UoW 内查询 + `DeleteAsync(row)` 后 `CompensateAsync` → 执行器调用 **0 次**；提交后跨 scope 行确实不存在 |
+| R3-CAP-02 [P2] Count 漏掉本地修改后新匹配的既存实体 | Count/LongCount/Any/Find/First/GetAll/GetByIds 全部改为**同一最终视图**（合并本地匹配 + 数据库候选，按主键去重，应用本地不匹配/Deleted 覆盖）——不再按单个查询方法维护不同算法。回归（真实 PG）：Pending→Completed 本地变更后 Completed 视图 Find=1/Count=1、Pending 视图 0/0；反向改为 Retrying 后 Completed 归零、Retrying 为一，Find 与 Count 始终一致 |
+| R3-CAP-03 [P2] 存储负例准备条件错误（无区分能力） | 两负例准备修正：初始 UoW / Crest 输入 / CAP ConnectionString **全部指向 A**，先独立初始化 B 的 CAP 表，仅在**最终** `PostConfigure<PostgreSqlOptions>` 改变目标（DataSource 用例保持 ConnectionString=A、DataSource=B）；新增 `capTableWaitConnectionString` 夹具参数按最终目标等待建表。**区分验证（本地）**：临时还原 R2 旧优先级 `ConnectionString ?? DataSource` → `Final_datasource_override_*` **失败（1/2）**；恢复修复后 2/2 通过。用例注释记录区分矩阵（DataSource 用例保护 R2 修复；ConnectionString 用例保护 R1 修复） |
+
+补充记录（诚实边界）：
+
+- 上轮完整套件复跑中出现 broker 恢复用例超时（首跑 33/34，独立复跑通过）。本轮将其与「提交期离线」变体一并重构为**独立数据库 + 专用宿主（重试预算 10）**，消除共享宿主扫描与重试预算的交叉干扰；不得以「某次完整套件全绿」作为时序稳定性的隐含声明，时序波动记录保留在本表。
+- 生命周期计数为「按事务实例每操作去重后的窗口计数」（含后台首周期预热重置），是既有证据的准确边界，不声称逐次原生调用审计。
+
 （后续实施发现问题将追加到本表。）

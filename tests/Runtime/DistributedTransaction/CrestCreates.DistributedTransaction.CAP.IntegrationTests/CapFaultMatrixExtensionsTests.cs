@@ -236,40 +236,51 @@ public class CapFaultMatrixExtensionsTests : IClassFixture<CapIntegrationFixture
     public async Task Broker_offline_after_commit_recovers_after_restart()
     {
         var topic = NewTopic("broker-offline");
+        var isolated = await _fixture.CreateIsolatedDatabaseAsync($"cap_it_broker_{Guid.NewGuid():N}");
+        var store = new CapStoreInspector(isolated);
 
-        using var scope = _fixture.Host.Services.CreateScope();
-        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
-        var publisher = scope.ServiceProvider.GetRequiredService<IDistributedEventPublisher>();
-        await using var unitOfWork = manager.BeginScope();
-        await unitOfWork.StartAsync();
-        await publisher.PublishAsync(topic, new { Value = 1 });
-        await unitOfWork.CompleteAsync();
-
-        Assert.True(await _fixture.Store.WaitForCountAsync(topic, 1, TimeSpan.FromSeconds(20)));
-
-        await _fixture.PauseBrokerAsync();
+        // 独立库 + 更高重试预算：broker 断连恢复期间的重试不被本套件其他宿主/共享计数干扰。
+        var host = await _fixture.CreateHostAsync(isolated, _fixture.RabbitMqConnectionString, failedRetryCount: 10);
         try
         {
-            // 扫描尝试投递失败 → 状态进入 Failed（重试计数递增，未耗尽）。
-            var failed = await WaitForStatusOrRetriesAsync(topic, TimeSpan.FromSeconds(90));
-            Assert.True(failed, "with the broker down, scan delivery attempts must fail visibly");
+            using var scope = host.Services.CreateScope();
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var publisher = scope.ServiceProvider.GetRequiredService<IDistributedEventPublisher>();
+            await using var unitOfWork = manager.BeginScope();
+            await unitOfWork.StartAsync();
+            await publisher.PublishAsync(topic, new { Value = 1 });
+            await unitOfWork.CompleteAsync();
+
+            Assert.True(await store.WaitForCountAsync(topic, 1, TimeSpan.FromSeconds(20)));
+
+            await _fixture.PauseBrokerAsync();
+            try
+            {
+                // 扫描尝试投递失败 → 状态进入 Failed（重试计数递增，未耗尽）。
+                var failed = await WaitForFailedStatusAsync(store, topic, TimeSpan.FromSeconds(90));
+                Assert.True(failed, "with the broker down, scan delivery attempts must fail visibly");
+            }
+            finally
+            {
+                await _fixture.ResumeBrokerAsync();
+            }
+
+            Assert.True(await store.WaitForStatusAsync(topic, "Succeeded", ScanWait),
+                "after the broker restarts, the retry budget must deliver the committed message");
         }
         finally
         {
-            await _fixture.ResumeBrokerAsync();
+            await host.StopAsync();
+            host.Dispose();
         }
-
-        Assert.True(await _fixture.Store.WaitForStatusAsync(topic, "Succeeded", ScanWait),
-            "after the broker restarts, the retry budget must deliver the committed message");
     }
 
-    private async Task<bool> WaitForStatusOrRetriesAsync(string topic, TimeSpan timeout)
+    private static async Task<bool> WaitForFailedStatusAsync(CapStoreInspector store, string topic, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
-            var status = await _fixture.Store.GetStatusAsync(topic);
-            if (status == "Failed")
+            if (await store.GetStatusAsync(topic) == "Failed")
             {
                 return true;
             }

@@ -246,6 +246,84 @@ public class CapPersistenceChainIntegrationTests : IClassFixture<CapIntegrationF
         }
     }
 
+    [Fact]
+    public async Task Deleted_pending_row_is_not_compensated_and_is_gone_after_commit()
+    {
+        var transactionId = Guid.NewGuid();
+        await RegisterAsync(transactionId);
+
+        using (var scope = _host.Services.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var compensator = scope.ServiceProvider.GetRequiredService<ITransactionCompensator>();
+            var executor = scope.ServiceProvider.GetRequiredService<PgTestCompensationExecutor>();
+            var repository = scope.ServiceProvider.GetRequiredService<IRepository<TransactionCompensation, Guid>>();
+
+            await manager.ExecuteAsync<object?>(async _ =>
+            {
+                var row = await repository.FirstOrDefaultAsync(x => x.TransactionId == transactionId);
+                Assert.NotNull(row);
+                await repository.DeleteAsync(row!);
+
+                // 待删除（同 UoW 未 flush）记录不得被重新查询带回执行。
+                await compensator.CompensateAsync(transactionId);
+                return null;
+            });
+
+            Assert.Empty(executor.Invocations);
+        }
+
+        // 提交后行确实不存在。
+        Assert.Null(await GetRowAsync(transactionId));
+    }
+
+    [Fact]
+    public async Task Count_view_matches_find_view_after_local_mutations()
+    {
+        var transactionId = Guid.NewGuid();
+        await RegisterAsync(transactionId);
+
+        using (var scope = _host.Services.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var compensator = scope.ServiceProvider.GetRequiredService<ITransactionCompensator>();
+            var repository = scope.ServiceProvider.GetRequiredService<IRepository<TransactionCompensation, Guid>>();
+
+            await manager.ExecuteAsync<object?>(async _ =>
+            {
+                // Pending → Completed（本地跟踪变更，未 flush）
+                await compensator.CompensateAsync(transactionId);
+
+                var completed = await repository.FindAsync(x =>
+                    x.TransactionId == transactionId && x.Status == CompensationStatus.Completed);
+                Assert.Single(completed);
+                Assert.Equal(1, await repository.CountAsync(x =>
+                    x.TransactionId == transactionId && x.Status == CompensationStatus.Completed));
+                Assert.Empty(await repository.FindAsync(x =>
+                    x.TransactionId == transactionId &&
+                    (x.Status == CompensationStatus.Pending || x.Status == CompensationStatus.Retrying)));
+                Assert.Equal(0, await repository.CountAsync(x =>
+                    x.TransactionId == transactionId &&
+                    (x.Status == CompensationStatus.Pending || x.Status == CompensationStatus.Retrying)));
+
+                // 反向状态变更：本地改回 Retrying → Completed 视图归零、Retrying 视图为一。
+                var row = await repository.FirstOrDefaultAsync(x => x.TransactionId == transactionId);
+                Assert.NotNull(row);
+                row!.Status = CompensationStatus.Retrying;
+
+                Assert.Equal(0, await repository.CountAsync(x =>
+                    x.TransactionId == transactionId && x.Status == CompensationStatus.Completed));
+                Assert.Empty(await repository.FindAsync(x =>
+                    x.TransactionId == transactionId && x.Status == CompensationStatus.Completed));
+                Assert.Equal(1, await repository.CountAsync(x =>
+                    x.TransactionId == transactionId && x.Status == CompensationStatus.Retrying));
+                Assert.Single(await repository.FindAsync(x =>
+                    x.TransactionId == transactionId && x.Status == CompensationStatus.Retrying));
+                return null;
+            });
+        }
+    }
+
     // ── 辅助 ──
 
     private async Task RegisterAsync(Guid transactionId)

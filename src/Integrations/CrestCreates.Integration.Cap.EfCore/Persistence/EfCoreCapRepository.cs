@@ -15,8 +15,9 @@ namespace CrestCreates.Integration.Cap.EfCore.Persistence;
 /// <summary>
 /// Data.Abstractions <see cref="IRepository{TEntity, TKey}"/> 的 EF Core 实现（CAP 持久化专用）：
 /// 1) 读写经 scoped <see cref="IDataBaseContext"/> 解析实际上下文（跟随受管链路由）；
-/// 2) **跟踪契约**：读取本地优先（同键已跟踪实例复用，含未落库的 Added 行），数据库查询保持跟踪，
-///    连续读写同一主键复用同一实例——首次写入保持 Added、不会被 Update 误改为 Modified；
+/// 2) **统一最终视图**：所有读取（Find/First/GetAll/GetByIds/Any/Count/LongCount）共用同一合并规则——
+///    本地跟踪视图（Added/Modified/Unchanged，**Deleted 显式排除**）优先，数据库候选按跟踪实例的
+///    当前状态做谓词复核与删除覆盖，主键去重；「数据库旧值」绝不把本地已删除/已不匹配的实体带回；
 /// 3) **不自行 SaveChanges**：落库由唯一 UoW 内核的 flush 统一完成（业务路径由调用方 UoW 承载，
 ///    后台补偿由 <c>CompensationRetryBackgroundService</c> 经内核建立 UoW 边界）。
 /// </summary>
@@ -45,116 +46,26 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
     private TEntity? FindTrackedLocal(TKey id)
         => LocallyTracked().FirstOrDefault(entity => entity.Id.Equals(id));
 
-    // ── 查询（本地优先 + 跟踪查询；同键复用同一实例） ──
+    // ── 统一最终视图（所有读取共用；Deleted 为显式排除覆盖） ──
 
-    public async Task<List<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
-    {
-        var fromDatabase = await Set.ToListAsync(cancellationToken).ConfigureAwait(false);
-        return MergeLocalFirst(fromDatabase);
-    }
-
-    public async Task<List<TEntity>> FindAsync(
-        Expression<Func<TEntity, bool>> predicate,
-        CancellationToken cancellationToken = default)
-    {
-        var compiled = predicate.Compile();
-        var fromDatabase = await Set.Where(predicate).ToListAsync(cancellationToken).ConfigureAwait(false);
-        return MergeLocalFirst(fromDatabase, compiled);
-    }
-
-    public async Task<TEntity?> FirstOrDefaultAsync(
-        Expression<Func<TEntity, bool>> predicate,
-        CancellationToken cancellationToken = default)
-    {
-        var compiled = predicate.Compile();
-
-        // 本地优先：同一 UoW 内先 Add 后查询必须看到未落库的 Added 行（且复用同一实例）。
-        var localMatch = LocallyTracked().AsQueryable().FirstOrDefault(predicate);
-        if (localMatch is not null)
-        {
-            return localMatch;
-        }
-
-        // SQL 按数据库旧值筛选，却可能返回 identity map 中已修改的同键实例：对最终实例复核谓词。
-        var candidate = await Set.FirstOrDefaultAsync(predicate, cancellationToken).ConfigureAwait(false);
-        return candidate is not null && compiled(candidate) ? candidate : null;
-    }
-
-    public async Task<bool> AnyAsync(
-        Expression<Func<TEntity, bool>> predicate,
-        CancellationToken cancellationToken = default)
-    {
-        var compiled = predicate.Compile();
-        if (LocallyTracked().Any(compiled))
-        {
-            return true;
-        }
-
-        // 数据库命中的 id：无本地跟踪实例时按数据库事实计入；有跟踪实例时以实例当前状态复核。
-        var candidateIds = await Set.Where(predicate).Select(entity => entity.Id)
-            .ToListAsync(cancellationToken).ConfigureAwait(false);
-        return candidateIds.Any(id =>
-        {
-            var local = FindTrackedLocal(id);
-            return local is null || compiled(local);
-        });
-    }
-
-    public async Task<int> CountAsync(
-        Expression<Func<TEntity, bool>>? predicate = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (predicate is null)
-        {
-            return await Set.CountAsync(cancellationToken).ConfigureAwait(false) + PendingLocalAdds(null);
-        }
-
-        return await CountTrackedAwareAsync(predicate, cancellationToken).ConfigureAwait(false) + PendingLocalAdds(predicate);
-    }
-
-    public async Task<long> LongCountAsync(
-        Expression<Func<TEntity, bool>>? predicate = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (predicate is null)
-        {
-            return await Set.LongCountAsync(cancellationToken).ConfigureAwait(false) + PendingLocalAdds(null);
-        }
-
-        return await CountTrackedAwareAsync(predicate, cancellationToken).ConfigureAwait(false) + PendingLocalAdds(predicate);
-    }
-
-    private async Task<int> CountTrackedAwareAsync(
-        Expression<Func<TEntity, bool>> predicate,
+    private async Task<List<TEntity>> QueryFinalViewAsync(
+        Expression<Func<TEntity, bool>>? predicate,
         CancellationToken cancellationToken)
     {
-        var compiled = predicate.Compile();
-        var candidateIds = await Set.Where(predicate).Select(entity => entity.Id)
-            .ToListAsync(cancellationToken).ConfigureAwait(false);
-        return candidateIds.Count(id =>
-        {
-            var local = FindTrackedLocal(id);
-            return local is null || compiled(local);
-        });
-    }
-
-    private int PendingLocalAdds(Expression<Func<TEntity, bool>>? predicate)
-    {
         var compiled = predicate?.Compile();
-        return Db.ChangeTracker.Entries<TEntity>()
-            .Where(entry => entry.State == EntityState.Added)
-            .Select(entry => entry.Entity)
-            .Count(entity => compiled is null || compiled(entity));
-    }
-
-    private List<TEntity> MergeLocalFirst(List<TEntity> fromDatabase, Func<TEntity, bool>? predicate = null)
-    {
         var result = new List<TEntity>();
         var seenIds = new HashSet<TKey>();
 
-        foreach (var entity in LocallyTracked())
+        // 本地视图优先（含未落库的 Added 与已修改的 Modified/Unchanged；Deleted 明确排除）。
+        foreach (var entry in Db.ChangeTracker.Entries<TEntity>())
         {
-            if (predicate is not null && !predicate(entity))
+            if (entry.State == EntityState.Deleted)
+            {
+                continue;
+            }
+
+            var entity = entry.Entity;
+            if (compiled is not null && !compiled(entity))
             {
                 continue;
             }
@@ -165,14 +76,21 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
             }
         }
 
-        foreach (var tracked in fromDatabase)
+        // 数据库候选：跟踪查询（同键经 identity resolution 返回本地实例）；
+        // 对最终身份实例复核谓词、并覆盖待删除状态——旧快照不得复活本地已删除/已不匹配的实体。
+        var fromDatabase = predicate is null
+            ? await Set.ToListAsync(cancellationToken).ConfigureAwait(false)
+            : await Set.Where(predicate).ToListAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var materialized in fromDatabase)
         {
-            var local = FindTrackedLocal(tracked.Id);
-            var chosen = local ?? tracked;
+            var entry = Db.Entry(materialized);
+            if (entry.State == EntityState.Deleted)
+            {
+                continue;
+            }
 
-            // SQL 旧快照命中的行，其本地同键实例可能已不满足谓词（如已变为 Completed）：
-            // 对最终选中的身份实例复核谓词，避免把已不匹配的本地实体带回结果。
-            if (predicate is not null && !predicate(chosen))
+            var chosen = entry.Entity;
+            if (compiled is not null && !compiled(chosen))
             {
                 continue;
             }
@@ -184,6 +102,53 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
         }
 
         return result;
+    }
+
+    // ── 查询（统一视图；计数与列表身份/状态一致） ──
+
+    public async Task<List<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
+        => await QueryFinalViewAsync(predicate: null, cancellationToken).ConfigureAwait(false);
+
+    public async Task<List<TEntity>> FindAsync(
+        Expression<Func<TEntity, bool>> predicate,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        return await QueryFinalViewAsync(predicate, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<TEntity?> FirstOrDefaultAsync(
+        Expression<Func<TEntity, bool>> predicate,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        var view = await QueryFinalViewAsync(predicate, cancellationToken).ConfigureAwait(false);
+        return view.FirstOrDefault();
+    }
+
+    public async Task<bool> AnyAsync(
+        Expression<Func<TEntity, bool>> predicate,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        var view = await QueryFinalViewAsync(predicate, cancellationToken).ConfigureAwait(false);
+        return view.Count > 0;
+    }
+
+    public async Task<int> CountAsync(
+        Expression<Func<TEntity, bool>>? predicate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var view = await QueryFinalViewAsync(predicate, cancellationToken).ConfigureAwait(false);
+        return view.Count;
+    }
+
+    public async Task<long> LongCountAsync(
+        Expression<Func<TEntity, bool>>? predicate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var view = await QueryFinalViewAsync(predicate, cancellationToken).ConfigureAwait(false);
+        return view.LongCount();
     }
 
     // ── 写入（不 SaveChanges；状态由 UoW flush 统一落库） ──
@@ -276,17 +241,17 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
 
     public IQueryableBuilder<TEntity> AsQueryable() => new EfCoreQueryableBuilder<TEntity>(Set, _chainNode);
 
-    // ── 主键操作 ──
+    // ── 主键操作（统一视图语义） ──
 
-    public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        var local = FindTrackedLocal(id);
-        if (local is not null)
+        var entry = Db.ChangeTracker.Entries<TEntity>().FirstOrDefault(candidate => candidate.Entity.Id.Equals(id));
+        if (entry is not null)
         {
-            return local;
+            return Task.FromResult(entry.State == EntityState.Deleted ? null : entry.Entity);
         }
 
-        return await Set.FindAsync(new object?[] { id }, cancellationToken).ConfigureAwait(false);
+        return FirstOrDefaultAsync(entity => entity.Id.Equals(id), cancellationToken);
     }
 
     public async Task<List<TEntity>> GetByIdsAsync(
@@ -295,10 +260,7 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
     {
         ArgumentNullException.ThrowIfNull(ids);
         var idList = ids.ToList();
-        var fromDatabase = await Set.Where(entity => idList.Contains(entity.Id))
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-        return MergeLocalFirst(fromDatabase, entity => idList.Contains(entity.Id));
+        return await QueryFinalViewAsync(entity => idList.Contains(entity.Id), cancellationToken).ConfigureAwait(false);
     }
 
     public async Task DeleteByIdAsync(TKey id, CancellationToken cancellationToken = default)

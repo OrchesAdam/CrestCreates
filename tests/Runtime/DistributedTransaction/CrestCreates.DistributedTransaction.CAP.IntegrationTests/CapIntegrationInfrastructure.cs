@@ -185,7 +185,8 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
         string? capStorageConnectionString = null,
         int compensationRetryIntervalSeconds = 30,
         int failedRetryCount = 5,
-        Action<IServiceCollection>? mutateServices = null)
+        Action<IServiceCollection>? mutateServices = null,
+        string? capTableWaitConnectionString = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -231,7 +232,8 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
         await host.StartAsync();
 
         // CAP 的存储初始化在 BackgroundService 内异步进行：等待 cap."published" 可见，避免启动竞态。
-        var storageConnectionString = capStorageConnectionString ?? postgresConnectionString;
+        // 覆盖型宿主按**最终**存储目标等待（capTableWaitConnectionString 显式指定）。
+        var storageConnectionString = capTableWaitConnectionString ?? capStorageConnectionString ?? postgresConnectionString;
         await WaitForCapTablesAsync(storageConnectionString, TimeSpan.FromSeconds(60));
         return host;
     }

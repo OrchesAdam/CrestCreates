@@ -43,6 +43,13 @@ public class CapRound2FixTests : IClassFixture<CapIntegrationFixture>
             storageOverride: (options, connectionString) => options.DataSource = NpgsqlDataSource.Create(connectionString));
     }
 
+    /// <summary>
+    /// 区分能力（防止回归）：初始 UoW / Crest 输入 / CAP ConnectionString 全部指向 A，
+    /// 仅通过**最终** PostConfigure 改变存储目标为 B。
+    /// - 还原 R2 旧优先级（`ConnectionString ?? DataSource`）时，DataSource 用例必须失败（ConnectionString=A 仍匹配）；
+    /// - 还原 R1 旧实现（读 Crest 输入快照）时，两个用例都会失败（输入仍是 A）；
+    /// 当前实现两例都应在写入前 `StorageIdentityMismatch` 拒绝。
+    /// </summary>
     private async Task AssertFinalStorageOverrideRefusedAsync(
         Action<DotNetCore.CAP.PostgreSqlOptions, string> storageOverride)
     {
@@ -50,12 +57,16 @@ public class CapRound2FixTests : IClassFixture<CapIntegrationFixture>
         var databaseB = await _fixture.CreateIsolatedDatabaseAsync($"cap_it_alt_{Guid.NewGuid():N}");
         var storeB = new CapStoreInspector(databaseB);
 
+        // 先独立初始化 B 的 CAP 表（覆盖宿主启动后由 CAP 初始化器按最终目标建表，此处保证断言前可查询）。
+        await _fixture.InitializeCapStorageAsync(databaseB);
+
         var host = await _fixture.CreateHostAsync(
             _fixture.PostgresConnectionString,
             _fixture.RabbitMqConnectionString,
-            capStorageConnectionString: databaseB,
+            capStorageConnectionString: null, // Crest/CAP ConnectionString 保持 A
             mutateServices: services => services.PostConfigure<DotNetCore.CAP.PostgreSqlOptions>(
-                options => storageOverride(options, databaseB)));
+                options => storageOverride(options, databaseB)),
+            capTableWaitConnectionString: databaseB);
         try
         {
             using var scope = host.Services.CreateScope();
@@ -153,30 +164,40 @@ public class CapRound2FixTests : IClassFixture<CapIntegrationFixture>
     public async Task Broker_offline_during_commit_recovers_after_restart()
     {
         var topic = NewTopic("broker-offline-during-commit");
-
-        await _fixture.PauseBrokerAsync();
+        var isolated = await _fixture.CreateIsolatedDatabaseAsync($"cap_it_broker_dc_{Guid.NewGuid():N}");
+        var store = new CapStoreInspector(isolated);
+        var host = await _fixture.CreateHostAsync(isolated, _fixture.RabbitMqConnectionString, failedRetryCount: 10);
         try
         {
-            using var scope = _fixture.Host.Services.CreateScope();
-            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
-            var publisher = scope.ServiceProvider.GetRequiredService<IDistributedEventPublisher>();
-            await using var unitOfWork = manager.BeginScope();
-            await unitOfWork.StartAsync();
-            await publisher.PublishAsync(topic, new { Value = 1 });
-            await unitOfWork.CompleteAsync();
+            await _fixture.PauseBrokerAsync();
+            try
+            {
+                using var scope = host.Services.CreateScope();
+                var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+                var publisher = scope.ServiceProvider.GetRequiredService<IDistributedEventPublisher>();
+                await using var unitOfWork = manager.BeginScope();
+                await unitOfWork.StartAsync();
+                await publisher.PublishAsync(topic, new { Value = 1 });
+                await unitOfWork.CompleteAsync();
 
-            // broker 离线期间的提交仍应落库（投递失败可见、重试计数递增、未耗尽）。
-            Assert.True(await _fixture.Store.WaitForCountAsync(topic, 1, TimeSpan.FromSeconds(20)));
-            var failedVisible = await WaitForFailedStatusAsync(topic, TimeSpan.FromSeconds(90));
-            Assert.True(failedVisible, "with the broker offline, delivery attempts must fail visibly");
+                // broker 离线期间的提交仍应落库（投递失败可见、重试计数递增、未耗尽）。
+                Assert.True(await store.WaitForCountAsync(topic, 1, TimeSpan.FromSeconds(20)));
+                var failedVisible = await WaitForFailedStatusAsync(store, topic, TimeSpan.FromSeconds(90));
+                Assert.True(failedVisible, "with the broker offline, delivery attempts must fail visibly");
+            }
+            finally
+            {
+                await _fixture.ResumeBrokerAsync();
+            }
+
+            Assert.True(await store.WaitForStatusAsync(topic, "Succeeded", ScanWait),
+                "after the broker restarts, the committed message must be delivered");
         }
         finally
         {
-            await _fixture.ResumeBrokerAsync();
+            await host.StopAsync();
+            host.Dispose();
         }
-
-        Assert.True(await _fixture.Store.WaitForStatusAsync(topic, "Succeeded", ScanWait),
-            "after the broker restarts, the committed message must be delivered");
     }
 
     [Fact]
@@ -238,12 +259,12 @@ public class CapRound2FixTests : IClassFixture<CapIntegrationFixture>
             explicitDefault: OrmProvider.EfCore,
             chainNode: scopedProvider.GetRequiredService<UnitOfWorkChainNode>());
 
-    private async Task<bool> WaitForFailedStatusAsync(string topic, TimeSpan timeout)
+    private static async Task<bool> WaitForFailedStatusAsync(CapStoreInspector store, string topic, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
-            if (await _fixture.Store.GetStatusAsync(topic) == "Failed")
+            if (await store.GetStatusAsync(topic) == "Failed")
             {
                 return true;
             }
