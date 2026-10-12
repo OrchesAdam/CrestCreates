@@ -256,7 +256,7 @@ UnitOfWorkManager.BeginScope
   | --- | --- | --- | --- | --- |
   | SupportsTransactions | 本地事务 | 是 | 是（SDK） | 是（SDK Ado） |
   | SupportsRequiresNew | 隔离子 scope + 环境跟随 | 是（已验证） | 否（fail closed） | 否（fail closed） |
-  | SupportedIsolationLevels | 显式隔离级别集合 | **实测矩阵**：SQLite={Serializable}（本地实测：接受并通过、ReadCommitted 执行前拒绝）；PostgreSQL={ReadCommitted, RepeatableRead, Serializable}（CI Testcontainers 实测接受）；未知提供者按透传声明 | **未声明**（SDK 隔离未实测）：显式请求执行前拒绝（`<none declared>`） | **未声明**：显式请求执行前拒绝 |
+  | SupportedIsolationLevels | 显式隔离级别集合 | **实测矩阵**：SQLite={Serializable}（本地实测：接受并通过、ReadCommitted 执行前拒绝）；PostgreSQL={ReadCommitted, RepeatableRead, Serializable}（`ci.yml`/`full-validation.yml` 已接入测试门禁，含实际事务级别断言；证据以最终 head 的 CI run 为准）；未知提供者按透传声明 | **未声明**（SDK 隔离未实测）：显式请求执行前拒绝（`<none declared>`） | **未声明**：显式请求执行前拒绝 |
   | SupportsTimeout | 内核截止时间之外的 Provider 级超时（如有） | 无额外声明（内核合作式截止时间生效，原生门禁覆盖 deadline 取消） | 无额外声明 | 无额外声明 |
   | PromptTerminationOnAbandon | 未完成退出及时终结事务 | 是（#136；`IUnitOfWorkAbandonable` + ChangeTracker 丢弃） | 是（切片 3：`AbandonPendingWork` 回滚 SDK 工作单元，实测随后可再次开始） | 是（切片 3：`AbandonPendingWork` 回滚 Ado 事务） |
   | DiscardUncommittedOnAbandon | 未完成退出丢弃未 flush 跟踪状态 | 是（`ChangeTracker.Clear()`；连续顶层 UoW 无残留用例） | 是（跟踪队列清空；立即执行模式下即事务回滚） | 是（跟踪队列清空；立即执行模式下即事务回滚） |

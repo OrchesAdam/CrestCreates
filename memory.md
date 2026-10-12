@@ -60,8 +60,10 @@ archived to 99_RecycleBin, never deleted; never output credentials.
   split; managed-chain ambient routing (descendant-or-self visibility + tenant/
   declaration/connection validation before routing), abandonment terminates AND
   discards uncommitted tracking; provider capability declarations with
-  pre-execution gate (SQLite={Serializable}, PostgreSQL={ReadCommitted,
-  RepeatableRead, Serializable} measured; FreeSql/SqlSugar declare termination/
+  pre-execution gate (SQLite={Serializable} locally measured; PostgreSQL=
+  {ReadCommitted, RepeatableRead, Serializable} with CI gate wiring and actual
+  transaction-level assertions, evidence = final head CI run; FreeSql/SqlSugar
+  declare termination/
   discard, no isolation levels); CAP participation lease (provider-owned live
   view, read-only identity, borrow rules; handoff doc
   `docs/superpowers/specs/2026-10-10-issue-137-cap-handoff.md`); dead contracts

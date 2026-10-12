@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.UnitOfWork;
@@ -150,7 +151,7 @@ public class UnitOfWorkKernelStateTests
     }
 
     [Fact]
-    public async Task Abandonment_with_failing_rollback_records_failed_state_without_throwing()
+    public async Task Abandonment_with_failing_rollback_records_failed_state_and_reports_cleanup_failure()
     {
         var unitOfWork = new FailingAbandonUnitOfWork();
         var manager = new UnitOfWorkManager(new SingletonUnitOfWorkFactory(unitOfWork));
@@ -158,8 +159,10 @@ public class UnitOfWorkKernelStateTests
         var scope = manager.BeginScope();
         await scope.StartAsync();
 
-        scope.Dispose();
+        var act = () => scope.Dispose();
 
+        var cleanup = act.Should().Throw<UnitOfWorkCleanupException>().Subject.Single();
+        cleanup.Failures.Should().ContainSingle().Which.Phase.Should().Be("abandon");
         scope.IsReleased.Should().BeTrue();
         scope.State.Should().Be(UnitOfWorkState.Failed,
             "a failed termination is recorded as a checkable result instead of being swallowed");

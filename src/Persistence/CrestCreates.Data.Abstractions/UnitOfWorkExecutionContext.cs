@@ -4,29 +4,7 @@ using System.Threading;
 namespace CrestCreates.Data.Abstractions
 {
     /// <summary>
-    /// 受管执行上下文的执行 token 载体（per-scope 对象；AsyncLocal 帧仅保存引用）。
-    /// </summary>
-    /// <remarks>
-    /// 载体在调用方帧同步 Push（见设计 §4.1 激活协议）；token 由内核在 StartAsync
-    /// 通过变更载体字段发布，使调用方帧与织入方法体内的正式仓储/Provider 都能组合到
-    /// 「传入 CT ⊕ 受管执行 token」。载体随 scope 释放恢复，不跨 scope 复用。
-    /// 帧携带 owner 链节点：读方（正式仓储，可注入自身节点）只跟随自身或其后代的帧。
-    /// </remarks>
-    public sealed class UnitOfWorkExecutionTokenSource
-    {
-        private CancellationToken _token;
-
-        /// <summary>受管执行 token（StartAsync 之前为 default）。</summary>
-        public CancellationToken Token => _token;
-
-        internal void Publish(CancellationToken token)
-        {
-            _token = token;
-        }
-    }
-
-    /// <summary>
-    /// 当前受管执行 token 的读入口（链校验：只跟随自身或其后代的帧）。
+    /// 当前受管执行 token 的读入口与数据准入守卫（链校验：只跟随自身或其后代的帧）。
     /// </summary>
     public static class UnitOfWorkExecutionContext
     {
@@ -54,7 +32,7 @@ namespace CrestCreates.Data.Abstractions
             UnitOfWorkChainNode? readerNode,
             out CancellationToken effective)
         {
-            var current = ResolveVisibleToken(readerNode);
+            var current = ResolveVisibleFrame(readerNode)?.Source.Token ?? default;
 
             if (!current.CanBeCanceled)
             {
@@ -73,42 +51,114 @@ namespace CrestCreates.Data.Abstractions
             return linked;
         }
 
-        private static CancellationToken ResolveVisibleToken(UnitOfWorkChainNode? readerNode)
+        /// <summary>
+        /// 数据准入守卫（正式读方在返回资源前调用）：
+        /// 1) 租户身份：顶层可见受管帧与读方均具备租户来源时按值（含 null=host）精确比较，不一致确定性拒绝；
+        /// 2) 生命周期：顶层可见 owner 帧处于终态/已释放时拒绝新数据动作（结果仍可读，需新建 UoW）。
+        /// </summary>
+        public static void ValidateDataAccess(UnitOfWorkChainNode? readerNode, TenantKeySnapshot readerTenant)
+        {
+            var frame = ResolveVisibleFrame(readerNode);
+            if (frame is null)
+            {
+                return; // 无受管窗口：无 UoW 的既有行为（含自动保存）不受影响
+            }
+
+            if (frame.Tenant.HasTenantSource &&
+                readerTenant.HasTenantSource &&
+                !frame.Tenant.Matches(readerTenant))
+            {
+                throw new InvalidOperationException(
+                    $"The ambient unit-of-work resource belongs to tenant '{frame.Tenant.Value ?? "<host>"}' but the current " +
+                    $"tenant is '{readerTenant.Value ?? "<host>"}'. Switching tenant (including switching to host) inside an " +
+                    "active unit of work is not supported; start a new unit of work for the other tenant.");
+            }
+
+            if (frame.Source.IsOwner && (frame.Source.State != UnitOfWorkState.Active || frame.Source.IsReleased))
+            {
+                throw new InvalidOperationException(
+                    $"The unit of work is '{frame.Source.State}' (released: {frame.Source.IsReleased}). Scope results remain " +
+                    "readable, but new data operations require a new unit of work.");
+            }
+        }
+
+        /// <summary>
+        /// 解析读方可见的顶层受管 owner 状态（供 CAP lease 等受管窗口准入使用）。
+        /// </summary>
+        public static bool TryGetCurrentManagedState(
+            UnitOfWorkChainNode? readerNode,
+            out UnitOfWorkState state,
+            out bool released)
         {
             for (var frame = CurrentSource.Value; frame is not null; frame = frame.Parent)
             {
-                if (readerNode is not null &&
-                    frame.OwnerNode is not null &&
-                    !frame.OwnerNode.IsSelfOrDescendantOf(readerNode))
+                if (!IsVisible(frame, readerNode))
                 {
-                    continue; // 帧不在读方链上，视为不可见（独立 scope / 其他宿主）
+                    continue;
                 }
 
-                return frame.Source.Token;
+                if (!frame.Source.IsOwner)
+                {
+                    continue; // join 帧不承载受管窗口身份，继续向 owner 帧查找
+                }
+
+                state = frame.Source.State;
+                released = frame.Source.IsReleased;
+                return true;
             }
 
-            return default;
+            state = UnitOfWorkState.Active;
+            released = false;
+            return false;
         }
 
-        internal static IDisposable Push(UnitOfWorkExecutionTokenSource source, UnitOfWorkChainNode? ownerNode)
+        private static SourceFrame? ResolveVisibleFrame(UnitOfWorkChainNode? readerNode)
         {
-            var frame = new SourceFrame(source, ownerNode, CurrentSource.Value);
+            for (var frame = CurrentSource.Value; frame is not null; frame = frame.Parent)
+            {
+                if (IsVisible(frame, readerNode))
+                {
+                    return frame;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsVisible(SourceFrame frame, UnitOfWorkChainNode? readerNode)
+            => readerNode is null ||
+               frame.OwnerNode is null ||
+               frame.OwnerNode.IsSelfOrDescendantOf(readerNode);
+
+        internal static IDisposable Push(
+            UnitOfWorkExecutionTokenSource source,
+            UnitOfWorkChainNode? ownerNode,
+            TenantKeySnapshot tenant)
+        {
+            var frame = new SourceFrame(source, ownerNode, tenant, CurrentSource.Value);
             CurrentSource.Value = frame;
             return new FrameRestorer(frame);
         }
 
         private sealed class SourceFrame
         {
-            public SourceFrame(UnitOfWorkExecutionTokenSource source, UnitOfWorkChainNode? ownerNode, SourceFrame? parent)
+            public SourceFrame(
+                UnitOfWorkExecutionTokenSource source,
+                UnitOfWorkChainNode? ownerNode,
+                TenantKeySnapshot tenant,
+                SourceFrame? parent)
             {
                 Source = source;
                 OwnerNode = ownerNode;
+                Tenant = tenant;
                 Parent = parent;
             }
 
             public UnitOfWorkExecutionTokenSource Source { get; }
 
             public UnitOfWorkChainNode? OwnerNode { get; }
+
+            public TenantKeySnapshot Tenant { get; }
 
             public SourceFrame? Parent { get; }
         }

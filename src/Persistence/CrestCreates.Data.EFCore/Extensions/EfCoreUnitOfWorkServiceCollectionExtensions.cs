@@ -33,7 +33,10 @@ namespace CrestCreates.Data.EFCore.Extensions
             services.AddScoped(sp => new EfCoreUnitOfWork(
                 sp.GetRequiredService<IDataBaseContext>(),
                 sp.GetRequiredService<IDomainEventPublisher>()));
-            services.AddScoped<IUnitOfWorkTransactionLeaseProvider, EfCoreTransactionLeaseProvider>();
+            services.AddScoped<IUnitOfWorkTransactionLeaseProvider>(sp => new EfCoreTransactionLeaseProvider(
+                sp.GetRequiredService<IDataBaseContext>(),
+                sp.GetService<UnitOfWorkChainNode>()));
+            services.AddScoped<IEfCoreTransactionBorrower, EfCoreTransactionBorrower>();
             services.AddUnitOfWorkProvider(
                 OrmProvider.EfCore,
                 static sp => sp.GetRequiredService<EfCoreUnitOfWork>(),

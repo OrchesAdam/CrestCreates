@@ -364,8 +364,12 @@ namespace CrestCreates.Data.EFCore.DbContexts
 
         /// <summary>
         /// requiresNew 隔离期间返回环境推入的内层上下文（链校验 + 身份校验后）；否则返回本实例。
+        /// 数据准入守卫（租户 host/null 身份与终态/释放拒绝）先于一切路由执行。
         /// </summary>
         private DbContext EffectiveDataContext =>
-            EfCoreAmbientContext.Resolve(this, this, _chainNode, _currentTenant?.Id);
+            EfCoreAmbientContext.Resolve(this, this, _chainNode, TenantSnapshot);
+
+        private TenantKeySnapshot TenantSnapshot =>
+            _currentTenant is null ? TenantKeySnapshot.NotParticipating : new TenantKeySnapshot(_currentTenant.Id);
     }
 }

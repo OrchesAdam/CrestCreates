@@ -86,7 +86,11 @@ public class EfCoreDbContextAdapter : IEntityFrameworkCoreDbContext
 
     /// <summary>
     /// requiresNew 隔离期间返回环境推入的内层上下文（链校验 + 身份校验后）；否则返回本作用域上下文。
+    /// 数据准入守卫（租户 host/null 身份与终态/释放拒绝）先于一切路由执行。
     /// </summary>
     private DbContext EffectiveDbContext =>
-        EfCoreAmbientContext.Resolve(this, _dbContext, _chainNode, _currentTenant?.Id);
+        EfCoreAmbientContext.Resolve(this, _dbContext, _chainNode, TenantSnapshot);
+
+    private TenantKeySnapshot TenantSnapshot =>
+        _currentTenant is null ? TenantKeySnapshot.NotParticipating : new TenantKeySnapshot(_currentTenant.Id);
 }

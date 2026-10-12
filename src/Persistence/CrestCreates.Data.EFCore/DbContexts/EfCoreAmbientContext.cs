@@ -15,8 +15,11 @@ internal static class EfCoreAmbientContext
         IDataBaseContext self,
         DbContext own,
         UnitOfWorkChainNode? readerNode,
-        string? currentTenantKey)
+        TenantKeySnapshot readerTenant)
     {
+        // 数据准入守卫（先于一切路由与提前返回）：租户身份（含 host/null）与终态/释放拒绝。
+        UnitOfWorkExecutionContext.ValidateDataAccess(readerNode, readerTenant);
+
         // 无环境帧时快速返回，避免为非关系型 Provider 计算逻辑键（连接串读取仅限关系型）。
         if (UnitOfWorkAmbientContext.Current is null)
         {
@@ -26,7 +29,7 @@ internal static class EfCoreAmbientContext
         if (!UnitOfWorkAmbientContext.TryResolveCurrent(
                 self,
                 readerNode,
-                currentTenantKey,
+                readerTenant,
                 own.GetType().FullName,
                 TryGetConnectionString(own),
                 out var ambient))

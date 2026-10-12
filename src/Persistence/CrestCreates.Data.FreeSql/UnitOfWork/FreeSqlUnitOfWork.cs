@@ -53,7 +53,7 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
         }
 
         /// <summary>
-        /// 数据库提交（不含 flush 与通知）。
+        /// 数据库提交（不含 flush 与通知）；提交已确认后的句柄清理失败作为次级诊断保留。
         /// </summary>
         public override async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
         {
@@ -62,13 +62,39 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
                 throw new InvalidOperationException("No transaction has been started");
             }
 
+            var committed = false;
             try
             {
                 await Task.Run(() => _unitOfWork.Commit(), cancellationToken);
+                committed = true;
             }
             finally
             {
-                DisposeUnitOfWork();
+                if (committed)
+                {
+                    try
+                    {
+                        DisposeUnitOfWork();
+                    }
+                    catch (Exception cleanupException)
+                    {
+                        throw new UnitOfWorkCommitCleanupFailureException(
+                            "The database commit was confirmed, but releasing the FreeSql unit of work failed. " +
+                            "The committed fact is preserved; treat this as a cleanup failure, not an unknown commit outcome.",
+                            cleanupException);
+                    }
+                }
+                else
+                {
+                    try
+                    {
+                        DisposeUnitOfWork();
+                    }
+                    catch (Exception)
+                    {
+                        // 提交自身失败：保留根因，清理失败不再叠加。
+                    }
+                }
             }
         }
 

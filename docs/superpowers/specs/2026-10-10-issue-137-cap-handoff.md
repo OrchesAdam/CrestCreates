@@ -19,11 +19,12 @@
 
 - **唯一内核**（`UnitOfWorkManager` + 状态化 scope）负责：`StartAsync` 打开事务、完成顺序（rollback-only 校验 → flush → commit【确认即记录 Committed】→ 通知 → 清理）、失败路径回滚与「终结 + 丢弃」。
 - **CAP 不获得生命周期操作**：公开参与契约（`UnitOfWorkTransactionLease` / `IUnitOfWorkTransactionIdentity`）不暴露 Commit/Rollback/Dispose；CAP 不得尝试完成或释放外层事务。
-- **适配边界借用**（仅 Provider 适配层）：`IUnitOfWorkTransactionIdentity.NativeTransaction` 是原生事务对象（如 `IDbContextTransaction`），供 CAP SDK 适配（如 `ICapPublisher.Transaction = native`）使用；借用规则：**不得 Dispose / Commit / Rollback**，仅可读取身份并在同一事务内附加命令（消息记录写入）。
+- **原生句柄借用（仅 Provider 适配层）**：公开 lease 只携带**非操作性**信息（`UnitOfWorkResourceIdentity` 只读标识 + `NativeTransaction` 借用标记，标记不可强转为原生事务类型）；需要原生句柄的 SDK 适配必须通过 Provider 专属 borrower 边界——EF 为 `IEfCoreTransactionBorrower.TryBorrowCurrent(out DbContext, out IDbContextTransaction)`（scoped，普通业务不应依赖）。借用规则：**不得 Dispose / Commit / Rollback**，仅可在同一事务内附加命令（消息记录写入）。
 
 ## 三、获取与失效
 
 - 获取：`IUnitOfWorkTransactionLeaseProvider.TryAcquireCurrentLease(out var lease)`（Provider 所有、绑定/注册声明；EF 实现为 scoped）。
+- **受管窗口前置条件**：签发要求读方可见链上存在 **Active 且未释放** 的受管 owner 窗口，且其有效资源持有活动事务；未开始、终态、已释放、独立 scope/宿主与**原生未受管事务**一律拒绝（「存在事务」不等于「受管参与窗口」）。
 - 关联校验：lease 解析的是「当前有效资源上下文」（受管链路由后）的 `Database.CurrentTransaction`，因此天然满足同一 Connection/Transaction；`TransactionId` 可用于与数据库侧核对。
 - **live view**：`IsValid` 为实时计算（事务句柄已释放/已完结即 false）；每个参与动作前应重新 `TryAcquireCurrentLease`，**不得跨 scope 缓存 lease**。
 - 无事务（未开始/非事务模式/已终结）→ `TryAcquireCurrentLease` 返回 false；继续使用已失效 lease → 确定性拒绝。

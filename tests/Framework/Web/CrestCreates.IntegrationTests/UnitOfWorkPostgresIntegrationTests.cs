@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -94,6 +96,15 @@ public class UnitOfWorkPostgresIntegrationTests : IClassFixture<LibraryManagemen
         });
 
         await unitOfWorkScope.StartAsync();
+
+        // 读取实际事务级别断言（不只判断 Complete 成功）。
+        var dbContext = (Microsoft.EntityFrameworkCore.DbContext)scope.ServiceProvider
+            .GetRequiredService<IEntityFrameworkCoreDbContext>().GetNativeContext();
+        dbContext.Database.CurrentTransaction.Should().NotBeNull();
+        dbContext.Database.CurrentTransaction!.GetDbTransaction().IsolationLevel.Should().Be(
+            isolationLevel,
+            "the declared isolation level must reach the actual database transaction");
+
         await unitOfWorkScope.CompleteAsync();
         unitOfWorkScope.TransactionOutcome.Should().Be(UnitOfWorkTransactionOutcome.Committed);
     }

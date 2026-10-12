@@ -55,14 +55,23 @@ public class CapLeaseTests : IDisposable
         var currentTransaction = dbContext.Database.CurrentTransaction;
         currentTransaction.Should().NotBeNull();
 
-        lease!.Provider.Should().Be(OrmProvider.EfCore);
-        lease.ResourceIdentity.Should().BeSameAs(dbContext,
-            "the physical resource identity is the effective context instance, not a logical key");
+        lease!.Resource.Provider.Should().Be(OrmProvider.EfCore);
+        lease.Resource.ResourceKind.Should().Be(typeof(ProviderCapabilityTests.CapDbContext).FullName,
+            "the resource identity exposes the declaration kind, not the mutable instance");
+        lease.Resource.InstanceId.Should().NotBeEmpty();
         lease.Transaction.TransactionId.Should().Be(currentTransaction!.TransactionId,
             "the lease must confirm the same transaction as the effective resource");
-        lease.Transaction.NativeTransaction.Should().BeSameAs(currentTransaction,
-            "the native transaction view is the same handle the resource uses (adapter-boundary borrow)");
+        lease.Transaction.NativeTransaction.Should().BeOfType<UnitOfWorkNativeTransactionMarker>(
+            "the public view carries a non-operable marker, never the lifecycle handle");
+        ((UnitOfWorkNativeTransactionMarker)lease.Transaction.NativeTransaction).TransactionId
+            .Should().Be(lease.Transaction.TransactionId);
         lease.IsValid.Should().BeTrue();
+
+        // 原生句柄借用走 Provider 适配边界（不得经公开 lease 取得）。
+        var borrower = scope.ServiceProvider.GetRequiredService<CrestCreates.Data.EFCore.UnitOfWork.IEfCoreTransactionBorrower>();
+        borrower.TryBorrowCurrent(out var borrowedContext, out var borrowedTransaction).Should().BeTrue();
+        borrowedContext.Should().BeSameAs(dbContext);
+        borrowedTransaction.Should().BeSameAs(currentTransaction);
     }
 
     [Fact]

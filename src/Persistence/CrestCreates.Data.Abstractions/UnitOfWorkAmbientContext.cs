@@ -41,7 +41,7 @@ namespace CrestCreates.Data.Abstractions
         public static bool TryResolveCurrent(
             IDataBaseContext self,
             UnitOfWorkChainNode? readerNode,
-            string? currentTenantKey,
+            TenantKeySnapshot currentTenant,
             string? readerLogicalContextType,
             string? readerConnectionString,
             out IDataBaseContext context)
@@ -64,14 +64,15 @@ namespace CrestCreates.Data.Abstractions
             }
 
             // 先校验后路由：身份不一致属于「第二资源」，确定性拒绝而不是静默切换。
-            if (!string.IsNullOrEmpty(frame.TenantKey) &&
-                !string.IsNullOrEmpty(currentTenantKey) &&
-                !string.Equals(frame.TenantKey, currentTenantKey, StringComparison.Ordinal))
+            // host/null 是有效身份值：两端均有租户来源时按值（含 null）精确比较。
+            if (frame.Tenant.HasTenantSource &&
+                currentTenant.HasTenantSource &&
+                !frame.Tenant.Matches(currentTenant))
             {
                 throw new InvalidOperationException(
-                    $"The ambient unit-of-work resource belongs to tenant '{frame.TenantKey}' but the current " +
-                    $"tenant is '{currentTenantKey}'. Switching tenant inside an active unit of work is not " +
-                    "supported; start a new unit of work for the other tenant.");
+                    $"The ambient unit-of-work resource belongs to tenant '{frame.Tenant.Value ?? "<host>"}' but the current " +
+                    $"tenant is '{currentTenant.Value ?? "<host>"}'. Switching tenant (including switching to host) inside " +
+                    "an active unit of work is not supported; start a new unit of work for the other tenant.");
             }
 
             if (!string.IsNullOrEmpty(frame.LogicalContextType) &&
@@ -103,14 +104,14 @@ namespace CrestCreates.Data.Abstractions
         internal static IDisposable Push(
             IDataBaseContext context,
             UnitOfWorkChainNode? ownerNode,
-            string? tenantKey)
+            TenantKeySnapshot tenant)
         {
             ArgumentNullException.ThrowIfNull(context);
 
             var frame = new AmbientContextFrame(
                 context,
                 ownerNode,
-                tenantKey,
+                tenant,
                 context.GetNativeContext().GetType().FullName,
                 TryReadConnectionString(context),
                 CurrentFrame.Value);
@@ -137,14 +138,14 @@ namespace CrestCreates.Data.Abstractions
             public AmbientContextFrame(
                 IDataBaseContext context,
                 UnitOfWorkChainNode? ownerNode,
-                string? tenantKey,
+                TenantKeySnapshot tenant,
                 string? logicalContextType,
                 string? logicalConnectionString,
                 AmbientContextFrame? parent)
             {
                 Context = context;
                 OwnerNode = ownerNode;
-                TenantKey = tenantKey;
+                Tenant = tenant;
                 LogicalContextType = logicalContextType;
                 LogicalConnectionString = logicalConnectionString;
                 Parent = parent;
@@ -154,7 +155,7 @@ namespace CrestCreates.Data.Abstractions
 
             public UnitOfWorkChainNode? OwnerNode { get; }
 
-            public string? TenantKey { get; }
+            public TenantKeySnapshot Tenant { get; }
 
             public string? LogicalContextType { get; }
 

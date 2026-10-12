@@ -29,4 +29,22 @@
 | I-14 | 交付整理（切片 5） | CAP lease 契约落地：`IUnitOfWorkTransactionLeaseProvider`/`UnitOfWorkTransactionLease`/`IUnitOfWorkTransactionIdentity`（只读身份，无生命周期操作；live view 失效）；EF 实现按「有效资源的 CurrentTransaction」签发（同一 Connection/Transaction 关联）；构造经 `InternalsVisibleTo(CrestCreates.Data.EFCore)` 限定 Provider 边界，业务/CAP 不可构造 | 无 | 交接文档 `docs/superpowers/specs/2026-10-10-issue-137-cap-handoff.md` 随 PR；`RegisterWithDistributedTransaction` 死扩展处置交 #125 | 已处理 |
 | I-15 | 遗留（交 #125） | `DistributedTransaction` 包内 `UnitOfWorkIntegrationExtensions`/`ITransactionParticipant` 仍为死代码/内存抽象；本项不删除（不在范围） | 双轨风险若被误用 | #125 按交接文档决定删除或归档；不得与 lease 契约形成双轨 | 交 #125 |
 
+## PR #139 审查修复轮（2026-10-12，R139-01…11）
+
+对照 `docs/review/2026-10-12-pr-139-uow-implementation-review.md` 的逐项修复（审查方 11 条契约回归用例已纳入本仓库测试并由 11/11 失败转为 11/11 通过）：
+
+| 审查项 | 修复 |
+| --- | --- |
+| R139-01 [P1] 未完成 join 不标记 rollback-only | `DisposeCore` 增加「非 owner 且 Active 的 join 退出 → 标记实际 owner rollback-only」；成功完成的 join 仅恢复环境。回归：`Abandoned_join_must_prevent_outer_commit` |
+| R139-02 [P1] 显式/异常回滚不丢弃跟踪写入 | 所有未提交退出路径统一经 `TryTerminateUncommittedAsync`（优先 `IUnitOfWorkAbandonable`：终结事务 + 丢弃未 flush 跟踪写入；否则回滚）。回归：`Explicit_rollback_must_not_leak_pending_writes_into_next_uow` |
+| R139-03 [P1] 租户校验被顶层/host 绕过 | 全部受管 scope（root/join/RequiresNew）在 token 帧记录租户快照；`ValidateDataAccess` 先于一切路由与提前返回执行，两端均有租户来源时按值（含 null=host）精确比较。回归：`Root_uow_must_reject_tenant_change_before_repository_access`、`Tenant_to_host_change_must_be_rejected_inside_isolation` |
+| R139-04 [P1] 提交确认后被句柄释放异常改写 Unknown | EF/FreeSql 提交成功后的清理失败抛 `UnitOfWorkCommitCleanupFailureException`（次级诊断）；内核固定 `Committed` + `Failed`（清理未完成），不尝试回滚。回归：`Confirmed_commit_must_not_become_unknown_when_handle_dispose_fails` |
+| R139-05 [P1] PG/ORM 套件未接入 CI | `ci.yml` 与 `full-validation.yml` 新增「ORM providers」与「LibraryManagement PG integration」两个测试步骤；PG 隔离用例增加实际事务级别断言；Spec/memory/PR 措辞改为「CI 门禁已接入，证据以最终 head CI run 为准」。回归/证据：CI run（最终 head） |
+| R139-06 [P2] 终态窗口可继续写入 | token 源携带参与状态/释放标志；`ValidateDataAccess` 对终态/已释放 owner 帧拒绝新数据动作（结果仍可读）；`BeginScope` join 拒绝终态 owner。回归：`Completed_scope_must_reject_new_repository_writes` |
+| R139-07 [P2] 释放失败替换业务根因/释放标志不完成 | `DisposeCore` 按阶段收集失败（abandon/restore/token-dispose/uow-dispose/owned-scope-dispose），各步骤尽可能执行，始终置 `IsReleased`；无主异常时抛 `UnitOfWorkCleanupException`（含阶段），有主异常时入口抑制传播。回归：`Cleanup_failure_must_not_replace_business_exception` |
+| R139-08 [P2] join 丢失 owner token 继承 | token 选择改为「唯一来源直接复用（caller 或 owner）+ deadline 时链接」，不再返回会被误解的 null。回归：`Joined_scope_must_inherit_owner_cancellation_without_deadline` |
+| R139-09 [P2] join Complete 绕过自身 deadline | join 成功记录前执行同等 `ThrowIfExecutionInterrupted`；失败进入统一参与者失败语义。回归：`Joined_scope_completion_must_observe_its_deadline` |
+| R139-10 [P2] lease 公开面暴露生命周期句柄 | `IUnitOfWorkTransactionIdentity.NativeTransaction` 改为不可操作借用标记（不可强转原生类型）；`ResourceIdentity` 改为只读 `UnitOfWorkResourceIdentity`（声明类型 + 稳定实例标识）；原生句柄借用走新增 `IEfCoreTransactionBorrower` 适配边界。回归：`Public_lease_must_not_expose_lifecycle_handle` |
+| R139-11 [P2] lease 签发未绑定受管窗口 | 签发前置：读方可见链存在 Active 且未释放的 owner 窗口（`TryGetCurrentManagedState`），原生未受管事务/独立 scope/终态一律拒绝。回归：`Lease_must_reject_transaction_outside_managed_scope` |
+
 （后续切片发现问题将追加到本表。）

@@ -110,7 +110,8 @@ namespace CrestCreates.Data.Abstractions
         {
             ArgumentNullException.ThrowIfNull(action);
 
-            await using var scope = BeginScope(options);
+            var scope = (UnitOfWorkScope)BeginScope(options);
+            Exception? primary = null;
             try
             {
                 await scope.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -118,10 +119,22 @@ namespace CrestCreates.Data.Abstractions
                 await scope.CompleteAsync(CancellationToken.None).ConfigureAwait(false);
                 return result;
             }
-            catch
+            catch (Exception exception)
             {
-                await ((UnitOfWorkScope)scope).TryRollbackOnFailureAsync().ConfigureAwait(false);
+                primary = exception;
+                await scope.TryRollbackOnFailureAsync().ConfigureAwait(false);
                 throw;
+            }
+            finally
+            {
+                try
+                {
+                    scope.Dispose();
+                }
+                catch (UnitOfWorkCleanupException) when (primary is not null)
+                {
+                    // 释放阶段的次级失败保留（可经异常对象/日志检查），不替换业务主异常。
+                }
             }
         }
 
@@ -159,6 +172,7 @@ namespace CrestCreates.Data.Abstractions
             var provider = ResolveProvider(options.Provider);
             ValidateIsolationCapability(provider, options);
             var unitOfWork = _factory.Create(provider);
+            var tenantSnapshot = ResolveTenantSnapshot(provider, _serviceProvider);
             var node = new UnitOfWorkChainNode();
             node.AttachTo(frame?.Scope.Node ?? _chainNode);
             return UnitOfWorkScope.CreateOwner(
@@ -167,6 +181,7 @@ namespace CrestCreates.Data.Abstractions
                 provider,
                 options,
                 node,
+                tenantSnapshot,
                 parentFrame: frame,
                 ownedScope: null,
                 ambientToken: null,
@@ -200,6 +215,7 @@ namespace CrestCreates.Data.Abstractions
                     provider,
                     options,
                     manualNode,
+                    ResolveTenantSnapshot(provider, _serviceProvider),
                     parentFrame: parentFrame,
                     ownedScope: null,
                     ambientToken: null,
@@ -210,6 +226,8 @@ namespace CrestCreates.Data.Abstractions
             IDisposable? ambientToken = null;
             try
             {
+                var tenantSnapshot = ResolveTenantSnapshot(provider, childScope.ServiceProvider);
+
                 // Push the isolated ambient context BEFORE constructing the unit of
                 // work: construction must capture the child scope's own resources,
                 // never be redirected to a parent context via ambient routing.
@@ -221,8 +239,7 @@ namespace CrestCreates.Data.Abstractions
                             "requires a resolvable resource context.");
                     var childNode = childScope.ServiceProvider.GetRequiredService<UnitOfWorkChainNode>();
                     childNode.AttachTo(parentFrame.Scope.Node);
-                    var tenantKey = binding.TenantKeyFactory?.Invoke(childScope.ServiceProvider);
-                    ambientToken = UnitOfWorkAmbientContext.Push(ambientContext, childNode, tenantKey);
+                    ambientToken = UnitOfWorkAmbientContext.Push(ambientContext, childNode, tenantSnapshot);
                 }
 
                 var childFactory = childScope.ServiceProvider.GetRequiredService<IUnitOfWorkFactory>();
@@ -234,6 +251,7 @@ namespace CrestCreates.Data.Abstractions
                     provider,
                     options,
                     childScope.ServiceProvider.GetRequiredService<UnitOfWorkChainNode>(),
+                    tenantSnapshot,
                     parentFrame: parentFrame,
                     ownedScope: childScope,
                     ambientToken: ambientToken,
@@ -255,6 +273,20 @@ namespace CrestCreates.Data.Abstractions
             }
 
             return requested ?? _explicitDefault ?? OrmProvider.EfCore;
+        }
+
+        /// <summary>
+        /// 解析受管资源的租户身份快照（host/null 是有效身份值，不能被当作关闭校验的开关）。
+        /// </summary>
+        private TenantKeySnapshot ResolveTenantSnapshot(OrmProvider provider, IServiceProvider? serviceProvider)
+        {
+            var factory = _bindings?.GetRequired(provider).TenantKeyFactory;
+            if (factory is null || serviceProvider is null)
+            {
+                return TenantKeySnapshot.NotParticipating;
+            }
+
+            return new TenantKeySnapshot(factory(serviceProvider));
         }
 
         /// <summary>
@@ -331,6 +363,7 @@ namespace CrestCreates.Data.Abstractions
             private readonly IUnitOfWork _unitOfWork;
             private readonly OrmProvider _provider;
             private readonly UnitOfWorkChainNode? _node;
+            private readonly TenantKeySnapshot _tenantSnapshot;
             private readonly bool _isOwner;
             private readonly bool _isTransactional;
             private readonly IsolationLevel? _requestedIsolation;
@@ -357,6 +390,7 @@ namespace CrestCreates.Data.Abstractions
                 IUnitOfWork unitOfWork,
                 OrmProvider provider,
                 UnitOfWorkChainNode? node,
+                TenantKeySnapshot tenantSnapshot,
                 UnitOfWorkOptions options,
                 bool isOwner,
                 bool isTransactional,
@@ -370,6 +404,7 @@ namespace CrestCreates.Data.Abstractions
                 _unitOfWork = unitOfWork;
                 _provider = provider;
                 _node = node;
+                _tenantSnapshot = tenantSnapshot;
                 _isOwner = isOwner;
                 _isTransactional = isTransactional;
                 _requestedIsolation = options.IsolationLevel;
@@ -379,7 +414,8 @@ namespace CrestCreates.Data.Abstractions
                 _ownedScope = ownedScope;
                 _ambientToken = ambientToken;
                 _ownsUnitOfWorkDirectly = ownsUnitOfWorkDirectly;
-                _tokenRestorer = UnitOfWorkExecutionContext.Push(_tokenSource, node);
+                _tokenSource.IsOwner = isOwner;
+                _tokenRestorer = UnitOfWorkExecutionContext.Push(_tokenSource, node, tenantSnapshot);
                 if (isOwner)
                 {
                     manager._currentFrame.Value = new AmbientFrame(this, parentFrame);
@@ -394,6 +430,7 @@ namespace CrestCreates.Data.Abstractions
                 OrmProvider provider,
                 UnitOfWorkOptions options,
                 UnitOfWorkChainNode? node,
+                TenantKeySnapshot tenantSnapshot,
                 AmbientFrame? parentFrame,
                 IServiceScope? ownedScope,
                 IDisposable? ambientToken,
@@ -404,6 +441,7 @@ namespace CrestCreates.Data.Abstractions
                     unitOfWork ?? throw new InvalidOperationException("The unit-of-work factory returned null."),
                     provider,
                     node,
+                    tenantSnapshot,
                     options,
                     isOwner: true,
                     isTransactional: options.IsTransactional,
@@ -420,6 +458,13 @@ namespace CrestCreates.Data.Abstractions
                 UnitOfWorkScope owner,
                 UnitOfWorkOptions options)
             {
+                if (owner._state != UnitOfWorkState.Active)
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot join a unit of work in state '{owner._state}'. Scope results remain readable, " +
+                        "but new participation requires a new unit of work.");
+                }
+
                 if (options.IsTransactional != owner.IsTransactional)
                 {
                     throw new InvalidOperationException(
@@ -456,6 +501,7 @@ namespace CrestCreates.Data.Abstractions
                     owner._unitOfWork,
                     owner._provider,
                     owner._node,
+                    owner._tenantSnapshot,
                     options,
                     isOwner: false,
                     isTransactional: owner._isTransactional,
@@ -504,8 +550,9 @@ namespace CrestCreates.Data.Abstractions
 
                 var deadline = ComputeDeadline();
                 _deadlineUtc = deadline;
-                _executionCts = CreateExecutionTokenSource(cancellationToken, deadline);
-                _tokenSource.Publish(_executionCts?.Token ?? cancellationToken);
+                var (executionCts, executionToken) = CreateExecutionToken(cancellationToken, deadline);
+                _executionCts = executionCts;
+                _tokenSource.Publish(executionToken);
 
                 if (!_isOwner || !_isTransactional)
                 {
@@ -552,8 +599,11 @@ namespace CrestCreates.Data.Abstractions
 
                 if (!_isOwner)
                 {
+                    // join：成功记录前执行同等的截止时间/取消检查（联动 token 生成不等于完成阶段已观察取消）。
+                    ThrowIfExecutionInterrupted(cancellationToken);
+
                     // join：记录参与者成功；不 flush、不 commit、不释放外层。
-                    _state = UnitOfWorkState.Completed;
+                    TransitionTo(UnitOfWorkState.Completed);
                     return;
                 }
 
@@ -574,8 +624,8 @@ namespace CrestCreates.Data.Abstractions
                 }
                 catch (Exception)
                 {
-                    var aborted = await TryAbortOwnerAsync().ConfigureAwait(false);
-                    _state = aborted ? UnitOfWorkState.RolledBack : UnitOfWorkState.Failed;
+                    var aborted = await TryTerminateUncommittedAsync().ConfigureAwait(false);
+                    TransitionTo(aborted ? UnitOfWorkState.RolledBack : UnitOfWorkState.Failed);
                     if (aborted)
                     {
                         _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
@@ -590,18 +640,25 @@ namespace CrestCreates.Data.Abstractions
                     {
                         await _unitOfWork.CommitTransactionAsync(_tokenSource.Token).ConfigureAwait(false);
                     }
+                    catch (UnitOfWorkCommitCleanupFailureException)
+                    {
+                        // 提交已确认，句柄清理失败：固定 Committed，记录清理未完成，不尝试回滚。
+                        _transactionOutcome = UnitOfWorkTransactionOutcome.Committed;
+                        TransitionTo(UnitOfWorkState.Failed);
+                        throw;
+                    }
                     catch (Exception)
                     {
                         // 提交派发期失败/响应丢失：结果未知；回滚尝试不得改写 Unknown。
                         _transactionOutcome = UnitOfWorkTransactionOutcome.Unknown;
-                        await TryAbortOwnerAsync().ConfigureAwait(false);
-                        _state = UnitOfWorkState.Failed;
+                        await TryTerminateUncommittedAsync().ConfigureAwait(false);
+                        TransitionTo(UnitOfWorkState.Failed);
                         throw;
                     }
                 }
 
                 _transactionOutcome = UnitOfWorkTransactionOutcome.Committed;
-                _state = UnitOfWorkState.Completed;
+                TransitionTo(UnitOfWorkState.Completed);
 
                 // 阶段 3：提交后通知（失败不回滚、不谎称、不自动重试）。
                 if (_unitOfWork is IUnitOfWorkCommittedNotifier notifier)
@@ -687,41 +744,39 @@ namespace CrestCreates.Data.Abstractions
                 if (!_started)
                 {
                     // 未开始（无事务句柄）：无需回滚。
-                    _state = UnitOfWorkState.RolledBack;
+                    TransitionTo(UnitOfWorkState.RolledBack);
                     return;
                 }
 
-                var aborted = await TryRollbackAsync().ConfigureAwait(false);
+                var aborted = await TryTerminateUncommittedAsync().ConfigureAwait(false);
                 if (_transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
                 {
                     _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
                 }
-                _state = aborted ? UnitOfWorkState.RolledBack : UnitOfWorkState.Failed;
+                TransitionTo(aborted ? UnitOfWorkState.RolledBack : UnitOfWorkState.Failed);
             }
 
-            private async Task<bool> TryRollbackAsync()
+            /// <summary>
+            /// 未提交退出的统一终结：优先 <see cref="IUnitOfWorkAbandonable"/>（终结事务 + 丢弃未 flush 跟踪写入），
+            /// 否则回滚事务。所有回滚路径（显式回滚/业务异常/flush 失败/提交失败清理）共用，
+            /// 避免已回滚的跟踪写入被下一个 UoW 重新持久化。
+            /// </summary>
+            private async Task<bool> TryTerminateUncommittedAsync()
             {
                 try
                 {
+                    if (_unitOfWork is IUnitOfWorkAbandonable abandonable)
+                    {
+                        abandonable.AbandonPendingWork();
+                        return true;
+                    }
+
                     await _unitOfWork.RollbackTransactionAsync(CancellationToken.None).ConfigureAwait(false);
                     return true;
                 }
                 catch (Exception)
                 {
                     // 清理失败仅作结果记录（可检查：状态 Failed）。
-                    return false;
-                }
-            }
-
-            private async Task<bool> TryAbortOwnerAsync()
-            {
-                try
-                {
-                    await _unitOfWork.RollbackTransactionAsync(CancellationToken.None).ConfigureAwait(false);
-                    return true;
-                }
-                catch (Exception)
-                {
                     return false;
                 }
             }
@@ -765,7 +820,9 @@ namespace CrestCreates.Data.Abstractions
                     : own;
             }
 
-            private CancellationTokenSource? CreateExecutionTokenSource(CancellationToken callerToken, DateTimeOffset? deadline)
+            private (CancellationTokenSource? Cts, CancellationToken Token) CreateExecutionToken(
+                CancellationToken callerToken,
+                DateTimeOffset? deadline)
             {
                 var sources = new System.Collections.Generic.List<CancellationToken>(2);
                 if (callerToken.CanBeCanceled)
@@ -778,14 +835,26 @@ namespace CrestCreates.Data.Abstractions
                     sources.Add(owner._tokenSource.Token);
                 }
 
+                if (sources.Count == 0)
+                {
+                    if (deadline is null)
+                    {
+                        return (null, callerToken);
+                    }
+
+                    var standalone = new CancellationTokenSource();
+                    standalone.CancelAfter(deadline.Value - DateTimeOffset.UtcNow);
+                    return (standalone, standalone.Token);
+                }
+
                 if (sources.Count == 1 && deadline is null)
                 {
-                    return null; // 直接使用调用方 token
+                    // 唯一来源直接复用：无论是 caller token 还是 owner token（join 继承）都必须生效。
+                    return (null, sources[0]);
                 }
 
                 var cts = sources.Count switch
                 {
-                    0 => new CancellationTokenSource(),
                     1 => CancellationTokenSource.CreateLinkedTokenSource(sources[0]),
                     _ => CancellationTokenSource.CreateLinkedTokenSource(sources[0], sources[1])
                 };
@@ -796,7 +865,7 @@ namespace CrestCreates.Data.Abstractions
                     cts.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
                 }
 
-                return cts;
+                return (cts, cts.Token);
             }
 
             private void ThrowIfReleased()
@@ -820,6 +889,12 @@ namespace CrestCreates.Data.Abstractions
                 return default;
             }
 
+            private void TransitionTo(UnitOfWorkState state)
+            {
+                _state = state;
+                _tokenSource.TransitionTo(state);
+            }
+
             private void DisposeCore()
             {
                 if (_released)
@@ -827,58 +902,90 @@ namespace CrestCreates.Data.Abstractions
                     return;
                 }
 
-                // owner 未完成退出：回滚 + 释放（不等请求 DI scope 结束）。
+                var failures = new System.Collections.Generic.List<UnitOfWorkCleanupFailure>();
+
+                // owner 未完成退出：回滚 + 丢弃 + 释放（不等请求 DI scope 结束）。
                 if (_isOwner && _state == UnitOfWorkState.Active)
                 {
-                    TryAbandonOwner();
+                    TryAbandonOwner(failures);
+                }
+                else if (!_isOwner && _state == UnitOfWorkState.Active)
+                {
+                    // 未成功完成的 join 退出：标记实际 owner rollback-only；
+                    // 成功完成的 join 仅恢复环境（不污染外层）。
+                    _ownerScope?.MarkRollbackOnly();
                 }
 
-                Exception? restoreFailure = null;
                 try
                 {
                     _manager.RestoreCallerEnvironment(this);
                 }
-                catch (Exception ex)
+                catch (Exception exception)
                 {
-                    restoreFailure = ex;
+                    failures.Add(new UnitOfWorkCleanupFailure("restore", exception));
                 }
 
-                _executionCts?.Dispose();
+                try
+                {
+                    _executionCts?.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    failures.Add(new UnitOfWorkCleanupFailure("token-dispose", exception));
+                }
 
                 if (_ownsUnitOfWorkDirectly)
                 {
-                    _unitOfWork.Dispose();
+                    try
+                    {
+                        _unitOfWork.Dispose();
+                    }
+                    catch (Exception exception)
+                    {
+                        failures.Add(new UnitOfWorkCleanupFailure("unit-of-work-dispose", exception));
+                    }
                 }
 
-                _ownedScope?.Dispose();
-                _released = true;
-
-                if (restoreFailure is not null)
+                try
                 {
-                    throw restoreFailure;
+                    _ownedScope?.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    failures.Add(new UnitOfWorkCleanupFailure("owned-scope-dispose", exception));
+                }
+
+                _released = true;
+                _tokenSource.MarkReleased();
+
+                if (failures.Count > 0)
+                {
+                    throw new UnitOfWorkCleanupException(failures);
                 }
             }
 
-            private void TryAbandonOwner()
+            private void TryAbandonOwner(System.Collections.Generic.List<UnitOfWorkCleanupFailure> failures)
             {
-                try
+                if (_unitOfWork is IUnitOfWorkAbandonable abandonable)
                 {
-                    if (_unitOfWork is IUnitOfWorkAbandonable abandonable)
+                    try
                     {
                         // DI 路径：容器负责对象释放，内核终结未完成事务并丢弃未 flush 跟踪写入。
                         abandonable.AbandonPendingWork();
                     }
+                    catch (Exception exception)
+                    {
+                        failures.Add(new UnitOfWorkCleanupFailure("abandon", exception));
+                        TransitionTo(UnitOfWorkState.Failed);
+                        return;
+                    }
+                }
 
-                    // 无终结能力的 Provider：依赖其容器释放语义（见 Provider 矩阵）。
-                    _transactionOutcome = _isTransactional
-                        ? UnitOfWorkTransactionOutcome.RolledBack
-                        : UnitOfWorkTransactionOutcome.NotStarted;
-                    _state = UnitOfWorkState.RolledBack;
-                }
-                catch (Exception)
-                {
-                    _state = UnitOfWorkState.Failed;
-                }
+                // 无终结能力的 Provider：依赖其容器释放语义（见 Provider 矩阵）。
+                _transactionOutcome = _isTransactional
+                    ? UnitOfWorkTransactionOutcome.RolledBack
+                    : UnitOfWorkTransactionOutcome.NotStarted;
+                TransitionTo(UnitOfWorkState.RolledBack);
             }
 
             internal void RestoreTokenCarrier()

@@ -64,7 +64,9 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
 
         /// <summary>
         /// 数据库提交（不含 flush 与通知）；句柄在成功或失败后都恰好释放一次。
-        /// 提交派发期失败/响应丢失由内核判定为「提交结果未知」。
+        /// 提交派发期失败/响应丢失由内核判定为「提交结果未知」；
+        /// 提交**已确认**后的句柄清理失败作为次级诊断保留（<see cref="UnitOfWorkCommitCleanupFailureException"/>），
+        /// 不得改写为提交结果未知。
         /// </summary>
         public override async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
         {
@@ -73,13 +75,39 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
                 throw new InvalidOperationException("No transaction has been started");
             }
 
+            var committed = false;
             try
             {
                 await _currentTransaction.CommitAsync(cancellationToken);
+                committed = true;
             }
             finally
             {
-                DisposeTransaction();
+                if (committed)
+                {
+                    try
+                    {
+                        DisposeTransaction();
+                    }
+                    catch (Exception cleanupException)
+                    {
+                        throw new UnitOfWorkCommitCleanupFailureException(
+                            "The database commit was confirmed, but releasing the transaction handle failed. " +
+                            "The committed fact is preserved; treat this as a cleanup failure, not an unknown commit outcome.",
+                            cleanupException);
+                    }
+                }
+                else
+                {
+                    try
+                    {
+                        DisposeTransaction();
+                    }
+                    catch (Exception)
+                    {
+                        // 提交自身失败：保留根因，清理失败不再叠加。
+                    }
+                }
             }
         }
 
