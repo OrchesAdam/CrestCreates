@@ -1,11 +1,12 @@
 # CrestCreates platform status — 2026-10-10
 
 Baseline: master `1dc4a9cc` (PR #139 merge: #137 slices 1-5 + three review-fix rounds;
-PR #138/#136/#135 merged before). Remote verified 2026-10-12. In flight: #125 CAP entry
-consolidation (design rev.3 under review, PR #140). CI: all GitHub workflows manually
-disabled (development-phase local-first verification; Testcontainers suites runnable
-locally via podman socket). Workflow: GitHub PR flow, never auto-merge; replaced files
-archived to 99_RecycleBin, never deleted; never output credentials.
+PR #138/#136/#135 merged before). Remote verified 2026-10-12. In flight: none for wave 1 -
+#125 CAP entry consolidation merged via PR #140 (five review rounds closed; wave 2 #126-#128
+is the next candidate). CI: all GitHub workflows manually disabled (development-phase
+local-first verification; Testcontainers suites runnable locally via podman socket).
+Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
+never deleted; never output credentials.
 
 ## Delivered capabilities (master)
 
@@ -79,9 +80,10 @@ archived to 99_RecycleBin, never deleted; never output credentials.
 - Wave 0: #122 baseline calibration (merged via PR #134).
 - Wave 1: #123 native gates / evidence matrix (merged via PR #135); #124 UnitOfWork
   (merged via PR #136); #137 UnitOfWork follow-up (design+plans merged via PR #138;
-  slices 1-5 + three review-fix rounds merged via PR #139); #125 CAP (S1-S4
-  implemented on the #125 branch / PR #140; design rev.4 approved; unified feature
-  review pending; issues log docs/superpowers/plans/2026-10-12-issue-125-implementation-issues-log.md).
+  slices 1-5 + three review-fix rounds merged via PR #139); #125 CAP entry
+  consolidation (design rev.4 + S1-S4 + four implementation review-fix rounds merged
+  via PR #140 on 2026-10-12; CAP unit 41/41, CAP integration 38/38 on the merged head;
+  issues log docs/superpowers/plans/2026-10-12-issue-125-implementation-issues-log.md).
 - Wave 2: #126 LocalEvent / #127 RabbitMQ / #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
@@ -99,11 +101,11 @@ archived to 99_RecycleBin, never deleted; never output credentials.
 ## Known gaps
 
 - B12 unsupported-intent negative case missing (#133, bounded).
-- CAP entry consolidation (#125): implemented on the #125 branch (design rev.4 approved;
-  single entry `AddCrestCapDistributedTransaction`, in-memory fakes/module/dead bridge/
-  participant engine archived, two-layer config validation, atomic publish over the
-  #137 lease/borrower contract with scan-recovery delivery, PG+RabbitMQ integration
-  evidence); compensation concurrency / process-crash recovery not pledged;
+- CAP entry consolidation (#125): merged via PR #140 (single entry
+  `AddCrestCapDistributedTransaction`; in-memory fakes/module/dead bridge/participant
+  engine archived; two-layer config validation; atomic publish over the #137
+  lease/borrower contract with scan-recovery delivery; PG+RabbitMQ integration evidence);
+  compensation concurrency / process-crash recovery not pledged;
   LocalEvent/RabbitMQ reflection bridges (#126/#127);
   CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
   (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).
