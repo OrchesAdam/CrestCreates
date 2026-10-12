@@ -42,6 +42,46 @@ namespace CrestCreates.Data.Abstractions
     }
 
     /// <summary>
+    /// Provider 终结未完成事务时**回滚无法确认**（终结失败）。
+    /// 原始终结故障保留为 <see cref="Exception.InnerException"/>；句柄释放/丢弃等后续失败
+    /// 经 <see cref="SubsequentFailures"/> 保留。内核据此不得宣称 RolledBack
+    /// （事务结果转 Unknown、参与状态 Failed），不得吞掉或替换本故障。
+    /// </summary>
+    public sealed class UnitOfWorkAbandonFailureException : InvalidOperationException
+    {
+        public UnitOfWorkAbandonFailureException(
+            string message,
+            Exception terminationFailure,
+            IReadOnlyList<Exception>? subsequentFailures = null)
+            : base(message, terminationFailure)
+        {
+            SubsequentFailures = subsequentFailures ?? Array.Empty<Exception>();
+        }
+
+        /// <summary>回滚失败之后的句柄释放/丢弃等次级失败（尽力完成，逐一保留）。</summary>
+        public IReadOnlyList<Exception> SubsequentFailures { get; }
+    }
+
+    /// <summary>
+    /// Provider 终结未完成事务时回滚**已确认**，但句柄释放/未 flush 丢弃失败（次级清理失败）。
+    /// 内核保持 RolledBack 事务结果、记录 Failed 参与状态（清理未完成），与提交后的
+    /// <see cref="UnitOfWorkCommitCleanupFailureException"/> 语义对称。
+    /// </summary>
+    public sealed class UnitOfWorkAbandonCleanupFailureException : InvalidOperationException
+    {
+        public UnitOfWorkAbandonCleanupFailureException(
+            string message,
+            IReadOnlyList<Exception> failures)
+            : base(message, failures.Count > 0 ? failures[0] : null)
+        {
+            Failures = failures;
+        }
+
+        /// <summary>回滚已确认后的次级清理失败集合（逐一保留）。</summary>
+        public IReadOnlyList<Exception> Failures { get; }
+    }
+
+    /// <summary>
     /// 释放（Dispose）阶段的次级失败聚合：回滚/环境恢复/资源释放按阶段收集，
     /// 各步骤尽可能完成；存在业务主异常时由入口抑制传播（次级结果保留），
     /// 无主异常时抛出以便调用方可检查。
@@ -83,4 +123,3 @@ namespace CrestCreates.Data.Abstractions
         public Exception Exception { get; }
     }
 }
-

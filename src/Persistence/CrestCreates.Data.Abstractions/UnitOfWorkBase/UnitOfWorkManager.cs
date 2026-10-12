@@ -25,6 +25,12 @@ namespace CrestCreates.Data.Abstractions
     /// </remarks>
     public class UnitOfWorkManager : IUnitOfWorkManager
     {
+        /// <summary>释放阶段清理异常附加到业务主异常 <see cref="Exception.Data"/> 的键。</summary>
+        internal const string CleanupExceptionDataKey = "CrestCreates.UnitOfWork.CleanupException";
+
+        /// <summary>回滚终结失败附加到业务主异常 <see cref="Exception.Data"/> 的键。</summary>
+        internal const string RollbackTerminationFailureDataKey = "CrestCreates.UnitOfWork.RollbackTerminationFailure";
+
         private readonly IUnitOfWorkFactory _factory;
         private readonly UnitOfWorkProviderBindingRegistry? _bindings;
         private readonly IServiceScopeFactory? _scopeFactory;
@@ -122,7 +128,11 @@ namespace CrestCreates.Data.Abstractions
             catch (Exception exception)
             {
                 primary = exception;
-                await scope.TryRollbackOnFailureAsync().ConfigureAwait(false);
+                var rollbackTerminationFailure = await scope.TryRollbackOnFailureAsync().ConfigureAwait(false);
+                if (rollbackTerminationFailure is not null)
+                {
+                    AttachCleanupDiagnostic(primary, RollbackTerminationFailureDataKey, rollbackTerminationFailure);
+                }
                 throw;
             }
             finally
@@ -131,9 +141,11 @@ namespace CrestCreates.Data.Abstractions
                 {
                     scope.Dispose();
                 }
-                catch (UnitOfWorkCleanupException) when (primary is not null)
+                catch (UnitOfWorkCleanupException cleanupException) when (primary is not null)
                 {
-                    // 释放阶段的次级失败保留（可经异常对象/日志检查），不替换业务主异常。
+                    // 释放阶段的次级失败以结构化诊断附加到业务主异常（Data），
+                    // 根因（类型/栈）保留；无主异常时 Dispose 照常向外抛出 UnitOfWorkCleanupException。
+                    AttachCleanupDiagnostic(primary, CleanupExceptionDataKey, cleanupException);
                 }
             }
         }
@@ -165,6 +177,15 @@ namespace CrestCreates.Data.Abstractions
                     timeout,
                     "Unit-of-work Timeout must be a positive duration.");
             }
+        }
+
+        /// <summary>
+        /// 把次级清理/终结诊断附加到业务主异常的可检查通道（<see cref="Exception.Data"/>），
+        /// 不改写主异常的类型/栈/消息。
+        /// </summary>
+        private static void AttachCleanupDiagnostic(Exception primary, string key, Exception diagnostic)
+        {
+            primary.Data[key] = diagnostic;
         }
 
         private UnitOfWorkScope BeginRootScope(AmbientFrame? frame, UnitOfWorkOptions options)
@@ -379,6 +400,7 @@ namespace CrestCreates.Data.Abstractions
             private bool _started;
             private bool _released;
             private bool _rollbackOnly;
+            private Exception? _rollbackTerminationFailure;
             private DateTimeOffset? _deadlineUtc;
             private CancellationTokenSource? _executionCts;
             private UnitOfWorkState _state = UnitOfWorkState.Active;
@@ -529,6 +551,8 @@ namespace CrestCreates.Data.Abstractions
 
             public bool IsReleased => _released;
 
+            public Exception? RollbackTerminationFailure => _rollbackTerminationFailure;
+
             public CancellationToken ExecutionToken => _tokenSource.Token;
 
             internal bool FramePushed => _framePushed;
@@ -553,9 +577,17 @@ namespace CrestCreates.Data.Abstractions
                 var (executionCts, executionToken) = CreateExecutionToken(cancellationToken, deadline);
                 _executionCts = executionCts;
                 _tokenSource.Publish(executionToken);
+                _tokenSource.MarkStarted();
 
-                if (!_isOwner || !_isTransactional)
+                if (!_isOwner)
                 {
+                    return Task.CompletedTask;
+                }
+
+                if (!_isTransactional)
+                {
+                    // 非事务 owner：记录逻辑资源身份（无事务句柄），逻辑资源准入仍然生效。
+                    PublishManagedResource(transactionHandle: null);
                     return Task.CompletedTask;
                 }
 
@@ -577,6 +609,23 @@ namespace CrestCreates.Data.Abstractions
                 };
 
                 await _unitOfWork.BeginTransactionAsync(options, _tokenSource.Token).ConfigureAwait(false);
+
+                // 事务开始成功后记录实际资源/事务关联：CAP 准入据此核对同一窗口、同一事务。
+                PublishManagedResource((_unitOfWork as IUnitOfWorkManagedResource)?.ManagedTransactionHandle);
+            }
+
+            /// <summary>
+            /// 记录 owner 窗口选定资源的逻辑键与实际资源关联（无 Provider 曝光时为 null，不参与比对）。
+            /// </summary>
+            private void PublishManagedResource(object? transactionHandle)
+            {
+                var managed = _unitOfWork as IUnitOfWorkManagedResource;
+                _tokenSource.PublishManagedResource(
+                    _isTransactional,
+                    managed?.ManagedResourceKind,
+                    managed?.ManagedResourceConnectionString,
+                    managed?.ManagedResourceContext,
+                    transactionHandle);
             }
 
             public async Task CompleteAsync(CancellationToken cancellationToken = default)
@@ -609,10 +658,15 @@ namespace CrestCreates.Data.Abstractions
 
                 if (_rollbackOnly)
                 {
-                    await RollbackOwnerCoreAsync().ConfigureAwait(false);
-                    throw new UnitOfWorkRollbackOnlyException(
+                    var terminationFailure = await RollbackOwnerCoreAsync().ConfigureAwait(false);
+                    var rollbackOnly = new UnitOfWorkRollbackOnlyException(
                         "The unit of work was marked rollback-only because an inner participant failed or exited " +
                         "without completing. The transaction was rolled back instead of committing a partial failure.");
+                    if (terminationFailure is not null)
+                    {
+                        AttachCleanupDiagnostic(rollbackOnly, RollbackTerminationFailureDataKey, terminationFailure);
+                    }
+                    throw rollbackOnly;
                 }
 
                 ThrowIfExecutionInterrupted(cancellationToken);
@@ -622,13 +676,23 @@ namespace CrestCreates.Data.Abstractions
                 {
                     await _unitOfWork.SaveChangesAsync(_tokenSource.Token).ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (Exception flushFailure)
                 {
-                    var aborted = await TryTerminateUncommittedAsync().ConfigureAwait(false);
-                    TransitionTo(aborted ? UnitOfWorkState.RolledBack : UnitOfWorkState.Failed);
-                    if (aborted)
+                    var terminationFailure = await TryTerminateUncommittedAsync().ConfigureAwait(false);
+                    if (terminationFailure is null)
                     {
                         _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
+                        TransitionTo(UnitOfWorkState.RolledBack);
+                    }
+                    else
+                    {
+                        // 回滚无法确认：不得宣称 RolledBack；原始终结故障附加到 flush 根因。
+                        if (_isTransactional && _transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
+                        {
+                            _transactionOutcome = UnitOfWorkTransactionOutcome.Unknown;
+                        }
+                        TransitionTo(UnitOfWorkState.Failed);
+                        AttachCleanupDiagnostic(flushFailure, RollbackTerminationFailureDataKey, terminationFailure);
                     }
                     throw;
                 }
@@ -647,11 +711,15 @@ namespace CrestCreates.Data.Abstractions
                         TransitionTo(UnitOfWorkState.Failed);
                         throw;
                     }
-                    catch (Exception)
+                    catch (Exception commitFailure)
                     {
                         // 提交派发期失败/响应丢失：结果未知；回滚尝试不得改写 Unknown。
                         _transactionOutcome = UnitOfWorkTransactionOutcome.Unknown;
-                        await TryTerminateUncommittedAsync().ConfigureAwait(false);
+                        var terminationFailure = await TryTerminateUncommittedAsync().ConfigureAwait(false);
+                        if (terminationFailure is not null)
+                        {
+                            AttachCleanupDiagnostic(commitFailure, RollbackTerminationFailureDataKey, terminationFailure);
+                        }
                         TransitionTo(UnitOfWorkState.Failed);
                         throw;
                     }
@@ -707,12 +775,12 @@ namespace CrestCreates.Data.Abstractions
                 await RollbackOwnerCoreAsync().ConfigureAwait(false);
             }
 
-            /// <summary>异常路径使用：不抛次级异常，保留原始业务异常。</summary>
-            internal async Task TryRollbackOnFailureAsync()
+            /// <summary>异常路径使用：不抛次级异常，保留原始业务异常；返回原始终结故障（无失败为 null）。</summary>
+            internal async Task<Exception?> TryRollbackOnFailureAsync()
             {
                 if (_released)
                 {
-                    return;
+                    return null;
                 }
 
                 try
@@ -723,61 +791,92 @@ namespace CrestCreates.Data.Abstractions
                         {
                             _ownerScope?.MarkRollbackOnly();
                         }
-                        return;
+                        return null;
                     }
 
                     if (_state is UnitOfWorkState.Completed or UnitOfWorkState.RolledBack or UnitOfWorkState.Failed)
                     {
-                        return;
+                        return null;
                     }
 
-                    await RollbackOwnerCoreAsync().ConfigureAwait(false);
+                    return await RollbackOwnerCoreAsync().ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (Exception exception)
                 {
-                    // 清理失败不替换原始业务异常。
+                    // 防御：次级失败不替换原始业务异常，但保留为可检查结果。
+                    _rollbackTerminationFailure ??= exception;
+                    return exception;
                 }
             }
 
-            private async Task RollbackOwnerCoreAsync()
+            /// <summary>
+            /// owner 回滚：终结未提交工作并迁移状态。返回原始终结故障（无法确认回滚时非 null）。
+            /// 终结失败不得宣称 RolledBack：状态转 Failed、事务结果转 Unknown（回滚已确认但
+            /// 释放/丢弃失败的次级情况保持 RolledBack）。
+            /// </summary>
+            private async Task<Exception?> RollbackOwnerCoreAsync()
             {
                 if (!_started)
                 {
                     // 未开始（无事务句柄）：无需回滚。
                     TransitionTo(UnitOfWorkState.RolledBack);
-                    return;
+                    return null;
                 }
 
-                var aborted = await TryTerminateUncommittedAsync().ConfigureAwait(false);
-                if (_transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
+                var terminationFailure = await TryTerminateUncommittedAsync().ConfigureAwait(false);
+                if (terminationFailure is null)
                 {
-                    _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
+                    if (_transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
+                    {
+                        _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
+                    }
+                    TransitionTo(UnitOfWorkState.RolledBack);
+                    return null;
                 }
-                TransitionTo(aborted ? UnitOfWorkState.RolledBack : UnitOfWorkState.Failed);
+
+                _rollbackTerminationFailure ??= terminationFailure;
+
+                if (terminationFailure is UnitOfWorkAbandonCleanupFailureException)
+                {
+                    // 回滚已确认，仅句柄释放/未 flush 丢弃失败：事务结果保持 RolledBack，状态 Failed（清理未完成）。
+                    if (_transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
+                    {
+                        _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
+                    }
+                }
+                else if (_isTransactional && _transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
+                {
+                    // 回滚无法确认：不得宣称 RolledBack。
+                    _transactionOutcome = UnitOfWorkTransactionOutcome.Unknown;
+                }
+
+                TransitionTo(UnitOfWorkState.Failed);
+                return terminationFailure;
             }
 
             /// <summary>
             /// 未提交退出的统一终结：优先 <see cref="IUnitOfWorkAbandonable"/>（终结事务 + 丢弃未 flush 跟踪写入），
             /// 否则回滚事务。所有回滚路径（显式回滚/业务异常/flush 失败/提交失败清理）共用，
             /// 避免已回滚的跟踪写入被下一个 UoW 重新持久化。
+            /// 返回终结失败（无法确认回滚或释放失败）的原始异常；成功为 null —— Provider 不得吞掉终结故障。
             /// </summary>
-            private async Task<bool> TryTerminateUncommittedAsync()
+            private async Task<Exception?> TryTerminateUncommittedAsync()
             {
                 try
                 {
                     if (_unitOfWork is IUnitOfWorkAbandonable abandonable)
                     {
                         abandonable.AbandonPendingWork();
-                        return true;
+                        return null;
                     }
 
                     await _unitOfWork.RollbackTransactionAsync(CancellationToken.None).ConfigureAwait(false);
-                    return true;
+                    return null;
                 }
-                catch (Exception)
+                catch (Exception exception)
                 {
-                    // 清理失败仅作结果记录（可检查：状态 Failed）。
-                    return false;
+                    // 终结失败结果交回调用方（状态/结果迁移 + 故障保留），不静默吞掉。
+                    return exception;
                 }
             }
 

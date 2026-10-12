@@ -24,16 +24,27 @@ public class CapLeaseTests : IDisposable
     private readonly string _databasePath =
         System.IO.Path.Combine(System.IO.Path.GetTempPath(), "crest-uow-lease-" + Guid.NewGuid().ToString("N") + ".db");
 
+    private readonly System.Collections.Generic.List<string> _extraDatabasePaths = new();
+
     public void Dispose()
     {
-        foreach (var suffix in new string[] { string.Empty, "-wal", "-shm" })
+        foreach (var databasePath in new[] { _databasePath }.Concat(_extraDatabasePaths))
         {
-            var path = _databasePath + suffix;
-            if (System.IO.File.Exists(path))
+            foreach (var suffix in new string[] { string.Empty, "-wal", "-shm" })
             {
-                System.IO.File.Delete(path);
+                var path = databasePath + suffix;
+                if (System.IO.File.Exists(path))
+                {
+                    System.IO.File.Delete(path);
+                }
             }
         }
+    }
+
+    private string RegisterExtraPath(string path)
+    {
+        _extraDatabasePaths.Add(path);
+        return path;
     }
 
     [Fact]
@@ -122,11 +133,108 @@ public class CapLeaseTests : IDisposable
                 "the identity view must stay read-only");
     }
 
-    private ServiceProvider BuildProvider()
+    [Fact]
+    public async Task Borrower_and_lease_reject_not_started_carrier_with_native_transaction()
     {
+        var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+        var leaseProvider = scope.ServiceProvider.GetRequiredService<IUnitOfWorkTransactionLeaseProvider>();
+        var borrower = scope.ServiceProvider.GetRequiredService<CrestCreates.Data.EFCore.UnitOfWork.IEfCoreTransactionBorrower>();
+        var dbContext = (ProviderCapabilityTests.CapDbContext)scope.ServiceProvider
+            .GetRequiredService<IDataBaseContext>().GetNativeContext();
+
+        await using var notStarted = manager.BeginScope(); // 有载体 ≠ 受管事务已开始
+        await using var native = await dbContext.Database.BeginTransactionAsync();
+
+        leaseProvider.TryAcquireCurrentLease(out _).Should().BeFalse(
+            "an Active carrier that never ran StartAsync must not adopt an external transaction");
+        borrower.TryBorrowCurrent(out _, out _).Should().BeFalse(
+            "native borrowing requires a started managed window, not just a carrier");
+    }
+
+    [Fact]
+    public async Task Borrower_and_lease_reject_non_transactional_window_with_native_transaction()
+    {
+        var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+        var leaseProvider = scope.ServiceProvider.GetRequiredService<IUnitOfWorkTransactionLeaseProvider>();
+        var borrower = scope.ServiceProvider.GetRequiredService<CrestCreates.Data.EFCore.UnitOfWork.IEfCoreTransactionBorrower>();
+        var dbContext = (ProviderCapabilityTests.CapDbContext)scope.ServiceProvider
+            .GetRequiredService<IDataBaseContext>().GetNativeContext();
+
+        await using var nonTransactional = manager.BeginScope(new UnitOfWorkOptions { IsTransactional = false });
+        await nonTransactional.StartAsync();
+        await using var native = await dbContext.Database.BeginTransactionAsync();
+
+        leaseProvider.TryAcquireCurrentLease(out _).Should().BeFalse(
+            "a non-transactional window has no managed transaction even when the resource holds one");
+        borrower.TryBorrowCurrent(out _, out _).Should().BeFalse(
+            "an external transaction opened inside a non-transactional window is not managed");
+    }
+
+    [Fact]
+    public async Task Borrower_and_lease_reject_independent_root_with_native_transaction()
+    {
+        var providerA = BuildProvider();
+        var providerB = BuildProvider(RegisterExtraPath(_databasePath + "-independent"));
+        using var scopeA = providerA.CreateScope();
+        using var scopeB = providerB.CreateScope();
+
+        var managerA = scopeA.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+        var leaseProviderB = scopeB.ServiceProvider.GetRequiredService<IUnitOfWorkTransactionLeaseProvider>();
+        var borrowerB = scopeB.ServiceProvider.GetRequiredService<CrestCreates.Data.EFCore.UnitOfWork.IEfCoreTransactionBorrower>();
+        var dbContextB = (ProviderCapabilityTests.CapDbContext)scopeB.ServiceProvider
+            .GetRequiredService<IDataBaseContext>().GetNativeContext();
+
+        await using var managedA = managerA.BeginScope();
+        await managedA.StartAsync();
+        await using var nativeB = await dbContextB.Database.BeginTransactionAsync();
+
+        leaseProviderB.TryAcquireCurrentLease(out _).Should().BeFalse(
+            "an independent root (different chain, different resource) must not see another chain's window");
+        borrowerB.TryBorrowCurrent(out _, out _).Should().BeFalse(
+            "borrowing must follow the same chain visibility as lease issuance");
+    }
+
+    [Fact]
+    public async Task Borrower_and_lease_reject_replaced_transaction()
+    {
+        var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+        var leaseProvider = scope.ServiceProvider.GetRequiredService<IUnitOfWorkTransactionLeaseProvider>();
+        var borrower = scope.ServiceProvider.GetRequiredService<CrestCreates.Data.EFCore.UnitOfWork.IEfCoreTransactionBorrower>();
+        var dbContext = (ProviderCapabilityTests.CapDbContext)scope.ServiceProvider
+            .GetRequiredService<IDataBaseContext>().GetNativeContext();
+
+        await using var managed = manager.BeginScope();
+        await managed.StartAsync();
+
+        // 手动终结 UoW 的事务并在同一资源上替换为另一个事务：
+        // 受管关联仍指向原事务，被替换后的事务不受平台认领。
+        var original = dbContext.Database.CurrentTransaction!;
+        await original.RollbackAsync();
+        await original.DisposeAsync();
+        await using var replaced = await dbContext.Database.BeginTransactionAsync();
+
+        leaseProvider.TryAcquireCurrentLease(out _).Should().BeFalse(
+            "the window's recorded transaction was replaced; a different transaction is not managed");
+        borrower.TryBorrowCurrent(out _, out _).Should().BeFalse(
+            "borrowing must match the owner window's recorded resource/transaction association");
+
+        // 收尾：原受管事务已被外部终结，回滚路径记录终结失败但不抛次级异常。
+        await managed.RollbackAsync();
+        managed.State.Should().Be(UnitOfWorkState.Failed);
+    }
+
+    private ServiceProvider BuildProvider(string? databasePath = null)
+    {
+        var path = databasePath ?? _databasePath;
         var services = new ServiceCollection();
         services.AddDbContext<ProviderCapabilityTests.CapDbContext>(options =>
-            options.UseSqlite("Data Source=" + _databasePath));
+            options.UseSqlite("Data Source=" + path));
         services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
             new EfCoreDbContextAdapter(sp.GetRequiredService<ProviderCapabilityTests.CapDbContext>()));
         services.AddScoped<IDataBaseContext>(sp => sp.GetRequiredService<IEntityFrameworkCoreDbContext>());

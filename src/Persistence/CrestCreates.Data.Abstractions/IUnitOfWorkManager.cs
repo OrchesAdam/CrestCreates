@@ -74,6 +74,13 @@ namespace CrestCreates.Data.Abstractions
         /// <summary>释放标志；释放后最终结果仍可读，任何操作确定性拒绝。</summary>
         bool IsReleased { get; }
 
+        /// <summary>
+        /// 显式/异常回滚**无法确认回滚**（终结失败）时保留的原始终结故障；无失败为 null。
+        /// 显式回滚不抛次级异常：故障经本属性与 State=Failed / TransactionOutcome 检查；
+        /// 异常路径同时附加到业务主异常的 Data（不替换根因）。
+        /// </summary>
+        Exception? RollbackTerminationFailure { get; }
+
         /// <summary>内核联动执行 token（调用方 CT + 截止时间）。</summary>
         CancellationToken ExecutionToken { get; }
 

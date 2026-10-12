@@ -22,7 +22,7 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
     /// 提交后通知（<see cref="IUnitOfWorkCommittedNotifier"/>）由内核按
     /// 「校验→flush→commit（确认即记录）→通知→清理」调用。
     /// </remarks>
-    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkAbandonable, IUnitOfWorkCommittedNotifier
+    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkAbandonable, IUnitOfWorkCommittedNotifier, IUnitOfWorkManagedResource
     {
         private readonly DbContext _dbContext;
         private IDbContextTransaction? _currentTransaction;
@@ -178,25 +178,85 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             }
         }
 
+        /// <summary>受管资源声明种类（逻辑键：Context 声明类型全名）。</summary>
+        public string? ManagedResourceKind => _dbContext.GetType().FullName;
+
+        /// <summary>受管资源连接配置（逻辑键；非关系型 Provider 为 null）。</summary>
+        public string? ManagedResourceConnectionString => TryReadManagedConnectionString();
+
+        /// <summary>受管资源原生上下文（身份关联；生命周期仍由内核掌握）。</summary>
+        public object? ManagedResourceContext => _dbContext;
+
+        /// <summary>当前受管事务句柄（事务开始成功后非 null；仅用于身份比对）。</summary>
+        public object? ManagedTransactionHandle => _currentTransaction;
+
+        private string? TryReadManagedConnectionString()
+        {
+            try
+            {
+                return _dbContext.Database.GetConnectionString();
+            }
+            catch (Exception)
+            {
+                // 非关系型/未配置 Provider：没有连接配置（逻辑键退化为声明种类）。
+                return null;
+            }
+        }
+
         /// <summary>
-        /// 未完成退出的终结：回滚并释放未完成事务，并丢弃未 flush 的跟踪写入
-        /// （已 flush 的写入不在丢弃范围；跨 UoW 不残留跟踪状态）；可重复调用。
+        /// 未完成退出的终结：**尽力**回滚并释放事务句柄、丢弃未 flush 的跟踪写入（已 flush 的写入不在丢弃范围；
+        /// 跨 UoW 不残留跟踪状态）；终结失败不得吞掉——回滚无法确认时抛
+        /// <see cref="UnitOfWorkAbandonFailureException"/>（保留原始故障与后续清理失败），
+        /// 回滚已确认但释放/丢弃失败时抛 <see cref="UnitOfWorkAbandonCleanupFailureException"/>；
+        /// 可重复调用。
         /// </summary>
         public void AbandonPendingWork()
         {
+            Exception? terminationFailure = null;
+            var subsequentFailures = new List<Exception>();
+
             try
             {
                 _currentTransaction?.Rollback();
             }
-            catch (Exception)
+            catch (Exception exception)
             {
-                // Best effort: the handle is released below regardless, and the
-                // failure that triggered scope unwinding must not be replaced.
+                terminationFailure = exception;
             }
-            finally
+
+            try
             {
                 DisposeTransaction();
+            }
+            catch (Exception exception)
+            {
+                subsequentFailures.Add(exception);
+            }
+
+            try
+            {
                 _dbContext.ChangeTracker.Clear();
+            }
+            catch (Exception exception)
+            {
+                subsequentFailures.Add(exception);
+            }
+
+            if (terminationFailure is not null)
+            {
+                throw new UnitOfWorkAbandonFailureException(
+                    "The unit of work could not confirm the rollback of its pending transaction. " +
+                    "The original termination failure is preserved; the transaction outcome must not be reported as rolled back.",
+                    terminationFailure,
+                    subsequentFailures);
+            }
+
+            if (subsequentFailures.Count > 0)
+            {
+                throw new UnitOfWorkAbandonCleanupFailureException(
+                    "The pending transaction was rolled back, but releasing the handle or discarding tracked writes failed. " +
+                    "The rollback fact is preserved; treat this as a cleanup failure.",
+                    subsequentFailures);
             }
         }
 

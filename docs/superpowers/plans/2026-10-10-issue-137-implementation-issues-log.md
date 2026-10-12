@@ -57,3 +57,23 @@
 | I-19 | 证据（CI，R139-05 收口） | 修复轮全部推送后，CI 在代码终点 `cea23075` 全绿：run 38192439617 **success**（26m29s）。新增两个步骤均真实执行并通过：「Test — Persistence / ORM providers (UnitOfWork kernel, chain, capabilities, AOP weave, CAP lease)」与「Test — UnitOfWork PostgreSQL acceptance (Testcontainers)」（自包含类：requiresNew 独立提交 + 隔离级别实测断言）；全部原生 publish/link/run 门禁通过；审查方 11 条契约回归用例在该 head 下本地与 CI 均 11/11 通过；I-16/I-17/I-18 的稳定化修复均已生效，无残余失败 | 该 run 即 R139-05 的 CI 证据（未再改动代码）；后续如有变更以新 head 的 CI run 为准 |
 
 （后续切片发现问题将追加到本表；证据以最新 head 的 CI run 为准。）
+
+## PR #139 第二轮审查修复（2026-10-12，R2-139-01…05）
+
+对照 `docs/review/2026-10-12-pr-139-uow-implementation-review-round2.md` 的逐项修复（审查方 5 条探针原样纳入 `Pr139Round2ReviewerTests.cs`：修复前 5/5 失败 → 修复后 5/5 通过）：
+
+| 审查项 | 修复 |
+| --- | --- |
+| R2-139-01 [P1] Provider 吞掉回滚异常、内核仍报成功回滚 | EF/FreeSql/SqlSugar 的 `AbandonPendingWork` 改为「尽力终结 + 如实上报」：**回滚无法确认**时抛 `UnitOfWorkAbandonFailureException`（原始终结故障保留为 InnerException，后续句柄释放/丢弃失败经 `SubsequentFailures` 保留）；回滚已确认但释放/丢弃失败抛 `UnitOfWorkAbandonCleanupFailureException`（与提交后清理失败语义对称）。内核 `TryTerminateUncommittedAsync` 把终结失败交回调用方：无法确认回滚不得宣称 RolledBack（State=Failed、事务结果转 Unknown）；回滚已确认的次级失败保持 RolledBack + Failed；显式回滚经 `IUnitOfWorkScope.RollbackTerminationFailure` 保留可检查，异常路径附加到业务主异常。回归：`Ef_rollback_failure_must_not_report_successful_rollback`（探针）+ `Explicit_rollback_termination_failure_must_not_report_rolled_back`、`Rollback_termination_failure_is_attached_to_business_root_cause` |
+| R2-139-02 [P1] 顶层窗口放行第二逻辑资源 | 所有 owner 窗口在 `StartAsync` 记录选定资源的逻辑键（声明种类 + 连接配置）与实际资源/事务关联（新增 `IUnitOfWorkManagedResource`，EF 实现）；`ValidateDataAccess` 改为作用于**最近的可见 owner 帧**，读方在返回自身 Context 或路由前统一比较——第二 Context 声明/连接配置在根窗口同样确定性拒绝；保留「独立 DI 根不可见」语义。回归：`Root_scope_must_reject_second_logical_context` |
+| R2-139-03 [P2] 清理次级诊断被空吞 | `ExecuteAsync` finally 把 `UnitOfWorkCleanupException` 附加到业务主异常 `Data`（键 `CrestCreates.UnitOfWork.CleanupException`），根因类型/栈保留；无主异常时照旧外抛；回滚终结失败同样附加（键 `…RollbackTerminationFailure`），终结方法不再「只返回 bool 丢弃原异常」。回归：`Business_exception_must_retain_cleanup_diagnostic` |
+| R2-139-04 [P2] 原生 borrower 无受管窗口校验 | borrower 与 lease 签发共用单一受管事务准入权威 `TryGetCurrentManagedTransaction`（最近可见 owner 帧：已开始、事务型、Active、未释放、事务句柄非空，且解析到的 Context/Transaction 与 owner 开始记录为**同一引用关联**）；未受管原生事务、独立根一律拒绝。回归：`Native_borrower_must_reject_unmanaged_transaction`、`Borrower_and_lease_reject_independent_root_with_native_transaction`、`Borrower_and_lease_reject_replaced_transaction` |
+| R2-139-05 [P2] lease 认领未 Start 的外部事务 | 同一权威取代 `TryGetCurrentManagedState`：载体 `HasStarted` 与事务句柄关联成为准入必要条件——BeginScope 后未 Start、非事务窗口中的外部事务、同资源上被替换的事务都不再被认领。回归：`Lease_must_not_adopt_native_transaction_before_scope_start`、`Borrower_and_lease_reject_not_started_carrier_with_native_transaction`、`Borrower_and_lease_reject_non_transactional_window_with_native_transaction` |
+
+### 修复轮补充记录（R2）
+
+| # | 类别 | 说明 | 处置 |
+| --- | --- | --- | --- |
+| I-20 | 整理（审查方指出） | `git diff --check a9da4dab..43b5c8a7` 报 `UnitOfWorkExceptions.cs` 文件末尾多余空白行 | 已清理；提交前 `git diff --check` 复查干净 |
+| I-21 | 测试环境（I-02 复核） | 新增 lease/borrower 负例中「独立根」「第二实例」场景若共用同一 SQLite 文件会触发单写者 `database is locked`（30s 超时假失败） | 独立根场景改用独立数据库文件；「事务被替换」改为在同资源上手动终结并替换事务（无并发写者）；本地 118/118 复跑通过 |
+| I-22 | 平台界面变化（交审查知悉） | 新增 `IUnitOfWorkManagedResource`（Provider 受管资源曝光）与 `IUnitOfWorkScope.RollbackTerminationFailure`（保留终结故障）；`UnitOfWorkExecutionContext.TryGetCurrentManagedState` 被 `TryGetCurrentManagedTransaction` 取代（切片 5 期间引入、未发布） | 属本 PR 未合并契约的强化，不构成对外兼容负担；公开面均无生命周期操作 |

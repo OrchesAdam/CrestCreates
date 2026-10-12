@@ -163,26 +163,36 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
         }
 
         /// <summary>
-        /// 未完成退出的终结：未完成事务回滚，清空已跟踪实体的域事件队列；可重复调用。
+        /// 未完成退出的终结：未完成事务回滚，清空已跟踪实体的域事件队列；
+        /// 终结失败不得吞掉——回滚无法确认时抛 <see cref="UnitOfWorkAbandonFailureException"/>
+        /// （原始终结故障保留）；可重复调用。
         /// </summary>
         public void AbandonPendingWork()
         {
-            try
+            Exception? terminationFailure = null;
+
+            if (_isTransactionStarted)
             {
-                if (_isTransactionStarted)
+                try
                 {
                     _sqlSugarClient.Ado.RollbackTran();
                 }
-            }
-            catch (Exception)
-            {
-                // Best effort: state is reset below regardless, and the failure
-                // that triggered scope unwinding must not be replaced.
-            }
-            finally
-            {
+                catch (Exception exception)
+                {
+                    terminationFailure = exception;
+                }
+
                 _isTransactionStarted = false;
-                _trackedEntities.Clear();
+            }
+
+            _trackedEntities.Clear();
+
+            if (terminationFailure is not null)
+            {
+                throw new UnitOfWorkAbandonFailureException(
+                    "The SqlSugar unit of work could not confirm the rollback of its pending transaction. " +
+                    "The original termination failure is preserved; the transaction outcome must not be reported as rolled back.",
+                    terminationFailure);
             }
         }
 

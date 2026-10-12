@@ -177,6 +177,48 @@ public class UnitOfWorkKernelStateTests
             "a failed termination is recorded as a checkable result instead of being swallowed");
     }
 
+    [Fact]
+    public async Task Explicit_rollback_termination_failure_must_not_report_rolled_back()
+    {
+        var unitOfWork = new FailingAbandonUnitOfWork();
+        var manager = new UnitOfWorkManager(new SingletonUnitOfWorkFactory(unitOfWork));
+
+        using var scope = manager.BeginScope();
+        await scope.StartAsync();
+        await scope.RollbackAsync(); // 显式回滚不抛次级异常：故障经结果检查
+
+        scope.State.Should().Be(UnitOfWorkState.Failed,
+            "a rollback that cannot be confirmed must not be reported as rolled back");
+        scope.TransactionOutcome.Should().Be(UnitOfWorkTransactionOutcome.Unknown,
+            "the transaction outcome is unknown while the rollback cannot be confirmed");
+        scope.RollbackTerminationFailure.Should().BeOfType<InvalidOperationException>()
+            .Which.Message.Should().Be("abandon-failure",
+                "the original termination failure is retained for inspection");
+    }
+
+    [Fact]
+    public async Task Rollback_termination_failure_is_attached_to_business_root_cause()
+    {
+        var unitOfWork = new FailingAbandonUnitOfWork();
+        var manager = new UnitOfWorkManager(new SingletonUnitOfWorkFactory(unitOfWork));
+        var primary = new ApplicationException("business-root");
+
+        Exception? observed = null;
+        try
+        {
+            await manager.ExecuteAsync<int>(_ => throw primary);
+        }
+        catch (Exception exception)
+        {
+            observed = exception;
+        }
+
+        observed.Should().BeSameAs(primary, "the business root cause must be preserved");
+        observed!.Data.Values.Cast<object>().Should().Contain(
+            x => x is InvalidOperationException && ((InvalidOperationException)x).Message == "abandon-failure",
+            "the retained rollback termination failure must be inspectable without replacing the root cause");
+    }
+
     private sealed class FailingAbandonUnitOfWork : IUnitOfWork, IUnitOfWorkAbandonable
     {
         public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)

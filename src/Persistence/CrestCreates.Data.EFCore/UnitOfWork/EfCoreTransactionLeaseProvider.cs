@@ -11,9 +11,11 @@ namespace CrestCreates.Data.EFCore.UnitOfWork;
 /// EF Core 的 CAP 参与 lease 签发者：解析当前受管窗口有效资源的数据库事务。
 /// </summary>
 /// <remarks>
-/// 签发前置条件：读方可见链上存在 **Active 且未释放** 的受管 owner 窗口，
-/// 且该窗口有效资源持有活动事务；未开始、终态、已释放、独立 scope/宿主与
-/// 原生未受管事务一律拒绝（「存在事务」不等于「受管参与窗口」）。
+/// 签发前置条件（与 <see cref="IEfCoreTransactionBorrower"/> 共用同一受管事务准入权威）：
+/// 读方可见链上**最近的 owner 窗口**已开始、为事务型、Active、未释放，且其开始事务时
+/// 记录的**实际资源/事务**与本读方解析到的 Context/Transaction 为同一关联；
+/// 无 owner、未开始、非事务、终态、已释放、独立 scope/宿主、原生未受管事务与
+/// 事务被替换（引用不一致）一律拒绝（「存在事务」不等于「受管参与窗口」）。
 /// 公开 lease 不携带生命周期句柄；原生借用由 <see cref="IEfCoreTransactionBorrower"/> 边界提供。
 /// </remarks>
 internal sealed class EfCoreTransactionLeaseProvider : IUnitOfWorkTransactionLeaseProvider
@@ -39,17 +41,20 @@ internal sealed class EfCoreTransactionLeaseProvider : IUnitOfWorkTransactionLea
 
     public bool TryAcquireCurrentLease(out UnitOfWorkTransactionLease? lease)
     {
-        // 受管窗口检查先于事务检查：无活动受管 owner 窗口时一律拒绝。
-        if (!UnitOfWorkExecutionContext.TryGetCurrentManagedState(_chainNode, out var state, out var released) ||
-            state != UnitOfWorkState.Active ||
-            released)
+        // 受管事务准入先于一切资源检查：无有效受管窗口（或有窗口但无受管事务关联）时一律拒绝。
+        if (!UnitOfWorkExecutionContext.TryGetCurrentManagedTransaction(
+                _chainNode,
+                out var managedTransaction,
+                out var managedContext))
         {
             lease = null;
             return false;
         }
 
         if (_dataBaseContext.GetNativeContext() is DbContext dbContext &&
-            dbContext.Database.CurrentTransaction is { } transaction)
+            ReferenceEquals(dbContext, managedContext) &&
+            dbContext.Database.CurrentTransaction is { } transaction &&
+            ReferenceEquals(transaction, managedTransaction))
         {
             var resource = new UnitOfWorkResourceIdentity(
                 OrmProvider.EfCore,

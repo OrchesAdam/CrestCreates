@@ -226,6 +226,8 @@ public sealed class TestUnitOfWorkScope : IUnitOfWorkScope
 
     public bool IsReleased { get; private set; }
 
+    public System.Exception? RollbackTerminationFailure => null;
+
     public System.Threading.CancellationToken ExecutionToken { get; private set; }
 
     public Task StartAsync(System.Threading.CancellationToken cancellationToken = default)

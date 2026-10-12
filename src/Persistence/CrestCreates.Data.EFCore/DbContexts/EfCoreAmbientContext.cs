@@ -17,10 +17,16 @@ internal static class EfCoreAmbientContext
         UnitOfWorkChainNode? readerNode,
         TenantKeySnapshot readerTenant)
     {
-        // 数据准入守卫（先于一切路由与提前返回）：租户身份（含 host/null）与终态/释放拒绝。
-        UnitOfWorkExecutionContext.ValidateDataAccess(readerNode, readerTenant);
+        // 数据准入守卫（先于一切路由与提前返回）：租户身份（含 host/null）、终态/释放拒绝，
+        // 以及逻辑资源身份（owner 窗口记录的声明种类/连接配置 vs 读方自身——第二 Context
+        // 声明/连接配置在根窗口与隔离窗口同样确定性拒绝）。
+        UnitOfWorkExecutionContext.ValidateDataAccess(
+            readerNode,
+            readerTenant,
+            own.GetType().FullName,
+            TryGetConnectionString(own));
 
-        // 无环境帧时快速返回，避免为非关系型 Provider 计算逻辑键（连接串读取仅限关系型）。
+        // 无环境帧（requiresNew 推入）时返回本作用域上下文；逻辑资源准入已在上方完成。
         if (UnitOfWorkAmbientContext.Current is null)
         {
             return own;
@@ -46,9 +52,9 @@ internal static class EfCoreAmbientContext
         {
             return context.Database.GetConnectionString();
         }
-        catch (System.InvalidOperationException)
+        catch (System.Exception)
         {
-            // 非关系型 Provider（如 InMemory）没有连接配置。
+            // 非关系型 Provider（如 InMemory）：没有连接配置，逻辑键退化为声明种类。
             return null;
         }
     }

@@ -191,23 +191,50 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
         }
 
         /// <summary>
-        /// 未完成退出的终结：回滚并释放 SDK 工作单元，清空已跟踪实体的域事件队列；可重复调用。
+        /// 未完成退出的终结：**尽力**回滚并释放 SDK 工作单元，清空已跟踪实体的域事件队列；
+        /// 终结失败不得吞掉——回滚无法确认时抛 <see cref="UnitOfWorkAbandonFailureException"/>，
+        /// 回滚已确认但释放失败时抛 <see cref="UnitOfWorkAbandonCleanupFailureException"/>；可重复调用。
         /// </summary>
         public void AbandonPendingWork()
         {
+            Exception? terminationFailure = null;
+            var subsequentFailures = new List<Exception>();
+
             try
             {
                 _unitOfWork?.Rollback();
             }
-            catch (Exception)
+            catch (Exception exception)
             {
-                // Best effort: the handle is released below regardless, and the
-                // failure that triggered scope unwinding must not be replaced.
+                terminationFailure = exception;
             }
-            finally
+
+            try
             {
                 DisposeUnitOfWork();
-                _trackedEntities.Clear();
+            }
+            catch (Exception exception)
+            {
+                subsequentFailures.Add(exception);
+            }
+
+            _trackedEntities.Clear();
+
+            if (terminationFailure is not null)
+            {
+                throw new UnitOfWorkAbandonFailureException(
+                    "The FreeSql unit of work could not confirm the rollback of its pending transaction. " +
+                    "The original termination failure is preserved; the transaction outcome must not be reported as rolled back.",
+                    terminationFailure,
+                    subsequentFailures);
+            }
+
+            if (subsequentFailures.Count > 0)
+            {
+                throw new UnitOfWorkAbandonCleanupFailureException(
+                    "The pending FreeSql transaction was rolled back, but releasing the unit of work failed. " +
+                    "The rollback fact is preserved; treat this as a cleanup failure.",
+                    subsequentFailures);
             }
         }
 

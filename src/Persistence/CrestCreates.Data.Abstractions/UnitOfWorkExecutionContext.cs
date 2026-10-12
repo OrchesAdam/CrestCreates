@@ -4,7 +4,8 @@ using System.Threading;
 namespace CrestCreates.Data.Abstractions
 {
     /// <summary>
-    /// 当前受管执行 token 的读入口与数据准入守卫（链校验：只跟随自身或其后代的帧）。
+    /// 当前受管执行 token 的读入口、数据准入守卫与受管事务准入权威
+    /// （链校验：只跟随自身或其后代的帧；准入作用于最近的可见 owner 窗口）。
     /// </summary>
     public static class UnitOfWorkExecutionContext
     {
@@ -52,17 +53,29 @@ namespace CrestCreates.Data.Abstractions
         }
 
         /// <summary>
-        /// 数据准入守卫（正式读方在返回资源前调用）：
+        /// 数据准入守卫（正式读方在返回资源前调用；作用于最近的可见 owner 窗口）：
         /// 1) 租户身份：顶层可见受管帧与读方均具备租户来源时按值（含 null=host）精确比较，不一致确定性拒绝；
-        /// 2) 生命周期：顶层可见 owner 帧处于终态/已释放时拒绝新数据动作（结果仍可读，需新建 UoW）。
+        /// 2) 生命周期：顶层可见 owner 帧处于终态/已释放时拒绝新数据动作（结果仍可读，需新建 UoW）；
+        /// 3) 逻辑资源身份：owner 窗口开始后记录的声明种类/连接配置与读方自身不一致时确定性拒绝
+        ///    （第二 Context 声明/连接配置是不同逻辑资源，根窗口与隔离窗口规则一致）。
         /// </summary>
-        public static void ValidateDataAccess(UnitOfWorkChainNode? readerNode, TenantKeySnapshot readerTenant)
+        /// <param name="readerNode">读方所在 scope 的受管链节点；null 表示读方未接入链校验。</param>
+        /// <param name="readerTenant">读方当前租户快照。</param>
+        /// <param name="readerLogicalContextType">读方自身 context 的声明类型全名；null 表示不参与。</param>
+        /// <param name="readerConnectionString">读方自身连接配置；null 表示不参与（非关系型）。</param>
+        public static void ValidateDataAccess(
+            UnitOfWorkChainNode? readerNode,
+            TenantKeySnapshot readerTenant,
+            string? readerLogicalContextType = null,
+            string? readerConnectionString = null)
         {
-            var frame = ResolveVisibleFrame(readerNode);
+            var frame = ResolveVisibleOwnerFrame(readerNode);
             if (frame is null)
             {
                 return; // 无受管窗口：无 UoW 的既有行为（含自动保存）不受影响
             }
+
+            var source = frame.Source;
 
             if (frame.Tenant.HasTenantSource &&
                 readerTenant.HasTenantSource &&
@@ -74,21 +87,45 @@ namespace CrestCreates.Data.Abstractions
                     "active unit of work is not supported; start a new unit of work for the other tenant.");
             }
 
-            if (frame.Source.IsOwner && (frame.Source.State != UnitOfWorkState.Active || frame.Source.IsReleased))
+            if (source.State != UnitOfWorkState.Active || source.IsReleased)
             {
                 throw new InvalidOperationException(
-                    $"The unit of work is '{frame.Source.State}' (released: {frame.Source.IsReleased}). Scope results remain " +
+                    $"The unit of work is '{source.State}' (released: {source.IsReleased}). Scope results remain " +
                     "readable, but new data operations require a new unit of work.");
+            }
+
+            if (!string.IsNullOrEmpty(source.ManagedResourceKind) &&
+                !string.IsNullOrEmpty(readerLogicalContextType) &&
+                !string.Equals(source.ManagedResourceKind, readerLogicalContextType, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"The managed unit-of-work resource uses context declaration '{source.ManagedResourceKind}', " +
+                    $"but this reader declares '{readerLogicalContextType}'. A second context declaration is a " +
+                    "different logical resource; start a new unit of work for it instead of sharing the active one.");
+            }
+
+            if (!string.IsNullOrEmpty(source.ManagedResourceConnectionString) &&
+                !string.IsNullOrEmpty(readerConnectionString) &&
+                !string.Equals(source.ManagedResourceConnectionString, readerConnectionString, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The managed unit-of-work resource uses a different connection configuration than this reader. " +
+                    "A second connection is a different logical resource; start a new unit of work for it.");
             }
         }
 
         /// <summary>
-        /// 解析读方可见的顶层受管 owner 状态（供 CAP lease 等受管窗口准入使用）。
+        /// 受管事务准入（CAP lease 签发与原生借用共用的**唯一权威**）：
+        /// 读方可见链上**最近的 owner 窗口**必须已开始、为事务型、Active、未释放且持有关联事务句柄；
+        /// 不满足即确定性拒绝，不回退到更外层窗口（有载体 ≠ 本事务已受管）。
         /// </summary>
-        public static bool TryGetCurrentManagedState(
+        /// <param name="readerNode">读方所在 scope 的受管链节点；null 表示不参与链校验。</param>
+        /// <param name="transactionHandle">owner 开始事务时记录的实际事务句柄（仅用于身份比对）。</param>
+        /// <param name="resourceContext">owner 开始事务时记录的原生资源上下文（仅用于身份比对）。</param>
+        public static bool TryGetCurrentManagedTransaction(
             UnitOfWorkChainNode? readerNode,
-            out UnitOfWorkState state,
-            out bool released)
+            out object? transactionHandle,
+            out object? resourceContext)
         {
             for (var frame = CurrentSource.Value; frame is not null; frame = frame.Parent)
             {
@@ -102,14 +139,37 @@ namespace CrestCreates.Data.Abstractions
                     continue; // join 帧不承载受管窗口身份，继续向 owner 帧查找
                 }
 
-                state = frame.Source.State;
-                released = frame.Source.IsReleased;
-                return true;
+                var source = frame.Source;
+                if (source.HasStarted &&
+                    source.IsTransactionalOwner &&
+                    source.State == UnitOfWorkState.Active &&
+                    !source.IsReleased &&
+                    source.ManagedTransactionHandle is not null)
+                {
+                    transactionHandle = source.ManagedTransactionHandle;
+                    resourceContext = source.ManagedResourceContext;
+                    return true;
+                }
+
+                break; // 最近的 owner 窗口即准入权威：不满足即拒绝，不回退到更外层窗口
             }
 
-            state = UnitOfWorkState.Active;
-            released = false;
+            transactionHandle = null;
+            resourceContext = null;
             return false;
+        }
+
+        private static SourceFrame? ResolveVisibleOwnerFrame(UnitOfWorkChainNode? readerNode)
+        {
+            for (var frame = CurrentSource.Value; frame is not null; frame = frame.Parent)
+            {
+                if (IsVisible(frame, readerNode) && frame.Source.IsOwner)
+                {
+                    return frame;
+                }
+            }
+
+            return null;
         }
 
         private static SourceFrame? ResolveVisibleFrame(UnitOfWorkChainNode? readerNode)
