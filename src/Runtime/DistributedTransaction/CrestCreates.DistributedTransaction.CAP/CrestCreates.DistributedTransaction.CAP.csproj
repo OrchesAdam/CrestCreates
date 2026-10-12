@@ -9,7 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.DistributedTransaction\CrestCreates.DistributedTransaction.csproj" />
     <ProjectReference Include="../../Eventing/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
-    <ProjectReference Include="../../../Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="../../../Persistence/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
   </ItemGroup>
 

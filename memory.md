@@ -1,8 +1,10 @@
 # CrestCreates platform status — 2026-10-10
 
-Baseline: master `1fcf1ab8` (PR #138 merge: #137 design + plans; PR #136/#135 merged
-before). Remote verified 2026-10-10. In flight: #137 UnitOfWork slice 1 (kernel/state,
-this branch; PR in review). Workflow: GitHub PR flow, never auto-merge; replaced files
+Baseline: master `1dc4a9cc` (PR #139 merge: #137 slices 1-5 + three review-fix rounds;
+PR #138/#136/#135 merged before). Remote verified 2026-10-12. In flight: #125 CAP entry
+consolidation (design rev.3 under review, PR #140). CI: all GitHub workflows manually
+disabled (development-phase local-first verification; Testcontainers suites runnable
+locally via podman socket). Workflow: GitHub PR flow, never auto-merge; replaced files
 archived to 99_RecycleBin, never deleted; never output credentials.
 
 ## Delivered capabilities (master)
@@ -46,8 +48,8 @@ archived to 99_RecycleBin, never deleted; never output credentials.
   scopes with ambient context following (pre-injected EF dependencies bind to the
   current UoW; other providers fail closed); legacy Infrastructure dual
   factory/manager archived; native gate `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`.
-- UnitOfWork kernel/state (delivered by #137 slices 1-5, PR #139 pending unified
-  review): unified `UnitOfWorkOptions` (transaction toggle / Required+RequiresNew /
+- UnitOfWork kernel/state (delivered by #137 slices 1-5, merged via PR #139 on
+  2026-10-12 including three review-fix rounds): unified `UnitOfWorkOptions` (transaction toggle / Required+RequiresNew /
   isolation / timeout / provider with null-inheritance rules), caller-frame
   activation protocol (`BeginScope` sync carrier + `StartAsync`; AOP non-async
   callbacks + OnExit sync restore), four orthogonal result dimensions
@@ -77,8 +79,9 @@ archived to 99_RecycleBin, never deleted; never output credentials.
 - Wave 0: #122 baseline calibration (merged via PR #134).
 - Wave 1: #123 native gates / evidence matrix (merged via PR #135); #124 UnitOfWork
   (merged via PR #136); #137 UnitOfWork follow-up (design+plans merged via PR #138;
-  slices 1-5 implemented on PR #139, unified review pending); #125 CAP (blocked on
-  #137 acceptance).
+  slices 1-5 + three review-fix rounds merged via PR #139); #125 CAP (S1-S4
+  implemented on the #125 branch / PR #140; design rev.4 approved; unified feature
+  review pending; issues log docs/superpowers/plans/2026-10-12-issue-125-implementation-issues-log.md).
 - Wave 2: #126 LocalEvent / #127 RabbitMQ / #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
@@ -96,10 +99,12 @@ archived to 99_RecycleBin, never deleted; never output credentials.
 ## Known gaps
 
 - B12 unsupported-intent negative case missing (#133, bounded).
-- UnitOfWork #137 slices 2-5 pending (typed managed ambient + logical resource keys,
-  provider capability declarations + real PG matrices, failure taxonomy/native
-  evidence, CAP participation lease);
-  CAP entry split (#125); LocalEvent/RabbitMQ reflection bridges (#126/#127);
+- CAP entry consolidation (#125): implemented on the #125 branch (design rev.4 approved;
+  single entry `AddCrestCapDistributedTransaction`, in-memory fakes/module/dead bridge/
+  participant engine archived, two-layer config validation, atomic publish over the
+  #137 lease/borrower contract with scan-recovery delivery, PG+RabbitMQ integration
+  evidence); compensation concurrency / process-crash recovery not pledged;
+  LocalEvent/RabbitMQ reflection bridges (#126/#127);
   CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
   (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).
 

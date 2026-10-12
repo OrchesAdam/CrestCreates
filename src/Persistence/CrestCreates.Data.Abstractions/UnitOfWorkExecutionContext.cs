@@ -115,6 +115,29 @@ namespace CrestCreates.Data.Abstractions
         }
 
         /// <summary>
+        /// 参与判定（公共权威，三值）：只跟随读方可见链上**最近的 owner 窗口**，
+        /// 不满足即拒绝且不回退到更外层窗口（有载体 ≠ 本事务已受管）。
+        /// 结果只报告决策/原因，**不暴露句柄**；原生资源经 Provider 借用边界获取。
+        /// </summary>
+        /// <param name="readerNode">读方所在 scope 的受管链节点；null 表示不参与链校验。</param>
+        /// <param name="readerTenant">读方当前租户快照；两端均有租户来源时按值（含 null=host）精确比较。</param>
+        public static UnitOfWorkParticipationResult ResolveParticipation(
+            UnitOfWorkChainNode? readerNode,
+            TenantKeySnapshot readerTenant = default)
+        {
+            var frame = ResolveVisibleOwnerFrame(readerNode);
+            if (frame is null)
+            {
+                return UnitOfWorkParticipationResult.NoVisibleWindow();
+            }
+
+            var refusal = EvaluateParticipation(frame, readerTenant);
+            return refusal is null
+                ? UnitOfWorkParticipationResult.Granted()
+                : UnitOfWorkParticipationResult.Refused(refusal.Value);
+        }
+
+        /// <summary>
         /// 受管事务准入（CAP lease 签发与原生借用共用的**唯一权威**）：
         /// 读方可见链上**最近的 owner 窗口**必须已开始、为事务型、Active、未释放且持有关联事务句柄；
         /// 不满足即确定性拒绝，不回退到更外层窗口（有载体 ≠ 本事务已受管）。
@@ -130,38 +153,63 @@ namespace CrestCreates.Data.Abstractions
             out object? resourceContext,
             out UnitOfWorkExecutionTokenSource? ownerSource)
         {
-            for (var frame = CurrentSource.Value; frame is not null; frame = frame.Parent)
+            var frame = ResolveVisibleOwnerFrame(readerNode);
+            if (frame is not null && EvaluateParticipation(frame, TenantKeySnapshot.NotParticipating) is null)
             {
-                if (!IsVisible(frame, readerNode))
-                {
-                    continue;
-                }
-
-                if (!frame.Source.IsOwner)
-                {
-                    continue; // join 帧不承载受管窗口身份，继续向 owner 帧查找
-                }
-
-                var source = frame.Source;
-                if (source.HasStarted &&
-                    source.IsTransactionalOwner &&
-                    source.State == UnitOfWorkState.Active &&
-                    !source.IsReleased &&
-                    source.ManagedTransactionHandle is not null)
-                {
-                    transactionHandle = source.ManagedTransactionHandle;
-                    resourceContext = source.ManagedResourceContext;
-                    ownerSource = source;
-                    return true;
-                }
-
-                break; // 最近的 owner 窗口即准入权威：不满足即拒绝，不回退到更外层窗口
+                transactionHandle = frame.Source.ManagedTransactionHandle;
+                resourceContext = frame.Source.ManagedResourceContext;
+                ownerSource = frame.Source;
+                return true;
             }
 
             transactionHandle = null;
             resourceContext = null;
             ownerSource = null;
             return false;
+        }
+
+        /// <summary>
+        /// 统一判定：返回 null 表示获准；否则给出确定性拒绝原因
+        /// （与 <see cref="ResolveParticipation"/> 共用同一判定，保证两处权威一致）。
+        /// </summary>
+        private static UnitOfWorkParticipationRefusalReason? EvaluateParticipation(
+            SourceFrame frame,
+            TenantKeySnapshot readerTenant)
+        {
+            if (frame.Tenant.HasTenantSource &&
+                readerTenant.HasTenantSource &&
+                !frame.Tenant.Matches(readerTenant))
+            {
+                return UnitOfWorkParticipationRefusalReason.ResourceMismatch;
+            }
+
+            var source = frame.Source;
+            if (source.IsReleased)
+            {
+                return UnitOfWorkParticipationRefusalReason.Released;
+            }
+
+            if (source.State != UnitOfWorkState.Active)
+            {
+                return UnitOfWorkParticipationRefusalReason.Terminal;
+            }
+
+            if (!source.HasStarted)
+            {
+                return UnitOfWorkParticipationRefusalReason.NotStarted;
+            }
+
+            if (!source.IsTransactionalOwner)
+            {
+                return UnitOfWorkParticipationRefusalReason.NonTransactional;
+            }
+
+            if (source.ManagedTransactionHandle is null)
+            {
+                return UnitOfWorkParticipationRefusalReason.NoTransactionAssociation;
+            }
+
+            return null;
         }
 
         private static SourceFrame? ResolveVisibleOwnerFrame(UnitOfWorkChainNode? readerNode)
