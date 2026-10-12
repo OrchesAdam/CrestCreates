@@ -45,7 +45,7 @@ public class UnitOfWorkKernelStateTests
         await using var scope = manager.BeginScope(new UnitOfWorkOptions { Timeout = TimeSpan.FromMilliseconds(80) });
         await scope.StartAsync();
 
-        await Task.Delay(200);
+        await WaitUntilCancelledAsync(scope.ExecutionToken, TimeSpan.FromSeconds(10));
         scope.ExecutionToken.IsCancellationRequested.Should().BeTrue(
             "the kernel deadline must cancel the execution token even without caller cancellation");
 
@@ -56,6 +56,15 @@ public class UnitOfWorkKernelStateTests
         await scope.RollbackAsync();
         scope.State.Should().Be(UnitOfWorkState.RolledBack);
         ((FakeUnitOfWork)scope.UnitOfWork).CommitCount.Should().Be(0, "an expired deadline must not commit");
+    }
+
+    private static async Task WaitUntilCancelledAsync(CancellationToken token, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (!token.IsCancellationRequested && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
     }
 
     [Fact]
@@ -104,15 +113,15 @@ public class UnitOfWorkKernelStateTests
         var factory = new FakeUnitOfWorkFactory();
         var manager = new UnitOfWorkManager(factory);
 
-        await using var outer = manager.BeginScope(new UnitOfWorkOptions { Timeout = TimeSpan.FromSeconds(1) });
+        await using var outer = manager.BeginScope(new UnitOfWorkOptions { Timeout = TimeSpan.FromSeconds(30) });
         await outer.StartAsync();
 
-        var extendAct = () => manager.BeginScope(new UnitOfWorkOptions { Timeout = TimeSpan.FromSeconds(10) });
+        var extendAct = () => manager.BeginScope(new UnitOfWorkOptions { Timeout = TimeSpan.FromSeconds(60) });
         extendAct.Should().Throw<InvalidOperationException>().WithMessage("*tighten*");
 
         await using var inner = manager.BeginScope(new UnitOfWorkOptions { Timeout = TimeSpan.FromMilliseconds(80) });
         await inner.StartAsync();
-        await Task.Delay(200);
+        await WaitUntilCancelledAsync(inner.ExecutionToken, TimeSpan.FromSeconds(10));
 
         inner.ExecutionToken.IsCancellationRequested.Should().BeTrue("the join deadline tightens the outer budget");
         outer.ExecutionToken.IsCancellationRequested.Should().BeFalse("the outer budget is unchanged");

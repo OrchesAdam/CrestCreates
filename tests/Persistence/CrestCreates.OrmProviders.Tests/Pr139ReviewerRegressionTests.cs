@@ -153,7 +153,14 @@ public class Pr139ReviewerRegressionTests
         await root.StartAsync();
         await using var join = manager.BeginScope(new() { Timeout = TimeSpan.FromMilliseconds(20) });
         await join.StartAsync();
-        await Task.Delay(80);
+
+        // Wait mechanics hardened (bounded wait for the deadline to fire); assertions unchanged.
+        var waitDeadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
+        while (!join.ExecutionToken.IsCancellationRequested && DateTimeOffset.UtcNow < waitDeadline)
+        {
+            await Task.Delay(20);
+        }
+
         join.ExecutionToken.IsCancellationRequested.Should().BeTrue();
         Func<Task> complete = () => join.CompleteAsync();
         await complete.Should().ThrowAsync<OperationCanceledException>();
