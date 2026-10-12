@@ -54,5 +54,6 @@
 | I-16 | 流程（CI） | 新增 CI 步骤时 `name:` 值内含「`: `」（冒号+空格）会使 YAML 纯量截断、整个 workflow 解析失败（run 显示 0 jobs）且不产生明确错误信息 | 已移除步骤名中的冒号并本地 YAML 解析校验；后续在 CI 工作流中避免步骤名含冒号 |
 | I-17 | 测试健壮性（CI 首跑暴露） | ORM 套件首次在 CI 执行时，基于「固定 `Task.Delay` + 定时器 `CancelAfter`」的 deadline 用例在负载下时序抖动（取消未在窗口内触发）；本地从未暴露（该套件此前未接入 CI） | 时序敏感用例改为**有界等待条件**（轮询直到 token 取消，超时 10s 后再断言；断言不变，判别力保留）；本地 3 轮复跑全绿 |
 | I-18 | 遗留（CI 接线，预存问题，非本项引入） | 既有 LibraryManagement IntegrationTests 套件首次接入 CI 后整体失败：宿主**启动期** seeding 即查询 OpenIddict（`42P01 relation "OpenIddictScopes" does not exist`，栈：`OpenIddictEntityFrameworkCoreScopeStore.FindByNameAsync`）。根因类别：`HostMigrationAndSeedRunner` 对多 DbContext 依赖 `EnsureCreatedAsync` 的「仅第一次调用生效」语义，在已存在的库上不会为后续上下文（OpenIddict）建表；fixture 的建表步骤在宿主启动之后，永远无法先执行。该套件历史上从未接入任何 workflow，在干净库 CI 环境不可运行 | UoW PG 验收已改为**自包含 Testcontainers 类**（自带容器/DbContext，不依赖 legacy fixture），CI 以过滤方式真实执行；完整 legacy 套件待修复后再整体接入 | 交 CI/集成测试轨道：修复多上下文建表（runner 或 fixture 顺序）后放开 `ci.yml`/`full-validation.yml` 的过滤 |
+| I-19 | 证据（CI，R139-05 收口） | 修复轮全部推送后，CI 在代码终点 `cea23075` 全绿：run 38192439617 **success**（26m29s）。新增两个步骤均真实执行并通过：「Test — Persistence / ORM providers (UnitOfWork kernel, chain, capabilities, AOP weave, CAP lease)」与「Test — UnitOfWork PostgreSQL acceptance (Testcontainers)」（自包含类：requiresNew 独立提交 + 隔离级别实测断言）；全部原生 publish/link/run 门禁通过；审查方 11 条契约回归用例在该 head 下本地与 CI 均 11/11 通过；I-16/I-17/I-18 的稳定化修复均已生效，无残余失败 | 该 run 即 R139-05 的 CI 证据（未再改动代码）；后续如有变更以新 head 的 CI run 为准 |
 
-（后续切片发现问题将追加到本表。）
+（后续切片发现问题将追加到本表；证据以最新 head 的 CI run 为准。）
