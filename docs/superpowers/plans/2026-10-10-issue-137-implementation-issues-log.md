@@ -77,3 +77,18 @@
 | I-20 | 整理（审查方指出） | `git diff --check a9da4dab..43b5c8a7` 报 `UnitOfWorkExceptions.cs` 文件末尾多余空白行 | 已清理；提交前 `git diff --check` 复查干净 |
 | I-21 | 测试环境（I-02 复核） | 新增 lease/borrower 负例中「独立根」「第二实例」场景若共用同一 SQLite 文件会触发单写者 `database is locked`（30s 超时假失败） | 独立根场景改用独立数据库文件；「事务被替换」改为在同资源上手动终结并替换事务（无并发写者）；本地 118/118 复跑通过 |
 | I-22 | 平台界面变化（交审查知悉） | 新增 `IUnitOfWorkManagedResource`（Provider 受管资源曝光）与 `IUnitOfWorkScope.RollbackTerminationFailure`（保留终结故障）；`UnitOfWorkExecutionContext.TryGetCurrentManagedState` 被 `TryGetCurrentManagedTransaction` 取代（切片 5 期间引入、未发布） | 属本 PR 未合并契约的强化，不构成对外兼容负担；公开面均无生命周期操作 |
+
+## PR #139 第三轮审查修复（2026-10-12，R3-139-01…02）
+
+对照 `docs/review/2026-10-12-pr-139-uow-implementation-review-round3.md` 的逐项修复（审查方 3 条探针原样纳入 `Pr139Round3ReviewerTests.cs`：修复前 0/3 通过 → 修复后 3/3 通过）：
+
+| 审查项 | 修复 |
+| --- | --- |
+| R3-139-01 [P2] 已签发 lease 未随 owner 终态失效 | 签发时绑定**原 owner 载体**（`TryGetCurrentManagedTransaction` 新增只读 owner 输出，不重新解析「当前最近的 owner」）；`EfCoreTransactionIdentity.IsCompleted` 改为「owner 终态/已释放 **OR** 事务关联失效」——提交已确认但句柄清理失败（CurrentTransaction 仍指向原句柄）时旧 lease 立即失效；正常完成/回滚/释放、清理失败均覆盖，旧 lease 不随后续 scope 复活。回归：`Issued_lease_must_expire_when_confirmed_commit_cleanup_fails`（探针）+ `Issued_lease_must_invalidate_on_rollback_and_release`、`Old_lease_must_not_revive_with_subsequent_scope` |
+| R3-139-02 [P2] 已确认回滚的清理故障结果不一致 | 新增共用分类 `ClassifyTerminationResult`（所有退出路径同源）：成功回滚保持 RolledBack；`UnitOfWorkAbandonCleanupFailureException`（回滚已确认、仅释放/丢弃失败）保持 **RolledBack + Failed** 且诊断保留；无法确认才 Unknown + Failed；提交已确认的 Unknown 不被随后回滚改写。flush 失败路径与 `TryAbandonOwner`（已开始 owner 直接 Dispose）改用同一分类，后者同时填充 `RollbackTerminationFailure`。回归：`Confirmed_rollback_must_survive_cleanup_failure_on_all_exit_paths`（探针，2 cases）+ `Confirmed_rollback_cleanup_failure_keeps_rolled_back_on_explicit_rollback` |
+
+### 修复轮补充记录（R3）
+
+| # | 类别 | 说明 | 处置 |
+| --- | --- | --- | --- |
+| I-23 | 契约文档（R3） | `IUnitOfWorkTransactionIdentity.IsCompleted` 语义文档同步为「owner 终态或已释放，或事务关联终结后为 true」；lease live validity 不依赖驱动清理成功 | 已更新；公开参与契约仍无生命周期操作 |

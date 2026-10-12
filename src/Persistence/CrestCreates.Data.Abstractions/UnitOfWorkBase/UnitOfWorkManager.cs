@@ -679,21 +679,13 @@ namespace CrestCreates.Data.Abstractions
                 catch (Exception flushFailure)
                 {
                     var terminationFailure = await TryTerminateUncommittedAsync().ConfigureAwait(false);
-                    if (terminationFailure is null)
+                    if (terminationFailure is not null)
                     {
-                        _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
-                        TransitionTo(UnitOfWorkState.RolledBack);
-                    }
-                    else
-                    {
-                        // 回滚无法确认：不得宣称 RolledBack；原始终结故障附加到 flush 根因。
-                        if (_isTransactional && _transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
-                        {
-                            _transactionOutcome = UnitOfWorkTransactionOutcome.Unknown;
-                        }
-                        TransitionTo(UnitOfWorkState.Failed);
                         AttachCleanupDiagnostic(flushFailure, RollbackTerminationFailureDataKey, terminationFailure);
                     }
+
+                    // 统一分类：已确认回滚（含仅清理失败）保持 RolledBack，无法确认才 Unknown。
+                    ClassifyTerminationResult(terminationFailure);
                     throw;
                 }
 
@@ -810,9 +802,9 @@ namespace CrestCreates.Data.Abstractions
             }
 
             /// <summary>
-            /// owner 回滚：终结未提交工作并迁移状态。返回原始终结故障（无法确认回滚时非 null）。
-            /// 终结失败不得宣称 RolledBack：状态转 Failed、事务结果转 Unknown（回滚已确认但
-            /// 释放/丢弃失败的次级情况保持 RolledBack）。
+            /// owner 回滚：终结未提交工作并按统一分类迁移结果。返回原始终结故障（无法确认回滚时非 null）。
+            /// 终结失败不得宣称 RolledBack：无法确认转 Unknown + Failed，回滚已确认但释放/丢弃失败保持
+            /// RolledBack + Failed（详见 <see cref="ClassifyTerminationResult"/>）。
             /// </summary>
             private async Task<Exception?> RollbackOwnerCoreAsync()
             {
@@ -824,21 +816,35 @@ namespace CrestCreates.Data.Abstractions
                 }
 
                 var terminationFailure = await TryTerminateUncommittedAsync().ConfigureAwait(false);
+                ClassifyTerminationResult(terminationFailure);
+                return terminationFailure;
+            }
+
+            /// <summary>
+            /// 终结结果统一分类（所有退出路径共用；同一数据库事实不得因入口不同而变化）：
+            /// 1) 成功回滚：保持/恢复 RolledBack（已有 Unknown 提交结果不得被改写）；
+            /// 2) 回滚**已确认**但后续句柄释放/未 flush 丢弃失败（<see cref="UnitOfWorkAbandonCleanupFailureException"/>）：
+            ///    事务事实保持 RolledBack，状态 Failed（清理未完成）；
+            /// 3) 回滚**无法确认**（其它终结故障）：Unknown + Failed。
+            /// 原始终结故障经 scope 的 <c>RollbackTerminationFailure</c> 保留；异常路径由调用方附加到主异常。
+            /// </summary>
+            private void ClassifyTerminationResult(Exception? terminationFailure)
+            {
                 if (terminationFailure is null)
                 {
                     if (_transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
                     {
                         _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
                     }
+
                     TransitionTo(UnitOfWorkState.RolledBack);
-                    return null;
+                    return;
                 }
 
                 _rollbackTerminationFailure ??= terminationFailure;
 
                 if (terminationFailure is UnitOfWorkAbandonCleanupFailureException)
                 {
-                    // 回滚已确认，仅句柄释放/未 flush 丢弃失败：事务结果保持 RolledBack，状态 Failed（清理未完成）。
                     if (_transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
                     {
                         _transactionOutcome = UnitOfWorkTransactionOutcome.RolledBack;
@@ -846,12 +852,10 @@ namespace CrestCreates.Data.Abstractions
                 }
                 else if (_isTransactional && _transactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
                 {
-                    // 回滚无法确认：不得宣称 RolledBack。
                     _transactionOutcome = UnitOfWorkTransactionOutcome.Unknown;
                 }
 
                 TransitionTo(UnitOfWorkState.Failed);
-                return terminationFailure;
             }
 
             /// <summary>
@@ -1075,7 +1079,10 @@ namespace CrestCreates.Data.Abstractions
                     catch (Exception exception)
                     {
                         failures.Add(new UnitOfWorkCleanupFailure("abandon", exception));
-                        TransitionTo(UnitOfWorkState.Failed);
+
+                        // 与其它退出路径共用同一分类：已确认回滚（含仅清理失败）保持 RolledBack，
+                        // 无法确认才 Unknown；原始终结故障同时保留在 scope 诊断上。
+                        ClassifyTerminationResult(exception);
                         return;
                     }
                 }

@@ -197,6 +197,24 @@ public class UnitOfWorkKernelStateTests
     }
 
     [Fact]
+    public async Task Confirmed_rollback_cleanup_failure_keeps_rolled_back_on_explicit_rollback()
+    {
+        var unitOfWork = new ConfirmedRollbackCleanupFailureUnitOfWork();
+        var manager = new UnitOfWorkManager(new SingletonUnitOfWorkFactory(unitOfWork));
+
+        using var scope = manager.BeginScope();
+        await scope.StartAsync();
+        await scope.RollbackAsync();
+
+        scope.State.Should().Be(UnitOfWorkState.Failed,
+            "the cleanup failure is checkable as Failed");
+        scope.TransactionOutcome.Should().Be(UnitOfWorkTransactionOutcome.RolledBack,
+            "the rollback was confirmed; only the subsequent handle release failed");
+        scope.RollbackTerminationFailure.Should().BeOfType<UnitOfWorkAbandonCleanupFailureException>(
+            "the cleanup failure is retained without claiming an unconfirmed rollback");
+    }
+
+    [Fact]
     public async Task Rollback_termination_failure_is_attached_to_business_root_cause()
     {
         var unitOfWork = new FailingAbandonUnitOfWork();
@@ -233,6 +251,30 @@ public class UnitOfWorkKernelStateTests
         public void AbandonPendingWork()
         {
             throw new InvalidOperationException("abandon-failure");
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ConfirmedRollbackCleanupFailureUnitOfWork : IUnitOfWork, IUnitOfWorkAbandonable
+    {
+        public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task CommitTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task RollbackTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+
+        public void AbandonPendingWork()
+        {
+            // 回滚已确认，仅后续句柄释放失败（与 Provider 的真实分类一致）。
+            throw new UnitOfWorkAbandonCleanupFailureException(
+                "rollback-confirmed-cleanup-failed",
+                new[] { new InvalidOperationException("dispose-failed") });
         }
 
         public void Dispose()

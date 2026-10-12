@@ -229,6 +229,56 @@ public class CapLeaseTests : IDisposable
         managed.State.Should().Be(UnitOfWorkState.Failed);
     }
 
+    [Fact]
+    public async Task Issued_lease_must_invalidate_on_rollback_and_release()
+    {
+        var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+        var leaseProvider = scope.ServiceProvider.GetRequiredService<IUnitOfWorkTransactionLeaseProvider>();
+
+        // 回滚（确认）后失效
+        var rollbackScope = manager.BeginScope();
+        await rollbackScope.StartAsync();
+        leaseProvider.TryAcquireCurrentLease(out var rolledBackLease).Should().BeTrue();
+        await rollbackScope.RollbackAsync();
+        rolledBackLease!.IsValid.Should().BeFalse(
+            "a rollback completes the owner window even before the scope is released");
+        rollbackScope.Dispose();
+
+        // 直接释放（未完成退出 → 放弃终结）后失效
+        var releasedScope = manager.BeginScope();
+        await releasedScope.StartAsync();
+        leaseProvider.TryAcquireCurrentLease(out var releasedLease).Should().BeTrue();
+        releasedScope.Dispose();
+        releasedLease!.IsValid.Should().BeFalse(
+            "release invalidates the live view without relying on the provider's handle cleanup");
+    }
+
+    [Fact]
+    public async Task Old_lease_must_not_revive_with_subsequent_scope()
+    {
+        var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+        var leaseProvider = scope.ServiceProvider.GetRequiredService<IUnitOfWorkTransactionLeaseProvider>();
+
+        var first = manager.BeginScope();
+        await first.StartAsync();
+        leaseProvider.TryAcquireCurrentLease(out var firstLease).Should().BeTrue();
+        await first.CompleteAsync();
+        first.Dispose();
+        firstLease!.IsValid.Should().BeFalse("the first window completed");
+
+        // 后续 scope 在同一资源上开启新事务：旧 lease 绑定原 owner，不得因此重新有效。
+        await using var second = manager.BeginScope();
+        await second.StartAsync();
+        leaseProvider.TryAcquireCurrentLease(out var secondLease).Should().BeTrue();
+        firstLease.IsValid.Should().BeFalse(
+            "an old lease is bound to the window it was issued for, not to the current nearest owner");
+        secondLease!.IsValid.Should().BeTrue();
+    }
+
     private ServiceProvider BuildProvider(string? databasePath = null)
     {
         var path = databasePath ?? _databasePath;

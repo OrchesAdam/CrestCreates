@@ -62,7 +62,7 @@ namespace CrestCreates.Data.Abstractions
         /// <summary>事务标识（与数据库侧可核对）。</summary>
         Guid TransactionId { get; }
 
-        /// <summary>事务是否已完结（提交/回滚/句柄释放后为 true）。</summary>
+        /// <summary>事务是否已完结/失效（owner 终态或已释放，或事务关联终结后为 true）。</summary>
         bool IsCompleted { get; }
 
         /// <summary>隔离级别；Provider 无法读取时为 null。</summary>

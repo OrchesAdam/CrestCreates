@@ -45,7 +45,8 @@ internal sealed class EfCoreTransactionBorrower : IEfCoreTransactionBorrower
         if (!UnitOfWorkExecutionContext.TryGetCurrentManagedTransaction(
                 _chainNode,
                 out var managedTransaction,
-                out var managedContext))
+                out var managedContext,
+                out _))
         {
             return false;
         }

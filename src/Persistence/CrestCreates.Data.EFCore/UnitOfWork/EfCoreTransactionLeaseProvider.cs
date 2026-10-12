@@ -45,7 +45,8 @@ internal sealed class EfCoreTransactionLeaseProvider : IUnitOfWorkTransactionLea
         if (!UnitOfWorkExecutionContext.TryGetCurrentManagedTransaction(
                 _chainNode,
                 out var managedTransaction,
-                out var managedContext))
+                out var managedContext,
+                out var ownerSource))
         {
             lease = null;
             return false;
@@ -61,7 +62,11 @@ internal sealed class EfCoreTransactionLeaseProvider : IUnitOfWorkTransactionLea
                 dbContext.GetType().FullName ?? dbContext.GetType().Name,
                 GetInstanceId(dbContext));
 
-            lease = new UnitOfWorkTransactionLease(resource, new EfCoreTransactionIdentity(dbContext, transaction));
+            // live validity 绑定**签发时**的 owner 载体与事务关联：
+            // owner 终态/释放后必须失效，即使驱动未清理成功、CurrentTransaction 仍指向原句柄。
+            lease = new UnitOfWorkTransactionLease(
+                resource,
+                new EfCoreTransactionIdentity(dbContext, transaction, ownerSource!));
             return true;
         }
 
@@ -73,13 +78,18 @@ internal sealed class EfCoreTransactionLeaseProvider : IUnitOfWorkTransactionLea
     {
         private readonly DbContext _dbContext;
         private readonly IDbContextTransaction _transaction;
+        private readonly UnitOfWorkExecutionTokenSource _ownerSource;
         private Guid? _transactionId;
         private UnitOfWorkNativeTransactionMarker? _marker;
 
-        public EfCoreTransactionIdentity(DbContext dbContext, IDbContextTransaction transaction)
+        public EfCoreTransactionIdentity(
+            DbContext dbContext,
+            IDbContextTransaction transaction,
+            UnitOfWorkExecutionTokenSource ownerSource)
         {
             _dbContext = dbContext;
             _transaction = transaction;
+            _ownerSource = ownerSource;
         }
 
         public Guid TransactionId => _transactionId ??= _transaction.TransactionId;
@@ -88,6 +98,13 @@ internal sealed class EfCoreTransactionLeaseProvider : IUnitOfWorkTransactionLea
         {
             get
             {
+                // owner 生命周期优先：终态（Completed/RolledBack/Failed）或已释放即失效——
+                // 不依赖驱动清理一定成功（提交确认后句柄清理失败时 CurrentTransaction 可能仍指向原句柄）。
+                if (_ownerSource.State != UnitOfWorkState.Active || _ownerSource.IsReleased)
+                {
+                    return true;
+                }
+
                 try
                 {
                     var current = _dbContext.Database.CurrentTransaction;

@@ -122,10 +122,13 @@ namespace CrestCreates.Data.Abstractions
         /// <param name="readerNode">读方所在 scope 的受管链节点；null 表示不参与链校验。</param>
         /// <param name="transactionHandle">owner 开始事务时记录的实际事务句柄（仅用于身份比对）。</param>
         /// <param name="resourceContext">owner 开始事务时记录的原生资源上下文（仅用于身份比对）。</param>
+        /// <param name="ownerSource">准入通过的 owner 载体（只读生命周期视图）。
+        /// lease 等 live view 应绑定**签发时**的该载体判定有效性，不得重新解析「当前最近的 owner」。</param>
         public static bool TryGetCurrentManagedTransaction(
             UnitOfWorkChainNode? readerNode,
             out object? transactionHandle,
-            out object? resourceContext)
+            out object? resourceContext,
+            out UnitOfWorkExecutionTokenSource? ownerSource)
         {
             for (var frame = CurrentSource.Value; frame is not null; frame = frame.Parent)
             {
@@ -148,6 +151,7 @@ namespace CrestCreates.Data.Abstractions
                 {
                     transactionHandle = source.ManagedTransactionHandle;
                     resourceContext = source.ManagedResourceContext;
+                    ownerSource = source;
                     return true;
                 }
 
@@ -156,6 +160,7 @@ namespace CrestCreates.Data.Abstractions
 
             transactionHandle = null;
             resourceContext = null;
+            ownerSource = null;
             return false;
         }
 
