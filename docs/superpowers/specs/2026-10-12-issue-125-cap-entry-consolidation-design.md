@@ -1,6 +1,6 @@
 # Issue #125 CAP 入口收口与事务承诺核实 — 设计与现状清单
 
-日期：2026-10-12（rev.2，响应 `docs/review/2026-10-12-pr-140-cap-design-review.md` 的 D140-01…04 与 Q1–Q6 裁定建议）
+日期：2026-10-12（rev.3，响应第二轮审查 `docs/review/2026-10-12-pr-140-cap-design-review-round2.md`：R2-D140-01 扫描配置约束 + 非阻塞说明；此前 rev.2 响应首轮 D140-01…04）
 基线：master `1dc4a9cc`（PR #139 / #137 合并后）
 输入：
 - Issue #125 正文（含验收项与「纠正审查」）
@@ -9,7 +9,9 @@
 - CAP 10.0.1 锁定版本**源码级核实**（§1.8；引用文件均为 v10.0.1 tag）
 - 代码事实（本文所有引用以当前基线为准）
 
-> rev.2 变更摘要：重写 §3.4 原子发布协议（参与判定三值 + 瞬态绑定 + 扫描恢复投递）；补 §1.8 源码核实记录；按 D140-03 增加存储身份绑定规则；按 D140-04 收窄 executor 校验承诺；按 Q1–Q6 裁定更新 §3.1/§3.5/§6；修订 §4 切片与验收矩阵；同步 memory.md 状态残留。
+> rev.3 变更摘要：补扫投递的**配置前提与启动校验**（有效 `FailedRetryCount>0`、扫描间隔有效正值、lookback 受支持范围 [30s,∞)、以最终生效值为准；新增框架 option 透传 lookback）；投递延迟改写为「名义扫描等待，非时限」；参与判定公共结果**不再暴露可强转句柄**（原生句柄仅经 Provider borrower）；补迁移/行为取舍（窗口内即时发布转为扫描等待、窗口内延迟拒绝、`FailedRetryCount=0` 不再是合法配置）；S1/S3 验收补配置负例与宽松超时断言；memory.md 头部残留与 PR 正文同步。
+>
+> rev.2 变更摘要：重写 §3.4 原子发布协议（参与判定三值 + 瞬态绑定 + 扫描恢复投递）；补 §1.8 源码核实记录；按 D140-03 增加存储身份绑定规则；按 D140-04 收窄 executor 校验承诺；按 Q1–Q6 裁定更新 §3.1/§3.5/§6；修订 §4 切片与验收矩阵。
 
 ---
 
@@ -18,7 +20,7 @@
 1. **入口分裂确认**：同一包内两条注册路径——`[CrestModule]` 模块入口注册**内存实现**，扩展入口注册**持久化实现并调用 `AddCap`**。模块会被 BuildTasks 自动发现，在任何引用该包的应用里**无需显式调用扩展**即完成注册；解析结果取决于注册顺序，存在静默回落内存实现的风险（G-01）。
 2. **唯一正式入口**：扩展 `AddCrestCapDistributedTransaction` 收口为唯一正式入口；模块归档（99_RecycleBin）。依据是**唯一装配原则与现状能力**（零消费者、双入口分裂、模块路径无法完成配置绑定装配），并在 S1 验证模块清单/自动注册产物不再残留（Q1 裁定）。
 3. **内存件与死代码归档**：`TransactionLogger`、`DefaultTransactionCompensator`、`UnitOfWorkIntegrationExtensions`、参与者列表引擎（`IDistributedTransaction`/`DistributedTransaction`/`DistributedTransactionManager`/`ITransactionParticipant`，Q2 裁定同意）归档；归档后**补偿的注册与触发责任在文档中明确**（CAP 不会自动调用自定义补偿器）。
-4. **原子发布协议（rev.2 重写）**：参与判定三值（确无可见窗口 / 已获准 / 拒绝参与），由内核侧最小平台补充提供；发布路径"瞬态绑定 + 事务内写行 + 不 flush（缓冲丢弃）+ 由 CAP 存储扫描恢复投递"；所有拒绝路径在写入前确定性失败。不调用 CAP 的 Commit/Rollback/Dispose 操作借用句柄是硬边界（§3.4）。
+4. **原子发布协议（rev.2 重写；rev.3 补配置前提）**：参与判定三值（确无可见窗口 / 已获准 / 拒绝参与），由内核侧最小平台补充提供（公共结果只报决策/原因，不含可强转句柄）；发布路径「瞬态绑定 + 事务内写行 + 不 flush（缓冲丢弃）+ CAP 存储扫描恢复投递」；扫描配置以**最终生效值**启动校验（有效 `FailedRetryCount > 0`、间隔有效正值、lookback ≥ 30s），投递延迟声明为**名义扫描等待、非时限**；所有拒绝路径在写入前确定性失败；不调用 CAP 的 Commit/Rollback/Dispose 是硬边界。行为取舍（窗口内即时消息改扫描等待、窗口内 `PublishDelayAsync` 拒绝、「禁用重试」不可用）进入迁移说明（§3.8）。
 5. **存储身份绑定**（D140-03）：声明支持的 Provider/数据库组合（EF+Npgsql ↔ CAP PostgreSql，单一固定数据库）；发布前校验 CAP 存储目标与参与资源的数据库身份（规范字段比较，非原始串文本）；不匹配在多库双向场景下拒绝于写入前。
 6. **证据**：PG + RabbitMQ Testcontainers 集成门禁覆盖审查给出的完整故障矩阵（正常/回滚/放弃/Unknown/提交确认后清理失败/连续发布/RequiresNew/结束后普通发布/延迟消息/重启恢复）；executor fixture 消费**真实生成产物**。
 7. **不做**：不另造通用事务引擎；不把内存参与者列表或依次 commit 推导为分布式原子；不整体重命名/搬走 CAP Provider（E7）。
@@ -141,6 +143,10 @@
 | `StorageProvider` ∈ {SqlServer, PostgreSql} | 注册期 | 抛（现状保留） |
 | `TransportConnectionString` 非空且**无默认值** | 注册期 | 移除 `"localhost"` 默认；空则抛（**行为变化，PR 明示**） |
 | `TransportProvider` ∈ {RabbitMQ, Kafka} | 注册期 | 抛（现状保留） |
+| **扫描模式配置组（§3.4.2 投递前提）** | 注册期 | 校验对象为**最终生效值**：配置节绑定 + `configure` 回调合并后的同一实例，且该实例就是传给 `AddCap` 的实例——杜绝「先校验后被其他配置覆盖」 |
+| ├ 最终生效 `FailedRetryCount > 0` | 注册期 | ≤0 → 启动失败：扫描模式下 0/负值使 `Retries < FailedRetryCount` 恒 false，**事务消息没有首次投递**；文档明示「禁用重试」在此模式下不可用 |
+| ├ `FailedRetryIntervalSeconds` 有效正值 | 注册期 | ≤0 → 启动失败（防止零间隔轮询） |
+| ├ `FallbackWindowLookbackSeconds` ∈ **[30s, ∞)**（新增框架 option，默认 240，经 `capOptions.FallbackWindowLookbackSeconds` 透传） | 注册期 | <30s（CAP 建议下限 `MinSuggestedValueForFallbackWindowLookbackSeconds`）或 ≤0 → 启动失败并提示受支持范围 |
 | `ICompensationExecutorRegistry` 可解析 | 启动期 | 不可解析 → 启动失败 + 修复指引（`AddCompensationExecutors()`） |
 | **声明必需执行器集合**（options `RequiredCompensationExecutors: string[]`，默认空）逐一可解析 | 启动期 | 缺失 → 启动失败并列出缺失名称 |
 | 持久化仓库可解析 | 启动期 | `IRepository<TransactionLog>`/`IRepository<TransactionCompensation>` 不可解析 → 启动失败 |
@@ -161,23 +167,30 @@
 
 #### 3.4.1 参与判定（唯一权威与最小平台补充）
 
-`TryAcquireCurrentLease` 的 `false` 只表达「未获准参与」，**不能**推导「无受管窗口」（未 Start、非事务、终态、释放、不可见链、无事务关联等都可能 false；部分 Provider 无 lease provider）。为此定义**参与判定三值**并由内核提供唯一权威（最小平台补充，归属 Data.Abstractions，紧邻现有 `TryGetCurrentManagedTransaction`；CAP 不复制 ambient 状态机）：
+`TryAcquireCurrentLease` 的 `false` 只表达「未获准参与」，**不能**推导「无受管窗口」（未 Start、非事务、终态、释放、不可见链、无事务关联等都可能 false；部分 Provider 无 lease provider）。为此定义**参与判定三值**并由内核提供唯一权威（最小平台补充，归属 Data.Abstractions，紧邻现有 `TryGetCurrentManagedTransaction`；CAP 不复制 ambient 状态机）。公共结果**只报告决策与拒绝原因，不暴露任何句柄/上下文对象**（注释性约束可被强转绕过——原生 Context/Transaction 一律经 #137 Provider 借用边界获取，见下）：
 
 ```csharp
 public enum UnitOfWorkParticipationDecision { NoVisibleWindow, Granted, Refused }
 
+public enum UnitOfWorkParticipationRefusalReason
+{
+    NotStarted, NonTransactional, Terminal, Released,
+    NoTransactionAssociation,   // 事务型已开始但 Provider 未曝光受管事务关联
+    ResourceMismatch            // 租户/资源身份与读方不匹配
+}
+
 public readonly struct UnitOfWorkParticipationResult
 {
     public UnitOfWorkParticipationDecision Decision { get; }
-    public string? RefusalReason { get; }            // 诊断；不含凭据
-    public object? TransactionHandle { get; }        // Granted 时非空（仅身份比对）
-    public object? ResourceContext { get; }
-    public UnitOfWorkExecutionTokenSource? OwnerSource { get; }
+    public UnitOfWorkParticipationRefusalReason? RefusalReason { get; }
 }
 
-// 内核唯一权威（实现复用现有帧遍历；TryGetCurrentManagedTransaction 重构为其 Granted 判定特例）
+// 内核唯一权威（复用现有帧遍历；TryGetCurrentManagedTransaction 内部复用同一判定，
+// lease/borrower 的原生句柄比对路径不变——句柄只存在于 Provider 适配层）
 public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolveParticipation(UnitOfWorkChainNode? readerNode);
 ```
+
+**Granted 之后的原生资源获取**：CAP 集成先调用 `ResolveParticipation`；`Granted` 仅表示可以进入借用流程——原生 `DbContext`/`IDbContextTransaction` 经 #137 Provider 借用边界（EF 为 `IEfCoreTransactionBorrower`，含资源/事务引用比对）取得；容器内的租户/资源校验与 borrower 判定与内核同源（复核要求：实施时逐项核对）。适配器侧的拒绝（未受管原生事务、存储身份不匹配、借用边界缺失）以带错误码的确定性异常表达，均先于任何写入。
 
 **判定与行为表**（验收：每种结果断言「是否调用 CAP 非事务发布/是否写消息表」，拒绝用例必须证明**未产生任何非事务副作用**）：
 
@@ -190,10 +203,10 @@ public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolvePa
 | 可见 owner：终态（Completed/RolledBack/Failed）或已释放 | Refused(Terminal) | 同上 |
 | 可见 owner：事务型已开始但无事务关联句柄（Provider 未曝光/非 EF） | Refused(NoTransactionAssociation) | 同上（当前 CAP 集成仅声明支持 EF+Npgsql） |
 | 可见 owner：租户/资源不匹配（内核数据准入拒绝） | Refused(ResourceMismatch) | 同上 |
-| scoped 上下文存在**原生未受管事务**且无可见窗口（可检测时） | Refused(UnmanagedNativeTransaction) | 确定性失败；CAP 不加入未受管事务、不通过连接嗅探探测（无可检测上下文时按无窗口处理，文档明示） |
-| Granted 但集成借用边界不可用（装配缺失） | — | 确定性失败（装配诊断：引用集成包并注册） |
-| Granted 但 CAP 存储身份 ≠ 参与资源身份（§3.4.4） | Refused(StorageIdentityMismatch) | 同上（在**写入前**） |
-| Granted + 身份一致 + 借用成功 | Granted | 事务内写行（§3.4.2），投递走扫描恢复（§3.4.3） |
+| scoped 上下文存在**原生未受管事务**且无可见窗口（可检测时） | 适配器拒绝（`UnmanagedNativeTransaction`） | 确定性失败；CAP 不加入未受管事务、不通过连接嗅探探测（无可检测上下文时按无窗口处理，文档明示） |
+| Granted 但集成借用边界不可用（装配缺失） | 适配器拒绝（`BorrowerUnavailable`） | 确定性失败（装配诊断：引用集成包并注册） |
+| Granted 但 CAP 存储身份 ≠ 参与资源身份（§3.4.4） | 适配器拒绝（`StorageIdentityMismatch`） | 同上（在**写入前**） |
+| Granted + 身份一致 + 借用成功 | Granted | 事务内写行（§3.4.2），投递走扫描恢复（§3.4.2） |
 
 所有 Refused/装配失败路径都**先于** `ICapPublisher` 调用，保证零副作用（S3 用例逐一断言）。
 
@@ -214,7 +227,8 @@ public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolvePa
 
 **投递（提交确认后）**：采用 **CAP 存储扫描恢复作为正式投递机制**（M-05）：
 - 提交确认后，行已随事务提交（`Scheduled`）；CAP `NeedRetryProcessor` 每 `FailedRetryInterval` 扫描 `StatusName IN ('Failed','Scheduled') AND Retries < FailedRetryCount AND Added < now - FallbackWindowLookbackSeconds` 并投递；
-- **声明延迟**：默认为 `FallbackWindowLookbackSeconds`（240s）至 `+FailedRetryInterval`（60s）区间（本仓 options 可将两项显式调小；文档给配置样例）；**恢复条件**与**故障证据**见 M-05 与 S3 用例；
+- **声明（名义扫描等待，非投递时限）**：健康低负载环境下，提交后的消息通常在 `FallbackWindowLookbackSeconds`（默认 240s）与 `+FailedRetryInterval`（默认 60s）**量级**内被扫描投递；实际等待取决于消息 `Added` 时间（扫描按 Added 判龄——长事务提交后可能很快被下一轮选中）、提交可见性、积压、锁竞争、批次上限（LIMIT 200）、停机与 broker 故障，可能显著延长。该量级为**能力描述**，不构成提交后投递时限；S3 以**有界宽松超时**断言最终投递，不按精确区间断言；
+- **配置前提（并入 §3.2 启动校验）**：有效 `FailedRetryCount > 0`（0/负值使扫描恒不选中新行 → 事务消息没有首次投递，「禁用重试」在此模式下不可用）；`FailedRetryIntervalSeconds` 有效正值；新增框架 option `FallbackWindowLookbackSeconds ≥ 30s`（默认 240，透传 CAP 同名选项）；全部以**最终生效值**校验（与传给 `AddCap` 的同一实例）；
 - **不依赖 flush**：适配器从不调用 `FlushAsync`/`CommitAsync`（守护）。
 
 **各退出路径**：
@@ -260,6 +274,15 @@ public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolvePa
 - memory.md 与支持表更新（入口、归档、证据、限制：补偿并发/进程崩溃恢复不承诺、`Executing` 残留为已知限制）；
 - 事务 API 保证按 §3.4.3 + §1.8 修正；不承诺 exactly-once/2PC/跨库原子。
 
+### 3.8 迁移与行为取舍（必须进入迁移说明与支持表）
+
+扫描投递是一项**产品行为取舍**，不能只写「原子发布已支持」，以下变化须在迁移说明与支持表逐条突出：
+
+1. 受管事务内的**即时消息**：从「提交后立即投递」变为「提交后经扫描等待投递」（名义量级 240–300s；`FallbackWindowLookbackSeconds`/`FailedRetryIntervalSeconds` 可调小，最小 lookback 30s，见 §3.2/§3.4.2）；
+2. 受管事务内的 **`PublishDelayAsync`**：确定性拒绝（CAP 事务分支延迟调度限制，M-06）；窗口外延迟保持 CAP 原生行为；
+3. **「禁用重试」语义变化**：`FailedRetryCount = 0` 在扫描模式下会关闭事务消息首次投递，配置校验直接拒绝——不能用它关闭重试；
+4. 支持表按**组合**声明：PG+RabbitMQ 为第一组待验证组合（S3 真实 DB/broker 证据），不推导 SqlServer/Kafka/trim/NativeAOT；补偿并发与 `Executing` 崩溃恢复不承诺。
+
 ---
 
 ## 4. 实施切片
@@ -267,13 +290,13 @@ public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolvePa
 | 切片 | 内容 | 验收映射 |
 | --- | --- | --- |
 | S0（本设计 rev.2 已完成） | CAP 10.0.1 源码核实（§1.8 M-01…M-07）；参与判定与协议定案 | Q6：架构未知量在实施前收敛（运行时证据由 S3 提供） |
-| S1 入口收口 | 扩展唯一入口；模块/内存件/死桥归档；配置校验落地；启动校验（registry + Required 集合 + 仓库可解析）；模块清单产物验证；测试项目改造/归档 | 验收 1、5；D140-04（启动部分） |
+| S1 入口收口 | 扩展唯一入口；模块/内存件/死桥归档；配置校验落地（含**扫描模式配置组**：最终生效 `FailedRetryCount`/`FailedRetryIntervalSeconds`/`FallbackWindowLookbackSeconds` 校验与新增 lookback option 透传）；启动校验（registry + Required 集合 + 仓库可解析）；模块清单产物验证；测试项目改造/归档 | 验收 1、5；D140-04（启动部分）；R2-D140-01 |
 | S2 持久化与补偿真实性 | 实体配置类 + `AddCrestCapPersistence` + 文档；注册前执行器校验；顺序补偿链测试（成功/重试/Failed/缺失）；**fixture 消费真实生成产物**；PG Testcontainers | 验收 2；D140-04（运行部分） |
-| S3 原子发布 | 参与判定 API + 集成借用适配 + 守护 CapTransaction + 身份绑定；**故障矩阵**（见下）；PG + RabbitMQ Testcontainers（可调小 lookback 加速证据） | 验收 2/3；D140-01/02/03 |
+| S3 原子发布 | 参与判定 API + 集成借用适配 + 守护 CapTransaction + 身份绑定；**故障矩阵**（见下，含扫描配置负例/正例）；PG + RabbitMQ Testcontainers（可调小 lookback 加速证据；本地经 podman socket 可跑） | 验收 2/3；D140-01/02/03；R2-D140-01 |
 | S4 声明与收尾 | 支持表、文档修正、memory.md、issues log | 验收 4/5 |
 
 **S3 故障矩阵（每项真实 DB/broker + 可控故障）**：
-1. 正常 commit：提交前 broker 无消息；提交后经 lookback 窗口内投递；行 Succeeded/清理；
+1. 正常 commit：提交前 broker 无消息；提交后在**有界宽松超时**内投递（名义扫描等待，见 §3.4.2，不按精确区间断言）；行 Succeeded/清理；
 2. 回滚/放弃：零行、零消息；
 3. Unknown（提交派发故障注入）：行存在 ⇔ 提交事实；扫描按事实投递；不宣称；
 4. 提交确认 + 清理失败：行投递正常；
@@ -282,8 +305,9 @@ public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolvePa
 7. 结束后普通发布：无窗口路径正常；
 8. 窗口内延迟发布：确定性拒绝、零副作用；窗口外延迟保持原生；
 9. 重启恢复：broker 停止期间提交 → 重启后扫描投递（M-05 条件）；
-10. 拒绝矩阵全量：对 §3.4.1 每个 Refused 情形断言无行、无消息、无 publisher 状态残留；
-11. 生命周期调用计数：适配器对借用句柄的 Commit/Rollback/Dispose 调用次数 = 0。
+10. 拒绝矩阵全量：对 §3.4.1 每个 Refused/适配器拒绝情形断言无行、无消息、无 publisher 状态残留；
+11. 生命周期调用计数：适配器对借用句柄的 Commit/Rollback/Dispose 调用次数 = 0；
+12. **扫描配置约束**：`FailedRetryCount` 0/负值、`FailedRetryIntervalSeconds` ≤0、`FallbackWindowLookbackSeconds` <30s → 启动失败（负例，且不产出任何可发布装配）；最低允许配置（count=1、lookback=30s、小间隔）仍完成事务消息**首次投递**（正例）。
 
 ---
 

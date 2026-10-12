@@ -1,8 +1,10 @@
 # CrestCreates platform status — 2026-10-10
 
-Baseline: master `1fcf1ab8` (PR #138 merge: #137 design + plans; PR #136/#135 merged
-before). Remote verified 2026-10-10. In flight: #137 UnitOfWork slice 1 (kernel/state,
-this branch; PR in review). Workflow: GitHub PR flow, never auto-merge; replaced files
+Baseline: master `1dc4a9cc` (PR #139 merge: #137 slices 1-5 + three review-fix rounds;
+PR #138/#136/#135 merged before). Remote verified 2026-10-12. In flight: #125 CAP entry
+consolidation (design rev.3 under review, PR #140). CI: all GitHub workflows manually
+disabled (development-phase local-first verification; Testcontainers suites runnable
+locally via podman socket). Workflow: GitHub PR flow, never auto-merge; replaced files
 archived to 99_RecycleBin, never deleted; never output credentials.
 
 ## Delivered capabilities (master)
