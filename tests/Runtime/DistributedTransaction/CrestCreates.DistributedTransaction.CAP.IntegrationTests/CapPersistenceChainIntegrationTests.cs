@@ -210,6 +210,42 @@ public class CapPersistenceChainIntegrationTests : IClassFixture<CapIntegrationF
         Assert.Contains("post-commit-boom", row!.ErrorDetails);
     }
 
+    [Fact]
+    public async Task Compensating_twice_in_same_uow_executes_once_and_stays_completed()
+    {
+        var transactionId = Guid.NewGuid();
+        await RegisterAsync(transactionId);
+
+        using (var scope = _host.Services.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var compensator = scope.ServiceProvider.GetRequiredService<ITransactionCompensator>();
+            var executor = scope.ServiceProvider.GetRequiredService<PgTestCompensationExecutor>();
+
+            await manager.ExecuteAsync<object?>(async _ =>
+            {
+                await compensator.CompensateAsync(transactionId);
+                await compensator.CompensateAsync(transactionId); // 同一 UoW 第二次：不得重复执行
+                return null;
+            });
+
+            Assert.Equal(1, executor.Invocations.Count);
+        }
+
+        var row = await GetRowAsync(transactionId);
+        Assert.NotNull(row);
+        Assert.Equal(CompensationStatus.Completed, row!.Status);
+
+        using (var verify = _host.Services.CreateScope())
+        {
+            var repository = verify.ServiceProvider.GetRequiredService<IRepository<TransactionCompensation, Guid>>();
+            var pending = await repository.FindAsync(x =>
+                x.TransactionId == transactionId &&
+                (x.Status == CompensationStatus.Pending || x.Status == CompensationStatus.Retrying));
+            Assert.Empty(pending);
+        }
+    }
+
     // ── 辅助 ──
 
     private async Task RegisterAsync(Guid transactionId)

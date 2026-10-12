@@ -129,10 +129,13 @@ public sealed class EfCoreCapManagedTransactionProvider : ICapManagedTransaction
         }
 
         // 权威比较对象是 CAP **最终有效**的存储配置（所有 Configure/PostConfigure 之后），
-        // 而不是 Crest 输入快照——后续覆盖最终存储目标的注册同样会被此检查捕获。
+        // 且必须镜像 CAP 的实际消费优先级（v10.0.1 PostgreSqlOptions.CreateConnection：
+        // DataSource 存在时一律使用 DataSource，ConnectionString 被遮蔽）——后续任何覆盖
+        // 最终存储目标的注册（ConnectionString 或 DataSource）都会被此检查捕获。
         var effectiveStorage = _effectivePostgresStorage.Value;
-        var effectiveConnectionString = effectiveStorage.ConnectionString
-            ?? effectiveStorage.DataSource?.ConnectionString;
+        var effectiveConnectionString = effectiveStorage.DataSource is { } dataSource
+            ? dataSource.ConnectionString
+            : effectiveStorage.ConnectionString;
         if (string.IsNullOrWhiteSpace(effectiveConnectionString))
         {
             throw new CapPublishRefusalException(

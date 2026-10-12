@@ -162,6 +162,21 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
 
     public Task ResumeBrokerAsync() => _rabbit.StartAsync();
 
+    /// <summary>预热指定数据库上的 CAP 存储表（真实双库负例准备；用一次性宿主完成初始化）。</summary>
+    public async Task InitializeCapStorageAsync(string connectionString)
+    {
+        var host = await CreateHostAsync(connectionString, RabbitMqConnectionString);
+        try
+        {
+            await WaitForCapTablesAsync(connectionString, TimeSpan.FromSeconds(60));
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
     /// <summary>构建并启动一个真实 Host（UoW + EF 集成 + CAP 单入口）；调用方负责释放。</summary>
     public async Task<IHost> CreateHostAsync(
         string postgresConnectionString,
@@ -195,6 +210,9 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
                     sp.GetRequiredService<CapIntegrationDbContext>(),
                     sp.GetRequiredService<UnitOfWorkChainNode>()));
                 services.AddSingleton<IDomainEventPublisher>(new NoOpDomainEventPublisher());
+                services.AddSingleton<MutableCurrentTenant>();
+                services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(sp =>
+                    sp.GetRequiredService<MutableCurrentTenant>());
                 services.AddUnitOfWork();
                 services.AddEfCoreUnitOfWork();
                 services.AddCrestCapEfCoreIntegration();
@@ -343,6 +361,15 @@ public sealed class ControllableEfUnitOfWork : IUnitOfWork, IUnitOfWorkManagedRe
 
     public bool FailCleanupAfterCommit { get; set; }
 
+    /// <summary>提交派发阶段故障注入：提交调用被触达但派发失败（不产生已提交事实）。</summary>
+    public bool FailCommitDispatch { get; set; }
+
+    /// <summary>提交已落到数据库但确认丢失（提交调用成功、随后抛非清理型异常）。</summary>
+    public bool CommitThenFailConfirmation { get; set; }
+
+    /// <summary>提交派发调用计数（证明故障发生在提交阶段而非 flush 阶段）。</summary>
+    public int CommitDispatchAttempts { get; private set; }
+
     public string? ManagedResourceKind => typeof(CapIntegrationDbContext).FullName;
 
     public string? ManagedResourceConnectionString => _db.Database.GetConnectionString();
@@ -359,9 +386,24 @@ public sealed class ControllableEfUnitOfWork : IUnitOfWork, IUnitOfWorkManagedRe
 
     public async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
     {
+        CommitDispatchAttempts++;
+
+        if (FailCommitDispatch)
+        {
+            // 提交派发期失败：未产生已提交事实（内核应记 Unknown 并尝试终结）。
+            throw new InvalidOperationException("injected-commit-dispatch-failure");
+        }
+
         var transaction = _db.Database.CurrentTransaction
             ?? throw new InvalidOperationException("No transaction has been started");
         await transaction.CommitAsync(cancellationToken);
+
+        if (CommitThenFailConfirmation)
+        {
+            // 数据库已提交但确认响应丢失：内核应保持 Unknown（不被回滚尝试改写），
+            // 消息行/业务行按数据库事实存在并可经扫描恢复投递。
+            throw new InvalidOperationException("injected-confirmation-lost");
+        }
 
         if (FailCleanupAfterCommit)
         {
@@ -408,4 +450,19 @@ public sealed class ControllableEfUnitOfWork : IUnitOfWork, IUnitOfWorkManagedRe
     public void Dispose()
     {
     }
+}
+
+
+/// <summary>可变租户（ResourceMismatch 拒绝用例；默认 null=host）。</summary>
+public sealed class MutableCurrentTenant : CrestCreates.MultiTenancy.Abstract.ICurrentTenant
+{
+    public string? Id { get; set; }
+
+    public CrestCreates.MultiTenancy.Abstract.ITenantInfo? Tenant => null;
+
+    public Task<IDisposable> ChangeAsync(string tenantId) => throw new NotSupportedException();
+
+    public IDisposable Change(CrestCreates.MultiTenancy.Abstract.ITenantInfo tenant) => throw new NotSupportedException();
+
+    public void SetTenantId(string tenantId) => Id = tenantId;
 }

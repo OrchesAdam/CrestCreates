@@ -29,9 +29,12 @@ public class CapFaultMatrixExtensionsTests : IClassFixture<CapIntegrationFixture
     }
 
     [Fact]
-    public async Task Unknown_commit_failure_leaves_no_row_and_no_delivery()
+    public async Task Flush_stage_failure_after_publish_records_unknown_without_rows()
     {
-        var topic = NewTopic("unknown");
+        // 停库使 flush 先于 commit 失败（本用例覆盖的是 flush+终结阶段失败；
+        // 真正进入提交派发的 Unknown 证据见 CapRound2FixTests.Commit_dispatch_failure_* 与
+        // Confirmation_lost_after_commit_recovers_by_database_fact）。
+        var topic = NewTopic("flush-stage-unknown");
         var probeId = Guid.NewGuid();
 
         using var scope = _fixture.Host.Services.CreateScope();

@@ -66,6 +66,8 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
         Expression<Func<TEntity, bool>> predicate,
         CancellationToken cancellationToken = default)
     {
+        var compiled = predicate.Compile();
+
         // 本地优先：同一 UoW 内先 Add 后查询必须看到未落库的 Added 行（且复用同一实例）。
         var localMatch = LocallyTracked().AsQueryable().FirstOrDefault(predicate);
         if (localMatch is not null)
@@ -73,33 +75,67 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
             return localMatch;
         }
 
-        return await Set.FirstOrDefaultAsync(predicate, cancellationToken).ConfigureAwait(false);
+        // SQL 按数据库旧值筛选，却可能返回 identity map 中已修改的同键实例：对最终实例复核谓词。
+        var candidate = await Set.FirstOrDefaultAsync(predicate, cancellationToken).ConfigureAwait(false);
+        return candidate is not null && compiled(candidate) ? candidate : null;
     }
 
     public async Task<bool> AnyAsync(
         Expression<Func<TEntity, bool>> predicate,
         CancellationToken cancellationToken = default)
-        => LocallyTracked().AsQueryable().Any(predicate)
-           || await Set.AnyAsync(predicate, cancellationToken).ConfigureAwait(false);
+    {
+        var compiled = predicate.Compile();
+        if (LocallyTracked().Any(compiled))
+        {
+            return true;
+        }
+
+        // 数据库命中的 id：无本地跟踪实例时按数据库事实计入；有跟踪实例时以实例当前状态复核。
+        var candidateIds = await Set.Where(predicate).Select(entity => entity.Id)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        return candidateIds.Any(id =>
+        {
+            var local = FindTrackedLocal(id);
+            return local is null || compiled(local);
+        });
+    }
 
     public async Task<int> CountAsync(
         Expression<Func<TEntity, bool>>? predicate = null,
         CancellationToken cancellationToken = default)
     {
-        var fromDatabase = predicate is null
-            ? await Set.CountAsync(cancellationToken).ConfigureAwait(false)
-            : await Set.CountAsync(predicate, cancellationToken).ConfigureAwait(false);
-        return fromDatabase + PendingLocalAdds(predicate);
+        if (predicate is null)
+        {
+            return await Set.CountAsync(cancellationToken).ConfigureAwait(false) + PendingLocalAdds(null);
+        }
+
+        return await CountTrackedAwareAsync(predicate, cancellationToken).ConfigureAwait(false) + PendingLocalAdds(predicate);
     }
 
     public async Task<long> LongCountAsync(
         Expression<Func<TEntity, bool>>? predicate = null,
         CancellationToken cancellationToken = default)
     {
-        var fromDatabase = predicate is null
-            ? await Set.LongCountAsync(cancellationToken).ConfigureAwait(false)
-            : await Set.LongCountAsync(predicate, cancellationToken).ConfigureAwait(false);
-        return fromDatabase + PendingLocalAdds(predicate);
+        if (predicate is null)
+        {
+            return await Set.LongCountAsync(cancellationToken).ConfigureAwait(false) + PendingLocalAdds(null);
+        }
+
+        return await CountTrackedAwareAsync(predicate, cancellationToken).ConfigureAwait(false) + PendingLocalAdds(predicate);
+    }
+
+    private async Task<int> CountTrackedAwareAsync(
+        Expression<Func<TEntity, bool>> predicate,
+        CancellationToken cancellationToken)
+    {
+        var compiled = predicate.Compile();
+        var candidateIds = await Set.Where(predicate).Select(entity => entity.Id)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        return candidateIds.Count(id =>
+        {
+            var local = FindTrackedLocal(id);
+            return local is null || compiled(local);
+        });
     }
 
     private int PendingLocalAdds(Expression<Func<TEntity, bool>>? predicate)
@@ -133,6 +169,14 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
         {
             var local = FindTrackedLocal(tracked.Id);
             var chosen = local ?? tracked;
+
+            // SQL 旧快照命中的行，其本地同键实例可能已不满足谓词（如已变为 Completed）：
+            // 对最终选中的身份实例复核谓词，避免把已不匹配的本地实体带回结果。
+            if (predicate is not null && !predicate(chosen))
+            {
+                continue;
+            }
+
             if (seenIds.Add(chosen.Id))
             {
                 result.Add(chosen);

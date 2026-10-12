@@ -32,4 +32,16 @@
 | R1-CAP-04 [P2] RabbitMQ URI 遗漏 TLS 与 vhost 解码 | 解析器补：amqps → 默认 5671 + `ConnectionFactoryOptions` 启用 TLS（ServerName=host）；amqp 无端口 → 5672；vhost 按 AMQP URI 语义取第一个 `/` 之后内容并 `UnescapeDataString`（`%2F` → `/`）；单元测试 6 条（amqp/amqps/显式端口/编码 vhost/纯主机名原生语义） |
 | R1-CAP-05 [P2] S3 矩阵未补齐 | 新增集成用例：Unknown 提交故障（停库 → Unknown + 无行无投递）、确认提交 + 清理失败（真实 PG 提交 + 注入清理异常 → Failed+Committed、行照常投递）、未完成退出放弃（零行零投递）、窗口外状态恢复（同一 publisher 绑定无残留 + 立即投递）、拒绝矩阵全量（未 Start/非事务/终态）、最低配置（FailedRetryCount=1）首次投递、broker 离线→扫描可检查失败→恢复后投递；矩阵 11 原生生命周期计数以守护事务测试（IVT）覆盖 |
 
+
+## 实现复审修复轮（第二轮，2026-10-12，R2-CAP-01…03）
+
+对照 `docs/review/2026-10-12-pr-140-cap-implementation-review-round2.md`：
+
+| 审查项 | 修复 |
+| --- | --- |
+| R2-CAP-01 [P1] DataSource 被 ConnectionString 遮蔽 | Provider 改为**镜像 CAP 实际消费优先级**（v10.0.1 `PostgreSqlOptions.CreateConnection`：DataSource 存在时一律使用 DataSource）：有效目标 = `DataSource.ConnectionString ?? ConnectionString`，再与借用活连接规范字段比较。**两个正式集成负例**：`PostConfigure<PostgreSqlOptions>` 覆盖 ConnectionString / DataSource 为 B 库 → 发布前 `StorageIdentityMismatch`、A/B 双库零新增行、publisher 上下文无残留。（修正上轮"已有最终覆盖负例"的声称——当时仅 ConnectionString 路径有未入正式测试的规划，本轮补齐为真实用例） |
+| R2-CAP-02 [P1] 合并跟踪结果遗漏谓词 | `MergeLocalFirst` 对最终选中身份实例**复核谓词**；`FirstOrDefaultAsync` 对 SQL 旧快照返回的跟踪实例复核；`AnyAsync`/`CountAsync`/`LongCountAsync` 改为「本地优先 + 数据库候选 id 按跟踪实例当前状态复核」的一致语义。回归：同 UoW 连续两次 `CompensateAsync`（真实 PG）执行器调用恰 1 次、状态 Completed、跨 scope Pending 集合为空 |
+| R2-CAP-03 [P2] Unknown 未进入提交派发阶段 | flush 阶段用例更名 `Flush_stage_failure_after_publish_records_unknown_without_rows`（准确表述）；新增提交阶段注入：`Commit_dispatch_failure_records_unknown_without_commit_fact`（派发失败、计数=1、无提交事实、零行零投递）与 `Confirmation_lost_after_commit_recovers_by_database_fact`（真实提交+确认丢失 → Unknown 保持、行与业务行一致、按数据库事实扫描恢复投递）；broker 用例补「提交期离线→恢复」变体；拒绝矩阵补 `ResourceMismatch`（窗口内切租户，真实宿主）与 `NoTransactionAssociation`（无受管资源曝光的 owner，集成级）；生命周期计数以 `IRelationalTransactionFactory` 装饰实现（正式绑定路径：Commit=1、Rollback=0、Dispose=1；注：EF Core 10 拦截器已无 Dispose 事件，故用工厂装饰，见实现注释）|
+| 说明（Released 拒绝） | 「已释放 owner 帧可见」在公开 API 下不可构造（释放即恢复环境）；该拒绝分支由内核 `EvaluateParticipation` 覆盖并随三值判定单测保护，不在集成层强行构造 |
+
 （后续实施发现问题将追加到本表。）
