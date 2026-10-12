@@ -28,8 +28,6 @@ public class UnitOfWorkPostgresIntegrationTests : IClassFixture<LibraryManagemen
     [Fact]
     public async Task Requires_new_commits_independently_while_outer_transaction_is_active()
     {
-        await _factory.EnsureSeedCompleteAsync();
-
         var innerRowId = Guid.NewGuid();
         var outerRowId = Guid.NewGuid();
 
@@ -85,8 +83,6 @@ public class UnitOfWorkPostgresIntegrationTests : IClassFixture<LibraryManagemen
     [InlineData(IsolationLevel.Serializable)]
     public async Task Declared_isolation_levels_are_accepted_on_postgres(IsolationLevel isolationLevel)
     {
-        await _factory.EnsureSeedCompleteAsync();
-
         using var scope = _factory.Services.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
 

@@ -53,5 +53,6 @@
 | --- | --- | --- | --- |
 | I-16 | 流程（CI） | 新增 CI 步骤时 `name:` 值内含「`: `」（冒号+空格）会使 YAML 纯量截断、整个 workflow 解析失败（run 显示 0 jobs）且不产生明确错误信息 | 已移除步骤名中的冒号并本地 YAML 解析校验；后续在 CI 工作流中避免步骤名含冒号 |
 | I-17 | 测试健壮性（CI 首跑暴露） | ORM 套件首次在 CI 执行时，基于「固定 `Task.Delay` + 定时器 `CancelAfter`」的 deadline 用例在负载下时序抖动（取消未在窗口内触发）；本地从未暴露（该套件此前未接入 CI） | 时序敏感用例改为**有界等待条件**（轮询直到 token 取消，超时 10s 后再断言；断言不变，判别力保留）；本地 3 轮复跑全绿 |
+| I-18 | 遗留（CI 接线，预存问题，非本项引入） | 既有 LibraryManagement IntegrationTests 套件首次接入 CI 后整体失败：`EnsureSeedCompleteAsync` 中 OpenIddict 客户端 seeding 报 `42P01 relation "OpenIddictScopes" does not exist`（栈：`OpenIddictEntityFrameworkCoreScopeStore.FindByNameAsync`）；该套件此前从未接入任何 workflow，属其自身 bootstrap/OpenIddict schema 问题 | CI 暂以过滤方式仅执行 UoW PG 验收类（证据真实执行）；完整套件待修复后再整体接入 | 交 CI/集成测试轨道修复 seeding（不需要 #137 范围）；修复后把 `ci.yml`/`full-validation.yml` 的过滤放开为整套件 |
 
 （后续切片发现问题将追加到本表。）
