@@ -60,4 +60,13 @@
 - 上轮完整套件复跑中出现 broker 恢复用例超时（首跑 33/34，独立复跑通过）。本轮将其与「提交期离线」变体一并重构为**独立数据库 + 专用宿主（重试预算 10）**，消除共享宿主扫描与重试预算的交叉干扰；不得以「某次完整套件全绿」作为时序稳定性的隐含声明，时序波动记录保留在本表。
 - 生命周期计数为「按事务实例每操作去重后的窗口计数」（含后台首周期预热重置），是既有证据的准确边界，不声称逐次原生调用审计。
 
+
+## 实现复审修复轮（第四轮，2026-10-12，R4-CAP-01）
+
+对照 `docs/review/2026-10-12-pr-140-cap-implementation-review-round4.md`：
+
+| 审查项 | 修复 |
+| --- | --- |
+| R4-CAP-01 [P2] `DeleteAsync(predicate)` 仍按数据库旧值选行 | 删除谓词复用 `QueryFinalViewAsync`（与读取同一最终视图）：同 UoW 新增（未 flush）的 Pending 行可被删除（Added → RemoveRange 转 Detached、不产生删除语句）；本地已变为 Completed 的行不被 Pending/Retrying 谓词误删；与最终视图一致的 Completed 谓词可正常删除。回归（真实 PG）：`Delete_predicate_matches_locally_added_rows`（漏删探针：deleted=1、提交后行不存在）与 `Delete_predicate_protects_locally_mutated_rows`（误删探针：过期谓词 deleted=0、当前谓词 deleted=1、提交后行不存在）。**判别验证**：临时还原旧实现（`Set.Where` 数据库选行）→ 两条回归 **2/2 失败**；恢复修复后通过 |
+
 （后续实施发现问题将追加到本表。）

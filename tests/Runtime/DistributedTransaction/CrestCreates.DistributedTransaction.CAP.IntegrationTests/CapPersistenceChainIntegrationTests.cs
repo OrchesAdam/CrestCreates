@@ -324,6 +324,77 @@ public class CapPersistenceChainIntegrationTests : IClassFixture<CapIntegrationF
         }
     }
 
+    [Fact]
+    public async Task Delete_predicate_matches_locally_added_rows()
+    {
+        var transactionId = Guid.NewGuid();
+
+        using (var scope = _host.Services.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var repository = scope.ServiceProvider.GetRequiredService<IRepository<TransactionCompensation, Guid>>();
+
+            await manager.ExecuteAsync<object?>(async _ =>
+            {
+                await repository.AddAsync(new TransactionCompensation
+                {
+                    Id = Guid.NewGuid(),
+                    TransactionId = transactionId,
+                    ParticipantName = PgTestCompensationExecutor.ExecutorName,
+                    Status = CompensationStatus.Pending,
+                    MaxRetries = 3,
+                    CreatedAt = DateTime.UtcNow
+                });
+
+                // 同一 UoW 新增（未 flush）的 Pending 记录必须能被谓词删除（漏删探针）。
+                var deleted = await repository.DeleteAsync(x =>
+                    x.TransactionId == transactionId &&
+                    (x.Status == CompensationStatus.Pending || x.Status == CompensationStatus.Retrying));
+                Assert.Equal(1, deleted);
+                Assert.Equal(0, await repository.CountAsync(x => x.TransactionId == transactionId));
+                return null;
+            });
+        }
+
+        // 从未落库：提交后行不存在。
+        Assert.Null(await GetRowAsync(transactionId));
+    }
+
+    [Fact]
+    public async Task Delete_predicate_protects_locally_mutated_rows()
+    {
+        var transactionId = Guid.NewGuid();
+        await SeedPendingRowAsync(transactionId, PgTestCompensationExecutor.ExecutorName, maxRetries: 3);
+
+        using (var scope = _host.Services.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var repository = scope.ServiceProvider.GetRequiredService<IRepository<TransactionCompensation, Guid>>();
+
+            await manager.ExecuteAsync<object?>(async _ =>
+            {
+                var row = await repository.FirstOrDefaultAsync(x => x.TransactionId == transactionId);
+                Assert.NotNull(row);
+                row!.Status = CompensationStatus.Completed; // 本地变更（未 flush）
+
+                // 误删探针：Pending/Retrying 谓词不得删除本地已 Completed 的记录。
+                var deletedByStalePredicate = await repository.DeleteAsync(x =>
+                    x.TransactionId == transactionId &&
+                    (x.Status == CompensationStatus.Pending || x.Status == CompensationStatus.Retrying));
+                Assert.Equal(0, deletedByStalePredicate);
+
+                // 与最终视图一致的谓词可以删除。
+                var deletedByCurrentPredicate = await repository.DeleteAsync(x =>
+                    x.TransactionId == transactionId && x.Status == CompensationStatus.Completed);
+                Assert.Equal(1, deletedByCurrentPredicate);
+                return null;
+            });
+        }
+
+        // 提交后行确实不存在（由与最终视图一致的谓词删除）。
+        Assert.Null(await GetRowAsync(transactionId));
+    }
+
     // ── 辅助 ──
 
     private async Task RegisterAsync(Guid transactionId)

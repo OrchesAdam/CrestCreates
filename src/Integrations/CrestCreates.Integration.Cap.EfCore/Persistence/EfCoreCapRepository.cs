@@ -234,7 +234,10 @@ public sealed class EfCoreCapRepository<TEntity, TKey> : IRepository<TEntity, TK
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(predicate);
-        var matches = await Set.Where(predicate).ToListAsync(cancellationToken).ConfigureAwait(false);
+
+        // 与读取共用同一最终视图：同 UoW 新增的行可被删除；本地已不匹配/待删除的行不得误删。
+        // （Added 实体经 RemoveRange 转为 Detached，不会产生数据库删除语句。）
+        var matches = await QueryFinalViewAsync(predicate, cancellationToken).ConfigureAwait(false);
         Set.RemoveRange(matches);
         return matches.Count;
     }
