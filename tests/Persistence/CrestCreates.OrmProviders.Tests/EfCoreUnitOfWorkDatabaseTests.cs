@@ -25,12 +25,17 @@ namespace CrestCreates.OrmProviders.Tests;
 /// <summary>
 /// 唯一装配路径在真实数据库（SQLite 文件库）上的生命周期验证：
 /// 提交持久化、回滚丢弃、requiresNew 将预注入业务依赖绑定到内层 UoW、
-/// 嵌套 ExecuteAsync 正式用法、提交后事件顺序。
+/// 嵌套内核执行、提交后事件顺序。
 /// </summary>
 public class EfCoreUnitOfWorkDatabaseTests : IDisposable
 {
     private readonly string _databasePath =
         Path.Combine(Path.GetTempPath(), $"crest-uow-{Guid.NewGuid():N}.db");
+
+    private static readonly UnitOfWorkOptions RequiresNewOptions = new()
+    {
+        Propagation = UnitOfWorkPropagation.RequiresNew
+    };
 
     public void Dispose()
     {
@@ -55,13 +60,13 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
             var dbContext = scope.ServiceProvider.GetRequiredService<UowTestDbContext>();
 
-            using (var unitOfWorkScope = manager.BeginScope())
+            await using (var unitOfWorkScope = manager.BeginScope())
             {
-                await unitOfWorkScope.UnitOfWork.BeginTransactionAsync();
+                await unitOfWorkScope.StartAsync();
                 var entity = new UowTestEntity(Guid.NewGuid(), "committed");
                 entityId = entity.Id;
                 dbContext.Entities.Add(entity);
-                await unitOfWorkScope.UnitOfWork.CommitTransactionAsync();
+                await unitOfWorkScope.CompleteAsync();
             }
 
             manager.CurrentOrNull.Should().BeNull();
@@ -85,14 +90,14 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
             var dbContext = scope.ServiceProvider.GetRequiredService<UowTestDbContext>();
 
-            using (var unitOfWorkScope = manager.BeginScope())
+            await using (var unitOfWorkScope = manager.BeginScope())
             {
-                await unitOfWorkScope.UnitOfWork.BeginTransactionAsync();
+                await unitOfWorkScope.StartAsync();
                 var entity = new UowTestEntity(Guid.NewGuid(), "rolled-back");
                 entityId = entity.Id;
                 dbContext.Entities.Add(entity);
                 await dbContext.SaveChangesAsync();
-                await unitOfWorkScope.UnitOfWork.RollbackTransactionAsync();
+                await unitOfWorkScope.RollbackAsync();
             }
         }
 
@@ -121,34 +126,35 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var preInjectedContext = scope.ServiceProvider.GetRequiredService<IDataBaseContext>();
             var parentNativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
 
-            using (var outerScope = manager.BeginScope())
+            await using (var outerScope = manager.BeginScope())
             {
                 var outerUnitOfWork = outerScope.UnitOfWork;
 
-                using (var innerScope = manager.BeginScope(requiresNew: true))
+                await using (var innerScope = manager.BeginScope(RequiresNewOptions))
                 {
+                    await innerScope.StartAsync();
                     var innerNativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
                     innerNativeContext.Should().NotBeSameAs(parentNativeContext,
                         "the pre-injected dependency must follow the current unit of work during requiresNew");
 
-                    await innerScope.UnitOfWork.BeginTransactionAsync();
                     var innerEntity = new UowTestEntity(Guid.NewGuid(), "inner");
                     innerEntityId = innerEntity.Id;
                     await preInjectedContext.Set<UowTestEntity>().AddAsync(innerEntity);
-                    await innerScope.UnitOfWork.CommitTransactionAsync();
+                    await innerScope.CompleteAsync();
                 }
 
                 ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(parentNativeContext,
                     "the ambient context must be restored after the inner scope");
 
-                await outerUnitOfWork.BeginTransactionAsync();
+                // SQLite 单写者：外层写事务在内层完成后才开启（按顺序证明隔离语义）。
+                await outerScope.StartAsync();
                 var outerEntity = new UowTestEntity(Guid.NewGuid(), "outer");
                 outerEntityId = outerEntity.Id;
                 await preInjectedContext.Set<UowTestEntity>().AddAsync(outerEntity);
 
                 manager.Current.Should().BeSameAs(outerUnitOfWork,
                     "the inner scope must not replace or close the outer unit of work");
-                await outerUnitOfWork.RollbackTransactionAsync();
+                await outerScope.RollbackAsync();
             }
         }
 
@@ -163,7 +169,7 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
     }
 
     [Fact]
-    public async Task Nested_execute_async_commits_inner_and_restores_parent()
+    public async Task Nested_requires_new_execution_commits_inner_and_restores_parent()
     {
         var (provider, _) = BuildProvider();
         var innerEntityId = Guid.Empty;
@@ -174,24 +180,27 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var preInjectedContext = scope.ServiceProvider.GetRequiredService<IDataBaseContext>();
             var parentNativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
 
-            using (var outerScope = manager.BeginScope())
+            await using (var outerScope = manager.BeginScope())
             {
-                var committed = await manager.ExecuteAsync(async _ =>
-                {
-                    ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().NotBeSameAs(
-                        parentNativeContext,
-                        "nested ExecuteAsync must isolate the ambient context for the callback");
-                    var innerEntity = new UowTestEntity(Guid.NewGuid(), "execute-async-inner");
-                    innerEntityId = innerEntity.Id;
-                    await preInjectedContext.Set<UowTestEntity>().AddAsync(innerEntity);
-                    return true;
-                });
+                // SQLite 单写者：外层不先开启写事务，内层 child 连接独立提交。
+                var committed = await manager.ExecuteAsync(
+                    async _ =>
+                    {
+                        ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().NotBeSameAs(
+                            parentNativeContext,
+                            "nested requiresNew execution must isolate the ambient context for the callback");
+                        var innerEntity = new UowTestEntity(Guid.NewGuid(), "execute-async-inner");
+                        innerEntityId = innerEntity.Id;
+                        await preInjectedContext.Set<UowTestEntity>().AddAsync(innerEntity);
+                        return true;
+                    },
+                    RequiresNewOptions);
 
                 committed.Should().BeTrue();
                 manager.Current.Should().BeSameAs(outerScope.UnitOfWork,
-                    "the nested ExecuteAsync scope must restore the parent unit of work");
+                    "the nested scope must restore the parent unit of work");
                 ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(parentNativeContext,
-                    "the nested ExecuteAsync scope must restore the parent ambient context");
+                    "the nested scope must restore the parent ambient context");
             }
 
             manager.CurrentOrNull.Should().BeNull();
@@ -201,7 +210,7 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
         {
             var verifyContext = verifyScope.ServiceProvider.GetRequiredService<UowTestDbContext>();
             (await verifyContext.Entities.FindAsync(innerEntityId)).Should().NotBeNull(
-                "the nested ExecuteAsync unit of work must commit independently");
+                "the nested unit of work must commit independently");
         }
     }
 
@@ -219,25 +228,26 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var preInjectedContext = scope.ServiceProvider.GetRequiredService<IDataBaseContext>();
             var parentNativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
 
-            using (var outerScope = manager.BeginScope())
+            await using (var outerScope = manager.BeginScope())
             {
-                using (var level1Scope = manager.BeginScope(requiresNew: true))
+                // SQLite 单写者：各层写事务不重叠开启，逐层构造与恢复仍被验证。
+                await using (var level1Scope = manager.BeginScope(RequiresNewOptions))
                 {
                     var level1NativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
                     level1NativeContext.Should().NotBeSameAs(parentNativeContext,
                         "the first isolated level must use its own context");
 
-                    using (var level2Scope = manager.BeginScope(requiresNew: true))
+                    await using (var level2Scope = manager.BeginScope(RequiresNewOptions))
                     {
+                        await level2Scope.StartAsync();
                         var level2NativeContext = (UowTestDbContext)preInjectedContext.GetNativeContext();
                         level2NativeContext.Should().NotBeSameAs(level1NativeContext,
                             "the second isolated level must use its own context");
 
-                        await level2Scope.UnitOfWork.BeginTransactionAsync();
                         var entity = new UowTestEntity(Guid.NewGuid(), "level2");
                         level2EntityId = entity.Id;
                         await preInjectedContext.Set<UowTestEntity>().AddAsync(entity);
-                        await level2Scope.UnitOfWork.CommitTransactionAsync();
+                        await level2Scope.CompleteAsync();
                     }
 
                     ((UowTestDbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(
@@ -273,22 +283,23 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
             var dbContext = scope.ServiceProvider.GetRequiredService<UowTestDbContext>();
 
-            using (var abandonedScope = manager.BeginScope())
+            await using (var abandonedScope = manager.BeginScope())
             {
-                await abandonedScope.UnitOfWork.BeginTransactionAsync();
+                await abandonedScope.StartAsync();
+                abandonedScope.State.Should().Be(UnitOfWorkState.Active);
             }
 
             manager.CurrentOrNull.Should().BeNull();
             dbContext.Database.CurrentTransaction.Should().BeNull(
                 "an abandoned scope must terminate its pending transaction immediately");
 
-            using (var nextScope = manager.BeginScope())
+            await using (var nextScope = manager.BeginScope())
             {
-                await nextScope.UnitOfWork.BeginTransactionAsync();
+                await nextScope.StartAsync();
                 var nextEntity = new UowTestEntity(Guid.NewGuid(), "after-abandon");
                 nextEntityId = nextEntity.Id;
                 dbContext.Entities.Add(nextEntity);
-                await nextScope.UnitOfWork.CommitTransactionAsync();
+                await nextScope.CompleteAsync();
             }
         }
 
@@ -333,17 +344,17 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var parentNativeContext = (DbContext)preInjectedContext.GetNativeContext();
             var repository = new EfCoreRepository<Tenant, Guid>(preInjectedContext);
 
-            using (var outerScope = manager.BeginScope())
+            await using (var outerScope = manager.BeginScope())
             {
-                using (var innerScope = manager.BeginScope(requiresNew: true))
+                await using (var innerScope = manager.BeginScope(RequiresNewOptions))
                 {
+                    await innerScope.StartAsync();
                     ((DbContext)preInjectedContext.GetNativeContext()).Should().NotBeSameAs(
                         parentNativeContext,
                         "the default framework DbContext must follow the current unit of work through the platform ambient mechanism");
 
-                    await innerScope.UnitOfWork.BeginTransactionAsync();
                     await repository.InsertAsync(new Tenant(tenantId, "Ambient Tenant"));
-                    await innerScope.UnitOfWork.CommitTransactionAsync();
+                    await innerScope.CompleteAsync();
                 }
 
                 ((DbContext)preInjectedContext.GetNativeContext()).Should().BeSameAs(
@@ -367,13 +378,13 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
             var injectionContext = rollbackScope.ServiceProvider.GetRequiredService<IDataBaseContext>();
             var repository = new EfCoreRepository<Tenant, Guid>(injectionContext);
 
-            using (var outerScope = manager.BeginScope())
+            await using (var outerScope = manager.BeginScope())
             {
-                using (var innerScope = manager.BeginScope(requiresNew: true))
+                await using (var innerScope = manager.BeginScope(RequiresNewOptions))
                 {
-                    await innerScope.UnitOfWork.BeginTransactionAsync();
+                    await innerScope.StartAsync();
                     await repository.InsertAsync(new Tenant(rollbackTenantId, "Rolled Back Tenant"));
-                    await innerScope.UnitOfWork.RollbackTransactionAsync();
+                    await innerScope.RollbackAsync();
                 }
             }
         }
@@ -404,13 +415,16 @@ public class EfCoreUnitOfWorkDatabaseTests : IDisposable
                 return await probeContext.Entities.AnyAsync(entity => entity.Name == "with-event");
             };
 
-            using (var unitOfWorkScope = manager.BeginScope())
+            await using (var unitOfWorkScope = manager.BeginScope())
             {
-                await unitOfWorkScope.UnitOfWork.BeginTransactionAsync();
+                await unitOfWorkScope.StartAsync();
                 var entity = new UowTestEntity(Guid.NewGuid(), "with-event");
                 entity.AddDomainEvent(new UowTestDomainEvent { OccurredOn = DateTime.UtcNow });
                 dbContext.Entities.Add(entity);
-                await unitOfWorkScope.UnitOfWork.CommitTransactionAsync();
+                await unitOfWorkScope.CompleteAsync();
+
+                unitOfWorkScope.TransactionOutcome.Should().Be(UnitOfWorkTransactionOutcome.Committed);
+                unitOfWorkScope.NotificationOutcome.Should().Be(UnitOfWorkNotificationOutcome.Succeeded);
             }
         }
 

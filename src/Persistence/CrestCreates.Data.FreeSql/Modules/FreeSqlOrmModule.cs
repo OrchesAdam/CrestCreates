@@ -56,7 +56,12 @@ namespace CrestCreates.Data.FreeSql.Modules
             services.AddUnitOfWorkProvider(
                 OrmProvider.FreeSql,
                 static sp => sp.GetRequiredService<FreeSqlUnitOfWork>(),
-                supportsRequiresNew: false);
+                supportsRequiresNew: false,
+                capabilities: new UnitOfWorkProviderCapabilities
+                {
+                    PromptTerminationOnAbandon = true,
+                    DiscardUncommittedOnAbandon = true
+                });
         }
     }
 }

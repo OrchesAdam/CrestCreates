@@ -62,22 +62,22 @@ public class UnitOfWorkEventTests
             return SaveChangesWithEventsAsync<TestEntity, Guid>(entities, cancellationToken);
         }
 
-        public override Task BeginTransactionAsync()
+        public override Task BeginTransactionAsync(CrestCreates.Domain.UnitOfWork.UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
         }
 
-        public override Task CommitTransactionAsync()
+        public override Task CommitTransactionAsync(CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
         }
 
-        public override Task RollbackTransactionAsync()
+        public override Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
         }
 
-        public override Task<int> SaveChangesAsync()
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(1);
         }

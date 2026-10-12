@@ -12,6 +12,7 @@
   <ItemGroup>
     <!-- 项目引用 -->
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="..\..\..\src\Framework\Infrastructure\CrestCreates.Aop\CrestCreates.Aop.csproj" />
     <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
     <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.FreeSql\CrestCreates.Data.FreeSql.csproj" />
     <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore.SqlServer\CrestCreates.Data.EFCore.SqlServer.csproj" />
@@ -31,6 +32,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="FreeSql.Provider.Sqlite" />
+    <PackageReference Include="Rougamo.Fody" />
     <PackageReference Include="coverlet.collector">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

@@ -62,7 +62,12 @@ namespace CrestCreates.Data.FreeSql.Extensions
             services.AddUnitOfWorkProvider(
                 OrmProvider.FreeSql,
                 static sp => sp.GetRequiredService<FreeSqlUnitOfWork>(),
-                supportsRequiresNew: false);
+                supportsRequiresNew: false,
+                capabilities: new UnitOfWorkProviderCapabilities
+                {
+                    PromptTerminationOnAbandon = true,
+                    DiscardUncommittedOnAbandon = true
+                });
 
             return services;
         }
@@ -98,7 +103,12 @@ namespace CrestCreates.Data.FreeSql.Extensions
             services.AddUnitOfWorkProvider(
                 OrmProvider.FreeSql,
                 static sp => sp.GetRequiredService<FreeSqlUnitOfWork>(),
-                supportsRequiresNew: false);
+                supportsRequiresNew: false,
+                capabilities: new UnitOfWorkProviderCapabilities
+                {
+                    PromptTerminationOnAbandon = true,
+                    DiscardUncommittedOnAbandon = true
+                });
 
             return services;
         }

@@ -20,10 +20,14 @@ namespace CrestCreates.Data.EFCore.Repositories
         where TId : IEquatable<TId>
     {
         private readonly IDataBaseContext _dbContext;
+        private readonly CrestCreates.Data.Abstractions.UnitOfWorkChainNode? _chainNode;
 
-        public EfCoreRepository(IDataBaseContext dbContext)
+        public EfCoreRepository(
+            IDataBaseContext dbContext,
+            CrestCreates.Data.Abstractions.UnitOfWorkChainNode? chainNode = null)
         {
             _dbContext = dbContext;
+            _chainNode = chainNode;
         }
 
         public override IQueryable<TEntity> GetQueryable()
@@ -226,7 +230,8 @@ namespace CrestCreates.Data.EFCore.Repositories
         {
             if (_dbContext.CurrentTransaction == null)
             {
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                using var linked = CrestCreates.Data.Abstractions.UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
+                await _dbContext.SaveChangesAsync(effective);
             }
         }
 

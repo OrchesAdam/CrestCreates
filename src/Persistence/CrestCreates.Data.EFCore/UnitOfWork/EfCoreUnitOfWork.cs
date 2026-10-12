@@ -1,18 +1,28 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Domain.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.Abstractions.UnitOfWorkBase;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Data.EFCore.UnitOfWork
 {
-    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkTransactionAbortable
+    /// <summary>
+    /// EF Core 工作单元：flush / commit / 提交后通知职责分离（内核负责顺序）。
+    /// </summary>
+    /// <remarks>
+    /// <c>CommitTransactionAsync</c> 只做数据库提交并释放句柄；flush（SaveChanges）与
+    /// 提交后通知（<see cref="IUnitOfWorkCommittedNotifier"/>）由内核按
+    /// 「校验→flush→commit（确认即记录）→通知→清理」调用。
+    /// </remarks>
+    public class EfCoreUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkAbandonable, IUnitOfWorkCommittedNotifier, IUnitOfWorkManagedResource
     {
         private readonly DbContext _dbContext;
         private IDbContextTransaction? _currentTransaction;
@@ -36,45 +46,78 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
                     $"The configured {nameof(IDataBaseContext)} does not wrap an Entity Framework Core {nameof(DbContext)}.");
         }
 
-        public override async Task BeginTransactionAsync()
+        public override async Task BeginTransactionAsync(
+            UnitOfWorkBeginOptions options,
+            CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(options);
+
             if (_currentTransaction != null)
             {
                 throw new InvalidOperationException("Transaction already in progress");
             }
 
-            _currentTransaction = await _dbContext.Database.BeginTransactionAsync();
+            _currentTransaction = options.IsolationLevel is { } isolationLevel
+                ? await _dbContext.Database.BeginTransactionAsync(isolationLevel, cancellationToken)
+                : await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         }
 
-        public override async Task CommitTransactionAsync()
+        /// <summary>
+        /// 数据库提交（不含 flush 与通知）；句柄在成功或失败后都恰好释放一次。
+        /// 提交派发期失败/响应丢失由内核判定为「提交结果未知」；
+        /// 提交**已确认**后的句柄清理失败作为次级诊断保留（<see cref="UnitOfWorkCommitCleanupFailureException"/>），
+        /// 不得改写为提交结果未知。
+        /// </summary>
+        public override async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
         {
+            if (_currentTransaction == null)
+            {
+                throw new InvalidOperationException("No transaction has been started");
+            }
+
+            var committed = false;
             try
             {
-                var entities = GetEntitiesWithDomainEvents();
-                await SaveChangesAsync();
-
-                if (_currentTransaction != null)
+                await _currentTransaction.CommitAsync(cancellationToken);
+                committed = true;
+            }
+            finally
+            {
+                if (committed)
                 {
-                    await _currentTransaction.CommitAsync();
-                    DisposeTransaction();
+                    try
+                    {
+                        DisposeTransaction();
+                    }
+                    catch (Exception cleanupException)
+                    {
+                        throw new UnitOfWorkCommitCleanupFailureException(
+                            "The database commit was confirmed, but releasing the transaction handle failed. " +
+                            "The committed fact is preserved; treat this as a cleanup failure, not an unknown commit outcome.",
+                            cleanupException);
+                    }
                 }
-
-                await PublishDomainEventsAsync(entities);
-            }
-            catch
-            {
-                await RollbackTransactionAsync();
-                throw;
+                else
+                {
+                    try
+                    {
+                        DisposeTransaction();
+                    }
+                    catch (Exception)
+                    {
+                        // 提交自身失败：保留根因，清理失败不再叠加。
+                    }
+                }
             }
         }
 
-        public override async Task RollbackTransactionAsync()
+        public override async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
             try
             {
                 if (_currentTransaction != null)
                 {
-                    await _currentTransaction.RollbackAsync();
+                    await _currentTransaction.RollbackAsync(cancellationToken);
                 }
             }
             finally
@@ -83,17 +126,32 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             }
         }
 
-        public override async Task<int> SaveChangesAsync()
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            return await _dbContext.SaveChangesAsync();
+            return _dbContext.SaveChangesAsync(cancellationToken);
         }
 
         public async Task<int> SaveChangesWithEventsAsync(CancellationToken cancellationToken = default)
         {
-            var entities = GetEntitiesWithDomainEvents();
-            var result = await SaveChangesAsync();
-            await PublishDomainEventsAsync(entities, cancellationToken);
+            var result = await SaveChangesAsync(cancellationToken);
+            await PublishCommittedNotificationsAsync(cancellationToken);
             return result;
+        }
+
+        /// <summary>
+        /// 提交后通知：发布待发域事件。失败不吞掉、不清空未成功发布的实体事件队列（清空条件 = 发布成功）。
+        /// </summary>
+        public async Task PublishCommittedNotificationsAsync(CancellationToken cancellationToken = default)
+        {
+            foreach (var entity in GetEntitiesWithDomainEvents())
+            {
+                foreach (var domainEvent in entity.DomainEvents.ToArray())
+                {
+                    await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
+                }
+
+                entity.ClearDomainEvents();
+            }
         }
 
         private List<IHasDomainEvents> GetEntitiesWithDomainEvents()
@@ -111,46 +169,6 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             return entities;
         }
 
-        private async Task PublishDomainEventsAsync(List<IHasDomainEvents> entities, CancellationToken cancellationToken = default)
-        {
-            foreach (var entity in entities)
-            {
-                foreach (var domainEvent in entity.DomainEvents)
-                {
-                    await PublishWithRetryAsync(domainEvent, cancellationToken);
-                }
-
-                entity.ClearDomainEvents();
-            }
-        }
-
-        private async Task PublishWithRetryAsync(IDomainEvent domainEvent, CancellationToken cancellationToken = default, int maxRetries = 3)
-        {
-            int retryCount = 0;
-            while (true)
-            {
-                try
-                {
-                    await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    retryCount++;
-                    if (retryCount >= maxRetries)
-                    {
-                        // 记录错误但不影响事务
-                        // 实际应用中应该使用日志系统
-                        Console.WriteLine($"Failed to publish event after {maxRetries} retries: {ex.Message}");
-                        break;
-                    }
-                    
-                    // 指数退避
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, retryCount)), cancellationToken);
-                }
-            }
-        }
-
         private void DisposeTransaction()
         {
             if (_currentTransaction != null)
@@ -160,24 +178,85 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             }
         }
 
-        /// <summary>
-        /// 逻辑工作单元的事务终结：scope 未完成退出时回滚并释放未提交事务，
-        /// 只终结事务句柄，不释放 DI 持有的上下文对象；可重复调用。
-        /// </summary>
-        public void AbortPendingTransaction()
+        /// <summary>受管资源声明种类（逻辑键：Context 声明类型全名）。</summary>
+        public string? ManagedResourceKind => _dbContext.GetType().FullName;
+
+        /// <summary>受管资源连接配置（逻辑键；非关系型 Provider 为 null）。</summary>
+        public string? ManagedResourceConnectionString => TryReadManagedConnectionString();
+
+        /// <summary>受管资源原生上下文（身份关联；生命周期仍由内核掌握）。</summary>
+        public object? ManagedResourceContext => _dbContext;
+
+        /// <summary>当前受管事务句柄（事务开始成功后非 null；仅用于身份比对）。</summary>
+        public object? ManagedTransactionHandle => _currentTransaction;
+
+        private string? TryReadManagedConnectionString()
         {
+            try
+            {
+                return _dbContext.Database.GetConnectionString();
+            }
+            catch (Exception)
+            {
+                // 非关系型/未配置 Provider：没有连接配置（逻辑键退化为声明种类）。
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 未完成退出的终结：**尽力**回滚并释放事务句柄、丢弃未 flush 的跟踪写入（已 flush 的写入不在丢弃范围；
+        /// 跨 UoW 不残留跟踪状态）；终结失败不得吞掉——回滚无法确认时抛
+        /// <see cref="UnitOfWorkAbandonFailureException"/>（保留原始故障与后续清理失败），
+        /// 回滚已确认但释放/丢弃失败时抛 <see cref="UnitOfWorkAbandonCleanupFailureException"/>；
+        /// 可重复调用。
+        /// </summary>
+        public void AbandonPendingWork()
+        {
+            Exception? terminationFailure = null;
+            var subsequentFailures = new List<Exception>();
+
             try
             {
                 _currentTransaction?.Rollback();
             }
-            catch (Exception)
+            catch (Exception exception)
             {
-                // Best effort: the handle is released below regardless, and the
-                // failure that triggered scope unwinding must not be replaced.
+                terminationFailure = exception;
             }
-            finally
+
+            try
             {
                 DisposeTransaction();
+            }
+            catch (Exception exception)
+            {
+                subsequentFailures.Add(exception);
+            }
+
+            try
+            {
+                _dbContext.ChangeTracker.Clear();
+            }
+            catch (Exception exception)
+            {
+                subsequentFailures.Add(exception);
+            }
+
+            if (terminationFailure is not null)
+            {
+                throw new UnitOfWorkAbandonFailureException(
+                    "The unit of work could not confirm the rollback of its pending transaction. " +
+                    "The original termination failure is preserved; the transaction outcome must not be reported as rolled back.",
+                    terminationFailure,
+                    subsequentFailures);
+            }
+
+            if (subsequentFailures.Count > 0)
+            {
+                throw new UnitOfWorkAbandonCleanupFailureException(
+                    "The pending transaction was rolled back, but releasing the handle or discarding tracked writes failed. " +
+                    "The rollback fact is preserved; treat this as a cleanup failure.",
+                    subsequentFailures);
             }
         }
 

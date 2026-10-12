@@ -15,6 +15,11 @@ namespace CrestCreates.Data.Abstractions.AotFixture;
 /// </summary>
 internal static class Program
 {
+    private static readonly UnitOfWorkOptions RequiresNewOptions = new()
+    {
+        Propagation = UnitOfWorkPropagation.RequiresNew
+    };
+
     private static int Main() => RunAsync().GetAwaiter().GetResult();
 
     private static async Task<int> RunAsync()
@@ -27,6 +32,9 @@ internal static class Program
             VerifyDuplicateBindingDiagnostic();
             VerifyMissingDefaultDiagnostic();
             await VerifyExecuteRollbackPreservesOriginalExceptionAsync();
+            await VerifyDeadlineAndCompletionSemanticsAsync();
+            await VerifyNotificationFailureSemanticsAsync();
+            VerifyIsolationCapabilityGate();
 
             Console.WriteLine("CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK");
             return 0;
@@ -52,13 +60,18 @@ internal static class Program
         {
             var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
 
-            using (var unitOfWorkScope = manager.BeginScope())
+            await using (var unitOfWorkScope = manager.BeginScope())
             {
                 unitOfWork = unitOfWorkScope.UnitOfWork as StaticUnitOfWork
                     ?? throw new InvalidOperationException("The single binding must supply the default provider.");
                 Check(unitOfWorkScope.IsOwner, "first BeginScope must own the unit of work");
-                await unitOfWorkScope.UnitOfWork.BeginTransactionAsync();
-                await unitOfWorkScope.UnitOfWork.CommitTransactionAsync();
+                await unitOfWorkScope.StartAsync();
+                await unitOfWorkScope.CompleteAsync();
+                Check(unitOfWorkScope.State == UnitOfWorkState.Completed,
+                    "a completed scope must record the completed participation state");
+                Check(unitOfWorkScope.TransactionOutcome == UnitOfWorkTransactionOutcome.Committed,
+                    "a committed scope must record the committed transaction outcome");
+                Check(!unitOfWorkScope.IsReleased, "results must be readable before release");
             }
 
             Check(manager.CurrentOrNull is null, "ambient state must be cleared after dispose");
@@ -83,16 +96,18 @@ internal static class Program
                 OrmProvider.FreeSql,
                 static sp => new StaticUnitOfWork(sp.GetRequiredService<ScopeToken>().Id),
                 supportsRequiresNew: true,
-                ambientContextFactory: static sp => sp.GetRequiredService<ScopeToken>()));
+                ambientContextFactory: static sp => new FixtureDataBaseContext(sp.GetRequiredService<ScopeToken>().Id)));
 
         using var scope = provider.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
 
-        using (var outerScope = manager.BeginScope())
+        await using (var outerScope = manager.BeginScope())
         {
+            await outerScope.StartAsync();
             var outerUnitOfWork = (StaticUnitOfWork)outerScope.UnitOfWork;
-            using (var innerScope = manager.BeginScope(requiresNew: true))
+            await using (var innerScope = manager.BeginScope(RequiresNewOptions))
             {
+                await innerScope.StartAsync();
                 var innerUnitOfWork = (StaticUnitOfWork)innerScope.UnitOfWork;
                 Check(innerUnitOfWork != outerUnitOfWork, "requiresNew must create a distinct unit of work");
                 Check(innerUnitOfWork.ScopeId != outerUnitOfWork.ScopeId,
@@ -200,6 +215,107 @@ internal static class Program
         Check(manager.CurrentOrNull is null, "the failed execution must restore ambient state");
     }
 
+    private static async Task VerifyDeadlineAndCompletionSemanticsAsync()
+    {
+        using var provider = BuildProvider(services =>
+            services.AddUnitOfWorkProvider(
+                OrmProvider.EfCore,
+                static sp => sp.GetRequiredService<StaticUnitOfWork>(),
+                supportsRequiresNew: false));
+
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        await using (var deadlineScope = manager.BeginScope(new UnitOfWorkOptions
+        {
+            Timeout = TimeSpan.FromMilliseconds(60)
+        }))
+        {
+            await deadlineScope.StartAsync();
+            await Task.Delay(150);
+            Check(deadlineScope.ExecutionToken.IsCancellationRequested,
+                "the kernel deadline must cancel the execution token without caller cancellation");
+            await deadlineScope.RollbackAsync();
+            Check(deadlineScope.State == UnitOfWorkState.RolledBack, "an expired deadline must not report success");
+        }
+
+        await using (var outer = manager.BeginScope())
+        {
+            await outer.StartAsync();
+            await using (var inner = manager.BeginScope())
+            {
+                await inner.StartAsync();
+                await inner.RollbackAsync();
+            }
+
+            try
+            {
+                await outer.CompleteAsync();
+                throw new InvalidOperationException("rollback-only rejection expected.");
+            }
+            catch (UnitOfWorkRollbackOnlyException)
+            {
+            }
+
+            Check(outer.TransactionOutcome == UnitOfWorkTransactionOutcome.RolledBack,
+                "a rollback-only owner must roll back instead of committing a partial failure");
+        }
+    }
+
+    private static async Task VerifyNotificationFailureSemanticsAsync()
+    {
+        using var provider = BuildProvider(services =>
+            services.AddUnitOfWorkProvider(
+                OrmProvider.EfCore,
+                static sp => new StaticUnitOfWork { NotifyThrows = true },
+                supportsRequiresNew: false));
+
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        await using var unitOfWorkScope = manager.BeginScope();
+        await unitOfWorkScope.StartAsync();
+
+        try
+        {
+            await unitOfWorkScope.CompleteAsync();
+            throw new InvalidOperationException("post-commit notification failure expected.");
+        }
+        catch (UnitOfWorkPostCommitNotificationException)
+        {
+        }
+
+        Check(unitOfWorkScope.TransactionOutcome == UnitOfWorkTransactionOutcome.Committed,
+            "the committed fact must be preserved when notifications fail");
+        Check(unitOfWorkScope.NotificationOutcome == UnitOfWorkNotificationOutcome.Failed,
+            "notification failure must be recorded without rewinding the transaction outcome");
+    }
+
+    private static void VerifyIsolationCapabilityGate()
+    {
+        using var provider = BuildProvider(services =>
+            services.AddUnitOfWorkProvider(
+                OrmProvider.FreeSql,
+                static sp => new StaticUnitOfWork(),
+                supportsRequiresNew: false));
+
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        try
+        {
+            manager.BeginScope(new UnitOfWorkOptions { IsolationLevel = System.Data.IsolationLevel.Serializable });
+            throw new InvalidOperationException("capability gate rejection expected.");
+        }
+        catch (NotSupportedException exception)
+        {
+            Check(exception.Message.Contains("<none declared>", StringComparison.Ordinal),
+                "the gate must reject undeclared isolation levels before execution");
+        }
+
+        Check(manager.CurrentOrNull is null, "the rejected request must not create a unit of work");
+    }
+
     private static ServiceProvider BuildProvider(Action<IServiceCollection> configureProviders)
     {
         var services = new ServiceCollection();
@@ -237,7 +353,42 @@ internal static class Program
         public Guid Id { get; } = Guid.NewGuid();
     }
 
-    private sealed class StaticUnitOfWork : IUnitOfWork
+    /// <summary>最小 IDataBaseContext 探针（仅 ambient 身份用途）。</summary>
+    private sealed class FixtureDataBaseContext : CrestCreates.DbContextProvider.Abstract.IDataBaseContext
+    {
+        public FixtureDataBaseContext(Guid scopeId)
+        {
+            ScopeId = scopeId;
+        }
+
+        public Guid ScopeId { get; }
+
+        public OrmProvider Provider => OrmProvider.EfCore;
+
+        public CrestCreates.DbContextProvider.Abstract.IDataBaseTransaction? CurrentTransaction => null;
+
+        public string? ConnectionString => null;
+
+        public CrestCreates.DbContextProvider.Abstract.IDataBaseSet<TEntity> Set<TEntity>() where TEntity : class
+            => throw new NotSupportedException();
+
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<CrestCreates.DbContextProvider.Abstract.IDataBaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public CrestCreates.DbContextProvider.Abstract.IQueryableBuilder<TEntity> Queryable<TEntity>() where TEntity : class
+            => throw new NotSupportedException();
+
+        public object GetNativeContext() => this;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class StaticUnitOfWork : IUnitOfWork, IUnitOfWorkCommittedNotifier
     {
         private bool _disposed;
 
@@ -252,6 +403,8 @@ internal static class Program
 
         public Guid ScopeId { get; }
 
+        public bool NotifyThrows { get; set; }
+
         public int BeginCount { get; private set; }
 
         public int CommitCount { get; private set; }
@@ -260,25 +413,35 @@ internal static class Program
 
         public int DisposeCount { get; private set; }
 
-        public Task BeginTransactionAsync()
+        public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
         {
             BeginCount++;
             return Task.CompletedTask;
         }
 
-        public Task CommitTransactionAsync()
+        public Task CommitTransactionAsync(CancellationToken cancellationToken = default)
         {
             CommitCount++;
             return Task.CompletedTask;
         }
 
-        public Task RollbackTransactionAsync()
+        public Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
             RollbackCount++;
             return Task.CompletedTask;
         }
 
-        public Task<int> SaveChangesAsync() => Task.FromResult(0);
+        public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
+
+        public Task PublishCommittedNotificationsAsync(CancellationToken cancellationToken = default)
+        {
+            if (NotifyThrows)
+            {
+                throw new InvalidOperationException("fixture-notification-failure");
+            }
+
+            return Task.CompletedTask;
+        }
 
         public void Dispose()
         {

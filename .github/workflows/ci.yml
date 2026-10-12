@@ -106,6 +106,17 @@ jobs:
       - name: Test — Framework / Web
         run: dotnet test tests/Framework/Web/CrestCreates.Web.Tests --no-build
 
+      - name: Test — Persistence / ORM providers (UnitOfWork kernel, chain, capabilities, AOP weave, CAP lease)
+        run: dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests --no-build
+
+      # The UnitOfWork PostgreSQL acceptance class is self-contained (own
+      # Testcontainers database). The legacy LibraryManagement integration
+      # suite is not CI-wired yet: its host bootstrap fails on a fresh database
+      # (OpenIddictScopes missing — pre-existing, tracked as I-18 in the #137
+      # issue log); relax the filter once its seeding is fixed.
+      - name: Test — UnitOfWork PostgreSQL acceptance (Testcontainers)
+        run: dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build --filter "FullyQualifiedName~UnitOfWorkPostgresIntegrationTests"
+
       - name: Test — Framework / Modules
         run: |
           dotnet test tests/Framework/Modules/CrestCreates.FileManagement.Tests --no-build

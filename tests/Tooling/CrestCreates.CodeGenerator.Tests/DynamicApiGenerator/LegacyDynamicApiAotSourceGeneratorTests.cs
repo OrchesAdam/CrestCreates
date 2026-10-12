@@ -43,7 +43,7 @@ public class LegacyDynamicApiAotSourceGeneratorTests
         endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ValidateAsync");
         endpointSource.SourceText.Should().Contain("var input = new global::TestContracts.TestBookListRequestDto();");
         endpointSource.SourceText.Should().Contain("input.Keyword = string.IsNullOrWhiteSpace(context.Request.Query[\"Keyword\"].ToString()) ? null : context.Request.Query[\"Keyword\"].ToString()");
-        endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ExecuteAsync(context, false, () => service.UpdateAsync(id, input, context.RequestAborted))");
+        endpointSource.SourceText.Should().Contain("await DynamicApiGeneratedRuntime.ExecuteAsync(context, new global::CrestCreates.Data.Abstractions.UnitOfWorkOptions { IsTransactional = false }, kernelToken => service.UpdateAsync(id, input, kernelToken))");
         endpointSource.SourceText.Should().Contain("return DynamicApiGeneratedRuntime.WrapGetResult(result);");
         endpointSource.SourceText.Should().Contain("return DynamicApiGeneratedRuntime.WrapResult(result);");
     }
@@ -353,6 +353,7 @@ public class LegacyDynamicApiAotSourceGeneratorTests
                using Microsoft.AspNetCore.Routing;
                using Microsoft.Extensions.DependencyInjection;
                using CrestCreates.Authorization.Abstractions;
+               using CrestCreates.Data.Abstractions;
                using CrestCreates.Validation.Modules;
 
                namespace Microsoft.AspNetCore.Builder
@@ -610,8 +611,8 @@ public class LegacyDynamicApiAotSourceGeneratorTests
                        public static Task<T> ReadBodyAsync<T>(HttpContext context, bool optional) where T : new() => Task.FromResult(default(T));
                        public static Task EnsurePermissionAsync(HttpContext context, IPermissionChecker permissionChecker, IReadOnlyCollection<string> permissions) => Task.CompletedTask;
                        public static Task ValidateAsync<T>(IValidationService validationService, T instance) => Task.CompletedTask;
-                       public static Task ExecuteAsync(HttpContext context, bool requiresTransaction, Func<Task> action) => Task.CompletedTask;
-                       public static Task<T> ExecuteAsync<T>(HttpContext context, bool requiresTransaction, Func<Task<T>> action) => Task.FromResult(default(T));
+                       public static Task ExecuteAsync(HttpContext context, UnitOfWorkOptions options, Func<CancellationToken, Task> action) => Task.CompletedTask;
+                       public static Task<T> ExecuteAsync<T>(HttpContext context, UnitOfWorkOptions options, Func<CancellationToken, Task<T>> action) => Task.FromResult(default(T));
                        public static IResult WrapResult<T>(T value) => new ResultStub();
                        public static IResult WrapVoidResult() => new ResultStub();
                        public static IResult WrapGetResult<T>(T value) => new ResultStub();
@@ -716,9 +717,14 @@ public class LegacyDynamicApiAotSourceGeneratorTests
 
                namespace CrestCreates.Data.Abstractions
                {
+                   public sealed class UnitOfWorkOptions
+                   {
+                       public bool IsTransactional { get; set; } = true;
+                   }
+
                    public interface IUnitOfWorkManager
                    {
-                       IUnitOfWorkScope BeginScope(bool isTransactional = false);
+                       IUnitOfWorkScope BeginScope(UnitOfWorkOptions options);
                    }
 
                    public interface IUnitOfWorkScope : IDisposable

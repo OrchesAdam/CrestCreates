@@ -62,7 +62,7 @@ public class UnitOfWorkDiRegistrationTests
         using var scope = provider.CreateScope();
         var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
 
-        using var unitOfWorkScope = manager.BeginScope(provider: OrmProvider.EfCore);
+        using var unitOfWorkScope = manager.BeginScope(new UnitOfWorkOptions { Provider = OrmProvider.EfCore });
         ((ProbeUnitOfWork)unitOfWorkScope.UnitOfWork).Provider.Should().Be(OrmProvider.EfCore);
     }
 
@@ -207,7 +207,7 @@ public class UnitOfWorkDiRegistrationTests
             OrmProvider.EfCore,
             static sp => sp.GetRequiredService<ProbeUnitOfWork>(),
             supportsRequiresNew: true,
-            ambientContextFactory: static sp => sp.GetRequiredService<ScopeMarker>());
+            ambientContextFactory: static sp => new TestDataBaseContext(sp.GetRequiredService<ScopeMarker>().Id));
 
         using var provider = services.BuildServiceProvider();
         var scope = provider.CreateScope();
@@ -220,7 +220,7 @@ public class UnitOfWorkDiRegistrationTests
             using (var outerScope = manager.BeginScope())
             {
                 outerUnitOfWork = (ProbeUnitOfWork)outerScope.UnitOfWork;
-                using (var innerScope = manager.BeginScope(requiresNew: true))
+                using (var innerScope = manager.BeginScope(new UnitOfWorkOptions { Propagation = UnitOfWorkPropagation.RequiresNew }))
                 {
                     innerScope.IsOwner.Should().BeTrue();
                     innerUnitOfWork = (ProbeUnitOfWork)innerScope.UnitOfWork;
@@ -269,7 +269,7 @@ public class UnitOfWorkDiRegistrationTests
 
         using var outerScope = manager.BeginScope();
 
-        var act = () => manager.BeginScope(requiresNew: true);
+        var act = () => manager.BeginScope(new UnitOfWorkOptions { Propagation = UnitOfWorkPropagation.RequiresNew });
 
         act.Should().Throw<NotSupportedException>()
             .WithMessage("*SqlSugar*requiresNew*");
@@ -295,7 +295,7 @@ public class UnitOfWorkDiRegistrationTests
                 return new ProbeUnitOfWork(sp.GetRequiredService<ScopeMarker>().Id, OrmProvider.EfCore);
             },
             supportsRequiresNew: true,
-            ambientContextFactory: static sp => sp.GetRequiredService<ScopeMarker>());
+            ambientContextFactory: static sp => new TestDataBaseContext(sp.GetRequiredService<ScopeMarker>().Id));
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -304,7 +304,7 @@ public class UnitOfWorkDiRegistrationTests
         using var outerScope = manager.BeginScope();
         failNextCreation = true;
 
-        var act = () => manager.BeginScope(requiresNew: true);
+        var act = () => manager.BeginScope(new UnitOfWorkOptions { Propagation = UnitOfWorkPropagation.RequiresNew });
 
         act.Should().Throw<InvalidOperationException>().WithMessage("probe dependency failure");
         manager.Current.Should().BeSameAs(outerScope.UnitOfWork,
@@ -354,13 +354,13 @@ public class UnitOfWorkDiRegistrationTests
 
         public int DisposeCount { get; private set; }
 
-        public Task BeginTransactionAsync() => Task.CompletedTask;
+        public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, System.Threading.CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public Task CommitTransactionAsync() => Task.CompletedTask;
+        public Task CommitTransactionAsync(System.Threading.CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public Task RollbackTransactionAsync() => Task.CompletedTask;
+        public Task RollbackTransactionAsync(System.Threading.CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public Task<int> SaveChangesAsync() => Task.FromResult(0);
+        public Task<int> SaveChangesAsync(System.Threading.CancellationToken cancellationToken = default) => Task.FromResult(0);
 
         public void Dispose()
         {
