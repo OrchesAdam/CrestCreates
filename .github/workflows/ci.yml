@@ -106,7 +106,7 @@ jobs:
       - name: Test — Framework / Web
         run: dotnet test tests/Framework/Web/CrestCreates.Web.Tests --no-build
 
-      - name: Test — Persistence / ORM providers (UnitOfWork suites: kernel, chain, capabilities, AOP weave, CAP lease)
+      - name: Test — Persistence / ORM providers (UnitOfWork kernel, chain, capabilities, AOP weave, CAP lease)
         run: dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests --no-build
 
       - name: Test — LibraryManagement PostgreSQL integration (incl. UnitOfWork PG acceptance)
