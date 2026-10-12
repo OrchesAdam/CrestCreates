@@ -79,8 +79,9 @@ archived to 99_RecycleBin, never deleted; never output credentials.
 - Wave 0: #122 baseline calibration (merged via PR #134).
 - Wave 1: #123 native gates / evidence matrix (merged via PR #135); #124 UnitOfWork
   (merged via PR #136); #137 UnitOfWork follow-up (design+plans merged via PR #138;
-  slices 1-5 + three review-fix rounds merged via PR #139); #125 CAP (started on
-  merged master; design + current-state inventory under review).
+  slices 1-5 + three review-fix rounds merged via PR #139); #125 CAP (S1-S4
+  implemented on the #125 branch / PR #140; design rev.4 approved; unified feature
+  review pending; issues log docs/superpowers/plans/2026-10-12-issue-125-implementation-issues-log.md).
 - Wave 2: #126 LocalEvent / #127 RabbitMQ / #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
@@ -98,9 +99,11 @@ archived to 99_RecycleBin, never deleted; never output credentials.
 ## Known gaps
 
 - B12 unsupported-intent negative case missing (#133, bounded).
-- CAP entry consolidation (#125): design rev.2 under review (PR #140); in-memory
-  fake compensation + entry split pending archival and real evidence (slices S1..S4;
-  compensation concurrency / process-crash recovery not pledged);
+- CAP entry consolidation (#125): implemented on the #125 branch (design rev.4 approved;
+  single entry `AddCrestCapDistributedTransaction`, in-memory fakes/module/dead bridge/
+  participant engine archived, two-layer config validation, atomic publish over the
+  #137 lease/borrower contract with scan-recovery delivery, PG+RabbitMQ integration
+  evidence); compensation concurrency / process-crash recovery not pledged;
   LocalEvent/RabbitMQ reflection bridges (#126/#127);
   CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
   (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).

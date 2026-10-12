@@ -121,6 +121,7 @@
     <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
     <Project Path="../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <Project Path="../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
+    <Project Path="../src/Integrations/CrestCreates.Integration.Cap.EfCore/CrestCreates.Integration.Cap.EfCore.csproj" />
     <Project Path="../src/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP/CrestCreates.DistributedTransaction.CAP.csproj" />
     <Project Path="../src/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction/CrestCreates.DistributedTransaction.csproj" />
     <Project Path="../src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj" />
@@ -185,6 +186,7 @@
     <Project Path="../tests/Runtime/Capability/CrestCreates.Capability.Tests/CrestCreates.Capability.Tests.csproj" />
     <Project Path="../tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests/CrestCreates.DescriptorDraft.Tests.csproj" />
     <Project Path="../tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />
+    <Project Path="../tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP.IntegrationTests/CrestCreates.DistributedTransaction.CAP.IntegrationTests.csproj" />
     <Project Path="../tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj" />
     <Project Path="../tests/Runtime/Eventing/CrestCreates.Event.Tests/CrestCreates.Event.Tests.csproj" />
     <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.Kafka.Tests.Integration/CrestCreates.EventBus.Kafka.Tests.Integration.csproj" />

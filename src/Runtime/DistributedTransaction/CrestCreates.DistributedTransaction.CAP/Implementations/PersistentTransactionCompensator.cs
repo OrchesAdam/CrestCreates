@@ -33,6 +33,16 @@ namespace CrestCreates.DistributedTransaction.CAP.Implementations
             string participantName,
             object? compensationData)
         {
+            // 写 Pending 之前校验 participant 可执行：无执行器的补偿不允许进入持久化队列
+            // （历史记录缺执行器仍保留执行期的可检查 Failed 路径）。
+            if (_executorRegistry.GetExecutor(participantName) is null)
+            {
+                throw new InvalidOperationException(
+                    $"No compensation executor is registered for participant '{participantName}'. " +
+                    "Register one ([CompensationExecutor] class + the generated AddCompensationExecutors()) " +
+                    "before registering a compensation; nothing was written.");
+            }
+
             var compensation = new TransactionCompensation
             {
                 Id = Guid.NewGuid(),

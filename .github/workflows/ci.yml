@@ -228,6 +228,13 @@ jobs:
           dotnet test tests/Runtime/Audit/CrestCreates.AuditLogging.Tests --no-build
           dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests --no-build
 
+      - name: Test — Runtime / CAP atomic publish (PostgreSQL + RabbitMQ Testcontainers)
+        run: |
+          dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP.IntegrationTests --no-build
+        # #125: real PG + RabbitMQ fault matrix (scan-recovery delivery, rollback holds no
+        # rows, identity/refusal negatives, host-restart recovery). Tuning: lookback 30s +
+        # interval 2s keeps the nominal scan wait bounded.
+
       # ── Tooling ──
       - name: Test — Tooling (CodeGenerator + BuildTasks)
         run: |
