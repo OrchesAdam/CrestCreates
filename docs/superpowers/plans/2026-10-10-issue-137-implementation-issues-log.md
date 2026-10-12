@@ -47,4 +47,10 @@
 | R139-10 [P2] lease 公开面暴露生命周期句柄 | `IUnitOfWorkTransactionIdentity.NativeTransaction` 改为不可操作借用标记（不可强转原生类型）；`ResourceIdentity` 改为只读 `UnitOfWorkResourceIdentity`（声明类型 + 稳定实例标识）；原生句柄借用走新增 `IEfCoreTransactionBorrower` 适配边界。回归：`Public_lease_must_not_expose_lifecycle_handle` |
 | R139-11 [P2] lease 签发未绑定受管窗口 | 签发前置：读方可见链存在 Active 且未释放的 owner 窗口（`TryGetCurrentManagedState`），原生未受管事务/独立 scope/终态一律拒绝。回归：`Lease_must_reject_transaction_outside_managed_scope` |
 
+### 修复轮补充记录
+
+| # | 类别 | 说明 | 处置 |
+| --- | --- | --- | --- |
+| I-16 | 流程（CI） | 新增 CI 步骤时 `name:` 值内含「`: `」（冒号+空格）会使 YAML 纯量截断、整个 workflow 解析失败（run 显示 0 jobs）且不产生明确错误信息 | 已移除步骤名中的冒号并本地 YAML 解析校验；后续在 CI 工作流中避免步骤名含冒号 |
+
 （后续切片发现问题将追加到本表。）
