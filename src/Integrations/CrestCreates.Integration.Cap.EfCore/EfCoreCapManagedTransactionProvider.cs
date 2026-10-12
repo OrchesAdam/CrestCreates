@@ -28,17 +28,20 @@ public sealed class EfCoreCapManagedTransactionProvider : ICapManagedTransaction
     private readonly IEfCoreTransactionBorrower _borrower;
     private readonly IServiceProvider _serviceProvider;
     private readonly DistributedTransactionCapOptions _options;
+    private readonly IOptions<DotNetCore.CAP.PostgreSqlOptions> _effectivePostgresStorage;
 
     public EfCoreCapManagedTransactionProvider(
         IDataBaseContext dataBaseContext,
         IEfCoreTransactionBorrower borrower,
         IServiceProvider serviceProvider,
-        IOptions<DistributedTransactionCapOptions> options)
+        IOptions<DistributedTransactionCapOptions> options,
+        IOptions<DotNetCore.CAP.PostgreSqlOptions> effectivePostgresStorage)
     {
         _dataBaseContext = dataBaseContext ?? throw new ArgumentNullException(nameof(dataBaseContext));
         _borrower = borrower ?? throw new ArgumentNullException(nameof(borrower));
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _effectivePostgresStorage = effectivePostgresStorage ?? throw new ArgumentNullException(nameof(effectivePostgresStorage));
     }
 
     /// <inheritdoc />
@@ -125,8 +128,21 @@ public sealed class EfCoreCapManagedTransactionProvider : ICapManagedTransaction
                 "The borrowed transaction does not expose an Npgsql connection; no message was written.");
         }
 
+        // 权威比较对象是 CAP **最终有效**的存储配置（所有 Configure/PostConfigure 之后），
+        // 而不是 Crest 输入快照——后续覆盖最终存储目标的注册同样会被此检查捕获。
+        var effectiveStorage = _effectivePostgresStorage.Value;
+        var effectiveConnectionString = effectiveStorage.ConnectionString
+            ?? effectiveStorage.DataSource?.ConnectionString;
+        if (string.IsNullOrWhiteSpace(effectiveConnectionString))
+        {
+            throw new CapPublishRefusalException(
+                "StorageIdentityMismatch",
+                "The final CAP PostgreSQL storage is not configured (PostgreSqlOptions.ConnectionString/DataSource " +
+                "is empty). Atomic publish requires a configured single fixed database; no message was written.");
+        }
+
         var live = new NpgsqlConnectionStringBuilder(connection.ConnectionString);
-        var storage = new NpgsqlConnectionStringBuilder(_options.StorageConnectionString);
+        var storage = new NpgsqlConnectionStringBuilder(effectiveConnectionString);
         var sameDatabase =
             string.Equals(live.Host ?? string.Empty, storage.Host ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
             live.Port == storage.Port &&

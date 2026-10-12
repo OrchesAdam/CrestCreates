@@ -14,9 +14,22 @@
 | I-102 | 遗留（仓储契约，实施中暴露） | `CrestCreates.Data.Abstractions.IRepository<TEntity, TKey>` 全仓无 EF 实现（EF 侧仅 Domain 契约体系）；原 `PersistentTransactionLogger` 从未有可运行的装配路径 | 持久化链此前不可运行（#125 清单 G-04 的实证） | 集成包提供 `EfCoreCapRepository<TEntity, TKey>`（仅覆盖 Data.Abstractions 契约、不自行 SaveChanges、跟随受管链路由）；真实链由 PG 集成用例验证 |
 | I-103 | 环境（启动竞态） | CAP 的 `IStorageInitializer` 在 `BackgroundService` 内异步执行：`host.StartAsync` 返回时 `cap."published"` 可能尚不存在 | 集成用例首跑 42P01 | 集成夹具在启动后等待 `cap."published"` 可见（60s 有界）；生产语义不受影响 |
 | I-104 | 配置（组合声明） | `StorageProvider` 默认值仍为 `SqlServer`（调用方显式配置）；原子发布集成仅支持 PostgreSql 单库 | 未配置 StorageProvider=PostgreSql 时窗口内发布确定性拒绝 `StorageIdentityMismatch`（非静默） | 保持默认值（不扩大行为变更面）；诊断消息指明组合要求；文档/AGENTS.md 已注明 |
-| I-105 | 偏离设计（供审查裁定） | ① 集成扩展命名 `AddCrestCapEfCoreIntegration()`（设计文写作 `AddCrestCapPersistence<TContext>()`；实现按「显式 ModelBuilder 配置 `ApplyCrestCapPersistence()` + 仓储/提供者注册」拆分，语义一致）；② 矩阵 4「提交确认 + 清理失败」与 11「生命周期调用计数 = 0」未做真实注入用例——内核侧语义由 #137 探针覆盖，CAP 侧投递完全由存储扫描驱动（与内核提交后代码路径无关），守卫子类以构造性保护（Commit/Rollback 覆写抛确定性异常，误触即测试失败）；如需真实注入用例请审查裁定 | 覆盖方式与矩阵文字不完全一一对应 | 记入本表并随 PR 评论说明；审查如要求，可在 S 后续轮次补注入型用例 |
+| I-105 | 偏离设计（已由审查修复轮关闭） | ① 集成扩展命名 `AddCrestCapEfCoreIntegration()`（设计文写作 `AddCrestCapPersistence<TContext>()`；实现按「显式 ModelBuilder 配置 `ApplyCrestCapPersistence()` + 仓储/提供者注册」拆分，语义一致）；② 矩阵 4「提交确认 + 清理失败」与 11「生命周期调用计数 = 0」原为构造性覆盖 | 审查要求补注入证据 | **已修复**：审查修复轮以真实注入用例覆盖（ControllableEfUnitOfWork 提交后清理故障、守护事务测试；见 I-113） |
 | I-106 | 环境（本地验证路径） | CI 暂停期间：集成套件本地经 `DOCKER_HOST=unix:///run/user/1000/podman/podman.sock` 运行（docker=podman 别名）；`ci.yml`/`full-validation.yml` 已预置 «Runtime / CAP atomic publish» 步骤（恢复 CI 后生效） | 无 | 已记录至项目记忆；恢复 CI 指令待用户指示 |
 | I-108 | 缺陷（传输配置，实施中暴露，预存问题） | CAP `UseRabbitMQ(string)` 的原生语义是 **HostName**（v10.0.1 源证：`CAP.Options.Extensions.cs` 单参重载 `o.HostName = hostName`），既有扩展把它当「连接串」直接传入 → 非纯主机名的配置（含 `amqp://` URI）在投递期才暴露（行 Failed、重试耗尽；broker 侧零连接） | 真实 PG+RabbitMQ 集成首跑暴露；此前从未有真实 broker 证据 | 已修：扩展支持 `amqp(s)://user:pass@host:port[/vhost]` URI（解析 HostName/Port/凭据/VHost）并保留纯主机名原生语义；`TransportConnectionString` 文档注明；Kafka 语义（bootstrap servers）一并注明 |
 | I-107 | 测试颗粒度（声明纪律） | 补偿链顺序重试已覆盖；**并发补偿与进程崩溃（`Executing` 残留）不承诺**（设计 §3.3 声明）；测试不以顺序 mock 宣称 durable compensation 闭环 | 无（如实声明） | 保持声明；`Executing` 残留列为已知限制 |
+
+
+## 实现审查修复轮（2026-10-12，R1-CAP-01…05）
+
+对照 `docs/review/2026-10-12-pr-140-cap-implementation-review.md`：
+
+| 审查项 | 修复 |
+| --- | --- |
+| R1-CAP-01 [P1] 后台补偿执行后状态未落库 | `CompensationRetryBackgroundService` 每个处理周期经**唯一内核**建立持久化边界（scoped `IUnitOfWorkManager.ExecuteAsync`，flush 统一落库）；装配自检新增 `IUnitOfWorkManager` 可解析要求；真实 PG 持久化链用例（注册跨 scope 可见、失败 Retrying 持久化、后台完成 Completed、上限 Failed+ErrorMessage、历史缺执行器 Failed）经专用宿主（补偿周期 1s）驱动**真实后台服务路径** |
+| R1-CAP-02 [P1] 仓储跟踪语义使日志链不可用 | `EfCoreCapRepository` 重写跟踪契约：查询本地优先（同键复用同一实例、含未落库 Added 行）+ 数据库查询保持跟踪；`AddAsync` 同键去重返回已跟踪实例；`UpdateAsync` 已跟踪 → no-op（快照自动标记，绝不把 Added 误改 Modified）、detached 同键 → 合并到已跟踪实例、否则附加 Modified；PG 用例覆盖首次写入、同一 UoW 连续更新、提交后新 UoW 更新 |
+| R1-CAP-03 [P1] 存储身份读 Crest 输入可被最终配置绕过 | Provider 改读**最终有效** `DotNetCore.CAP.PostgreSqlOptions`（ConnectionString 或 DataSource；空则拒绝），与借用活连接的 host/port/database 规范字段比较；`PostConfigure<PostgreSqlOptions>` 覆盖负例集成用例（A/B 均零新行、publisher 上下文无残留） |
+| R1-CAP-04 [P2] RabbitMQ URI 遗漏 TLS 与 vhost 解码 | 解析器补：amqps → 默认 5671 + `ConnectionFactoryOptions` 启用 TLS（ServerName=host）；amqp 无端口 → 5672；vhost 按 AMQP URI 语义取第一个 `/` 之后内容并 `UnescapeDataString`（`%2F` → `/`）；单元测试 6 条（amqp/amqps/显式端口/编码 vhost/纯主机名原生语义） |
+| R1-CAP-05 [P2] S3 矩阵未补齐 | 新增集成用例：Unknown 提交故障（停库 → Unknown + 无行无投递）、确认提交 + 清理失败（真实 PG 提交 + 注入清理异常 → Failed+Committed、行照常投递）、未完成退出放弃（零行零投递）、窗口外状态恢复（同一 publisher 绑定无残留 + 立即投递）、拒绝矩阵全量（未 Start/非事务/终态）、最低配置（FailedRetryCount=1）首次投递、broker 离线→扫描可检查失败→恢复后投递；矩阵 11 原生生命周期计数以守护事务测试（IVT）覆盖 |
 
 （后续实施发现问题将追加到本表。）

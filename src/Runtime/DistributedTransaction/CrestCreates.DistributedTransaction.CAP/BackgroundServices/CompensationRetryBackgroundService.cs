@@ -2,6 +2,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.CAP.Options;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +12,11 @@ using Microsoft.Extensions.Options;
 
 namespace CrestCreates.DistributedTransaction.CAP.BackgroundServices
 {
+    /// <summary>
+    /// 补偿重试后台服务：每个处理周期经**唯一 UoW 内核**建立持久化边界
+    /// （scoped 内核 + 事务型窗口，flush 统一落库），补偿器的 Executing/Completed/Retrying/Failed
+    /// 状态与重试计数不会随 scope 释放丢失。
+    /// </summary>
     public class CompensationRetryBackgroundService : BackgroundService
     {
         private readonly IServiceProvider _serviceProvider;
@@ -51,10 +57,17 @@ namespace CrestCreates.DistributedTransaction.CAP.BackgroundServices
         private async Task ProcessRetryingCompensationsAsync(CancellationToken cancellationToken)
         {
             using var scope = _serviceProvider.CreateScope();
-            var compensator = scope.ServiceProvider
-                .GetRequiredService<ITransactionCompensator>();
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
 
-            await compensator.ProcessRetryingCompensationsAsync();
+            // 唯一内核承载持久化边界：处理周期内的仓储写入由 UoW flush/commit 统一落库。
+            await manager.ExecuteAsync<object?>(
+                async _ =>
+                {
+                    var compensator = scope.ServiceProvider.GetRequiredService<ITransactionCompensator>();
+                    await compensator.ProcessRetryingCompensationsAsync().ConfigureAwait(false);
+                    return null;
+                },
+                cancellationToken: cancellationToken).ConfigureAwait(false);
         }
     }
 }

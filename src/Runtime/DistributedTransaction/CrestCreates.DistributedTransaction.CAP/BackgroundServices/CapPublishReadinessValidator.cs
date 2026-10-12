@@ -37,6 +37,20 @@ public sealed class CapPublishReadinessValidator : IHostedService
         var registry = scoped.GetRequiredService<ICompensationExecutorRegistry>();
         var options = scoped.GetRequiredService<IOptions<DistributedTransactionCapOptions>>().Value;
 
+        // 唯一内核是原子发布与后台补偿持久化边界的前提：必须可解析。
+        try
+        {
+            _ = scoped.GetRequiredService<IUnitOfWorkManager>();
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidOperationException(
+                "The unit-of-work kernel is not registered (IUnitOfWorkManager). The CAP integration uses it as the " +
+                "single execution kernel for atomic publish and background compensation persistence; call " +
+                "AddUnitOfWork() (and a provider binding such as AddEfCoreUnitOfWork()) before starting the host.",
+                exception);
+        }
+
         var missing = options.RequiredCompensationExecutors
             .Where(name => registry.GetExecutor(name) is null)
             .ToArray();

@@ -248,6 +248,7 @@ public class CapEntryConsolidationTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddUnitOfWork(); // 唯一内核：原子发布/后台补偿持久化边界的前提
         services.AddCrestCapDistributedTransaction(ValidConfiguration());
         services.AddCompensationExecutors(); // 真实生成产物（[CompensationExecutor] → 生成 registry + 扩展）
         services.AddScoped<IRepository<TransactionLog, Guid>>(_ => new TestCapRepository<TransactionLog, Guid>());

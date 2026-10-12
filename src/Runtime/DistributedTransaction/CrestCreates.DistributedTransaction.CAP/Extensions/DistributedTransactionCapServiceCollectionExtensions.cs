@@ -174,7 +174,8 @@ public static class DistributedTransactionCapServiceCollectionExtensions
 
     /// <summary>
     /// RabbitMQ 传输配置：支持两种形式——
-    /// 1) <c>amqp(s)://user:pass@host:port[/vhost]</c> URI：解析出 HostName/Port/凭据/VirtualHost（推荐）；
+    /// 1) <c>amqp(s)://user:pass@host[:port][/vhost]</c> URI：解析 HostName/端口（amqp=5672、amqps=5671，
+    ///    显式端口优先）/凭据/解码后的 vhost；<c>amqps</c> 同时启用 TLS（ServerName=host）；
     /// 2) 纯主机名：沿用 CAP <c>UseRabbitMQ(string)</c> 的原生语义（该参数是 HostName，不是连接串）。
     /// </summary>
     private static void ConfigureRabbitMq(DotNetCore.CAP.CapOptions capOptions, string connectionString)
@@ -183,13 +184,11 @@ public static class DistributedTransactionCapServiceCollectionExtensions
             (string.Equals(uri.Scheme, "amqp", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(uri.Scheme, "amqps", StringComparison.OrdinalIgnoreCase)))
         {
+            var isTls = string.Equals(uri.Scheme, "amqps", StringComparison.OrdinalIgnoreCase);
             capOptions.UseRabbitMQ(rabbitOptions =>
             {
                 rabbitOptions.HostName = uri.Host;
-                if (uri.Port > 0)
-                {
-                    rabbitOptions.Port = uri.Port;
-                }
+                rabbitOptions.Port = uri.Port > 0 ? uri.Port : (isTls ? 5671 : 5672);
 
                 if (!string.IsNullOrEmpty(uri.UserInfo))
                 {
@@ -201,10 +200,19 @@ public static class DistributedTransactionCapServiceCollectionExtensions
                     }
                 }
 
-                var virtualHost = uri.AbsolutePath.Trim('/');
-                if (!string.IsNullOrEmpty(virtualHost))
+                // AMQP URI 语义：路径中第一个 "/" 之后为 vhost（可含百分号编码，如 %2F 表示 "/"）。
+                if (uri.AbsolutePath.Length > 1)
                 {
-                    rabbitOptions.VirtualHost = virtualHost;
+                    rabbitOptions.VirtualHost = Uri.UnescapeDataString(uri.AbsolutePath.Substring(1));
+                }
+
+                if (isTls)
+                {
+                    rabbitOptions.ConnectionFactoryOptions = factory => factory.Ssl = new RabbitMQ.Client.SslOption
+                    {
+                        Enabled = true,
+                        ServerName = uri.Host
+                    };
                 }
             });
             return;

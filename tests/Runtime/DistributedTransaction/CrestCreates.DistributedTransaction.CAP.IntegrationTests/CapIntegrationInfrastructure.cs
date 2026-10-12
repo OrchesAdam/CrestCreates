@@ -10,6 +10,7 @@ using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.CAP.Extensions;
 using CrestCreates.DistributedTransaction.Models;
 using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Integration.Cap.EfCore;
 using CrestCreates.Integration.Cap.EfCore.Persistence;
@@ -37,6 +38,9 @@ public sealed class PgTestCompensationExecutor : ICompensationExecutor
 {
     public const string ExecutorName = "pg-test";
 
+    /// <summary>测试开关：置位后本执行器抛出（同名测试内串行控制）。</summary>
+    public static volatile bool Fail;
+
     public string Name => ExecutorName;
 
     public List<string?> Invocations { get; } = new();
@@ -44,6 +48,11 @@ public sealed class PgTestCompensationExecutor : ICompensationExecutor
     public Task ExecuteAsync(string? compensationData)
     {
         Invocations.Add(compensationData);
+        if (Fail)
+        {
+            throw new InvalidOperationException("pg-executor-failure");
+        }
+
         return Task.CompletedTask;
     }
 }
@@ -143,12 +152,25 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
 
     public string RabbitMqConnectionString => RabbitConnectionString;
 
+    /// <summary>暂停/恢复主 PG 容器（Unknown 提交故障注入用例；仅限串行用例，需在 finally 中恢复）。</summary>
+    public Task PauseDatabaseAsync() => _postgres.StopAsync();
+
+    public Task ResumeDatabaseAsync() => _postgres.StartAsync();
+
+    /// <summary>暂停/恢复 RabbitMQ 容器（broker 离线恢复用例；仅限串行用例，需在 finally 中恢复）。</summary>
+    public Task PauseBrokerAsync() => _rabbit.StopAsync();
+
+    public Task ResumeBrokerAsync() => _rabbit.StartAsync();
+
     /// <summary>构建并启动一个真实 Host（UoW + EF 集成 + CAP 单入口）；调用方负责释放。</summary>
     public async Task<IHost> CreateHostAsync(
         string postgresConnectionString,
         string rabbitConnectionString,
         bool ensureUowSchema = true,
-        string? capStorageConnectionString = null)
+        string? capStorageConnectionString = null,
+        int compensationRetryIntervalSeconds = 30,
+        int failedRetryCount = 5,
+        Action<IServiceCollection>? mutateServices = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -157,9 +179,10 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
                 ["DistributedTransaction:CAP:TransportProvider"] = "RabbitMQ",
                 ["DistributedTransaction:CAP:StorageConnectionString"] = capStorageConnectionString ?? postgresConnectionString,
                 ["DistributedTransaction:CAP:TransportConnectionString"] = rabbitConnectionString,
-                ["DistributedTransaction:CAP:FailedRetryCount"] = "5",
+                ["DistributedTransaction:CAP:FailedRetryCount"] = failedRetryCount.ToString(),
                 ["DistributedTransaction:CAP:FailedRetryIntervalSeconds"] = "2",
                 ["DistributedTransaction:CAP:FallbackWindowLookbackSeconds"] = "30",
+                ["DistributedTransaction:CAP:CompensationRetryIntervalSeconds"] = compensationRetryIntervalSeconds.ToString(),
             })
             .Build();
 
@@ -177,6 +200,7 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
                 services.AddCrestCapEfCoreIntegration();
                 services.AddCompensationExecutors(); // 真实生成产物
                 services.AddCrestCapDistributedTransaction(configuration);
+                mutateServices?.Invoke(services);
             })
             .Build();
 
@@ -299,5 +323,89 @@ public sealed class CapStoreInspector
         }
 
         return false;
+    }
+}
+
+
+/// <summary>
+/// 可控 EF 工作单元（清理失败故障注入）：真实 BEGIN/COMMIT 到 PG；提交确认后抛
+/// <see cref="UnitOfWorkCommitCleanupFailureException"/> 模拟句柄清理失败（内核应固定 Committed + Failed）。
+/// </summary>
+public sealed class ControllableEfUnitOfWork : IUnitOfWork, IUnitOfWorkManagedResource, IUnitOfWorkAbandonable
+{
+    private readonly CapIntegrationDbContext _db;
+    private object? _handle;
+
+    public ControllableEfUnitOfWork(CapIntegrationDbContext db)
+    {
+        _db = db;
+    }
+
+    public bool FailCleanupAfterCommit { get; set; }
+
+    public string? ManagedResourceKind => typeof(CapIntegrationDbContext).FullName;
+
+    public string? ManagedResourceConnectionString => _db.Database.GetConnectionString();
+
+    public object? ManagedResourceContext => _db;
+
+    public object? ManagedTransactionHandle => _handle;
+
+    public async Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
+    {
+        await _db.Database.BeginTransactionAsync(cancellationToken);
+        _handle = _db.Database.CurrentTransaction;
+    }
+
+    public async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        var transaction = _db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException("No transaction has been started");
+        await transaction.CommitAsync(cancellationToken);
+
+        if (FailCleanupAfterCommit)
+        {
+            throw new UnitOfWorkCommitCleanupFailureException(
+                "Injected: the database commit was confirmed but releasing the transaction handle failed.",
+                new InvalidOperationException("injected-cleanup-failure"));
+        }
+    }
+
+    public async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
+    {
+        if (_db.Database.CurrentTransaction is { } transaction)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+        }
+    }
+
+    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => _db.SaveChangesAsync(cancellationToken);
+
+    public void AbandonPendingWork()
+    {
+        try
+        {
+            _db.Database.CurrentTransaction?.Rollback();
+        }
+        catch (Exception)
+        {
+            // Best-effort termination for the injected-fault harness.
+        }
+
+        try
+        {
+            _db.Database.CurrentTransaction?.Dispose();
+        }
+        catch (Exception)
+        {
+            // Best-effort release.
+        }
+
+        _db.ChangeTracker.Clear();
+    }
+
+    public void Dispose()
+    {
     }
 }
