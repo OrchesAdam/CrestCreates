@@ -109,10 +109,11 @@ jobs:
       - name: Test — Persistence / ORM providers (UnitOfWork kernel, chain, capabilities, AOP weave, CAP lease)
         run: dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests --no-build
 
-      # The legacy LibraryManagement integration suite is not CI-wired yet: its
-      # seeding path fails with OpenIddictScopes missing (pre-existing, tracked
-      # in the #137 issue log as I-18). Run the UnitOfWork PostgreSQL acceptance
-      # class explicitly so the PG evidence is real and executed.
+      # The UnitOfWork PostgreSQL acceptance class is self-contained (own
+      # Testcontainers database). The legacy LibraryManagement integration
+      # suite is not CI-wired yet: its host bootstrap fails on a fresh database
+      # (OpenIddictScopes missing — pre-existing, tracked as I-18 in the #137
+      # issue log); relax the filter once its seeding is fixed.
       - name: Test — UnitOfWork PostgreSQL acceptance (Testcontainers)
         run: dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build --filter "FullyQualifiedName~UnitOfWorkPostgresIntegrationTests"
 
