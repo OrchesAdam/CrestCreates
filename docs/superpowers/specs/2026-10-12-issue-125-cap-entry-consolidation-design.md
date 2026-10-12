@@ -1,6 +1,6 @@
 # Issue #125 CAP 入口收口与事务承诺核实 — 设计与现状清单
 
-日期：2026-10-12（rev.3，响应第二轮审查 `docs/review/2026-10-12-pr-140-cap-design-review-round2.md`：R2-D140-01 扫描配置约束 + 非阻塞说明；此前 rev.2 响应首轮 D140-01…04）
+日期：2026-10-12（rev.4，响应第三轮审查 `docs/review/2026-10-12-pr-140-cap-design-review-round3.md`：R3-D140-01 最终配置校验时机；此前 rev.3 响应第二轮 R2-D140-01，rev.2 响应首轮 D140-01…04）
 基线：master `1dc4a9cc`（PR #139 / #137 合并后）
 输入：
 - Issue #125 正文（含验收项与「纠正审查」）
@@ -9,7 +9,9 @@
 - CAP 10.0.1 锁定版本**源码级核实**（§1.8；引用文件均为 v10.0.1 tag）
 - 代码事实（本文所有引用以当前基线为准）
 
-> rev.3 变更摘要：补扫投递的**配置前提与启动校验**（有效 `FailedRetryCount>0`、扫描间隔有效正值、lookback 受支持范围 [30s,∞)、以最终生效值为准；新增框架 option 透传 lookback）；投递延迟改写为「名义扫描等待，非时限」；参与判定公共结果**不再暴露可强转句柄**（原生句柄仅经 Provider borrower）；补迁移/行为取舍（窗口内即时发布转为扫描等待、窗口内延迟拒绝、`FailedRetryCount=0` 不再是合法配置）；S1/S3 验收补配置负例与宽松超时断言；memory.md 头部残留与 PR 正文同步。
+> rev.4 变更摘要（响应第三轮审查 `docs/review/2026-10-12-pr-140-cap-design-review-round3.md`，R3-D140-01）：撤回「同一输入实例即足以杜绝后续覆盖」的表述；扫描配置组改为**两层校验**——注册期只做 Crest 输入早期诊断，权威校验改为**宿主启动期对 CAP 实际消费的最终 `CapOptions`** 执行（`IValidateOptions<CapOptions>` + `ValidateOnStart`，标准 Options 机制、不引入新配置真相来源）；验收补注册顺序/后配置覆盖负例（`Configure/PostConfigure` 把最终 count 改 0、interval 非法、lookback 低于下限 → 启动失败；合法后配置可通过）。
+>
+> rev.3 变更摘要：补扫投递的**配置前提与启动校验**（有效 `FailedRetryCount>0`、扫描间隔有效正值、lookback 受支持范围 [30s,∞)、以最终生效值为准；新增框架 option 透传 lookback）；投递延迟改写为「名义扫描等待，非时限」；参与判定公共结果**不再暴露可强转句柄**（原生句柄仅经 Provider borrower）；补迁移/行为取舍；S1/S3 验收补配置负例与宽松超时断言；memory.md 头部残留与 PR 正文同步。
 >
 > rev.2 变更摘要：重写 §3.4 原子发布协议（参与判定三值 + 瞬态绑定 + 扫描恢复投递）；补 §1.8 源码核实记录；按 D140-03 增加存储身份绑定规则；按 D140-04 收窄 executor 校验承诺；按 Q1–Q6 裁定更新 §3.1/§3.5/§6；修订 §4 切片与验收矩阵。
 
@@ -20,7 +22,7 @@
 1. **入口分裂确认**：同一包内两条注册路径——`[CrestModule]` 模块入口注册**内存实现**，扩展入口注册**持久化实现并调用 `AddCap`**。模块会被 BuildTasks 自动发现，在任何引用该包的应用里**无需显式调用扩展**即完成注册；解析结果取决于注册顺序，存在静默回落内存实现的风险（G-01）。
 2. **唯一正式入口**：扩展 `AddCrestCapDistributedTransaction` 收口为唯一正式入口；模块归档（99_RecycleBin）。依据是**唯一装配原则与现状能力**（零消费者、双入口分裂、模块路径无法完成配置绑定装配），并在 S1 验证模块清单/自动注册产物不再残留（Q1 裁定）。
 3. **内存件与死代码归档**：`TransactionLogger`、`DefaultTransactionCompensator`、`UnitOfWorkIntegrationExtensions`、参与者列表引擎（`IDistributedTransaction`/`DistributedTransaction`/`DistributedTransactionManager`/`ITransactionParticipant`，Q2 裁定同意）归档；归档后**补偿的注册与触发责任在文档中明确**（CAP 不会自动调用自定义补偿器）。
-4. **原子发布协议（rev.2 重写；rev.3 补配置前提）**：参与判定三值（确无可见窗口 / 已获准 / 拒绝参与），由内核侧最小平台补充提供（公共结果只报决策/原因，不含可强转句柄）；发布路径「瞬态绑定 + 事务内写行 + 不 flush（缓冲丢弃）+ CAP 存储扫描恢复投递」；扫描配置以**最终生效值**启动校验（有效 `FailedRetryCount > 0`、间隔有效正值、lookback ≥ 30s），投递延迟声明为**名义扫描等待、非时限**；所有拒绝路径在写入前确定性失败；不调用 CAP 的 Commit/Rollback/Dispose 是硬边界。行为取舍（窗口内即时消息改扫描等待、窗口内 `PublishDelayAsync` 拒绝、「禁用重试」不可用）进入迁移说明（§3.8）。
+4. **原子发布协议（rev.2 重写；rev.3 补配置前提）**：参与判定三值（确无可见窗口 / 已获准 / 拒绝参与），由内核侧最小平台补充提供（公共结果只报决策/原因，不含可强转句柄）；发布路径「瞬态绑定 + 事务内写行 + 不 flush（缓冲丢弃）+ CAP 存储扫描恢复投递」；扫描配置**两层校验**（注册期输入早期诊断 + 宿主启动期对最终 `CapOptions` 的 `ValidateOnStart` 权威校验：`FailedRetryCount > 0`、间隔 > 0、lookback ≥ 30s），投递延迟声明为**名义扫描等待、非时限**；所有拒绝路径在写入前确定性失败；不调用 CAP 的 Commit/Rollback/Dispose 是硬边界。行为取舍（窗口内即时消息改扫描等待、窗口内 `PublishDelayAsync` 拒绝、「禁用重试」不可用）进入迁移说明（§3.8）。
 5. **存储身份绑定**（D140-03）：声明支持的 Provider/数据库组合（EF+Npgsql ↔ CAP PostgreSql，单一固定数据库）；发布前校验 CAP 存储目标与参与资源的数据库身份（规范字段比较，非原始串文本）；不匹配在多库双向场景下拒绝于写入前。
 6. **证据**：PG + RabbitMQ Testcontainers 集成门禁覆盖审查给出的完整故障矩阵（正常/回滚/放弃/Unknown/提交确认后清理失败/连续发布/RequiresNew/结束后普通发布/延迟消息/重启恢复）；executor fixture 消费**真实生成产物**。
 7. **不做**：不另造通用事务引擎；不把内存参与者列表或依次 commit 推导为分布式原子；不整体重命名/搬走 CAP Provider（E7）。
@@ -143,10 +145,10 @@
 | `StorageProvider` ∈ {SqlServer, PostgreSql} | 注册期 | 抛（现状保留） |
 | `TransportConnectionString` 非空且**无默认值** | 注册期 | 移除 `"localhost"` 默认；空则抛（**行为变化，PR 明示**） |
 | `TransportProvider` ∈ {RabbitMQ, Kafka} | 注册期 | 抛（现状保留） |
-| **扫描模式配置组（§3.4.2 投递前提）** | 注册期 | 校验对象为**最终生效值**：配置节绑定 + `configure` 回调合并后的同一实例，且该实例就是传给 `AddCap` 的实例——杜绝「先校验后被其他配置覆盖」 |
-| ├ 最终生效 `FailedRetryCount > 0` | 注册期 | ≤0 → 启动失败：扫描模式下 0/负值使 `Retries < FailedRetryCount` 恒 false，**事务消息没有首次投递**；文档明示「禁用重试」在此模式下不可用 |
-| ├ `FailedRetryIntervalSeconds` 有效正值 | 注册期 | ≤0 → 启动失败（防止零间隔轮询） |
-| ├ `FallbackWindowLookbackSeconds` ∈ **[30s, ∞)**（新增框架 option，默认 240，经 `capOptions.FallbackWindowLookbackSeconds` 透传） | 注册期 | <30s（CAP 建议下限 `MinSuggestedValueForFallbackWindowLookbackSeconds`）或 ≤0 → 启动失败并提示受支持范围 |
+| **扫描模式配置组（§3.4.2 投递前提）——两层校验** | | |
+| ├ 第 1 层（早期诊断）：**Crest 输入** options 的 `FailedRetryCount` / `FailedRetryIntervalSeconds` / `FallbackWindowLookbackSeconds` 数值合法性 | 注册期 | 非法 → 注册期抛（快速定位输入错误）。**这不构成最终保证**：Crest 输入类型与 CAP 运行时消费的 `CapOptions` 是不同类型，`AddCap` 的配置回调也不是 Options 管线的最后一步——宿主后续 `Configure/PostConfigure<CapOptions>` 仍可改变 CAP 实际配置 |
+| ├ 第 2 层（权威）：**CAP 实际消费的最终 `CapOptions`**（所有 Configure/PostConfigure 之后的实例）必须满足 `FailedRetryCount > 0`、`FailedRetryInterval > 0`、`FallbackWindowLookbackSeconds ≥ 30` | 宿主启动期（强制触发） | 机制：扩展内 `services.AddOptions<DotNetCore.CAP.CapOptions>().Validate(...).ValidateOnStart()`——标准 Options 校验，不引入新配置真相来源、不另造配置管线；Options 语义保证 Configure → PostConfigure → 校验的执行顺序，`ValidateOnStart` 在宿主启动时解析并校验最终值；非法 → 宿主启动失败（`OptionsValidationException`）并输出实际生效值 |
+| ├ 数值约束语义（按最终 `CapOptions`） | 启动期 | `FailedRetryCount ≤ 0`：扫描模式下 `Retries < FailedRetryCount` 恒 false → **事务消息没有首次投递**（「禁用重试」在此模式下不可用）；`FailedRetryInterval ≤ 0`：零间隔轮询风险；`FallbackWindowLookbackSeconds < 30`（CAP 建议下限 `MinSuggestedValueForFallbackWindowLookbackSeconds`）：受支持范围外 |
 | `ICompensationExecutorRegistry` 可解析 | 启动期 | 不可解析 → 启动失败 + 修复指引（`AddCompensationExecutors()`） |
 | **声明必需执行器集合**（options `RequiredCompensationExecutors: string[]`，默认空）逐一可解析 | 启动期 | 缺失 → 启动失败并列出缺失名称 |
 | 持久化仓库可解析 | 启动期 | `IRepository<TransactionLog>`/`IRepository<TransactionCompensation>` 不可解析 → 启动失败 |
@@ -228,7 +230,7 @@ public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolvePa
 **投递（提交确认后）**：采用 **CAP 存储扫描恢复作为正式投递机制**（M-05）：
 - 提交确认后，行已随事务提交（`Scheduled`）；CAP `NeedRetryProcessor` 每 `FailedRetryInterval` 扫描 `StatusName IN ('Failed','Scheduled') AND Retries < FailedRetryCount AND Added < now - FallbackWindowLookbackSeconds` 并投递；
 - **声明（名义扫描等待，非投递时限）**：健康低负载环境下，提交后的消息通常在 `FallbackWindowLookbackSeconds`（默认 240s）与 `+FailedRetryInterval`（默认 60s）**量级**内被扫描投递；实际等待取决于消息 `Added` 时间（扫描按 Added 判龄——长事务提交后可能很快被下一轮选中）、提交可见性、积压、锁竞争、批次上限（LIMIT 200）、停机与 broker 故障，可能显著延长。该量级为**能力描述**，不构成提交后投递时限；S3 以**有界宽松超时**断言最终投递，不按精确区间断言；
-- **配置前提（并入 §3.2 启动校验）**：有效 `FailedRetryCount > 0`（0/负值使扫描恒不选中新行 → 事务消息没有首次投递，「禁用重试」在此模式下不可用）；`FailedRetryIntervalSeconds` 有效正值；新增框架 option `FallbackWindowLookbackSeconds ≥ 30s`（默认 240，透传 CAP 同名选项）；全部以**最终生效值**校验（与传给 `AddCap` 的同一实例）；
+- **配置前提（§3.2 两层校验；权威层对最终 `CapOptions`）**：注册期对 Crest 输入做早期诊断；**权威校验在宿主启动期对 CAP 实际消费的最终 `CapOptions`（所有 Configure/PostConfigure 之后）执行**（`IValidateOptions<CapOptions>` + `ValidateOnStart`）——有效 `FailedRetryCount > 0`（0/负值使扫描恒不选中新行 → 事务消息没有首次投递，「禁用重试」在此模式下不可用）、`FailedRetryInterval > 0`、`FallbackWindowLookbackSeconds ≥ 30s`（新增框架 option，默认 240 透传）。后续任何 `Configure/PostConfigure<CapOptions>` 覆盖都在启动期被同一权威检查捕获；
 - **不依赖 flush**：适配器从不调用 `FlushAsync`/`CommitAsync`（守护）。
 
 **各退出路径**：
@@ -290,7 +292,7 @@ public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolvePa
 | 切片 | 内容 | 验收映射 |
 | --- | --- | --- |
 | S0（本设计 rev.2 已完成） | CAP 10.0.1 源码核实（§1.8 M-01…M-07）；参与判定与协议定案 | Q6：架构未知量在实施前收敛（运行时证据由 S3 提供） |
-| S1 入口收口 | 扩展唯一入口；模块/内存件/死桥归档；配置校验落地（含**扫描模式配置组**：最终生效 `FailedRetryCount`/`FailedRetryIntervalSeconds`/`FallbackWindowLookbackSeconds` 校验与新增 lookback option 透传）；启动校验（registry + Required 集合 + 仓库可解析）；模块清单产物验证；测试项目改造/归档 | 验收 1、5；D140-04（启动部分）；R2-D140-01 |
+| S1 入口收口 | 扩展唯一入口；模块/内存件/死桥归档；配置校验落地（**两层**：注册期 Crest 输入早期诊断 + 宿主启动期对最终 `CapOptions` 的 `IValidateOptions`/`ValidateOnStart` 权威校验；新增 lookback option 透传）；启动校验（registry + Required 集合 + 仓库可解析）；模块清单产物验证；测试项目改造/归档 | 验收 1、5；D140-04（启动部分）；R2-D140-01；R3-D140-01 |
 | S2 持久化与补偿真实性 | 实体配置类 + `AddCrestCapPersistence` + 文档；注册前执行器校验；顺序补偿链测试（成功/重试/Failed/缺失）；**fixture 消费真实生成产物**；PG Testcontainers | 验收 2；D140-04（运行部分） |
 | S3 原子发布 | 参与判定 API + 集成借用适配 + 守护 CapTransaction + 身份绑定；**故障矩阵**（见下，含扫描配置负例/正例）；PG + RabbitMQ Testcontainers（可调小 lookback 加速证据；本地经 podman socket 可跑） | 验收 2/3；D140-01/02/03；R2-D140-01 |
 | S4 声明与收尾 | 支持表、文档修正、memory.md、issues log | 验收 4/5 |
@@ -307,7 +309,7 @@ public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolvePa
 9. 重启恢复：broker 停止期间提交 → 重启后扫描投递（M-05 条件）；
 10. 拒绝矩阵全量：对 §3.4.1 每个 Refused/适配器拒绝情形断言无行、无消息、无 publisher 状态残留；
 11. 生命周期调用计数：适配器对借用句柄的 Commit/Rollback/Dispose 调用次数 = 0；
-12. **扫描配置约束**：`FailedRetryCount` 0/负值、`FailedRetryIntervalSeconds` ≤0、`FallbackWindowLookbackSeconds` <30s → 启动失败（负例，且不产出任何可发布装配）；最低允许配置（count=1、lookback=30s、小间隔）仍完成事务消息**首次投递**（正例）。
+12. **扫描配置约束（含后配置覆盖负例）**：(a) Crest 输入非法（count 0/负、间隔 ≤0、lookback <30s）→ 注册期失败；(b) **输入合法但后续 `Configure/PostConfigure<DotNetCore.CAP.CapOptions>` 将最终值改为 count=0 / 间隔非法 / lookback 低于下限 → 宿主启动失败**（`ValidateOnStart` 触发 `OptionsValidationException`），且不产出可发布装配；(c) 合法后配置（如 PostConfigure 设 count=2）可通过启动；(d) 最低允许配置（count=1、lookback=30s、小间隔）仍完成事务消息**首次投递**（正例）。
 
 ---
 
