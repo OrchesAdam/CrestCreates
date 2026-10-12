@@ -1,23 +1,27 @@
 # Issue #125 CAP 入口收口与事务承诺核实 — 设计与现状清单
 
-日期：2026-10-12
+日期：2026-10-12（rev.2，响应 `docs/review/2026-10-12-pr-140-cap-design-review.md` 的 D140-01…04 与 Q1–Q6 裁定建议）
 基线：master `1dc4a9cc`（PR #139 / #137 合并后）
 输入：
 - Issue #125 正文（含验收项与「纠正审查」）
 - `docs/review/2026-10-10-framework-overall-architecture-review-follow-up.md` E7 修正（不能整体判玩具；核心问题是入口语义分裂与假补偿）
 - #137 交接文档 `docs/superpowers/specs/2026-10-10-issue-137-cap-handoff.md`（CAP 参与契约、拒绝项、原子发布边界）
-- 代码事实（本文所有引用以当前基线为准，file:line 供逐条复核）
+- CAP 10.0.1 锁定版本**源码级核实**（§1.8；引用文件均为 v10.0.1 tag）
+- 代码事实（本文所有引用以当前基线为准）
+
+> rev.2 变更摘要：重写 §3.4 原子发布协议（参与判定三值 + 瞬态绑定 + 扫描恢复投递）；补 §1.8 源码核实记录；按 D140-03 增加存储身份绑定规则；按 D140-04 收窄 executor 校验承诺；按 Q1–Q6 裁定更新 §3.1/§3.5/§6；修订 §4 切片与验收矩阵；同步 memory.md 状态残留。
 
 ---
 
 ## 0. 结论摘要
 
-1. **入口分裂确认**：同一包内两条注册路径——`[CrestModule]` 模块入口注册**内存实现**，扩展入口注册**持久化实现并调用 `AddCap`**。模块会被 BuildTasks 自动发现，在任何引用该包的应用里**无需显式调用扩展**即完成注册；扩展随后被调用（或顺序相反）时，`ITransactionLogger` / `ITransactionCompensator` 的解析结果取决于**注册顺序**，存在静默回落内存实现的风险（G-01）。
-2. **唯一正式入口方向**：扩展 `AddCrestCapDistributedTransaction` 收口为唯一正式入口；**模块入口归档**（99_RecycleBin）。依据：模块的 `OnConfigureServices` 拿不到 `IConfiguration`，而 `AddCap` 的 storage/transport 装配需要配置——模块入口在结构上只能产出「未装配 AddCap 的半成品注册」，无法满足「正式配置缺 storage/transport 时明确失败」（G-02）。
-3. **内存件与死代码归档**：`TransactionLogger`（内存字典 + Console）、`DefaultTransactionCompensator`（假补偿：不调用执行器即标记完成、`CanCompensateAsync` 恒 true）、`UnitOfWorkIntegrationExtensions`（#137 已判死扩展）随本项一并归档；参与者列表引擎（`IDistributedTransaction`/`DistributedTransaction`/`DistributedTransactionManager`/`ITransactionParticipant`）建议归档（Q2 待审查裁定）。
-4. **真实语义补齐**：持久化链（仓库 + 实体映射 + executor registry）具备可运行的装配与启动校验；补偿失败如实记录（Failed/Retrying），不得只把状态改成 completed；原子发布消费 #137 的受管窗口/借用契约（同库同事务或确定性失败），适配器放**集成层**（Runtime 不引具体 ORM Provider）。
-5. **证据**：PG（CAP 存储/消息表 + 业务库）+ RabbitMQ Testcontainers 集成门禁，覆盖发布、失败重试、补偿 executor 调用、UoW 回滚时消息不发布、提交确认失败不宣称成功；支持声明逐项（JIT/trim/AOT）如实标注，无证据不声称。
-6. **不做**：不另造通用事务引擎；不把「依次 commit」或内存参与者列表推导为分布式原子；不整体重命名/搬走 CAP Provider（E7 约束）。
+1. **入口分裂确认**：同一包内两条注册路径——`[CrestModule]` 模块入口注册**内存实现**，扩展入口注册**持久化实现并调用 `AddCap`**。模块会被 BuildTasks 自动发现，在任何引用该包的应用里**无需显式调用扩展**即完成注册；解析结果取决于注册顺序，存在静默回落内存实现的风险（G-01）。
+2. **唯一正式入口**：扩展 `AddCrestCapDistributedTransaction` 收口为唯一正式入口；模块归档（99_RecycleBin）。依据是**唯一装配原则与现状能力**（零消费者、双入口分裂、模块路径无法完成配置绑定装配），并在 S1 验证模块清单/自动注册产物不再残留（Q1 裁定）。
+3. **内存件与死代码归档**：`TransactionLogger`、`DefaultTransactionCompensator`、`UnitOfWorkIntegrationExtensions`、参与者列表引擎（`IDistributedTransaction`/`DistributedTransaction`/`DistributedTransactionManager`/`ITransactionParticipant`，Q2 裁定同意）归档；归档后**补偿的注册与触发责任在文档中明确**（CAP 不会自动调用自定义补偿器）。
+4. **原子发布协议（rev.2 重写）**：参与判定三值（确无可见窗口 / 已获准 / 拒绝参与），由内核侧最小平台补充提供；发布路径"瞬态绑定 + 事务内写行 + 不 flush（缓冲丢弃）+ 由 CAP 存储扫描恢复投递"；所有拒绝路径在写入前确定性失败。不调用 CAP 的 Commit/Rollback/Dispose 操作借用句柄是硬边界（§3.4）。
+5. **存储身份绑定**（D140-03）：声明支持的 Provider/数据库组合（EF+Npgsql ↔ CAP PostgreSql，单一固定数据库）；发布前校验 CAP 存储目标与参与资源的数据库身份（规范字段比较，非原始串文本）；不匹配在多库双向场景下拒绝于写入前。
+6. **证据**：PG + RabbitMQ Testcontainers 集成门禁覆盖审查给出的完整故障矩阵（正常/回滚/放弃/Unknown/提交确认后清理失败/连续发布/RequiresNew/结束后普通发布/延迟消息/重启恢复）；executor fixture 消费**真实生成产物**。
+7. **不做**：不另造通用事务引擎；不把内存参与者列表或依次 commit 推导为分布式原子；不整体重命名/搬走 CAP Provider（E7）。
 
 ---
 
@@ -34,19 +38,15 @@
   - `ICapTopicNameProvider → DefaultCapTopicNameProvider`
   - `IDistributedEventPublisher → CapDistributedEventPublisher`
   - `IEventBus → CapEventBus`
-- 不调用 `AddCap`，不读取任何配置。`CapEventBus` 依赖 `ICapPublisher`（由 `AddCap` 提供）与 `IEventValidator`（Eventing 提供）→ 模块单独使用时装配不完整。
-- `ModuleBase.OnConfigureServices(IServiceCollection)` 无配置上下文；`IModule` 其余钩子（`OnPreInitializeAsync` 等 / `OnApplicationInitializationAsync(IHost)`）均在**服务注册之后**运行，无法在注册期完成配置绑定的 CAP 装配。
+- 不调用 `AddCap`，不读取任何配置；`CapEventBus` 依赖 `ICapPublisher`（`AddCap` 提供）与 `IEventValidator` → 模块单独使用时装配不完整。
+- `ModuleBase.OnConfigureServices(IServiceCollection)` 无配置上下文；其余钩子（`OnPreInitializeAsync` 等 / `OnApplicationInitializationAsync(IHost)`）均在服务注册之后运行。
 
 ### 1.2 入口 B — 扩展（手动调用）
 
-`src/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP/Extensions/DistributedTransactionCapServiceCollectionExtensions.cs`
+`.../Extensions/DistributedTransactionCapServiceCollectionExtensions.cs`
 
-- `AddCrestCapDistributedTransaction(IConfiguration, Action<DistributedTransactionCapOptions>?)`：
-  - 绑定 `DistributedTransaction: CAP` 节；注册**持久化** `ITransactionLogger → PersistentTransactionLogger`、`ITransactionCompensator → PersistentTransactionCompensator`（:37-38），其余与模块相同的 topic/publisher/event bus；
-  - 可选注册 `CompensationRetryBackgroundService`（`EnableCompensationBackgroundWorker` 默认 true，:41-45）；
-  - 调用 `services.AddCap(...)`（:48）：设置 group/retry 参数与 `ConfigureStorage`/`ConfigureTransport`；
-  - `ConfigureStorage`：`StorageConnectionString` 为空即抛 `ArgumentException.ThrowIfNullOrWhiteSpace`；`StorageProvider` 不在 {SqlServer, PostgreSql} 抛 `NotSupportedException`（:64-88）——**fail closed 已有**；
-  - `ConfigureTransport`：`TransportConnectionString` 为空即抛；不在 {RabbitMQ, Kafka} 抛（:90-105）。
+- `AddCrestCapDistributedTransaction(IConfiguration, Action<DistributedTransactionCapOptions>?)`：绑定 `DistributedTransaction:CAP`；注册持久化 `ITransactionLogger → PersistentTransactionLogger`、`ITransactionCompensator → PersistentTransactionCompensator`（:37-38）；可选注册 `CompensationRetryBackgroundService`（:41-45）；调用 `services.AddCap(...)`（:48）并 `ConfigureStorage`/`ConfigureTransport`。
+- `ConfigureStorage`：`StorageConnectionString` 空 → 抛；Provider 不在 {SqlServer, PostgreSql} → 抛（:64-88，fail closed 已有）。`ConfigureTransport` 同理（:90-105）。
 
 ### 1.3 配置链
 
@@ -57,38 +57,50 @@
 | `StorageProvider` | `SqlServer` | 显式枚举；非法值注册期抛 |
 | `StorageConnectionString` | 空串 | 注册期抛（fail closed） |
 | `TransportProvider` | `RabbitMQ` | 显式枚举 |
-| `TransportConnectionString` | `"localhost"` | **非空默认值**：未配置时静默指向本机 RabbitMQ，可能延迟到运行期才暴露（G-03） |
+| `TransportConnectionString` | `"localhost"` | **非空默认值**：未配置时静默指向本机（G-03） |
 | `DefaultGroup` | `"crestcreates"` | 无校验需求 |
-| `FailedRetryCount/Interval` | 5 / 60s | 透传给 CAP |
+| `FailedRetryCount/Interval` | 5 / 60s | 透传 CAP（CAP 默认 50/60s，此处覆盖为 5/60s） |
 | `CompensationMaxRetries/RetryInterval` | 3 / 30s | 补偿重试参数 |
 | `EnableCompensationBackgroundWorker` | true | 后台重试服务开关 |
 
 ### 1.4 持久化链
 
-- `PersistentTransactionLogger`（:14-90）：`IRepository<TransactionLog, Guid>` 读写 `TransactionLog`（Id/Status/Message/ErrorDetails/ParticipantCount/UpdatedAt）。
-- `PersistentTransactionCompensator`（:13-190）：`IRepository<TransactionCompensation, Guid>` + `ICompensationExecutorRegistry` + options；注册补偿、查询 Pending/Retrying、按 CreatedAt 倒序执行、指数退避（上限 300s）、执行器缺失或抛异常 → `Retrying`（达 MaxRetries → `Failed`）。
-- **实体映射缺口**：`TransactionLog` / `TransactionCompensation`（`Models/`）在框架其它位置**没有任何 EF 映射或 DbContext 注册**（全仓 grep 仅包内命中）；持久化链要求应用自行注册 `IRepository<>` 与建表，当前**无装配文档、无验证**（G-04）。
-- **执行器注册表缺口**：`ICompensationExecutorRegistry` 由 Source Generator（`CompensationExecutorCodeWriter.cs:33,100`）生成 `CompensationExecutorRegistry` + `AddCompensationExecutors()` 扩展，须应用**显式调用**；全仓无生产消费者（仅生成器测试与 2026-04-26 设计文档引用）。扩展入口未校验其存在 → 解析失败推迟到运行期（G-05）。
+- `PersistentTransactionLogger`：`IRepository<TransactionLog, Guid>` 读写 `TransactionLog`。
+- `PersistentTransactionCompensator`：`IRepository<TransactionCompensation, Guid>` + `ICompensationExecutorRegistry` + options；注册补偿、查询 Pending/Retrying、按 CreatedAt 倒序执行、指数退避（上限 300s）、执行器缺失或抛异常 → `Retrying`（达 MaxRetries → `Failed`）。
+- **实体映射缺口**：`TransactionLog`/`TransactionCompensation` 全仓无框架侧 EF 映射（G-04）。
+- **执行器注册表缺口**：`ICompensationExecutorRegistry` 由生成器产物提供（`CompensationExecutorCodeWriter.cs:33,100`），应用须显式调用 `AddCompensationExecutors()`；全仓无生产消费者（G-05）。
 
 ### 1.5 发布链
 
-- `CapDistributedEventPublisher`：包装 `ICapPublisher.PublishAsync(topic, message, headers, ct)` / `PublishDelayAsync`；**不携带事务**（未使用 `ICapPublisher.Transaction`）。
-- `CapEventBus : DistributedEventBusBase`：`PublishAsync` → topic 映射（`DefaultCapTopicNameProvider`，`命名空间.类型名`）→ publisher；`Subscribe/Unsubscribe` 抛 `NotSupportedException`（CAP 以 `[CapSubscribe]` 声明订阅）。
-- **原子性现状**：#137 交接文档 §4 明确「消息记录必须与业务数据同一资源/事务、在本 UoW commit 之前落库」；当前发布路径**没有**接入受管事务（G-06）。
+- `CapDistributedEventPublisher`：包装 `ICapPublisher.PublishAsync(topic, message, headers, ct)` / `PublishDelayAsync`；**不携带事务**。
+- `CapEventBus : DistributedEventBusBase`：发布 → topic 映射（`命名空间.类型名`）→ publisher；`Subscribe/Unsubscribe` 抛 `NotSupportedException`。
 
 ### 1.6 补偿执行链
 
-- 真实链（应用配置持久化路径时）：UoW/业务失败 → `RegisterCompensationAsync`（持久化 Pending）→ `CompensateAsync(transactionId)` 或后台 `ProcessRetryingCompensationsAsync` → `ExecuteCompensationAsync` → `ICompensationExecutor.ExecuteAsync(data)` → 成功 Completed / 失败 Retrying（退避）或 Failed。
-- 假链（模块/内存路径）：`DefaultTransactionCompensator.CompensateAsync` 对 Pending 项**直接** `MarkCompensationCompletedAsync`（不调用任何执行器）；`CanCompensateAsync` 恒 `true`；`ProcessRetryingCompensationsAsync` 同样直接标完成。
-- 参与者引擎（两条入口都注册的 `DistributedTransactionManager`）：`CreateTransactionAsync` → `DistributedTransaction.BeginAsync`（空操作）→ `CommitAsync` 对**内存参与者列表**做 Prepare/Commit（任一 Prepare false 即整体回滚）→ `Status` 记录在内存。不接触 CAP、不接触数据库事务（G-07）。
-- `UnitOfWorkIntegrationExtensions.RegisterWithDistributedTransaction`（`CrestCreates.DistributedTransaction/Extensions/`）：零消费者（#137 交接表已判死）；把 `Domain.UnitOfWork.IUnitOfWork` 包成参与者，Prepare 调 `SaveChangesAsync`、Commit 调 `CommitTransactionAsync`（G-08）。
+- 真实链（持久化路径）：UoW/业务失败 → `RegisterCompensationAsync`（持久化 Pending）→ `CompensateAsync` 或后台 `ProcessRetryingCompensationsAsync` → `ExecuteCompensationAsync` → `ICompensationExecutor.ExecuteAsync` → 成功 Completed / 失败 Retrying / 达上限 Failed。
+- 假链（内存路径）：`DefaultTransactionCompensator` 对 Pending 项直接 `MarkCompensationCompletedAsync`（不调用执行器）；`CanCompensateAsync` 恒 `true`。
+- 参与者引擎：`DistributedTransactionManager`/`DistributedTransaction` 为内存参与者列表伪 2PC；`BeginAsync` 空操作。
+- `UnitOfWorkIntegrationExtensions.RegisterWithDistributedTransaction`：零消费者死扩展（#137 交接已判）。
 
 ### 1.7 消费与测试现状
 
-- **生产消费者：零**。samples 不引用 CAP 包；`AddCrestCapDistributedTransaction` / `DistributedTransactionCapModule` 在 src/samples 均无调用方（仅定义处命中）。
-- 测试：`tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests/DistributedTransactionManagerTests.cs` 仅覆盖**内存** manager（手工 new `TransactionLogger`/`DefaultTransactionCompensator`，Moq），无持久化/补偿真实执行/CAP 发布测试。
-- CI：`.github/workflows/ci.yml` "Runtime / Audit & DistributedTransaction" 步骤执行上述测试项目；CAP 集成无任何 CI 门禁。
-- 质量债务：9 处 CS1998（CAP 包内）；`TransactionLogger` 等含「这里可以添加实际的…」废话注释。
+- **生产消费者：零**（samples 不引用；两入口均无调用方）。
+- 测试仅覆盖内存 manager（Moq）；CI "Runtime / Audit & DistributedTransaction" 步骤执行该测试项目；无 CAP 集成门禁。
+- 质量债务：CAP 包内 9 处 CS1998、废话注释。
+
+### 1.8 CAP 10.0.1 机制核实（源码级；v10.0.1 tag）
+
+> 本节为设计定案输入：核实锁定版本的真实行为，避免把架构未知量推到实现期。**运行时行为证据仍由 S3 CI 用例提供**；以下为源码推导结论（高置信）。
+
+| # | 结论 | 依据（v10.0.1 源码） |
+| --- | --- | --- |
+| M-01 | 事务发布时消息行**在发布调用内**写入给定事务（`StoreMessageAsync(name, message, transaction)` 用 `IDbContextTransaction.GetDbTransaction()` 的连接 + 事务执行 INSERT；`StatusName='Scheduled'`、`ExpiresAt=NULL`），同时把 `MediumMessage` 放入**内存缓冲**；`AutoCommit=false` 时不自动提交 | `ICapPublisher.Default.cs`（PublishInternalAsync :153-179）；`IDataStorage.PostgreSql.cs` StoreMessageAsync :114-158 |
+| M-02 | 缓冲**只**经 `CapTransactionBase.FlushAsync()` 投递（延迟消息入调度器、即时消息入发布队列）；`Flush`/`FlushAsync` 为 `protected virtual`；标准 `CommitAsync` = 提交底层事务 + `FlushAsync()` | `ICapTransaction.Base.cs` :92-133；`ICapTransaction.PostgreSql.cs` :41-56 |
+| M-03 | `CapTransactionBase.Dispose()` 会对 `DbTransaction`（若可 IDisposable）**执行释放**——CAP 生命周期操作会触碰借用句柄，必须规避 | `ICapTransaction.Base.cs` :138-142 |
+| M-04 | `ICapPublisher.Transaction` 由 AsyncLocal `CapTransactionHolder` 承载，可设置任意的 `CapTransactionBase` 子类实例（发布路径会强转 `(CapTransactionBase)Transaction`） | `ICapPublisher.Default.cs` :30-52；PublishInternalAsync :170 |
+| M-05 | 未 flush 但已随事务提交的 `Scheduled` 行会被**重试扫描**捡起投递：`StatusName IN ('Failed','Scheduled') AND Retries < FailedRetryCount AND Version=... AND Added < now - FallbackWindowLookbackSeconds`（默认 240s），处理器每 `FailedRetryInterval`（默认 60s；本仓选项覆盖为 60s）运行一次并 `EnqueueToPublish` | `IDataStorage.PostgreSql.cs` GetMessagesOfNeedRetryAsync :341-380；`IProcessor.NeedRetry.cs` :36-83；`CAP.Options.cs` 默认值 :26-37 |
+| M-06 | 延迟行调度扫描只处理 `Delayed`/`Queued` 状态（不含 `Scheduled`）→ 事务分支写入的延迟消息在无 flush 时**不会**按延迟调度 | `IDataStorage.PostgreSql.cs` ScheduleMessagesOfDelayedAsync :245-260 |
+| M-07 | CAP PG 表由存储初始化器在**配置的存储连接**上创建：`CREATE SCHEMA IF NOT EXISTS "{schema}"`（默认 schema `cap`）+ published/received/lock 表；无事务的存储操作与重试查询走该配置连接 | `IStorageInitializer.PostgreSql.cs`；`CAP.EFOptions.cs`（`DefaultSchema="cap"`）；`IDataStorage.PostgreSql.cs` :141-155 |
 
 ---
 
@@ -96,136 +108,206 @@
 
 | # | 类别 | 缺口 | 证据 | 影响 |
 | --- | --- | --- | --- | --- |
-| G-01 | 缺陷 | 双入口注册分裂：模块注册内存实现且自动发现；解析结果依赖注册顺序 | `DistributedTransactionCapModule.cs`（内存注册）vs 扩展（持久化 + AddCap） | 静默回落内存、假补偿上线风险；违反「唯一主链」 |
-| G-02 | 缺陷 | 模块无法配置绑定装配（无 IConfiguration 通道），单独使用即半装配 | `ModuleBase.OnConfigureServices(IServiceCollection)` 签名；模块不调 `AddCap` | 「正式配置缺失明确失败」无法在模块路径成立 |
-| G-03 | 缺陷 | `TransportConnectionString` 默认 `"localhost"` 使缺失配置静默指向本机 | `DistributedTransactionCapOptions.cs` | 延迟暴露、可能误连本机 broker |
-| G-04 | 遗留 | 持久化实体无框架侧映射/装配文档；`IRepository<TransactionLog/TransactionCompensation>` 来源未定义 | 全仓 grep 仅包内；无 samples 装配 | 持久化链实际不可运行（未验证） |
-| G-05 | 缺陷 | 扩展不校验 `ICompensationExecutorRegistry` 是否存在 | 生成器要求显式 `AddCompensationExecutors()`；扩展未引用 | 补偿执行在运行期才失败（「无 executor found」被记录为 Failed 但启动期无诊断） |
-| G-06 | 缺陷 | 发布链不接入受管事务（无 `ICapPublisher.Transaction` 使用） | `CapDistributedEventPublisher` | 消息与业务落库不同事务时，「原子发布」声明不成立 |
-| G-07 | 缺陷 | 内存参与者引擎承载伪 2PC 语义（Prepare/Commit 内存列表，`BeginAsync` 空操作） | `DistributedTransaction.cs` / `DistributedTransactionManager.cs` | 与「不从回调或依次 commit 推导原子发布」直接冲突；误导上层 |
-| G-08 | 遗留 | `RegisterWithDistributedTransaction` 死扩展 + `UnitOfWorkTransactionParticipant` | #137 交接记录；零消费者 | 双轨风险（误用为参与路径） |
-| G-09 | 缺陷 | 假补偿：`DefaultTransactionCompensator` 不调用执行器即标完成、`CanCompensateAsync` 恒 true | `DefaultTransactionCompensator.cs:17-38` | 「失败不能只把状态改成 completed」的反面样本 |
-| G-10 | 测试 | 无持久化/补偿执行/发布/故障恢复测试；CI 仅跑内存 manager 测试 | 测试项目清单；ci.yml:224-229 | 绿灯信号不证明任何 CAP 语义 |
+| G-01 | 缺陷 | 双入口注册分裂：模块注册内存实现且自动发现；解析结果依赖注册顺序 | 1.1 / 1.2 | 静默回落内存、假补偿上线风险；违反唯一主链 |
+| G-02 | 缺陷 | 模块路径无法完成配置绑定的 CAP 装配（结构缺口） | `ModuleBase.OnConfigureServices(IServiceCollection)` 签名；模块不调 `AddCap` | 「正式配置缺失明确失败」在模块路径不成立 |
+| G-03 | 缺陷 | `TransportConnectionString` 默认 `"localhost"` | `DistributedTransactionCapOptions.cs` | 延迟暴露、可能误连本机 broker |
+| G-04 | 遗留 | 持久化实体无框架侧映射/装配文档 | 1.4 | 持久化链实际不可运行（未验证） |
+| G-05 | 缺陷 | 扩展不校验 executor registry；「registry 可解析 ≠ 必需 executor 完整」 | 1.4；D140-04 | 运行期才暴露的补偿失败 |
+| G-06 | 缺陷 | 发布链不接入受管事务 | 1.5 | 「原子发布」声明不成立 |
+| G-07 | 缺陷 | 内存参与者引擎承载伪 2PC 语义 | 1.6 | 误导上层；与唯一内核冲突 |
+| G-08 | 遗留 | 死扩展 + 参与者桥 | 1.6 | 双轨风险 |
+| G-09 | 缺陷 | 假补偿：不调用执行器即标完成 | 1.6 | 「失败不能只把状态改成 completed」的反面样本 |
+| G-10 | 测试 | 无持久化/补偿执行/发布/故障恢复测试 | 1.7 | 绿灯信号不证明任何 CAP 语义 |
 | G-11 | 声明 | CAP 集成无 JIT/trim/AOT 或「未验证」声明 | AGENTS.md 分层规则 | 支持表缺项 |
-| G-12 | 文档 | 「事务 API 实际保证」未核实：无 exactly-once/2PC 承诺说明；`CanCompensateAsync=true` 语义被文档放大 | 任务书第 4 条；`DefaultTransactionCompensator` | 文档与实现不符 |
-| G-13 | 质量 | 9 处 CS1998、废话注释 | 架构审查 §4 | 维护噪声 |
-| G-14 | 边界 | 原子发布适配若直接落 Runtime 会导致 Runtime 引具体 ORM Provider（边界测试当前只禁 FreeSql/SqlSugar，原则禁「如」同类） | `DependencyBoundaryTests.cs:48-53`；#137 交接 §4.4 | 落位错误 = 边界违规 |
+| G-12 | 文档 | 事务 API 保证未核实；无 exactly-once/2PC 声明边界 | §1.8 前无依据 | 文档与实现不符 |
+| G-13 | 质量 | 9 处 CS1998、废话注释 | §1.7 | 维护噪声 |
+| G-14 | 边界 | 原子发布适配落位：Runtime 不引具体 ORM Provider | `DependencyBoundaryTests.cs:48-53`；#137 交接 §4.4 | 落位错误 = 边界违规 |
 
 ---
 
 ## 3. 设计
 
-### 3.1 唯一正式入口与模块处置（G-01/G-02）
+### 3.1 唯一正式入口与模块处置（G-01/G-02；Q1 裁定）
 
-- **唯一正式入口**：`AddCrestCapDistributedTransaction(IConfiguration, configure?)`（扩展）。所有真实注册集中于此。
-- **模块入口归档**：`DistributedTransactionCapModule` 移除到 `99_RecycleBin/issue-125-cap-module/`。理由（须在 PR 说明中如实呈现）：
-  1. 注册期无配置通道 → 结构上无法完成 CAP 装配；
-  2. 自动发现使其在任何引用应用里「无调用即注册」，与显式配置入口形成顺序敏感的双轨；
-  3. 归档是「隔离否则归档」原则下可验证的唯一选择（保留但其改为空注册会制造「调用过模块即放心」的错觉，反而更糟）。
-- **顺序不变量**：收口后 `ITransactionLogger`/`ITransactionCompensator` 只有持久化注册一处来源；验收项「模块/扩展组合及注册顺序不会切回内存实现」以「无内存实现可回落」直接成立，并以启动校验（§3.2）兜底。
+- **唯一正式入口**：`AddCrestCapDistributedTransaction(IConfiguration, configure?)`。
+- **模块归档**：依据 = 唯一装配原则 + 现状能力（零消费者、双入口分裂、模块路径无法完成配置绑定装配）；这是对 #125 原「模块委托统一平台装配」方案的**替代**而非其实现——不为此改造通用模块框架。S1 验收包含：**验证生成模块清单/自动注册产物不再包含该模块**（BuildTasks 产物检查），并确认无编译引用残留。
+- **归档后不变量**：`ITransactionLogger`/`ITransactionCompensator` 只有持久化一处注册；验收项「模块/扩展组合及注册顺序不会切回内存实现」以「无内存实现可回落」+ 启动校验直接成立。
 
-### 3.2 配置与启动校验（G-03/G-05 fail-closed）
+### 3.2 配置与启动校验（G-03/G-05；D140-04 收窄）
 
 | 校验 | 时机 | 行为 |
 | --- | --- | --- |
-| `StorageConnectionString` 非空 | 注册期 | 抛 `ArgumentException`（现状保留） |
-| `StorageProvider` ∈ {SqlServer, PostgreSql} | 注册期 | 抛 `NotSupportedException`（现状保留） |
-| `TransportConnectionString` 非空且**无默认值** | 注册期 | 移除 `"localhost"` 默认；空则抛（**行为变化，需在 PR 明示**） |
+| `StorageConnectionString` 非空 | 注册期 | 抛（现状保留） |
+| `StorageProvider` ∈ {SqlServer, PostgreSql} | 注册期 | 抛（现状保留） |
+| `TransportConnectionString` 非空且**无默认值** | 注册期 | 移除 `"localhost"` 默认；空则抛（**行为变化，PR 明示**） |
 | `TransportProvider` ∈ {RabbitMQ, Kafka} | 注册期 | 抛（现状保留） |
-| `ICompensationExecutorRegistry` 存在 | **应用启动期**（`IValidateOnStart` 选项校验或启动自检 hosted service） | 缺失即启动失败并给出修复指引（`AddCompensationExecutors()`） |
-| 持久化仓库可解析 | 启动自检（同上） | `IRepository<TransactionLog>`/`IRepository<TransactionCompensation>` 不可解析即启动失败（替代首次写入才暴露） |
+| `ICompensationExecutorRegistry` 可解析 | 启动期 | 不可解析 → 启动失败 + 修复指引（`AddCompensationExecutors()`） |
+| **声明必需执行器集合**（options `RequiredCompensationExecutors: string[]`，默认空）逐一可解析 | 启动期 | 缺失 → 启动失败并列出缺失名称 |
+| 持久化仓库可解析 | 启动期 | `IRepository<TransactionLog>`/`IRepository<TransactionCompensation>` 不可解析 → 启动失败 |
+| **新注册补偿的 participant 在执行前可执行** | `RegisterCompensationAsync` 写入 Pending **之前** | 无执行器 → 确定性异常（不写 Pending） |
+| 历史补偿记录缺执行器 | 执行时 | 保留现有可检查 `Failed` 路径（不删除） |
 
-### 3.3 持久化与补偿链落位（G-04/G-05/G-10）
+**承诺收窄（D140-04）**：仅声明「registry 装配存在 + 声明的必需集合覆盖 + 新注册前校验」；不声明「缺失不可达」——历史记录、nonce 名称与版本演化的执行器缺失仍有明确失败路径。声明的必需集合来源 = 应用 options（生成器提供全量注册；应用声明其期望集合）；若应用不声明，启动校验退化为 registry 存在性 + 注册时校验。
 
-- **实体映射责任**：框架提供「集成装配包」（见 §3.4 同一归属）：
-  - 提供 `IEntityTypeConfiguration<TransactionLog>` / `<TransactionCompensation>`（表名、键、索引：`TransactionId`、`Status`）；
-  - 提供 `AddCrestCapPersistence<TContext>()`（或等价最小扩展）把配置应用到应用 DbContext 并注册框架仓储所需绑定；
-  - 文档章节：实体迁移（应用侧 migration）+ 示例装配（供 CI fixture 复用）。
-- **补偿执行真实验证**：executor 正常 → Completed；executor 抛异常 → Retrying（退避）→ 重试成功 Completed；达到 MaxRetries → Failed 且保留 ErrorMessage；**任何路径不得在未调用 executor 时标记 Completed**。
-- **失败可见性**：executor 缺失 → `Failed` + 明确消息（现状已有）；启动期校验（§3.2）使该状态在正常装配下不可达。
+### 3.3 持久化与补偿链落位（G-04/G-10）
 
-### 3.4 原子发布契约（G-06/G-14，消费 #137）
+- **实体映射责任**：集成装配包提供**显式强类型**配置：`TransactionLogConfiguration : IEntityTypeConfiguration<TransactionLog>` 与 `TransactionCompensationConfiguration`（表名、主键、`TransactionId`/`Status` 索引、列长）；应用在自身 `OnModelCreating` 显式 `modelBuilder.ApplyConfiguration(...)` 应用（文档 + 示例）。**不**自动修改任意应用 DbContext 模型、**不**新增 runtime 扫描 fallback。
+- **仓储绑定**：集成包提供 `AddCrestCapPersistence<TContext>()`，仅负责「注册本上下文 + 注册 `IRepository<TransactionLog/TransactionCompensation>` 的 EF 实现 + 注册生成的执行器扩展调用指引」；其行为与限制在文档中逐条列出（不生成迁移；迁移由应用侧负责）。
+- **补偿链测试**：
+  - 顺序路径：成功/失败退避重试/达上限 Failed/executor 缺失（注册时拒绝 + 历史行 Failed）；
+  - **明确声明限制**：并发补偿与进程崩溃恢复（`Executing` 状态残留）不在本项承诺内；测试不得用顺序 mock 宣称 durable compensation 闭环；`Executing` 残留列为已知限制（S4 支持表记录）。
 
-约定（相对 #137 交接文档的落地方案）：
+### 3.4 原子发布协议（G-06/G-14；D140-01/02/03；rev.2 重写）
 
-1. **受管窗口内发布 = 同事务或确定性失败**：
-   - `CapDistributedEventPublisher` 检测当前是否有受管事务窗口（`IUnitOfWorkTransactionLeaseProvider.TryAcquireCurrentLease`）；
-   - 有窗口：通过 **EF 适配边界** 借用原生 `DbContext`/`IDbContextTransaction`（#137 `IEfCoreTransactionBorrower`），将其包装为 CAP 事务（`ICapPublisher.Transaction = provider-specific CapTransaction { DbTransaction = <native> }`，AutoCommit=false），发布即写入**同一事务**；由 UoW 内核提交/回滚消息表写入；
-   - 无窗口：普通发布（CAP 自身提交后投递语义），文档明示「与业务落库非原子」；
-   - 有窗口但借用不可用（非受管事务、独立宿主、资源不匹配等）→ **确定性失败**，不静默降级为非事务发布。
-2. **适配器落位**：EF 耦合代码（borrower 消费、CapTransaction 包装、实体映射）放**集成层新项目**（建议 `src/Integrations/` 下，名称待裁定 Q3），Runtime 的 CAP 包保持不引具体 ORM Provider（G-14）。
-3. **语义如实声明**（G-12）：
-   - 本机制提供「消息与业务数据同库同事务写入」的原子性（由 #137 内核提交/回滚保证）、CAP 侧 at-least-once 投递与重试（CAP 能力）；
-   - **不承诺**分布式 exactly-once、2PC、跨库原子；依次 commit 不构成原子；
-   - `ICapPublisher` / `CapTransaction` 的真实行为以本项实测（S3 故障用例）为准并写入文档。
-4. **故障语义映射**（来自 #137 交接 §6，逐条转成用例）：
-   - UoW 回滚 → 消息表写入随事务回滚（broker 侧观察不到消息）；
-   - 提交派发期失败（Unknown）→ 消息可能已随事务提交亦可能未提交；不得宣称「已发布/已回滚」二选一；
-   - 提交后通知失败（Committed）→ 不影响消息原子性结论；
-   - 未完成退出（终结 + 丢弃）→ 消息不得依赖未完成窗口内的写入。
+#### 3.4.1 参与判定（唯一权威与最小平台补充）
+
+`TryAcquireCurrentLease` 的 `false` 只表达「未获准参与」，**不能**推导「无受管窗口」（未 Start、非事务、终态、释放、不可见链、无事务关联等都可能 false；部分 Provider 无 lease provider）。为此定义**参与判定三值**并由内核提供唯一权威（最小平台补充，归属 Data.Abstractions，紧邻现有 `TryGetCurrentManagedTransaction`；CAP 不复制 ambient 状态机）：
+
+```csharp
+public enum UnitOfWorkParticipationDecision { NoVisibleWindow, Granted, Refused }
+
+public readonly struct UnitOfWorkParticipationResult
+{
+    public UnitOfWorkParticipationDecision Decision { get; }
+    public string? RefusalReason { get; }            // 诊断；不含凭据
+    public object? TransactionHandle { get; }        // Granted 时非空（仅身份比对）
+    public object? ResourceContext { get; }
+    public UnitOfWorkExecutionTokenSource? OwnerSource { get; }
+}
+
+// 内核唯一权威（实现复用现有帧遍历；TryGetCurrentManagedTransaction 重构为其 Granted 判定特例）
+public static UnitOfWorkParticipationResult UnitOfWorkExecutionContext.ResolveParticipation(UnitOfWorkChainNode? readerNode);
+```
+
+**判定与行为表**（验收：每种结果断言「是否调用 CAP 非事务发布/是否写消息表」，拒绝用例必须证明**未产生任何非事务副作用**）：
+
+| 情形 | 判定 | 行为 |
+| --- | --- | --- |
+| 无受管帧（无 UoW） | NoVisibleWindow | 普通发布（CAP 非事务路径：CAP 自连接存行 + 即时投递）；文档明示与业务落库非原子 |
+| 独立 DI 根 / 他链窗口（不可见） | NoVisibleWindow | 同上（**不**做全局扫描探测其他宿主） |
+| 可见 owner：未 Start | Refused(NotStarted) | 确定性失败；消息不写、无发布副作用 |
+| 可见 owner：非事务模式 | Refused(NonTransactional) | 同上 |
+| 可见 owner：终态（Completed/RolledBack/Failed）或已释放 | Refused(Terminal) | 同上 |
+| 可见 owner：事务型已开始但无事务关联句柄（Provider 未曝光/非 EF） | Refused(NoTransactionAssociation) | 同上（当前 CAP 集成仅声明支持 EF+Npgsql） |
+| 可见 owner：租户/资源不匹配（内核数据准入拒绝） | Refused(ResourceMismatch) | 同上 |
+| scoped 上下文存在**原生未受管事务**且无可见窗口（可检测时） | Refused(UnmanagedNativeTransaction) | 确定性失败；CAP 不加入未受管事务、不通过连接嗅探探测（无可检测上下文时按无窗口处理，文档明示） |
+| Granted 但集成借用边界不可用（装配缺失） | — | 确定性失败（装配诊断：引用集成包并注册） |
+| Granted 但 CAP 存储身份 ≠ 参与资源身份（§3.4.4） | Refused(StorageIdentityMismatch) | 同上（在**写入前**） |
+| Granted + 身份一致 + 借用成功 | Granted | 事务内写行（§3.4.2），投递走扫描恢复（§3.4.3） |
+
+所有 Refused/装配失败路径都**先于** `ICapPublisher` 调用，保证零副作用（S3 用例逐一断言）。
+
+#### 3.4.2 发布生命周期协议（D140-02）
+
+**硬边界**：不调用 CAP 的 Commit/Rollback/Dispose（M-03 证明 CAP Dispose 会释放借用句柄）；借用句柄生命周期唯一归 #137 内核。
+
+每次 Granted 发布：
+
+1. 参与判定 → Granted（含 `TransactionHandle`）；
+2. 身份校验（§3.4.4）→ 通过；
+3. 集成借用边界取原生 `IDbContextTransaction`（经 #137 `IEfCoreTransactionBorrower`，资源/事务引用比对由 borrower 保证）；
+4. **瞬态绑定**：`previous = publisher.Transaction; publisher.Transaction = guardedCapTransaction;`（`guardedCapTransaction` 为集成层的 `CapTransactionBase` 子类：`DbTransaction = <借用句柄>`、`AutoCommit = false`；**覆写 Commit/Rollback/Dispose 为守护**——抛确定性异常或仅解除字段引用，绝不触达借用句柄）；
+5. `await publisher.PublishAsync(...)`：CAP 事务分支在**同一事务**内写 `cap.published` 行（M-01），并把消息加入**本实例缓冲**；
+6. `finally { publisher.Transaction = previous; }` 瞬态恢复（不跨调用遗留；RequiresNew 内层发布同样只影响本次调用，不污染外层 publisher 状态）。
+
+**缓冲处置**：不调用 flush、不保留跨发布缓冲——实例随调用结束丢弃（缓冲即丢弃）。**同一 owner 连续发布** = 逐条独立行（无共享缓冲状态）；**结束后普通发布** = 判定回落 NoVisibleWindow，走 CAP 原生路径。
+
+**投递（提交确认后）**：采用 **CAP 存储扫描恢复作为正式投递机制**（M-05）：
+- 提交确认后，行已随事务提交（`Scheduled`）；CAP `NeedRetryProcessor` 每 `FailedRetryInterval` 扫描 `StatusName IN ('Failed','Scheduled') AND Retries < FailedRetryCount AND Added < now - FallbackWindowLookbackSeconds` 并投递；
+- **声明延迟**：默认为 `FallbackWindowLookbackSeconds`（240s）至 `+FailedRetryInterval`（60s）区间（本仓 options 可将两项显式调小；文档给配置样例）；**恢复条件**与**故障证据**见 M-05 与 S3 用例；
+- **不依赖 flush**：适配器从不调用 `FlushAsync`/`CommitAsync`（守护）。
+
+**各退出路径**：
+- **正常 commit**：行提交 → 扫描投递（延迟声明如上）；
+- **回滚/放弃/RolledBack**：行随事务回滚消失；零投递、零残留；
+- **Unknown（提交派发失败/响应丢失）**：行存在 ⇔ 事务已提交（同一事务）——扫描按**数据库事实**投递；CAP 适配层不宣称「已发布/已回滚」；与 #137「Unknown 不被改写」一致；
+- **提交确认 + 句柄清理失败（Committed + Failed）**：行已提交 → 扫描投递；与 #137「提交事实保留」一致；
+- **延迟消息（`PublishDelayAsync`）在 Granted 窗口内**：M-06——事务分支行不会按延迟调度，声明**不支持** → Grant 后、写入前确定性 `NotSupportedException`（零副作用）；窗口外延迟发布保持 CAP 原生行为。
+
+**关于 UoW 完成通知**：rev.1 曾考虑内核 post-commit 挂钩（用于 flush 时机）；扫描恢复机制消除了该需求——**不需要**新增内核完成通知能力，本项不引入第二执行内核。
+
+#### 3.4.3 原子性与投递失败的分别报告
+
+- **落库原子性**（本机制承诺）：消息行与业务数据同库同事务；回滚 ⇒ 无行无投递；提交 ⇒ 行存在——由 #137 内核提交/回滚唯一决定；
+- **提交后投递**（CAP 语义，独立报告）：broker 不可用 ⇒ 行保持 `Scheduled/Failed`，按 `Retries < FailedRetryCount`（本仓 5）重试；耗尽 ⇒ 行停留 `Failed`（CAP 监控/仪表盘可见）——**不影响**「业务已提交」事实；
+- 文档与测试分别陈述、分别断言，不合并为单一"成功"。
+
+#### 3.4.4 存储身份绑定（D140-03；G-14 落位）
+
+- **声明支持组合（本项唯一）**：EF Core + Npgsql 参与资源 ↔ CAP `PostgreSql` 存储；**同一固定数据库**。其他组合（SqlServer 存储、租户库、跨库）**确定性拒绝**（`Refused(StorageIdentityMismatch)` 或装配期诊断），拒绝发生在**写入前**，且不作为「每租户 CAP 恢复基础设施」扩展。
+- **身份规则**（不按原始连接串文本比较）：从**借用事务的活连接**取 `NpgsqlConnection` 的规范字段（`Host`/`Port`/`Database`），与从 `StorageConnectionString` 解析的同名字段比较（忽略大小写差异的部分按 Npgsql 语义处理）；schema/table 由 CAP 初始化器在存储连接上创建（M-07，默认 schema `cap`）——同一物理库 ⇒ 同一 schema/表可被后台扫描访问；
+- **诊断纪律**：输出 host/database 标识，**不输出连接凭据**；
+- **Provider 不匹配**（CAP 存储 Provider 与参与资源驱动不一致）→ 拒绝；**数据库租户切换**（活动 UoW 中切库）由 #137 数据准入先行拒绝。
 
 ### 3.5 内存件处置清单（G-07/G-08/G-09）
 
-| 对象 | 处置 | 依赖/引用检查结论 |
-| --- | --- | --- |
-| `DistributedTransactionCapModule` | 归档 | 仅模块发现机制引用（自动）；移除后无编译引用 |
-| `TransactionLogger`（内存） | 归档 | 模块与测试引用；测试改为持久化实现或删除（见 S1） |
-| `DefaultTransactionCompensator` | 归档 | 同上 |
-| `UnitOfWorkIntegrationExtensions` + `UnitOfWorkTransactionParticipant` + `ITransactionParticipantRegistry` | 归档 | 零消费者（#137 交接表） |
-| `IDistributedTransaction` / `DistributedTransaction` / `DistributedTransactionManager` / `ITransactionParticipant` / `IDistributedTransactionManager` | **建议归档**（Q2 待裁定） | 仅其自身测试引用；无 CAP/数据库语义；与「唯一内核」冲突 |
+| 对象 | 处置 |
+| --- | --- |
+| `DistributedTransactionCapModule` | 归档（S1 验证模块清单/自动注册产物无残留） |
+| `TransactionLogger`（内存）、`DefaultTransactionCompensator`（假补偿） | 归档 |
+| `UnitOfWorkIntegrationExtensions` + `UnitOfWorkTransactionParticipant` + `ITransactionParticipantRegistry` | 归档 |
+| `IDistributedTransaction` / `DistributedTransaction` / `DistributedTransactionManager` / `ITransactionParticipant` / `IDistributedTransactionManager` | 归档（Q2 裁定同意；包含其零消费者抽象） |
+| 旧测试项目（内存 manager 测试） | **随引擎归档或改造**（不保留内存路径断言；新测试面向持久化/发布真实路径） |
 
-归档统一落 `99_RecycleBin/issue-125-cap-consolidation/` 并附 README（原路径、原因、替代路径）。
+归档统一落 `99_RecycleBin/issue-125-cap-consolidation/` + README（原路径、原因、替代路径）。**归档后文档必须写明**：补偿的注册与触发是应用/业务责任（UoW 失败路径调用 `RegisterCompensationAsync`、由 `CompensateAsync` 或后台服务触发），CAP 不会自动调用自定义补偿器（Q2 裁定）。
 
 ### 3.6 支持声明（G-11）
 
-`CrestCreates.DistributedTransaction(.CAP)` 与集成适配包在支持表中逐项声明：
-
-- 运行时：JIT 路径（待 S2/S3 测试证据）；
-- trim：**未验证**（无 trim 证据，不得标 trimming-verified）；
-- NativeAOT：**未验证**（CAP 及其存储/传输 SDK 未做 publish/link/run 门禁；不借 Core/UoW 原生证据推导）。
+`CrestCreates.DistributedTransaction(.CAP)` 与集成适配包逐项声明：JIT（S2/S3 证据）；trim **未验证**；NativeAOT **未验证**（不借 Core/UoW 原生证据推导）。CAP 存储/传输 SDK 为第三方组件，其能力不并入框架声明。
 
 ### 3.7 文档修正（G-12）
 
-- `memory.md` 与支持表更新（入口、归档、证据）；
-- 若存在引用「分布式事务保证」的过时表述，按 §3.4.3 修正；
-- `CanCompensateAsync` 语义：删除或改为按补偿记录真实判定（跟随 Q2 裁定；若引擎归档则一并消失）。
+- memory.md 与支持表更新（入口、归档、证据、限制：补偿并发/进程崩溃恢复不承诺、`Executing` 残留为已知限制）；
+- 事务 API 保证按 §3.4.3 + §1.8 修正；不承诺 exactly-once/2PC/跨库原子。
 
 ---
 
-## 4. 实施切片（全部基于本项设计通过后的 master）
+## 4. 实施切片
 
 | 切片 | 内容 | 验收映射 |
 | --- | --- | --- |
-| S1 入口收口 | 扩展唯一入口；模块/内存件/死桥归档；配置校验表落地（含 `TransportConnectionString` 默认值移除）；启动自检（executor registry + 仓库可解析）；测试项目改造（不依赖内存件） | 验收 1（顺序不变量）、5（归档）；G-01/02/03/05/08/09 |
-| S2 持久化与补偿真实性 | 集成装配包（实体映射 + 装配扩展 + 文档）；补偿链测试（成功/失败重试/Failed/executor 缺失不可达）；PG Testcontainers 证据 | 验收 2（补偿 executor 调用、失败不标 completed）；G-04/10 |
-| S3 原子发布 | 受管窗口检测 + EF 适配（CapTransaction 包装）+ 故障用例（回滚不发布、提交失败 Unknown、无窗口语义、借用拒绝确定性失败）；PG + RabbitMQ Testcontainers 证据（发布、失败恢复/重试） | 验收 2/3；G-06/14 |
-| S4 声明与收尾 | 支持表逐项声明、文档修正、memory.md 同步、issues log | 验收 4/5；G-11/12/13 |
+| S0（本设计 rev.2 已完成） | CAP 10.0.1 源码核实（§1.8 M-01…M-07）；参与判定与协议定案 | Q6：架构未知量在实施前收敛（运行时证据由 S3 提供） |
+| S1 入口收口 | 扩展唯一入口；模块/内存件/死桥归档；配置校验落地；启动校验（registry + Required 集合 + 仓库可解析）；模块清单产物验证；测试项目改造/归档 | 验收 1、5；D140-04（启动部分） |
+| S2 持久化与补偿真实性 | 实体配置类 + `AddCrestCapPersistence` + 文档；注册前执行器校验；顺序补偿链测试（成功/重试/Failed/缺失）；**fixture 消费真实生成产物**；PG Testcontainers | 验收 2；D140-04（运行部分） |
+| S3 原子发布 | 参与判定 API + 集成借用适配 + 守护 CapTransaction + 身份绑定；**故障矩阵**（见下）；PG + RabbitMQ Testcontainers（可调小 lookback 加速证据） | 验收 2/3；D140-01/02/03 |
+| S4 声明与收尾 | 支持表、文档修正、memory.md、issues log | 验收 4/5 |
 
-每个切片独立 PR、基于前一阶段合并后 master；本地测试通过后推送 CI；不自动合并。
+**S3 故障矩阵（每项真实 DB/broker + 可控故障）**：
+1. 正常 commit：提交前 broker 无消息；提交后经 lookback 窗口内投递；行 Succeeded/清理；
+2. 回滚/放弃：零行、零消息；
+3. Unknown（提交派发故障注入）：行存在 ⇔ 提交事实；扫描按事实投递；不宣称；
+4. 提交确认 + 清理失败：行投递正常；
+5. 同 owner 连续多次发布：逐条独立行、无重复、无丢；
+6. RequiresNew 内外均发布：各自事务、各自投递；
+7. 结束后普通发布：无窗口路径正常；
+8. 窗口内延迟发布：确定性拒绝、零副作用；窗口外延迟保持原生；
+9. 重启恢复：broker 停止期间提交 → 重启后扫描投递（M-05 条件）；
+10. 拒绝矩阵全量：对 §3.4.1 每个 Refused 情形断言无行、无消息、无 publisher 状态残留；
+11. 生命周期调用计数：适配器对借用句柄的 Commit/Rollback/Dispose 调用次数 = 0。
 
 ---
 
 ## 5. 明确不做（防扩界）
 
-- 不新增通用事务引擎 / 不引入新的 UoW manager（消费 #137 契约）；
-- 不实现跨库、跨 ORM 原子提交；不承诺 exactly-once/2PC；
+- 不新增通用事务引擎 / 不引入第二 UoW manager（消费 #137 契约；§3.4.2 明确取消内核完成通知需求）；
+- 不实现跨库、跨 ORM、每租户库的 CAP 恢复；不承诺 exactly-once/2PC；
 - 不整体重命名或搬走 CAP Provider 项目（E7）；
 - 不为测试便利添加生产不使用的公开扩展点；
 - 不在本项内改造 CAP SDK 本体（仅适配与装配）。
 
 ---
 
-## 6. 待审查裁定项
+## 6. Q1…Q6 裁定落实情况
 
-| # | 事项 | 建议 | 备选 |
-| --- | --- | --- | --- |
-| Q1 | 模块入口处置 | 归档 | 改造为空注册并文档禁启用（不推荐：制造错觉） |
-| Q2 | 参与者引擎归档范围 | 归档 `IDistributedTransaction`/`DistributedTransaction`/`DistributedTransactionManager`/`ITransactionParticipant` | 保留抽象、仅归档实现；或整体保留并标注（不推荐：与唯一内核冲突） |
-| Q3 | EF 原子发布适配 + 实体映射落位 | 新集成项目（`src/Integrations/` 下） | Runtime.CAP 直接引用 Data.EFCore（违反原则，不推荐） |
-| Q4 | `TransportConnectionString` 默认值移除 | 移除（空即抛） | 保留默认但启动告警（弱 fail-closed） |
-| Q5 | CI broker 选型 | RabbitMQ Testcontainers（与默认 TransportProvider 一致） | Kafka（CI 时间成本更高） |
-| Q6 | 事务 API 核实深度 | S3 中实测 `ICapPublisher.Transaction` 包装既有事务的行为并写故障用例 | 仅文档核对（证据不足，不推荐） |
+| 项 | 裁定建议（审查方） | 落实 |
+| --- | --- | --- |
+| Q1 模块 | 可以归档，理由改为唯一装配与现状能力（非"签名证明不可能"）；验证生成模块清单/自动注册产物无残留；无需改造通用模块框架 | §3.1 已改措辞与依据；S1 增加产物验证 |
+| Q2 内存引擎 | 同意归档实现与零消费者抽象；文档说明归档后补偿注册/触发责任 | §3.5 已补文档要求 |
+| Q3 落位 | 同意独立集成项目；EF/具体 CAP storage 耦合与实体映射留集成层 | §3.3/§3.4.4 已明确；Runtime 仅消费强类型适配契约 |
+| Q4 默认连接 | 同意移除 localhost 默认，显式配置、失败关闭 | §3.2 落地（行为变化已标注） |
+| Q5 broker | 同意 PG + RabbitMQ 作为第一组证据；不推导 Kafka/SqlServer 已验证 | §3.6/§4 已限定 |
+| Q6 核实深度 | 必须实测；设计通过前明确方案；可先最小 spike | §1.8 源码级核实先行；S3 运行时门禁；`ICapPublisher.Transaction` 包装行为按 M-01/M-02/M-04 定义 |
 
 ---
 
-（本设计为 rev.1，供审查；实施以审查通过版本为准。）
+（本设计为 rev.2，供审查；实施以审查通过版本为准。）

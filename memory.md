@@ -46,8 +46,8 @@ archived to 99_RecycleBin, never deleted; never output credentials.
   scopes with ambient context following (pre-injected EF dependencies bind to the
   current UoW; other providers fail closed); legacy Infrastructure dual
   factory/manager archived; native gate `CRESTCREATES_UNITOFWORK_NATIVE_PIPELINE_OK`.
-- UnitOfWork kernel/state (delivered by #137 slices 1-5, PR #139 pending unified
-  review): unified `UnitOfWorkOptions` (transaction toggle / Required+RequiresNew /
+- UnitOfWork kernel/state (delivered by #137 slices 1-5, merged via PR #139 on
+  2026-10-12 including three review-fix rounds): unified `UnitOfWorkOptions` (transaction toggle / Required+RequiresNew /
   isolation / timeout / provider with null-inheritance rules), caller-frame
   activation protocol (`BeginScope` sync carrier + `StartAsync`; AOP non-async
   callbacks + OnExit sync restore), four orthogonal result dimensions
@@ -96,10 +96,10 @@ archived to 99_RecycleBin, never deleted; never output credentials.
 ## Known gaps
 
 - B12 unsupported-intent negative case missing (#133, bounded).
-- UnitOfWork #137 slices 2-5 pending (typed managed ambient + logical resource keys,
-  provider capability declarations + real PG matrices, failure taxonomy/native
-  evidence, CAP participation lease);
-  CAP entry split (#125); LocalEvent/RabbitMQ reflection bridges (#126/#127);
+- CAP entry consolidation (#125): design rev.2 under review (PR #140); in-memory
+  fake compensation + entry split pending archival and real evidence (slices S1..S4;
+  compensation concurrency / process-crash recovery not pledged);
+  LocalEvent/RabbitMQ reflection bridges (#126/#127);
   CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
   (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).
 
