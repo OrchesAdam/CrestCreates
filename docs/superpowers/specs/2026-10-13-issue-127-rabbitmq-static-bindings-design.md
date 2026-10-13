@@ -118,7 +118,7 @@ public sealed class OrderCreatedEvent { public string OrderId { get; init; } = "
 | `IRabbitMqBindingRegistry` | Host 级冻结只读：发布索引（`Type → binding`）、wire 索引（`(EventId, EventVersion) → binding`）、队列消费计划（`(exchange, queue) → 有序 handler 序列`）、alias 表。冻结后不可变。 |
 | generated registration extension | 每程序集一个显式扩展（事件侧 `AddEventDescriptors`；订阅侧 `AddRabbitMqSubscriptions`），注册 contributor / Handler DI / 所属项目 JSON contribution。 |
 
-Registry 只持有静态元数据、codec、委托；不捕获 root `IServiceProvider`、业务 scope 或 Handler 实例。**codec 贡献为 per-Host 显式装配**：事件所属程序集的 `AddEventDescriptors()` 以 `EventJsonCodecRegistration`（PayloadType/CodecFactory/Origin）注册进宿主 DI，冻结时按 Host 聚合解析并快照进绑定（同一 Origin 重复激活幂等；同一 PayloadType 多 Origin 冲突为确定性装配失败）；不存在进程全局 codec 字典（R1-RMQ-05 已修正 Spec 原措辞）。
+Registry 只持有静态元数据、codec、委托；不捕获 root `IServiceProvider`、业务 scope 或 Handler 实例。**codec 贡献为 per-Host 显式装配**：事件所属程序集的 `AddEventDescriptors()` 以 `EventJsonCodecRegistration`（PayloadType/CodecFactory/Origin）注册进宿主 DI，冻结时按 Host 聚合**逐项**解析并快照进绑定（同一 Origin 内多份贡献必须解析为同一 `JsonTypeInfo` 实例——重复启用幂等、契约不一致确定性失败且与注册顺序无关；同一 PayloadType 多 Origin 冲突为确定性装配失败）；不存在进程全局 codec 字典（R1-RMQ-05 / R2-RMQ-02 已修正 Spec 原措辞）。
 
 ### 3.2 冻结流程与校验（全部先于 broker I/O）
 
@@ -254,7 +254,7 @@ Startup:
 - publisher channel 以 lease 管理：获取失败/取消、Return、Discard/异常 Dispose 都**精确释放一次**许可；不得直接 Dispose 后漏释放 semaphore（F5 修复）。生命周期与 DI（Transient vs Singleton，F7）统一到唯一入口。
 - consumer 使用专属长生命周期 channel，不占用 publisher 可借用池；文档明确 `MaxChannels` 只约束 publisher 池、专属消费 channel 独立计算。`MaxChannels=1` 时必须能完成“正式消费 → 失败重投”（不自锁）。
 - 同一 publisher channel 同时只有一个发布所有者、需要复用时串行归还；共享消费 channel 的 Ack/Nack/Cancel 有明确串行策略（单一 settlement 门 + SDK `ConsumerDispatchConcurrency` 显式配置，不依赖默认值）。
-- 连接恢复沿用 SDK recovery 主链（`AutomaticRecoveryEnabled`），不另建竞争恢复循环；**恢复窗口内连接所有权归 SDK**：pool 对非 open 的既有连接执行有界等待（20s，可取消）而不得 Dispose/替换（替换会连带作废承载 consumer 的专属 channel）；专属 consumer channel 终态丢失（channel 关闭且连接已恢复/连接长期不可恢复超过 30s 宽限）→ 抛错停止宿主，不保持虚假 ready。真实断开测试必须先确认目标连接在 management 中存在且确已关闭，再在恢复窗口内发布验证 consumer 存活（不得仅遍历一次 connections 就认定断连）。
+- 连接恢复沿用 SDK recovery 主链（`AutomaticRecoveryEnabled`），不另建竞争恢复循环；**恢复窗口内连接所有权归 SDK**：pool 对非 open 的既有连接执行有界等待（20s，可取消；**调用方取消保持 OperationCanceledException 语义**，仅真实等待超时才报连接错误）而不得 Dispose/替换（替换会连带作废承载 consumer 的专属 channel）；专属 consumer channel 看护**按 SDK 恢复阶段判断**：恢复进行中（观察到 connection shutdown 或连接未 open）channel 关闭不计数、不停宿主（SDK 先重开连接、再恢复拓扑/channel/consumer，最后才发 `RecoverySucceeded`）；连接稳定且无恢复进行中时 channel 持续关闭超过 5s 判终态 → 抛错停止宿主，不保持虚假 ready。真实断开测试必须先确认目标连接在 management 中存在且确已关闭，再在恢复窗口内发布验证 consumer 存活（不得仅遍历一次 connections 就认定断连）；慢拓扑恢复（`TopologyRecoveryFilter` 挂起）不得被误判为终态。
 - 停机顺序：停止 intake/`BasicCancel` → 有界等待在途回调 → 关闭专属消费 channel → 释放 connection/lease；未完成消息保持未确认；禁止先把活跃 consumer channel 放回发布池再等 BackgroundService 停止。
 
 ---

@@ -35,6 +35,7 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
     private readonly SemaphoreSlim _channelSemaphore;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private bool _disposed;
+    private volatile bool _recoveryInProgress;
     private int _activeChannels;
 
     public RabbitMqConnectionPool(
@@ -69,6 +70,14 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
     /// (or should be) working on it. Publish paths wait for recovery instead of replacing it.
     /// </summary>
     public bool IsConnectionRecovering => _connection is { IsOpen: false } && !_disposed;
+
+    /// <summary>
+    /// True between a connection shutdown observation and the SDK's RecoverySucceeded signal (or a
+    /// fresh connection). The SDK reopens the underlying connection first and restores
+    /// topology/channels/consumers afterwards, so a closed channel during this phase is work in
+    /// progress, not a terminal loss.
+    /// </summary>
+    public bool IsRecoveryInProgress => _recoveryInProgress;
 
     /// <summary>
     /// Acquires a publisher channel lease from the bounded pool. Every successful acquisition must be
@@ -179,6 +188,10 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
             // channel on the dead connection (including the dedicated consumer channel and its
             // registered consumers), so wait for recovery within a bounded, cancellable window.
             await WaitForRecoveryAsync(cancellationToken);
+
+            // The caller's cancellation is not a connection failure: propagate it as cancellation.
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (_connection is { IsOpen: true })
             {
                 _logger.LogInformation("RabbitMQ connection recovered by the SDK.");
@@ -200,7 +213,9 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
                 "RabbitMQ connection established to {HostName}:{Port}",
                 _options.HostName, _options.Port);
 
+            _recoveryInProgress = false;
             _connection.ConnectionShutdownAsync += OnConnectionShutdownAsync;
+            _connection.RecoverySucceededAsync += OnRecoverySucceededAsync;
             _connection.CallbackExceptionAsync += OnCallbackExceptionAsync;
         }
         catch (Exception ex)
@@ -232,14 +247,9 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
                 return;
             }
 
-            try
-            {
-                await Task.Delay(RecoveryPollInterval, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
+            // Caller cancellation propagates as OperationCanceledException; only a genuine
+            // recovery-timeout produces a connection exception in the caller.
+            await Task.Delay(RecoveryPollInterval, cancellationToken);
         }
     }
 
@@ -262,9 +272,17 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
 
     private Task OnConnectionShutdownAsync(object? sender, ShutdownEventArgs e)
     {
+        _recoveryInProgress = true;
         _logger.LogWarning(
-            "RabbitMQ connection shutdown: {ReplyCode} - {ReplyText}",
+            "RabbitMQ connection shutdown observed: {ReplyCode} - {ReplyText}; the SDK recovery loop owns the connection from here.",
             e.ReplyCode, e.ReplyText);
+        return Task.CompletedTask;
+    }
+
+    private Task OnRecoverySucceededAsync(object? sender, AsyncEventArgs e)
+    {
+        _recoveryInProgress = false;
+        _logger.LogInformation("RabbitMQ SDK recovery completed (connection, topology and consumers restored).");
         return Task.CompletedTask;
     }
 
@@ -315,6 +333,7 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
         if (_connection is not null)
         {
             _connection.ConnectionShutdownAsync -= OnConnectionShutdownAsync;
+            _connection.RecoverySucceededAsync -= OnRecoverySucceededAsync;
             _connection.CallbackExceptionAsync -= OnCallbackExceptionAsync;
             await _connection.DisposeAsync();
         }
@@ -339,6 +358,7 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
         if (_connection is not null)
         {
             _connection.ConnectionShutdownAsync -= OnConnectionShutdownAsync;
+            _connection.RecoverySucceededAsync -= OnRecoverySucceededAsync;
             _connection.CallbackExceptionAsync -= OnCallbackExceptionAsync;
             _connection.Dispose();
         }

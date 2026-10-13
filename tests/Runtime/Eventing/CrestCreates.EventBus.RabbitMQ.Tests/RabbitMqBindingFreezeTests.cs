@@ -413,6 +413,41 @@ public class RabbitMqBindingFreezeTests
     }
 
     [Fact]
+    public void Freeze_Rejects_same_origin_codec_conflicts_in_both_registration_orders()
+    {
+        static RabbitMqCompositionException Capture(bool goodFirst)
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<IEventDescriptorProvider, OrderPlacedDescriptorProvider>();
+            var good = new EventJsonCodecRegistration
+            {
+                PayloadType = typeof(OrderPlacedPayload),
+                CodecFactory = static () => FreezeTestJsonContext.Default.OrderPlacedPayload,
+                Origin = "Same.Owner",
+            };
+            var wrong = new EventJsonCodecRegistration
+            {
+                PayloadType = typeof(OrderPlacedPayload),
+                CodecFactory = static () => FreezeTestJsonContext.Default.InvoiceIssuedPayload,
+                Origin = "Same.Owner",
+            };
+            services.AddSingleton(goodFirst ? good : wrong);
+            services.AddSingleton(goodFirst ? wrong : good);
+            services.AddRabbitMqEventBus(builder: b => b.PublisherOnly().RequirePublishableEvent<OrderPlacedPayload>());
+            using var provider = services.BuildServiceProvider();
+            provider.GetRequiredService<EventRegistry>().Build(provider.GetServices<IEventDescriptorProvider>());
+            return FluentActions.Invoking(() => provider.GetRequiredService<IRabbitMqBindingRegistry>())
+                .Should().Throw<RabbitMqCompositionException>().Subject.Single();
+        }
+
+        Capture(goodFirst: true).Violations.Should().ContainSingle(v =>
+            v.Contains("is invalid", StringComparison.Ordinal));
+        Capture(goodFirst: false).Violations.Should().ContainSingle(v =>
+            v.Contains("is invalid", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Freeze_Rejects_required_handler_that_is_not_registered_in_di()
     {
         var contributor = new TestContributor("handlers.alpha")

@@ -115,6 +115,9 @@ public static class RabbitMqBindingFreeze
             .ToList();
 
         // ── Per-host codec contributions (explicit activation, no process-global registry) ──
+        // Every registration is validated (never first-wins): a repeated activation of the same
+        // generated contribution resolves to the same cached JsonTypeInfo instance and is idempotent;
+        // any contribution describing a different contract fails deterministically, in any order.
         var codecIndex = new Dictionary<Type, JsonTypeInfo>();
         foreach (var group in input.CodecContributions
                      .GroupBy(c => c.PayloadType)
@@ -129,25 +132,47 @@ public static class RabbitMqBindingFreeze
                 continue;
             }
 
-            var registration = group.First();
-            var info = registration.CodecFactory();
-            if (info is null)
+            JsonTypeInfo? resolvedInfo = null;
+            string? groupProblem = null;
+            foreach (var registration in group.OrderBy(r => r.Origin, StringComparer.Ordinal))
             {
-                violations.Add(
-                    $"Codec contribution for '{group.Key.FullName}' (origin '{registration.Origin}') returned no " +
-                    "metadata; the generated context does not declare this payload type.");
+                var info = registration.CodecFactory();
+                if (info is null)
+                {
+                    groupProblem = $"a contribution (origin '{registration.Origin}') returned no metadata; " +
+                                   "the generated context does not declare this payload type";
+                    break;
+                }
+
+                if (info.Type != group.Key)
+                {
+                    groupProblem = $"a contribution (origin '{registration.Origin}') describes " +
+                                   $"'{info.Type.FullName}' instead";
+                    break;
+                }
+
+                if (resolvedInfo is null)
+                {
+                    resolvedInfo = info;
+                    continue;
+                }
+
+                if (!ReferenceEquals(resolvedInfo, info))
+                {
+                    groupProblem = $"the same origin ('{registration.Origin}') contributes different codec " +
+                                   "metadata for this payload type; repeated activation must resolve to the same " +
+                                   "contract";
+                    break;
+                }
+            }
+
+            if (groupProblem is not null)
+            {
+                violations.Add($"Codec contribution for '{group.Key.FullName}' is invalid: {groupProblem}.");
                 continue;
             }
 
-            if (info.Type != group.Key)
-            {
-                violations.Add(
-                    $"Codec contribution for '{group.Key.FullName}' (origin '{registration.Origin}') describes " +
-                    $"'{info.Type.FullName}' instead.");
-                continue;
-            }
-
-            codecIndex[group.Key] = info;
+            codecIndex[group.Key] = resolvedInfo!;
         }
 
         // ── Publish index ──

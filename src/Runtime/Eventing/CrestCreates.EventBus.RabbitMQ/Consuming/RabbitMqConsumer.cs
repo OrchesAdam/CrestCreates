@@ -32,7 +32,7 @@ public sealed class RabbitMqConsumer : BackgroundService
 {
     private static readonly TimeSpan ShutdownDrainTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ConsumerChannelProbeInterval = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan ConsumerChannelLossGrace = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ConsumerChannelLossGrace = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RequeueBackoffFloor = TimeSpan.FromSeconds(1);
 
     private readonly IServiceProvider _serviceProvider;
@@ -130,10 +130,13 @@ public sealed class RabbitMqConsumer : BackgroundService
     }
 
     /// <summary>
-    /// Watches the dedicated consumer channel for terminal loss. Transient drops are owned by the SDK
-    /// automatic recovery (channel and consumers are restored by the recovery loop); when the channel
-    /// stays closed — either the connection is back but this channel was not recovered, or neither
-    /// recovered within the grace window — the consumer fails the host instead of staying falsely ready.
+    /// Watches the dedicated consumer channel for terminal loss. While the SDK recovery loop owns the
+    /// connection (a drop was observed, or the connection is not open), the SDK first reopens the
+    /// underlying connection and only then restores topology/channels/consumers before signalling
+    /// RecoverySucceeded — a closed channel in that phase is recovery work in progress and must not
+    /// stop the host. Once the connection is stable and no recovery is running, a channel that stays
+    /// closed was not restored (or was closed terminally): a short grace absorbs completion-event
+    /// races, then the consumer fails the host instead of staying falsely ready.
     /// </summary>
     private async Task SuperviseConsumerChannelAsync(CancellationToken stoppingToken)
     {
@@ -148,11 +151,10 @@ public sealed class RabbitMqConsumer : BackgroundService
                 continue;
             }
 
-            if (_connectionPool.IsConnectionOpen)
+            if (_connectionPool.IsConnectionRecovering || _connectionPool.IsRecoveryInProgress)
             {
-                throw new RabbitMqConnectionException(
-                    "The dedicated consumer channel is closed while the connection is open; SDK recovery did not " +
-                    "restore it. Failing the host instead of consuming nothing silently.");
+                lostSince = null;
+                continue;
             }
 
             lostSince ??= DateTime.UtcNow;
@@ -160,7 +162,7 @@ public sealed class RabbitMqConsumer : BackgroundService
             {
                 throw new RabbitMqConnectionException(
                     $"The dedicated consumer channel has been closed for more than {ConsumerChannelLossGrace.TotalSeconds}s " +
-                    "without connection recovery; failing the host instead of staying falsely ready.");
+                    "without an active SDK recovery; failing the host instead of staying falsely ready.");
             }
         }
     }

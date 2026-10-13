@@ -65,6 +65,20 @@ per-Host 贡献形式适配（场景与断言不变，见下映射）。
 
 说明：R1-RMQ-05 的探针 #1 原引用被删除的 `EventJsonCodecRegistry` API，属“修复确实移除该 API”的必然适配；场景、双 Host 隔离断言与失败期望保持不变，并补齐了审查要求的注册顺序/幂等/冲突三项覆盖。
 
+## R2 审查修复（2026-10-13，审查 head `12323cf7`，1×P1 + 2×P2；R1 七项中 5 项确认关闭）
+
+复审报告：`docs/review/2026-10-13-pr-145-rabbitmq-implementation-review-round2.md`。两个 R2 探针文件原样入库
+（`ReviewRound2RegressionTests.cs`、`ReviewRound2BrokerRecoveryTests.cs`），修复前 **4/4 失败**（3 单测 + 1 真实 broker），
+修复后同一批全过。
+
+| 发现 | 修复 | 回归测试与证据 |
+| --- | --- | --- |
+| R2-RMQ-01 连接先恢复、拓扑未恢复时看护误停 Host | pool 增加恢复阶段信号：`ConnectionShutdown`（SDK 在断线瞬间触发，实验实证）置 `IsRecoveryInProgress`，`RecoverySucceeded`/新建连接清除；consumer 看护改为**恢复进行中（或连接未 open）一律视为瞬态**、不计数不停宿主；连接稳定且无恢复进行中时 channel 持续关闭超过 5s 才判终态 | 探针 `Slow_SDK_topology_recovery_must_not_be_misclassified_as_terminal_channel_loss`（真实 broker：`TopologyRecoveryFilter` 挂起拓扑恢复，connection open=True 阶段断言 `ApplicationStopping` 未触发）；单测 `Supervisor_must_allow_channel_recovery_after_connection_reopens`（阶段模拟：连接先开、channel 后恢复）；原终态测试 `Terminal_consumer_channel_loss_fails_the_host...` 保持通过（真终态仍停宿主） |
+| R2-RMQ-02 同来源不同 codec first-wins | 冻结期对每组（PayloadType×Origin）贡献**逐项**解析校验：每份必须成功、Type 匹配、且全部解析为同一 `JsonTypeInfo` 实例；不一致即确定性违规，与注册顺序无关；重复启用同贡献仍幂等 | 探针 `Different_codec_factories_with_same_origin_must_not_bypass_type_validation`；新增单测 `Freeze_Rejects_same_origin_codec_conflicts_in_both_registration_orders`（正反序各一）+ 既有幂等/顺序用例 |
+| R2-RMQ-03 恢复等待吞取消异常 | `WaitForRecoveryAsync` 不再捕获 `OperationCanceledException`；超时抛错前 `ThrowIfCancellationRequested`；调用方取消沿 `GetChannelAsync`/publisher 既有取消分支传播 | 探针 `Cancellation_during_recovery_wait_must_preserve_OperationCanceledException`；新增单测 `ConnectionPool_cancellation_during_recovery_wait_preserves_cancellation_semantics_and_lease`（MaxChannels=1：取消后许可仍可复用） |
+
+计数修正：R1 回复中集成计数 “37/37” 为笔误；R1 修复后实际为 36/36（27 原有 + 8 R1 探针/新增 + 1 终态看护），R2 修复后含 broker 探针为 37/37。
+
 ## 验证记录（本地）
 
 | 验证 | 结果 | 日志 |

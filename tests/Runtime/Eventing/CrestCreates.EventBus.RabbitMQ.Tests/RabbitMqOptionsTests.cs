@@ -2,6 +2,7 @@ using CrestCreates.EventBus.RabbitMQ.Connection;
 using CrestCreates.EventBus.RabbitMQ.Extensions;
 using CrestCreates.EventBus.RabbitMQ.Options;
 using FluentAssertions;
+using Moq;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -94,6 +95,39 @@ public class RabbitMqOptionsTests
 
         FluentActions.Invoking(() => new RabbitMqConnectionPool(options, NullLogger<RabbitMqConnectionPool>.Instance))
             .Should().Throw<ArgumentException>().WithMessage("*MaxChannels*");
+    }
+
+    [Fact]
+    public async Task ConnectionPool_cancellation_during_recovery_wait_preserves_cancellation_semantics_and_lease()
+    {
+        var options = Microsoft.Extensions.Options.Options.Create(new RabbitMqOptions { MaxChannels = 1 });
+        using var pool = new RabbitMqConnectionPool(options, NullLogger<RabbitMqConnectionPool>.Instance);
+
+        var connectionOpen = false;
+        var connection = new Moq.Mock<global::RabbitMQ.Client.IConnection>();
+        connection.SetupGet(c => c.IsOpen).Returns(() => Volatile.Read(ref connectionOpen));
+        var channel = new Moq.Mock<global::RabbitMQ.Client.IChannel>();
+        channel.SetupGet(c => c.IsOpen).Returns(true);
+        connection.Setup(c => c.CreateChannelAsync(
+                Moq.It.IsAny<global::RabbitMQ.Client.CreateChannelOptions>(),
+                Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(channel.Object);
+        typeof(RabbitMqConnectionPool)
+            .GetField("_connection", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(pool, connection.Object);
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        await FluentActions.Awaiting(() => pool.GetChannelAsync(cancellation.Token))
+            .Should().ThrowAsync<OperationCanceledException>(
+                "caller cancellation during the recovery wait must stay a cancellation, not a connection failure");
+
+        // The semaphore permit must have been released exactly once: with MaxChannels=1 a leaked
+        // permit would block this acquisition forever.
+        Volatile.Write(ref connectionOpen, true);
+        var acquired = await pool.GetChannelAsync(CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        acquired.Should().BeSameAs(channel.Object);
+        pool.ReturnChannel(acquired);
     }
 
     [Fact]
