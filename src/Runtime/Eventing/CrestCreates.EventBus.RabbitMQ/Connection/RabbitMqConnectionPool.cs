@@ -13,8 +13,10 @@ using CrestCreates.EventBus.RabbitMQ.Exceptions;
 namespace CrestCreates.EventBus.RabbitMQ.Connection;
 
 /// <summary>
-/// Manages a pool of RabbitMQ channels for concurrent message processing.
-/// Uses RabbitMQ.Client 7.x async API where IModel is renamed to IChannel.
+/// Manages the single long-lived RabbitMQ connection, a pool of publisher channels and the dedicated
+/// consumer channel. MaxChannels bounds the publisher pool only; the dedicated consumer channel is
+/// independent. Channel leases are released exactly once on every path (return, closed-channel
+/// discard, disposal, acquisition failure).
 /// </summary>
 public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
 {
@@ -34,13 +36,7 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
     {
         _options = options.Value;
         _logger = logger;
-
-        if (_options.MaxChannels <= 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(RabbitMqOptions.MaxChannels),
-                "MaxChannels must be greater than 0.");
-        }
+        _options.Validate();
 
         _channelSemaphore = new SemaphoreSlim(_options.MaxChannels, _options.MaxChannels);
 
@@ -53,60 +49,105 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
             VirtualHost = _options.VirtualHost,
             AutomaticRecoveryEnabled = true,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
-            RequestedHeartbeat = TimeSpan.FromSeconds(60)
+            RequestedHeartbeat = TimeSpan.FromSeconds(60),
+            ConsumerDispatchConcurrency = (ushort)Math.Clamp(_options.ConsumerDispatchConcurrency, 1, ushort.MaxValue)
         };
     }
 
+    /// <summary>
+    /// Acquires a publisher channel lease from the bounded pool. Every successful acquisition must be
+    /// released exactly once through <see cref="ReturnChannel"/>.
+    /// </summary>
     public async Task<IChannel> GetChannelAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         await _channelSemaphore.WaitAsync(cancellationToken);
+        var releaseOnFailure = true;
+        try
+        {
+            await _connectionLock.WaitAsync(cancellationToken);
+            try
+            {
+                await EnsureConnectionAsync(cancellationToken);
+
+                if (_channelPool.TryDequeue(out var channel))
+                {
+                    if (channel.IsOpen)
+                    {
+                        releaseOnFailure = false;
+                        return channel;
+                    }
+
+                    Interlocked.Decrement(ref _activeChannels);
+                    SafeDispose(channel);
+                }
+
+                var created = await CreatePublisherChannelAsync();
+                releaseOnFailure = false;
+                return created;
+            }
+            finally
+            {
+                _connectionLock.Release();
+            }
+        }
+        finally
+        {
+            if (releaseOnFailure)
+            {
+                ReleaseSemaphoreQuietly();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns a publisher channel lease. Closed channels are discarded; the semaphore permit is
+    /// released exactly once on every path. Never dispose a pooled channel directly.
+    /// </summary>
+    public void ReturnChannel(IChannel channel)
+    {
+        ArgumentNullException.ThrowIfNull(channel);
+
+        if (_disposed || !channel.IsOpen)
+        {
+            if (!_disposed)
+            {
+                Interlocked.Decrement(ref _activeChannels);
+            }
+
+            SafeDispose(channel);
+            ReleaseSemaphoreQuietly();
+            return;
+        }
+
+        _channelPool.Enqueue(channel);
+        ReleaseSemaphoreQuietly();
+    }
+
+    /// <summary>
+    /// Creates the dedicated, long-lived consumer channel. It is not counted against MaxChannels and
+    /// must be closed by its owner (the consumer) during shutdown.
+    /// </summary>
+    public async Task<IChannel> CreateDedicatedChannelAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
 
         await _connectionLock.WaitAsync(cancellationToken);
         try
         {
             await EnsureConnectionAsync(cancellationToken);
-
-            if (_channelPool.TryDequeue(out var channel))
-            {
-                if (channel.IsOpen)
-                {
-                    return channel;
-                }
-                // Channel is closed, dispose and decrement counter
-                Interlocked.Decrement(ref _activeChannels);
-                channel.Dispose();
-            }
-
-            try
-            {
-                return await CreateChannelAsync();
-            }
-            catch
-            {
-                _channelSemaphore.Release();
-                throw;
-            }
+            Debug.Assert(_connection != null, "Connection should be established");
+            var channel = await _connection.CreateChannelAsync(
+                new CreateChannelOptions(publisherConfirmationsEnabled: false, publisherConfirmationTrackingEnabled: false),
+                cancellationToken);
+            _logger.LogDebug("Created dedicated consumer channel");
+            return channel;
         }
         finally
         {
             _connectionLock.Release();
         }
-    }
-
-    public void ReturnChannel(IChannel channel)
-    {
-        if (_disposed || !channel.IsOpen)
-        {
-            Interlocked.Decrement(ref _activeChannels);
-            channel.Dispose();
-            _channelSemaphore.Release();
-            return;
-        }
-
-        _channelPool.Enqueue(channel);
-        _channelSemaphore.Release();
     }
 
     private async Task EnsureConnectionAsync(CancellationToken cancellationToken)
@@ -118,7 +159,13 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
 
         try
         {
-            _connection?.Dispose();
+            if (_connection is not null)
+            {
+                _connection.ConnectionShutdownAsync -= OnConnectionShutdownAsync;
+                _connection.CallbackExceptionAsync -= OnCallbackExceptionAsync;
+                _connection.Dispose();
+            }
+
             _connection = await _factory.CreateConnectionAsync(cancellationToken);
 
             _logger.LogInformation(
@@ -138,7 +185,7 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
         }
     }
 
-    private async Task<IChannel> CreateChannelAsync()
+    private async Task<IChannel> CreatePublisherChannelAsync()
     {
         Debug.Assert(_connection != null, "Connection should be established");
 
@@ -150,7 +197,7 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
         var channel = await _connection.CreateChannelAsync(options);
         Interlocked.Increment(ref _activeChannels);
 
-        _logger.LogDebug("Created new channel, active channels: {Count}", _activeChannels);
+        _logger.LogDebug("Created new publisher channel, active channels: {Count}", _activeChannels);
 
         return channel;
     }
@@ -169,6 +216,33 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
         return Task.CompletedTask;
     }
 
+    private void ReleaseSemaphoreQuietly()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            _channelSemaphore.Release();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private static void SafeDispose(IChannel channel)
+    {
+        try
+        {
+            channel.Dispose();
+        }
+        catch (Exception)
+        {
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
@@ -177,11 +251,13 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
         while (_channelPool.TryDequeue(out var channel))
         {
             Interlocked.Decrement(ref _activeChannels);
-            channel.Dispose();
+            SafeDispose(channel);
         }
 
         if (_connection is not null)
         {
+            _connection.ConnectionShutdownAsync -= OnConnectionShutdownAsync;
+            _connection.CallbackExceptionAsync -= OnCallbackExceptionAsync;
             await _connection.DisposeAsync();
         }
 
@@ -199,10 +275,16 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
         while (_channelPool.TryDequeue(out var channel))
         {
             Interlocked.Decrement(ref _activeChannels);
-            channel.Dispose();
+            SafeDispose(channel);
         }
 
-        _connection?.Dispose();
+        if (_connection is not null)
+        {
+            _connection.ConnectionShutdownAsync -= OnConnectionShutdownAsync;
+            _connection.CallbackExceptionAsync -= OnCallbackExceptionAsync;
+            _connection.Dispose();
+        }
+
         _channelSemaphore.Dispose();
         _connectionLock.Dispose();
 

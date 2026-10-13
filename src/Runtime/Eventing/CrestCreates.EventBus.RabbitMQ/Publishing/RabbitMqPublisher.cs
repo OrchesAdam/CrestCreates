@@ -1,328 +1,59 @@
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 using CrestCreates.EventBus.RabbitMQ.Connection;
 using CrestCreates.EventBus.RabbitMQ.Exceptions;
 using CrestCreates.EventBus.RabbitMQ.Options;
+using CrestCreates.EventBus.RabbitMQ.Registration;
 using CrestCreates.EventBus.RabbitMQ.Serialization;
-using Microsoft.Extensions.Options;
 
 namespace CrestCreates.EventBus.RabbitMQ.Publishing;
 
 /// <summary>
-/// Publisher for RabbitMQ events with publisher confirmation support.
-/// Uses RabbitMQ.Client 7.x async API with event-based confirmations.
+/// The single publish core: typed envelope creation for frozen event bindings and raw republish for the
+/// retry path, sharing one confirm/property-copy engine. Publisher channels come from the bounded pool
+/// with SDK publisher-confirm tracking enabled, so awaiting BasicPublishAsync participates in the
+/// broker confirmation; no parallel homemade confirm ledger exists.
 /// </summary>
-public sealed class RabbitMqPublisher : IAsyncDisposable
+public sealed class RabbitMqPublisher
 {
     private readonly RabbitMqConnectionPool _connectionPool;
     private readonly RabbitMqOptions _options;
     private readonly ILogger<RabbitMqPublisher> _logger;
-    private readonly JsonSerializerContext? _jsonSerializerContext;
-    private bool _disposed;
 
     public RabbitMqPublisher(
         RabbitMqConnectionPool connectionPool,
         IOptions<RabbitMqOptions> options,
-        ILogger<RabbitMqPublisher> logger,
-        JsonSerializerContext? jsonSerializerContext = null)
+        ILogger<RabbitMqPublisher> logger)
     {
         _connectionPool = connectionPool ?? throw new ArgumentNullException(nameof(connectionPool));
         _options = options.Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _jsonSerializerContext = jsonSerializerContext;
     }
 
     /// <summary>
-    /// Publishes an event to RabbitMQ with publisher confirmation.
+    /// Publishes one frozen binding as a new-format envelope (EventId/EventVersion written, EventType =
+    /// canonical Name) and waits for the broker confirm.
     /// </summary>
-    /// <typeparam name="TEvent">The event type.</typeparam>
-    /// <param name="event">The event to publish.</param>
-    /// <param name="exchange">Optional exchange name. Uses default if not specified.</param>
-    /// <param name="routingKey">Optional routing key. Uses event type name if not specified.</param>
-    /// <param name="correlationId">Optional correlation ID for tracing.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="RabbitMqPublishException">Thrown when publish fails.</exception>
-    public async Task PublishAsync<TEvent>(
-        TEvent @event,
-        string? exchange = null,
-        string? routingKey = null,
-        string? correlationId = null,
-        CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        if (@event == null)
-        {
-            throw new ArgumentNullException(nameof(@event));
-        }
-
-        var eventType = typeof(TEvent).Name;
-        var actualExchange = exchange ?? _options.DefaultExchange;
-        var actualRoutingKey = routingKey ?? eventType;
-
-        IChannel? channel = null;
-        var confirmationTracker = new PublishConfirmationTracker();
-        var publishSucceeded = false;
-
-        try
-        {
-            // Get a channel from the pool
-            channel = await _connectionPool.GetChannelAsync(cancellationToken);
-
-            // Setup confirmation event handlers for this publish operation
-            channel.BasicAcksAsync += confirmationTracker.OnAckAsync;
-            channel.BasicNacksAsync += confirmationTracker.OnNackAsync;
-            channel.BasicReturnAsync += confirmationTracker.OnReturnAsync;
-
-            // Declare exchange (idempotent operation)
-            await channel.ExchangeDeclareAsync(
-                exchange: actualExchange,
-                type: ExchangeType.Direct,
-                durable: true,
-                autoDelete: false,
-                arguments: null,
-                cancellationToken: cancellationToken);
-
-            // Serialize the event to envelope
-            var envelope = CreateEnvelope(@event, eventType, correlationId);
-            var body = SerializeEnvelope(envelope);
-
-            // Create basic properties with persistent delivery and mandatory flag
-            var properties = new BasicProperties
-            {
-                DeliveryMode = DeliveryModes.Persistent,
-                MessageId = Guid.NewGuid().ToString(),
-                CorrelationId = correlationId,
-                Type = eventType,
-                Timestamp = new AmqpTimestamp(envelope.Timestamp.Ticks),
-                ContentType = "application/json"
-            };
-
-            // Get the publish sequence number before publishing
-            var sequenceNumber = await channel.GetNextPublishSequenceNumberAsync(cancellationToken);
-            confirmationTracker.ExpectSequence(sequenceNumber);
-            confirmationTracker.RegisterMessageId(properties.MessageId, sequenceNumber);
-
-            // Publish the message
-            await channel.BasicPublishAsync(
-                exchange: actualExchange,
-                routingKey: actualRoutingKey,
-                mandatory: true,
-                basicProperties: properties,
-                body: body,
-                cancellationToken: cancellationToken);
-
-            // Wait for publisher confirmation
-            var confirmTimeout = TimeSpan.FromSeconds(_options.PublisherConfirmTimeoutSeconds);
-            var result = await confirmationTracker.WaitForConfirmationAsync(sequenceNumber, confirmTimeout, cancellationToken);
-
-            if (!result.Confirmed)
-            {
-                var message = result.Returned
-                    ? $"Message returned for event type '{eventType}' - broker could not route message"
-                    : $"Publisher confirmation failed (nacked) for event type '{eventType}'";
-
-                throw new RabbitMqPublishException(message, eventType, correlationId);
-            }
-
-            publishSucceeded = true;
-
-            _logger.LogDebug(
-                "Published event {EventType} to exchange {Exchange} with routing key {RoutingKey}",
-                eventType, actualExchange, actualRoutingKey);
-        }
-        catch (RabbitMqPublishException)
-        {
-            // Re-throw our own exceptions
-            throw;
-        }
-        catch (OperationCanceledException ex)
-        {
-            _logger.LogWarning(ex, "Publish cancelled for event type {EventType}", eventType);
-            throw new RabbitMqPublishException(
-                $"Publish operation cancelled for event type '{eventType}'",
-                eventType,
-                correlationId,
-                ex);
-        }
-        catch (TimeoutException ex)
-        {
-            _logger.LogError(ex, "Publish confirmation timeout for event type {EventType}", eventType);
-            throw new RabbitMqPublishException(
-                $"Publish confirmation timeout for event type '{eventType}'",
-                eventType,
-                correlationId,
-                ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to publish event {EventType}", eventType);
-            throw new RabbitMqPublishException(
-                $"Failed to publish event of type '{eventType}'",
-                eventType,
-                correlationId,
-                ex);
-        }
-        finally
-        {
-            // Remove event handlers before returning/disposing channel
-            if (channel != null)
-            {
-                channel.BasicAcksAsync -= confirmationTracker.OnAckAsync;
-                channel.BasicNacksAsync -= confirmationTracker.OnNackAsync;
-                channel.BasicReturnAsync -= confirmationTracker.OnReturnAsync;
-
-                if (publishSucceeded)
-                {
-                    _connectionPool.ReturnChannel(channel);
-                }
-                else
-                {
-                    // Channel is disposed on error (not returned to pool)
-                    channel.Dispose();
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Publishes an event to RabbitMQ with custom headers.
-    /// </summary>
-    public async Task PublishWithHeadersAsync<TEvent>(
-        TEvent @event,
-        Dictionary<string, string?> headers,
-        string? exchange = null,
-        string? routingKey = null,
-        string? correlationId = null,
-        CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        if (@event == null)
-        {
-            throw new ArgumentNullException(nameof(@event));
-        }
-
-        var eventType = typeof(TEvent).Name;
-        var actualExchange = exchange ?? _options.DefaultExchange;
-        var actualRoutingKey = routingKey ?? eventType;
-
-        IChannel? channel = null;
-        var confirmationTracker = new PublishConfirmationTracker();
-        var publishSucceeded = false;
-
-        try
-        {
-            channel = await _connectionPool.GetChannelAsync(cancellationToken);
-
-            channel.BasicAcksAsync += confirmationTracker.OnAckAsync;
-            channel.BasicNacksAsync += confirmationTracker.OnNackAsync;
-            channel.BasicReturnAsync += confirmationTracker.OnReturnAsync;
-
-            await channel.ExchangeDeclareAsync(
-                exchange: actualExchange,
-                type: ExchangeType.Direct,
-                durable: true,
-                autoDelete: false,
-                arguments: null,
-                cancellationToken: cancellationToken);
-
-            var envelope = CreateEnvelope(@event, eventType, correlationId, headers);
-            var body = SerializeEnvelope(envelope);
-
-            var properties = new BasicProperties
-            {
-                DeliveryMode = DeliveryModes.Persistent,
-                MessageId = Guid.NewGuid().ToString(),
-                CorrelationId = correlationId,
-                Type = eventType,
-                Timestamp = new AmqpTimestamp(envelope.Timestamp.Ticks),
-                ContentType = "application/json"
-            };
-
-            var sequenceNumber = await channel.GetNextPublishSequenceNumberAsync(cancellationToken);
-            confirmationTracker.ExpectSequence(sequenceNumber);
-            confirmationTracker.RegisterMessageId(properties.MessageId, sequenceNumber);
-
-            await channel.BasicPublishAsync(
-                exchange: actualExchange,
-                routingKey: actualRoutingKey,
-                mandatory: true,
-                basicProperties: properties,
-                body: body,
-                cancellationToken: cancellationToken);
-
-            var confirmTimeout = TimeSpan.FromSeconds(_options.PublisherConfirmTimeoutSeconds);
-            var result = await confirmationTracker.WaitForConfirmationAsync(sequenceNumber, confirmTimeout, cancellationToken);
-
-            if (!result.Confirmed)
-            {
-                var message = result.Returned
-                    ? $"Message returned for event type '{eventType}' - broker could not route message"
-                    : $"Publisher confirmation failed (nacked) for event type '{eventType}'";
-
-                throw new RabbitMqPublishException(message, eventType, correlationId);
-            }
-
-            publishSucceeded = true;
-
-            _logger.LogDebug(
-                "Published event {EventType} with headers to exchange {Exchange}",
-                eventType, actualExchange);
-        }
-        catch (RabbitMqPublishException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to publish event {EventType} with headers", eventType);
-            throw new RabbitMqPublishException(
-                $"Failed to publish event of type '{eventType}' with headers",
-                eventType,
-                correlationId,
-                ex);
-        }
-        finally
-        {
-            if (channel != null)
-            {
-                channel.BasicAcksAsync -= confirmationTracker.OnAckAsync;
-                channel.BasicNacksAsync -= confirmationTracker.OnNackAsync;
-                channel.BasicReturnAsync -= confirmationTracker.OnReturnAsync;
-
-                if (publishSucceeded)
-                {
-                    _connectionPool.ReturnChannel(channel);
-                }
-                else
-                {
-                    // Channel is disposed on error (not returned to pool)
-                    channel.Dispose();
-                }
-            }
-        }
-    }
-
-    private RabbitMqMessageEnvelope CreateEnvelope<TEvent>(
-        TEvent @event,
-        string eventType,
+    public async Task PublishEventAsync(
+        RabbitMqPublishBinding binding,
+        object payload,
         string? correlationId,
-        Dictionary<string, string?>? headers = null)
+        CancellationToken cancellationToken = default)
     {
-        var payload = JsonSerializer.Serialize(@event, typeof(TEvent), _jsonSerializerContext ?? RabbitMqMessageEnvelopeContext.Default);
+        ArgumentNullException.ThrowIfNull(binding);
+        ArgumentNullException.ThrowIfNull(payload);
 
-        var envelope = new RabbitMqMessageEnvelope(eventType, payload, headers ?? new Dictionary<string, string?>())
+        var payloadJson = JsonSerializer.Serialize(payload, binding.Codec);
+        var envelope = new RabbitMqMessageEnvelope(binding.Descriptor.Name, payloadJson)
         {
-            Timestamp = DateTime.UtcNow
+            EventId = binding.Descriptor.Id,
+            EventVersion = binding.Descriptor.Version
         };
 
         if (!string.IsNullOrEmpty(correlationId))
@@ -330,142 +61,222 @@ public sealed class RabbitMqPublisher : IAsyncDisposable
             envelope.Headers["CorrelationId"] = correlationId;
         }
 
-        return envelope;
-    }
+        var body = JsonSerializer.SerializeToUtf8Bytes(envelope, RabbitMqMessageEnvelopeContext.Default.RabbitMqMessageEnvelope);
+        var properties = BuildProperties(
+            messageId: Guid.NewGuid().ToString(),
+            correlationId: correlationId,
+            eventName: binding.Descriptor.Name,
+            timestamp: envelope.Timestamp,
+            headers: null);
 
-    private ReadOnlyMemory<byte> SerializeEnvelope(RabbitMqMessageEnvelope envelope)
-    {
-        var json = JsonSerializer.Serialize(envelope, RabbitMqMessageEnvelopeContext.Default.RabbitMqMessageEnvelope);
-        return System.Text.Encoding.UTF8.GetBytes(json);
-    }
+        await SendAsync(
+            _options.DefaultExchange,
+            binding.RoutingKey,
+            body,
+            properties,
+            declareExchange: true,
+            eventName: binding.Descriptor.Name,
+            correlationId,
+            cancellationToken).ConfigureAwait(false);
 
-    public ValueTask DisposeAsync()
-    {
-        if (_disposed) return ValueTask.CompletedTask;
-        _disposed = true;
-        return ValueTask.CompletedTask;
+        _logger.LogDebug(
+            "Published event {EventName} v{Version} to exchange {Exchange} with routing key {RoutingKey}",
+            binding.Descriptor.Name, binding.Descriptor.Version, _options.DefaultExchange, binding.RoutingKey);
     }
 
     /// <summary>
-    /// Tracks publisher confirmations for a single message using RabbitMQ.Client 7.x async events.
+    /// Business-retry redelivery: republishes the original body to the original queue through the
+    /// default exchange with the cloned properties (identity preserved; only the framework-owned retry
+    /// header changed) and waits for the confirm. The caller acks the original delivery only after
+    /// this method completes successfully.
     /// </summary>
-    private sealed class PublishConfirmationTracker
+    public async Task RepublishToQueueAsync(
+        string queue,
+        ReadOnlyMemory<byte> body,
+        BasicProperties properties,
+        CancellationToken cancellationToken = default)
     {
-        private readonly ConcurrentDictionary<ulong, PublishResult> _results = new();
-        private readonly ConcurrentDictionary<ulong, bool> _expectedSequences = new();
-        private readonly ConcurrentDictionary<string, ulong> _messageIdToSequence = new();
-        private readonly SemaphoreSlim _signal = new(0);
+        ArgumentException.ThrowIfNullOrWhiteSpace(queue);
+        ArgumentNullException.ThrowIfNull(properties);
 
-        public void ExpectSequence(ulong sequenceNumber)
-        {
-            _expectedSequences[sequenceNumber] = true;
-        }
+        await SendAsync(
+            exchange: string.Empty,
+            routingKey: queue,
+            body,
+            properties,
+            declareExchange: false,
+            eventName: properties.Type ?? queue,
+            properties.CorrelationId,
+            cancellationToken).ConfigureAwait(false);
 
-        public void RegisterMessageId(string messageId, ulong sequenceNumber)
-        {
-            _messageIdToSequence[messageId] = sequenceNumber;
-        }
-
-        public Task OnAckAsync(object? sender, BasicAckEventArgs e)
-        {
-            // Multiple flag indicates batch acknowledgment
-            if (e.Multiple)
-            {
-                // Iterate through all expected sequences and confirm those <= delivery tag
-                foreach (var seq in _expectedSequences.Keys)
-                {
-                    if (seq <= e.DeliveryTag)
-                    {
-                        _results[seq] = new PublishResult { Confirmed = true, Returned = false };
-                        _signal.Release();
-                    }
-                }
-            }
-            else
-            {
-                // Single message acknowledgment
-                _results[e.DeliveryTag] = new PublishResult { Confirmed = true, Returned = false };
-                _signal.Release();
-            }
-            return Task.CompletedTask;
-        }
-
-        public Task OnNackAsync(object? sender, BasicNackEventArgs e)
-        {
-            if (e.Multiple)
-            {
-                // Iterate through all expected sequences and nack those <= delivery tag
-                foreach (var seq in _expectedSequences.Keys)
-                {
-                    if (seq <= e.DeliveryTag)
-                    {
-                        _results[seq] = new PublishResult { Confirmed = false, Returned = false };
-                        _signal.Release();
-                    }
-                }
-            }
-            else
-            {
-                _results[e.DeliveryTag] = new PublishResult { Confirmed = false, Returned = false };
-                _signal.Release();
-            }
-            return Task.CompletedTask;
-        }
-
-        public Task OnReturnAsync(object? sender, BasicReturnEventArgs e)
-        {
-            // Message was returned because it couldn't be routed (mandatory flag)
-            // Extract message ID from basic properties and map to sequence number
-            var messageId = e.BasicProperties?.MessageId;
-            if (!string.IsNullOrEmpty(messageId) && _messageIdToSequence.TryGetValue(messageId, out var sequenceNumber))
-            {
-                _results[sequenceNumber] = new PublishResult { Confirmed = false, Returned = true };
-                _signal.Release();
-            }
-            return Task.CompletedTask;
-        }
-
-        public async Task<PublishResult> WaitForConfirmationAsync(
-            ulong sequenceNumber,
-            TimeSpan timeout,
-            CancellationToken cancellationToken)
-        {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            linkedCts.CancelAfter(timeout);
-
-            try
-            {
-                // Wait for signal that confirmation arrived
-                await _signal.WaitAsync(linkedCts.Token);
-
-                // Use TryRemove to prevent memory leak
-                if (_results.TryRemove(sequenceNumber, out var result))
-                {
-                    // Cleanup tracking dictionaries
-                    _expectedSequences.TryRemove(sequenceNumber, out _);
-                    return result;
-                }
-
-                // If not found, wait a bit more in case it was batched
-                await _signal.WaitAsync(linkedCts.Token);
-                if (_results.TryRemove(sequenceNumber, out result))
-                {
-                    _expectedSequences.TryRemove(sequenceNumber, out _);
-                    return result;
-                }
-                return new PublishResult { Confirmed = false };
-            }
-            catch (OperationCanceledException)
-            {
-                // Timeout waiting for confirmation
-                return new PublishResult { Confirmed = false };
-            }
-        }
+        _logger.LogInformation(
+            "Redelivered message {MessageId} to queue {Queue} for retry",
+            properties.MessageId, queue);
     }
 
-    private sealed class PublishResult
+    /// <summary>
+    /// Clones the original AMQP properties for a redelivery: identity and app headers are preserved,
+    /// only the framework-owned retry fields are modified by the caller afterwards.
+    /// </summary>
+    public static BasicProperties CloneProperties(IReadOnlyBasicProperties? source, Dictionary<string, object?>? replacementHeaders = null)
     {
-        public bool Confirmed { get; init; }
-        public bool Returned { get; init; }
+        var clone = new BasicProperties
+        {
+            AppId = source?.AppId,
+            ClusterId = source?.ClusterId,
+            ContentEncoding = source?.ContentEncoding,
+            ContentType = source?.ContentType,
+            CorrelationId = source?.CorrelationId,
+            DeliveryMode = source?.DeliveryMode ?? DeliveryModes.Persistent,
+            Expiration = source?.Expiration,
+            MessageId = source?.MessageId,
+            Persistent = source?.Persistent ?? true,
+            Priority = source?.Priority ?? 0,
+            ReplyTo = source?.ReplyTo,
+            Timestamp = source?.Timestamp ?? default,
+            Type = source?.Type,
+            UserId = source?.UserId,
+            Headers = replacementHeaders ?? CloneHeaders(source?.Headers)
+        };
+
+        return clone;
+    }
+
+    private static Dictionary<string, object?> CloneHeaders(IDictionary<string, object?>? source)
+    {
+        var clone = new Dictionary<string, object?>();
+        if (source is null)
+        {
+            return clone;
+        }
+
+        foreach (var pair in source)
+        {
+            clone[pair.Key] = pair.Value;
+        }
+
+        return clone;
+    }
+
+    private static BasicProperties BuildProperties(
+        string messageId,
+        string? correlationId,
+        string eventName,
+        DateTime timestamp,
+        Dictionary<string, object?>? headers)
+        => new()
+        {
+            DeliveryMode = DeliveryModes.Persistent,
+            MessageId = messageId,
+            CorrelationId = correlationId,
+            Type = eventName,
+            Timestamp = new AmqpTimestamp(new DateTimeOffset(DateTime.SpecifyKind(timestamp, DateTimeKind.Utc)).ToUnixTimeSeconds()),
+            ContentType = "application/json",
+            Headers = headers
+        };
+
+    private async Task SendAsync(
+        string exchange,
+        string routingKey,
+        ReadOnlyMemory<byte> body,
+        BasicProperties properties,
+        bool declareExchange,
+        string eventName,
+        string? correlationId,
+        CancellationToken cancellationToken)
+    {
+        IChannel? channel = null;
+        try
+        {
+            channel = await _connectionPool.GetChannelAsync(cancellationToken).ConfigureAwait(false);
+
+            if (declareExchange)
+            {
+                await channel.ExchangeDeclareAsync(
+                    exchange: exchange,
+                    type: ExchangeType.Direct,
+                    durable: true,
+                    autoDelete: false,
+                    arguments: null,
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
+
+            using var confirmTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            confirmTimeout.CancelAfter(TimeSpan.FromSeconds(_options.PublisherConfirmTimeoutSeconds));
+
+            // With publisher-confirmation tracking enabled, this await completes when the broker
+            // confirms the publish (or faults on return/nack).
+            await channel.BasicPublishAsync(
+                exchange: exchange,
+                routingKey: routingKey,
+                mandatory: true,
+                basicProperties: properties,
+                body: body,
+                cancellationToken: confirmTimeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("Publish cancelled by the caller for event {EventName}", eventName);
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            throw new RabbitMqPublishException(
+                $"Publish confirmation timed out after {_options.PublisherConfirmTimeoutSeconds}s for event '{eventName}'.",
+                eventName,
+                correlationId,
+                ex,
+                RabbitMqPublishFailureKind.Timeout);
+        }
+        catch (PublishReturnException ex)
+        {
+            throw new RabbitMqPublishException(
+                $"Message returned for event '{eventName}': the broker could not route the mandatory publish " +
+                $"({ex.Message}).",
+                eventName,
+                correlationId,
+                ex,
+                RabbitMqPublishFailureKind.Unroutable);
+        }
+        catch (PublishException ex)
+        {
+            throw new RabbitMqPublishException(
+                $"Publisher confirmation nacked by the broker for event '{eventName}' ({ex.Message}).",
+                eventName,
+                correlationId,
+                ex,
+                RabbitMqPublishFailureKind.Nacked);
+        }
+        catch (Exception ex) when (ex is AlreadyClosedException or BrokerUnreachableException or System.IO.IOException)
+        {
+            throw new RabbitMqPublishException(
+                $"Publish interrupted for event '{eventName}'; the outcome is indeterminate.",
+                eventName,
+                correlationId,
+                ex,
+                RabbitMqPublishFailureKind.Interrupted);
+        }
+        catch (RabbitMqPublishException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new RabbitMqPublishException(
+                $"Failed to publish event '{eventName}'.",
+                eventName,
+                correlationId,
+                ex,
+                RabbitMqPublishFailureKind.Failed);
+        }
+        finally
+        {
+            if (channel is not null)
+            {
+                // Exactly-once lease release: ReturnChannel handles both open (pooled) and closed
+                // (discarded) channels and releases the semaphore permit on every path.
+                _connectionPool.ReturnChannel(channel);
+            }
+        }
     }
 }

@@ -1,0 +1,127 @@
+using CrestCreates.JsonContracts.BuildTasks.Diagnostics;
+using CrestCreates.JsonContracts.BuildTasks.Model;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+
+namespace CrestCreates.JsonContracts.BuildTasks.Semantic;
+
+/// <summary>
+/// Discovers [CrestEvent(Scope = EventScope.Integration)] declarations in the project sources and turns
+/// them into source-generated JSON codec roots for wire transports (RabbitMQ and future providers). This
+/// is the pre-compile half of the Integration codec contract: the roots plus a static codec contribution
+/// are emitted into the existing generated file, consumed by the official STJ generator during
+/// CoreCompile — never by a second source generator reading another generator's output.
+/// </summary>
+public sealed class IntegrationEventJsonSurfaceDiscovery
+{
+    // EventScope.Integration = 2 (CrestCreates.Event.Abstractions.EventScope).
+    private const int IntegrationScopeValue = 2;
+
+    private readonly List<JsonContractDiagnostic> _diagnostics = [];
+
+    public IReadOnlyList<JsonContractDiagnostic> Diagnostics => _diagnostics;
+
+    public List<JsonContractRootModel> Discover(CSharpCompilation compilation)
+    {
+        var roots = new List<JsonContractRootModel>();
+
+        var attributeSymbol = compilation.GetTypeByMetadataName(JsonContractBuildConstants.CrestEventAttributeFullName);
+        if (attributeSymbol is null)
+        {
+            return roots;
+        }
+
+        var seen = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+
+        foreach (var type in compilation.SourceModule.GlobalNamespace.GetAllTypes())
+        {
+            var attribute = type.GetAttributes()
+                .FirstOrDefault(candidate => SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, attributeSymbol));
+
+            if (attribute is null)
+            {
+                continue;
+            }
+
+            var isIntegration = attribute.NamedArguments
+                .Any(named => named.Key == "Scope" && named.Value.Value is int scope && scope == IntegrationScopeValue);
+            if (!isIntegration)
+            {
+                continue;
+            }
+
+            var location = attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation();
+
+            if (!seen.Add(type))
+            {
+                continue;
+            }
+
+            if (type.IsAbstract || type.IsGenericType || type.TypeKind != TypeKind.Class)
+            {
+                _diagnostics.Add(new JsonContractDiagnostic
+                {
+                    Id = JsonContractDiagnosticIds.IntegrationEventInvalidPayload,
+                    Message = $"Integration event '{type.ToDisplayString()}' must be a closed, non-abstract class; " +
+                              "open generics, abstract classes and other shapes have no closed JSON payload contract.",
+                    Severity = JsonContractDiagnosticSeverity.Error,
+                    OffendingType = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                }.WithLocation(location));
+                continue;
+            }
+
+            if (type.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal))
+            {
+                _diagnostics.Add(new JsonContractDiagnostic
+                {
+                    Id = JsonContractDiagnosticIds.IntegrationEventInaccessiblePayload,
+                    Message = $"Integration event '{type.ToDisplayString()}' must be public or internal so the " +
+                              "generated codec context in the same assembly can reference it.",
+                    Severity = JsonContractDiagnosticSeverity.Error,
+                    OffendingType = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                }.WithLocation(location));
+                continue;
+            }
+
+            var unsealedMember = LocalEventJsonClosureValidator.FindFirstUnsealedMember(type);
+            if (unsealedMember is not null)
+            {
+                _diagnostics.Add(new JsonContractDiagnostic
+                {
+                    Id = JsonContractDiagnosticIds.IntegrationEventUnsealedMember,
+                    Message = $"Integration event '{type.ToDisplayString()}' has an unsealed JSON member: " +
+                              $"{unsealedMember}. Every serialized member must have a closed JSON contract (a concrete " +
+                              "type, a closed collection, a typed [JsonConverter], or a [JsonDerivedType] hierarchy); " +
+                              "object/interface/abstract members without an explicit contract are not wire-encodable.",
+                    Severity = JsonContractDiagnosticSeverity.Error,
+                    OffendingType = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                }.WithLocation(location));
+                continue;
+            }
+
+            var normalized = JsonContractRootNormalizer.Normalize(type);
+            roots.Add(new JsonContractRootModel
+            {
+                RootType = normalized,
+                FullMetadataName = normalized.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                IsExplicitExtra = true,
+                Provenance = new JsonContractRootProvenance
+                {
+                    Origins =
+                    [
+                        new JsonContractRootOrigin
+                        {
+                            SourceKind = JsonContractRootSourceKind.IntegrationEvent,
+                            DeclaringSurface = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                            RoleName = "IntegrationEvent",
+                            Location = location,
+                        },
+                    ],
+                },
+            });
+        }
+
+        roots.Sort((left, right) => string.Compare(left.FullMetadataName, right.FullMetadataName, StringComparison.Ordinal));
+        return roots;
+    }
+}

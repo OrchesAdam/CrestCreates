@@ -13,10 +13,12 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />
   </ItemGroup>
 
 </Project>

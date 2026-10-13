@@ -7,8 +7,12 @@
     <!-- Marker consumed by the LocalEvent source generator (via CompilerVisibleProperty) to verify
          that this project imports the JSON contract toolchain before declaring replayable events. -->
     <CrestCreatesLocalEventJsonContracts>true</CrestCreatesLocalEventJsonContracts>
+    <!-- Marker consumed by the EventDescriptor source generator (via CompilerVisibleProperty) to verify
+         that this project imports the JSON contract toolchain before declaring Integration events. -->
+    <CrestCreatesEventJsonContracts>true</CrestCreatesEventJsonContracts>
   </PropertyGroup>
   <ItemGroup>
     <CompilerVisibleProperty Include="CrestCreatesLocalEventJsonContracts" />
+    <CompilerVisibleProperty Include="CrestCreatesEventJsonContracts" />
   </ItemGroup>
 </Project>

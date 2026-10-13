@@ -24,6 +24,20 @@ public static class EventServiceCollectionExtensions
         services.TryAddSingleton<IRegistryValidationEngine<GeneratedEventDescriptor>,
             RegistryValidationEngine<GeneratedEventDescriptor>>();
 
+        // Registry build-time validators (duplicate name+version, active version chains, payload uniqueness).
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRegistryValidator<GeneratedEventDescriptor>,
+            DuplicateNameVersionValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRegistryValidator<GeneratedEventDescriptor>,
+            EventVersionChainValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRegistryValidator<GeneratedEventDescriptor>,
+            UniquePayloadTypeValidator>());
+
+        // Resolver (generated + dynamic) and publish-time validator. The validator performs
+        // name/state checks only; payload/version/scope checks require transport-level freeze.
+        services.TryAddSingleton<IDynamicEventRegistry, DynamicEventRegistry>();
+        services.TryAddSingleton<IEventResolver, EventResolver>();
+        services.TryAddSingleton<IEventValidator, RegistryEventValidator>();
+
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, EventBindingStatusContributor>();
 

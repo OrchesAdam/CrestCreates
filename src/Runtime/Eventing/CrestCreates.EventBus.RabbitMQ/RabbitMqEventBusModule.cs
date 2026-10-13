@@ -1,13 +1,8 @@
-using System;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.Modularity;
 using CrestCreates.Domain.Shared.Attributes;
-using CrestCreates.EventBus.RabbitMQ.Connection;
-using CrestCreates.EventBus.RabbitMQ.Consuming;
-using CrestCreates.EventBus.RabbitMQ.Options;
-using CrestCreates.EventBus.Abstract;
+using CrestCreates.EventBus.RabbitMQ.Extensions;
 
 namespace CrestCreates.EventBus.RabbitMQ;
 
@@ -22,20 +17,5 @@ public class RabbitMqEventBusModule : ModuleBase
     }
 
     public override void OnConfigureServices(IServiceCollection services)
-    {
-        // Configure options
-        services.Configure<RabbitMqOptions>(_configuration.GetSection("RabbitMQ"));
-
-        // Register connection pool
-        services.AddSingleton<RabbitMqConnectionPool>();
-
-        // Register publisher
-        services.AddSingleton<Publishing.RabbitMqPublisher>();
-
-        // Register event bus
-        services.AddSingleton<IEventBus, RabbitMqEventBus>();
-
-        // Register consumer as hosted service
-        services.AddHostedService<RabbitMqConsumer>();
-    }
+        => services.AddRabbitMqEventBus(_configuration.GetSection("RabbitMQ"));
 }
