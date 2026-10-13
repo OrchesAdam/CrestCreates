@@ -5,6 +5,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.State;
 
 namespace CrestCreates.HumanTask.Abstractions;
 
+[LocalEvent]
 public sealed class HumanTaskCompletedEvent : ILocalEvent
 {
     public string EventId { get; init; } = string.Empty;

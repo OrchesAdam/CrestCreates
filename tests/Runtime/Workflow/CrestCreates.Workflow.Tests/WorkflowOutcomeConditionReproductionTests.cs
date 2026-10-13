@@ -77,10 +77,7 @@ public sealed class WorkflowOutcomeConditionReproductionTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-        services.AddSingleton<LocalEventBusOptions>();
-        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
-        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
+        services.AddCrestLocalEventDispatch();
         services.AddAccountability();
         services.AddSingleton(auditSink);
         services.AddSingleton<IAuditSink>(auditSink);
@@ -184,10 +181,7 @@ public sealed class WorkflowOutcomeConditionReproductionTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-        services.AddSingleton<LocalEventBusOptions>();
-        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
-        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
+        services.AddCrestLocalEventDispatch();
         services.AddAccountability().AddAuditSink<InMemoryAuditSink>();
         services.AddCapabilityRuntime();
         services.AddRuntimePersistence();
@@ -266,10 +260,7 @@ public sealed class WorkflowOutcomeConditionReproductionTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-        services.AddSingleton<LocalEventBusOptions>();
-        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
-        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
+        services.AddCrestLocalEventDispatch();
         services.AddAccountability().AddAuditSink<InMemoryAuditSink>();
         services.AddCapabilityRuntime();
         services.AddRuntimePersistence();

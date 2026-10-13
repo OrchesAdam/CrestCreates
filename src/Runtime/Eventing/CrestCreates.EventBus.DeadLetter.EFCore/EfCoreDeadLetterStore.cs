@@ -32,7 +32,8 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
                 FailedAt = message.FailedAt,
                 RetryCount = message.RetryCount,
                 MaxRetries = message.MaxRetries,
-                Status = message.Status.ToString()
+                Status = message.Status.ToString(),
+                LocalReplayKey = message.LocalReplayKey
             });
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
@@ -125,5 +126,6 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
             e.FailedAt,
             e.RetryCount,
             e.MaxRetries,
-            Enum.Parse<DeadLetterStatus>(e.Status));
+            Enum.Parse<DeadLetterStatus>(e.Status),
+            e.LocalReplayKey);
 }

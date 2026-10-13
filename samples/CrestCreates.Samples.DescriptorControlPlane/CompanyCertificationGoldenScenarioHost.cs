@@ -187,9 +187,7 @@ public sealed class CompanyCertificationGoldenScenarioHost : IDisposable
         services.AddSingleton<IEventValidator, NoOpEventValidator>();
 
         // ── Local Event Bus ────────────────────────────────────────────
-        services.AddSingleton<LocalEventBusOptions>();
-        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+        services.AddCrestLocalEventDispatch();
 
         // ── Capability Pipeline & Runtime ──────────────────────────────
         services.AddCapabilityPipeline(builder =>

@@ -38,21 +38,30 @@ public class BackgroundChannelLocalEventBusTests
         await consumer.StopAsync(CancellationToken.None);
     }
 
+    [Fact]
+    public async Task PublishAsync_Undeclared_Event_Throws_Before_Enqueue()
+    {
+        using var provider = CreateServiceProvider();
+        var eventBus = provider.GetRequiredService<ILocalEventBus>();
+
+        var exception = await Record.ExceptionAsync(
+            () => eventBus.PublishAsync(new LocalEventBusTests.BaseTestEvent()));
+
+        Assert.IsType<UnknownLocalEventException>(exception);
+    }
+
     private static ServiceProvider CreateServiceProvider(Action<IServiceCollection>? configure = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-        services.AddSingleton(new LocalEventBusOptions());
-        services.AddSingleton<ChannelLocalEventQueue>();
-        services.AddSingleton<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-        services.AddSingleton<ILocalEventBus, BackgroundChannelLocalEventBus>();
+        services.AddCrestLocalChannelEventDispatch(builder => builder.Declare<TestChannelLocalEvent>());
         services.AddSingleton<BackgroundChannelLocalEventBusConsumer>();
         configure?.Invoke(services);
         return services.BuildServiceProvider();
     }
 
-    private sealed class ChannelRecordingHandler : ILocalEventHandler<TestChannelLocalEvent>
+    internal sealed class ChannelRecordingHandler : ILocalEventHandler<TestChannelLocalEvent>
     {
         public TaskCompletionSource<TestChannelLocalEvent> ReceivedEvent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

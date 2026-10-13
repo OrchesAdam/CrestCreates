@@ -39,6 +39,10 @@ public sealed class JsonContractGenerationEngine
         var builder = new JsonContractSurfaceModelBuilder();
         var model = builder.Build(compilation);
 
+        var localEventDiscovery = new LocalEventJsonSurfaceDiscovery();
+        model.LocalEventRoots.AddRange(localEventDiscovery.Discover(compilation));
+        model.Diagnostics.AddRange(localEventDiscovery.Diagnostics);
+
         var accessibility = JsonContractSurfaceModelBuilder.ParseManifestAccessibility(manifestAccessibility);
         foreach (var ctx in model.Contexts)
             ctx.ManifestAccessibility = accessibility;

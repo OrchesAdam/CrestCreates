@@ -1,28 +1,30 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.EventBus.Abstractions;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.EventBus.Local;
 
+/// <summary>
+/// Manual dead-letter entry point. Single and batch retries delegate to the shared replay
+/// executor; the manager does not duplicate decoding, state transitions or dispatch logic.
+/// </summary>
 public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
 {
     private readonly IDeadLetterStore _store;
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<DefaultLocalDeadLetterManager> _logger;
+    private readonly ILocalDeadLetterReplayExecutor _executor;
+    private readonly ILogger<DefaultLocalDeadLetterManager>? _logger;
 
     public DefaultLocalDeadLetterManager(
         IDeadLetterStore store,
-        IServiceScopeFactory scopeFactory,
-        ILogger<DefaultLocalDeadLetterManager> logger)
+        ILocalDeadLetterReplayExecutor executor,
+        ILogger<DefaultLocalDeadLetterManager>? logger = null)
     {
         _store = store;
-        _scopeFactory = scopeFactory;
+        _executor = executor;
         _logger = logger;
     }
 
@@ -49,53 +51,7 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
             return new DeadLetterRetryResult(messageId, false, "Message not found");
         }
 
-        await _store.MarkRetryingAsync(messageId, cancellationToken);
-
-        try
-        {
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
-
-            var eventType = Type.GetType(message.PayloadTypeFullName);
-            if (eventType is null)
-            {
-                return new DeadLetterRetryResult(messageId, false,
-                    $"Cannot resolve event type: {message.PayloadTypeFullName}");
-            }
-
-            var eventData = JsonSerializer.Deserialize(
-                message.Payload, eventType);
-
-            if (eventData is ILocalEvent localEvent)
-            {
-                await dispatcher.DispatchAsync(localEvent, cancellationToken);
-            }
-
-            await _store.MarkRetriedAsync(messageId, cancellationToken);
-            _logger.LogInformation(
-                "Manually retried dead letter message {MessageId} successfully", messageId);
-
-            return new DeadLetterRetryResult(messageId, true, null);
-        }
-        catch (Exception ex)
-        {
-            var newRetryCount = message.RetryCount + 1;
-            var updatedMessage = message with
-            {
-                RetryCount = newRetryCount,
-                Status = newRetryCount >= message.MaxRetries
-                    ? DeadLetterStatus.Archived
-                    : DeadLetterStatus.Pending,
-                ErrorMessage = ex.Message,
-                ExceptionType = ex.GetType().FullName
-            };
-            await _store.EnqueueAsync(updatedMessage, cancellationToken);
-
-            _logger.LogError(ex,
-                "Manual retry failed for dead letter message {MessageId}", messageId);
-
-            return new DeadLetterRetryResult(messageId, false, ex.Message);
-        }
+        return await _executor.ExecuteAsync(message, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<DeadLetterRetryResult>> RetryAllAsync(
@@ -110,8 +66,14 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
             if (cancellationToken.IsCancellationRequested)
                 break;
 
-            var result = await RetryAsync(message.MessageId, cancellationToken);
-            results.Add(result);
+            try
+            {
+                results.Add(await _executor.ExecuteAsync(message, cancellationToken).ConfigureAwait(false));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
 
         return results.AsReadOnly();
@@ -132,7 +94,7 @@ public class DefaultLocalDeadLetterManager : ILocalDeadLetterManager
             await _store.MarkArchivedAsync(message.MessageId, cancellationToken);
         }
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Cleared {Count} dead letter messages (eventType: {EventType})",
             toRemove.Count, eventType ?? "all");
 

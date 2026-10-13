@@ -1,5 +1,4 @@
 using System;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
@@ -7,40 +6,80 @@ using CrestCreates.Event;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstract;
 using CrestCreates.EventBus.Abstractions;
-using Microsoft.Extensions.Options;
+using CrestCreates.Metadata.Abstractions.Registry;
+using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.EventBus.Local;
 
+/// <summary>
+/// Synchronous local event bus. Membership is resolved in the unified dispatch registry before
+/// validation and dispatch; handler failures propagate to the caller and are additionally
+/// recorded through the shared typed dead-letter recorder when the event is replayable.
+/// </summary>
 public class DefaultLocalEventBus : ILocalEventBus, IEventBus
 {
+    private readonly ILocalEventDispatchRegistry _registry;
     private readonly ILocalEventDispatcher _dispatcher;
-    private readonly IDeadLetterStore? _deadLetterStore;
-    private readonly IEventValidator _validator;
-    private readonly LocalDeadLetterOptions _deadLetterOptions;
+    private readonly ILocalEventFailureRecorder? _recorder;
+    private readonly IEventValidator? _validator;
+    private readonly IEventRegistry? _eventRegistry;
+    private readonly ILogger<DefaultLocalEventBus>? _logger;
 
     public DefaultLocalEventBus(
+        ILocalEventDispatchRegistry registry,
         ILocalEventDispatcher dispatcher,
-        IEventValidator validator,
-        IDeadLetterStore? deadLetterStore = null,
-        IOptions<LocalDeadLetterOptions>? deadLetterOptions = null)
+        IEventValidator? validator = null,
+        ILocalEventFailureRecorder? recorder = null,
+        IEventRegistry? eventRegistry = null,
+        ILogger<DefaultLocalEventBus>? logger = null)
     {
+        _registry = registry;
         _dispatcher = dispatcher;
         _validator = validator;
-        _deadLetterStore = deadLetterStore;
-        _deadLetterOptions = deadLetterOptions?.Value ?? new LocalDeadLetterOptions();
+        _recorder = recorder;
+        _eventRegistry = eventRegistry;
+        _logger = logger;
     }
 
     public async Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
     {
-        _validator.ValidateOrThrow(@event.GetType().Name, @event);
+        ArgumentNullException.ThrowIfNull(@event);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var eventType = @event.GetType();
+        if (!_registry.TryGet(eventType, out var binding))
+        {
+            throw new UnknownLocalEventException(eventType);
+        }
+
+        _validator?.ValidateOrThrow(ResolveCanonicalName(binding), @event);
 
         try
         {
-            await _dispatcher.DispatchAsync(@event, cancellationToken);
+            await _dispatcher.DispatchAsync(@event, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (_deadLetterStore is not null)
+        catch (Exception failure) when (!IsCallerCancellation(failure, cancellationToken))
         {
-            await EnqueueToDeadLetterAsync(@event, ex, cancellationToken);
+            if (_recorder is not null)
+            {
+                var outcome = await _recorder
+                    .TryRecordAsync(binding, @event, failure, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (outcome.Recorded)
+                {
+                    _logger?.LogInformation(
+                        "Recorded failed local event '{EventName}' to the dead-letter store.",
+                        binding.LocalName);
+                }
+                else if (outcome.Problem is not null)
+                {
+                    _logger?.LogWarning(
+                        "Local event '{EventName}' failed and was not recorded to the dead-letter store: {Problem}",
+                        binding.LocalName, outcome.Problem);
+                }
+            }
+
             throw;
         }
     }
@@ -48,28 +87,15 @@ public class DefaultLocalEventBus : ILocalEventBus, IEventBus
     public async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
         where TEvent : ILocalEvent
     {
-        _validator.ValidateOrThrow(@event.GetType().Name, @event);
-
-        try
-        {
-            await _dispatcher.DispatchAsync(@event, cancellationToken);
-        }
-        catch (Exception ex) when (_deadLetterStore is not null)
-        {
-            await EnqueueToDeadLetterAsync(@event, ex, cancellationToken);
-            throw;
-        }
+        ArgumentNullException.ThrowIfNull(@event);
+        await PublishAsync((ILocalEvent)@event, cancellationToken).ConfigureAwait(false);
     }
 
     Task IEventBus.PublishAsync(IDomainEvent @event, CancellationToken cancellationToken)
-    {
-        return PublishAsync(@event, cancellationToken);
-    }
+        => PublishAsync(@event, cancellationToken);
 
     Task IEventBus.PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken)
-    {
-        return PublishAsync(@event, cancellationToken);
-    }
+        => PublishAsync(@event, cancellationToken);
 
     void IEventBus.Subscribe<TEvent, THandler>()
     {
@@ -79,31 +105,20 @@ public class DefaultLocalEventBus : ILocalEventBus, IEventBus
     {
     }
 
-    private async Task EnqueueToDeadLetterAsync(ILocalEvent @event, Exception ex, CancellationToken cancellationToken)
+    private static bool IsCallerCancellation(Exception failure, CancellationToken cancellationToken)
+        => failure is OperationCanceledException && cancellationToken.IsCancellationRequested;
+
+    private string ResolveCanonicalName(LocalEventBinding binding)
     {
-        if (_deadLetterStore is null) return;
+        if (_eventRegistry is { State: RegistryState.Built })
+        {
+            var descriptor = _eventRegistry.GetByPayloadType(binding.EventType);
+            if (descriptor is not null)
+            {
+                return descriptor.Name;
+            }
+        }
 
-        var eventType = @event.GetType();
-        var payload = JsonSerializer.SerializeToUtf8Bytes(@event, eventType);
-
-        var message = new DeadLetterMessage(
-            MessageId: Guid.NewGuid().ToString("N"),
-            EventName: eventType.Name,
-            EventVersion: 1,
-            EventDescriptorId: null,
-            CorrelationId: null,
-            TenantId: null,
-            Scope: CrestCreates.Event.Abstractions.EventScope.Local,
-            PayloadTypeFullName: eventType.AssemblyQualifiedName!,
-            Payload: payload,
-            ErrorMessage: ex.Message,
-            ExceptionType: ex.GetType().FullName,
-            OccurredAt: DateTime.UtcNow,
-            FailedAt: DateTime.UtcNow,
-            RetryCount: 0,
-            MaxRetries: _deadLetterOptions.MaxRetries,
-            Status: DeadLetterStatus.Pending);
-
-        await _deadLetterStore.EnqueueAsync(message, cancellationToken);
+        return binding.LocalName;
     }
 }

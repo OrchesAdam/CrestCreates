@@ -381,11 +381,7 @@ public sealed class LibraryManagementWebApplicationFactory
             // but not included in LibraryManagement's generated ModuleAutoInitializer.
             new SecurityModule(hostConfiguration!).OnConfigureServices(services);
             services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-            services.AddSingleton<LocalEventBusOptions>();
-            services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-            services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
-            services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
-            services.AddScoped<IDomainEventPublisher, DomainEventPublisher>();
+            services.AddCrestLocalEventDispatch();
         });
     }
 

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Text;
 
 namespace CrestCreates.CodeGenerator.Tests.TestHelpers
@@ -168,10 +169,11 @@ namespace CrestCreates.Domain.Shared.Attributes
         public static SourceGeneratorResult RunGenerator<TGenerator>(
             string source,
             string[]? additionalSources = null,
-            string[]? additionalReferences = null)
+            string[]? additionalReferences = null,
+            Dictionary<string, string>? globalAnalyzerOptions = null)
             where TGenerator : IIncrementalGenerator, new()
         {
-            return RunGenerators(new[] { source }, new IIncrementalGenerator[] { new TGenerator() }, additionalSources, additionalReferences);
+            return RunGenerators(new[] { source }, new IIncrementalGenerator[] { new TGenerator() }, additionalSources, additionalReferences, globalAnalyzerOptions);
         }
 
         /// <summary>
@@ -198,9 +200,10 @@ namespace CrestCreates.Domain.Shared.Attributes
             string source,
             IEnumerable<IIncrementalGenerator> generators,
             string[]? additionalSources = null,
-            string[]? additionalReferences = null)
+            string[]? additionalReferences = null,
+            Dictionary<string, string>? globalAnalyzerOptions = null)
         {
-            return RunGenerators(new[] { source }, generators, additionalSources, additionalReferences);
+            return RunGenerators(new[] { source }, generators, additionalSources, additionalReferences, globalAnalyzerOptions);
         }
 
         /// <summary>
@@ -210,7 +213,8 @@ namespace CrestCreates.Domain.Shared.Attributes
             string[] sources,
             IEnumerable<IIncrementalGenerator> generators,
             string[]? additionalSources = null,
-            string[]? additionalReferences = null)
+            string[]? additionalReferences = null,
+            Dictionary<string, string>? globalAnalyzerOptions = null)
         {
             var compilation = CreateCompilation(sources, additionalSources, additionalReferences);
             var allDiagnostics = new List<Diagnostic>();
@@ -218,7 +222,12 @@ namespace CrestCreates.Domain.Shared.Attributes
 
             foreach (var generator in generators)
             {
-                var driver = CSharpGeneratorDriver.Create(generator.AsSourceGenerator());
+                GeneratorDriver driver = CSharpGeneratorDriver.Create(generator.AsSourceGenerator());
+                if (globalAnalyzerOptions is not null)
+                {
+                    driver = driver.WithUpdatedAnalyzerConfigOptions(
+                        new SimpleAnalyzerConfigOptionsProvider(globalAnalyzerOptions));
+                }
 
                 driver.RunGeneratorsAndUpdateCompilation(
                     compilation,
@@ -533,5 +542,31 @@ namespace CrestCreates.Domain.Shared.Attributes
         {
             return result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Warning);
         }
+    }
+
+    internal sealed class SimpleAnalyzerConfigOptionsProvider : AnalyzerConfigOptionsProvider
+    {
+        private readonly SimpleAnalyzerConfigOptions _globalOptions;
+        private static readonly SimpleAnalyzerConfigOptions Empty = new(new Dictionary<string, string>());
+
+        public SimpleAnalyzerConfigOptionsProvider(Dictionary<string, string> globalOptions)
+        {
+            _globalOptions = new SimpleAnalyzerConfigOptions(globalOptions);
+        }
+
+        public override AnalyzerConfigOptions GlobalOptions => _globalOptions;
+
+        public override AnalyzerConfigOptions GetOptions(Microsoft.CodeAnalysis.SyntaxTree tree) => Empty;
+
+        public override AnalyzerConfigOptions GetOptions(Microsoft.CodeAnalysis.AdditionalText textFile) => Empty;
+    }
+
+    internal sealed class SimpleAnalyzerConfigOptions : AnalyzerConfigOptions
+    {
+        private readonly Dictionary<string, string> _options;
+
+        public SimpleAnalyzerConfigOptions(Dictionary<string, string> options) => _options = options;
+
+        public override bool TryGetValue(string key, out string value) => _options.TryGetValue(key, out value!);
     }
 }

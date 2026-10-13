@@ -18,4 +18,7 @@ public sealed class DeadLetterEntity
     public int RetryCount { get; set; }
     public int MaxRetries { get; set; }
     public string Status { get; set; } = "Pending";
+
+    /// <summary>Local replay lookup key ("assembly:metadataTypeName"); null on pre-migration records.</summary>
+    public string? LocalReplayKey { get; set; }
 }

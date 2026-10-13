@@ -4,5 +4,11 @@
     <CrestCreatesJsonContractManifestAccessibility Condition="'$(CrestCreatesJsonContractManifestAccessibility)' == ''">Internal</CrestCreatesJsonContractManifestAccessibility>
     <CrestCreatesJsonContractGenerationDependsOn Condition="'$(CrestCreatesJsonContractGenerationDependsOn)' == ''"></CrestCreatesJsonContractGenerationDependsOn>
     <CrestCreatesJsonContractsTaskSemanticVersion Condition="'$(CrestCreatesJsonContractsTaskSemanticVersion)' == ''">1.0.0</CrestCreatesJsonContractsTaskSemanticVersion>
+    <!-- Marker consumed by the LocalEvent source generator (via CompilerVisibleProperty) to verify
+         that this project imports the JSON contract toolchain before declaring replayable events. -->
+    <CrestCreatesLocalEventJsonContracts>true</CrestCreatesLocalEventJsonContracts>
   </PropertyGroup>
+  <ItemGroup>
+    <CompilerVisibleProperty Include="CrestCreatesLocalEventJsonContracts" />
+  </ItemGroup>
 </Project>

@@ -7,6 +7,11 @@ internal static class JsonContractBuildConstants
     public const string JsonSerializerContextFullName = "System.Text.Json.Serialization.JsonSerializerContext";
     public const string JsonSerializableAttributeFullName = "System.Text.Json.Serialization.JsonSerializableAttribute";
     public const string CancellationTokenFullName = "System.Threading.CancellationToken";
+    public const string LocalEventAttributeFullName = "CrestCreates.EventBus.Abstractions.LocalEventAttribute";
+    public const string LocalEventCodecRegistryFullName = "CrestCreates.EventBus.Abstractions.LocalEventJsonCodecRegistry";
+    public const string LocalEventGeneratedNamespace = "CrestCreates.Generated";
+    public const string LocalEventJsonContextSimpleName = "LocalEventJsonSerializerContext";
+    public const string LocalEventCodecContributionsSimpleName = "LocalEventJsonCodecContributions";
     public const string TaskFullName = "System.Threading.Tasks.Task";
     public const string ValueTaskFullName = "System.Threading.Tasks.ValueTask";
     public const string GeneratedFileName = "CrestCreates.JsonContracts.g.cs";

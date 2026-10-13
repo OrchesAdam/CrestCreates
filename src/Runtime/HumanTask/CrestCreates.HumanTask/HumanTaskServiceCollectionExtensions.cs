@@ -22,6 +22,8 @@ public static class HumanTaskServiceCollectionExtensions
     {
         services.TryAddSingleton(new HumanTaskDeliveryOptions());
         services.TryAddSingleton<OptionalCompatibilityExecutionTracker>();
+        // Explicit activation of the HumanTask.Abstractions local event declarations (typed dispatch membership).
+        CrestCreates.Generated.CrestCreates_HumanTask_Abstractions.LocalEventRegistrations.AddLocalEvents(services);
         services.TryAddScoped<IHumanTaskRuntime, DefaultHumanTaskRuntime>();
         services.TryAddScoped<IHumanTaskAssigneeResolver, DefaultHumanTaskAssigneeResolver>();
         services.AddOutboxDeliveryHandler<HumanTaskCompletedOutboxHandler>(HumanTaskDeliveryConstants.CompletedContractId);
