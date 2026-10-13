@@ -1,9 +1,9 @@
 # CrestCreates platform status — 2026-10-10
 
-Baseline: master `1dc4a9cc` (PR #139 merge: #137 slices 1-5 + three review-fix rounds;
-PR #138/#136/#135 merged before). Remote verified 2026-10-12. In flight: none for wave 1 -
-#125 CAP entry consolidation merged via PR #140 (five review rounds closed; wave 2 #126-#128
-is the next candidate). CI: all GitHub workflows manually disabled (development-phase
+Baseline: master `1cad6e35` (PR #142 merge: #126 LocalEvent typed dispatch/replay S1-S4 + eight
+review rounds; PR #139/#140 merged before). Remote verified 2026-10-13. In flight: none -
+wave 1 fully merged; wave 2 #126 merged via PR #142, #127/#128 are the next candidates.
+CI: all GitHub workflows manually disabled (development-phase
 local-first verification; Testcontainers suites runnable locally via podman socket).
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
@@ -22,6 +22,18 @@ never deleted; never output credentials.
 - JsonContracts build-time toolchain: `src/Tooling/CrestCreates.JsonContracts.BuildTasks`
   (+ `.BuildTasks.Core`, `.Tool`) generates deterministic JSON contract roots consumed
   by the official STJ source generator; no runtime reflection/scanner fallback.
+- LocalEvent typed dispatch + dead-letter replay (delivered by #126 via PR #142 on
+  2026-10-13, eight review rounds closed): single typed dispatch index
+  (`ILocalEventDispatchRegistry` / `LocalEventBinding` / `LocalEventInvoker`, freeze-time
+  merged validation; undeclared events fail deterministically, no fallback), per-assembly
+  generated registration (`AddLocalEvents()`, CCCLE001-005; explicit cross-assembly
+  activation contract, no scanning), replayable codecs statically bound by the JsonContracts
+  toolchain (`[LocalEvent(Replayable=true)]` discovery; CJC015/016/017 closure diagnostics
+  incl. polymorphic discriminator uniqueness and STJ-recoverable collection checks), shared
+  replay core (`LocalDeadLetterReplayExecutor`: re-read current state, precheck before state
+  transition, persisted retry budget, cancel-safe Pending restore), EF `LocalReplayKey`
+  additive column, `InMemoryDeadLetterStore` same-key update fix. Not pledged: replay
+  concurrency mutual exclusion, crash-leftover Retrying recovery, per-handler checkpoints.
 - `src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql`: durable runtime state,
   Control Plane reference data, review/package artifact persistence, native AotHost
   evidence.
@@ -34,7 +46,11 @@ never deleted; never output credentials.
   CapabilityEndpoint native HTTP request gate (loopback requests, success/400/404
   negative cases, process reaping, evidence artifact `aot-native-evidence-<sha>`;
   merged via PR #135); MCP/Agent.Tools main fixtures run their existing
-  publish-and-run tests in active CI.
+  publish-and-run tests in active CI; LocalEvent typed dispatch/replay native gate
+  (five scenarios + sentinel `CRESTCREATES_LOCALEVENT_TYPED_REPLAY_NATIVE_OK`, linux-x64,
+  in-memory DLQ store only, evidence `local-event-typed-replay.json`; gate step prepared
+  in `ci.yml`/`full-validation.yml`, workflows remain manually disabled; merged via
+  PR #142).
 - #123 baseline finding (recorded, fixed): native HTTP success requests returned
   500 because `DynamicApiResponse<object>` was not declared by the fixture's
   JsonSerializerContext; fixed by declaring the envelope root (golden-host pattern),
@@ -84,7 +100,10 @@ never deleted; never output credentials.
   consolidation (design rev.4 + S1-S4 + four implementation review-fix rounds merged
   via PR #140 on 2026-10-12; CAP unit 41/41, CAP integration 38/38 on the merged head;
   issues log docs/superpowers/plans/2026-10-12-issue-125-implementation-issues-log.md).
-- Wave 2: #126 LocalEvent / #127 RabbitMQ / #128 CRUD JSON.
+- Wave 2: #126 LocalEvent (design + S1-S4 + eight implementation review-fix rounds merged
+  via PR #142 on 2026-10-13; JSON toolchain 126/126, LocalEvent integration 47/47 and
+  NativeAOT five scenarios on the merged head; issues log
+  docs/superpowers/plans/2026-10-13-issue-126-issues-log.md); #127 RabbitMQ / #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
 - At most 2 implementation PRs in flight; verify at current head before merge.
@@ -106,7 +125,7 @@ never deleted; never output credentials.
   engine archived; two-layer config validation; atomic publish over the #137
   lease/borrower contract with scan-recovery delivery; PG+RabbitMQ integration evidence);
   compensation concurrency / process-crash recovery not pledged;
-  LocalEvent/RabbitMQ reflection bridges (#126/#127);
+  RabbitMQ reflection bridge (#127);
   CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
   (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).
 
