@@ -996,4 +996,69 @@ public class LocalEventJsonSurfaceDiscoveryTests : JsonContractCompilationTestBa
         discovery.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items"));
     }
+
+    [Fact]
+    public void Discover_AbstractDerivedCollection_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                public abstract class AbstractList : List<int> { }
+
+                public sealed class ConcreteList : AbstractList { }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ExampleEvent
+                {
+                    public AbstractList Items { get; set; } = new ConcreteList();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items"));
+    }
+
+    [Fact]
+    public void Discover_DerivedCollectionWithoutParameterlessCtor_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                public sealed class NoDefaultList : List<int>
+                {
+                    public NoDefaultList(int capacity) : base(capacity) { }
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ExampleEvent
+                {
+                    public NoDefaultList Items { get; set; } = new(4);
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items"));
+    }
 }

@@ -364,7 +364,7 @@ internal static class LocalEventJsonClosureValidator
         // STJ can recover:
         // 1. Standard collection interfaces (IEnumerable, IList, etc.)
         // 2. Standard concrete collections (List, Dictionary, HashSet, etc.)
-        // 3. Types that derive from standard concrete collections
+        // 3. Non-abstract types that derive from standard concrete collections AND have a parameterless constructor
         
         var name = type.Name;
         var ns = type.ContainingNamespace?.ToDisplayString();
@@ -391,6 +391,8 @@ internal static class LocalEventJsonClosureValidator
 
         // Check if this type derives from a recoverable concrete collection
         var baseType = type.BaseType;
+        var derivesFromStandardCollection = false;
+        
         while (baseType is not null)
         {
             var baseName = baseType.Name;
@@ -401,13 +403,29 @@ internal static class LocalEventJsonClosureValidator
                     or "LinkedList" or "Collection" or "ObservableCollection"
                     or "Dictionary" or "SortedDictionary" or "SortedList" or "ConcurrentDictionary")
             {
-                return true;
+                derivesFromStandardCollection = true;
+                break;
             }
             
             baseType = baseType.BaseType;
         }
 
-        return false;
+        if (!derivesFromStandardCollection)
+        {
+            return false;
+        }
+
+        // For derived types, verify they can actually be instantiated:
+        // 1. Must not be abstract
+        if (type.IsAbstract)
+        {
+            return false;
+        }
+
+        // 2. Must have a parameterless constructor (implicit or explicit)
+        // STJ requires a way to create the instance before populating it
+        var hasParameterlessCtor = type.InstanceConstructors.Any(c => c.Parameters.Length == 0);
+        return hasParameterlessCtor;
     }
 
     private static bool IsUnrecoverableCollection(INamedTypeSymbol type)
