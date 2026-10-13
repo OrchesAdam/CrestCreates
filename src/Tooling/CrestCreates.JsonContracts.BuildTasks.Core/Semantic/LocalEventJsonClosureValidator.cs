@@ -141,6 +141,13 @@ internal static class LocalEventJsonClosureValidator
             return null;
         }
 
+        // Check if this is an unrecoverable collection (implements IEnumerable but not in whitelist)
+        if (IsUnrecoverableCollection(type))
+        {
+            return $"{path} ({type.ToDisplayString()} implements IEnumerable but is not a recoverable collection; " +
+                   "STJ cannot deserialize it. Use a standard collection type or add [JsonConverter])";
+        }
+
         if (type.TypeKind == TypeKind.Interface)
         {
             return $"{path} ({type.ToDisplayString()} is an interface with no closed polymorphic contract)";
@@ -257,16 +264,12 @@ internal static class LocalEventJsonClosureValidator
         }
 
         // If we found elements, this is a collection - now check if it's recoverable
-        // Interfaces and abstract types cannot be recovered unless they're in the whitelist
-        if (type.TypeKind == TypeKind.Interface || type.IsAbstract)
+        // This applies to ALL collection types: interface, abstract, and concrete
+        if (!IsStjRecoverableCollection(type))
         {
-            // Only whitelisted interfaces/abstract collections are recoverable
-            if (!IsStjRecoverableCollection(type))
-            {
-                // Clear elements to signal this is not a valid collection
-                elements.Clear();
-                return false;
-            }
+            // Clear elements to signal this is not a valid collection
+            elements.Clear();
+            return false;
         }
 
         return elements.Count > 0;
@@ -358,19 +361,101 @@ internal static class LocalEventJsonClosureValidator
 
     private static bool IsStjRecoverableCollection(INamedTypeSymbol type)
     {
-        // STJ can recover standard collection interfaces and concrete types
+        // STJ can recover:
+        // 1. Standard collection interfaces (IEnumerable, IList, etc.)
+        // 2. Standard concrete collections (List, Dictionary, HashSet, etc.)
+        // 3. Types that derive from standard concrete collections
+        
         var name = type.Name;
         var ns = type.ContainingNamespace?.ToDisplayString();
 
-        if (ns != "System.Collections.Generic" && ns != "System.Collections")
+        // Check if this is a standard collection type (interface or concrete)
+        if (ns == "System.Collections.Generic" || ns == "System.Collections")
+        {
+            // Standard interfaces
+            if (name is "IEnumerable" or "ICollection" or "IList" 
+                or "IReadOnlyCollection" or "IReadOnlyList"
+                or "IDictionary" or "IReadOnlyDictionary")
+            {
+                return true;
+            }
+
+            // Standard concrete collections
+            if (name is "List" or "HashSet" or "SortedSet" or "Queue" or "Stack"
+                or "LinkedList" or "Collection" or "ObservableCollection"
+                or "Dictionary" or "SortedDictionary" or "SortedList" or "ConcurrentDictionary")
+            {
+                return true;
+            }
+        }
+
+        // Check if this type derives from a recoverable concrete collection
+        var baseType = type.BaseType;
+        while (baseType is not null)
+        {
+            var baseName = baseType.Name;
+            var baseNs = baseType.ContainingNamespace?.ToDisplayString();
+            
+            if ((baseNs == "System.Collections.Generic" || baseNs == "System.Collections")
+                && baseName is "List" or "HashSet" or "SortedSet" or "Queue" or "Stack"
+                    or "LinkedList" or "Collection" or "ObservableCollection"
+                    or "Dictionary" or "SortedDictionary" or "SortedList" or "ConcurrentDictionary")
+            {
+                return true;
+            }
+            
+            baseType = baseType.BaseType;
+        }
+
+        return false;
+    }
+
+    private static bool IsUnrecoverableCollection(INamedTypeSymbol type)
+    {
+        // Exclude scalar types that happen to implement IEnumerable (like string)
+        // Check by SpecialType or by well-known type names
+        if (type.SpecialType == SpecialType.System_String ||
+            type.SpecialType != SpecialType.None)
         {
             return false;
         }
 
-        // Standard interfaces that STJ can recover
-        return name is "IEnumerable" or "ICollection" or "IList" 
-            or "IReadOnlyCollection" or "IReadOnlyList"
-            or "IDictionary" or "IReadOnlyDictionary";
+        // Also check by display name for types not covered by SpecialType
+        var displayName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        if (ClosedScalars.Contains(displayName))
+        {
+            return false;
+        }
+
+        // Check if this type implements IEnumerable<T> or IEnumerable
+        // but is not a recoverable collection
+        var implementsEnumerable = false;
+        
+        foreach (var iface in type.AllInterfaces)
+        {
+            var ifaceName = iface.Name;
+            var ifaceNs = iface.ContainingNamespace?.ToDisplayString();
+            
+            if (ifaceNs == "System.Collections.Generic" && ifaceName == "IEnumerable")
+            {
+                implementsEnumerable = true;
+                break;
+            }
+            
+            if (ifaceNs == "System.Collections" && ifaceName == "IEnumerable")
+            {
+                implementsEnumerable = true;
+                break;
+            }
+        }
+
+        if (!implementsEnumerable)
+        {
+            return false;
+        }
+
+        // It implements IEnumerable - check if it's recoverable
+        return !IsStjRecoverableCollection(type);
     }
 
     private static IEnumerable<INamedTypeSymbol> EnumerateSelfAndInterfaces(INamedTypeSymbol type)

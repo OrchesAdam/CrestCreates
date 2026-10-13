@@ -960,4 +960,40 @@ public class LocalEventJsonSurfaceDiscoveryTests : JsonContractCompilationTestBa
         discovery.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Id == "CJC017" && diagnostic.Message.Contains("discriminator"));
     }
+
+    [Fact]
+    public void Discover_ConcreteEnumerableOnlyClass_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                public sealed class EnumerableOnly : IEnumerable<int>
+                {
+                    public IEnumerator<int> GetEnumerator()
+                        => ((IEnumerable<int>)new[] { 1, 2 }).GetEnumerator();
+                    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ExampleEvent
+                {
+                    public EnumerableOnly Items { get; set; } = new();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items"));
+    }
 }
