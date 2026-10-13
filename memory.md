@@ -1,9 +1,8 @@
 # CrestCreates platform status — 2026-10-10
 
-Baseline: master `1cad6e35` (PR #142 merge: #126 LocalEvent typed dispatch/replay S1-S4 + eight
-review rounds; PR #139/#140 merged before). Remote verified 2026-10-13. In flight: #127 RabbitMQ
-static bindings (PR #145 on `feat/issue-127-rabbitmq-static-bindings-20261013-145133`, based on
-`6dd608a3`, awaiting review — not merged); #128 CRUD JSON is the next candidate.
+Baseline: master `5d3de8c5` (PR #145 merge: #127 RabbitMQ static bindings S1-S4 + R1/R2 review rounds;
+PR #142/#139/#140 merged before). Remote verified 2026-10-14. In flight: none —
+wave 2 #126/#127 both merged; #128 CRUD JSON is the next candidate.
 CI: all GitHub workflows manually disabled (development-phase
 local-first verification; Testcontainers suites runnable locally via podman socket).
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
@@ -35,8 +34,9 @@ never deleted; never output credentials.
   transition, persisted retry budget, cancel-safe Pending restore), EF `LocalReplayKey`
   additive column, `InMemoryDeadLetterStore` same-key update fix. Not pledged: replay
   concurrency mutual exclusion, crash-leftover Retrying recovery, per-handler checkpoints.
-- RabbitMQ static bindings + canonical event contracts (delivered by #127 via PR #145 — IN FLIGHT,
-  NOT MERGED yet; baseline code facts: the reflection subscription bridge returned empty in any real
+- RabbitMQ static bindings + canonical event contracts (delivered by #127, merged via PR #145 on
+  2026-10-14; R1+R2 review rounds closed — 10 findings fixed with the reviewer probes in-repo;
+  baseline code facts: the reflection subscription bridge returned empty in any real
   host, publisher/consumer identity and routing disagreed, retry dropped properties and ignored the
   delay, three divergent registration paths; issues log
   docs/superpowers/plans/2026-10-13-issue-127-issues-log.md): `[CrestEvent]` declarations generate
@@ -88,7 +88,7 @@ never deleted; never output credentials.
   cross-assembly typed payloads, same-short-name isolation, refusals to a real DLQ, explicit
   legacy alias, retry-then-success, budget exhaustion, unroutable typed failure; linux-x64;
   evidence `rabbitmq-static-bindings-{trim,native-aot}.json`; gate step + rabbitmq service
-  prepared in both workflows, keep disabled; #127 PR #145 in review, NOT merged).
+  prepared in both workflows, keep disabled; merged via PR #145).
 - #123 baseline finding (recorded, fixed): native HTTP success requests returned
   500 because `DynamicApiResponse<object>` was not declared by the fixture's
   JsonSerializerContext; fixed by declaring the envelope root (golden-host pattern),
@@ -142,9 +142,10 @@ never deleted; never output credentials.
   via PR #142 on 2026-10-13; JSON toolchain 126/126, LocalEvent integration 47/47 and
   NativeAOT five scenarios on the merged head; issues log
   docs/superpowers/plans/2026-10-13-issue-126-issues-log.md); #127 RabbitMQ static bindings
-  (S1-S4 implemented on PR #145, local evidence after R2: unit 58/58, generators 365/365 full, JsonContracts
-  131/131, real-broker integration 37/37, trim + NativeAOT gates green; awaiting re-review, NOT
-  merged; issues log docs/superpowers/plans/2026-10-13-issue-127-issues-log.md); #128 CRUD JSON.
+  (design + S1-S4 + R1/R2 review-fix rounds merged via PR #145 on 2026-10-14; unit 58/58,
+  generators 365/365 full, JsonContracts 131/131, real-broker integration 37/37, real trim +
+  NativeAOT gates per mode on the merged head; issues log
+  docs/superpowers/plans/2026-10-13-issue-127-issues-log.md); #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
 - At most 2 implementation PRs in flight; verify at current head before merge.
@@ -166,7 +167,6 @@ never deleted; never output credentials.
   engine archived; two-layer config validation; atomic publish over the #137
   lease/borrower contract with scan-recovery delivery; PG+RabbitMQ integration evidence);
   compensation concurrency / process-crash recovery not pledged;
-  RabbitMQ reflection bridge (#127);
   CRUD DTO JSON contract (#128); legacy controller exit + route convention residue
   (#129); ORM support matrix (#130); placeholders and long-tail modules (#131).
 
