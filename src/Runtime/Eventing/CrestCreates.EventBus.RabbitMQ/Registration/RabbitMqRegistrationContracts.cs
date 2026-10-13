@@ -4,12 +4,13 @@ using CrestCreates.Event.Abstractions;
 namespace CrestCreates.EventBus.RabbitMQ.Registration;
 
 /// <summary>
-/// Closed, compilation-safe host invocation for one subscription binding. The generated code resolves
-/// the handler from the delivery scope and calls the handler method with the exact payload type; no
-/// reflection is involved.
+/// Closed, compilation-safe host invocation for one subscription binding. The consumer resolves the
+/// handler instance from the delivery scope (all handlers first, then execution) and passes it to the
+/// generated invoker, which only performs the exact-type cast and the method call; no reflection is
+/// involved.
 /// </summary>
 public delegate Task RabbitMqHandlerInvoker(
-    IServiceProvider serviceProvider,
+    object handlerInstance,
     object payload,
     CancellationToken cancellationToken);
 

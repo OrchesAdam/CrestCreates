@@ -73,7 +73,19 @@ public sealed class RabbitMqStaticBindingsNativeTests
             evidence["publishExitCode"] = publish.ExitCode;
             evidence["publishLog"] = publish.Output;
             publish.ExitCode.Should().Be(0, publish.Output);
-            publish.Output.Should().Contain("Generating native code");
+
+            var expectsNativeLink = publishMode.EndsWith("=aot", StringComparison.Ordinal);
+            if (expectsNativeLink)
+            {
+                publish.Output.Should().Contain("Generating native code");
+            }
+            else
+            {
+                // The trim gate must produce a trimmed (JIT) product: a native link here would mean
+                // the mode did not take effect and this would be a second native gate.
+                publish.Output.Should().NotContain("Generating native code");
+            }
+
             publish.Output.Should().NotContain("warning IL2026");
             publish.Output.Should().NotContain("warning IL3050");
 

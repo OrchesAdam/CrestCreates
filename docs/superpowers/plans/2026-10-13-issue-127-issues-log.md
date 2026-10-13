@@ -44,6 +44,27 @@
 - 文档同步：旧 `2026-04-26-rabbitmq-event-bus-design.md` 增加失真提示；`memory.md`、AGENTS.md 平台状态、#123 evidence matrix 增行。
 - 覆盖限制（不承诺）：competing consumers 跨进程、quorum DLX 无损、per-handler checkpoint、重放并发互斥、崩溃窗口去重、`MetadataBootstrapper`（ModuleInitializer 静态 bag）路径不扩展。
 
+## R1 审查修复（2026-10-13，审查 head `1fb4468f`，6×P1 + 1×P2）
+
+审查报告：`docs/review/2026-10-13-pr-145-rabbitmq-implementation-review.md`；探针：
+`docs/review/2026-10-13-pr-145-rabbitmq-review-probes.md`。两个探针文件已**原样入库**（`ReviewRegressionTests.cs` /
+`ReviewRetryRecoveryTests.cs`），先确认 7/7 失败基线，再逐项修复；R1-RMQ-05 因删除全局注册表 API，探针 #1 以等价的
+per-Host 贡献形式适配（场景与断言不变，见下映射）。
+
+| 发现 | 修复 | 仓库回归测试 |
+| --- | --- | --- |
+| R1-RMQ-01 恢复窗口发布销毁连接/consumer | pool 对非 open 既有连接**有界等待（20s，可取消）SDK 恢复**，禁止 Disposal/替换；专属 consumer channel 终态丢失（channel 关闭且连接已恢复，或连接 >30s 未恢复）抛错停宿主 | 探针 `Publish_during_confirmed_recovery_window_must_preserve_consumer`（先确认目标连接存在于 management 且 `IsOpen=false` 再发布）；`Connection_drop_between_targeted_close_and_recovery_window_preserves_the_consumer`（补强原断连测试：断言原连接被保留 `ReferenceEquals`、恢复窗口内单次发布后消费成功且无重复 consumer）；`Terminal_consumer_channel_loss_fails_the_host_instead_of_staying_falsely_ready`（真实 manifest：`ApplicationStopping` 触发） |
+| R1-RMQ-02 重投确认失败无恢复动作 | `HandleBusinessFailureAsync` 的 `RabbitMqPublishException` 分支：有界退避（`max(1s, RetryDelaySeconds)`）后 `Nack(requeue:true)` 受控重入队；不递增重试计数、不消耗业务预算；取消/停机仍不结算 | 探针 `Retry_confirm_timeout_must_schedule_recovery_for_original_unacked_delivery`（mock 注入确认超时，断言 Nack(requeue:true)） |
+| R1-RMQ-03 `payload:null` 永久 unacked | 信封必要字段预检（`Payload` 空/null → 确定性拒绝）先于编解码 | 探针 `Envelope_with_JSON_null_Payload_field_must_reach_DLQ`（真实 broker：DLQ=True、unacked=0） |
+| R1-RMQ-04 required Handler 只校验元数据 | 冻结期经 `IServiceProviderIsService` 探测 required Handler 的 DI 注册（不构造实例）；delivery 期**整批预解析**全部 Handler 实例后再执行（invoker 改为接收实例），任一缺失零业务效果 | 探针 `Missing_Handler_DI_registration_must_fail_composition_before_broker_IO`（required + 移除注册 → 组合失败）、`Missing_later_Handler_must_not_execute_earlier_Handler`（非 required：执行前整批预解析 → CallLog 空 + DLQ=1）；单测 `Freeze_Rejects_required_handler_that_is_not_registered_in_di` / `Freeze_Allows_unregistered_non_required_handler_because_delivery_pre_resolution_guards_it` |
+| R1-RMQ-05 全局 codec 注册表跨 Host 泄漏 | 删除 `EventJsonCodecRegistry`（归档 99_RecycleBin）；改为 per-Host `EventJsonCodecRegistration`（AddEventDescriptors → `AddCodecs(services)`）；同 Origin 幂等、多 Origin 同类目冲突诊断 | 探针 `Host_B_without_own_codec_contribution_must_not_use_Host_A_codec`（per-Host 形式适配）、`Codec_contribution_registration_order_and_idempotent_reactivation_are_host_local`、`Conflicting_codec_origins_for_one_payload_must_fail_freeze`（新增，覆盖双 Host/注册顺序/幂等） |
+| R1-RMQ-06 RabbitMQ 破坏 LocalEvent 默认路径 | `AddEventKernel` 不再注册共享 `IEventValidator`；`RabbitMqEventBus` 以工厂构造**自有** `RegistryEventValidator` 实例；LocalEvent 可选依赖保持既有缺席语义 | 探针 `Adding_RabbitMQ_must_not_require_governance_for_plain_LocalEvent`（真实组合：AddCrestLocalEventDispatch + publisher-only RabbitMQ 共存发布不抛） |
+| R1-RMQ-07 trim 门禁实际是 native | AotHost csproj 按 `CrestCreatesPublishMode` 求值 `PublishAot`（trim=false / aot=true，`-getProperty` 实证）；门禁按模式分别断言（trim 不得含 native link 文案） | 门禁自身（trim + native 双测试） |
+
+修复后本地结果：单元 53/53（含审查单测探针 + 2 条新增）、集成 37/37（27 原有 + 6 审查探针 + 2 新增 + 补强改写 + 终态看护）、生成器全量 365/365、Event 41/41、LocalEvent 集成 47/47、CAP 单元 41/41、全量构建 0 错误；trim 门禁（无 native link）与 NativeAOT 门禁分别通过并重写证据。
+
+说明：R1-RMQ-05 的探针 #1 原引用被删除的 `EventJsonCodecRegistry` API，属“修复确实移除该 API”的必然适配；场景、双 Host 隔离断言与失败期望保持不变，并补齐了审查要求的注册顺序/幂等/冲突三项覆盖。
+
 ## 验证记录（本地）
 
 | 验证 | 结果 | 日志 |

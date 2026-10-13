@@ -39,7 +39,7 @@ public class LocalEventCodecWriterTests : JsonContractCompilationTestBase
         var discovery = new LocalEventJsonSurfaceDiscovery();
         result.Model!.LocalEventRoots.AddRange(discovery.Discover(result.Compilation));
 
-        var output = JsonContractSourceWriter.WriteContextSource(result.Model);
+        var output = JsonContractSourceWriter.WriteContextSource(result.Model, "TestAssembly");
 
         output.Should().Contain("namespace CrestCreates.Generated");
         output.Should().Contain("[global::System.Text.Json.Serialization.JsonSerializable(typeof(global::MyApp.ReplayableSalesEvent))]");
@@ -57,7 +57,7 @@ public class LocalEventCodecWriterTests : JsonContractCompilationTestBase
             ("Plain.cs", "namespace MyApp; public sealed class Plain { }"),
         ], GetDefaultReferences());
 
-        var output = JsonContractSourceWriter.WriteContextSource(result.Model!);
+        var output = JsonContractSourceWriter.WriteContextSource(result.Model!, "TestAssembly");
 
         output.Should().NotContain("LocalEventJsonSerializerContext");
         output.Should().NotContain("LocalEventJsonCodecContributions");

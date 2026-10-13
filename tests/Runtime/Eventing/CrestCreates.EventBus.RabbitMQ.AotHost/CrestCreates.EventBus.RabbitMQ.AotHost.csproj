@@ -6,13 +6,23 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsAotCompatible>true</IsAotCompatible>
-    <PublishTrimmed>true</PublishTrimmed>
-    <PublishAot>true</PublishAot>
     <TrimMode>full</TrimMode>
     <InvariantGlobalization>true</InvariantGlobalization>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2070;IL2072;IL2075;IL3050;SYSLIB1034</WarningsAsErrors>
     <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
+  </PropertyGroup>
+
+  <!-- The publish mode must actually follow CrestCreatesPublishMode: the trim gate publishes a
+       trimmed (JIT) product and the native gate publishes with PublishAot=true. Hardcoding
+       PublishAot here would silently turn the trim gate into a second native gate. -->
+  <PropertyGroup Condition="'$(CrestCreatesPublishMode)' == 'aot'">
+    <PublishAot>true</PublishAot>
+    <PublishTrimmed>true</PublishTrimmed>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(CrestCreatesPublishMode)' != 'aot'">
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>true</PublishTrimmed>
   </PropertyGroup>
 
   <ItemGroup>

@@ -23,7 +23,9 @@ public class EventDescriptorSourceGeneratorTests
         {
             internal static class EventJsonCodecContributions
             {
-                public static void Register() { }
+                public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddCodecs(
+                    this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)
+                    => services;
             }
         }
         """;
@@ -67,7 +69,7 @@ public class EventDescriptorSourceGeneratorTests
         generated.Should().Contain("GeneratedEventDescriptor.GenerateId(\"orders.order-created\")");
         generated.Should().Contain("public static class EventRegistrations");
         generated.Should().Contain("IEventDescriptorProvider");
-        generated.Should().Contain("EventJsonCodecContributions.Register();");
+        generated.Should().Contain("EventJsonCodecContributions.AddCodecs(services);");
     }
 
     [Fact]
@@ -100,7 +102,7 @@ public class EventDescriptorSourceGeneratorTests
         generated.Should().Contain("Version = 2");
         generated.Should().Contain("Scope = global::CrestCreates.Event.Abstractions.EventScope.Domain");
         generated.Should().NotContain("GenerateId");
-        generated.Should().NotContain("EventJsonCodecContributions.Register();");
+        generated.Should().NotContain("EventJsonCodecContributions.AddCodecs(services);");
     }
 
     [Fact]

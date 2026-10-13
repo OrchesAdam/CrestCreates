@@ -105,9 +105,9 @@ internal static class RabbitMqSubscriptionCodeWriter
 
         builder.AppendLine($"                    PrefetchCount = {subscription.PrefetchCount},");
         builder.AppendLine($"                    Origin = \"{escapedOrigin}\",");
-        builder.AppendLine("                    Invoker = static (provider, payload, cancellationToken) =>");
+        builder.AppendLine("                    Invoker = static (handlerInstance, payload, cancellationToken) =>");
         builder.AppendLine("                    {");
-        builder.AppendLine($"                        var handler = ({subscription.HandlerTypeDisplay})global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService(provider, typeof({subscription.HandlerTypeDisplay}));");
+        builder.AppendLine($"                        var handler = ({subscription.HandlerTypeDisplay})handlerInstance;");
         builder.AppendLine($"                        return handler.{subscription.HandlerMethod}(({subscription.PayloadTypeDisplay})payload, cancellationToken);");
         builder.AppendLine("                    }");
         builder.AppendLine("                },");

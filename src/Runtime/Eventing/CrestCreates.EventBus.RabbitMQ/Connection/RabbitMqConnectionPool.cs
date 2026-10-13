@@ -17,9 +17,16 @@ namespace CrestCreates.EventBus.RabbitMQ.Connection;
 /// consumer channel. MaxChannels bounds the publisher pool only; the dedicated consumer channel is
 /// independent. Channel leases are released exactly once on every path (return, closed-channel
 /// discard, disposal, acquisition failure).
+///
+/// Connection ownership stays with the SDK's automatic recovery: a non-open connection is treated as
+/// recovering and waited on (bounded, cancellable) instead of being disposed and replaced, because a
+/// replacement would strand the dedicated consumer channel and its consumers on the dead connection.
 /// </summary>
 public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
 {
+    private static readonly TimeSpan RecoveryWaitTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan RecoveryPollInterval = TimeSpan.FromMilliseconds(250);
+
     private readonly RabbitMqOptions _options;
     private readonly ILogger<RabbitMqConnectionPool> _logger;
     private readonly ConnectionFactory _factory;
@@ -53,6 +60,15 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
             ConsumerDispatchConcurrency = (ushort)Math.Clamp(_options.ConsumerDispatchConcurrency, 1, ushort.MaxValue)
         };
     }
+
+    /// <summary>True while the current connection is usable (open, or already recovered by the SDK).</summary>
+    public bool IsConnectionOpen => _connection?.IsOpen == true;
+
+    /// <summary>
+    /// True when a connection object exists but is not open right now — the SDK automatic recovery is
+    /// (or should be) working on it. Publish paths wait for recovery instead of replacing it.
+    /// </summary>
+    public bool IsConnectionRecovering => _connection is { IsOpen: false } && !_disposed;
 
     /// <summary>
     /// Acquires a publisher channel lease from the bounded pool. Every successful acquisition must be
@@ -157,15 +173,27 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
             return;
         }
 
-        try
+        if (_connection != null && !_disposed)
         {
-            if (_connection is not null)
+            // The SDK automatic recovery owns this connection. Replacing it here would strand every
+            // channel on the dead connection (including the dedicated consumer channel and its
+            // registered consumers), so wait for recovery within a bounded, cancellable window.
+            await WaitForRecoveryAsync(cancellationToken);
+            if (_connection is { IsOpen: true })
             {
-                _connection.ConnectionShutdownAsync -= OnConnectionShutdownAsync;
-                _connection.CallbackExceptionAsync -= OnCallbackExceptionAsync;
-                _connection.Dispose();
+                _logger.LogInformation("RabbitMQ connection recovered by the SDK.");
+                return;
             }
 
+            throw new RabbitMqConnectionException(
+                $"RabbitMQ connection to {_options.HostName}:{_options.Port} did not recover within " +
+                $"{RecoveryWaitTimeout.TotalSeconds}s; the outcome of this operation is unknown and the connection " +
+                "is left to the SDK recovery loop.",
+                _options.HostName);
+        }
+
+        try
+        {
             _connection = await _factory.CreateConnectionAsync(cancellationToken);
 
             _logger.LogInformation(
@@ -182,6 +210,36 @@ public sealed class RabbitMqConnectionPool : IAsyncDisposable, IDisposable
             throw new RabbitMqConnectionException(
                 $"Failed to connect to RabbitMQ at {_options.HostName}:{_options.Port}",
                 _options.HostName, ex);
+        }
+    }
+
+    private async Task WaitForRecoveryAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogWarning(
+            "RabbitMQ connection to {HostName}:{Port} is not open; waiting up to {Timeout}s for the SDK recovery loop.",
+            _options.HostName, _options.Port, RecoveryWaitTimeout.TotalSeconds);
+
+        var deadline = DateTime.UtcNow + RecoveryWaitTimeout;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (_connection is null or { IsOpen: true } || _disposed)
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(RecoveryPollInterval, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
         }
     }
 

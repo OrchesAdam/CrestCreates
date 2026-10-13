@@ -111,7 +111,7 @@ internal static class EventDescriptorCodeWriter
 
         if (emitCodecContribution)
         {
-            builder.AppendLine("            global::CrestCreates.Generated.EventJsonCodecContributions.Register();");
+            builder.AppendLine("            global::CrestCreates.Generated.EventJsonCodecContributions.AddCodecs(services);");
             builder.AppendLine();
         }
 

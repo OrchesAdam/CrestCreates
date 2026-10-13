@@ -5,7 +5,7 @@ namespace CrestCreates.JsonContracts.BuildTasks.Generation;
 
 public static class JsonContractSourceWriter
 {
-    public static string WriteContextSource(JsonContractGenerationModel model)
+    public static string WriteContextSource(JsonContractGenerationModel model, string assemblyName)
     {
         var sb = new System.Text.StringBuilder();
 
@@ -55,7 +55,7 @@ public static class JsonContractSourceWriter
         if (model.IntegrationEventRoots.Count > 0)
         {
             sb.AppendLine();
-            WriteIntegrationEventCodecBlock(sb, model.IntegrationEventRoots);
+            WriteIntegrationEventCodecBlock(sb, model.IntegrationEventRoots, assemblyName);
         }
 
         return sb.ToString();
@@ -96,7 +96,10 @@ public static class JsonContractSourceWriter
         sb.AppendLine("}");
     }
 
-    private static void WriteIntegrationEventCodecBlock(System.Text.StringBuilder sb, List<JsonContractRootModel> roots)
+    private static void WriteIntegrationEventCodecBlock(
+        System.Text.StringBuilder sb,
+        List<JsonContractRootModel> roots,
+        string assemblyName)
     {
         sb.AppendLine($"namespace {JsonContractBuildConstants.LocalEventGeneratedNamespace}");
         sb.AppendLine("{");
@@ -114,20 +117,29 @@ public static class JsonContractSourceWriter
         sb.AppendLine("    {");
         sb.AppendLine("    }");
         sb.AppendLine();
-        sb.AppendLine($"    /// <summary>Registers the source-generated integration event codecs; called by the assembly's generated AddEventDescriptors() extension.</summary>");
+
+        var escapedOrigin = assemblyName.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        sb.AppendLine($"    /// <summary>Registers the source-generated integration event codecs as per-host service contributions; called by the assembly's generated AddEventDescriptors() extension.</summary>");
         sb.AppendLine($"    internal static class {JsonContractBuildConstants.EventJsonCodecContributionsSimpleName}");
         sb.AppendLine("    {");
-        sb.AppendLine("        public static void Register()");
+        sb.AppendLine("        public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddCodecs(");
+        sb.AppendLine("            this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("        {");
 
         foreach (var root in roots.OrderBy(r => r.FullMetadataName, StringComparer.Ordinal))
         {
             var typeOf = JsonContractTypeNameWriter.WriteTypeofExpression(root.RootType);
-            sb.AppendLine($"            {JsonContractBuildConstants.EventJsonCodecRegistryFullName}.Register(");
-            sb.AppendLine($"                {typeOf},");
-            sb.AppendLine($"                static () => {JsonContractBuildConstants.EventJsonContextSimpleName}.Default.GetTypeInfo({typeOf}));");
+            sb.AppendLine("            global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(");
+            sb.AppendLine("                services,");
+            sb.AppendLine($"                new {JsonContractBuildConstants.EventJsonCodecRegistrationFullName}");
+            sb.AppendLine("                {");
+            sb.AppendLine($"                    PayloadType = {typeOf},");
+            sb.AppendLine($"                    CodecFactory = static () => {JsonContractBuildConstants.EventJsonContextSimpleName}.Default.GetTypeInfo({typeOf}),");
+            sb.AppendLine($"                    Origin = \"{escapedOrigin}\",");
+            sb.AppendLine("                });");
         }
 
+        sb.AppendLine("            return services;");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine("}");

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using CrestCreates.Event.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using CrestCreates.EventBus.RabbitMQ.Registration;
 using CrestCreates.Metadata.Abstractions;
 
@@ -43,23 +44,33 @@ public partial class FreezeTestJsonContext : JsonSerializerContext;
 
 public static class FreezeTestCodecs
 {
-    private static int _registered;
-
     /// <summary>
-    /// Registers the first-party test payload codecs into the production static codec registry
-    /// (idempotent TryAdd semantics), mirroring the generated AddEventDescriptors() contribution path.
-    /// ThirdPartyPayload is intentionally excluded: it exercises the explicit typed-codec path.
+    /// Registers the first-party test payload codecs as per-host service contributions, mirroring the
+    /// generated AddEventDescriptors() activation path. ThirdPartyPayload is intentionally excluded:
+    /// it exercises the explicit typed-codec path.
     /// </summary>
-    public static void EnsureRegistered()
+    public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPerHostCodecs(
+        this Microsoft.Extensions.DependencyInjection.IServiceCollection services)
     {
-        if (Interlocked.Exchange(ref _registered, 1) == 1)
+        services.AddSingleton(new EventJsonCodecRegistration
         {
-            return;
-        }
-
-        EventJsonCodecRegistry.Register(typeof(OrderPlacedPayload), static () => FreezeTestJsonContext.Default.OrderPlacedPayload);
-        EventJsonCodecRegistry.Register(typeof(InvoiceIssuedPayload), static () => FreezeTestJsonContext.Default.InvoiceIssuedPayload);
-        EventJsonCodecRegistry.Register(typeof(LocalScopedPayload), static () => FreezeTestJsonContext.Default.LocalScopedPayload);
+            PayloadType = typeof(OrderPlacedPayload),
+            CodecFactory = static () => FreezeTestJsonContext.Default.OrderPlacedPayload,
+            Origin = "FreezeTests",
+        });
+        services.AddSingleton(new EventJsonCodecRegistration
+        {
+            PayloadType = typeof(InvoiceIssuedPayload),
+            CodecFactory = static () => FreezeTestJsonContext.Default.InvoiceIssuedPayload,
+            Origin = "FreezeTests",
+        });
+        services.AddSingleton(new EventJsonCodecRegistration
+        {
+            PayloadType = typeof(LocalScopedPayload),
+            CodecFactory = static () => FreezeTestJsonContext.Default.LocalScopedPayload,
+            Origin = "FreezeTests",
+        });
+        return services;
     }
 }
 

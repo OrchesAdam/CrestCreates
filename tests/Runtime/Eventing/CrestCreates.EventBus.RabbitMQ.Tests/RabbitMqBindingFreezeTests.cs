@@ -21,10 +21,10 @@ public class RabbitMqBindingFreezeTests
         Action<RabbitMqOptions>? options = null,
         params Type[] descriptorProviders)
     {
-        FreezeTestCodecs.EnsureRegistered();
-
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddPerHostCodecs();
+        services.AddScoped<TestHandler>();
         foreach (var providerType in descriptorProviders)
         {
             services.AddSingleton(typeof(IEventDescriptorProvider), providerType);
@@ -265,7 +265,6 @@ public class RabbitMqBindingFreezeTests
     [Fact]
     public void Freeze_Rejects_non_integration_scope_for_subscriptions()
     {
-        FreezeTestCodecs.EnsureRegistered();
         var contributor = new TestContributor("handlers.alpha")
             .AddSubscription("local.only", typeof(LocalScopedPayload));
 
@@ -414,6 +413,37 @@ public class RabbitMqBindingFreezeTests
     }
 
     [Fact]
+    public void Freeze_Rejects_required_handler_that_is_not_registered_in_di()
+    {
+        var contributor = new TestContributor("handlers.alpha")
+            .AddSubscription("orders.order-placed", typeof(OrderPlacedPayload), handlerType: typeof(UnregisteredHandler));
+
+        using var provider = BuildProvider(
+            builder => builder
+                .AddContributor(contributor)
+                .RequireSubscription<UnregisteredHandler>(),
+            descriptorProviders: [typeof(OrderPlacedDescriptorProvider)]);
+
+        var failure = CaptureFreezeFailure(provider);
+        failure.Violations.Should().ContainSingle(v =>
+            v.Contains("declared but not registered", StringComparison.Ordinal) &&
+            v.Contains(nameof(UnregisteredHandler), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Freeze_Allows_unregistered_non_required_handler_because_delivery_pre_resolution_guards_it()
+    {
+        var contributor = new TestContributor("handlers.alpha")
+            .AddSubscription("orders.order-placed", typeof(OrderPlacedPayload), handlerType: typeof(UnregisteredHandler));
+
+        using var provider = BuildProvider(
+            builder => builder.AddContributor(contributor),
+            descriptorProviders: [typeof(OrderPlacedDescriptorProvider)]);
+
+        Freeze(provider).QueuePlans.Should().ContainSingle();
+    }
+
+    [Fact]
     public void Freeze_Rejects_required_publishable_event_without_codec()
     {
         var contributor = new TestContributor("handlers.alpha")
@@ -463,7 +493,6 @@ public class RabbitMqBindingFreezeTests
     [Fact]
     public void Freeze_Rejects_before_broker_io_when_event_registry_is_not_built()
     {
-        FreezeTestCodecs.EnsureRegistered();
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IEventDescriptorProvider, OrderPlacedDescriptorProvider>();
@@ -478,4 +507,6 @@ public class RabbitMqBindingFreezeTests
     }
 
     private sealed class MissingHandler;
+
+    private sealed class UnregisteredHandler;
 }

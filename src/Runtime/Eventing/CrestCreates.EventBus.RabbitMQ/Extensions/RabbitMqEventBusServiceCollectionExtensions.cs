@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Text.Json.Serialization;
 using CrestCreates.Event;
+using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstract;
 using CrestCreates.EventBus.RabbitMQ.Composition;
 using CrestCreates.EventBus.RabbitMQ.Connection;
@@ -130,7 +131,18 @@ public static class RabbitMqEventBusServiceCollectionExtensions
 
         services.TryAddSingleton<RabbitMqConnectionPool>();
         services.TryAddSingleton<RabbitMqPublisher>();
-        services.TryAddSingleton<RabbitMqEventBus>();
+
+        // The RabbitMQ bus validates canonical events against the event registry through its OWN
+        // validator instance. The shared IEventValidator slot is deliberately left untouched so plain
+        // LocalEvent hosts keep their existing semantics (the kernel must not force governance
+        // validation onto local events just because a RabbitMQ host was composed alongside).
+        services.TryAddSingleton<RabbitMqEventBus>(provider => new RabbitMqEventBus(
+            provider.GetRequiredService<RabbitMqPublisher>(),
+            provider.GetRequiredService<IRabbitMqBindingRegistry>(),
+            provider.GetRequiredService<IEventRegistry>(),
+            new RegistryEventValidator(
+                provider.GetRequiredService<IEventResolver>(),
+                provider.GetRequiredService<IEventMetadataProvider>())));
         services.TryAddSingleton<IEventBus>(provider => provider.GetRequiredService<RabbitMqEventBus>());
         services.TryAddSingleton<RabbitMqCompositionReadiness>();
 
@@ -139,7 +151,9 @@ public static class RabbitMqEventBusServiceCollectionExtensions
                 provider.GetRequiredService<EventRegistry>(),
                 provider.GetServices<IRabbitMqRegistrationContributor>().ToList(),
                 provider.GetRequiredService<RabbitMqCompositionConfiguration>(),
-                provider.GetRequiredService<IOptions<RabbitMqOptions>>().Value)));
+                provider.GetRequiredService<IOptions<RabbitMqOptions>>().Value,
+                provider.GetServices<EventJsonCodecRegistration>().ToList(),
+                provider.GetService<IServiceProviderIsService>())));
 
         // Registration order puts the composition service first; the consumer additionally awaits the
         // readiness gate, so startup sequencing holds even if a host reorders IHostedService entries.

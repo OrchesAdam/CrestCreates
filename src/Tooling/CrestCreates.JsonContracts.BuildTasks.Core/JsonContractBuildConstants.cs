@@ -13,7 +13,7 @@ internal static class JsonContractBuildConstants
     public const string LocalEventJsonContextSimpleName = "LocalEventJsonSerializerContext";
     public const string LocalEventCodecContributionsSimpleName = "LocalEventJsonCodecContributions";
     public const string CrestEventAttributeFullName = "CrestCreates.Event.Abstractions.CrestEventAttribute";
-    public const string EventJsonCodecRegistryFullName = "CrestCreates.Event.Abstractions.EventJsonCodecRegistry";
+    public const string EventJsonCodecRegistrationFullName = "CrestCreates.Event.Abstractions.EventJsonCodecRegistration";
     public const string EventJsonContextSimpleName = "EventJsonSerializerContext";
     public const string EventJsonCodecContributionsSimpleName = "EventJsonCodecContributions";
     public const string TaskFullName = "System.Threading.Tasks.Task";

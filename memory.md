@@ -41,8 +41,10 @@ never deleted; never output credentials.
   delay, three divergent registration paths; issues log
   docs/superpowers/plans/2026-10-13-issue-127-issues-log.md): `[CrestEvent]` declarations generate
   per-assembly IEventDescriptorProvider + `AddEventDescriptors()` activation (CCCEV001-003);
-  Integration-scope events get source-generated codec roots + `EventJsonCodecRegistry` contribution
-  (CJC018-020; camelCase wire payload policy; no `[LocalEvent]` requirement); per-assembly
+  Integration-scope events get source-generated codec roots + per-host `EventJsonCodecRegistration`
+  service contributions (CJC018-020; camelCase wire payload policy; no `[LocalEvent]` requirement;
+  same-origin reactivation idempotent, cross-origin conflicts diagnostic; no process-global codec
+  registry); per-assembly
   `[RabbitMqSubscribe]` generation with closed typed invokers (CCCRMQ001-005); per-host frozen
   `RabbitMqBindingRegistry` (publish index by concrete type, wire index by (EventId, EventVersion),
   legacy alias table, per-queue consume plans with sequential handlers, required manifests) validated
@@ -52,7 +54,13 @@ never deleted; never output credentials.
   EventType = canonical Name); SDK-confirm publish core (homemade confirm ledger removed, exact-once
   channel lease release); business retry/DLQ settlement state machine (delay honored, MessageId/
   CorrelationId preserved, tolerant retry-header parsing, no fake redelivery success), dedicated
-  consumer channel + settlement gate + bounded shutdown drain. Not pledged: competing-consumer
+  consumer channel + settlement gate + bounded shutdown drain. R1 review fixes (2026-10-13, all in
+  PR #145 head): recovery-window connection ownership (pool waits for SDK recovery instead of
+  replacing the connection; terminal consumer-channel loss fails the host), controlled requeue with
+  bounded backoff for failed redelivery confirms (no business-budget consumption), envelope
+  field prechecks (payload null), delivery-time whole-batch handler pre-resolution plus
+  required-manifest DI registration probe, and LocalEvent default-path coexistence (the shared
+  IEventValidator slot is never claimed by the kernel). Not pledged: competing-consumer
   semantics beyond broker defaults, quorum DLX losslessness, per-handler checkpoints, replay
   concurrency exclusion, crash-window dedup.
 - `src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql`: durable runtime state,
@@ -71,8 +79,9 @@ never deleted; never output credentials.
   (five scenarios + sentinel `CRESTCREATES_LOCALEVENT_TYPED_REPLAY_NATIVE_OK`, linux-x64,
   in-memory DLQ store only, evidence `local-event-typed-replay.json`; gate step prepared
   in `ci.yml`/`full-validation.yml`, workflows remain manually disabled; merged via
-  PR #142). RabbitMQ static bindings trim + native gates (real broker vhost prepared by the
-  harness; sentinel `CRESTCREATES_RABBITMQ_STATIC_BINDINGS_NATIVE_OK`; six scenarios incl.
+  PR #142). RabbitMQ static bindings trim + native gates (true per-mode publish: trim runs a trimmed JIT
+  product, native links; real broker vhost prepared by the harness; sentinel
+  `CRESTCREATES_RABBITMQ_STATIC_BINDINGS_NATIVE_OK`; six scenarios incl.
   cross-assembly typed payloads, same-short-name isolation, refusals to a real DLQ, explicit
   legacy alias, retry-then-success, budget exhaustion, unroutable typed failure; linux-x64;
   evidence `rabbitmq-static-bindings-{trim,native-aot}.json`; gate step + rabbitmq service

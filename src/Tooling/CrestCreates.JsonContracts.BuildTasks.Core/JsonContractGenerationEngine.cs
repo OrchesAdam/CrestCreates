@@ -51,7 +51,7 @@ public sealed class JsonContractGenerationEngine
         foreach (var ctx in model.Contexts)
             ctx.ManifestAccessibility = accessibility;
 
-        var sourceText = JsonContractSourceWriter.WriteContextSource(model);
+        var sourceText = JsonContractSourceWriter.WriteContextSource(model, assemblyName);
 
         return new JsonContractGenerationResult
         {

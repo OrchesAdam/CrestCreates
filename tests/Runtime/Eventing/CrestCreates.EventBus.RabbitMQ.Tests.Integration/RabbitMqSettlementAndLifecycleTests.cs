@@ -1,3 +1,5 @@
+using CrestCreates.EventBus.RabbitMQ.Connection;
+using RabbitMQ.Client;
 using CrestCreates.EventBus.RabbitMQ.Exceptions;
 using CrestCreates.RabbitMq.TestContractsA;
 using CrestCreates.RabbitMq.TestHandlersA;
@@ -107,7 +109,35 @@ public class RabbitMqSettlementAndLifecycleTests : RabbitMqIntegrationTestBase
     }
 
     [Fact]
-    public async Task Real_connection_drop_recovers_topology_and_consumption_without_duplicate_registration()
+    public async Task Terminal_consumer_channel_loss_fails_the_host_instead_of_staying_falsely_ready()
+    {
+        var host = await StartHostAsync();
+
+        var consumer = host.Services.GetServices<Microsoft.Extensions.Hosting.IHostedService>()
+            .OfType<CrestCreates.EventBus.RabbitMQ.Consuming.RabbitMqConsumer>()
+            .Single();
+        var channelField = typeof(CrestCreates.EventBus.RabbitMQ.Consuming.RabbitMqConsumer)
+            .GetField("_consumerChannel", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+
+        global::RabbitMQ.Client.IChannel? channel = null;
+        (await WaitUntilAsync(
+            () => Task.FromResult((channel = (global::RabbitMQ.Client.IChannel?)channelField.GetValue(consumer)) is not null),
+            TimeSpan.FromSeconds(10))).Should().BeTrue("the dedicated consumer channel must exist");
+
+        var stopping = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>()
+            .ApplicationStopping.Register(() => stopping.TrySetResult());
+
+        // Closing the channel in place (connection stays healthy) is terminal: the supervisor must
+        // fail the host instead of idling forever with no consumer.
+        await channel!.CloseAsync(CancellationToken.None);
+
+        (await Task.WhenAny(stopping.Task, Task.Delay(TimeSpan.FromSeconds(15))) == stopping.Task)
+            .Should().BeTrue("a permanently lost consumer channel must stop the host, not stay falsely ready");
+    }
+
+    [Fact]
+    public async Task Connection_drop_between_targeted_close_and_recovery_window_preserves_the_consumer()
     {
         var host = await StartHostAsync();
 
@@ -117,31 +147,41 @@ public class RabbitMqSettlementAndLifecycleTests : RabbitMqIntegrationTestBase
             () => Task.FromResult(RabbitMqTestHooks.CallLog.Any(e => e.StartsWith("order:recover-before:"))),
             TimeSpan.FromSeconds(10))).Should().BeTrue();
 
-        // Force-close the broker-side connection (management API); SDK recovery must restore topology
-        // and consumers on the same connection.
+        // The target connection must actually exist in management before the close, otherwise a
+        // single empty listing would fake a "disconnect" that never happened.
+        (await WaitUntilAsync(
+            async () => (await ManagementJsonAsync(HttpMethod.Get, "connections"))
+                .EnumerateArray().Any(c => c.TryGetProperty("vhost", out var v) && v.GetString() == VHost),
+            TimeSpan.FromSeconds(10))).Should().BeTrue("the target connection must appear in management before it is closed");
+
+        var pool = host.Services.GetRequiredService<RabbitMqConnectionPool>();
+        var connectionField = typeof(RabbitMqConnectionPool)
+            .GetField("_connection", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var originalConnection = connectionField.GetValue(pool)!;
+
         await CloseAllConnectionsAsync(VHost);
+        (await WaitUntilAsync(
+            () => Task.FromResult(!((global::RabbitMQ.Client.IConnection)originalConnection).IsOpen),
+            TimeSpan.FromSeconds(5))).Should().BeTrue("a real drop of the target connection is required");
 
-        var published = false;
-        for (var attempt = 0; attempt < 40 && !published; attempt++)
-        {
-            try
-            {
-                await bus.PublishAsync(new OrderPlacedEvent { OrderId = "recover-after", Amount = 2m });
-                published = true;
-            }
-            catch (RabbitMqPublishException)
-            {
-                await Task.Delay(500);
-            }
-        }
+        // Publish immediately inside the SDK recovery window: the pool must wait for the SDK to
+        // recover the SAME connection instead of disposing it (which would strand the consumer).
+        await bus.PublishAsync(new OrderPlacedEvent { OrderId = "recover-during-window", Amount = 2m });
 
-        published.Should().BeTrue("the publisher must recover after the forced disconnect");
+        ReferenceEquals(originalConnection, connectionField.GetValue(pool)).Should().BeTrue(
+            "the connection that carries the consumer must be retained across the recovery window");
 
         (await WaitUntilAsync(
-            () => Task.FromResult(RabbitMqTestHooks.CallLog.Any(e => e.StartsWith("order:recover-after:"))),
-            TimeSpan.FromSeconds(30))).Should().BeTrue("consumption must recover after the connection drop");
+            () => Task.FromResult(RabbitMqTestHooks.CallLog.Any(e => e.StartsWith("order:recover-during-window:"))),
+            TimeSpan.FromSeconds(20))).Should().BeTrue("consumption must survive a publish inside the recovery window");
 
-        RabbitMqTestHooks.CallLog.Count(e => e.StartsWith("order:recover-after:")).Should().Be(1,
+        RabbitMqTestHooks.CallLog.Count(e => e.StartsWith("order:recover-during-window:")).Should().Be(1,
             "recovery must not register a duplicate consumer");
+
+        // Full recovery cycle: later publishes and consumption keep working on the same connection.
+        await bus.PublishAsync(new OrderPlacedEvent { OrderId = "recover-after", Amount = 3m });
+        (await WaitUntilAsync(
+            () => Task.FromResult(RabbitMqTestHooks.CallLog.Any(e => e.StartsWith("order:recover-after:"))),
+            TimeSpan.FromSeconds(20))).Should().BeTrue("consumption must recover after the connection drop");
     }
 }

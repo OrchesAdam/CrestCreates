@@ -64,6 +64,6 @@ public sealed class JsonContractManifestWriterTests : JsonContractCompilationTes
         var result = JsonContractTestHelper.BuildModel("TestAssembly", [source], GetDefaultReferences());
         result.Model.Should().NotBeNull();
         result.Model!.Contexts.Single().ManifestAccessibility = accessibility;
-        return JsonContractSourceWriter.WriteContextSource(result.Model);
+        return JsonContractSourceWriter.WriteContextSource(result.Model, "TestAssembly");
     }
 }

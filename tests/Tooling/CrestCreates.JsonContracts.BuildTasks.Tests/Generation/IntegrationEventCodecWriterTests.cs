@@ -50,14 +50,15 @@ public class IntegrationEventCodecWriterTests : JsonContractCompilationTestBase
         result.Model!.IntegrationEventRoots.AddRange(discovery.Discover(result.Compilation));
         discovery.Diagnostics.Should().BeEmpty();
 
-        var output = JsonContractSourceWriter.WriteContextSource(result.Model!);
+        var output = JsonContractSourceWriter.WriteContextSource(result.Model!, "TestAssembly");
 
         output.Should().Contain("[global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]");
         output.Should().Contain("internal sealed partial class EventJsonSerializerContext");
         output.Should().Contain("internal static class EventJsonCodecContributions");
-        output.Should().Contain("CrestCreates.Event.Abstractions.EventJsonCodecRegistry.Register(");
-        output.Should().Contain("typeof(global::MyApp.OrderCreatedEvent)");
-        output.Should().Contain("static () => EventJsonSerializerContext.Default.GetTypeInfo(typeof(global::MyApp.OrderCreatedEvent)));");
+        output.Should().Contain("CrestCreates.Event.Abstractions.EventJsonCodecRegistration");
+        output.Should().Contain("PayloadType = typeof(global::MyApp.OrderCreatedEvent)");
+        output.Should().Contain("static () => EventJsonSerializerContext.Default.GetTypeInfo(typeof(global::MyApp.OrderCreatedEvent))");
+        output.Should().Contain("Origin = \"TestAssembly\"");
         output.Should().NotContain("LocalEventJsonSerializerContext");
         output.Should().NotContain("LocalEventJsonCodecContributions");
     }
@@ -156,7 +157,7 @@ public class IntegrationEventCodecWriterTests : JsonContractCompilationTestBase
         var discovery = new IntegrationEventJsonSurfaceDiscovery();
         result.Model!.IntegrationEventRoots.AddRange(discovery.Discover(result.Compilation));
 
-        var output = JsonContractSourceWriter.WriteContextSource(result.Model!);
+        var output = JsonContractSourceWriter.WriteContextSource(result.Model!, "TestAssembly");
         output.Should().Contain("EventJsonSerializerContext");
         output.Should().Contain("typeof(global::MyApp.SimpleEvent)");
     }

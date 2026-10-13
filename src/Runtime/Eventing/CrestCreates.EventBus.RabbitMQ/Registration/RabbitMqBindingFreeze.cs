@@ -7,6 +7,7 @@ using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.RabbitMQ.Options;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Registry;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.EventBus.RabbitMQ.Registration;
 
@@ -24,7 +25,9 @@ public sealed record RabbitMqFreezeInput(
     EventRegistry EventRegistry,
     IReadOnlyList<IRabbitMqRegistrationContributor> Contributors,
     RabbitMqCompositionConfiguration Configuration,
-    RabbitMqOptions Options);
+    RabbitMqOptions Options,
+    IReadOnlyList<EventJsonCodecRegistration> CodecContributions,
+    IServiceProviderIsService? ServiceProviderIsService);
 
 /// <summary>
 /// Merge validation and freeze for the RabbitMQ transport binding registry. All declaration checks run
@@ -111,13 +114,49 @@ public static class RabbitMqBindingFreeze
             .OrderBy(c => c.Origin, StringComparer.Ordinal)
             .ToList();
 
+        // ── Per-host codec contributions (explicit activation, no process-global registry) ──
+        var codecIndex = new Dictionary<Type, JsonTypeInfo>();
+        foreach (var group in input.CodecContributions
+                     .GroupBy(c => c.PayloadType)
+                     .OrderBy(g => g.Key.FullName, StringComparer.Ordinal))
+        {
+            var origins = group.Select(c => c.Origin).Distinct(StringComparer.Ordinal).OrderBy(o => o, StringComparer.Ordinal).ToList();
+            if (origins.Count > 1)
+            {
+                violations.Add(
+                    $"Codec for payload '{group.Key.FullName}' is contributed by multiple origins " +
+                    $"({string.Join(", ", origins)}); one payload type has exactly one owning assembly.");
+                continue;
+            }
+
+            var registration = group.First();
+            var info = registration.CodecFactory();
+            if (info is null)
+            {
+                violations.Add(
+                    $"Codec contribution for '{group.Key.FullName}' (origin '{registration.Origin}') returned no " +
+                    "metadata; the generated context does not declare this payload type.");
+                continue;
+            }
+
+            if (info.Type != group.Key)
+            {
+                violations.Add(
+                    $"Codec contribution for '{group.Key.FullName}' (origin '{registration.Origin}') describes " +
+                    $"'{info.Type.FullName}' instead.");
+                continue;
+            }
+
+            codecIndex[group.Key] = info;
+        }
+
         // ── Publish index ──
         var publishBindings = new List<RabbitMqPublishBinding>();
         var publishByDescriptor = new Dictionary<(string Id, int Version), RabbitMqPublishBinding>();
         foreach (var descriptor in active.Where(d => d.Scope == EventScope.Integration))
         {
             manualByType.TryGetValue(descriptor.PayloadType, out var manual);
-            var codec = ResolveCodec(descriptor.PayloadType, manual?.CodecFactory, configuration, out var codecProblem);
+            var codec = ResolveCodec(descriptor.PayloadType, manual?.CodecFactory, codecIndex, configuration, out var codecProblem);
             if (codec is null)
             {
                 // Not a freeze error by itself: a host is not required to publish every registered
@@ -158,7 +197,7 @@ public static class RabbitMqBindingFreeze
 
             if (!publishByDescriptor.ContainsKey((descriptor.Id, descriptor.Version)))
             {
-                ResolveCodec(descriptor.PayloadType, null, configuration, out var problem);
+                ResolveCodec(descriptor.PayloadType, null, codecIndex, configuration, out var problem);
                 violations.Add(
                     $"Required publishable event '{descriptor.Name}' v{descriptor.Version} has no frozen codec: {problem}. " +
                     "Activate the owning assembly's AddEventDescriptors() extension or supply an explicit typed codec.");
@@ -198,7 +237,7 @@ public static class RabbitMqBindingFreeze
                 }
 
                 manualByType.TryGetValue(descriptor.PayloadType, out var manual);
-                var codec = ResolveCodec(descriptor.PayloadType, manual?.CodecFactory, configuration, out var problem);
+                var codec = ResolveCodec(descriptor.PayloadType, manual?.CodecFactory, codecIndex, configuration, out var problem);
                 if (codec is null)
                 {
                     violations.Add(
@@ -262,7 +301,7 @@ public static class RabbitMqBindingFreeze
             }
         }
 
-        // ── Required subscriptions manifest ──
+        // ── Required subscriptions manifest (membership + actual DI registration) ──
         foreach (var requiredHandler in configuration.RequiredHandlers.OrderBy(t => t.FullName, StringComparer.Ordinal))
         {
             if (!resolved.Any(r => r.Handler.HandlerType == requiredHandler))
@@ -270,6 +309,18 @@ public static class RabbitMqBindingFreeze
                 violations.Add(
                     $"Required subscription handler '{requiredHandler.FullName}' is not part of the frozen " +
                     "subscriptions. Activate the owning assembly's AddRabbitMqSubscriptions() extension.");
+                continue;
+            }
+
+            // Registration probe only (IServiceProviderIsService); handlers are never constructed here.
+            // Handlers outside the required manifest are validated by the delivery-time batch
+            // pre-resolution, which resolves every handler before running any of them.
+            if (input.ServiceProviderIsService is { } serviceProbe && !serviceProbe.IsService(requiredHandler))
+            {
+                violations.Add(
+                    $"Required subscription handler '{requiredHandler.FullName}' is declared but not registered " +
+                    "in the service collection. Activate the owning assembly's AddRabbitMqSubscriptions() " +
+                    "extension or register the handler explicitly.");
             }
         }
 
@@ -434,6 +485,7 @@ public static class RabbitMqBindingFreeze
     private static JsonTypeInfo? ResolveCodec(
         Type payloadType,
         Func<JsonTypeInfo?>? manualFactory,
+        IReadOnlyDictionary<Type, JsonTypeInfo> codecIndex,
         RabbitMqCompositionConfiguration configuration,
         out string problem)
     {
@@ -456,17 +508,10 @@ public static class RabbitMqBindingFreeze
             return manual;
         }
 
-        var staticInfo = EventJsonCodecRegistry.Resolve(payloadType);
-        if (staticInfo is not null)
+        if (codecIndex.TryGetValue(payloadType, out var contributed))
         {
-            if (staticInfo.Type != payloadType)
-            {
-                problem = $"the generated codec describes '{staticInfo.Type.FullName}' instead of '{payloadType.FullName}'";
-                return null;
-            }
-
             problem = string.Empty;
-            return staticInfo;
+            return contributed;
         }
 
         foreach (var context in configuration.ContextCodecs)
@@ -486,10 +531,11 @@ public static class RabbitMqBindingFreeze
         }
 
         problem = configuration.ContextCodecs.Count > 0
-            ? $"no source-generated codec is registered for '{payloadType.FullName}' (checked the static registry " +
-              "and the explicitly supplied JsonSerializerContext instances)"
+            ? $"no source-generated codec is registered for '{payloadType.FullName}' on this host (checked the " +
+              "activated per-assembly codec contributions and the explicitly supplied JsonSerializerContext instances)"
             : "no source-generated codec is registered for '" + payloadType.FullName +
-              "'; the owning assembly must import the CrestCreates.JsonContracts.Build toolchain";
+              "'; activate the owning assembly's AddEventDescriptors() extension (the owning assembly must import " +
+              "the CrestCreates.JsonContracts.Build toolchain)";
         return null;
     }
 

@@ -31,6 +31,9 @@ namespace CrestCreates.EventBus.RabbitMQ.Consuming;
 public sealed class RabbitMqConsumer : BackgroundService
 {
     private static readonly TimeSpan ShutdownDrainTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ConsumerChannelProbeInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ConsumerChannelLossGrace = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RequeueBackoffFloor = TimeSpan.FromSeconds(1);
 
     private readonly IServiceProvider _serviceProvider;
     private readonly RabbitMqCompositionReadiness _readiness;
@@ -113,7 +116,7 @@ public sealed class RabbitMqConsumer : BackgroundService
                 _registry.QueuePlans.Count,
                 _registry.QueuePlans.Sum(p => p.HandlersByIdentity.Count));
 
-            await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+            await SuperviseConsumerChannelAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -123,6 +126,42 @@ public sealed class RabbitMqConsumer : BackgroundService
         {
             _logger.LogError(ex, "Fatal error in the RabbitMQ consumer; failing startup is intentional.");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Watches the dedicated consumer channel for terminal loss. Transient drops are owned by the SDK
+    /// automatic recovery (channel and consumers are restored by the recovery loop); when the channel
+    /// stays closed — either the connection is back but this channel was not recovered, or neither
+    /// recovered within the grace window — the consumer fails the host instead of staying falsely ready.
+    /// </summary>
+    private async Task SuperviseConsumerChannelAsync(CancellationToken stoppingToken)
+    {
+        DateTime? lostSince = null;
+        while (true)
+        {
+            await Task.Delay(ConsumerChannelProbeInterval, stoppingToken).ConfigureAwait(false);
+
+            if (_consumerChannel is { IsOpen: true })
+            {
+                lostSince = null;
+                continue;
+            }
+
+            if (_connectionPool.IsConnectionOpen)
+            {
+                throw new RabbitMqConnectionException(
+                    "The dedicated consumer channel is closed while the connection is open; SDK recovery did not " +
+                    "restore it. Failing the host instead of consuming nothing silently.");
+            }
+
+            lostSince ??= DateTime.UtcNow;
+            if (DateTime.UtcNow - lostSince.Value > ConsumerChannelLossGrace)
+            {
+                throw new RabbitMqConnectionException(
+                    $"The dedicated consumer channel has been closed for more than {ConsumerChannelLossGrace.TotalSeconds}s " +
+                    "without connection recovery; failing the host instead of staying falsely ready.");
+            }
         }
     }
 
@@ -271,6 +310,15 @@ public sealed class RabbitMqConsumer : BackgroundService
                 return;
             }
 
+            if (string.IsNullOrEmpty(envelope.Payload))
+            {
+                // JSON envelopes may legally carry payload:null; without this check the typed
+                // deserialize would throw ArgumentNullException, bypass every rejection branch and
+                // leave the delivery unacknowledged forever.
+                await RejectAsync(delivery, "envelope has no payload").ConfigureAwait(false);
+                return;
+            }
+
             var resolution = _registry!.ResolveWire(envelope.EventType, envelope.EventId, envelope.EventVersion);
             if (!resolution.Success)
             {
@@ -308,10 +356,22 @@ public sealed class RabbitMqConsumer : BackgroundService
             try
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
-                foreach (var handler in handlers)
+
+                // Resolve every handler for this delivery before running any of them: a missing
+                // registration or a failing constructor must not leave partial business effects
+                // (freeze already validates that every handler type is a registered service; this
+                // guards scope-construction failures and keeps the delivered batch transactional in
+                // the "all or nothing per attempt" sense).
+                var handlerInstances = new object[handlers.Count];
+                for (var index = 0; index < handlers.Count; index++)
+                {
+                    handlerInstances[index] = scope.ServiceProvider.GetRequiredService(handlers[index].HandlerType);
+                }
+
+                for (var index = 0; index < handlers.Count; index++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await handler.Invoker(scope.ServiceProvider, payload, cancellationToken).ConfigureAwait(false);
+                    await handlers[index].Invoker(handlerInstances[index], payload, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -413,14 +473,70 @@ public sealed class RabbitMqConsumer : BackgroundService
         {
             _logger.LogError(
                 ex,
-                "Redelivery of '{EventName}' on queue {Queue} failed ({Kind}); the original delivery remains unacknowledged " +
-                "and broker-side recovery semantics apply.",
+                "Redelivery of '{EventName}' on queue {Queue} failed ({Kind}); the original delivery is requeued " +
+                "for a controlled recovery (the business retry budget is not consumed by settlement failures).",
                 binding.Descriptor.Name, delivery.Plan.Queue, ex.FailureKind);
+
+            // A publish-confirm failure on a healthy consumer channel does not invalidate the delivery:
+            // leaving it unacknowledged would silently occupy a prefetch slot forever. Requeue the
+            // original message for a bounded-backoff recovery instead (no header increment on the
+            // framework-owned retry counter; the outcome of the failed publish is unknown, so a
+            // duplicate window is preserved).
+            await RequeueOriginalAsync(delivery, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         // Acknowledge the original delivery only after the redelivery was confirmed by the broker.
         await AckAsync(delivery, binding.Descriptor.Name).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Requeues the original delivery after a settlement failure. Never spins: the requeue waits at
+    /// least the backoff floor (or the configured retry delay when larger) so a persistently failing
+    /// broker cannot turn into a hot loop, and shutdown cancellation still leaves the delivery
+    /// unacknowledged (broker-side requeue semantics apply).
+    /// </summary>
+    private async Task RequeueOriginalAsync(DeliveryContext delivery, CancellationToken cancellationToken)
+    {
+        var backoff = TimeSpan.FromSeconds(Math.Max(RequeueBackoffFloor.TotalSeconds, _options.RetryDelaySeconds));
+        try
+        {
+            await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "Requeue of the unacknowledged delivery on queue {Queue} was cancelled during shutdown; the message stays unacknowledged.",
+                delivery.Plan.Queue);
+            return;
+        }
+
+        if (_consumerChannel is null)
+        {
+            return;
+        }
+
+        await _settlementGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await _consumerChannel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: true).ConfigureAwait(false);
+            _logger.LogWarning(
+                "Requeued the unacknowledged delivery on queue {Queue} (delivery tag {DeliveryTag}) after a " +
+                "settlement failure.",
+                delivery.Plan.Queue, delivery.DeliveryTag);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Requeue (nack with requeue) failed on queue {Queue} (delivery tag {DeliveryTag}); broker-side " +
+                "recovery semantics apply.",
+                delivery.Plan.Queue, delivery.DeliveryTag);
+        }
+        finally
+        {
+            _settlementGate.Release();
+        }
     }
 
     private async Task AckAsync(DeliveryContext delivery, string eventName)

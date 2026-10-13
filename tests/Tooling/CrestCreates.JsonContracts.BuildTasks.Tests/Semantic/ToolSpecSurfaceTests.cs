@@ -77,7 +77,7 @@ public sealed class ToolSpecSurfaceTests : JsonContractCompilationTestBase
             .Should().Contain("global::RemovedDto");
         after.Model!.Contexts.Single().BindingRoots.Select(root => root.FullMetadataName)
             .Should().NotContain("global::RemovedDto");
-        JsonContractSourceWriter.WriteContextSource(after.Model).Should().NotContain("RemovedDto");
+        JsonContractSourceWriter.WriteContextSource(after.Model, "TestAssembly").Should().NotContain("RemovedDto");
     }
 
     [Fact]

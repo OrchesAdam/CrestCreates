@@ -118,7 +118,7 @@ public sealed class OrderCreatedEvent { public string OrderId { get; init; } = "
 | `IRabbitMqBindingRegistry` | Host 级冻结只读：发布索引（`Type → binding`）、wire 索引（`(EventId, EventVersion) → binding`）、队列消费计划（`(exchange, queue) → 有序 handler 序列`）、alias 表。冻结后不可变。 |
 | generated registration extension | 每程序集一个显式扩展（事件侧 `AddEventDescriptors`；订阅侧 `AddRabbitMqSubscriptions`），注册 contributor / Handler DI / 所属项目 JSON contribution。 |
 
-Registry 只持有静态元数据、codec、委托；不捕获 root `IServiceProvider`、业务 scope 或 Handler 实例；不借进程全局可变 codec 字典跨 Host 共享配置（codec 在冻结时解析并快照进绑定，见 §4.2）。
+Registry 只持有静态元数据、codec、委托；不捕获 root `IServiceProvider`、业务 scope 或 Handler 实例。**codec 贡献为 per-Host 显式装配**：事件所属程序集的 `AddEventDescriptors()` 以 `EventJsonCodecRegistration`（PayloadType/CodecFactory/Origin）注册进宿主 DI，冻结时按 Host 聚合解析并快照进绑定（同一 Origin 重复激活幂等；同一 PayloadType 多 Origin 冲突为确定性装配失败）；不存在进程全局 codec 字典（R1-RMQ-05 已修正 Spec 原措辞）。
 
 ### 3.2 冻结流程与校验（全部先于 broker I/O）
 
@@ -132,7 +132,7 @@ Startup:
 
 冻结最低校验集（诊断排序稳定，含来源程序集、事件键、队列、Handler/method）：
 
-1. 缺 required contributor / Handler 注册（Host 显式清单 expected vs 实际装配比对，§3.3）；
+1. 缺 required contributor / Handler 注册（Host 显式清单 expected vs 实际装配比对，§3.3；required Handler 除元数据比对（经 `IServiceProviderIsService` 探测，不构造实例）外还须在 DI 中真实可解析；非 required Handler 由 delivery 期整批预解析兜底）；
 2. 重复 identity 映射到不同 Type（同 Name+Version 双来源不同 PayloadType；跨程序集重复启用同 contributor 幂等，元数据不同的同 Id 贡献拒绝）；
 3. 同一 Type 的发布身份歧义（默认 Id/Name 冲突未显式消解）；
 4. codec 缺失 / `JsonTypeInfo` 与声明 Type 不符；
@@ -195,9 +195,9 @@ Startup:
 - 复用 JsonContracts BuildTasks：CoreCompile 前 roots → 官方 STJ Source Generator；不跨生成器消费输出。
 - `LocalEventJsonSurfaceDiscovery` 旁**新增** `IntegrationEventJsonSurfaceDiscovery`：发现 `[CrestEvent(Scope = EventScope.Integration)]` 的闭合 class（非 abstract/generic，类似 CJC015/016/017 校验复用 `LocalEventJsonClosureValidator` 的成员闭包逻辑），产出：
   - `[JsonSerializable]` roots（写入同一 `CrestCreates.JsonContracts.g.cs`，独立 context 或并入既有生成 context——由 S2 定，原则是不为同一 Type 生成两份 STJ 元数据）；
-  - `CrestCreates.Generated.EventJsonCodecContributions.Register()`（transport-neutral，注册进 `CrestCreates.Event.Abstractions.EventJsonCodecRegistry`，形态镜像 `LocalEventJsonCodecRegistry`：`Register(Type, Func<JsonTypeInfo?>)` TryAdd 幂等）。
+  - `CrestCreates.Generated.EventJsonCodecContributions.AddCodecs(services)`（transport-neutral，注册 `EventJsonCodecRegistration` 服务；per-Host 生效，同 Origin 重复激活幂等、多 Origin 同类目冲突报装配失败）。
 - 不要求同时标 `[LocalEvent(Replayable = true)]`；两者独立发现、共用同一 closure 校验器。
-- codec 由事件所属项目产生（其导入工具链为硬要求，`CCCEV001`）；Handler-only 项目引用其静态贡献（Host 显式调用事件所属程序集扩展触发 `Register()`）。
+- codec 由事件所属项目产生（其导入工具链为硬要求，`CCCEV001`）；Handler-only 项目引用其静态贡献（Host 显式调用事件所属程序集扩展触发 `AddCodecs()`/`AddEventDescriptors()`）。
 - 每 binding 冻结时解析出**精确 `JsonTypeInfo<T>`** 并快照；不使用 DI 里“最后一个 JsonSerializerContext”覆盖语义；发布/消费/重试均不使用无 metadata 的 Type overload，不启用 `DefaultJsonTypeInfoResolver` / 反射 fallback。
 - 保留 #126 全部闭包回归（构造器可恢复性、嵌套集合/字典、枚举、JsonIgnore 条件、封闭多态、discriminator 冲突、derived collection 实例化、public 无参构造要求）。object/interface/abstract 成员仅在有明确封闭可恢复契约（封闭多态声明）时允许；自定义 converter 必须静态可用且有 round-trip 证据。
 - 有效性断言必须含**实际序列化 → 反序列化 → Handler 读取值**；不得用 `GetTypeInfo` 非空或生成文本断言替代。
@@ -210,7 +210,7 @@ Startup:
 1. 每 Host **每物理队列一个消费计划**：`(exchange, queue)` → `prefetch` + 该队列声明的 wire identity 集合 + `身份 → 有序 handler 序列`。同队列多个 Handler **顺序执行，全部成功才 Ack**。禁止每 Handler 建同队列 consumer 的竞争消费冒充 fan-out。
 2. Handler 顺序按稳定标识排序：`(来源程序集简单名, Handler 元数据全名, method 名)` 序数排序；不依赖程序集加载/DI 调用先后。一个失败即停止后续；整条 delivery 重试会重放此前已成功的 handler（至少一次语义），**不提供 per-handler checkpoint**。
 3. 不同队列各自获得 broker 副本；多进程订阅同一队列仍是 competing consumers（文档 + 测试区分）。
-4. 每次 delivery 新建 async DI scope；本次所需 handler 全部从此 scope 解析，随后 await 释放（`IAsyncDisposable` 支持）。重投/重试新 scope；registry 不持有 scoped 服务。执行前核对本次所需 handler 已冻结解析（不许运行到一半才发现声明缺失）。
+4. 每次 delivery 新建 async DI scope；**先在该 scope 内解析本次所需 handler 的全部实例（整批预解析、不做业务调用），再按序执行**——任一缺失/构造失败时零业务效果，预检与执行使用同一批实例（invoker 接收已解析实例）。scope 随后 await 释放（`IAsyncDisposable` 支持）。重投/重试新 scope；registry 不持有 scoped 服务。
 5. 回调内完成 body 拷贝/反序列化；共享 channel 的发布/结算操作有明确串行所有权（§7）。此约束来自 RabbitMQ .NET client API guide。
 6. 未知 identity、错误版本/Name、本队列未声明事件、坏 JSON、null payload → Handler 前拒绝、零业务调用（结算见 §6 表）。消费不从 wire headers 擅自建立可信身份/租户上下文；需要时显式复用既有上下文机制。
 7. 本链提供**至少一次处理可能性**；`RequiresIdempotency` 等声明不等于框架已执行去重——不凭该字段声称幂等保证；如装配要求必须执行去重而缺实现，拒绝该能力声明。
@@ -227,7 +227,7 @@ Startup:
 | Handler 全部成功 | `Ack(multiple:false)` | 否 |
 | Handler 失败且预算有余 | 可取消延迟后经**独立 publisher channel** 重投原队列；**确认成功后 Ack 原消息** | 是 |
 | Handler 失败且预算耗尽 | `Nack(requeue:false)` → DLQ | 否 |
-| 重投 unroutable/nack/确认超时/取消/断连 | 不 Ack 原消息（释放/关闭失效 channel），交未确认 delivery 恢复语义 | 不伪造重投成功 |
+| 重投 unroutable/nack/确认超时/取消/断连 | 不 Ack 原消息、不伪造重投成功；consumer channel 健康时：有界退避（≥1s，避免忙循环）后 `Nack(requeue:true)` 受控恢复（不递增重试计数、不消耗业务预算）；channel 失效时交未确认 delivery 恢复语义 | 不消耗业务预算 |
 | Handler 成功但 Ack 失败 | 记录“业务成功、结算未确认”，恢复连接/channel；可能重投 | 不进入业务失败 catch 再主动复制 |
 | Host 停机取消 | 停止接收、协调在途；未完成不 Ack | 不消耗业务失败预算 |
 
@@ -254,7 +254,7 @@ Startup:
 - publisher channel 以 lease 管理：获取失败/取消、Return、Discard/异常 Dispose 都**精确释放一次**许可；不得直接 Dispose 后漏释放 semaphore（F5 修复）。生命周期与 DI（Transient vs Singleton，F7）统一到唯一入口。
 - consumer 使用专属长生命周期 channel，不占用 publisher 可借用池；文档明确 `MaxChannels` 只约束 publisher 池、专属消费 channel 独立计算。`MaxChannels=1` 时必须能完成“正式消费 → 失败重投”（不自锁）。
 - 同一 publisher channel 同时只有一个发布所有者、需要复用时串行归还；共享消费 channel 的 Ack/Nack/Cancel 有明确串行策略（单一 settlement 门 + SDK `ConsumerDispatchConcurrency` 显式配置，不依赖默认值）。
-- 连接恢复沿用 SDK recovery 主链（`AutomaticRecoveryEnabled`），不另建竞争恢复循环；真实断开/恢复测试证明拓扑与消费恢复且无重复 consumer 注册；恢复失败暴露可观察失败状态，不保持虚假 ready。
+- 连接恢复沿用 SDK recovery 主链（`AutomaticRecoveryEnabled`），不另建竞争恢复循环；**恢复窗口内连接所有权归 SDK**：pool 对非 open 的既有连接执行有界等待（20s，可取消）而不得 Dispose/替换（替换会连带作废承载 consumer 的专属 channel）；专属 consumer channel 终态丢失（channel 关闭且连接已恢复/连接长期不可恢复超过 30s 宽限）→ 抛错停止宿主，不保持虚假 ready。真实断开测试必须先确认目标连接在 management 中存在且确已关闭，再在恢复窗口内发布验证 consumer 存活（不得仅遍历一次 connections 就认定断连）。
 - 停机顺序：停止 intake/`BasicCancel` → 有界等待在途回调 → 关闭专属消费 channel → 释放 connection/lease；未完成消息保持未确认；禁止先把活跃 consumer channel 放回发布池再等 BackgroundService 停止。
 
 ---
@@ -321,7 +321,7 @@ Testcontainers 或 podman socket（`DOCKER_HOST=unix:///run/user/1000/podman/pod
 
 **S2 — 静态生成、codec 和唯一装配**：
 
-- 事件侧：EventDescriptorSourceGenerator（`[CrestEvent]` → provider + `AddEventDescriptors`）；`IntegrationEventJsonSurfaceDiscovery` + codec contribution + `EventJsonCodecRegistry`；CCCEV001–003。
+- 事件侧：EventDescriptorSourceGenerator（`[CrestEvent]` → provider + `AddEventDescriptors`）；`IntegrationEventJsonSurfaceDiscovery` + per-Host codec contribution（`EventJsonCodecRegistration`）；CCCEV001–003。
 - 订阅侧：`RabbitMqSubscriptionSourceGenerator` 重写 + 新属性参数（Version/RoutingKey）+ CCCRMQ001–005；contributor/binding/registry/freeze/required 诊断/唯一入口骨架；`RabbitMqCompositionHostedService` + readiness。
 - `AddEventKernel` 接线补齐（validators、IEventResolver、IEventValidator TryAdd）。
 - 负例（编译期/装配期）、多程序集、真实 JSON round-trip 通过；旧入口适配同一主链；consumer 反射 fallback 全部移除（本切片先保证发布链与冻结链可测）。
