@@ -13,44 +13,39 @@ namespace CrestCreates.EventBus.RabbitMQ.Tests;
 
 public class ConsumerTests
 {
-    private static RabbitMqConsumer CreateConsumer(
-        IRabbitMqBindingRegistry? registry = null,
-        RabbitMqConnectionPool? pool = null)
+    private static ServiceProvider BuildProvider(IRabbitMqBindingRegistry registry)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(registry);
+        return services.BuildServiceProvider();
+    }
+
+    private RabbitMqConsumer CreateConsumer(RabbitMqConnectionPool pool, ServiceProvider provider, RabbitMqCompositionReadiness readiness)
     {
         var options = Microsoft.Extensions.Options.Options.Create(new RabbitMqOptions());
-        pool ??= new RabbitMqConnectionPool(options, NullLogger<RabbitMqConnectionPool>.Instance);
         var publisher = new RabbitMqPublisher(pool, options, NullLogger<RabbitMqPublisher>.Instance);
-        var scopeFactory = new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
-
         return new RabbitMqConsumer(
-            registry ?? new EmptyRegistry(),
-            new RabbitMqCompositionReadiness(),
+            provider,
+            readiness,
             pool,
             publisher,
             options,
-            scopeFactory,
+            provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<RabbitMqConsumer>.Instance);
     }
 
     [Fact]
-    public void Constructor_accepts_valid_dependencies()
+    public async Task ExecuteAsync_exits_cleanly_for_publisher_only_registry()
     {
         using var pool = new RabbitMqConnectionPool(
             Microsoft.Extensions.Options.Options.Create(new RabbitMqOptions()),
             NullLogger<RabbitMqConnectionPool>.Instance);
+        using var provider = BuildProvider(new EmptyRegistry(publisherOnly: true));
+        var readiness = new RabbitMqCompositionReadiness();
+        var consumer = CreateConsumer(pool, provider, readiness);
 
-        var consumer = CreateConsumer(pool: pool);
-        consumer.Should().NotBeNull();
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_returns_immediately_for_publisher_only_registry()
-    {
-        using var pool = new RabbitMqConnectionPool(
-            Microsoft.Extensions.Options.Options.Create(new RabbitMqOptions()),
-            NullLogger<RabbitMqConnectionPool>.Instance);
-
-        var consumer = CreateConsumer(new EmptyRegistry(publisherOnly: true), pool);
+        readiness.SignalReady();
         await consumer.StartAsync(CancellationToken.None);
 
         await FluentActions.Awaiting(() => consumer.StopAsync(CancellationToken.None))
@@ -66,20 +61,9 @@ public class ConsumerTests
         using var pool = new RabbitMqConnectionPool(
             Microsoft.Extensions.Options.Options.Create(new RabbitMqOptions()),
             NullLogger<RabbitMqConnectionPool>.Instance);
-
-        var options = Microsoft.Extensions.Options.Options.Create(new RabbitMqOptions());
-        var publisher = new RabbitMqPublisher(pool, options, NullLogger<RabbitMqPublisher>.Instance);
+        using var provider = BuildProvider(new EmptyRegistry());
         var readiness = new RabbitMqCompositionReadiness();
-        using var scopeProvider = new ServiceCollection().BuildServiceProvider();
-        var scopeFactory = scopeProvider.GetRequiredService<IServiceScopeFactory>();
-        var consumer = new RabbitMqConsumer(
-            new EmptyRegistry(),
-            readiness,
-            pool,
-            publisher,
-            options,
-            scopeFactory,
-            NullLogger<RabbitMqConsumer>.Instance);
+        var consumer = CreateConsumer(pool, provider, readiness);
 
         readiness.Fail(new InvalidOperationException("freeze failed"));
         await consumer.StartAsync(CancellationToken.None);

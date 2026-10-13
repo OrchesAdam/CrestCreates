@@ -52,6 +52,7 @@ public class IntegrationEventCodecWriterTests : JsonContractCompilationTestBase
 
         var output = JsonContractSourceWriter.WriteContextSource(result.Model!);
 
+        output.Should().Contain("[global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]");
         output.Should().Contain("internal sealed partial class EventJsonSerializerContext");
         output.Should().Contain("internal static class EventJsonCodecContributions");
         output.Should().Contain("CrestCreates.Event.Abstractions.EventJsonCodecRegistry.Register(");

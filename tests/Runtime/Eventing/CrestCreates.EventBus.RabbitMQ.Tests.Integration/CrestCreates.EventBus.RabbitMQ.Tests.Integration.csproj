@@ -7,7 +7,6 @@
     <IsTestProject>true</IsTestProject>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,13 +14,15 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="Moq" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj" />
-    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
-    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />
+    <ProjectReference Include="../CrestCreates.EventBus.RabbitMQ.TestContractsA/CrestCreates.EventBus.RabbitMQ.TestContractsA.csproj" />
+    <ProjectReference Include="../CrestCreates.EventBus.RabbitMQ.TestHandlersA/CrestCreates.EventBus.RabbitMQ.TestHandlersA.csproj" />
+    <ProjectReference Include="../CrestCreates.EventBus.RabbitMQ.TestContractsB/CrestCreates.EventBus.RabbitMQ.TestContractsB.csproj" />
   </ItemGroup>
 
 </Project>

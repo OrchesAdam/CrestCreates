@@ -107,11 +107,13 @@ public static class JsonContractSourceWriter
             sb.AppendLine($"    [global::System.Text.Json.Serialization.JsonSerializable({JsonContractTypeNameWriter.WriteTypeofExpression(root.RootType)})]");
         }
 
+        // Wire payloads use one explicit, stable naming policy (camelCase, matching the envelope):
+        // the generated codec is the single serializer for publish/consume/redelivery.
+        sb.AppendLine("    [global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]");
         sb.AppendLine($"    internal sealed partial class {JsonContractBuildConstants.EventJsonContextSimpleName} : global::System.Text.Json.Serialization.JsonSerializerContext");
         sb.AppendLine("    {");
         sb.AppendLine("    }");
         sb.AppendLine();
-
         sb.AppendLine($"    /// <summary>Registers the source-generated integration event codecs; called by the assembly's generated AddEventDescriptors() extension.</summary>");
         sb.AppendLine($"    internal static class {JsonContractBuildConstants.EventJsonCodecContributionsSimpleName}");
         sb.AppendLine("    {");

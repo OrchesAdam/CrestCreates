@@ -32,7 +32,7 @@ public sealed class RabbitMqConsumer : BackgroundService
 {
     private static readonly TimeSpan ShutdownDrainTimeout = TimeSpan.FromSeconds(15);
 
-    private readonly IRabbitMqBindingRegistry _registry;
+    private readonly IServiceProvider _serviceProvider;
     private readonly RabbitMqCompositionReadiness _readiness;
     private readonly RabbitMqConnectionPool _connectionPool;
     private readonly RabbitMqPublisher _publisher;
@@ -45,11 +45,12 @@ public sealed class RabbitMqConsumer : BackgroundService
     private IChannel? _consumerChannel;
     private CancellationTokenSource? _deliveryCts;
     private CancellationToken _deliveryToken;
+    private IRabbitMqBindingRegistry? _registry;
     private int _inFlightCount;
     private TaskCompletionSource _idle = CreateCompletedSource();
 
     public RabbitMqConsumer(
-        IRabbitMqBindingRegistry registry,
+        IServiceProvider serviceProvider,
         RabbitMqCompositionReadiness readiness,
         RabbitMqConnectionPool connectionPool,
         RabbitMqPublisher publisher,
@@ -57,7 +58,10 @@ public sealed class RabbitMqConsumer : BackgroundService
         IServiceScopeFactory scopeFactory,
         ILogger<RabbitMqConsumer> logger)
     {
-        _registry = registry;
+        // The frozen registry is resolved only after the readiness gate: all IHostedService
+        // instances are constructed before any StartAsync runs, so resolving the registry in the
+        // constructor would freeze the bindings before the composition service built the event kernel.
+        _serviceProvider = serviceProvider;
         _readiness = readiness;
         _connectionPool = connectionPool;
         _publisher = publisher;
@@ -68,18 +72,20 @@ public sealed class RabbitMqConsumer : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (_registry.PublisherOnly)
-        {
-            _logger.LogInformation("RabbitMQ host is publisher-only; the consumer does not start.");
-            return;
-        }
-
         try
         {
             await _readiness.WaitAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
+            return;
+        }
+
+        _registry = _serviceProvider.GetRequiredService<IRabbitMqBindingRegistry>();
+
+        if (_registry.PublisherOnly)
+        {
+            _logger.LogInformation("RabbitMQ host is publisher-only; the consumer does not start.");
             return;
         }
 
@@ -265,7 +271,7 @@ public sealed class RabbitMqConsumer : BackgroundService
                 return;
             }
 
-            var resolution = _registry.ResolveWire(envelope.EventType, envelope.EventId, envelope.EventVersion);
+            var resolution = _registry!.ResolveWire(envelope.EventType, envelope.EventId, envelope.EventVersion);
             if (!resolution.Success)
             {
                 await RejectAsync(delivery, resolution.FailureReason!).ConfigureAwait(false);
@@ -496,7 +502,7 @@ public sealed class RabbitMqConsumer : BackgroundService
         // Shutdown order: stop intake, bounded wait for in-flight deliveries, then close the dedicated
         // consumer channel (unfinished messages stay unacknowledged), then let the base class cancel
         // the execution token. The consumer channel is never returned to the publisher pool.
-        if (_registry.PublisherOnly || _consumerChannel is null)
+        if (_registry is null || _registry.PublisherOnly || _consumerChannel is null)
         {
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
             return;
