@@ -249,50 +249,128 @@ internal static class LocalEventJsonClosureValidator
     {
         elements = new List<ITypeSymbol>();
 
-        // Only allow known STJ-supported collection contracts. Custom interfaces that implement
-        // IEnumerable<T> cannot be instantiated by STJ and must be rejected.
-        if (!IsStjSupportedCollectionType(type))
+        // First, try to identify element types from the collection shape
+        // This handles both standard collections and derived collections
+        if (!TryExtractCollectionElements(type, elements))
         {
             return false;
         }
 
-        // Extract element types from generic arguments
-        if (type.IsGenericType)
+        // If we found elements, this is a collection - now check if it's recoverable
+        // Interfaces and abstract types cannot be recovered unless they're in the whitelist
+        if (type.TypeKind == TypeKind.Interface || type.IsAbstract)
         {
-            // Single-parameter collections: IEnumerable<T>, ICollection<T>, IList<T>, IReadOnlyCollection<T>, IReadOnlyList<T>, List<T>
-            if (type.TypeArguments.Length == 1)
+            // Only whitelisted interfaces/abstract collections are recoverable
+            if (!IsStjRecoverableCollection(type))
             {
-                elements.Add(type.TypeArguments[0]);
-                return true;
+                // Clear elements to signal this is not a valid collection
+                elements.Clear();
+                return false;
+            }
+        }
+
+        return elements.Count > 0;
+    }
+
+    private static bool TryExtractCollectionElements(INamedTypeSymbol type, List<ITypeSymbol> elements)
+    {
+        // Check the type itself and all its base types/interfaces for collection patterns
+        var visited = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        return TryExtractElementsRecursive(type, elements, visited);
+    }
+
+    private static bool TryExtractElementsRecursive(ITypeSymbol type, List<ITypeSymbol> elements, HashSet<ITypeSymbol> visited)
+    {
+        if (type is null || !visited.Add(type))
+        {
+            return false;
+        }
+
+        if (type is INamedTypeSymbol namedType)
+        {
+            // Check if this type is a generic collection
+            if (namedType.IsGenericType)
+            {
+                var name = namedType.Name;
+                var ns = namedType.ContainingNamespace?.ToDisplayString();
+
+                // Single-parameter collections
+                if (namedType.TypeArguments.Length == 1 && IsSingleParamCollectionName(name, ns))
+                {
+                    elements.Add(namedType.TypeArguments[0]);
+                    return true;
+                }
+
+                // Two-parameter collections (dictionaries)
+                if (namedType.TypeArguments.Length == 2 && IsTwoParamCollectionName(name, ns))
+                {
+                    elements.Add(namedType.TypeArguments[0]); // key
+                    elements.Add(namedType.TypeArguments[1]); // value
+                    return true;
+                }
             }
 
-            // Two-parameter collections: IDictionary<K,V>, Dictionary<K,V>, IReadOnlyDictionary<K,V>
-            if (type.TypeArguments.Length == 2)
+            // Check interfaces
+            foreach (var iface in namedType.AllInterfaces)
             {
-                // For dictionaries, we validate both key and value types
-                elements.Add(type.TypeArguments[0]); // key
-                elements.Add(type.TypeArguments[1]); // value
-                return true;
+                if (TryExtractElementsRecursive(iface, elements, visited))
+                {
+                    return true;
+                }
+            }
+
+            // Check base type
+            if (namedType.BaseType is not null)
+            {
+                if (TryExtractElementsRecursive(namedType.BaseType, elements, visited))
+                {
+                    return true;
+                }
             }
         }
 
         return false;
     }
 
-    private static bool IsStjSupportedCollectionType(INamedTypeSymbol type)
+    private static bool IsSingleParamCollectionName(string name, string? ns)
     {
-        var name = type.Name;
-        var ns = type.ContainingNamespace?.ToDisplayString();
+        if (ns != "System.Collections.Generic" && ns != "System.Collections")
+        {
+            return false;
+        }
 
+        return name is "IEnumerable" or "ICollection" or "IList" 
+            or "IReadOnlyCollection" or "IReadOnlyList" or "List"
+            or "HashSet" or "SortedSet" or "Queue" or "Stack"
+            or "LinkedList" or "Collection" or "ObservableCollection";
+    }
+
+    private static bool IsTwoParamCollectionName(string name, string? ns)
+    {
         if (ns != "System.Collections.Generic")
         {
             return false;
         }
 
-        // Known STJ-supported collection types
+        return name is "IDictionary" or "IReadOnlyDictionary" or "Dictionary" 
+            or "SortedDictionary" or "SortedList" or "ConcurrentDictionary";
+    }
+
+    private static bool IsStjRecoverableCollection(INamedTypeSymbol type)
+    {
+        // STJ can recover standard collection interfaces and concrete types
+        var name = type.Name;
+        var ns = type.ContainingNamespace?.ToDisplayString();
+
+        if (ns != "System.Collections.Generic" && ns != "System.Collections")
+        {
+            return false;
+        }
+
+        // Standard interfaces that STJ can recover
         return name is "IEnumerable" or "ICollection" or "IList" 
-            or "IReadOnlyCollection" or "IReadOnlyList" or "List"
-            or "IDictionary" or "IReadOnlyDictionary" or "Dictionary";
+            or "IReadOnlyCollection" or "IReadOnlyList"
+            or "IDictionary" or "IReadOnlyDictionary";
     }
 
     private static IEnumerable<INamedTypeSymbol> EnumerateSelfAndInterfaces(INamedTypeSymbol type)
@@ -340,6 +418,10 @@ internal static class LocalEventJsonClosureValidator
             return false;
         }
 
+        // Track tags to ensure uniqueness
+        var seenStringTags = new HashSet<string>();
+        var seenIntTags = new HashSet<int>();
+
         foreach (var attr in derivedAttrs)
         {
             // [JsonDerivedType(typeof(Derived))] - no discriminator
@@ -351,16 +433,30 @@ internal static class LocalEventJsonClosureValidator
             }
 
             var tag = attr.ConstructorArguments[1].Value;
-            if (tag is string strTag && !string.IsNullOrEmpty(strTag))
+            if (tag is string strTag)
             {
+                if (string.IsNullOrEmpty(strTag))
+                {
+                    return false;
+                }
+                // Check for duplicate string tags
+                if (!seenStringTags.Add(strTag))
+                {
+                    return false;
+                }
                 continue;
             }
-            if (tag is int)
+            if (tag is int intTag)
             {
+                // Check for duplicate int tags
+                if (!seenIntTags.Add(intTag))
+                {
+                    return false;
+                }
                 continue;
             }
 
-            // Invalid or missing tag
+            // Invalid tag type
             return false;
         }
 
@@ -432,12 +528,13 @@ internal static class LocalEventJsonClosureValidator
         }
 
         // Case 2: underlying numeric value - try all common numeric types
+        // JsonIgnoreCondition: Never=0, Always=1, WhenWritingNull=2, WhenWritingDefault=3
         return constant.Value switch
         {
-            int i => i == 0,
-            byte b => b == 0,
-            short s => s == 0,
-            long l => l == 0,
+            int i => i == 1,
+            byte b => b == 1,
+            short s => s == 1,
+            long l => l == 1,
             _ => false
         };
     }
