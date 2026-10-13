@@ -80,6 +80,22 @@ public sealed class LocalEventJsonSurfaceDiscovery
                 continue;
             }
 
+            var unsealedMember = LocalEventJsonClosureValidator.FindFirstUnsealedMember(type);
+            if (unsealedMember is not null)
+            {
+                _diagnostics.Add(new JsonContractDiagnostic
+                {
+                    Id = JsonContractDiagnosticIds.LocalEventUnsealedMember,
+                    Message = $"Replayable local event '{type.ToDisplayString()}' has an unsealed JSON member: " +
+                              $"{unsealedMember}. Every serialized member must have a closed JSON contract (a concrete " +
+                              "type, a closed collection, a typed [JsonConverter], or a [JsonDerivedType] hierarchy); " +
+                              "object/interface/abstract members without an explicit contract are not replayable.",
+                    Severity = JsonContractDiagnosticSeverity.Error,
+                    OffendingType = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                }.WithLocation(location));
+                continue;
+            }
+
             var normalized = JsonContractRootNormalizer.Normalize(type);
             roots.Add(new JsonContractRootModel
             {

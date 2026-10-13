@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstractions;
@@ -36,21 +37,41 @@ public static class LocalEventServiceCollectionExtensions
         IServiceCollection services,
         Action<LocalEventDispatchRegistrationBuilder>? configure)
     {
+        // Manual declarations are accumulated on a shared instance so an earlier parameterless
+        // AddCrestLocalEventDispatch() call can never cause a later Declare<T>() to be dropped.
+        var configuration = services
+            .Where(descriptor => descriptor.ServiceType == typeof(LocalEventDispatchConfiguration))
+            .Select(descriptor => descriptor.ImplementationInstance)
+            .OfType<LocalEventDispatchConfiguration>()
+            .FirstOrDefault();
+
+        if (configuration is null)
+        {
+            configuration = new LocalEventDispatchConfiguration();
+            services.AddSingleton(configuration);
+        }
+
+        if (configure is not null)
+        {
+            configuration.Add(configure);
+        }
+
         services.TryAddSingleton<ILocalEventDispatchRegistry>(provider => LocalEventDispatchRegistry.Freeze(
             provider.GetServices<ILocalEventRegistrationContributor>(),
-            configure));
+            provider.GetRequiredService<LocalEventDispatchConfiguration>().Callbacks));
 
         services.Configure<LocalDeadLetterOptions>(_ => { });
         services.TryAddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
 
+        // The dead-letter store can be scoped (EF Core). Recorder and executor therefore resolve it
+        // from an explicit execution scope per operation and never capture it from the root provider.
         services.TryAddSingleton<ILocalEventFailureRecorder>(provider => new LocalEventDeadLetterRecorder(
-            provider.GetService<IDeadLetterStore>(),
+            provider.GetService<IServiceScopeFactory>(),
             provider.GetService<IEventRegistry>(),
             provider.GetService<IOptions<LocalDeadLetterOptions>>() ?? Options.Create(new LocalDeadLetterOptions()),
             provider.GetService<ILogger<LocalEventDeadLetterRecorder>>() ?? (ILogger)NullLogger.Instance));
 
         services.TryAddSingleton<ILocalDeadLetterReplayExecutor>(provider => new LocalDeadLetterReplayExecutor(
-            provider.GetRequiredService<IDeadLetterStore>(),
             provider.GetRequiredService<ILocalEventDispatchRegistry>(),
             provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetService<ILogger<LocalDeadLetterReplayExecutor>>()));

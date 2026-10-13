@@ -215,8 +215,23 @@ namespace CrestCreates.Domain.Shared.Attributes
             string[]? additionalSources = null,
             string[]? additionalReferences = null,
             Dictionary<string, string>? globalAnalyzerOptions = null)
+            => RunGenerators("TestCompilation", sources, generators, additionalSources, additionalReferences, globalAnalyzerOptions, additionalMetadataReferences: null);
+
+        /// <summary>
+        /// 运行多个源代码生成器并返回结果，允许指定编译的程序集名与额外的元数据引用镜像。
+        /// 用于跨程序集场景：被测程序集通过 <see cref="EmitAssemblyImage"/> 产出的其它程序集镜像引用事件类型，
+        /// 从而让生成器区分「事件所属程序集」与「仅引用事件的 handler 程序集」。
+        /// </summary>
+        public static SourceGeneratorResult RunGenerators(
+            string assemblyName,
+            string[] sources,
+            IEnumerable<IIncrementalGenerator> generators,
+            string[]? additionalSources = null,
+            string[]? additionalReferences = null,
+            Dictionary<string, string>? globalAnalyzerOptions = null,
+            IEnumerable<MetadataReference>? additionalMetadataReferences = null)
         {
-            var compilation = CreateCompilation(sources, additionalSources, additionalReferences);
+            var compilation = CreateCompilation(assemblyName, sources, additionalSources, additionalReferences, additionalMetadataReferences);
             var allDiagnostics = new List<Diagnostic>();
             var generatedSources = new List<GeneratedSource>();
 
@@ -268,6 +283,29 @@ namespace CrestCreates.Domain.Shared.Attributes
         }
 
         /// <summary>
+        /// 将一个程序集编译为 PE 镜像字节（不运行任何生成器），供跨程序集测试作为 MetadataReference 引用。
+        /// 编译失败时抛出，附带诊断，避免把编译错误静默当作"引用缺失"。
+        /// </summary>
+        public static byte[] EmitAssemblyImage(
+            string assemblyName,
+            string[] sources,
+            string[]? additionalReferences = null)
+        {
+            var compilation = CreateCompilation(assemblyName, sources, additionalSources: null, additionalReferences);
+            using var memoryStream = new System.IO.MemoryStream();
+            var emitResult = compilation.Emit(memoryStream);
+            if (!emitResult.Success)
+            {
+                var errors = string.Join("\n", emitResult.Diagnostics
+                    .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+                    .Select(diagnostic => diagnostic.ToString()));
+                throw new InvalidOperationException($"Failed to emit assembly '{assemblyName}':\n{errors}");
+            }
+
+            return memoryStream.ToArray();
+        }
+
+        /// <summary>
         /// 运行源代码生成器（异步版本）
         /// </summary>
         /// <typeparam name="TGenerator">源代码生成器类型</typeparam>
@@ -288,19 +326,21 @@ namespace CrestCreates.Domain.Shared.Attributes
         /// 创建编译对象
         /// </summary>
         private static Compilation CreateCompilation(
+            string assemblyName,
             string[] sources,
             string[]? additionalSources = null,
-            string[]? additionalReferences = null)
+            string[]? additionalReferences = null,
+            IEnumerable<MetadataReference>? additionalMetadataReferences = null)
         {
             // 获取引用
             var references = new List<MetadataReference>();
 
             // 添加默认引用
-            foreach (var assemblyName in DefaultReferences)
+            foreach (var defaultReferenceName in DefaultReferences)
             {
                 try
                 {
-                    var assembly = System.Reflection.Assembly.Load(assemblyName);
+                    var assembly = System.Reflection.Assembly.Load(defaultReferenceName);
                     references.Add(MetadataReference.CreateFromFile(assembly.Location));
                 }
                 catch
@@ -364,6 +404,12 @@ namespace CrestCreates.Domain.Shared.Attributes
             // For tests that need WebApplication, load Microsoft.AspNetCore from the ASP.NET Core ref pack
             AddAspNetCoreReference(references);
 
+            // 额外的元数据引用镜像（如跨程序集测试中由 EmitAssemblyImage 产出的引用程序集）
+            if (additionalMetadataReferences != null)
+            {
+                references.AddRange(additionalMetadataReferences);
+            }
+
             // 创建语法树
             var syntaxTrees = new List<SyntaxTree>();
 
@@ -385,7 +431,7 @@ namespace CrestCreates.Domain.Shared.Attributes
 
             // 创建编译
             var compilation = CSharpCompilation.Create(
-                "TestCompilation",
+                assemblyName,
                 syntaxTrees,
                 references,
                 new CSharpCompilationOptions(

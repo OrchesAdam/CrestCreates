@@ -104,6 +104,11 @@ public static class CapabilityServiceCollectionExtensions
     {
         services.AddCapabilityPipeline();
 
+        // Explicit activation of the Capability assembly's dispatch-only local event membership
+        // (the internal CapabilityEventEnvelope published by the first-party EventPublisher). No
+        // scanning fallback: without this the first-party publisher would hit UnknownLocalEvent.
+        CrestCreates.Generated.CrestCreates_Capability.LocalEventRegistrations.AddLocalEvents(services);
+
         // Dispatcher + Resolver
         services.TryAddScoped<ICapabilityDispatcher>(sp =>
             new CapabilityDispatcher(

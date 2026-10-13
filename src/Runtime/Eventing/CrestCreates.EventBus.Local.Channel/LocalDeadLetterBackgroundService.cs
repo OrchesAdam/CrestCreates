@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.EventBus.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -15,18 +17,18 @@ namespace CrestCreates.EventBus.Local.Channel;
 /// </summary>
 public sealed class LocalDeadLetterBackgroundService : BackgroundService
 {
-    private readonly IDeadLetterStore _store;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILocalDeadLetterReplayExecutor _executor;
     private readonly LocalDeadLetterOptions _options;
     private readonly ILogger<LocalDeadLetterBackgroundService>? _logger;
 
     public LocalDeadLetterBackgroundService(
-        IDeadLetterStore store,
+        IServiceScopeFactory scopeFactory,
         ILocalDeadLetterReplayExecutor executor,
         IOptions<LocalDeadLetterOptions>? options = null,
         ILogger<LocalDeadLetterBackgroundService>? logger = null)
     {
-        _store = store;
+        _scopeFactory = scopeFactory;
         _executor = executor;
         _options = options?.Value ?? new LocalDeadLetterOptions();
         _logger = logger;
@@ -49,7 +51,12 @@ public sealed class LocalDeadLetterBackgroundService : BackgroundService
 
             try
             {
-                var pending = await _store.GetPendingAsync(0, 100, stoppingToken).ConfigureAwait(false);
+                IReadOnlyList<DeadLetterMessage> pending;
+                await using (var scope = _scopeFactory.CreateAsyncScope())
+                {
+                    var store = scope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
+                    pending = await store.GetPendingAsync(0, 100, stoppingToken).ConfigureAwait(false);
+                }
 
                 foreach (var message in pending)
                 {

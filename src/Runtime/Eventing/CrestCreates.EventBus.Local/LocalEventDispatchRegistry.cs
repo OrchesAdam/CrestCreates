@@ -34,7 +34,7 @@ internal sealed class LocalEventDispatchRegistry : ILocalEventDispatchRegistry
 
     public static LocalEventDispatchRegistry Freeze(
         IEnumerable<ILocalEventRegistrationContributor> contributors,
-        Action<LocalEventDispatchRegistrationBuilder>? configure)
+        IReadOnlyList<Action<LocalEventDispatchRegistrationBuilder>>? configureCallbacks)
     {
         var builder = new LocalEventDispatchRegistrationBuilder();
         var seenContributorIds = new HashSet<string>(StringComparer.Ordinal);
@@ -49,7 +49,13 @@ internal sealed class LocalEventDispatchRegistry : ILocalEventDispatchRegistry
             contributor.Register(builder);
         }
 
-        configure?.Invoke(builder);
+        if (configureCallbacks is not null)
+        {
+            foreach (var configure in configureCallbacks)
+            {
+                configure(builder);
+            }
+        }
 
         var violations = new List<string>();
         var merged = new Dictionary<Type, LocalEventBinding>();

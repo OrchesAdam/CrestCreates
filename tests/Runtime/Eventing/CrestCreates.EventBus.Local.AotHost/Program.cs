@@ -146,7 +146,7 @@ internal static class Program
 
         var options = Options.Create(new LocalDeadLetterOptions { RetryIntervalSeconds = 1 });
         var service = new LocalDeadLetterBackgroundService(
-            store,
+            provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetRequiredService<ILocalDeadLetterReplayExecutor>(),
             options,
             provider.GetService<ILogger<LocalDeadLetterBackgroundService>>());

@@ -34,6 +34,15 @@ public class DefaultLocalEventDispatcher : ILocalEventDispatcher
             throw new UnknownLocalEventException(@event.GetType());
         }
 
+        // Validate against the binding's fully merged expected-handler list — not the retained
+        // invoker's contributor-local closure — so a required handler contributed by any assembly is
+        // enforced before the first handler runs.
+        if (binding.ExpectedHandlerTypes.Count > 0)
+        {
+            var instances = binding.Invoker.ProbeHandlerInstances(_serviceProvider);
+            LocalEventDispatch.ValidateRequiredHandlers(binding.EventType, binding.ExpectedHandlerTypes, instances);
+        }
+
         var pending = binding.Invoker.InvokeAsync(_serviceProvider, @event, cancellationToken);
         return pending.IsCompletedSuccessfully ? Task.CompletedTask : pending.AsTask();
     }

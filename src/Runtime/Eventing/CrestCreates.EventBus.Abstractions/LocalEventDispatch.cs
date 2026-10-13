@@ -35,31 +35,50 @@ public static class LocalEventDispatch
 
         var handlers = serviceProvider.GetServices<ILocalEventHandler<TEvent>>().ToList();
 
-        if (expectedHandlerTypes is not null)
-        {
-            foreach (var expectedHandlerType in expectedHandlerTypes)
-            {
-                var satisfied = false;
-                foreach (var handler in handlers)
-                {
-                    if (expectedHandlerType.IsInstanceOfType(handler))
-                    {
-                        satisfied = true;
-                        break;
-                    }
-                }
-
-                if (!satisfied)
-                {
-                    throw new LocalEventRequiredHandlerMissingException(typeof(TEvent), expectedHandlerType);
-                }
-            }
-        }
+        ValidateRequiredHandlers(typeof(TEvent), expectedHandlerTypes, handlers);
 
         foreach (var handler in handlers)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await handler.HandleAsync(@event, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Validates that every expected handler type is satisfied by a resolved instance. Called by the
+    /// dispatcher with the binding's merged expected-handler list so that typed expected-handler
+    /// diagnostics apply uniformly after contributor merge — independent of which contributor's
+    /// invoker happened to be retained.
+    /// </summary>
+    public static void ValidateRequiredHandlers(
+        Type eventType,
+        IReadOnlyList<Type>? expectedHandlerTypes,
+        IReadOnlyList<object> handlerInstances)
+    {
+        ArgumentNullException.ThrowIfNull(eventType);
+        ArgumentNullException.ThrowIfNull(handlerInstances);
+
+        if (expectedHandlerTypes is null)
+        {
+            return;
+        }
+
+        foreach (var expectedHandlerType in expectedHandlerTypes)
+        {
+            var satisfied = false;
+            foreach (var handler in handlerInstances)
+            {
+                if (expectedHandlerType.IsInstanceOfType(handler))
+                {
+                    satisfied = true;
+                    break;
+                }
+            }
+
+            if (!satisfied)
+            {
+                throw new LocalEventRequiredHandlerMissingException(eventType, expectedHandlerType);
+            }
         }
     }
 }

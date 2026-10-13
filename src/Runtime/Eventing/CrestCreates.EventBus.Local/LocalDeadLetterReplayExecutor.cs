@@ -19,18 +19,15 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
 {
     private static readonly TimeSpan StateWriteTimeout = TimeSpan.FromSeconds(5);
 
-    private readonly IDeadLetterStore _store;
     private readonly ILocalEventDispatchRegistry _registry;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<LocalDeadLetterReplayExecutor>? _logger;
 
     public LocalDeadLetterReplayExecutor(
-        IDeadLetterStore store,
         ILocalEventDispatchRegistry registry,
         IServiceScopeFactory scopeFactory,
         ILogger<LocalDeadLetterReplayExecutor>? logger = null)
     {
-        _store = store;
         _registry = registry;
         _scopeFactory = scopeFactory;
         _logger = logger;
@@ -107,7 +104,11 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
             return Reject(message, handlerProblem);
         }
 
-        await _store.MarkRetryingAsync(message.MessageId, cancellationToken).ConfigureAwait(false);
+        await using (var stateScope = _scopeFactory.CreateAsyncScope())
+        {
+            var store = stateScope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
+            await store.MarkRetryingAsync(message.MessageId, cancellationToken).ConfigureAwait(false);
+        }
 
         try
         {
@@ -260,7 +261,9 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         try
         {
             using var cts = new CancellationTokenSource(StateWriteTimeout);
-            await _store.EnqueueAsync(updated, cts.Token).ConfigureAwait(false);
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var store = scope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
+            await store.EnqueueAsync(updated, cts.Token).ConfigureAwait(false);
             return (true, null);
         }
         catch (Exception writeFailure)

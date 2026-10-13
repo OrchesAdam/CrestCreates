@@ -27,6 +27,13 @@ public sealed class EventPublisher : IEventPublisher
     }
 }
 
+/// <summary>
+/// Internal dispatch-only notification envelope used by the first-party <see cref="EventPublisher"/>.
+/// It carries an opaque object payload, so it is deliberately not replayable: it participates in the
+/// typed dispatch membership (declared here and activated by <c>AddCapabilityRuntime</c>) but has no
+/// JSON codec and is never recorded to the dead-letter store.
+/// </summary>
+[LocalEvent]
 internal sealed class CapabilityEventEnvelope : ILocalEvent
 {
     public string EventName { get; init; } = string.Empty;

@@ -6,6 +6,7 @@ using CrestCreates.Event;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.Metadata.Abstractions.Registry;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -18,18 +19,18 @@ namespace CrestCreates.EventBus.Local;
 /// </summary>
 internal sealed class LocalEventDeadLetterRecorder : ILocalEventFailureRecorder
 {
-    private readonly IDeadLetterStore? _store;
+    private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IEventRegistry? _eventRegistry;
     private readonly LocalDeadLetterOptions _options;
     private readonly ILogger _logger;
 
     public LocalEventDeadLetterRecorder(
-        IDeadLetterStore? store,
+        IServiceScopeFactory? scopeFactory,
         IEventRegistry? eventRegistry,
         IOptions<LocalDeadLetterOptions> options,
         ILogger logger)
     {
-        _store = store;
+        _scopeFactory = scopeFactory;
         _eventRegistry = eventRegistry;
         _options = options.Value;
         _logger = logger;
@@ -41,9 +42,9 @@ internal sealed class LocalEventDeadLetterRecorder : ILocalEventFailureRecorder
         Exception failure,
         CancellationToken cancellationToken)
     {
-        if (_store is null)
+        if (_scopeFactory is null)
         {
-            return new LocalEventRecordOutcome(false, "no dead-letter store is registered.");
+            return new LocalEventRecordOutcome(false, "no dead-letter scope factory is registered.");
         }
 
         if (!binding.Replayable)
@@ -117,7 +118,14 @@ internal sealed class LocalEventDeadLetterRecorder : ILocalEventFailureRecorder
 
         try
         {
-            await _store.EnqueueAsync(message, cancellationToken).ConfigureAwait(false);
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var store = scope.ServiceProvider.GetService<IDeadLetterStore>();
+            if (store is null)
+            {
+                return new LocalEventRecordOutcome(false, "no dead-letter store is registered.");
+            }
+
+            await store.EnqueueAsync(message, cancellationToken).ConfigureAwait(false);
             return new LocalEventRecordOutcome(true, null);
         }
         catch (Exception storeException)

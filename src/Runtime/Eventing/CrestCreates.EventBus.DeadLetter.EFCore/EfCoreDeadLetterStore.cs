@@ -15,26 +15,17 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
         await using var transaction = await _db.Database.BeginTransactionAsync(ct);
         try
         {
-            _db.DeadLetters.Add(new DeadLetterEntity
+            // Upsert keyed by MessageId: the same call inserts the initial record and persists every
+            // later state transition. A plain Add would collide on the primary key / tracked entity.
+            var entity = await _db.DeadLetters.FindAsync([message.MessageId], ct);
+            if (entity is null)
             {
-                MessageId = message.MessageId,
-                EventName = message.EventName,
-                EventVersion = message.EventVersion,
-                EventDescriptorId = message.EventDescriptorId,
-                CorrelationId = message.CorrelationId,
-                TenantId = message.TenantId,
-                Scope = message.Scope.ToString(),
-                PayloadTypeFullName = message.PayloadTypeFullName,
-                Payload = message.Payload,
-                ErrorMessage = message.ErrorMessage,
-                ExceptionType = message.ExceptionType,
-                OccurredAt = message.OccurredAt,
-                FailedAt = message.FailedAt,
-                RetryCount = message.RetryCount,
-                MaxRetries = message.MaxRetries,
-                Status = message.Status.ToString(),
-                LocalReplayKey = message.LocalReplayKey
-            });
+                entity = new DeadLetterEntity { MessageId = message.MessageId };
+                _db.DeadLetters.Add(entity);
+            }
+
+            Apply(entity, message);
+
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -43,6 +34,26 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
             await transaction.RollbackAsync(ct);
             throw;
         }
+    }
+
+    private static void Apply(DeadLetterEntity entity, DeadLetterMessage message)
+    {
+        entity.EventName = message.EventName;
+        entity.EventVersion = message.EventVersion;
+        entity.EventDescriptorId = message.EventDescriptorId;
+        entity.CorrelationId = message.CorrelationId;
+        entity.TenantId = message.TenantId;
+        entity.Scope = message.Scope.ToString();
+        entity.PayloadTypeFullName = message.PayloadTypeFullName;
+        entity.Payload = message.Payload;
+        entity.ErrorMessage = message.ErrorMessage;
+        entity.ExceptionType = message.ExceptionType;
+        entity.OccurredAt = message.OccurredAt;
+        entity.FailedAt = message.FailedAt;
+        entity.RetryCount = message.RetryCount;
+        entity.MaxRetries = message.MaxRetries;
+        entity.Status = message.Status.ToString();
+        entity.LocalReplayKey = message.LocalReplayKey;
     }
 
     public async Task<IReadOnlyList<DeadLetterMessage>> GetPendingAsync(int skip, int take, CancellationToken ct)

@@ -340,7 +340,7 @@ public class LocalDeadLetterReplaySemanticsTests
         await store.EnqueueAsync(message, CancellationToken.None);
 
         var service = new LocalDeadLetterBackgroundService(
-            store,
+            provider.GetRequiredService<IServiceScopeFactory>(),
             provider.GetRequiredService<ILocalDeadLetterReplayExecutor>(),
             provider.GetRequiredService<IOptions<LocalDeadLetterOptions>>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LocalDeadLetterBackgroundService>>());

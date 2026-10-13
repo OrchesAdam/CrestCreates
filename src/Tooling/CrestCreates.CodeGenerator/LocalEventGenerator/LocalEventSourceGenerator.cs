@@ -138,7 +138,16 @@ public sealed class LocalEventSourceGenerator : IIncrementalGenerator
 
             foreach (var declaration in analysis.EventDeclarations)
             {
-                declarations[declaration.EventMetadataName] = declaration;
+                if (declarations.TryGetValue(declaration.EventMetadataName, out var existing))
+                {
+                    // The same event can be seen both as a local declaration and as a handler's
+                    // referenced type. Ownership is owned if any producer observed it as owned.
+                    declarations[declaration.EventMetadataName] = declaration with { Owned = existing.Owned || declaration.Owned };
+                }
+                else
+                {
+                    declarations[declaration.EventMetadataName] = declaration;
+                }
             }
         }
 
@@ -155,12 +164,16 @@ public sealed class LocalEventSourceGenerator : IIncrementalGenerator
         var hasToolchain = optionsProvider.GlobalOptions.TryGetValue(ToolchainPropertyName, out var toolchainValue) &&
                            string.Equals(toolchainValue, "true", StringComparison.OrdinalIgnoreCase);
 
-        var hasReplayableEvents = false;
+        // Only the assembly that owns a replayable event is responsible for its JSON codec. A
+        // handler-only assembly that merely references another assembly's replayable event must not
+        // require the toolchain nor emit a codec contribution for it (the owner registers the codec,
+        // and the handler-only binding resolves it at freeze time).
+        var ownsReplayableEvent = false;
         foreach (var eventName in eventNames)
         {
-            if (declarations.TryGetValue(eventName, out var declaration) && declaration.Replayable)
+            if (declarations.TryGetValue(eventName, out var declaration) && declaration.Replayable && declaration.Owned)
             {
-                hasReplayableEvents = true;
+                ownsReplayableEvent = true;
                 if (!hasToolchain)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(
@@ -178,7 +191,7 @@ public sealed class LocalEventSourceGenerator : IIncrementalGenerator
             eventNames,
             handlersByEvent,
             declarations,
-            emitCodecContribution: hasToolchain && hasReplayableEvents);
+            emitCodecContribution: hasToolchain && ownsReplayableEvent);
 
         context.AddSource("LocalEventRegistration.g.cs", SourceText.From(source, Encoding.UTF8));
     }

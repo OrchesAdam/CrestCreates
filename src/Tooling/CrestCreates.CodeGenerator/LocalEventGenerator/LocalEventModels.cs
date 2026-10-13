@@ -17,7 +17,8 @@ internal sealed record EventDeclarationInfo(
     bool Replayable,
     int Version,
     ImmutableArray<LegacyIdentityInfo> LegacyIdentities,
-    Location? Location);
+    Location? Location,
+    bool Owned);
 
 internal sealed record LocalEventDiagnostic(string Id, string Message, Location? Location);
 

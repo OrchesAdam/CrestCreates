@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj" />
     <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj" />

@@ -17,5 +17,6 @@ public static class JsonContractDiagnosticIds
     public const string InvalidManifestAccessibility = "CJC013";
     public const string LocalEventInvalidPayload = "CJC015";
     public const string LocalEventInaccessiblePayload = "CJC016";
+    public const string LocalEventUnsealedMember = "CJC017";
     public const string TransportConflict = "CJC014";
 }

@@ -55,7 +55,7 @@ internal static class LocalEventCodeWriter
             builder.AppendLine();
             builder.AppendLine($"            builder.Add(global::CrestCreates.EventBus.Abstractions.LocalEventBinding.Create<{eventGlobalName}>(");
             builder.AppendLine($"                new global::CrestCreates.EventBus.Abstractions.LocalEventInvoker<{eventGlobalName}>(static (provider, @event, cancellationToken) =>");
-            builder.AppendLine($"                    global::CrestCreates.EventBus.Abstractions.LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken, {fieldName})),");
+            builder.AppendLine($"                    global::CrestCreates.EventBus.Abstractions.LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),");
             builder.AppendLine($"                {version},");
             builder.AppendLine($"                {replayableText},");
             builder.AppendLine($"                {codecArgument},");

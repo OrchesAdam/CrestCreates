@@ -132,7 +132,12 @@ internal static class LocalEventSymbolAnalyzer
                 EventMetadataName: namedEventType.ToDisplayString(),
                 Location: declaration.Identifier.GetLocation()));
 
-            var declarationInfo = ReadEventDeclaration(namedEventType, diagnostics);
+            // Codec ownership follows the assembly that declares the event, not the assembly that
+            // merely references it through a handler. A handler-only assembly still contributes the
+            // typed binding and its event metadata, but must never be treated as the codec owner.
+            var eventIsOwned = SymbolEqualityComparer.Default.Equals(
+                namedEventType.ContainingAssembly, symbol.ContainingAssembly);
+            var declarationInfo = ReadEventDeclaration(namedEventType, eventIsOwned, diagnostics);
             if (declarationInfo is not null)
             {
                 eventDeclarations.Add(declarationInfo);
@@ -161,7 +166,7 @@ internal static class LocalEventSymbolAnalyzer
             return;
         }
 
-        var info = ReadEventDeclaration(symbol, diagnostics);
+        var info = ReadEventDeclaration(symbol, isOwned: true, diagnostics);
         if (info is not null)
         {
             eventDeclarations.Add(info);
@@ -170,6 +175,7 @@ internal static class LocalEventSymbolAnalyzer
 
     private static EventDeclarationInfo? ReadEventDeclaration(
         INamedTypeSymbol eventSymbol,
+        bool isOwned,
         ImmutableArray<LocalEventDiagnostic>.Builder diagnostics)
     {
         var attribute = eventSymbol.GetAttributes()
@@ -216,7 +222,7 @@ internal static class LocalEventSymbolAnalyzer
         }
 
         var location = eventSymbol.Locations.FirstOrDefault();
-        if (version < 1)
+        if (isOwned && version < 1)
         {
             diagnostics.Add(new LocalEventDiagnostic(
                 LocalEventSourceGenerator.DiagnosticDescriptors.InvalidEventTypeId,
@@ -224,7 +230,7 @@ internal static class LocalEventSymbolAnalyzer
                 location));
         }
 
-        if (replayable && eventSymbol.IsAbstract)
+        if (isOwned && replayable && eventSymbol.IsAbstract)
         {
             diagnostics.Add(new LocalEventDiagnostic(
                 LocalEventSourceGenerator.DiagnosticDescriptors.UnsealedPayloadId,
@@ -232,7 +238,7 @@ internal static class LocalEventSymbolAnalyzer
                 location));
         }
 
-        if (replayable && eventSymbol.IsGenericType)
+        if (isOwned && replayable && eventSymbol.IsGenericType)
         {
             diagnostics.Add(new LocalEventDiagnostic(
                 LocalEventSourceGenerator.DiagnosticDescriptors.UnsealedPayloadId,
@@ -245,7 +251,8 @@ internal static class LocalEventSymbolAnalyzer
             Replayable: replayable,
             Version: version,
             LegacyIdentities: legacyIdentities.ToImmutable(),
-            Location: location);
+            Location: location,
+            Owned: isOwned);
     }
 
     private static bool ImplementsLocalEvent(ITypeSymbol type, INamedTypeSymbol localEventInterface)
