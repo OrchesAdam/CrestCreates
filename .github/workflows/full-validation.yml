@@ -185,6 +185,17 @@ jobs:
     # Bounded job budget: the native publish/link/run gates must fail explicitly
     # instead of hanging indefinitely.
     timeout-minutes: 120
+    services:
+      rabbitmq:
+        image: rabbitmq:4.0-management-alpine
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q check_port_connectivity"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout
@@ -217,6 +228,9 @@ jobs:
 
       - name: Test — LocalEvent typed dispatch/replay native gate (NativeAOT publish/link/run)
         run: dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.Local.AotHost.Tests
+
+      - name: Test — RabbitMQ static bindings trim + native gates (publish/link/run, real broker)
+        run: dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.AotHost.Tests
 
       - name: Test — Memory JSON contract AotFixtures (NativeAOT publish/link/run)
         run: bash .github/scripts/run-json-contract-aot-gates.sh

@@ -340,6 +340,8 @@
     <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.TestContractsA/CrestCreates.EventBus.RabbitMQ.TestContractsA.csproj" />
     <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.TestContractsB/CrestCreates.EventBus.RabbitMQ.TestContractsB.csproj" />
     <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.TestHandlersA/CrestCreates.EventBus.RabbitMQ.TestHandlersA.csproj" />
+    <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.AotHost/CrestCreates.EventBus.RabbitMQ.AotHost.csproj" />
+    <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.AotHost.Tests/CrestCreates.EventBus.RabbitMQ.AotHost.Tests.csproj" />
     <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.Local.Tests.Integration/CrestCreates.EventBus.Local.Tests.Integration.csproj" />
     <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.Local.AotHost/CrestCreates.EventBus.Local.AotHost.csproj" />
     <Project Path="tests/Runtime/Eventing/CrestCreates.EventBus.Local.AotHost.Tests/CrestCreates.EventBus.Local.AotHost.Tests.csproj" />

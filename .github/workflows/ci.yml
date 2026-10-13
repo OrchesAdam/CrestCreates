@@ -29,6 +29,16 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      rabbitmq:
+        image: rabbitmq:4.0-management-alpine
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q check_port_connectivity"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING: Host=127.0.0.1;Port=5432;Database=crest_asset_management;Username=crest;Password=crest
 
@@ -283,6 +293,9 @@ jobs:
 
       - name: Test — LocalEvent typed dispatch/replay native gate (NativeAOT publish/link/run)
         run: dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.Local.AotHost.Tests --no-build
+
+      - name: Test — RabbitMQ static bindings trim + native gates (publish/link/run, real broker)
+        run: dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.AotHost.Tests --no-build
 
       - name: Test — Memory JSON contract AotFixtures (NativeAOT publish/link/run)
         run: bash .github/scripts/run-json-contract-aot-gates.sh

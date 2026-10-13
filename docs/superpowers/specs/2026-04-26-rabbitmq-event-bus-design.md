@@ -1,3 +1,9 @@
+> **状态提示（2026-10-13，#127）**：本文档描述的是 2026-04 初版设计，**已不是当前代码事实**：
+> “assembly-qualified wire type”“生成器已校验 JSON”“requeue:true 延迟重试”“已 AOT 兼容”等描述均与实现不符。
+> 现行主链（canonical 事件身份、静态订阅生成、envelope EventId/EventVersion、重试/DLQ 结算语义、
+> NativeAOT/trim 证据与限制）以 `docs/superpowers/specs/2026-10-13-issue-127-rabbitmq-static-bindings-design.md`
+> 与 `memory.md` 为准。
+
 # RabbitMQ Distributed Event Bus Implementation Design
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -116,7 +116,10 @@
 | --- | --- | --- |
 | S1 实验 A（confirm 行为） | 通过（4 用例） | `/tmp/crest-127-s1/confirm-exp-run.log` |
 | S1 实验 B（最小 NativeAOT + broker） | 通过（publish exit 0 / 0 trim 警告 / run exit 0 / sentinel） | `/tmp/crest-127-s1/aot-exp-publish.log`、`/tmp/crest-127-s1/aot-exp-run.log` |
-| S2 生成器/装配测试 | 待执行 | |
-| S3 集成矩阵 | 待执行 | |
-| S4 native 门禁 | 待执行 | |
-| 回归（#126/边界/CAP） | 待执行 | |
+| S2 RabbitMQ 单元（冻结矩阵等） | 50/50 | `dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.Tests` |
+| S2 生成器（EventDescriptor/RabbitMqSubscription） | 21/21 | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter "EventDescriptorGenerator|RabbitMqGenerator"` |
+| S2 JsonContracts（含 Integration discovery/writer） | 131/131 | `dotnet test tests/Tooling/CrestCreates.JsonContracts.BuildTasks.Tests` |
+| S3 真实 broker 集成矩阵 | 27/27 | `dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.Tests.Integration` |
+| S4 trim 门禁（publish/link/run） | 通过（exit 0 + sentinel + 六场景 PASS） | `tests/artifacts/aot-native-evidence/rabbitmq-static-bindings-trim.json` |
+| S4 NativeAOT 门禁（publish/link/run） | 通过（exit 0 + sentinel + 六场景 PASS；publish 无 IL2026/IL3050） | `tests/artifacts/aot-native-evidence/rabbitmq-static-bindings-native-aot.json` |
+| S4 回归（全量构建/Event/LocalEvent/边界/CodeGen/JsonContracts 包/CAP 单元） | 见 issues log | `/tmp/crest-127-regression.log` |
