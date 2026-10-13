@@ -422,10 +422,11 @@ internal static class LocalEventJsonClosureValidator
             return false;
         }
 
-        // 2. Must have a parameterless constructor (implicit or explicit)
-        // STJ requires a way to create the instance before populating it
-        var hasParameterlessCtor = type.InstanceConstructors.Any(c => c.Parameters.Length == 0);
-        return hasParameterlessCtor;
+        // 2. Must have a public parameterless constructor (implicit or explicit)
+        // STJ source generators require public accessibility to instantiate types during deserialization
+        var hasPublicParameterlessCtor = type.InstanceConstructors.Any(c =>
+            c.Parameters.Length == 0 && c.DeclaredAccessibility == Accessibility.Public);
+        return hasPublicParameterlessCtor;
     }
 
     private static bool IsUnrecoverableCollection(INamedTypeSymbol type)

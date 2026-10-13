@@ -1061,4 +1061,111 @@ public class LocalEventJsonSurfaceDiscoveryTests : JsonContractCompilationTestBa
         discovery.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items"));
     }
+
+    [Fact]
+    public void Discover_DerivedCollectionWithPrivateParameterlessCtor_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                public sealed class PrivateCtorList : List<int>
+                {
+                    private PrivateCtorList() { }
+                    public PrivateCtorList(int capacity) : base(capacity) { }
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ExampleEvent
+                {
+                    public PrivateCtorList Items { get; set; } = new(4);
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items"));
+    }
+
+    [Fact]
+    public void Discover_DerivedCollectionWithProtectedParameterlessCtor_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                public class ProtectedCtorList : List<int>
+                {
+                    protected ProtectedCtorList() { }
+                    public ProtectedCtorList(int capacity) : base(capacity) { }
+                }
+
+                public sealed class ConcreteProtectedCtorList : ProtectedCtorList
+                {
+                    public ConcreteProtectedCtorList(int capacity) : base(capacity) { }
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ExampleEvent
+                {
+                    public ProtectedCtorList Items { get; set; } = new ConcreteProtectedCtorList(4);
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items"));
+    }
+
+    [Fact]
+    public void Discover_DerivedCollectionWithInternalParameterlessCtor_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                public sealed class InternalCtorList : List<int>
+                {
+                    internal InternalCtorList() { }
+                    public InternalCtorList(int capacity) : base(capacity) { }
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ExampleEvent
+                {
+                    public InternalCtorList Items { get; set; } = new(4);
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items"));
+    }
 }
