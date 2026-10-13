@@ -285,6 +285,8 @@
     <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.Tests/CrestCreates.EventBus.RabbitMQ.Tests.csproj" />
     <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.Tests.Integration/CrestCreates.EventBus.RabbitMQ.Tests.Integration.csproj" />
     <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.Local.Tests.Integration/CrestCreates.EventBus.Local.Tests.Integration.csproj" />
+    <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.Local.AotHost/CrestCreates.EventBus.Local.AotHost.csproj" />
+    <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.Local.AotHost.Tests/CrestCreates.EventBus.Local.AotHost.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Audit/">
     <Project Path="../tests/Runtime/Audit/CrestCreates.Accountability.Abstractions.Tests/CrestCreates.Accountability.Abstractions.Tests.csproj" />

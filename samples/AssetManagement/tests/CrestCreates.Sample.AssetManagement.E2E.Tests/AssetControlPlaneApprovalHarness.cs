@@ -139,9 +139,7 @@ public sealed class AssetControlPlaneApprovalHarness : IAsyncDisposable
         services.AddRuntimePersistence();
         services.AddCrestCreatesInMemoryRuntimePersistence();
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-        services.AddSingleton<LocalEventBusOptions>();
-        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
+        services.AddCrestLocalEventDispatch();
         services.AddHumanTaskRuntime();
         services.AddAgentControlPlane(AgentToolAuthorizationOptions.DevelopmentDefaults);
         services.AddAgentControlPlaneInMemoryStubs();

@@ -1,0 +1,648 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.CodeAnalysis;
+
+namespace CrestCreates.JsonContracts.BuildTasks.Semantic;
+
+/// <summary>
+/// Bounded, deterministic closure validation of a replayable local event's JSON contract. A
+/// <c>[LocalEvent(Replayable = true)]</c> event only produces a replayable payload if every
+/// reachable serialized member has a closed System.Text.Json contract: scalars, enums, concrete
+/// classes/structs (recursively), collections of closed elements, or an explicit typed contract
+/// (a <c>[JsonConverter]</c> or a closed <c>[JsonDerivedType]</c> hierarchy). Unsealed
+/// <c>object</c>/interface/abstract members are rejected at build time with a member-level path —
+/// this is never a runtime fallback or a dynamic resolver.
+/// </summary>
+internal static class LocalEventJsonClosureValidator
+{
+    private const int MaxDepth = 32;
+
+    private const string JsonIgnoreAttribute = "System.Text.Json.Serialization.JsonIgnoreAttribute";
+    private const string JsonConverterAttribute = "System.Text.Json.Serialization.JsonConverterAttribute";
+    private const string JsonDerivedTypeAttribute = "System.Text.Json.Serialization.JsonDerivedTypeAttribute";
+    private const string JsonPolymorphicAttribute = "System.Text.Json.Serialization.JsonPolymorphicAttribute";
+    private const string JsonIncludeAttribute = "System.Text.Json.Serialization.JsonIncludeAttribute";
+
+    private static readonly HashSet<string> ClosedScalars = new(StringComparer.Ordinal)
+    {
+        "global::System.String",
+        "global::System.Boolean", "global::System.Byte", "global::System.SByte",
+        "global::System.Int16", "global::System.UInt16", "global::System.Int32", "global::System.UInt32",
+        "global::System.Int64", "global::System.UInt64", "global::System.Single", "global::System.Double",
+        "global::System.Decimal", "global::System.Char",
+        "global::System.Guid", "global::System.DateTime", "global::System.DateTimeOffset",
+        "global::System.TimeSpan", "global::System.DateOnly", "global::System.TimeOnly",
+        "global::System.Uri", "global::System.Version",
+        "global::System.Numerics.BigInteger",
+        "global::System.Text.Json.JsonElement", "global::System.Text.Json.JsonDocument", "global::System.Text.Json.Nodes.JsonNode",
+    };
+
+    /// <summary>
+    /// Returns a member-level path to the first reachable member with no closed JSON contract, or
+    /// <c>null</c> when the whole serialized shape is closed.
+    /// </summary>
+    public static string? FindFirstUnsealedMember(ITypeSymbol rootType)
+    {
+        var visiting = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        return Inspect(rootType, rootType.Name, visiting, 0);
+    }
+
+    private static string? Inspect(ITypeSymbol type, string path, HashSet<ITypeSymbol> visiting, int depth)
+    {
+        if (depth > MaxDepth)
+        {
+            return null;
+        }
+
+        switch (type)
+        {
+            case IArrayTypeSymbol array:
+                return Inspect(array.ElementType, path + "[]", visiting, depth + 1);
+
+            case IPointerTypeSymbol or IFunctionPointerTypeSymbol:
+                return $"{path} ({type.ToDisplayString()} has no JSON contract)";
+
+            case ITypeParameterSymbol:
+                return $"{path} ({type.Name} is an open generic parameter)";
+
+            case INamedTypeSymbol { IsGenericType: true } nullable
+                when nullable.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T:
+                return Inspect(nullable.TypeArguments[0], path, visiting, depth + 1);
+
+            case INamedTypeSymbol named:
+                return InspectNamed(named, path, visiting, depth);
+
+            default:
+                return null;
+        }
+    }
+
+    private static string? InspectNamed(INamedTypeSymbol type, string path, HashSet<ITypeSymbol> visiting, int depth)
+    {
+        if (type.TypeKind == TypeKind.Enum)
+        {
+            return null;
+        }
+
+        if (type.SpecialType == SpecialType.System_Object)
+        {
+            return $"{path} ({type.ToDisplayString()} has no closed JSON contract; declare a concrete type)";
+        }
+
+        var displayName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        if (ClosedScalars.Contains(displayName))
+        {
+            return null;
+        }
+
+        // An explicit typed converter on the type itself closes it.
+        if (HasAttribute(type, JsonConverterAttribute))
+        {
+            return null;
+        }
+
+        // An explicit [JsonDerivedType] hierarchy closes a polymorphic base ONLY if it has a
+        // valid discriminator for round-trip. Check for [JsonPolymorphic] with TypeDiscriminatorPropertyName
+        // OR derived types with discriminator tags.
+        if (HasAttribute(type, JsonDerivedTypeAttribute))
+        {
+            if (!HasValidPolymorphicDiscriminator(type))
+            {
+                return $"{path} ({type.ToDisplayString()} has [JsonDerivedType] but no valid discriminator for round-trip; " +
+                       "add [JsonPolymorphic(TypeDiscriminatorPropertyName = ...)] or discriminator tags to [JsonDerivedType])";
+            }
+
+            foreach (var derived in GetJsonDerivedTypes(type))
+            {
+                var offender = Inspect(derived, path + "/" + derived.Name, visiting, depth + 1);
+                if (offender is not null)
+                {
+                    return offender;
+                }
+            }
+
+            return null;
+        }
+
+        // Collection interfaces (IReadOnlyList<T>, IEnumerable<T>, IDictionary<K,V>, etc.) are closed
+        // if their element types are closed. Check this BEFORE rejecting interfaces.
+        if (TryGetEnumerableElements(type, out var elements))
+        {
+            foreach (var element in elements)
+            {
+                var offender = Inspect(element, path + "[]", visiting, depth + 1);
+                if (offender is not null)
+                {
+                    return offender;
+                }
+            }
+
+            return null;
+        }
+
+        // Check if this is an unrecoverable collection (implements IEnumerable but not in whitelist)
+        if (IsUnrecoverableCollection(type))
+        {
+            return $"{path} ({type.ToDisplayString()} implements IEnumerable but is not a recoverable collection; " +
+                   "STJ cannot deserialize it. Use a standard collection type or add [JsonConverter])";
+        }
+
+        if (type.TypeKind == TypeKind.Interface)
+        {
+            return $"{path} ({type.ToDisplayString()} is an interface with no closed polymorphic contract)";
+        }
+
+        if (type.IsAbstract)
+        {
+            return $"{path} ({type.ToDisplayString()} is abstract with no closed [JsonDerivedType] contract)";
+        }
+
+        if (type.IsImplicitlyDeclared && type.BaseType is not null)
+        {
+            // Anonymous / compiler-generated shapes are not stable replay contracts.
+            return $"{path} ({type.ToDisplayString()} is not a stable JSON contract)";
+        }
+
+        if (!visiting.Add(type))
+        {
+            return null;
+        }
+
+        try
+        {
+            var offender = InspectMembers(type, path, visiting, depth);
+            if (offender is not null)
+            {
+                return offender;
+            }
+
+            // System.Text.Json flattens the public members of the whole base chain; validate them too.
+            for (var baseType = type.BaseType;
+                 baseType is not null && baseType.SpecialType == SpecialType.None;
+                 baseType = baseType.BaseType)
+            {
+                offender = InspectMembers(baseType, path, visiting, depth);
+                if (offender is not null)
+                {
+                    return offender;
+                }
+            }
+
+            return null;
+        }
+        finally
+        {
+            visiting.Remove(type);
+        }
+    }
+
+    private static string? InspectMembers(INamedTypeSymbol type, string path, HashSet<ITypeSymbol> visiting, int depth)
+    {
+        foreach (var member in type.GetMembers())
+        {
+            if (member.IsStatic)
+            {
+                continue;
+            }
+
+            if (IsAlwaysIgnored(member) || HasAttribute(member, JsonConverterAttribute))
+            {
+                continue;
+            }
+
+            ITypeSymbol? memberType = null;
+            if (member is IPropertySymbol property)
+            {
+                if (property.IsIndexer || property.GetMethod is null)
+                {
+                    continue;
+                }
+
+                if (property.DeclaredAccessibility != Accessibility.Public
+                    && !HasAttribute(property, JsonIncludeAttribute))
+                {
+                    continue;
+                }
+
+                memberType = property.Type;
+            }
+            else if (member is IFieldSymbol field)
+            {
+                if (field.IsConst || !HasAttribute(field, JsonIncludeAttribute))
+                {
+                    continue;
+                }
+
+                memberType = field.Type;
+            }
+
+            if (memberType is null)
+            {
+                continue;
+            }
+
+            var offender = Inspect(memberType, path + "." + member.Name, visiting, depth + 1);
+            if (offender is not null)
+            {
+                return offender;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetEnumerableElements(INamedTypeSymbol type, out List<ITypeSymbol> elements)
+    {
+        elements = new List<ITypeSymbol>();
+
+        // First, try to identify element types from the collection shape
+        // This handles both standard collections and derived collections
+        if (!TryExtractCollectionElements(type, elements))
+        {
+            return false;
+        }
+
+        // If we found elements, this is a collection - now check if it's recoverable
+        // This applies to ALL collection types: interface, abstract, and concrete
+        if (!IsStjRecoverableCollection(type))
+        {
+            // Clear elements to signal this is not a valid collection
+            elements.Clear();
+            return false;
+        }
+
+        return elements.Count > 0;
+    }
+
+    private static bool TryExtractCollectionElements(INamedTypeSymbol type, List<ITypeSymbol> elements)
+    {
+        // Check the type itself and all its base types/interfaces for collection patterns
+        var visited = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        return TryExtractElementsRecursive(type, elements, visited);
+    }
+
+    private static bool TryExtractElementsRecursive(ITypeSymbol type, List<ITypeSymbol> elements, HashSet<ITypeSymbol> visited)
+    {
+        if (type is null || !visited.Add(type))
+        {
+            return false;
+        }
+
+        if (type is INamedTypeSymbol namedType)
+        {
+            // Check if this type is a generic collection
+            if (namedType.IsGenericType)
+            {
+                var name = namedType.Name;
+                var ns = namedType.ContainingNamespace?.ToDisplayString();
+
+                // Single-parameter collections
+                if (namedType.TypeArguments.Length == 1 && IsSingleParamCollectionName(name, ns))
+                {
+                    elements.Add(namedType.TypeArguments[0]);
+                    return true;
+                }
+
+                // Two-parameter collections (dictionaries)
+                if (namedType.TypeArguments.Length == 2 && IsTwoParamCollectionName(name, ns))
+                {
+                    elements.Add(namedType.TypeArguments[0]); // key
+                    elements.Add(namedType.TypeArguments[1]); // value
+                    return true;
+                }
+            }
+
+            // Check interfaces
+            foreach (var iface in namedType.AllInterfaces)
+            {
+                if (TryExtractElementsRecursive(iface, elements, visited))
+                {
+                    return true;
+                }
+            }
+
+            // Check base type
+            if (namedType.BaseType is not null)
+            {
+                if (TryExtractElementsRecursive(namedType.BaseType, elements, visited))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsSingleParamCollectionName(string name, string? ns)
+    {
+        if (ns != "System.Collections.Generic" && ns != "System.Collections")
+        {
+            return false;
+        }
+
+        return name is "IEnumerable" or "ICollection" or "IList" 
+            or "IReadOnlyCollection" or "IReadOnlyList" or "List"
+            or "HashSet" or "SortedSet" or "Queue" or "Stack"
+            or "LinkedList" or "Collection" or "ObservableCollection";
+    }
+
+    private static bool IsTwoParamCollectionName(string name, string? ns)
+    {
+        if (ns != "System.Collections.Generic")
+        {
+            return false;
+        }
+
+        return name is "IDictionary" or "IReadOnlyDictionary" or "Dictionary" 
+            or "SortedDictionary" or "SortedList" or "ConcurrentDictionary";
+    }
+
+    private static bool IsStjRecoverableCollection(INamedTypeSymbol type)
+    {
+        // STJ can recover:
+        // 1. Standard collection interfaces (IEnumerable, IList, etc.)
+        // 2. Standard concrete collections (List, Dictionary, HashSet, etc.)
+        // 3. Non-abstract types that derive from standard concrete collections AND have a parameterless constructor
+        
+        var name = type.Name;
+        var ns = type.ContainingNamespace?.ToDisplayString();
+
+        // Check if this is a standard collection type (interface or concrete)
+        if (ns == "System.Collections.Generic" || ns == "System.Collections")
+        {
+            // Standard interfaces
+            if (name is "IEnumerable" or "ICollection" or "IList" 
+                or "IReadOnlyCollection" or "IReadOnlyList"
+                or "IDictionary" or "IReadOnlyDictionary")
+            {
+                return true;
+            }
+
+            // Standard concrete collections
+            if (name is "List" or "HashSet" or "SortedSet" or "Queue" or "Stack"
+                or "LinkedList" or "Collection" or "ObservableCollection"
+                or "Dictionary" or "SortedDictionary" or "SortedList" or "ConcurrentDictionary")
+            {
+                return true;
+            }
+        }
+
+        // Check if this type derives from a recoverable concrete collection
+        var baseType = type.BaseType;
+        var derivesFromStandardCollection = false;
+        
+        while (baseType is not null)
+        {
+            var baseName = baseType.Name;
+            var baseNs = baseType.ContainingNamespace?.ToDisplayString();
+            
+            if ((baseNs == "System.Collections.Generic" || baseNs == "System.Collections")
+                && baseName is "List" or "HashSet" or "SortedSet" or "Queue" or "Stack"
+                    or "LinkedList" or "Collection" or "ObservableCollection"
+                    or "Dictionary" or "SortedDictionary" or "SortedList" or "ConcurrentDictionary")
+            {
+                derivesFromStandardCollection = true;
+                break;
+            }
+            
+            baseType = baseType.BaseType;
+        }
+
+        if (!derivesFromStandardCollection)
+        {
+            return false;
+        }
+
+        // For derived types, verify they can actually be instantiated:
+        // 1. Must not be abstract
+        if (type.IsAbstract)
+        {
+            return false;
+        }
+
+        // 2. Must have a public parameterless constructor (implicit or explicit)
+        // STJ source generators require public accessibility to instantiate types during deserialization
+        var hasPublicParameterlessCtor = type.InstanceConstructors.Any(c =>
+            c.Parameters.Length == 0 && c.DeclaredAccessibility == Accessibility.Public);
+        return hasPublicParameterlessCtor;
+    }
+
+    private static bool IsUnrecoverableCollection(INamedTypeSymbol type)
+    {
+        // Exclude scalar types that happen to implement IEnumerable (like string)
+        // Check by SpecialType or by well-known type names
+        if (type.SpecialType == SpecialType.System_String ||
+            type.SpecialType != SpecialType.None)
+        {
+            return false;
+        }
+
+        // Also check by display name for types not covered by SpecialType
+        var displayName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        if (ClosedScalars.Contains(displayName))
+        {
+            return false;
+        }
+
+        // Check if this type implements IEnumerable<T> or IEnumerable
+        // but is not a recoverable collection
+        var implementsEnumerable = false;
+        
+        foreach (var iface in type.AllInterfaces)
+        {
+            var ifaceName = iface.Name;
+            var ifaceNs = iface.ContainingNamespace?.ToDisplayString();
+            
+            if (ifaceNs == "System.Collections.Generic" && ifaceName == "IEnumerable")
+            {
+                implementsEnumerable = true;
+                break;
+            }
+            
+            if (ifaceNs == "System.Collections" && ifaceName == "IEnumerable")
+            {
+                implementsEnumerable = true;
+                break;
+            }
+        }
+
+        if (!implementsEnumerable)
+        {
+            return false;
+        }
+
+        // It implements IEnumerable - check if it's recoverable
+        return !IsStjRecoverableCollection(type);
+    }
+
+    private static IEnumerable<INamedTypeSymbol> EnumerateSelfAndInterfaces(INamedTypeSymbol type)
+    {
+        if (type.TypeKind == TypeKind.Interface)
+        {
+            yield return type;
+        }
+
+        foreach (var @interface in type.AllInterfaces)
+        {
+            yield return @interface;
+        }
+    }
+
+    private static IEnumerable<ITypeSymbol> GetJsonDerivedTypes(INamedTypeSymbol type)
+    {
+        foreach (var attribute in type.GetAttributes())
+        {
+            if (attribute.AttributeClass?.ToDisplayString() != JsonDerivedTypeAttribute)
+            {
+                continue;
+            }
+
+            foreach (var argument in attribute.ConstructorArguments)
+            {
+                if (argument.Value is ITypeSymbol derived)
+                {
+                    yield return derived;
+                }
+            }
+        }
+    }
+
+    private static bool HasValidPolymorphicDiscriminator(INamedTypeSymbol type)
+    {
+        // Every [JsonDerivedType] must have a discriminator tag. TypeDiscriminatorPropertyName
+        // alone only defines WHERE the discriminator is written, not that each branch has one.
+        var derivedAttrs = type.GetAttributes()
+            .Where(a => a.AttributeClass?.ToDisplayString() == JsonDerivedTypeAttribute)
+            .ToList();
+
+        if (derivedAttrs.Count == 0)
+        {
+            return false;
+        }
+
+        // Track tags to ensure uniqueness
+        var seenStringTags = new HashSet<string>();
+        var seenIntTags = new HashSet<int>();
+
+        foreach (var attr in derivedAttrs)
+        {
+            // [JsonDerivedType(typeof(Derived))] - no discriminator
+            // [JsonDerivedType(typeof(Derived), "tag")] - string discriminator
+            // [JsonDerivedType(typeof(Derived), 1)] - int discriminator
+            if (attr.ConstructorArguments.Length < 2)
+            {
+                return false;
+            }
+
+            var tag = attr.ConstructorArguments[1].Value;
+            if (tag is string strTag)
+            {
+                if (string.IsNullOrEmpty(strTag))
+                {
+                    return false;
+                }
+                // Check for duplicate string tags
+                if (!seenStringTags.Add(strTag))
+                {
+                    return false;
+                }
+                continue;
+            }
+            if (tag is int intTag)
+            {
+                // Check for duplicate int tags
+                if (!seenIntTags.Add(intTag))
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            // Invalid tag type
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsAlwaysIgnored(ISymbol symbol)
+    {
+        var attribute = symbol.GetAttributes()
+            .FirstOrDefault(candidate => candidate.AttributeClass?.ToDisplayString() == JsonIgnoreAttribute);
+
+        if (attribute is null)
+        {
+            return false;
+        }
+
+        // No arguments at all → defaults to Always.
+        if (attribute.ConstructorArguments.Length == 0 && attribute.NamedArguments.Length == 0)
+        {
+            return true;
+        }
+
+        // Check constructor argument: [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
+        // JsonIgnoreCondition.Always = 0
+        if (attribute.ConstructorArguments.Length > 0)
+        {
+            var arg = attribute.ConstructorArguments[0];
+            if (IsJsonIgnoreAlways(arg))
+            {
+                return true;
+            }
+        }
+
+        // Check named argument: [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
+        foreach (var named in attribute.NamedArguments)
+        {
+            if (named.Key == "Condition" && IsJsonIgnoreAlways(named.Value))
+            {
+                return true;
+            }
+        }
+
+        // Any other argument → conditional (not Always).
+        return false;
+    }
+
+    private static bool IsJsonIgnoreAlways(TypedConstant constant)
+    {
+        // Enum values in Roslyn can be represented as:
+        // 1. The underlying numeric value (int, byte, short, etc.)
+        // 2. An IFieldSymbol representing the enum member
+        
+        if (constant.Value is null || constant.Type is null)
+        {
+            return false;
+        }
+
+        // Check if the type is actually resolved (not an error type)
+        if (constant.Type.TypeKind == TypeKind.Error)
+        {
+            // Enum not resolved - can't determine the value
+            return false;
+        }
+
+        // Case 1: IFieldSymbol representing the enum member
+        if (constant.Value is IFieldSymbol fieldSymbol)
+        {
+            return fieldSymbol.Name == "Always";
+        }
+
+        // Case 2: underlying numeric value - try all common numeric types
+        // JsonIgnoreCondition: Never=0, Always=1, WhenWritingNull=2, WhenWritingDefault=3
+        return constant.Value switch
+        {
+            int i => i == 1,
+            byte b => b == 1,
+            short s => s == 1,
+            long l => l == 1,
+            _ => false
+        };
+    }
+
+    private static bool HasAttribute(ISymbol symbol, string attributeMetadataName)
+        => symbol.GetAttributes().Any(candidate => candidate.AttributeClass?.ToDisplayString() == attributeMetadataName);
+}

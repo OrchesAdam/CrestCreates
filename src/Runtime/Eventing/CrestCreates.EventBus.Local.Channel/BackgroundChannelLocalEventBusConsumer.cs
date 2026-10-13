@@ -1,32 +1,38 @@
 using System;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.EventBus.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace CrestCreates.EventBus.Local.Channel;
 
+/// <summary>
+/// Background consumer of the channel queue. Each event dispatches in a fresh scope through the
+/// unified dispatcher; a handler failure is recorded through the shared typed failure recorder
+/// and the loop continues — in contrast to the synchronous bus it never rethrows to a caller.
+/// </summary>
 public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
 {
     private readonly ChannelLocalEventQueue _queue;
     private readonly IServiceScopeFactory _serviceScopeFactory;
-    private readonly ILogger<BackgroundChannelLocalEventBusConsumer> _logger;
-    private readonly LocalDeadLetterOptions _deadLetterOptions;
+    private readonly ILocalEventDispatchRegistry _registry;
+    private readonly ILocalEventFailureRecorder? _recorder;
+    private readonly ILogger<BackgroundChannelLocalEventBusConsumer>? _logger;
 
     public BackgroundChannelLocalEventBusConsumer(
         ChannelLocalEventQueue queue,
         IServiceScopeFactory serviceScopeFactory,
-        ILogger<BackgroundChannelLocalEventBusConsumer> logger,
-        IOptions<LocalDeadLetterOptions> deadLetterOptions)
+        ILocalEventDispatchRegistry registry,
+        ILocalEventFailureRecorder? recorder = null,
+        ILogger<BackgroundChannelLocalEventBusConsumer>? logger = null)
     {
         _queue = queue;
         _serviceScopeFactory = serviceScopeFactory;
+        _registry = registry;
+        _recorder = recorder;
         _logger = logger;
-        _deadLetterOptions = deadLetterOptions.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -35,7 +41,7 @@ public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
         {
             await foreach (var @event in _queue.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
-                await ProcessEventAsync(@event, stoppingToken);
+                await ProcessEventAsync(@event, stoppingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -43,52 +49,57 @@ public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
         }
     }
 
-    private async Task ProcessEventAsync(ILocalEvent @event, CancellationToken cancellationToken)
+    private async Task ProcessEventAsync(ILocalEvent @event, CancellationToken stoppingToken)
     {
         try
         {
             await using var scope = _serviceScopeFactory.CreateAsyncScope();
             var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
-            await dispatcher.DispatchAsync(@event, cancellationToken);
+            await dispatcher.DispatchAsync(@event, stoppingToken).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            _logger.LogError(ex, "Error processing local event of type {EventType}", @event.GetType().Name);
+            // Shutdown: do not record a dead letter for a canceled dispatch.
+        }
+        catch (Exception failure)
+        {
+            _logger?.LogError(failure, "Error processing local event of type {EventType}", @event.GetType().Name);
 
-            // Try to enqueue to DLQ if available
+            if (_recorder is null || stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (!_registry.TryGet(@event.GetType(), out var binding))
+            {
+                _logger?.LogWarning(
+                    "Failed local event '{EventType}' has no dispatch registration; nothing was recorded.",
+                    @event.GetType().FullName);
+                return;
+            }
+
             try
             {
-                await using var scope = _serviceScopeFactory.CreateAsyncScope();
-                var deadLetterStore = scope.ServiceProvider.GetService<IDeadLetterStore>();
-                if (deadLetterStore is not null)
+                var outcome = await _recorder
+                    .TryRecordAsync(binding, @event, failure, stoppingToken)
+                    .ConfigureAwait(false);
+
+                if (outcome.Recorded)
                 {
-                    var eventType = @event.GetType();
-                    var payload = JsonSerializer.SerializeToUtf8Bytes(@event, eventType);
-
-                    var message = new DeadLetterMessage(
-                        MessageId: Guid.NewGuid().ToString("N"),
-                        EventName: eventType.Name,
-                        EventVersion: 1,
-                        EventDescriptorId: null,
-                        CorrelationId: null,
-                        TenantId: null,
-                        Scope: CrestCreates.Event.Abstractions.EventScope.Local,
-                        PayloadTypeFullName: eventType.AssemblyQualifiedName!,
-                        Payload: payload,
-                        ErrorMessage: ex.Message,
-                        ExceptionType: ex.GetType().FullName,
-                        OccurredAt: DateTime.UtcNow,
-                        FailedAt: DateTime.UtcNow,
-                        RetryCount: 0,
-                        MaxRetries: _deadLetterOptions.MaxRetries,
-                        Status: DeadLetterStatus.Pending);
-
-                    await deadLetterStore.EnqueueAsync(message, cancellationToken);
+                    _logger?.LogInformation(
+                        "Recorded failed channel local event '{EventName}' to the dead-letter store.",
+                        binding.LocalName);
+                }
+                else if (outcome.Problem is not null)
+                {
+                    _logger?.LogWarning(
+                        "Channel local event '{EventName}' failed and was not recorded to the dead-letter store: {Problem}",
+                        binding.LocalName, outcome.Problem);
                 }
             }
-            catch (Exception dlqEx)
+            catch (Exception recordFailure)
             {
-                _logger.LogError(dlqEx, "Failed to enqueue event to dead letter store");
+                _logger?.LogError(recordFailure, "Failed to record event to dead letter store");
             }
         }
     }

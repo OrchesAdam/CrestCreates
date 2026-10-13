@@ -21,7 +21,9 @@ public class InMemoryDeadLetterStore : IDeadLetterStore
 
     public Task EnqueueAsync(DeadLetterMessage message, CancellationToken ct)
     {
-        if (_messages.Count >= _options.MaxQueueSize)
+        // Capacity limits new records only; same-key state updates (retry state transitions)
+        // must never be blocked by a full queue.
+        if (!_messages.ContainsKey(message.MessageId) && _messages.Count >= _options.MaxQueueSize)
             throw new InvalidOperationException(
                 $"Dead letter queue is full (max size: {_options.MaxQueueSize}). " +
                 "Message cannot be enqueued. Consider increasing MaxQueueSize or clearing processed messages.");

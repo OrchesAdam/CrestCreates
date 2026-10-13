@@ -157,11 +157,7 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
 
-        services.AddSingleton<LocalEventBusOptions>();
-        services.AddScoped<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-        services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
-        services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
-        services.AddScoped<CrestCreates.Domain.DomainEvents.IDomainEventPublisher, DomainEventPublisher>();
+        services.AddCrestLocalEventDispatch();
 
         services.AddMultiTenancy(mtOptions =>
         {

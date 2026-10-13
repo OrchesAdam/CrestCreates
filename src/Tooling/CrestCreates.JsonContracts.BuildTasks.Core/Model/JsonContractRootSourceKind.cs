@@ -9,4 +9,5 @@ public enum JsonContractRootSourceKind
     McpToolInput,
     McpToolOutput,
     Explicit,
+    LocalEvent,
 }

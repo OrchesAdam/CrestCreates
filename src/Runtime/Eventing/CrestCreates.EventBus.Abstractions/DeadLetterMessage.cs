@@ -19,7 +19,7 @@ public sealed record DeadLetterMessage(
     string? CorrelationId,         // distributed tracing correlation id
     string? TenantId,              // multi-tenant DLQ dashboard
     EventScope Scope,
-    string PayloadTypeFullName,    // survives assembly version changes
+    string PayloadTypeFullName,    // survives assembly version changes; diagnostic/compat only, never a type-resolution instruction
     byte[] Payload,
     string ErrorMessage,
     string? ExceptionType,         // typeof(TimeoutException).FullName
@@ -27,7 +27,8 @@ public sealed record DeadLetterMessage(
     DateTime FailedAt,             // when the handler failed
     int RetryCount,
     int MaxRetries,
-    DeadLetterStatus Status
+    DeadLetterStatus Status,
+    string? LocalReplayKey = null  // compile-time local replay lookup key; null on pre-migration records
 )
 {
     /// <summary>

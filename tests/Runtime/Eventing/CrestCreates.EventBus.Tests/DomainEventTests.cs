@@ -112,9 +112,7 @@ namespace CrestCreates.EventBus.Tests
         {
             var services = new ServiceCollection();
             services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-            services.AddSingleton<ILocalEventDispatcher, DefaultLocalEventDispatcher>();
-            services.AddSingleton<ILocalEventBus, DefaultLocalEventBus>();
-            services.AddSingleton<IDomainEventPublisher, DomainEventPublisher>();
+            services.AddCrestLocalEventDispatch(builder => builder.Declare<TestLocalEvent>());
             configure?.Invoke(services);
             return services.BuildServiceProvider();
         }

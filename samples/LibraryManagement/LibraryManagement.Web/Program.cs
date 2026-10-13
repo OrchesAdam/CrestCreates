@@ -71,9 +71,7 @@ builder.Services.AddTenantManagement();
 builder.Services.AddTenantBootstrapper();
 builder.Services.AddTenantManagementCore();
 
-builder.Services.AddScoped<ILocalEventBus, DefaultLocalEventBus>();
-builder.Services.AddScoped<CrestCreates.EventBus.Abstract.IEventBus, DefaultLocalEventBus>();
-builder.Services.AddScoped<IDomainEventPublisher, DomainEventPublisher>();
+builder.Services.AddCrestLocalEventDispatch();
 builder.Services.AddMultiTenancy(options =>
 {
     options.ResolutionStrategy = TenantResolutionStrategy.Header;
