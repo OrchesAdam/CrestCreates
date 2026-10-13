@@ -21,20 +21,21 @@ internal static class LocalEventJsonClosureValidator
     private const string JsonIgnoreAttribute = "System.Text.Json.Serialization.JsonIgnoreAttribute";
     private const string JsonConverterAttribute = "System.Text.Json.Serialization.JsonConverterAttribute";
     private const string JsonDerivedTypeAttribute = "System.Text.Json.Serialization.JsonDerivedTypeAttribute";
+    private const string JsonPolymorphicAttribute = "System.Text.Json.Serialization.JsonPolymorphicAttribute";
     private const string JsonIncludeAttribute = "System.Text.Json.Serialization.JsonIncludeAttribute";
 
     private static readonly HashSet<string> ClosedScalars = new(StringComparer.Ordinal)
     {
-        "System.String",
-        "System.Boolean", "System.Byte", "System.SByte",
-        "System.Int16", "System.UInt16", "System.Int32", "System.UInt32",
-        "System.Int64", "System.UInt64", "System.Single", "System.Double",
-        "System.Decimal", "System.Char",
-        "System.Guid", "System.DateTime", "System.DateTimeOffset",
-        "System.TimeSpan", "System.DateOnly", "System.TimeOnly",
-        "System.Uri", "System.Version",
-        "System.Numerics.BigInteger",
-        "System.Text.Json.JsonElement", "System.Text.Json.JsonDocument", "System.Text.Json.Nodes.JsonNode",
+        "global::System.String",
+        "global::System.Boolean", "global::System.Byte", "global::System.SByte",
+        "global::System.Int16", "global::System.UInt16", "global::System.Int32", "global::System.UInt32",
+        "global::System.Int64", "global::System.UInt64", "global::System.Single", "global::System.Double",
+        "global::System.Decimal", "global::System.Char",
+        "global::System.Guid", "global::System.DateTime", "global::System.DateTimeOffset",
+        "global::System.TimeSpan", "global::System.DateOnly", "global::System.TimeOnly",
+        "global::System.Uri", "global::System.Version",
+        "global::System.Numerics.BigInteger",
+        "global::System.Text.Json.JsonElement", "global::System.Text.Json.JsonDocument", "global::System.Text.Json.Nodes.JsonNode",
     };
 
     /// <summary>
@@ -101,13 +102,36 @@ internal static class LocalEventJsonClosureValidator
             return null;
         }
 
-        // An explicit [JsonDerivedType] hierarchy closes a polymorphic base; recurse into the
-        // declared derived types so their own members are validated too.
+        // An explicit [JsonDerivedType] hierarchy closes a polymorphic base ONLY if it has a
+        // valid discriminator for round-trip. Check for [JsonPolymorphic] with TypeDiscriminatorPropertyName
+        // OR derived types with discriminator tags.
         if (HasAttribute(type, JsonDerivedTypeAttribute))
         {
+            if (!HasValidPolymorphicDiscriminator(type))
+            {
+                return $"{path} ({type.ToDisplayString()} has [JsonDerivedType] but no valid discriminator for round-trip; " +
+                       "add [JsonPolymorphic(TypeDiscriminatorPropertyName = ...)] or discriminator tags to [JsonDerivedType])";
+            }
+
             foreach (var derived in GetJsonDerivedTypes(type))
             {
                 var offender = Inspect(derived, path + "/" + derived.Name, visiting, depth + 1);
+                if (offender is not null)
+                {
+                    return offender;
+                }
+            }
+
+            return null;
+        }
+
+        // Collection interfaces (IReadOnlyList<T>, IEnumerable<T>, IDictionary<K,V>, etc.) are closed
+        // if their element types are closed. Check this BEFORE rejecting interfaces.
+        if (TryGetEnumerableElements(type, out var elements))
+        {
+            foreach (var element in elements)
+            {
+                var offender = Inspect(element, path + "[]", visiting, depth + 1);
                 if (offender is not null)
                 {
                     return offender;
@@ -125,20 +149,6 @@ internal static class LocalEventJsonClosureValidator
         if (type.IsAbstract)
         {
             return $"{path} ({type.ToDisplayString()} is abstract with no closed [JsonDerivedType] contract)";
-        }
-
-        if (TryGetEnumerableElements(type, out var elements))
-        {
-            foreach (var element in elements)
-            {
-                var offender = Inspect(element, path + "[]", visiting, depth + 1);
-                if (offender is not null)
-                {
-                    return offender;
-                }
-            }
-
-            return null;
         }
 
         if (type.IsImplicitlyDeclared && type.BaseType is not null)
@@ -189,7 +199,7 @@ internal static class LocalEventJsonClosureValidator
                 continue;
             }
 
-            if (HasAttribute(member, JsonIgnoreAttribute) || HasAttribute(member, JsonConverterAttribute))
+            if (IsAlwaysIgnored(member) || HasAttribute(member, JsonConverterAttribute))
             {
                 continue;
             }
@@ -290,6 +300,72 @@ internal static class LocalEventJsonClosureValidator
                 }
             }
         }
+    }
+
+    private static bool HasValidPolymorphicDiscriminator(INamedTypeSymbol type)
+    {
+        // Check for [JsonPolymorphic(TypeDiscriminatorPropertyName = "...")]
+        var polymorphicAttr = type.GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == JsonPolymorphicAttribute);
+        if (polymorphicAttr is not null)
+        {
+            foreach (var named in polymorphicAttr.NamedArguments)
+            {
+                if (named.Key == "TypeDiscriminatorPropertyName" && named.Value.Value is string propName && !string.IsNullOrEmpty(propName))
+                {
+                    return true;
+                }
+            }
+        }
+
+        // Check if any [JsonDerivedType] has a discriminator tag (second or third constructor argument)
+        foreach (var attr in type.GetAttributes())
+        {
+            if (attr.AttributeClass?.ToDisplayString() != JsonDerivedTypeAttribute)
+            {
+                continue;
+            }
+
+            // [JsonDerivedType(typeof(Derived))] - no discriminator
+            // [JsonDerivedType(typeof(Derived), "tag")] - string discriminator
+            // [JsonDerivedType(typeof(Derived), 1)] - int discriminator
+            if (attr.ConstructorArguments.Length >= 2)
+            {
+                var tag = attr.ConstructorArguments[1].Value;
+                if (tag is string strTag && !string.IsNullOrEmpty(strTag))
+                {
+                    return true;
+                }
+                if (tag is int)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsAlwaysIgnored(ISymbol symbol)
+    {
+        var attribute = symbol.GetAttributes()
+            .FirstOrDefault(candidate => candidate.AttributeClass?.ToDisplayString() == JsonIgnoreAttribute);
+
+        if (attribute is null)
+        {
+            return false;
+        }
+
+        // No arguments at all → defaults to Always.
+        if (attribute.ConstructorArguments.Length == 0 && attribute.NamedArguments.Length == 0)
+        {
+            return true;
+        }
+
+        // Has any arguments → assume it's conditional (not Always).
+        // This is conservative: we can't reliably parse enum values in all test scenarios,
+        // so we treat any argument as "not unconditionally ignored".
+        return false;
     }
 
     private static bool HasAttribute(ISymbol symbol, string attributeMetadataName)

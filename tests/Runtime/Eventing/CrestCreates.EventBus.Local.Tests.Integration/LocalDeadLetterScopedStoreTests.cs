@@ -126,6 +126,49 @@ public class LocalDeadLetterScopedStoreTests
     }
 
     [Fact]
+    public async Task ScopedEfStore_SecondRetryOnSameManagerScope_RejectsAfterFirstSuccess()
+    {
+        var control = new HandlerControl { ShouldFail = false };
+        using var provider = BuildScopedEfComposition(
+            declare: builder => builder.Declare<ReplayableFailingEvent>(replayable: true),
+            configure: services =>
+            {
+                services.AddSingleton(control);
+                services.AddScoped<ILocalEventHandler<ReplayableFailingEvent>, ReplayableFailingHandler>();
+            });
+
+        var payload = LocalEventTestComposition.SerializeWithCodec(new ReplayableFailingEvent());
+        var message = LocalEventTestComposition.CreateModernMessage<ReplayableFailingEvent>(
+            payload, LocalEventIdentity.BuildLocalReplayKey(typeof(ReplayableFailingEvent)));
+
+        using (var seedScope = provider.CreateScope())
+        {
+            await seedScope.ServiceProvider.GetRequiredService<IDeadLetterStore>()
+                .EnqueueAsync(message, CancellationToken.None);
+        }
+
+        // First retry succeeds; handler runs once.
+        DeadLetterRetryResult firstResult;
+        using (var replayScope = provider.CreateScope())
+        {
+            var manager = replayScope.ServiceProvider.GetRequiredService<ILocalDeadLetterManager>();
+            firstResult = await manager.RetryAsync(message.MessageId);
+
+            // Second retry on the same manager scope must reject; handler must not run again.
+            var secondResult = await manager.RetryAsync(message.MessageId);
+            secondResult.Success.Should().BeFalse("message is already Retried; second attempt must be rejected");
+        }
+
+        firstResult.Success.Should().BeTrue(firstResult.ErrorMessage);
+        control.Calls.Should().Be(1, "handler must execute exactly once across both attempts");
+
+        using var verifyScope = provider.CreateScope();
+        var store = verifyScope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
+        (await store.GetByIdAsync(message.MessageId, CancellationToken.None))!.Status
+            .Should().Be(DeadLetterStatus.Retried);
+    }
+
+    [Fact]
     public async Task ScopedEfStore_BackgroundBatch_TransitionsToRetried()
     {
         var control = new HandlerControl { ShouldFail = false };

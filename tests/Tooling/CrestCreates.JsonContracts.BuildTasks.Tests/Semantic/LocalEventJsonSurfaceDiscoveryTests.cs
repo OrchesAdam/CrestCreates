@@ -338,7 +338,8 @@ public class LocalEventJsonSurfaceDiscoveryTests : JsonContractCompilationTestBa
 
                 namespace MyApp;
 
-                [JsonDerivedType(typeof(CatPayload))]
+                [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+                [JsonDerivedType(typeof(CatPayload), "cat")]
                 public abstract class AnimalPayload { }
 
                 public sealed class CatPayload : AnimalPayload
@@ -373,7 +374,8 @@ public class LocalEventJsonSurfaceDiscoveryTests : JsonContractCompilationTestBa
 
                 namespace MyApp;
 
-                [JsonDerivedType(typeof(CatPayload))]
+                [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+                [JsonDerivedType(typeof(CatPayload), "cat")]
                 public abstract class AnimalPayload { }
 
                 public sealed class CatPayload : AnimalPayload
@@ -395,5 +397,300 @@ public class LocalEventJsonSurfaceDiscoveryTests : JsonContractCompilationTestBa
         roots.Should().BeEmpty();
         discovery.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Id == "CJC017" && diagnostic.Message.Contains("LooseValue"));
+    }
+
+    [Fact]
+    public void Discover_JsonIgnoreNever_OnObjectMember_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Serialization;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ConditionalIgnoreEvent
+                {
+                    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+                    public object Payload { get; set; } = new object();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Payload"));
+    }
+
+    [Fact]
+    public void Discover_JsonIgnoreWhenWritingNull_OnObjectMember_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Serialization;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ConditionalIgnoreEvent
+                {
+                    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+                    public object? Payload { get; set; }
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Payload"));
+    }
+
+    [Fact]
+    public void Discover_JsonIgnoreWhenWritingDefault_OnObjectMember_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Serialization;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ConditionalIgnoreEvent
+                {
+                    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+                    public object? Payload { get; set; }
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Payload"));
+    }
+
+    [Fact]
+    public void Discover_PolymorphicWithValidDiscriminator_ProducesRoot()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Serialization;
+
+                namespace MyApp;
+
+                [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+                [JsonDerivedType(typeof(CatPayload), "cat")]
+                public abstract class AnimalPayload { }
+
+                public sealed class CatPayload : AnimalPayload
+                {
+                    public string Name { get; set; } = string.Empty;
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class PolymorphicEvent
+                {
+                    public AnimalPayload Payload { get; set; } = new CatPayload();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        discovery.Diagnostics.Should().BeEmpty();
+        roots.Should().ContainSingle(root => root.FullMetadataName.Contains("PolymorphicEvent"));
+    }
+
+    [Fact]
+    public void Discover_PolymorphicWithoutDiscriminator_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Serialization;
+
+                namespace MyApp;
+
+                [JsonDerivedType(typeof(CatPayload))]
+                public abstract class AnimalPayload { }
+
+                public sealed class CatPayload : AnimalPayload
+                {
+                    public string Name { get; set; } = string.Empty;
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class PolymorphicEvent
+                {
+                    public AnimalPayload Payload { get; set; } = new CatPayload();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("discriminator"));
+    }
+
+    [Fact]
+    public void Discover_JsonNodeMember_ProducesRoot()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Nodes;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class JsonNodeEvent
+                {
+                    public JsonNode Data { get; set; } = new JsonObject();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        discovery.Diagnostics.Should().BeEmpty();
+        roots.Should().ContainSingle(root => root.FullMetadataName.Contains("JsonNodeEvent"));
+    }
+
+    [Fact]
+    public void Discover_ReadOnlyListOfString_ProducesRoot()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class CollectionEvent
+                {
+                    public IReadOnlyList<string> Tags { get; set; } = new List<string>();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        discovery.Diagnostics.Should().BeEmpty();
+        roots.Should().ContainSingle(root => root.FullMetadataName.Contains("CollectionEvent"));
+    }
+
+    [Fact]
+    public void Discover_EnumerableOfInt_ProducesRoot()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class EnumerableEvent
+                {
+                    public IEnumerable<int> Numbers { get; set; } = new List<int>();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        discovery.Diagnostics.Should().BeEmpty();
+        roots.Should().ContainSingle(root => root.FullMetadataName.Contains("EnumerableEvent"));
+    }
+
+    [Fact]
+    public void Discover_DictionaryOfStringToInt_ProducesRoot()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class DictionaryEvent
+                {
+                    public IDictionary<string, int> Counts { get; set; } = new Dictionary<string, int>();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        discovery.Diagnostics.Should().BeEmpty();
+        roots.Should().ContainSingle(root => root.FullMetadataName.Contains("DictionaryEvent"));
+    }
+
+    [Fact]
+    public void Discover_ReadOnlyListOfObject_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class OpenCollectionEvent
+                {
+                    public IReadOnlyList<object> Items { get; set; } = new List<object>();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items[]"));
     }
 }

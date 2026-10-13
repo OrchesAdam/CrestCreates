@@ -42,6 +42,19 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         // Pre-execution cancellation leaves the message state untouched.
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Re-read the current persisted state to avoid stale EF tracking cache from the caller's scope.
+        // Each attempt must see the current state, not a cached snapshot.
+        await using (var readScope = _scopeFactory.CreateAsyncScope())
+        {
+            var freshStore = readScope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
+            var freshMessage = await freshStore.GetByIdAsync(message.MessageId, cancellationToken);
+            if (freshMessage is null)
+            {
+                return Reject(message, $"message {message.MessageId} no longer exists in the store.");
+            }
+            message = freshMessage;
+        }
+
         if (message.MaxRetries < 1)
         {
             return Reject(message,
