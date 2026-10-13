@@ -693,4 +693,143 @@ public class LocalEventJsonSurfaceDiscoveryTests : JsonContractCompilationTestBa
         discovery.Diagnostics.Should().Contain(diagnostic =>
             diagnostic.Id == "CJC017" && diagnostic.Message.Contains("Items[]"));
     }
+
+    [Fact]
+    public void Discover_JsonIgnoreExplicitAlways_OnObjectMember_IsAllowed()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Serialization;
+
+                namespace MyApp;
+
+                [LocalEvent(Replayable = true)]
+                public sealed class ExplicitAlwaysIgnoreEvent
+                {
+                    [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
+                    public object Ignored { get; set; } = new object();
+
+                    public string Kept { get; set; } = string.Empty;
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        discovery.Diagnostics.Should().BeEmpty();
+        roots.Should().ContainSingle(root => root.FullMetadataName.Contains("ExplicitAlwaysIgnoreEvent"));
+    }
+
+    [Fact]
+    public void Discover_PolymorphicWithOnlyPropertyName_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Serialization;
+
+                namespace MyApp;
+
+                [JsonPolymorphic(TypeDiscriminatorPropertyName = "$kind")]
+                [JsonDerivedType(typeof(CatPayload))]
+                public abstract class AnimalPayload { }
+
+                public sealed class CatPayload : AnimalPayload
+                {
+                    public string Name { get; set; } = string.Empty;
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class PolymorphicEvent
+                {
+                    public AnimalPayload Payload { get; set; } = new CatPayload();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("discriminator"));
+    }
+
+    [Fact]
+    public void Discover_PolymorphicWithMixedTags_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Text.Json.Serialization;
+
+                namespace MyApp;
+
+                [JsonDerivedType(typeof(CatPayload), "cat")]
+                [JsonDerivedType(typeof(DogPayload))]
+                public abstract class AnimalPayload { }
+
+                public sealed class CatPayload : AnimalPayload
+                {
+                    public string Name { get; set; } = string.Empty;
+                }
+
+                public sealed class DogPayload : AnimalPayload
+                {
+                    public string Name { get; set; } = string.Empty;
+                }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class PolymorphicEvent
+                {
+                    public AnimalPayload Payload { get; set; } = new CatPayload();
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("discriminator"));
+    }
+
+    [Fact]
+    public void Discover_CustomCollectionInterface_Reports_CJC017()
+    {
+        var compilation = CreateCompilation("TestAssembly",
+        [
+            ("Stub.cs", LocalEventStub),
+            ("Events.cs", """
+                using CrestCreates.EventBus.Abstractions;
+                using System.Collections.Generic;
+
+                namespace MyApp;
+
+                public interface ICustomCollection : IEnumerable<int> { }
+
+                [LocalEvent(Replayable = true)]
+                public sealed class CollectionEvent
+                {
+                    public ICustomCollection Items { get; set; } = null!;
+                }
+                """),
+        ]);
+
+        var discovery = new LocalEventJsonSurfaceDiscovery();
+        var roots = discovery.Discover(compilation);
+
+        roots.Should().BeEmpty();
+        discovery.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CJC017" && diagnostic.Message.Contains("interface"));
+    }
 }

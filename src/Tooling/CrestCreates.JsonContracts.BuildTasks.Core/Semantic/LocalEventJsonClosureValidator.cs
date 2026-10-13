@@ -248,26 +248,51 @@ internal static class LocalEventJsonClosureValidator
     private static bool TryGetEnumerableElements(INamedTypeSymbol type, out List<ITypeSymbol> elements)
     {
         elements = new List<ITypeSymbol>();
-        var seen = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
 
-        foreach (var candidate in EnumerateSelfAndInterfaces(type))
+        // Only allow known STJ-supported collection contracts. Custom interfaces that implement
+        // IEnumerable<T> cannot be instantiated by STJ and must be rejected.
+        if (!IsStjSupportedCollectionType(type))
         {
-            if (candidate is not INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } generic)
+            return false;
+        }
+
+        // Extract element types from generic arguments
+        if (type.IsGenericType)
+        {
+            // Single-parameter collections: IEnumerable<T>, ICollection<T>, IList<T>, IReadOnlyCollection<T>, IReadOnlyList<T>, List<T>
+            if (type.TypeArguments.Length == 1)
             {
-                continue;
+                elements.Add(type.TypeArguments[0]);
+                return true;
             }
 
-            if (generic.Name == "IEnumerable"
-                && generic.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic")
+            // Two-parameter collections: IDictionary<K,V>, Dictionary<K,V>, IReadOnlyDictionary<K,V>
+            if (type.TypeArguments.Length == 2)
             {
-                if (seen.Add(generic.TypeArguments[0]))
-                {
-                    elements.Add(generic.TypeArguments[0]);
-                }
+                // For dictionaries, we validate both key and value types
+                elements.Add(type.TypeArguments[0]); // key
+                elements.Add(type.TypeArguments[1]); // value
+                return true;
             }
         }
 
-        return elements.Count > 0;
+        return false;
+    }
+
+    private static bool IsStjSupportedCollectionType(INamedTypeSymbol type)
+    {
+        var name = type.Name;
+        var ns = type.ContainingNamespace?.ToDisplayString();
+
+        if (ns != "System.Collections.Generic")
+        {
+            return false;
+        }
+
+        // Known STJ-supported collection types
+        return name is "IEnumerable" or "ICollection" or "IList" 
+            or "IReadOnlyCollection" or "IReadOnlyList" or "List"
+            or "IDictionary" or "IReadOnlyDictionary" or "Dictionary";
     }
 
     private static IEnumerable<INamedTypeSymbol> EnumerateSelfAndInterfaces(INamedTypeSymbol type)
@@ -304,46 +329,42 @@ internal static class LocalEventJsonClosureValidator
 
     private static bool HasValidPolymorphicDiscriminator(INamedTypeSymbol type)
     {
-        // Check for [JsonPolymorphic(TypeDiscriminatorPropertyName = "...")]
-        var polymorphicAttr = type.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == JsonPolymorphicAttribute);
-        if (polymorphicAttr is not null)
+        // Every [JsonDerivedType] must have a discriminator tag. TypeDiscriminatorPropertyName
+        // alone only defines WHERE the discriminator is written, not that each branch has one.
+        var derivedAttrs = type.GetAttributes()
+            .Where(a => a.AttributeClass?.ToDisplayString() == JsonDerivedTypeAttribute)
+            .ToList();
+
+        if (derivedAttrs.Count == 0)
         {
-            foreach (var named in polymorphicAttr.NamedArguments)
-            {
-                if (named.Key == "TypeDiscriminatorPropertyName" && named.Value.Value is string propName && !string.IsNullOrEmpty(propName))
-                {
-                    return true;
-                }
-            }
+            return false;
         }
 
-        // Check if any [JsonDerivedType] has a discriminator tag (second or third constructor argument)
-        foreach (var attr in type.GetAttributes())
+        foreach (var attr in derivedAttrs)
         {
-            if (attr.AttributeClass?.ToDisplayString() != JsonDerivedTypeAttribute)
+            // [JsonDerivedType(typeof(Derived))] - no discriminator
+            // [JsonDerivedType(typeof(Derived), "tag")] - string discriminator
+            // [JsonDerivedType(typeof(Derived), 1)] - int discriminator
+            if (attr.ConstructorArguments.Length < 2)
+            {
+                return false;
+            }
+
+            var tag = attr.ConstructorArguments[1].Value;
+            if (tag is string strTag && !string.IsNullOrEmpty(strTag))
+            {
+                continue;
+            }
+            if (tag is int)
             {
                 continue;
             }
 
-            // [JsonDerivedType(typeof(Derived))] - no discriminator
-            // [JsonDerivedType(typeof(Derived), "tag")] - string discriminator
-            // [JsonDerivedType(typeof(Derived), 1)] - int discriminator
-            if (attr.ConstructorArguments.Length >= 2)
-            {
-                var tag = attr.ConstructorArguments[1].Value;
-                if (tag is string strTag && !string.IsNullOrEmpty(strTag))
-                {
-                    return true;
-                }
-                if (tag is int)
-                {
-                    return true;
-                }
-            }
+            // Invalid or missing tag
+            return false;
         }
 
-        return false;
+        return true;
     }
 
     private static bool IsAlwaysIgnored(ISymbol symbol)
@@ -362,10 +383,63 @@ internal static class LocalEventJsonClosureValidator
             return true;
         }
 
-        // Has any arguments → assume it's conditional (not Always).
-        // This is conservative: we can't reliably parse enum values in all test scenarios,
-        // so we treat any argument as "not unconditionally ignored".
+        // Check constructor argument: [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
+        // JsonIgnoreCondition.Always = 0
+        if (attribute.ConstructorArguments.Length > 0)
+        {
+            var arg = attribute.ConstructorArguments[0];
+            if (IsJsonIgnoreAlways(arg))
+            {
+                return true;
+            }
+        }
+
+        // Check named argument: [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
+        foreach (var named in attribute.NamedArguments)
+        {
+            if (named.Key == "Condition" && IsJsonIgnoreAlways(named.Value))
+            {
+                return true;
+            }
+        }
+
+        // Any other argument → conditional (not Always).
         return false;
+    }
+
+    private static bool IsJsonIgnoreAlways(TypedConstant constant)
+    {
+        // Enum values in Roslyn can be represented as:
+        // 1. The underlying numeric value (int, byte, short, etc.)
+        // 2. An IFieldSymbol representing the enum member
+        
+        if (constant.Value is null || constant.Type is null)
+        {
+            return false;
+        }
+
+        // Check if the type is actually resolved (not an error type)
+        if (constant.Type.TypeKind == TypeKind.Error)
+        {
+            // Enum not resolved - can't determine the value
+            return false;
+        }
+
+        // Case 1: IFieldSymbol representing the enum member
+        if (constant.Value is IFieldSymbol fieldSymbol)
+        {
+            return fieldSymbol.Name == "Always";
+        }
+
+        // Case 2: underlying numeric value - try all common numeric types
+        return constant.Value switch
+        {
+            int i => i == 0,
+            byte b => b == 0,
+            short s => s == 0,
+            long l => l == 0,
+            _ => false
+        };
     }
 
     private static bool HasAttribute(ISymbol symbol, string attributeMetadataName)
