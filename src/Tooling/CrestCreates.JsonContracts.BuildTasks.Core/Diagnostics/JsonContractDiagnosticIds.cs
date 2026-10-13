@@ -18,5 +18,8 @@ public static class JsonContractDiagnosticIds
     public const string LocalEventInvalidPayload = "CJC015";
     public const string LocalEventInaccessiblePayload = "CJC016";
     public const string LocalEventUnsealedMember = "CJC017";
+    public const string IntegrationEventInvalidPayload = "CJC018";
+    public const string IntegrationEventInaccessiblePayload = "CJC019";
+    public const string IntegrationEventUnsealedMember = "CJC020";
     public const string TransportConflict = "CJC014";
 }

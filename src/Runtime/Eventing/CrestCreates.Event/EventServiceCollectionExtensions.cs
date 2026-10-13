@@ -24,6 +24,20 @@ public static class EventServiceCollectionExtensions
         services.TryAddSingleton<IRegistryValidationEngine<GeneratedEventDescriptor>,
             RegistryValidationEngine<GeneratedEventDescriptor>>();
 
+        // Registry build-time validators (duplicate name+version, active version chains, payload uniqueness).
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRegistryValidator<GeneratedEventDescriptor>,
+            DuplicateNameVersionValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRegistryValidator<GeneratedEventDescriptor>,
+            EventVersionChainValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRegistryValidator<GeneratedEventDescriptor>,
+            UniquePayloadTypeValidator>());
+
+        // Resolver (generated + dynamic). The shared IEventValidator slot stays untouched: transports
+        // own their canonical validation boundary (RabbitMQ constructs its own RegistryEventValidator),
+        // and plain LocalEvent hosts keep their existing no-governance default.
+        services.TryAddSingleton<IDynamicEventRegistry, DynamicEventRegistry>();
+        services.TryAddSingleton<IEventResolver, EventResolver>();
+
         // Binding Status Contributor
         services.AddSingleton<IDescriptorBindingStatusContributor, EventBindingStatusContributor>();
 

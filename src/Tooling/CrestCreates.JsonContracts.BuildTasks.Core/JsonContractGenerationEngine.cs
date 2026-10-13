@@ -43,11 +43,15 @@ public sealed class JsonContractGenerationEngine
         model.LocalEventRoots.AddRange(localEventDiscovery.Discover(compilation));
         model.Diagnostics.AddRange(localEventDiscovery.Diagnostics);
 
+        var integrationEventDiscovery = new IntegrationEventJsonSurfaceDiscovery();
+        model.IntegrationEventRoots.AddRange(integrationEventDiscovery.Discover(compilation));
+        model.Diagnostics.AddRange(integrationEventDiscovery.Diagnostics);
+
         var accessibility = JsonContractSurfaceModelBuilder.ParseManifestAccessibility(manifestAccessibility);
         foreach (var ctx in model.Contexts)
             ctx.ManifestAccessibility = accessibility;
 
-        var sourceText = JsonContractSourceWriter.WriteContextSource(model);
+        var sourceText = JsonContractSourceWriter.WriteContextSource(model, assemblyName);
 
         return new JsonContractGenerationResult
         {

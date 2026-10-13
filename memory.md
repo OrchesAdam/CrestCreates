@@ -1,8 +1,9 @@
 # CrestCreates platform status — 2026-10-10
 
 Baseline: master `1cad6e35` (PR #142 merge: #126 LocalEvent typed dispatch/replay S1-S4 + eight
-review rounds; PR #139/#140 merged before). Remote verified 2026-10-13. In flight: none -
-wave 1 fully merged; wave 2 #126 merged via PR #142, #127/#128 are the next candidates.
+review rounds; PR #139/#140 merged before). Remote verified 2026-10-13. In flight: #127 RabbitMQ
+static bindings (PR #145 on `feat/issue-127-rabbitmq-static-bindings-20261013-145133`, based on
+`6dd608a3`, awaiting review — not merged); #128 CRUD JSON is the next candidate.
 CI: all GitHub workflows manually disabled (development-phase
 local-first verification; Testcontainers suites runnable locally via podman socket).
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
@@ -34,6 +35,37 @@ never deleted; never output credentials.
   transition, persisted retry budget, cancel-safe Pending restore), EF `LocalReplayKey`
   additive column, `InMemoryDeadLetterStore` same-key update fix. Not pledged: replay
   concurrency mutual exclusion, crash-leftover Retrying recovery, per-handler checkpoints.
+- RabbitMQ static bindings + canonical event contracts (delivered by #127 via PR #145 — IN FLIGHT,
+  NOT MERGED yet; baseline code facts: the reflection subscription bridge returned empty in any real
+  host, publisher/consumer identity and routing disagreed, retry dropped properties and ignored the
+  delay, three divergent registration paths; issues log
+  docs/superpowers/plans/2026-10-13-issue-127-issues-log.md): `[CrestEvent]` declarations generate
+  per-assembly IEventDescriptorProvider + `AddEventDescriptors()` activation (CCCEV001-003);
+  Integration-scope events get source-generated codec roots + per-host `EventJsonCodecRegistration`
+  service contributions (CJC018-020; camelCase wire payload policy; no `[LocalEvent]` requirement;
+  same-origin reactivation idempotent, cross-origin conflicts diagnostic; no process-global codec
+  registry); per-assembly
+  `[RabbitMqSubscribe]` generation with closed typed invokers (CCCRMQ001-005); per-host frozen
+  `RabbitMqBindingRegistry` (publish index by concrete type, wire index by (EventId, EventVersion),
+  legacy alias table, per-queue consume plans with sequential handlers, required manifests) validated
+  entirely before broker I/O; single `AddRabbitMqEventBus` entry (module/legacy context overloads
+  forward; context overloads are typed-codec adapters in the same freeze); composition hosted service
+  + consumer readiness gate (startup order independent); additive envelope (EventId/EventVersion,
+  EventType = canonical Name); SDK-confirm publish core (homemade confirm ledger removed, exact-once
+  channel lease release); business retry/DLQ settlement state machine (delay honored, MessageId/
+  CorrelationId preserved, tolerant retry-header parsing, no fake redelivery success), dedicated
+  consumer channel + settlement gate + bounded shutdown drain. R1+R2 review fixes (2026-10-13, all in
+  PR #145 head): recovery-window connection ownership (pool waits for SDK recovery instead of
+  replacing the connection; caller cancellation stays OperationCanceledException; the channel
+  supervisor is recovery-phase aware — a closed channel during SDK recovery is never terminal —
+  and a stable connection with a persistently closed channel fails the host after a short grace),
+  controlled requeue with bounded backoff for failed redelivery confirms (no business-budget
+  consumption), envelope field prechecks (payload null), delivery-time whole-batch handler
+  pre-resolution plus required-manifest DI registration probe, per-registration codec validation
+  (same-origin conflicts are deterministic and order-independent), and LocalEvent default-path
+  coexistence (the shared IEventValidator slot is never claimed by the kernel). Not pledged: competing-consumer
+  semantics beyond broker defaults, quorum DLX losslessness, per-handler checkpoints, replay
+  concurrency exclusion, crash-window dedup.
 - `src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql`: durable runtime state,
   Control Plane reference data, review/package artifact persistence, native AotHost
   evidence.
@@ -50,7 +82,13 @@ never deleted; never output credentials.
   (five scenarios + sentinel `CRESTCREATES_LOCALEVENT_TYPED_REPLAY_NATIVE_OK`, linux-x64,
   in-memory DLQ store only, evidence `local-event-typed-replay.json`; gate step prepared
   in `ci.yml`/`full-validation.yml`, workflows remain manually disabled; merged via
-  PR #142).
+  PR #142). RabbitMQ static bindings trim + native gates (true per-mode publish: trim runs a trimmed JIT
+  product, native links; real broker vhost prepared by the harness; sentinel
+  `CRESTCREATES_RABBITMQ_STATIC_BINDINGS_NATIVE_OK`; six scenarios incl.
+  cross-assembly typed payloads, same-short-name isolation, refusals to a real DLQ, explicit
+  legacy alias, retry-then-success, budget exhaustion, unroutable typed failure; linux-x64;
+  evidence `rabbitmq-static-bindings-{trim,native-aot}.json`; gate step + rabbitmq service
+  prepared in both workflows, keep disabled; #127 PR #145 in review, NOT merged).
 - #123 baseline finding (recorded, fixed): native HTTP success requests returned
   500 because `DynamicApiResponse<object>` was not declared by the fixture's
   JsonSerializerContext; fixed by declaring the envelope root (golden-host pattern),
@@ -103,7 +141,10 @@ never deleted; never output credentials.
 - Wave 2: #126 LocalEvent (design + S1-S4 + eight implementation review-fix rounds merged
   via PR #142 on 2026-10-13; JSON toolchain 126/126, LocalEvent integration 47/47 and
   NativeAOT five scenarios on the merged head; issues log
-  docs/superpowers/plans/2026-10-13-issue-126-issues-log.md); #127 RabbitMQ / #128 CRUD JSON.
+  docs/superpowers/plans/2026-10-13-issue-126-issues-log.md); #127 RabbitMQ static bindings
+  (S1-S4 implemented on PR #145, local evidence after R2: unit 58/58, generators 365/365 full, JsonContracts
+  131/131, real-broker integration 37/37, trim + NativeAOT gates green; awaiting re-review, NOT
+  merged; issues log docs/superpowers/plans/2026-10-13-issue-127-issues-log.md); #128 CRUD JSON.
 - Wave 3: #129 Dynamic API exit / #130 ORM matrix / #131 capability map.
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
 - At most 2 implementation PRs in flight; verify at current head before merge.

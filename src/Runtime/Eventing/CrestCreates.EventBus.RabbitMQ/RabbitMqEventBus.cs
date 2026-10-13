@@ -4,45 +4,45 @@ using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstract;
+using CrestCreates.EventBus.RabbitMQ.Exceptions;
 using CrestCreates.EventBus.RabbitMQ.Publishing;
-using CrestCreates.EventBus.RabbitMQ.Options;
+using CrestCreates.EventBus.RabbitMQ.Registration;
 
 namespace CrestCreates.EventBus.RabbitMQ;
 
+/// <summary>
+/// Canonical-identity event bus. Both entries share the same frozen publish index: the generic entry
+/// looks up typeof(TEvent) and the non-generic entry looks up the actual concrete type — the payload is
+/// never erased to the IDomainEvent contract. Undeclared events, missing codecs and identity mismatches
+/// fail before any broker I/O.
+/// </summary>
 public class RabbitMqEventBus : DistributedEventBusBase
 {
     private readonly RabbitMqPublisher _publisher;
-    private readonly RabbitMqOptions _options;
+    private readonly IRabbitMqBindingRegistry _registry;
+    private readonly IEventRegistry _eventRegistry;
 
     public RabbitMqEventBus(
         RabbitMqPublisher publisher,
-        Microsoft.Extensions.Options.IOptions<RabbitMqOptions> options,
+        IRabbitMqBindingRegistry registry,
+        IEventRegistry eventRegistry,
         IEventValidator validator) : base(validator)
     {
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
-        _options = options.Value;
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        _eventRegistry = eventRegistry ?? throw new ArgumentNullException(nameof(eventRegistry));
     }
 
-    public override async Task PublishAsync(IDomainEvent @event, CancellationToken cancellationToken = default)
+    public override Task PublishAsync(IDomainEvent @event, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(@event);
-
-        var eventName = EventNamingConvention.GetRoutingKey(@event.GetType());
-        ValidateEvent(eventName, @event);
-
-        var routingKey = EventNamingConvention.GetRoutingKey(@event.GetType());
-        await _publisher.PublishAsync(@event, _options.DefaultExchange, routingKey, null, cancellationToken);
+        return PublishCoreAsync(@event.GetType(), @event, cancellationToken);
     }
 
-    public override async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+    public override Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(@event);
-
-        var eventName = EventNamingConvention.GetRoutingKey<TEvent>();
-        ValidateEvent(eventName, @event);
-
-        var routingKey = EventNamingConvention.GetRoutingKey<TEvent>();
-        await _publisher.PublishAsync(@event, _options.DefaultExchange, routingKey, null, cancellationToken);
+        return PublishCoreAsync(typeof(TEvent), @event, cancellationToken);
     }
 
     public override void Subscribe<TEvent, THandler>()
@@ -55,5 +55,41 @@ public class RabbitMqEventBus : DistributedEventBusBase
     {
         throw new NotSupportedException(
             "Runtime unsubscription is not supported. Subscriptions are managed at compile time.");
+    }
+
+    private async Task PublishCoreAsync(Type eventType, object @event, CancellationToken cancellationToken)
+    {
+        if (!_registry.TryGetPublishBinding(eventType, out var binding) || binding is null)
+        {
+            throw new RabbitMqPublishException(
+                DescribeUnpublishable(eventType),
+                eventType.FullName,
+                correlationId: null);
+        }
+
+        ValidateEvent(binding.Descriptor.Name, @event);
+        await _publisher.PublishEventAsync(binding, @event, correlationId: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    private string DescribeUnpublishable(Type eventType)
+    {
+        var descriptor = _eventRegistry.GetByPayloadType(eventType);
+        if (descriptor is null)
+        {
+            return $"Event '{eventType.FullName}' has no Active descriptor after the event kernel bootstrap. " +
+                   "Declare [CrestEvent(Name = ..., Scope = EventScope.Integration)] on the type and activate the " +
+                   "owning assembly's AddEventDescriptors() extension.";
+        }
+
+        if (descriptor.Scope != EventScope.Integration)
+        {
+            return $"Event '{eventType.FullName}' resolves to '{descriptor.Name}' with scope {descriptor.Scope}; " +
+                   "RabbitMQ publishes Integration events only.";
+        }
+
+        return $"Event '{descriptor.Name}' v{descriptor.Version} has no frozen codec. Activate the owning " +
+               $"assembly's AddEventDescriptors() extension (payload assembly: " +
+               $"'{descriptor.PayloadType.Assembly.GetName().Name}') or supply an explicit typed codec through " +
+               "AddPublishedEvent<TEvent>().";
     }
 }

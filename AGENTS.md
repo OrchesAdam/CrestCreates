@@ -93,6 +93,10 @@ CrestCreates Core:
     LocalEvent typed dispatch / dead-letter replay:
         独立 AotHost fixture 原生 publish/link/run（五场景 + sentinel，linux-x64；
         仅内存 DLQ store、单进程 hosted）；不推导 EF DLQ / Mediator / RabbitMQ 状态
+    RabbitMQ 静态订阅与 canonical 事件契约 (publisher/consumer/retry/DLQ):
+        独立 AotHost fixture（trim 与 NativeAOT 双门）publish/link/run（六场景 + sentinel，
+        linux-x64；broker 由 harness 预置 vhost）；不推导 EF DLQ / Outbox / Kafka / CAP /
+        认证权限租户链路
 
 EF Core 和部分 Integrations:
     AOT capability separately declared
@@ -374,6 +378,7 @@ TestBase
 - UnitOfWork：唯一装配（`AddUnitOfWork` + Provider 包 typed `AddUnitOfWorkProvider` binding + 能力声明，无反射/程序集扫描）；唯一执行内核（`UnitOfWorkOptions`、`BeginScope + StartAsync` 调用方帧激活协议、四维结果：参与状态/事务结果/通知结果/释放；join 完成=参与者成功、rollback-only 拒绝部分提交；提交确认即记录 Committed、Unknown 不被回滚改写、提交后通知失败不回滚且保留已提交事实）；受管链 ambient 路由（descendant-or-self 可见性 + 租户/声明/连接先校验后路由）与未完成退出「终结 + 丢弃未 flush 跟踪写入」；操作层 token 组合（正式仓储/Provider 组合传入 CT ⊕ 受管执行 token，AOP/生成端点 deadline 覆盖）；Provider 能力（隔离级别实测矩阵、及时终止、丢弃）执行业务前 fail closed；requiresNew 经子 DI scope 隔离，不支持的 Provider 确定性诊断；旧双轨与死契约已归档（99_RecycleBin）。状态：#137 已合并（PR #139：切片 1-5 + 三轮审查修复；CAP 参与 lease 契约见交接文档）。
 - CAP 分布式事务集成（#125）：唯一装配入口 `AddCrestCapDistributedTransaction`（两层配置校验：注册期输入早期诊断 + 启动期对最终 `CapOptions` 的 `IValidateOptions`/`ValidateOnStart` 权威校验；装配自检：executor registry/声明必需集合/持久化仓库）；原子发布消费 #137 lease/borrower 契约——受管窗口内消息行与业务数据同库同事务写入、由 CAP 存储扫描恢复投递（**名义扫描等待、非时限**；窗口内 `PublishDelayAsync` 确定性拒绝）；全部拒绝路径（未 Start/非事务/终态/未受管原生事务/存储身份不匹配等）先于写入、零副作用）；内存假实现与模块入口已归档（`99_RecycleBin/issue-125-cap-consolidation`）。支持声明按组合：EF Core + Npgsql ↔ CAP PostgreSql（**单一固定数据库**；PG+RabbitMQ 为第一组证据）；SqlServer 存储/Kafka 传输/trim/NativeAOT **未验证**；补偿并发与 `Executing` 崩溃恢复不承诺；「禁用重试」（`FailedRetryCount=0`）在扫描投递模式下不可用。状态：#125 已合并（PR #140，五轮审查闭环；本地证据：CAP 单元 41/41、集成 38/38）。
 - LocalEvent 强类型分发与死信重放（#126）：唯一强类型分发索引（`ILocalEventDispatchRegistry`/`LocalEventBinding`/`LocalEventInvoker`，冻结期合并校验；未声明事件确定性失败 `UnknownLocalEventException`，无 fallback）；每程序集生成注册（`AddLocalEvents()`，CCCLE001-005；显式跨程序集激活契约，无扫描兜底）；Replayable codec 经 JsonContracts 工具链静态绑定（`[LocalEvent(Replayable=true)]` 发现；CJC015/016/017 闭包诊断含多态 discriminator 唯一性与 STJ 可恢复集合校验）；共用重放核心（`LocalDeadLetterReplayExecutor`：每次 attempt 重读当前持久化状态、预检先于状态迁移、预算取消息持久值、协作取消恢复 Pending）；EF `LocalReplayKey` additive 列；旧死契约已归档（`99_RecycleBin/issue-126-local-event-typed-dispatch`）。不承诺：重放并发互斥、崩溃遗留 Retrying 恢复、per-handler checkpoint。状态：#126 已合并（PR #142，八轮审查闭环；本地证据：JSON 工具链 126/126、LocalEvent 集成 47/47、NativeAOT 五场景 + sentinel）。
+- RabbitMQ 静态订阅与事件契约（#127）：唯一权威仍是 `GeneratedEventDescriptor`/`IEventRegistry`，RabbitMQ 只持有冻结的传输绑定（发布索引按具体 Type、wire 索引按 `(EventId, EventVersion)`、legacy alias 表、每队列消费计划）；`[CrestEvent]` 生成每程序集 descriptor provider + `AddEventDescriptors()`（CCCEV001-003），Integration 事件经 JsonContracts 工具链生成静态 codec（per-Host `EventJsonCodecRegistration` 贡献，无进程全局表；camelCase wire 策略，CJC018-020）；`[RabbitMqSubscribe]` 生成闭合 typed invoker（CCCRMQ001-005）；冻结全部先于 broker I/O，`AddRabbitMqEventBus` 唯一入口（module/旧 context 重载转发，context 重载 = 同一冻结内的 typed codec 适配器）；envelope additive 增 `EventId`/`EventVersion`（EventType = canonical Name）；SDK confirm 为核心（移除自制账本，channel lease 精确释放）；重试/DLQ 结算状态机（延迟生效、MessageId/CorrelationId 保留、`x-retry-count` 宽容解析、重投 confirm 后才 Ack）；专属消费 channel + settlement 串行门 + 有界停机；恢复窗口连接所有权归 SDK（等待恢复、不替换；取消保持取消语义；看护按 SDK 恢复阶段判断——恢复中不停宿主、稳定后持续关闭短宽限判终态）、重投确认失败受控重入队（不耗业务预算）、delivery 整批 Handler 预解析、codec 贡献逐项校验（同源冲突与顺序无关）、LocalEvent 默认路径共存（共享 IEventValidator 不被内核占用）。旧反射桥/占位测试已归档（`99_RecycleBin/issue-127-rabbitmq-static-bindings`）。不承诺：competing consumers 跨进程语义、quorum DLX 无损、per-handler checkpoint、重放并发互斥、崩溃窗口去重。状态：#127 实现完成于 PR #145，R1（6×P1+1×P2）与 R2（1×P1+2×P2）审查均已修复并加入探针回归（本地证据：单元 58/58、集成 37/37、生成器全量 365/365、JsonContracts 131/131、Event 41/41、LocalEvent 47/47、CAP 41/41、trim + NativeAOT 双门禁按真实模式通过），**待复审，未合并**。
 - ObjectMapping：SourceGenerator，支持多种转换、自定义转换器和导航路径。
 - Metadata / Descriptor 治理链路：Topology、Impact、Compatibility、Package、Stable Hash、Canonical Hash profile、Agent Control Plane 等属于严肃治理面，不应把复杂性下放给普通 Runtime Handler。
 - Agent 治理面与工件持久化：Authoring → review → package/evidence → approval 链路的契约与边界见「平台能力」；activation request/gate 仍为内存实现，durable activation 按 #88 判为应用侧范围，不重开。
@@ -401,4 +406,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-10-10
+**最后更新**: 2026-10-13
