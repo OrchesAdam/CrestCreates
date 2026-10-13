@@ -49,8 +49,19 @@
 | 验证 | 结果 | 日志 |
 | --- | --- | --- |
 | RabbitMQ 单元（冻结矩阵/retry header/options/consumer 生命周期） | 50/50 | `dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.Tests` |
-| 生成器（EventDescriptor + RabbitMqSubscription，含跨程序集编译） | 21/21 | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter "EventDescriptorGenerator|RabbitMqGenerator"` |
+| 生成器（EventDescriptor + RabbitMqSubscription，含跨程序集编译） | 21/21；全量 365/365 | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests` |
 | JsonContracts（含 Integration discovery/writer 5 项） | 131/131 | `dotnet test tests/Tooling/CrestCreates.JsonContracts.BuildTasks.Tests` |
 | 真实 broker 集成矩阵 | 27/27 | `dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.Tests.Integration` |
-| Native/trim 门禁 | 见下方“证据” | `dotnet test tests/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ.AotHost.Tests` |
+| Native/trim 门禁 | trim 通过 / native 通过（各 exit 0 + sentinel + 六场景 PASS） | `tests/artifacts/aot-native-evidence/rabbitmq-static-bindings-{trim,native-aot}.json`（sha `d5b00543`） |
 | AotHost JIT 冒烟（六场景，先于门禁） | 6/6 + sentinel | 会话命令输出（vhost 手工预置） |
+| 全量构建 | 0 错误（先 `dotnet restore` 主 slnx 之外的 TypeForwardLegacyConsumer，见 #126 同款环境摩擦） | `/tmp/crest-127-regression.log` |
+| Event 内核回归 | 41/41 | 同上 |
+| LocalEvent 集成回归（#126） | 47/47 | 同上 |
+| CAP 单元回归（#125） | 41/41 | 同上 |
+| 依赖边界全量 | 173/178；5 项失败均为**环境态**（见下） | 同上 |
+
+环境态失败甄别（非本 Issue 缺陷）：
+
+- `EvidenceLedgerGuard_RequiredTuplesMustBeExecuted` / `C07_OrganizationSchema...` / `LegacyInfrastructureHierarchyCache...` / `O15_OrganizationProvider...`：主工作区 master（`6dd608a3`）同一套件**完全相同的 4 项失败**（工作树 DB/环境态，与 #126 记录一致）。
+- `EvidenceLedgerSummary_Report`：按**工作树**累积 `tests/artifacts/control-plane-evidence/executed-*.jsonl`；新工作树累积不足 → pending（#126 日志同款）。
+- `JsonContracts.Build.PackageTests.Build_InternalManifestRemainsAssemblyScoped`（28/29）：断言英文子串 "inaccessible"，本机 dotnet 输出为 zh-CN 本地化错误文本；主工作区 master 同样失败，属本地化断言环境问题。
