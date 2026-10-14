@@ -23,8 +23,8 @@ never deleted; never output credentials.
   (+ `.BuildTasks.Core`, `.Tool`) generates deterministic JSON contract roots consumed
   by the official STJ source generator; no runtime reflection/scanner fallback.
 - LocalEvent typed dispatch + dead-letter replay (#126 delivered via PR #142 on 2026-10-13;
-  **#146 hardening S1-S4 delivered on branch `feat/issue-146-local-event-framework-hardening`
-  (PR #148, S2/S3 review R1-R3 closed with in-repo regression probes; merge pending review)**):
+  **#146 hardening S1-S4 merged via PR #148 on 2026-10-14 (merge commit `0c6e574a`; S2/S3/S4
+  review rounds R1-R3 closed with the regression probes in-repo)**):
   single typed dispatch index (`ILocalEventDispatchRegistry` / frozen `LocalEventBinding` /
   `LocalEventInvoker.Prepare`, freeze-time merged validation; undeclared events fail
   deterministically, no fallback), per-assembly generated registration (`AddLocalEvents()`,
