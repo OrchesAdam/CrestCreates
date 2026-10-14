@@ -19,7 +19,8 @@ public sealed class LocalEventRegistration
         Func<JsonTypeInfo?>? codecFactory,
         IReadOnlyList<Type> expectedHandlerTypes,
         IReadOnlyList<LocalEventLegacyIdentity> legacyIdentities,
-        string sourceAssembly)
+        string sourceAssembly,
+        LocalEventPolicyOptions policy)
     {
         Invoker = invoker;
         EventType = eventType;
@@ -29,6 +30,7 @@ public sealed class LocalEventRegistration
         ExpectedHandlerTypes = expectedHandlerTypes;
         LegacyIdentities = legacyIdentities;
         SourceAssembly = sourceAssembly;
+        Policy = policy;
     }
 
     public LocalEventInvoker Invoker { get; }
@@ -38,6 +40,12 @@ public sealed class LocalEventRegistration
     public int ReplayVersion { get; }
 
     public bool Replayable { get; }
+
+    /// <summary>Stable key, aliases, governance/tenant policy and explicit checks of this declaration.</summary>
+    public LocalEventPolicyOptions Policy { get; }
+
+    /// <summary>Effective replay key of this declaration (explicit stable key or the deterministic default).</summary>
+    public string EffectiveReplayKey => Policy.ReplayKey ?? LocalEventIdentity.BuildLocalReplayKey(EventType);
 
     /// <summary>
     /// Assembly-time codec input (manual typed codec); resolved exactly once at freeze and never
@@ -60,7 +68,8 @@ public sealed class LocalEventRegistration
         Func<JsonTypeInfo?>? codecFactory,
         IReadOnlyList<Type>? expectedHandlerTypes,
         IReadOnlyList<LocalEventLegacyIdentity>? legacyIdentities,
-        string sourceAssembly)
+        string sourceAssembly,
+        LocalEventPolicyOptions? policy = null)
         where TEvent : ILocalEvent
     {
         ArgumentNullException.ThrowIfNull(invoker);
@@ -73,7 +82,8 @@ public sealed class LocalEventRegistration
             codecFactory,
             expectedHandlerTypes ?? Array.Empty<Type>(),
             legacyIdentities ?? Array.Empty<LocalEventLegacyIdentity>(),
-            sourceAssembly);
+            sourceAssembly,
+            policy ?? LocalEventPolicyOptions.Default);
     }
 
     /// <summary>Creates a non-generic declaration (host-side typeof declarations and registry merge).</summary>
@@ -85,7 +95,8 @@ public sealed class LocalEventRegistration
         Func<JsonTypeInfo?>? codecFactory,
         IReadOnlyList<Type>? expectedHandlerTypes,
         IReadOnlyList<LocalEventLegacyIdentity>? legacyIdentities,
-        string sourceAssembly)
+        string sourceAssembly,
+        LocalEventPolicyOptions? policy = null)
     {
         ArgumentNullException.ThrowIfNull(invoker);
         ArgumentNullException.ThrowIfNull(eventType);
@@ -98,6 +109,7 @@ public sealed class LocalEventRegistration
             codecFactory,
             expectedHandlerTypes ?? Array.Empty<Type>(),
             legacyIdentities ?? Array.Empty<LocalEventLegacyIdentity>(),
-            sourceAssembly);
+            sourceAssembly,
+            policy ?? LocalEventPolicyOptions.Default);
     }
 }

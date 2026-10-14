@@ -12,9 +12,10 @@ namespace CrestCreates.EventBus.Local;
 
 /// <summary>
 /// Shared failure-recording component for the synchronous bus and the channel consumer. The record
-/// is produced from the frozen binding identity and the frozen codec resolved at freeze — never an
-/// advisory registry re-lookup and never a re-invoked factory — so the recorded identity matches the
-/// accepted execution contract even when the governance registry reports another version.
+/// is produced from the frozen binding identity, the admitted identity and the context snapshot
+/// captured at the acceptance boundary — never from an advisory registry re-lookup and never from
+/// a re-invoked factory — so the persisted identity/context match the accepted execution contract
+/// even when the governance registry reports another version later.
 /// </summary>
 internal sealed class LocalEventDeadLetterRecorder : ILocalEventFailureRecorder
 {
@@ -36,8 +37,13 @@ internal sealed class LocalEventDeadLetterRecorder : ILocalEventFailureRecorder
         LocalEventBinding binding,
         ILocalEvent @event,
         Exception failure,
+        LocalEventExecutionContextSnapshot snapshot,
+        LocalEventAcceptedIdentity acceptedIdentity,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(acceptedIdentity);
+
         if (_scopeFactory is null)
         {
             return new LocalEventRecordOutcome(false, "no dead-letter scope factory is registered.");
@@ -71,11 +77,11 @@ internal sealed class LocalEventDeadLetterRecorder : ILocalEventFailureRecorder
         var now = DateTime.UtcNow;
         var message = new DeadLetterMessage(
             MessageId: Guid.NewGuid().ToString("N"),
-            EventName: binding.LocalName,
-            EventVersion: binding.ReplayVersion,
-            EventDescriptorId: null,
-            CorrelationId: null,
-            TenantId: null,
+            EventName: acceptedIdentity.DescriptorName ?? binding.LocalName,
+            EventVersion: acceptedIdentity.ReplayVersion,
+            EventDescriptorId: acceptedIdentity.DescriptorId,
+            CorrelationId: snapshot.CorrelationId,
+            TenantId: snapshot.TenantId,
             Scope: EventScope.Local,
             PayloadTypeFullName: binding.EventType.AssemblyQualifiedName!,
             Payload: payload,
@@ -86,7 +92,8 @@ internal sealed class LocalEventDeadLetterRecorder : ILocalEventFailureRecorder
             RetryCount: 0,
             MaxRetries: _options.MaxRetries,
             Status: DeadLetterStatus.Pending,
-            LocalReplayKey: binding.LocalReplayKey);
+            LocalReplayKey: acceptedIdentity.LocalReplayKey,
+            LocalContextVersion: snapshot.ContextVersion);
 
         try
         {

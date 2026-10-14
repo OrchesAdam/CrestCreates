@@ -18,9 +18,11 @@ namespace CrestCreates.MultiTenancy.Abstract
         /// Switch to an already-resolved tenant without querying the database.
         /// Used in internal flows (tenant initialization) where the caller
         /// already holds a valid <see cref="ITenantInfo"/> and the tenant may
-        /// not yet be visible to other database scopes.
+        /// not yet be visible to other database scopes. Passing <c>null</c>
+        /// explicitly switches to host context (clears the current tenant) and
+        /// is restored by the returned LIFO <see cref="IDisposable"/>.
         /// </summary>
-        IDisposable Change(ITenantInfo tenant);
+        IDisposable Change(ITenantInfo? tenant);
 
         void SetTenantId(string tenantId);
     }

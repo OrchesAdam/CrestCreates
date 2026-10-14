@@ -2,40 +2,40 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
-using CrestCreates.Event;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstract;
 using CrestCreates.EventBus.Abstractions;
-using CrestCreates.Metadata.Abstractions.Registry;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.EventBus.Local.Channel;
 
 /// <summary>
-/// Channel-flavored local event bus. Membership and validation happen before enqueue; a
-/// successful return means the event was enqueued — nothing more. Handler failures are
-/// observed by the background consumer.
+/// Channel-flavored local event bus. Membership, context capture and the shared admission checks
+/// (governance, explicit checks, activated validator) run before enqueue; no handler is constructed
+/// here. A successful return means the immutable work item was enqueued — the consumer re-runs the
+/// policy checks against the then-current registry before executing.
 /// </summary>
 public class BackgroundChannelLocalEventBus : ILocalEventBus, IEventBus
 {
     private readonly ChannelLocalEventQueue _queue;
     private readonly ILocalEventDispatchRegistry _registry;
-    private readonly IEventValidator? _validator;
-    private readonly IEventRegistry? _eventRegistry;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ILogger<BackgroundChannelLocalEventBus>? _logger;
 
     public BackgroundChannelLocalEventBus(
         ChannelLocalEventQueue queue,
         ILocalEventDispatchRegistry registry,
-        IEventValidator? validator = null,
-        IEventRegistry? eventRegistry = null)
+        IServiceProvider serviceProvider,
+        ILogger<BackgroundChannelLocalEventBus>? logger = null)
     {
         _queue = queue;
         _registry = registry;
-        _validator = validator;
-        _eventRegistry = eventRegistry;
+        _serviceProvider = serviceProvider;
+        _logger = logger;
     }
 
-    public Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+    public async Task PublishAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(@event);
         cancellationToken.ThrowIfCancellationRequested();
@@ -46,8 +46,20 @@ public class BackgroundChannelLocalEventBus : ILocalEventBus, IEventBus
             throw new UnknownLocalEventException(eventType);
         }
 
-        _validator?.ValidateOrThrow(ResolveCanonicalName(binding), @event);
-        return _queue.EnqueueAsync(@event, cancellationToken).AsTask();
+        // Admission at the boundary: capture the snapshot now (the consumer must not read its own
+        // ambient state later) and run the shared checks once. The consumer still re-checks policy.
+        var snapshot = LocalEventContextBridge.Capture(_serviceProvider);
+        var admission = await LocalEventAdmission
+            .AdmitAsync(_serviceProvider, binding, @event, LocalEventExecutionSource.ChannelConsume, snapshot,
+                persistedDescriptorId: null, cancellationToken)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
+        {
+            throw new LocalEventAdmissionException(admission.ProblemCode!, admission.Problem!);
+        }
+
+        var workItem = new LocalEventWorkItem(@event, snapshot, admission.Identity!);
+        await _queue.EnqueueAsync(workItem, cancellationToken).ConfigureAwait(false);
     }
 
     public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
@@ -69,19 +81,5 @@ public class BackgroundChannelLocalEventBus : ILocalEventBus, IEventBus
 
     void IEventBus.Unsubscribe<TEvent, THandler>()
     {
-    }
-
-    private string ResolveCanonicalName(LocalEventBinding binding)
-    {
-        if (_eventRegistry is { State: RegistryState.Built })
-        {
-            var descriptor = _eventRegistry.GetByPayloadType(binding.EventType);
-            if (descriptor is not null)
-            {
-                return descriptor.Name;
-            }
-        }
-
-        return binding.LocalName;
     }
 }

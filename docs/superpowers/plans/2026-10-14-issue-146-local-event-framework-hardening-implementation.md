@@ -33,19 +33,21 @@ typed bridge 三程序集编译实验通过、bootstrap 挂接核对完成。**S
 
 ## S3 — 持久身份、策略与上下文
 
-- [ ] ReplayKey / ReplayAlias、同版本约束、payload legacy identity 分工与冲突空间。
-- [ ] Governance.Required、TenantMode、显式 validator / 执行 check 激活；公共 prepare 检查覆盖直接 dispatcher。
-- [ ] 基于 Built registry 精确关联 Id/version/Type；治理旧行采用映射必须显式且限定历史身份，不升级信任未知记录。
-- [ ] 独立 LocalEvent Host 的 bootstrap 注册/驱动（Spec §3.3 rev.2，R1-LE146-01）：存在 Governance.Required 时 TryAddEnumerable 既有 `EventRegistryBootstrapper` + `BootstrapCoordinator` + `local-governance-readiness` 任务（依赖 event-registry，置 gate）；非 hosted 未 Built fail-closed 且不缓存；不阻塞、不依赖注册顺序；LocalEvent-only 与 LocalEvent+RabbitMQ 两种顺序按 G06/G07 验收。
-- [ ] context snapshot、Channel work item、原快照失败记录；TenantId/correlation 一致性检查。
-- [ ] await tenant provider 解析与同步 Change/Push 分离；先激活再构造租户敏感依赖。
-- [ ] ICurrentTenant.Change nullable host 语义与 LIFO/await/异常恢复；各层清理异常不跳过其他恢复。
-- [ ] LocalContextVersion additive 可空列、双次可重复升级脚本、EF/InMemory 字段往返。
-- [ ] 历史 null 默认拒绝；显式历史 host policy 不得覆盖 Required。
-- [ ] 手工/后台重放不再 Publish、不新增 DLQ；状态与预算保持原行权威。
+- [x] ReplayKey / ReplayAlias、同版本约束、payload legacy identity 分工与冲突空间。
+- [x] Governance.Required、TenantMode、显式 validator / 执行 check 激活；公共 prepare 检查覆盖直接 dispatcher。
+- [x] 基于 Built registry 精确关联 Id/version/Type；治理旧行采用映射必须显式且限定历史身份，不升级信任未知记录。
+- [x] 独立 LocalEvent Host 的 bootstrap 注册/驱动（Spec §3.3 rev.2，R1-LE146-01）：存在 Governance.Required 时 TryAddEnumerable 既有 `EventRegistryBootstrapper` + `BootstrapCoordinator` + `local-governance-readiness` 任务（依赖 event-registry，置 gate）；非 hosted 未 Built fail-closed 且不缓存；不阻塞、不依赖注册顺序；LocalEvent-only 与 LocalEvent+RabbitMQ 两种顺序按 G06/G07 验收。
+- [x] context snapshot、Channel work item、原快照失败记录；TenantId/correlation 一致性检查。
+- [x] await tenant provider 解析与同步 Change/Push 分离；先激活再构造租户敏感依赖。
+- [x] ICurrentTenant.Change nullable host 语义与 LIFO/await/异常恢复；各层清理异常不跳过其他恢复。
+- [x] LocalContextVersion additive 可空列、双次可重复升级脚本、EF/InMemory 字段往返。
+- [x] 历史 null 默认拒绝；显式历史 host policy 不得覆盖 Required。
+- [x] 手工/后台重放不再 Publish、不新增 DLQ；状态与预算保持原行权威。
 
 验证：Spec I01–I03、G01–G07、C01–C05、D01–D02，补全 R 系列。
 退出：新旧持久记录真实可重放或按契约拒绝，租户/治理/结算失败均有确定结果。
+
+S3 落地记录（2026-10-14，同一分支）：新增 `LocalEventGovernanceAndContextTests` 22 条 + EF 模型 2 条；原先 4 条 S3 约定红基线（上下文捕获/恢复/缺设施拒绝）全部转绿；5 条旧夹具按目标语义修正（modern 记录带 ContextVersion=1、legacy 工厂保持 null、legacy 语义用例补显式历史策略）；`LocalEventContextBridge`/`LocalEventAdmission`/`AddCrestLocalEventGovernance` 为新增执行/装配核心；生成器按 Governance.Required/TenantMode/ReplayKey/alias 属性发出策略并在含治理声明的程序集 `AddLocalEvents()` 内自动装配 readiness。真实 PG 双次升级与原生 fixture 新场景留待 S4。
 
 ## S4 — 证据、迁移与最后验收
 

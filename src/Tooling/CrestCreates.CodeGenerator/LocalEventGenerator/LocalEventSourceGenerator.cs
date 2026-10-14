@@ -23,6 +23,7 @@ public sealed class LocalEventSourceGenerator : IIncrementalGenerator
     internal const string LocalEventInterfaceMetadataName = "CrestCreates.EventBus.Abstractions.ILocalEvent";
     internal const string LocalEventAttributeMetadataName = "CrestCreates.EventBus.Abstractions.LocalEventAttribute";
     internal const string LegacyIdentityAttributeMetadataName = "CrestCreates.EventBus.Abstractions.LocalEventLegacyIdentityAttribute";
+    internal const string ReplayAliasAttributeMetadataName = "CrestCreates.EventBus.Abstractions.LocalEventReplayAliasAttribute";
     internal const string ToolchainPropertyName = "build_property.CrestCreatesLocalEventJsonContracts";
 
     public static class DiagnosticDescriptors

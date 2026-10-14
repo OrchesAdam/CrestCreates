@@ -24,7 +24,7 @@ public class DefaultLocalEventDispatcher : ILocalEventDispatcher
         _serviceProvider = serviceProvider;
     }
 
-    public Task DispatchAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+    public async Task DispatchAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(@event);
         cancellationToken.ThrowIfCancellationRequested();
@@ -34,10 +34,20 @@ public class DefaultLocalEventDispatcher : ILocalEventDispatcher
             throw new UnknownLocalEventException(@event.GetType());
         }
 
-        // The shared execution core resolves the whole handler batch once (required-handler
-        // validation against the binding's fully merged expected list) and executes the same instances.
-        var pending = LocalEventExecution.ExecuteAsync(_serviceProvider, binding, @event, cancellationToken);
-        return pending.IsCompletedSuccessfully ? Task.CompletedTask : pending.AsTask();
+        // Direct dispatch borrows the caller's scope: the shared admission core (governance,
+        // explicit checks, activated validator) runs in this frame, then one Prepare resolves the
+        // whole handler batch and the same instances execute.
+        var snapshot = LocalEventContextBridge.Capture(_serviceProvider);
+        var admission = await LocalEventAdmission
+            .AdmitAsync(_serviceProvider, binding, @event, LocalEventExecutionSource.DirectDispatch, snapshot,
+                persistedDescriptorId: null, cancellationToken)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
+        {
+            throw new LocalEventAdmissionException(admission.ProblemCode!, admission.Problem!);
+        }
+
+        await LocalEventExecution.ExecuteAsync(_serviceProvider, binding, @event, cancellationToken).ConfigureAwait(false);
     }
 
     public Task DispatchAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)

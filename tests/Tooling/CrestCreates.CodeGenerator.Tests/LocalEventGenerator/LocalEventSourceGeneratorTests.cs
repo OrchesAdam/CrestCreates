@@ -110,6 +110,46 @@ public class LocalEventSourceGeneratorTests
     }
 
     [Fact]
+    public void Governance_And_Alias_Attributes_Emit_Policy_And_Readiness_Registration()
+    {
+        var source = """
+            using CrestCreates.EventBus.Abstractions;
+
+            namespace MyApp;
+
+            [LocalEvent(Governance = LocalEventGovernance.Required, TenantMode = LocalEventTenantMode.HostOnly, ReplayKey = "orders.placed")]
+            [LocalEventReplayAlias("Legacy.Assembly:MyApp.OldOrderPlaced", 1)]
+            public sealed class OrderPlacedEvent : ILocalEvent { }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<LocalEventSourceGenerator>(
+            source,
+            additionalReferences: [.. EventingReferences, "CrestCreates.EventBus.Local", "Microsoft.Extensions.DependencyInjection.Abstractions"]);
+
+        result.CompilationSuccess.Should().BeTrue(Describe(result));
+        var generated = result.GetSourceByFileName("LocalEventRegistration.g.cs")!;
+        generated.SourceText.Should().Contain("LocalEventPolicyOptions { ");
+        generated.SourceText.Should().Contain("ReplayKey = \"orders.placed\"");
+        generated.SourceText.Should().Contain("Governance = global::CrestCreates.EventBus.Abstractions.LocalEventGovernance.Required");
+        generated.SourceText.Should().Contain("TenantMode = global::CrestCreates.EventBus.Abstractions.LocalEventTenantMode.HostOnly");
+        generated.SourceText.Should().Contain(
+            "new global::CrestCreates.EventBus.Abstractions.LocalEventReplayAlias(\"Legacy.Assembly:MyApp.OldOrderPlaced\", 1)");
+        generated.SourceText.Should().Contain("AddCrestLocalEventGovernance(services);");
+    }
+
+    [Fact]
+    public void Plain_Declarations_Emit_No_Policy_Argument_Nor_Governance_Registration()
+    {
+        var result = SourceGeneratorTestHelper.RunGenerator<LocalEventSourceGenerator>(
+            HandlerSource, additionalReferences: EventingReferences);
+
+        result.CompilationSuccess.Should().BeTrue(Describe(result));
+        var generated = result.GetSourceByFileName("LocalEventRegistration.g.cs")!;
+        generated.SourceText.Should().NotContain("LocalEventPolicyOptions");
+        generated.SourceText.Should().NotContain("AddCrestLocalEventGovernance");
+    }
+
+    [Fact]
     public void Replayable_Without_Toolchain_Reports_CCCLE004_Error()
     {
         var source = """

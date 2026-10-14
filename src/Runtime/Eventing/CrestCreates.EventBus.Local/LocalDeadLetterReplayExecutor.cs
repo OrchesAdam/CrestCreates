@@ -10,10 +10,12 @@ namespace CrestCreates.EventBus.Local;
 
 /// <summary>
 /// Shared replay execution core: load → precheck (status/budget/identity) → frozen-codec decode →
-/// one prepare of the whole handler batch inside a fresh async scope → MarkRetrying → execute the
-/// same instances → release the scope → independent settlement. Preparation and decode happen before
-/// any state transition, and every attempt reports execution, settlement and release facts
-/// independently. Replay re-enters the unified dispatch core directly and never re-publishes.
+/// tenant resolution (awaited) and ambient context activation (in this frame) → shared admission
+/// (governance/checks/validator) → one prepare of the whole handler batch inside a fresh async
+/// scope → MarkRetrying → execute the same instances → release scope and context frames → independent
+/// settlement. Preparation and decode happen before any state transition, and every attempt reports
+/// execution, settlement and release facts independently. Replay re-enters the unified dispatch
+/// core directly and never re-publishes.
 /// </summary>
 internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExecutor
 {
@@ -137,9 +139,73 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
                 $"payload decode failed before any state transition: {decodeFailure.Message}", "PayloadDecode");
         }
 
-        // One fresh async scope owns the exact handler instances for this attempt: prepare the whole
-        // batch first, then MarkRetrying, then execute the same instances, then release.
+        // One fresh async scope owns the exact handler instances for this attempt: resolve and
+        // activate the persisted context in this frame, run the shared admission checks, prepare the
+        // whole batch, then MarkRetrying, then execute the same instances, then release.
         var executionScope = _scopeFactory.CreateAsyncScope();
+        var replaySnapshot = new LocalEventExecutionContextSnapshot(
+            message.LocalContextVersion, message.TenantId, message.CorrelationId);
+
+        LocalEventContextFrame contextFrame;
+        try
+        {
+            var resolution = await LocalEventContextBridge
+                .ResolveAsync(executionScope.ServiceProvider, binding, replaySnapshot, cancellationToken)
+                .ConfigureAwait(false);
+            contextFrame = LocalEventContextBridge.Activate(executionScope.ServiceProvider, resolution);
+        }
+        catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
+        {
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            AttachCancellationFacts(cancel, "NotStarted", "ContextNotRestored", releaseProblem);
+            throw;
+        }
+        catch (LocalEventContextRestoreException restoreFailure)
+        {
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            _logger?.LogWarning(
+                "Replay of dead letter message {MessageId} refused before MarkRetrying: context restore failed with {Code}: {Message}.",
+                message.MessageId, restoreFailure.ProblemCode, restoreFailure.Message);
+            return Reject(message, restoreFailure.Message, restoreFailure.ProblemCode, releaseProblem, scopeOwned: true);
+        }
+        catch (Exception restoreFailure)
+        {
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            _logger?.LogError(
+                restoreFailure,
+                "Replay of dead letter message {MessageId} failed while resolving its context before MarkRetrying; no handler was executed.",
+                message.MessageId);
+            return Reject(message,
+                $"context resolution failed before MarkRetrying: {restoreFailure.Message}", "ContextRestoreFailed",
+                releaseProblem, scopeOwned: true);
+        }
+
+        LocalEventAdmissionResult admission;
+        try
+        {
+            admission = await LocalEventAdmission
+                .AdmitAsync(executionScope.ServiceProvider, binding, (ILocalEvent)decoded, LocalEventExecutionSource.Replay,
+                    replaySnapshot, message.EventDescriptorId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
+        {
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
+            AttachCancellationFacts(cancel, "NotStarted", "AdmissionNotCompleted", releaseProblem);
+            throw;
+        }
+
+        if (!admission.Allowed)
+        {
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
+            _logger?.LogWarning(
+                "Replay of dead letter message {MessageId} refused before MarkRetrying: {Code}: {Problem}.",
+                message.MessageId, admission.ProblemCode, admission.Problem);
+            return Reject(message, admission.Problem!, admission.ProblemCode!, releaseProblem, scopeOwned: true);
+        }
+
         LocalEventPreparedInvocation prepared;
         try
         {
@@ -147,23 +213,15 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         }
         catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
-            if (releaseProblem is not null)
-            {
-                cancel.Data["LocalEventReplayExecution"] = "NotStarted";
-                cancel.Data["LocalEventReplayRelease"] = releaseProblem.ToString();
-                _logger?.LogError(
-                    releaseProblem,
-                    "Replay preparation for dead letter message {MessageId} was interrupted by caller cancellation " +
-                    "and releasing the execution scope also failed. No handler was executed and the message state is unchanged.",
-                    message.MessageId);
-            }
-
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
+            AttachCancellationFacts(cancel, "NotStarted", "PrepareNotCompleted", releaseProblem);
             throw;
         }
         catch (Exception prepareFailure)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
             _logger?.LogError(
                 prepareFailure,
                 "Replay preparation for dead letter message {MessageId} failed before MarkRetrying; no handler was executed and the message state is unchanged.",
@@ -175,7 +233,8 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
 
         if (prepared.HandlerCount == 0)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
             return Reject(message,
                 $"event '{binding.LocalName}' resolved no handlers in the execution scope; a dead-letter replay " +
                 "requires at least one matching handler and must not be marked successful.", "ZeroHandlers",
@@ -192,7 +251,8 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         }
         catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
             cancel.Data["LocalEventReplayExecution"] = "NotStarted";
             cancel.Data["LocalEventReplaySettlement"] = "MarkRetryingUnconfirmed";
             if (releaseProblem is not null)
@@ -201,7 +261,7 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
                 _logger?.LogError(
                     releaseProblem,
                     "MarkRetrying for dead letter message {MessageId} was interrupted by caller cancellation " +
-                    "and releasing the execution scope also failed. No handler was executed and the persisted " +
+                    "and releasing the execution environment also failed. No handler was executed and the persisted " +
                     "state of the message is unconfirmed.",
                     message.MessageId);
             }
@@ -214,7 +274,8 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         }
         catch (Exception markFailure)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
             _logger?.LogError(
                 markFailure,
                 "MarkRetrying for dead letter message {MessageId} failed; no handler was executed and the persisted state is unconfirmed.",
@@ -241,7 +302,8 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         }
         catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
             var restored = await TryWriteStateAsync(
                 message with { Status = DeadLetterStatus.Pending },
                 "restore Pending after cooperative cancellation");
@@ -268,7 +330,7 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
                 cancel.Data["LocalEventReplayRelease"] = releaseProblem.ToString();
                 _logger?.LogError(
                     releaseProblem,
-                    "Replay of dead letter message {MessageId} was cancelled and releasing the execution scope " +
+                    "Replay of dead letter message {MessageId} was cancelled and releasing the execution environment " +
                     "also failed; the release failure is preserved alongside the caller cancellation.",
                     message.MessageId);
             }
@@ -277,7 +339,8 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         }
         catch (Exception handlerFailure)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
             var newRetryCount = message.RetryCount + 1;
             var updated = message with
             {
@@ -311,7 +374,8 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
 
         // Business success is recorded the moment the last handler returned; release and settlement
         // are reported independently and never rewrite the execution fact.
-        var successReleaseProblem = await TryDisposeScopeAsync(executionScope);
+        var successReleaseProblem = CombineReleaseProblems(
+            await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
         var successWrite = await TryWriteStateAsync(
             message with { Status = DeadLetterStatus.Retried },
             "record successful replay");
@@ -319,7 +383,7 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         if (!successWrite.Ok || successReleaseProblem is not null)
         {
             var problem = successWrite.Ok
-                ? "handlers executed but the execution scope release failed"
+                ? "handlers executed but the execution environment release failed"
                 : $"handlers executed but the Retried state write failed: {successWrite.Problem}";
             if (successReleaseProblem is not null)
             {
@@ -349,6 +413,29 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         };
     }
 
+    private static void AttachCancellationFacts(
+        OperationCanceledException cancel,
+        string execution,
+        string settlement,
+        Exception? releaseProblem)
+    {
+        cancel.Data["LocalEventReplayExecution"] = execution;
+        cancel.Data["LocalEventReplaySettlement"] = settlement;
+        if (releaseProblem is not null)
+        {
+            cancel.Data["LocalEventReplayRelease"] = releaseProblem.ToString();
+        }
+    }
+
+    private static Exception? CombineReleaseProblems(Exception? scopeProblem, Exception? frameProblem)
+        => (scopeProblem, frameProblem) switch
+        {
+            (null, null) => null,
+            (not null, null) => scopeProblem,
+            (null, not null) => frameProblem,
+            _ => new AggregateException("multiple release steps failed", scopeProblem, frameProblem),
+        };
+
     private bool TryResolveBinding(
         DeadLetterMessage message,
         out LocalEventBinding? binding,
@@ -365,8 +452,8 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
 
             binding = null;
             problem =
-                $"no registered local event matches replay key '{message.LocalReplayKey}:v{message.EventVersion}'; " +
-                "the message is preserved and not treated as failed.";
+                $"no registered local event matches replay key '{message.LocalReplayKey}:v{message.EventVersion}' " +
+                "(current key or explicit alias); the message is preserved and not treated as failed.";
             return false;
         }
 

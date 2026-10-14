@@ -169,4 +169,54 @@ public class LocalDeadLetterEfModelTests
         stored.MaxRetries.Should().Be(2);
         (await store.CountAsync(null, default)).Should().Be(1);
     }
+
+    [Fact]
+    public void DeadLetterModel_HasNullableLocalContextVersion_AsAdditiveColumn()
+    {
+        var options = new DbContextOptionsBuilder<DeadLetterDbContext>()
+            .UseInMemoryDatabase("dead-letter-context-model")
+            .Options;
+        using var context = new DeadLetterDbContext(options);
+
+        var entity = context.Model.FindEntityType(typeof(DeadLetterEntity))!;
+        var contextVersion = entity.FindProperty(nameof(DeadLetterEntity.LocalContextVersion));
+        contextVersion.Should().NotBeNull();
+        contextVersion!.IsNullable.Should().BeTrue();
+        contextVersion.ClrType.Should().Be(typeof(int?));
+
+        // The additive upgrade script is repeatable by construction and never DROPs or rewrites.
+        DeadLetterSchemaUpgrade.PostgreSqlAddLocalContextVersionColumnSql.Should()
+            .Contain("ADD COLUMN IF NOT EXISTS \"LocalContextVersion\"");
+        DeadLetterSchemaUpgrade.PostgreSqlAddLocalContextVersionColumnSql.Should().NotContain("DROP");
+    }
+
+    [Fact]
+    public async Task EfCoreStore_RoundTrips_LocalContextVersion_And_Preserves_Legacy_Null()
+    {
+        var options = new DbContextOptionsBuilder<DeadLetterDbContext>()
+            .UseInMemoryDatabase("dead-letter-context-roundtrip-" + System.Guid.NewGuid())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        await using var context = new DeadLetterDbContext(options);
+        var store = new EfCoreDeadLetterStore(context);
+
+        var modern = CreateMessage("ctx-modern") with
+        {
+            LocalContextVersion = CrestCreates.EventBus.Abstractions.LocalEventExecutionContextSnapshot.CurrentContextVersion,
+            TenantId = "tenant-a",
+            CorrelationId = "correlation-a",
+        };
+        var legacy = CreateMessage("ctx-legacy");
+        await store.EnqueueAsync(modern, default);
+        await store.EnqueueAsync(legacy, default);
+
+        var storedModern = await store.GetByIdAsync("ctx-modern", default);
+        storedModern!.LocalContextVersion.Should().Be(1);
+        storedModern.TenantId.Should().Be("tenant-a");
+        storedModern.CorrelationId.Should().Be("correlation-a");
+
+        var storedLegacy = await store.GetByIdAsync("ctx-legacy", default);
+        storedLegacy!.LocalContextVersion.Should().BeNull();
+        storedLegacy.LocalReplayKey.Should().Be("SomeAssembly:My.Event");
+    }
 }

@@ -14,4 +14,14 @@ public sealed class LocalEventAttribute : Attribute
     public int Version { get; set; } = 1;
 
     public bool Replayable { get; set; }
+
+    /// <summary>
+    /// Stable replay key. When unset the existing deterministic default
+    /// (<c>assemblySimpleName:metadataFullName</c>) is kept; old data is never silently rewritten.
+    /// </summary>
+    public string? ReplayKey { get; set; }
+
+    public LocalEventGovernance Governance { get; set; } = LocalEventGovernance.None;
+
+    public LocalEventTenantMode TenantMode { get; set; } = LocalEventTenantMode.Optional;
 }

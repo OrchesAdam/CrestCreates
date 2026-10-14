@@ -51,6 +51,10 @@ internal static class LocalEventCodeWriter
             const string codecArgument = "null";
             var legacyArgument = BuildLegacyIdentities(declaration);
             var replayableText = replayable ? "true" : "false";
+            var policyArgument = BuildPolicyArgument(declaration);
+            var trailingArguments = policyArgument is null
+                ? $"                \"{escapedAssembly}\"));"
+                : $"                \"{escapedAssembly}\",\n                {policyArgument}));";
 
             builder.AppendLine();
             builder.AppendLine($"            builder.Add(global::CrestCreates.EventBus.Abstractions.LocalEventRegistration.Create<{eventGlobalName}>(");
@@ -60,7 +64,7 @@ internal static class LocalEventCodeWriter
             builder.AppendLine($"                {codecArgument},");
             builder.AppendLine($"                {fieldName},");
             builder.AppendLine($"                {legacyArgument},");
-            builder.AppendLine($"                \"{escapedAssembly}\"));");
+            builder.AppendLine(trailingArguments);
         }
 
         builder.AppendLine("        }");
@@ -78,7 +82,7 @@ internal static class LocalEventCodeWriter
         builder.AppendLine("}");
         builder.AppendLine();
 
-        AppendExtension(builder, extensionNamespace, contributorId, eventNames, handlersByEvent, emitCodecContribution);
+        AppendExtension(builder, extensionNamespace, contributorId, eventNames, handlersByEvent, declarations, emitCodecContribution);
         return builder.ToString();
     }
 
@@ -106,14 +110,58 @@ internal static class LocalEventCodeWriter
         return $"new global::CrestCreates.EventBus.Abstractions.LocalEventLegacyIdentity[] {{ {entries} }}";
     }
 
+    private static string? BuildPolicyArgument(EventDeclarationInfo? declaration)
+    {
+        if (declaration is null)
+        {
+            return null;
+        }
+
+        var parts = new List<string>();
+        if (declaration.ReplayKey is not null)
+        {
+            parts.Add($"ReplayKey = \"{EscapeString(declaration.ReplayKey)}\"");
+        }
+
+        if (declaration.GovernanceRequired)
+        {
+            parts.Add("Governance = global::CrestCreates.EventBus.Abstractions.LocalEventGovernance.Required");
+        }
+
+        if (!string.Equals(declaration.TenantMode, "Optional", StringComparison.Ordinal))
+        {
+            parts.Add($"TenantMode = global::CrestCreates.EventBus.Abstractions.LocalEventTenantMode.{declaration.TenantMode}");
+        }
+
+        if (!declaration.ReplayAliases.IsDefaultOrEmpty)
+        {
+            var aliases = string.Join(", ",
+                declaration.ReplayAliases
+                    .OrderBy(alias => alias.Key, StringComparer.Ordinal)
+                    .ThenBy(alias => alias.Version)
+                    .Select(alias =>
+                        $"new global::CrestCreates.EventBus.Abstractions.LocalEventReplayAlias(\"{EscapeString(alias.Key)}\", {alias.Version})"));
+            parts.Add($"ReplayAliases = new global::CrestCreates.EventBus.Abstractions.LocalEventReplayAlias[] {{ {aliases} }}");
+        }
+
+        if (parts.Count == 0)
+        {
+            return null;
+        }
+
+        return $"new global::CrestCreates.EventBus.Abstractions.LocalEventPolicyOptions {{ {string.Join(", ", parts)} }}";
+    }
+
     private static void AppendExtension(
         StringBuilder builder,
         string extensionNamespace,
         string contributorId,
         IReadOnlyList<string> eventNames,
         IReadOnlyDictionary<string, List<HandlerBindingInfo>> handlersByEvent,
+        IReadOnlyDictionary<string, EventDeclarationInfo> declarations,
         bool emitCodecContribution)
     {
+        var requiresGovernance = declarations.Values.Any(declaration => declaration.GovernanceRequired);
         builder.AppendLine($"namespace {extensionNamespace}");
         builder.AppendLine("{");
         builder.AppendLine("    /// <summary>");
@@ -154,6 +202,11 @@ internal static class LocalEventCodeWriter
         if (emitCodecContribution)
         {
             builder.AppendLine("            global::CrestCreates.Generated.LocalEventJsonCodecContributions.AddCodecs(services);");
+        }
+
+        if (requiresGovernance)
+        {
+            builder.AppendLine("            global::CrestCreates.EventBus.Local.LocalEventGovernanceServiceCollectionExtensions.AddCrestLocalEventGovernance(services);");
         }
 
         builder.AppendLine("            return services;");

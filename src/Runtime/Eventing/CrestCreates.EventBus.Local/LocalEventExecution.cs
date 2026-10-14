@@ -7,9 +7,9 @@ namespace CrestCreates.EventBus.Local;
 
 /// <summary>
 /// Shared execution core for every entry point (sync publish, direct dispatcher, channel consumer
-/// and replay): prepare resolves the whole handler batch exactly once inside the caller's execution
-/// scope and the same prepared instances execute. Zero handlers complete as a no-op; missing
-/// required handlers fail during prepare before any handler runs.
+/// and replay) AFTER admission passed: prepare resolves the whole handler batch exactly once inside
+/// the caller's execution scope and the same prepared instances execute. Zero handlers complete as
+/// a no-op; missing required handlers fail during prepare before any handler runs.
 /// </summary>
 internal static class LocalEventExecution
 {

@@ -116,10 +116,10 @@ internal sealed class HardeningCurrentTenant : ICurrentTenant
         return Task.FromResult<IDisposable>(new Restore(this, previous));
     }
 
-    public IDisposable Change(ITenantInfo tenant)
+    public IDisposable Change(ITenantInfo? tenant)
     {
         var previous = Snapshot();
-        Id = tenant.Id;
+        Id = tenant?.Id;
         Tenant = tenant;
         return new Restore(this, previous);
     }
@@ -268,7 +268,8 @@ public class LocalEventHardeningBaselineIntegrationTests
         string? descriptorId = null,
         string eventName = "hardening",
         int eventVersion = 1,
-        int retryCount = 0)
+        int retryCount = 0,
+        int? localContextVersion = null)
     {
         var now = DateTime.UtcNow;
         return new DeadLetterMessage(
@@ -288,7 +289,8 @@ public class LocalEventHardeningBaselineIntegrationTests
             RetryCount: retryCount,
             MaxRetries: 3,
             Status: DeadLetterStatus.Pending,
-            LocalReplayKey: replayKey ?? ReplayKeyOf<TEvent>());
+            LocalReplayKey: replayKey ?? ReplayKeyOf<TEvent>(),
+            LocalContextVersion: localContextVersion);
     }
 
     // ── C01 baseline ──
@@ -588,7 +590,8 @@ public class LocalEventHardeningBaselineIntegrationTests
 
         HardeningFactoryProbeHandler.Behavior = static () => Task.CompletedTask;
         Interlocked.Exchange(ref HardeningFactoryProbeHandler.Calls, 0);
-        var record = CreatePendingRecord<HardeningFactoryProbeEvent>(payload);
+        var record = CreatePendingRecord<HardeningFactoryProbeEvent>(
+            payload, localContextVersion: LocalEventExecutionContextSnapshot.CurrentContextVersion);
         var store = provider.GetRequiredService<IDeadLetterStore>();
         await store.EnqueueAsync(record, CancellationToken.None);
 

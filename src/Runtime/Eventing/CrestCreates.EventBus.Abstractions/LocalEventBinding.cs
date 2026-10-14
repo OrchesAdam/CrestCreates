@@ -15,22 +15,32 @@ public sealed class LocalEventBinding
     internal LocalEventBinding(
         LocalEventInvoker invoker,
         Type eventType,
+        string replayKey,
         int replayVersion,
         bool replayable,
         JsonTypeInfo? codec,
         ImmutableArray<Type> expectedHandlerTypes,
         ImmutableArray<LocalEventLegacyIdentity> legacyIdentities,
+        ImmutableArray<LocalEventReplayAlias> replayAliases,
+        LocalEventPolicyOptions policy,
         string sourceAssembly)
     {
         Invoker = invoker;
         EventType = eventType;
         LocalName = eventType.FullName ?? eventType.Name;
-        LocalReplayKey = LocalEventIdentity.BuildLocalReplayKey(eventType);
+        LocalReplayKey = replayKey;
         ReplayVersion = replayVersion;
         Replayable = replayable;
         Codec = codec;
         ExpectedHandlerTypes = expectedHandlerTypes;
         LegacyIdentities = legacyIdentities;
+        ReplayAliases = replayAliases;
+        Governance = policy.Governance;
+        TenantMode = policy.TenantMode;
+        ExecutionCheckTypes = policy.ExecutionCheckTypes;
+        UseEventValidator = policy.UseEventValidator;
+        AllowHistoricalHostContext = policy.AllowHistoricalHostContext;
+        AdoptGovernedHistory = policy.AdoptGovernedHistory;
         SourceAssembly = sourceAssembly;
     }
 
@@ -41,7 +51,7 @@ public sealed class LocalEventBinding
     /// <summary>Canonical local name = metadata type full name (never a short name).</summary>
     public string LocalName { get; }
 
-    /// <summary>Compile-time deterministic replay lookup key: "{assemblySimpleName}:{metadataFullName}".</summary>
+    /// <summary>Frozen replay lookup key: the explicit stable key, or the deterministic default.</summary>
     public string LocalReplayKey { get; }
 
     public int ReplayVersion { get; }
@@ -57,5 +67,25 @@ public sealed class LocalEventBinding
     /// <summary>Locked read-only copy of the merged legacy-identity set.</summary>
     public IReadOnlyList<LocalEventLegacyIdentity> LegacyIdentities { get; }
 
+    /// <summary>Locked read-only copy of the merged historical replay-key alias set.</summary>
+    public IReadOnlyList<LocalEventReplayAlias> ReplayAliases { get; }
+
+    public LocalEventGovernance Governance { get; }
+
+    public LocalEventTenantMode TenantMode { get; }
+
+    /// <summary>Scoped execution checks activated for this event; DI registration is validated at freeze.</summary>
+    public IReadOnlyList<Type> ExecutionCheckTypes { get; }
+
+    public bool UseEventValidator { get; }
+
+    public bool AllowHistoricalHostContext { get; }
+
+    public bool AdoptGovernedHistory { get; }
+
     public string SourceAssembly { get; }
+
+    /// <summary>Structured identity of an execution admitted against this binding.</summary>
+    public LocalEventAcceptedIdentity CreateAcceptedIdentity(string? descriptorId, string? descriptorName)
+        => new(LocalReplayKey, ReplayVersion, descriptorId, descriptorName);
 }

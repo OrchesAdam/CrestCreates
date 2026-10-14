@@ -26,13 +26,15 @@ public sealed class LocalEventDispatchRegistrationBuilder
     /// Declares an event without a generated contributor. Handlers registered through DI are
     /// dispatched in DI registration order; typed expected-handler diagnostics require a
     /// generated contributor. An optional manual typed codec factory participates in the same
-    /// freeze-time validation as generated per-host codec contributions.
+    /// freeze-time validation as generated per-host codec contributions. Policy inputs (stable
+    /// key, aliases, governance/tenant mode, explicit checks) join the same freeze validation.
     /// </summary>
     public LocalEventRegistration Declare<TEvent>(
         bool replayable = false,
         int version = 1,
         IReadOnlyList<LocalEventLegacyIdentity>? legacyIdentities = null,
-        Func<JsonTypeInfo?>? codecFactory = null)
+        Func<JsonTypeInfo?>? codecFactory = null,
+        LocalEventPolicyOptions? policy = null)
         where TEvent : ILocalEvent
     {
         var registration = LocalEventRegistration.Create(
@@ -43,7 +45,8 @@ public sealed class LocalEventDispatchRegistrationBuilder
             codecFactory,
             expectedHandlerTypes: null,
             legacyIdentities,
-            SourceAssemblyOf(typeof(TEvent)));
+            SourceAssemblyOf(typeof(TEvent)),
+            policy);
         Add(registration);
         return registration;
     }
@@ -54,7 +57,8 @@ public sealed class LocalEventDispatchRegistrationBuilder
         bool replayable = false,
         int version = 1,
         IReadOnlyList<LocalEventLegacyIdentity>? legacyIdentities = null,
-        Func<JsonTypeInfo?>? codecFactory = null)
+        Func<JsonTypeInfo?>? codecFactory = null,
+        LocalEventPolicyOptions? policy = null)
     {
         ArgumentNullException.ThrowIfNull(eventType);
         if (!typeof(ILocalEvent).IsAssignableFrom(eventType))
@@ -71,7 +75,8 @@ public sealed class LocalEventDispatchRegistrationBuilder
             codecFactory,
             expectedHandlerTypes: null,
             legacyIdentities,
-            SourceAssemblyOf(eventType));
+            SourceAssemblyOf(eventType),
+            policy);
         Add(registration);
         return registration;
     }

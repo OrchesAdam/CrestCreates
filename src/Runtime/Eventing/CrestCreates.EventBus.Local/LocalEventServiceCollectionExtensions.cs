@@ -59,7 +59,9 @@ public static class LocalEventServiceCollectionExtensions
         services.TryAddSingleton<ILocalEventDispatchRegistry>(provider => LocalEventDispatchRegistry.Freeze(
             provider.GetServices<ILocalEventRegistrationContributor>(),
             provider.GetRequiredService<LocalEventDispatchConfiguration>().Callbacks,
-            provider.GetServices<LocalEventJsonCodecRegistration>().ToList()));
+            provider.GetServices<LocalEventJsonCodecRegistration>().ToList(),
+            provider.GetService<IServiceProviderIsService>(),
+            provider.GetService<ILoggerFactory>()?.CreateLogger("CrestCreates.EventBus.Local.LocalEventDispatchRegistry")));
 
         services.Configure<LocalDeadLetterOptions>(_ => { });
         services.TryAddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();

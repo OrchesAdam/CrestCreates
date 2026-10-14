@@ -188,6 +188,9 @@ internal static class LocalEventSymbolAnalyzer
 
         var replayable = false;
         var version = 1;
+        string? replayKey = null;
+        var governanceRequired = false;
+        var tenantMode = "Optional";
         foreach (var named in attribute.NamedArguments)
         {
             if (named.Key == "Replayable" && named.Value.Value is bool replayableValue)
@@ -198,6 +201,44 @@ internal static class LocalEventSymbolAnalyzer
             {
                 version = versionValue;
             }
+            else if (named.Key == "ReplayKey" && named.Value.Value is string replayKeyValue)
+            {
+                replayKey = replayKeyValue;
+            }
+            else if (named.Key == "Governance" && named.Value.Value is int governanceValue)
+            {
+                governanceRequired = governanceValue == 1;
+            }
+            else if (named.Key == "TenantMode" && named.Value.Value is int tenantModeValue)
+            {
+                tenantMode = tenantModeValue switch
+                {
+                    1 => "Required",
+                    2 => "HostOnly",
+                    _ => "Optional",
+                };
+            }
+        }
+
+        var replayAliases = ImmutableArray.CreateBuilder<ReplayAliasInfo>();
+        foreach (var aliasAttribute in eventSymbol.GetAttributes())
+        {
+            if (aliasAttribute.AttributeClass?.ToDisplayString() != LocalEventSourceGenerator.ReplayAliasAttributeMetadataName)
+            {
+                continue;
+            }
+
+            if (aliasAttribute.ConstructorArguments.Length == 0 ||
+                aliasAttribute.ConstructorArguments[0].Value is not string aliasKey)
+            {
+                continue;
+            }
+
+            var aliasVersion = aliasAttribute.ConstructorArguments.Length > 1 &&
+                               aliasAttribute.ConstructorArguments[1].Value is int parsedAliasVersion
+                ? parsedAliasVersion
+                : 1;
+            replayAliases.Add(new ReplayAliasInfo(aliasKey, aliasVersion));
         }
 
         var legacyIdentities = ImmutableArray.CreateBuilder<LegacyIdentityInfo>();
@@ -250,6 +291,10 @@ internal static class LocalEventSymbolAnalyzer
             EventMetadataName: eventSymbol.ToDisplayString(),
             Replayable: replayable,
             Version: version,
+            ReplayKey: replayKey,
+            GovernanceRequired: governanceRequired,
+            TenantMode: tenantMode,
+            ReplayAliases: replayAliases.ToImmutable(),
             LegacyIdentities: legacyIdentities.ToImmutable(),
             Location: location,
             Owned: isOwned);

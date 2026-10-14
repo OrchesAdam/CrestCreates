@@ -102,3 +102,21 @@
 | 发现 | 修订 | 落点与验证 |
 | --- | --- | --- |
 | S2-R2-LE146-01（P2）执行中协作取消被记录为业务执行失败 | 执行期取消分支（`prepared.ExecuteAsync` 的 caller-cancellation catch）的 `Data["LocalEventReplayExecution"]` 由条件写入 `Failed/NotStarted` 改为按 Spec §8 / `LocalEventExecutionOutcome` 统一报 **`Cancelled`**；Handler 是否已进入保持独立事实 `Data["LocalEventReplayAnyHandlerInvoked"]`。Prepare / MarkRetrying 两个取消分支维持 `NotStarted`（与 §8 矩阵行一致：准备前停止 / MarkRetrying 未确认）。原 OCE 传播、释放错误保留、Pending 有界恢复与预算不变行为全部保持。 | `LocalDeadLetterReplayExecutor`；两条组合回归断言改为 `LocalEventExecutionOutcome.Cancelled.ToString()` 并新增 AnyHandlerInvoked 事实断言（审查在临时副本中改期望即复现 Expected Cancelled / Actual Failed） |
+
+## S3 — 身份、策略与上下文（design/S2 放行后实施）
+
+### 交付（对照 Spec §3.3/§5/§6/§7/§8/§9）
+
+- **稳定键与 alias**：`LocalEventAttribute` 增 `ReplayKey/Governance/TenantMode`；新增 repeatable `LocalEventReplayAliasAttribute` 与 `LocalEventReplayAlias`；冻结校验键格式（Ordinal、无首尾空白/控制字符）、alias 版本必须等于目标 ReplayVersion、alias 与现行键共用冲突空间（双向检测）；`TryGetByReplayKey` 现行键→alias；未知非空键不降级 payload identity（I02）；重放不改原行键（I01 迁移用例断言）。
+- **声明策略面**：`LocalEventPolicyOptions`（ReplayKey/Aliases/Governance/TenantMode/执行 check/validator 激活/历史 host 认可/治理历史采用）进入 `LocalEventRegistration` → frozen `LocalEventBinding`；单值身份元数据交叉一致、激活开关加法合并；freeze 用 `IServiceProviderIsService` 校验 check/validator 的 DI 注册（缺注册即组装失败）；检测到 IEventValidator 注册而零激活时给出迁移诊断日志。
+- **共用 admission**：`LocalEventAdmission` 覆盖发布/直接 dispatcher/Channel 入队与消费/重放：Governance.Required 精确 descriptor（payload+version 唯一、State.Active）、persisted descriptorId 匹配、null-id 历史行需显式采用映射、非治理声明读取带 id 记录拒绝降级；执行 check 结构化拒绝；validator 显式激活。拒绝不接受、不建 DLQ；Channel 消费拒绝用原 work item 快照落诊断行。
+- **bootstrap 就绪（§3.3 rev.2）**：`AddCrestLocalEventGovernance` = AddEventKernel + TryAddEnumerable 既有 `EventRegistryBootstrapper`（IBootstrapTask）+ 既有 `BootstrapCoordinator`（IHostedService）+ 新 `local-governance-readiness` 任务（依赖 event-registry；零 descriptor provider 为启动期可操作装配错误）；`LocalEventGovernanceReadiness` gate 由 admission 等待（hosted）；非 hosted 未 Built 直接可操作拒绝且不缓存（bootstrap 后重试通过，G06③）；生成器在含 Governance.Required 声明的程序集 `AddLocalEvents()` 自动调用；LocalEvent+RabbitMQ 双注册顺序等价（coordinator 单实例、registry 单次 Build，G07）。
+- **上下文捕获与恢复（§7）**：`LocalEventExecutionContextSnapshot`（版本=1 或 legacy null）/`LocalEventWorkItem`/`LocalEventAcceptedIdentity`；发布/入队边界捕获（audit 与 current tenant 冲突或不可恢复即捕获失败）、Channel 消费恢复、recorder 使用原快照+已接受身份（不再 advisory 选择版本）；恢复协议分离 await `ITenantProvider` 解析与执行帧同步 `ICurrentTenant.Change`/audit `Push`（LIFO frame、逐层独立释放、聚合次要错误）；`ICurrentTenant.Change(ITenantInfo?)` nullable host 语义。
+- **租户模式与历史矩阵（§7.3）**：TenantMode.Optional/Required/HostOnly × v1/legacy/未知 ContextVersion 全矩阵在 admission 前执行：未知租户/名称 fallback 得到不同 Id/缺 provider/缺 current tenant/缺 audit 设施/未知版本全部执行前拒绝且不落 host；legacy null-context 默认拒绝，显式 per-binding `AllowHistoricalHostContext` 才允许且不覆盖 Required/HostOnly。
+- **持久化（§9，S3 范围内）**：`DeadLetterMessage.LocalContextVersion` additive 可空；EF 实体/映射/store 往返；`DeadLetterSchemaUpgrade` 提供可重复 PG 脚本（`ADD COLUMN IF NOT EXISTS`，不 DROP/不重写）与只读列检测；真实旧 schema 双次升级与 store readiness 能力接口留待 S4 真实 PG fixture。
+
+### 夹具与计数（本地，S3 实施后）
+
+- 新增集成 `LocalEventGovernanceAndContextTests` 22 条（I01×2/I02/I03×2、G02×2、G03×2、G04、G05×3、G06×3、G07、C02×2、C03×2、C04/C05 组合、Channel 捕获恢复）；EF 模型 +2（可空列、往返含 legacy null 保真）。
+- 4 条 S3 约定红基线（recorder 捕获、A/B tenant 恢复、缺 provider/audit 拒绝）全部转绿；5 条旧夹具按目标语义修正：modern 记录带 ContextVersion=1（`CreateModernMessage`/AotHost SeedMessage/H03 用例），legacy 工厂保持 null，两条 legacy 身份语义用例补显式历史 host 策略。
+- 计数：单元 42/42；集成 **94/94**；CodeGenerator 367/367（+2 策略发射）；JsonContracts 131/131；LocalEvent 真实 NativeAOT 门禁在本 head 通过（linux-x64）；全量构建 0 错误；边界/Event/Capability/RabbitMQ 单元见同批日志。

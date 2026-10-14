@@ -317,7 +317,8 @@ internal static class Program
             0,
             3,
             DeadLetterStatus.Pending,
-            LocalReplayKey: replayKey);
+            LocalReplayKey: replayKey,
+            LocalContextVersion: LocalEventExecutionContextSnapshot.CurrentContextVersion);
         store.EnqueueAsync(message, CancellationToken.None).GetAwaiter().GetResult();
         return message;
     }

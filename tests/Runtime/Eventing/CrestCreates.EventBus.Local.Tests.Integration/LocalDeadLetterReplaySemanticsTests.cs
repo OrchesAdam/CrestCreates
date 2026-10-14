@@ -63,7 +63,9 @@ public class LocalDeadLetterReplaySemanticsTests
     {
         var control = new HandlerControl { ShouldFail = true };
         using var provider = LocalEventTestComposition.Build(
-            declare: builder => builder.Declare<ReplayableFailingEvent>(replayable: true),
+            declare: builder => builder.Declare<ReplayableFailingEvent>(
+                replayable: true,
+                policy: new LocalEventPolicyOptions { AllowHistoricalHostContext = true }),
             configure: services =>
             {
                 services.AddSingleton(control);
@@ -93,7 +95,8 @@ public class LocalDeadLetterReplaySemanticsTests
         using var provider = LocalEventTestComposition.Build(
             declare: builder => builder.Declare<LegacyAliasedReplayEvent>(
                 replayable: true,
-                legacyIdentities: new[] { new LocalEventLegacyIdentity("CrestCreates.Legacy.GoneEvent", 1) }),
+                legacyIdentities: new[] { new LocalEventLegacyIdentity("CrestCreates.Legacy.GoneEvent", 1) },
+                policy: new LocalEventPolicyOptions { AllowHistoricalHostContext = true }),
             configure: services =>
             {
                 services.AddSingleton(handler);

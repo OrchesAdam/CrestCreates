@@ -71,14 +71,16 @@ internal static class LocalEventTestComposition
         int eventVersion = 1,
         int retryCount = 0,
         int maxRetries = 3,
-        string? messageId = null)
+        string? messageId = null,
+        string? tenantId = null,
+        string? correlationId = null)
         => new(
             messageId ?? Guid.NewGuid().ToString("N"),
             typeof(TEvent).FullName!,
             eventVersion,
             null,
-            null,
-            null,
+            correlationId,
+            tenantId,
             EventScope.Local,
             typeof(TEvent).AssemblyQualifiedName!,
             payload,
@@ -89,7 +91,8 @@ internal static class LocalEventTestComposition
             retryCount,
             maxRetries,
             DeadLetterStatus.Pending,
-            LocalReplayKey: replayKey);
+            LocalReplayKey: replayKey,
+            LocalContextVersion: LocalEventExecutionContextSnapshot.CurrentContextVersion);
 }
 
 /// <summary>Shared observable state for per-event controllable handlers.</summary>
