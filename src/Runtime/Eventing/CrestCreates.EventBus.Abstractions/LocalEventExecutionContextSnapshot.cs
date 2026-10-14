@@ -23,14 +23,15 @@ public sealed record LocalEventExecutionContextSnapshot(
         => new(CurrentContextVersion, Normalize(tenantId), Normalize(correlationId));
 
     /// <summary>
-    /// Snapshot view of a persisted row: empty/whitespace ids are normalized to null so a damaged
-    /// value can never masquerade as an explicit host or bypass the tenant-mode checks.
+    /// Snapshot view of a persisted row. The raw tenant id is preserved on purpose: an empty or
+    /// whitespace value is a damaged write, not an explicit host context, and must be refused by
+    /// the format checks instead of being silently rewritten into the host fact.
     /// </summary>
     public static LocalEventExecutionContextSnapshot FromPersisted(
         int? contextVersion,
         string? tenantId,
         string? correlationId)
-        => new(contextVersion, Normalize(tenantId), Normalize(correlationId));
+        => new(contextVersion, tenantId, Normalize(correlationId));
 
     private static string? Normalize(string? value)
         => string.IsNullOrEmpty(value) ? null : value;

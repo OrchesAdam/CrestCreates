@@ -58,15 +58,29 @@ internal static class LocalEventContextBridge
     }
 
     /// <summary>
-    /// Async phase: validates the persisted snapshot against the binding policy and resolves the
-    /// tenant through the authoritative provider. Never mutates ambient state.
+    /// Full recoverability validation shared by every accept/execute boundary: context format,
+    /// damaged ids, tenant mode, authoritative tenant resolution with exact-id equality, and audit
+    /// association capability. A borrowed caller scope does not skip it, and a later execution
+    /// re-validates instead of trusting the earlier pass.
     /// </summary>
-    public static async Task<LocalEventContextResolution> ResolveAsync(
+    public static async Task<ITenantInfo?> ValidateRecoverabilityAsync(
         IServiceProvider provider,
         LocalEventBinding binding,
         LocalEventExecutionContextSnapshot snapshot,
         CancellationToken cancellationToken)
     {
+        // A damaged (empty/whitespace) persisted tenant id is refused before anything else: it is
+        // not an explicit host fact and must not be converted into one.
+        if (snapshot.TenantId is not null && string.IsNullOrWhiteSpace(snapshot.TenantId))
+        {
+            throw new LocalEventContextRestoreException(
+                "InvalidTenantId",
+                $"event '{binding.LocalName}' carries a damaged (empty) tenant id; a damaged value is never " +
+                "converted into an executable host.");
+        }
+
+        var hasTenant = !string.IsNullOrEmpty(snapshot.TenantId);
+
         if (snapshot.ContextVersion != LocalEventExecutionContextSnapshot.CurrentContextVersion)
         {
             if (snapshot.ContextVersion is not null)
@@ -77,7 +91,7 @@ internal static class LocalEventContextBridge
                     "the record is preserved and refused.");
             }
 
-            if (string.IsNullOrEmpty(snapshot.TenantId) && !binding.AllowHistoricalHostContext)
+            if (!hasTenant && !binding.AllowHistoricalHostContext)
             {
                 throw new LocalEventContextRestoreException(
                     "HistoricalContextNotRecognized",
@@ -86,39 +100,29 @@ internal static class LocalEventContextBridge
             }
         }
 
-        // Missing and invalid tenant ids are handled uniformly: an empty id is never a valid tenant
-        // and is never converted into an executable host.
         switch (binding.TenantMode)
         {
-            case LocalEventTenantMode.HostOnly when !string.IsNullOrEmpty(snapshot.TenantId):
+            case LocalEventTenantMode.HostOnly when hasTenant:
                 throw new LocalEventContextRestoreException(
                     "TenantModeHostOnly",
-                    $"event '{binding.LocalName}' is host-only but the record carries tenant '{snapshot.TenantId}'.");
-            case LocalEventTenantMode.Required when string.IsNullOrEmpty(snapshot.TenantId):
+                    $"event '{binding.LocalName}' is host-only but the request carries tenant '{snapshot.TenantId}'.");
+            case LocalEventTenantMode.Required when !hasTenant:
                 throw new LocalEventContextRestoreException(
                     "TenantModeRequired",
-                    $"event '{binding.LocalName}' requires a tenant but the record carries no valid tenant id.");
+                    $"event '{binding.LocalName}' requires a tenant but the request carries no valid tenant id.");
         }
 
-        ITenantInfo? tenant = null;
-        if (!string.IsNullOrEmpty(snapshot.TenantId))
+        ITenantInfo? resolvedTenant = null;
+        if (hasTenant)
         {
             var tenantProvider = provider.GetService<ITenantProvider>()
                 ?? throw new LocalEventContextRestoreException(
                     "MissingTenantProvider",
-                    $"the record of event '{binding.LocalName}' carries tenant '{snapshot.TenantId}' but this host has " +
-                    "no ITenantProvider; the tenant cannot be validated and the attempt is refused.");
+                    $"event '{binding.LocalName}' carries tenant '{snapshot.TenantId}' but this host has no " +
+                    "ITenantProvider; the tenant cannot be validated and the request is refused.");
 
-            if (provider.GetService<ICurrentTenant>() is null)
-            {
-                throw new LocalEventContextRestoreException(
-                    "MissingCurrentTenant",
-                    $"the record of event '{binding.LocalName}' carries tenant '{snapshot.TenantId}' but this host has " +
-                    "no ICurrentTenant; the tenant cannot be activated and the attempt is refused.");
-            }
-
-            tenant = await tenantProvider.GetTenantAsync(snapshot.TenantId, cancellationToken).ConfigureAwait(false);
-            if (tenant is null)
+            resolvedTenant = await tenantProvider.GetTenantAsync(snapshot.TenantId!, cancellationToken).ConfigureAwait(false);
+            if (resolvedTenant is null)
             {
                 throw new LocalEventContextRestoreException(
                     "UnknownTenant",
@@ -126,27 +130,54 @@ internal static class LocalEventContextBridge
                     "inactive tenants are refused and never fall back to host execution.");
             }
 
-            if (!string.Equals(tenant.Id, snapshot.TenantId, StringComparison.Ordinal))
+            if (!string.Equals(resolvedTenant.Id, snapshot.TenantId, StringComparison.Ordinal))
             {
                 throw new LocalEventContextRestoreException(
                     "TenantIdMismatch",
-                    $"tenant provider resolved id '{tenant.Id}' for requested '{snapshot.TenantId}' of event " +
+                    $"tenant provider resolved id '{resolvedTenant.Id}' for requested '{snapshot.TenantId}' of event " +
                     $"'{binding.LocalName}'; name-based fallback to a different id is refused.");
             }
         }
 
-        var accessor = provider.GetService<IAuditOperationContextAccessor>();
-        var generator = provider.GetService<IAuditIdentityGenerator>();
-        if (snapshot.CorrelationId is not null && (accessor is null || generator is null))
+        if (snapshot.CorrelationId is not null
+            && (provider.GetService<IAuditOperationContextAccessor>() is null
+                || provider.GetService<IAuditIdentityGenerator>() is null))
         {
             throw new LocalEventContextRestoreException(
                 "MissingAuditFacility",
-                $"the record of event '{binding.LocalName}' carries correlation '{snapshot.CorrelationId}' but this " +
-                "host has no audit accessor/identity facility; the association cannot be restored and the attempt is " +
-                "refused instead of silently degrading to an unassociated execution.");
+                $"event '{binding.LocalName}' carries correlation '{snapshot.CorrelationId}' but this host has no " +
+                "audit accessor/identity facility; the association could not be restored by a later execution and " +
+                "the request is refused instead of degrading to an unassociated one.");
         }
 
-        return new LocalEventContextResolution(tenant, snapshot, accessor, generator);
+        return resolvedTenant;
+    }
+
+    /// <summary>
+    /// Async phase: validates the persisted snapshot against the binding policy and resolves the
+    /// tenant through the authoritative provider. Never mutates ambient state.
+    /// </summary>
+    public static async Task<LocalEventContextResolution> ResolveAsync(
+        IServiceProvider provider,
+        LocalEventBinding binding,
+        LocalEventExecutionContextSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        var tenant = await ValidateRecoverabilityAsync(provider, binding, snapshot, cancellationToken).ConfigureAwait(false);
+
+        if (tenant is not null && provider.GetService<ICurrentTenant>() is null)
+        {
+            throw new LocalEventContextRestoreException(
+                "MissingCurrentTenant",
+                $"the record of event '{binding.LocalName}' carries tenant '{snapshot.TenantId}' but this host has " +
+                "no ICurrentTenant; the tenant cannot be activated and the attempt is refused.");
+        }
+
+        return new LocalEventContextResolution(
+            tenant,
+            snapshot,
+            provider.GetService<IAuditOperationContextAccessor>(),
+            provider.GetService<IAuditIdentityGenerator>());
     }
 
     /// <summary>
@@ -189,15 +220,21 @@ internal static class LocalEventContextBridge
         catch (Exception activationFailure)
         {
             var cleanupFailure = UnwindDisposers(disposers);
-            if (cleanupFailure is not null)
+            if (cleanupFailure is null)
             {
-                throw new AggregateException(
-                    $"context activation failed ({activationFailure.Message}) and restoring the already-entered " +
-                    "frames also failed; both facts are reported.",
-                    activationFailure, cleanupFailure);
+                throw;
             }
 
-            throw;
+            // The original failure keeps its identity: a caller cancellation stays an OCE (with the
+            // cleanup fact attached), and a non-cancellation failure is surfaced together with the
+            // cleanup failure so callers report Release.Failed instead of claiming a clean release.
+            if (activationFailure is OperationCanceledException)
+            {
+                activationFailure.Data["LocalEventContextCleanupFailure"] = cleanupFailure.ToString();
+                throw;
+            }
+
+            throw new LocalEventContextActivationException(activationFailure, cleanupFailure);
         }
 
         return new LocalEventContextFrame(disposers);
@@ -260,6 +297,7 @@ internal sealed class LocalEventContextFrame : IDisposable
         _disposers = null;
         Exception? first = null;
         List<string>? problems = null;
+        List<Exception>? failures = null;
         for (var index = disposers.Count - 1; index >= 0; index--)
         {
             try
@@ -270,6 +308,7 @@ internal sealed class LocalEventContextFrame : IDisposable
             {
                 first ??= failure;
                 (problems ??= new List<string>()).Add(failure.Message);
+                (failures ??= new List<Exception>()).Add(failure);
             }
         }
 
@@ -278,10 +317,10 @@ internal sealed class LocalEventContextFrame : IDisposable
             return null;
         }
 
-        return problems is { Count: > 1 }
+        return problems is { Count: > 1 } && failures is not null
             ? new AggregateException(
                 $"multiple context restore steps failed: {string.Join(" | ", problems)}",
-                disposers.Count == 0 ? Array.Empty<Exception>() : new[] { first })
+                failures)
             : first;
     }
 

@@ -56,6 +56,18 @@ internal sealed class ThrowingPushAuditAccessor : CrestCreates.Accountability.Ab
         => throw new InvalidOperationException("probe audit push failure");
 }
 
+internal sealed class CancelThenThrowPushAccessor(CancellationTokenSource source)
+    : CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor
+{
+    public CrestCreates.Accountability.Abstractions.Context.AuditOperationContext? Current => null;
+
+    public IDisposable Push(CrestCreates.Accountability.Abstractions.Context.AuditOperationContext context)
+    {
+        source.Cancel();
+        throw new OperationCanceledException(source.Token);
+    }
+}
+
 internal sealed class ReviewGovernedProbeEvent : DomainEvent
 {
 }
@@ -195,13 +207,16 @@ public class LocalEventGovernanceReviewR1Tests
         Assert.Equal(0, RejectingCheckHandler.Calls);
     }
 
-    [Fact]
-    public async Task Required_replay_with_empty_persisted_tenant_id_is_refused_not_run_as_host()
+    [Theory]
+    [InlineData(LocalEventTenantMode.Optional)]
+    [InlineData(LocalEventTenantMode.HostOnly)]
+    [InlineData(LocalEventTenantMode.Required)]
+    public async Task Damaged_empty_persisted_tenant_id_is_refused_instead_of_becoming_host(LocalEventTenantMode mode)
     {
         await using var provider = LocalEventTestComposition.Build(
             declare: builder => builder.Declare<ModeProbeEvent>(
                 replayable: true,
-                policy: new LocalEventPolicyOptions { TenantMode = LocalEventTenantMode.Required }),
+                policy: new LocalEventPolicyOptions { TenantMode = mode }),
             configure: services =>
             {
                 services.AddScoped<ILocalEventHandler<ModeProbeEvent>, ModeProbeHandler>();
@@ -219,7 +234,8 @@ public class LocalEventGovernanceReviewR1Tests
             .ExecuteAsync(record, CancellationToken.None);
 
         Assert.False(result.Success);
-        Assert.Equal("TenantModeRequired", result.ProblemCode);
+        Assert.Equal("InvalidTenantId", result.ProblemCode);
+        Assert.Equal(LocalEventExecutionOutcome.NotStarted, result.Execution);
         var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
         Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
         Assert.Equal(0, fresh.RetryCount);
@@ -260,12 +276,219 @@ public class LocalEventGovernanceReviewR1Tests
             Assert.Equal(0, provider.GetRequiredService<CurrentTenantProbeState>().Calls);
             Assert.Equal(1, await store.CountAsync(null, CancellationToken.None));
             var recorded = (await store.GetPendingAsync(0, 10, CancellationToken.None)).Single();
-            Assert.Contains("requires a tenant", recorded.ErrorMessage, StringComparison.Ordinal);
+            Assert.Contains("damaged", recorded.ErrorMessage, StringComparison.Ordinal);
         }
         finally
         {
             await consumer.StopAsync(CancellationToken.None);
         }
+    }
+
+    // ── Boundary recoverability: resolution, exact id and association capability ──
+
+    private static (ServiceProvider Provider, IServiceCollection Services) BuildTenantBoundaryProvider(
+        Action<IServiceCollection> configure)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+        services.AddCrestLocalEventDispatch(builder => builder.Declare<ModeProbeEvent>());
+        services.AddScoped<ILocalEventHandler<ModeProbeEvent>, ModeProbeHandler>();
+        services.AddSingleton(new CurrentTenantProbeState());
+        configure(services);
+        LocalEventJsonCodecContributions.AddCodecs(services);
+        return (services.BuildServiceProvider(), services);
+    }
+
+    [Fact]
+    public async Task Publish_boundary_resolves_the_recorded_tenant_with_exact_id()
+    {
+        var tenants = new FlakyTenantProvider();
+        tenants.Add("tenant-b");
+        await using var provider = BuildTenantBoundaryProvider(services =>
+        {
+            services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(
+                new HardeningCurrentTenant("tenant-b"));
+            services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(tenants);
+        }).Provider;
+
+        await using var scope = provider.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<ILocalEventBus>().PublishAsync(new ModeProbeEvent());
+        Assert.Equal(1, scope.ServiceProvider.GetRequiredService<CurrentTenantProbeState>().Calls);
+    }
+
+    [Fact]
+    public async Task Unknown_tenant_is_refused_at_publish_and_enqueue_boundaries()
+    {
+        await using (var provider = BuildTenantBoundaryProvider(services =>
+                     {
+                         services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(
+                             new HardeningCurrentTenant("tenant-unknown"));
+                         services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(
+                             new FlakyTenantProvider());
+                     }).Provider)
+        {
+            await using var scope = provider.CreateAsyncScope();
+            var failure = await Assert.ThrowsAsync<LocalEventAdmissionException>(
+                () => scope.ServiceProvider.GetRequiredService<ILocalEventBus>().PublishAsync(new ModeProbeEvent()));
+            Assert.Equal("UnknownTenant", failure.ProblemCode);
+            Assert.Equal(0, scope.ServiceProvider.GetRequiredService<CurrentTenantProbeState>().Calls);
+        }
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(
+            new HardeningCurrentTenant("tenant-unknown"));
+        services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(new FlakyTenantProvider());
+        services.AddCrestLocalChannelEventDispatch(builder => builder.Declare<ModeProbeEvent>(
+            replayable: true,
+            codecFactory: () => LocalEventTestComposition.CodecFor<ModeProbeEvent>()));
+        services.AddScoped<ILocalEventHandler<ModeProbeEvent>, ModeProbeHandler>();
+        services.AddSingleton(new CurrentTenantProbeState());
+        await using var channelProvider = services.BuildServiceProvider();
+
+        await using (var scope = channelProvider.CreateAsyncScope())
+        {
+            var failure = await Assert.ThrowsAsync<LocalEventAdmissionException>(
+                () => scope.ServiceProvider.GetRequiredService<ILocalEventBus>().PublishAsync(new ModeProbeEvent()));
+            Assert.Equal("UnknownTenant", failure.ProblemCode);
+        }
+
+        var consumer = channelProvider.GetServices<IHostedService>()
+            .OfType<BackgroundChannelLocalEventBusConsumer>().Single();
+        await consumer.StartAsync(CancellationToken.None);
+        try
+        {
+            await Task.Delay(300);
+            Assert.Equal(0, channelProvider.GetRequiredService<CurrentTenantProbeState>().Calls);
+        }
+        finally
+        {
+            await consumer.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task Tenant_provider_name_fallback_to_a_different_id_is_refused_at_publish()
+    {
+        var tenants = new FlakyTenantProvider();
+        tenants.AddWithDifferentId("tenant-by-name", "tenant-other-id");
+        await using var provider = BuildTenantBoundaryProvider(services =>
+        {
+            services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(
+                new HardeningCurrentTenant("tenant-by-name"));
+            services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(tenants);
+        }).Provider;
+
+        await using var scope = provider.CreateAsyncScope();
+        var failure = await Assert.ThrowsAsync<LocalEventAdmissionException>(
+            () => scope.ServiceProvider.GetRequiredService<ILocalEventBus>().PublishAsync(new ModeProbeEvent()));
+        Assert.Equal("TenantIdMismatch", failure.ProblemCode);
+        Assert.Equal(0, scope.ServiceProvider.GetRequiredService<CurrentTenantProbeState>().Calls);
+    }
+
+    [Fact]
+    public async Task Correlation_without_identity_generator_is_refused_at_publish()
+    {
+        await using var provider = BuildTenantBoundaryProvider(services =>
+        {
+            services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(new HardeningCurrentTenant());
+            services.AddSingleton<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(
+                new HardeningAuditContextAccessor("boundary-correlation"));
+            // IAuditIdentityGenerator deliberately absent.
+        }).Provider;
+
+        await using var scope = provider.CreateAsyncScope();
+        var failure = await Assert.ThrowsAsync<LocalEventAdmissionException>(
+            () => scope.ServiceProvider.GetRequiredService<ILocalEventBus>().PublishAsync(new ModeProbeEvent()));
+        Assert.Equal("MissingAuditFacility", failure.ProblemCode);
+        Assert.Equal(0, scope.ServiceProvider.GetRequiredService<CurrentTenantProbeState>().Calls);
+    }
+
+    // ── Activation + unwind combinations ──
+
+    [Fact]
+    public async Task Activation_failure_with_failed_frame_unwind_reports_release_failed()
+    {
+        var tenant = new HardeningCurrentTenant("caller-tenant-B", throwOnRestore: true);
+        var tenants = new FlakyTenantProvider();
+        tenants.Add("tenant-a");
+
+        await using var provider = LocalEventTestComposition.Build(
+            declare: builder => builder.Declare<ModeProbeEvent>(replayable: true),
+            configure: services =>
+            {
+                services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(tenant);
+                services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(tenants);
+                services.AddSingleton<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(
+                    new ThrowingPushAuditAccessor());
+                services.AddSingleton<CrestCreates.Accountability.Abstractions.Identity.IAuditIdentityGenerator,
+                    HardeningAuditIdentityGenerator>();
+                services.AddScoped<ILocalEventHandler<ModeProbeEvent>, ModeProbeHandler>();
+                services.AddSingleton(new CurrentTenantProbeState());
+            });
+
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        var record = LocalEventTestComposition.CreateModernMessage<ModeProbeEvent>(
+            LocalEventTestComposition.SerializeWithCodec(new ModeProbeEvent()),
+            LocalEventIdentity.BuildLocalReplayKey(typeof(ModeProbeEvent)),
+            tenantId: "tenant-a",
+            correlationId: "review-correlation");
+        await store.EnqueueAsync(record, CancellationToken.None);
+
+        var result = await provider.GetRequiredService<ILocalDeadLetterReplayExecutor>()
+            .ExecuteAsync(record, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("ContextRestoreFailed", result.ProblemCode);
+        Assert.Equal(LocalEventExecutionOutcome.NotStarted, result.Execution);
+        // The failed unwind is a release fact, not a footnote: Release must not claim Completed.
+        Assert.Equal(LocalEventReleaseOutcome.Failed, result.Release);
+        var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
+        Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
+        Assert.Equal(0, fresh.RetryCount);
+    }
+
+    [Fact]
+    public async Task Cancellation_during_activation_with_failed_unwind_keeps_the_original_cancellation()
+    {
+        using var cancel = new CancellationTokenSource();
+        var tenant = new HardeningCurrentTenant("caller-tenant-B", throwOnRestore: true);
+        var tenants = new FlakyTenantProvider();
+        tenants.Add("tenant-a");
+
+        await using var provider = LocalEventTestComposition.Build(
+            declare: builder => builder.Declare<ModeProbeEvent>(replayable: true),
+            configure: services =>
+            {
+                services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(tenant);
+                services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(tenants);
+                services.AddSingleton<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(
+                    new CancelThenThrowPushAccessor(cancel));
+                services.AddSingleton<CrestCreates.Accountability.Abstractions.Identity.IAuditIdentityGenerator,
+                    HardeningAuditIdentityGenerator>();
+                services.AddScoped<ILocalEventHandler<ModeProbeEvent>, ModeProbeHandler>();
+                services.AddSingleton(new CurrentTenantProbeState());
+            });
+
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        var record = LocalEventTestComposition.CreateModernMessage<ModeProbeEvent>(
+            LocalEventTestComposition.SerializeWithCodec(new ModeProbeEvent()),
+            LocalEventIdentity.BuildLocalReplayKey(typeof(ModeProbeEvent)),
+            tenantId: "tenant-a",
+            correlationId: "review-correlation");
+        await store.EnqueueAsync(record, CancellationToken.None);
+
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.GetRequiredService<ILocalDeadLetterReplayExecutor>().ExecuteAsync(record, cancel.Token));
+
+        // The caller cancellation keeps its identity; the unwind failure rides on it as data.
+        var cleanup = error.Data["LocalEventContextCleanupFailure"];
+        Assert.NotNull(cleanup);
+        Assert.Contains("probe tenant restore failure", cleanup!.ToString(), StringComparison.Ordinal);
+        var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
+        Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
+        Assert.Equal(0, fresh.RetryCount);
     }
 
     [Fact]

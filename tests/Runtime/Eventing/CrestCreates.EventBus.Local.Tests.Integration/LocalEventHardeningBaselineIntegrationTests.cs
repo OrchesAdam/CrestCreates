@@ -97,10 +97,12 @@ internal sealed class HardeningTenantInfo(string id) : ITenantInfo
 internal sealed class HardeningCurrentTenant : ICurrentTenant
 {
     private readonly string? _defaultId;
+    private readonly bool _throwOnRestore;
 
-    public HardeningCurrentTenant(string? defaultId = null)
+    public HardeningCurrentTenant(string? defaultId = null, bool throwOnRestore = false)
     {
         _defaultId = defaultId;
+        _throwOnRestore = throwOnRestore;
         Id = defaultId;
     }
 
@@ -142,6 +144,11 @@ internal sealed class HardeningCurrentTenant : ICurrentTenant
     {
         public void Dispose()
         {
+            if (owner._throwOnRestore)
+            {
+                throw new InvalidOperationException("probe tenant restore failure");
+            }
+
             owner.Id = previous.Id;
             owner.Tenant = previous.Tenant;
         }

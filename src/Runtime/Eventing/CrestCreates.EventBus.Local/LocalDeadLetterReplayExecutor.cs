@@ -160,6 +160,20 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
             AttachCancellationFacts(cancel, "NotStarted", "ContextNotRestored", releaseProblem);
             throw;
         }
+        catch (LocalEventContextActivationException activationFailure)
+        {
+            // Activation entered frames and its unwind failed as well: the frame cleanup failure is
+            // a release fact, not a footnote, so it folds into the release outcome.
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), activationFailure.CleanupFailure);
+            _logger?.LogError(
+                activationFailure,
+                "Replay of dead letter message {MessageId} failed while activating its context before MarkRetrying; the entered frames were unwound with errors and no handler was executed.",
+                message.MessageId);
+            return Reject(message,
+                $"context activation failed before MarkRetrying: {activationFailure.Message}", "ContextRestoreFailed",
+                releaseProblem, scopeOwned: true);
+        }
         catch (LocalEventContextRestoreException restoreFailure)
         {
             var releaseProblem = await TryDisposeScopeAsync(executionScope);

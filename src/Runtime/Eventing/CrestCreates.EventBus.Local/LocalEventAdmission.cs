@@ -47,29 +47,19 @@ internal static class LocalEventAdmission
         GeneratedEventDescriptor? descriptor = null;
 
         // Context format and tenant recoverability come before governance (Spec §6): every
-        // accept/execute boundary enforces the tenant mode against the captured snapshot, and a
-        // captured tenant that cannot be re-validated later is refused at its own boundary —
-        // a borrowed caller scope does not skip policy validation.
-        var hasTenant = !string.IsNullOrEmpty(snapshot.TenantId);
-        switch (binding.TenantMode)
+        // accept/execute boundary runs the full validation (mode, authoritative resolution with
+        // exact-id equality, damaged ids, association capability) — a borrowed caller scope does
+        // not skip policy validation, and the already-passed enqueue admission never substitutes
+        // for the consumer's re-check.
+        try
         {
-            case LocalEventTenantMode.HostOnly when hasTenant:
-                return LocalEventAdmissionResult.Reject(
-                    "TenantModeHostOnly",
-                    $"event '{binding.LocalName}' is host-only but the request carries tenant '{snapshot.TenantId}'.");
-            case LocalEventTenantMode.Required when !hasTenant:
-                return LocalEventAdmissionResult.Reject(
-                    "TenantModeRequired",
-                    $"event '{binding.LocalName}' requires a tenant but the request carries no valid tenant id.");
+            await LocalEventContextBridge
+                .ValidateRecoverabilityAsync(provider, binding, snapshot, cancellationToken)
+                .ConfigureAwait(false);
         }
-
-        if (hasTenant && provider.GetService<CrestCreates.MultiTenancy.Abstract.ITenantProvider>() is null)
+        catch (LocalEventContextRestoreException recoverabilityFailure)
         {
-            return LocalEventAdmissionResult.Reject(
-                "MissingTenantProvider",
-                $"event '{binding.LocalName}' carries tenant '{snapshot.TenantId}' but this host has no " +
-                "ITenantProvider; the tenant could not be re-validated by a later execution and the request " +
-                "is refused now.");
+            return LocalEventAdmissionResult.Reject(recoverabilityFailure.ProblemCode, recoverabilityFailure.Message);
         }
 
         if (binding.Governance == LocalEventGovernance.Required)

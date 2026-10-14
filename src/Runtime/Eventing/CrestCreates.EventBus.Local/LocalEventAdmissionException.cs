@@ -43,3 +43,23 @@ internal sealed class LocalEventContextRestoreException : InvalidOperationExcept
 
     public string ProblemCode { get; }
 }
+
+/// <summary>
+/// Ambient activation partially entered frames and then failed, and unwinding the entered frames
+/// failed as well. Both facts travel together so callers can report Release.Failed instead of
+/// claiming a clean release. Caller cancellation keeps its own exception identity: the cleanup
+/// fact is attached to the rethrown OperationCanceledException instead of this type.
+/// </summary>
+internal sealed class LocalEventContextActivationException : InvalidOperationException
+{
+    public LocalEventContextActivationException(Exception activationFailure, Exception cleanupFailure)
+        : base(
+            $"context activation failed ({activationFailure.Message}) and restoring the already-entered " +
+            "frames also failed; both facts are reported.",
+            activationFailure)
+    {
+        CleanupFailure = cleanupFailure;
+    }
+
+    public Exception CleanupFailure { get; }
+}
