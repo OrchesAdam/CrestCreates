@@ -8,7 +8,7 @@ typed bridge 三程序集编译实验通过、bootstrap 挂接核对完成。**S
 ## S1 — 锁定契约和可复现缺口
 
 - [x] 复核开工时 master，记录 #128 等在途 PR 与共享工具链修改。（#127 已合并、#128 未开工、仅 docs PR #147 在途，无工具链冲突）
-- [x] 将 Issue 中 Host A→B 污染、冲突 first-wins、冻结后工厂变化、Transient 两次构造的原始探针转为仓库内行为测试。（前 3 类 H01/H02/P01 已入库并 3/3 失败落证；冻结后工厂变化由 R01/记录侧基线覆盖其记录/重放面）
+- [x] 将 Issue 中 Host A→B 污染、冲突 first-wins、冻结后工厂变化、Transient 两次构造的原始探针转为仓库内行为测试。（H01/H02/P01 单元 3 条 3/3 失败落证；冻结后工厂变化 H03 独立基线 2 条——失败记录与重放两侧——入库，不以下列 R01/G01 替代（R1-LE146-03））
 - [x] 补旧 key 改名、精确治理旧版本、租户恢复和 pre-MarkRetrying 解码/准备的最小失败用例。（G01/C01/C01b/R01 入库并 4/4 失败落证；旧 key 改名按 issues log 偏差说明随 S3 alias API 落地，不制造假基线）
 - [x] 编译验证 generated public typed bridge 与 internal execution core 的边界，覆盖引用程序集事件和 handler-only 项目。（/tmp 三程序集实验：编译通过 + `constructs=1 handled=1+1`；handler-only CS0122 负例由 #126 跨程序集测试覆盖）
 - [x] 锁定 ContextVersion 历史 null、版本 alias、释放失败与结算 Unknown 的矩阵。（Spec §7.3/§8 已锁定并随 S1 入库）
@@ -36,6 +36,7 @@ typed bridge 三程序集编译实验通过、bootstrap 挂接核对完成。**S
 - [ ] ReplayKey / ReplayAlias、同版本约束、payload legacy identity 分工与冲突空间。
 - [ ] Governance.Required、TenantMode、显式 validator / 执行 check 激活；公共 prepare 检查覆盖直接 dispatcher。
 - [ ] 基于 Built registry 精确关联 Id/version/Type；治理旧行采用映射必须显式且限定历史身份，不升级信任未知记录。
+- [ ] 独立 LocalEvent Host 的 bootstrap 注册/驱动（Spec §3.3 rev.2，R1-LE146-01）：存在 Governance.Required 时 TryAddEnumerable 既有 `EventRegistryBootstrapper` + `BootstrapCoordinator` + `local-governance-readiness` 任务（依赖 event-registry，置 gate）；非 hosted 未 Built fail-closed 且不缓存；不阻塞、不依赖注册顺序；LocalEvent-only 与 LocalEvent+RabbitMQ 两种顺序按 G06/G07 验收。
 - [ ] context snapshot、Channel work item、原快照失败记录；TenantId/correlation 一致性检查。
 - [ ] await tenant provider 解析与同步 Change/Push 分离；先激活再构造租户敏感依赖。
 - [ ] ICurrentTenant.Change nullable host 语义与 LIFO/await/异常恢复；各层清理异常不跳过其他恢复。
@@ -43,7 +44,7 @@ typed bridge 三程序集编译实验通过、bootstrap 挂接核对完成。**S
 - [ ] 历史 null 默认拒绝；显式历史 host policy 不得覆盖 Required。
 - [ ] 手工/后台重放不再 Publish、不新增 DLQ；状态与预算保持原行权威。
 
-验证：Spec I01–I03、G01–G05、C01–C05、D01–D02，补全 R 系列。
+验证：Spec I01–I03、G01–G07、C01–C05、D01–D02，补全 R 系列。
 退出：新旧持久记录真实可重放或按契约拒绝，租户/治理/结算失败均有确定结果。
 
 ## S4 — 证据、迁移与最后验收

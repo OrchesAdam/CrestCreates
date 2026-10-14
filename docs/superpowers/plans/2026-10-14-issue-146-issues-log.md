@@ -42,4 +42,18 @@
 
 ### 设计审查门禁
 
-按计划："设计审查通过后再实施 S2/S3"。本分支当前状态：Spec/计划入库 + 7 条失败基线 + 实验结论；等待设计审查意见后进入 S2（生命周期收口）。
+按计划："设计审查通过后再实施 S2/S3"。状态更新（2026-10-14）：设计审查 R1 已到（1×P1+2×P2），修订已完成（见下节），当前等待复审放行 S2。
+
+## S1 设计审查 R1 修订（PR #148，审查 head `6f38f971`）
+
+审查结论：1×P1 + 2×P2，设计门禁暂不通过；7 条基线红色符合 S1 约定、旧 key 偏差可接受。修订（commit 见本分支）：
+
+| 发现 | 修订 | 落点 |
+| --- | --- | --- |
+| R1-LE146-01（P1）独立 LocalEvent Host 的 registry 启动责任 | Spec 升 rev.2 并重写 §3.3：①Governance.Required 时 Local 组合 TryAddEnumerable 既有 `EventRegistryBootstrapper` 与 `BootstrapCoordinator` + 新增 `local-governance-readiness` 任务（依赖 `event-registry`，Gate 模式，零 provider 装配为启动期可操作诊断）；②任务由同一 coordinator 拓扑驱动，intake 只 await gate、不跨 hosted service 等待；LocalEvent+RabbitMQ 两种注册顺序等价（coordinator 唯一、Build 单次）；③非 hosted 未 Built 明确拒绝、不缓存、bootstrap 后重试通过；④无 Governance 的普通通知零 bootstrap 依赖 | Spec §3.3 四点契约 + 新增验收 **G06/G07**；计划 S3 增装配/驱动条目并纳入验证行 |
+| R1-LE146-02（P2）上下文正向基线缺设施 | 两个正向 fixture 补齐目标契约设施：recorder 例补 `ITenantProvider`；replay 例补 `IAuditOperationContextAccessor` + `IAuditIdentityGenerator`（既有生产接口），并断言恢复出的 TenantId、原 CorrelationId 与调用方租户帧恢复；新增两条**缺设施拒绝负例**（专用无依赖 Handler：今日观测到业务真实执行 → `Assert.False` 失败、状态/预算被改，证明缺失的是 admission 拒绝而非 DI 崩溃）；Spec §7.2 "若声明需关联恢复"改为无条件规则：非空持久 CorrelationId 必须恢复、缺能力执行前拒绝、无开关、不静默降级 | 基线文件 2 改 + 2 增；Spec §7.2 |
+| R1-LE146-03（P2）R01 不覆盖冻结后工厂变化 | 新增 H03 独立基线 2 条：先成功冻结，再把可变工厂产物置 null；`Factory_mutation_after_freeze_must_not_break_failure_recording`（今日 DLQ 集合为空——记录丢失）与 `..._must_not_break_replay`（今日 "resolved no JSON codec at replay time" 拒绝） | 基线文件 +2；计划勾选项说明修正 |
+
+范围澄清（回应审查）：G01 只证明"非治理事件不被 advisory registry 的另一版本破坏记录"，**不等于**已交付 Governance.Required 精确版本拒绝（G02–G05 仍待 S3）。
+
+修订后计数：单元 37 过 + 3 基线失败（40）；集成 47 过 + 8 基线失败（55，原 4 + 缺设施 2 + H03 2）；既有零回归。

@@ -1,9 +1,13 @@
-# #146 LocalEvent 框架能力补全 — 详细设计 rev.1
+# #146 LocalEvent 框架能力补全 — 详细设计 rev.2
 
-- 日期：2026-10-14（Asia/Shanghai）。
+- 日期：2026-10-14（Asia/Shanghai）；rev.2 同日，响应 PR #148 设计审查 R1。
 - Issue：[#146](https://github.com/OrchesAdam/CrestCreates/issues/146)，总控 #121。
 - 设计基线：远端 master `5d3de8c544cfc888aca23124303494929c4a1c2c`（PR #145 合并），已通过 GitHub 合并信息及 `git ls-remote` 双重核对。
-- 状态：**设计完成，待设计审查；尚未实现，未运行本设计新增验收测试。**
+- 状态：**rev.2 修订完成，待复审；尚未实现，未运行本设计新增验收测试。**
+- rev.2 修订（对照 PR #148 设计审查 R1）：
+  - R1-LE146-01（P1）→ §3.3 锁定独立 LocalEvent Host 的 registry 启动责任（复用既有 EventRegistry bootstrap 的注册/驱动契约；LocalEvent-only 与 LocalEvent+RabbitMQ、两种注册顺序的有限启动/恢复验收；非 hosted 契约不阻塞、不缓存）；新增验收 G06/G07。
+  - R1-LE146-02（P2）→ §7.2 明确"非空持久 CorrelationId 必须恢复、缺能力执行前拒绝、无声明开关、不静默降级"；基线夹具补齐 tenant/correlation 设施并区分缺设施负例。
+  - R1-LE146-03（P2）→ 冻结后工厂变化补独立 H03 基线（不以下列 R01/G01 替代）。
 - 完整设计与实施交接已发布到 [Issue 评论](https://github.com/OrchesAdam/CrestCreates/issues/146#issuecomment-6158450713)。
 - 本文落实 Issue A–D；替代 #126 Spec 中全局 codec、重复实例预检、仅在失败记录时检查治理版本的旧设计。#126 已交付的唯一 typed dispatch / replay 主链继续有效。
 - 编排：#127 → #146 → #128；若 #128 已在途，先协调 CodeGenerator / JsonContracts 文件，再串行合并及重验，不要求中断在途工作。不自动合并，CI 保持暂停。
@@ -75,7 +79,12 @@
 - dispatch-only 不强制 codec；孤立且未启用的其他 Host 注册不可成为冻结输入。
 - 冻结只验证装配与静态元数据，不从 root provider 构造业务 Handler。Handler 服务是否实际可解析以执行 scope 的 Prepare 为准。
 
-新增 LocalEvent composition/readiness 检查，供 HostedService 与非 hosted 首次执行共享。仅存在 Governance.Required 时要求 EventRegistry 已经通过既有 bootstrap 完成 Built；**本索引不擅自创建第二套 registry，也不无条件依赖 RabbitMQ 启动顺序**。Hosted 部署把该检查接到现有 bootstrap 的 event-registry 之后、Channel consumer intake 之前；非 hosted 调用尚未 Built 时明确拒绝，可在既有 bootstrap 完成后重试，不能把临时未就绪永远缓存为成功或永久失败。
+新增 LocalEvent composition/readiness 检查，供 HostedService 与非 hosted 首次执行共享。仅存在 Governance.Required 时要求 EventRegistry 已经通过既有 bootstrap 完成 Built；**本索引不擅自创建第二套 registry，也不无条件依赖 RabbitMQ 启动顺序**。rev.2 锁定该责任的装配与驱动契约（R1-LE146-01）：
+
+1. **注册责任归 LocalEvent 组合入口**：当（且仅当）本 Host 存在 Governance.Required 声明时，Local 组合（`AddCrestLocalEventDispatch` 等价入口）以 TryAddEnumerable 注册**既有** `EventRegistryBootstrapper`（`CrestCreates.Event`，TaskId `event-registry`，IBootstrapTask）与**既有** `BootstrapCoordinator`（`CrestCreates.Metadata.Bootstrap`，IHostedService），并新增一个 `local-governance-readiness` IBootstrapTask，`Dependencies = ["event-registry"]`：其 ExecuteAsync 校验 registry `State == Built`，成功即置 readiness gate，失败即 fail closed。存在 Governance.Required 而无任何 descriptor provider 装配时，注册表以零 provider Built 属于**装配错误**：readiness 任务在启动期给出可操作诊断（"注册 descriptor provider / 调用事件所属程序集的 AddEventDescriptors()"），而不是把空注册表当就绪。
+2. **驱动顺序不靠 HostedService 注册顺序、也不阻塞**：所有任务由同一个 `BootstrapCoordinator.StartAsync` 拓扑执行；Channel consumer 的 intake 在任何消费前 `await` readiness gate（TaskCompletionSource 模式，参照 #127）；readiness 任务自身不得等待任何"尚未启动的后续 hosted service"（禁止在 StartAsync 内做跨 hosted service 等待）。LocalEvent+RabbitMQ 共存时两个组合各自 TryAddEnumerable 同一 coordinator（去重后唯一）与各自任务（`rabbitmq-bindings` 与 `local-governance-readiness` 都依赖 `event-registry`），因此**两种注册顺序等价**：coordinator 只运行一次、registry 只 Build 一次（`RegistryBase.Build` 幂等为兜底，主链是单次任务）；RabbitMQ 组合服务直接 Build 的现有事实与该任务兼容（任务看到已 Built 即通过）。
+3. **非 hosted 契约**：无 coordinator 的纯 ServiceProvider 场景，首次治理执行（admission/Prepare）前检查 Built——已 Built 通过；未 Built 抛可操作拒绝（指出应完成的既有 bootstrap，如调用方自行运行 BootstrapCoordinator 或等价初始化），**不缓存为永久失败**，bootstrap 完成后重试即通过；不得把"未就绪"静默降级为无治理执行。
+4. 普通本地事件（无 Governance.Required）不注册上述任何 bootstrap 组件，保持短路径——Local 组合不得为空通知类 Host 引入 registry/bootstrap 依赖。
 
 ## 4. 一次准备、同一批实例执行
 
@@ -208,7 +217,7 @@ LocalEventAttribute / 手工 builder 增加以下明确策略，默认为 Govern
 
 为明确 host 清空，**最小演进现有 ICurrentTenant.Change 为 `Change(ITenantInfo? tenant)`**：null 表示显式 host，并返回可恢复原值的 IDisposable；同步不查 DB。更新接口注解、实现和嵌套/异步测试。不使用 SetTenantId 作为不可恢复切换，不调用当前会同步阻塞且可静默 null 的 ChangeAsync 充当验证。此变更限定在现有租户能力，不另造一套 tenant truth。
 
-非空 CorrelationId 的后台/重放恢复复用 IAuditOperationContextAccessor.Push 及 IAuditIdentityGenerator：新 attempt 使用新 OperationId，沿用捕获 CorrelationId；Actor 来自当前可信人工调用环境或宿主后台执行身份，不从历史消息恢复。若声明需关联恢复而 accessor/identity 能力缺失，执行前拒绝。历史 CorrelationId=null 不伪造旧关联，可为新 attempt 生成独立关联，记录中原 null 保留。
+非空 CorrelationId 的后台/重放恢复复用 IAuditOperationContextAccessor.Push 及 IAuditIdentityGenerator：新 attempt 使用新 OperationId，沿用捕获 CorrelationId；Actor 来自当前可信人工调用环境或宿主后台执行身份，不从历史消息恢复。**规则为无条件适用（无声明开关）**：持久记录 CorrelationId 非空时，accessor/identity 能力缺失一律在执行前拒绝，不得静默降级为无关联执行（R1-LE146-02）。历史 CorrelationId=null 不伪造旧关联，可为新 attempt 生成独立关联，记录中原 null 保留。
 
 context bridge 同步 Enter 返回 scope；不得把 Push/Change 藏在异步方法内部返回 disposer后误以为调用帧已激活。验证必须让构造函数、HandleAsync、DisposeAsync 都读取权威 accessor，不能只检查被传入的 snapshot。
 
@@ -334,6 +343,8 @@ S2 若单独 PR，必须完整替换旧生命周期链并可独立验证，不�
 | G03 | 指定 v1 停用、同名 v2 Active；descriptorId 不匹配 | 发布/replay/直接 dispatcher 均不误放行 |
 | G04 | descriptor/local version 冲突、null descriptor 历史行 | 装配/准备拒绝；仅显式同版本采用映射可恢复 |
 | G05 | 明确 validator/授权 check 缺 DI 或失败 | 所有入口同语义，不能因可选依赖缺失绕过 |
+| G06 | 独立 LocalEvent-only Host（Governance.Required）：①正常装配（providers + 生成扩展）②零 provider 装配 ③非 hosted 未 bootstrap 后补 bootstrap | ①经既有 bootstrap 在有限启动内 Built，治理执行通过；②启动期可操作装配诊断（不把空注册表当就绪）；③未 Built 明确拒绝且不永久缓存，bootstrap 完成后重试通过 |
+| G07 | LocalEvent+RabbitMQ 共存，Local 先/RabbitMQ 先两种注册顺序 | coordinator 去重唯一、registry 单次 Build、两个 readiness 任务均就绪，消费与治理执行不受顺序影响 |
 | C01 | A/B tenant 经入队、失败记录、人工/后台 replay | 构造/执行/释放看到正确 TenantId、CorrelationId |
 | C02 | unknown/inactive tenant、provider 按名称返回不同 Id | 零业务执行；不落到 host |
 | C03 | Required/Optional/HostOnly × 新 host/tenant/legacy-null | 精确符合 §7.3，不猜当前调用方租户 |

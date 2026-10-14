@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Identity;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Event;
 using CrestCreates.Event.Abstractions;
@@ -37,14 +38,16 @@ internal sealed class HardeningTenantProbeEvent : DomainEvent
 {
 }
 
-internal sealed class HardeningTenantProbeHandler(ICurrentTenant currentTenant)
+internal sealed class HardeningTenantProbeHandler(ICurrentTenant currentTenant, IAuditOperationContextAccessor auditContext)
     : ILocalEventHandler<HardeningTenantProbeEvent>
 {
     public static string? LastObservedTenantId;
+    public static string? LastObservedCorrelationId;
 
     public Task HandleAsync(HardeningTenantProbeEvent @event, CancellationToken cancellationToken = default)
     {
         LastObservedTenantId = currentTenant.Id;
+        LastObservedCorrelationId = auditContext.Current?.CorrelationId;
         return Task.CompletedTask;
     }
 }
@@ -58,6 +61,25 @@ internal sealed class HardeningDecodeProbeHandler : ILocalEventHandler<Hardening
 {
     public Task HandleAsync(HardeningDecodeProbeEvent @event, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
+}
+
+// Dedicated parameterless handler for the missing-facility negative baselines: today's replay must
+// be able to fully execute the business path (no dependency on the absent facilities) so the
+// assertion targets the missing admission rejection, not a DI activation error.
+[LocalEvent(Replayable = true)]
+internal sealed class HardeningNoFacilityProbeEvent : DomainEvent
+{
+}
+
+internal sealed class HardeningNoFacilityProbeHandler : ILocalEventHandler<HardeningNoFacilityProbeEvent>
+{
+    public static int Executions;
+
+    public Task HandleAsync(HardeningNoFacilityProbeEvent @event, CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref Executions);
+        return Task.CompletedTask;
+    }
 }
 
 // ── Context fakes (factories for the #146 S3 restore protocol) ──
@@ -168,6 +190,40 @@ internal sealed class HardeningAuditContextAccessor : IAuditOperationContextAcce
     }
 }
 
+internal sealed class HardeningAuditIdentityGenerator : IAuditIdentityGenerator
+{
+    public string CreateOperationId() => Guid.NewGuid().ToString("N");
+
+    public string CreateAuditId() => Guid.NewGuid().ToString("N");
+}
+
+// ── H03 factory-mutation probe ──
+
+[LocalEvent(Replayable = true)]
+internal sealed class HardeningFactoryProbeEvent : DomainEvent
+{
+}
+
+internal sealed class HardeningFactoryProbeHandler : ILocalEventHandler<HardeningFactoryProbeEvent>
+{
+    public static Func<Task> Behavior = static () => Task.CompletedTask;
+    public static int Calls;
+
+    public Task HandleAsync(HardeningFactoryProbeEvent @event, CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref Calls);
+        return Behavior();
+    }
+}
+
+internal sealed class HardeningManualContributor(string contributorId, Action<LocalEventDispatchRegistrationBuilder> register)
+    : ILocalEventRegistrationContributor
+{
+    public string ContributorId => contributorId;
+
+    public void Register(LocalEventDispatchRegistrationBuilder builder) => register(builder);
+}
+
 // ── Descriptor provider for the governance-version baseline ──
 
 internal sealed class HardeningV2DescriptorProvider : IEventDescriptorProvider
@@ -239,8 +295,12 @@ public class LocalEventHardeningBaselineIntegrationTests
             declare: builder => builder.Declare<HardeningRecorderEvent>(replayable: true),
             configure: services =>
             {
+                var tenantProvider = new HardeningTenantProvider();
+                tenantProvider.Add("hardening-tenant-A");
                 services.AddSingleton<ICurrentTenant>(tenant);
+                services.AddSingleton<ITenantProvider>(tenantProvider);
                 services.AddSingleton<IAuditOperationContextAccessor>(accessor);
+                services.AddSingleton<IAuditIdentityGenerator, HardeningAuditIdentityGenerator>();
                 services.AddScoped<ILocalEventHandler<HardeningRecorderEvent>, HardeningFailingHandler>();
             });
 
@@ -269,16 +329,22 @@ public class LocalEventHardeningBaselineIntegrationTests
         var tenantProvider = new HardeningTenantProvider();
         tenantProvider.Add("hardening-tenant-A");
 
+        // The full recovery facilities required by the target contract (§7.2): async tenant
+        // resolution, audit context push and identity generation for the new attempt.
         await using var provider = LocalEventTestComposition.Build(
             declare: builder => builder.Declare<HardeningTenantProbeEvent>(replayable: true),
             configure: services =>
             {
                 services.AddSingleton<ICurrentTenant>(tenant);
                 services.AddSingleton<ITenantProvider>(tenantProvider);
+                services.AddSingleton<IAuditOperationContextAccessor>(
+                    new HardeningAuditContextAccessor("hardening-caller-correlation"));
+                services.AddSingleton<IAuditIdentityGenerator, HardeningAuditIdentityGenerator>();
                 services.AddScoped<ILocalEventHandler<HardeningTenantProbeEvent>, HardeningTenantProbeHandler>();
             });
 
         HardeningTenantProbeHandler.LastObservedTenantId = null;
+        HardeningTenantProbeHandler.LastObservedCorrelationId = null;
         var record = CreatePendingRecord<HardeningTenantProbeEvent>(
             LocalEventTestComposition.SerializeWithCodec(new HardeningTenantProbeEvent()),
             tenantId: "hardening-tenant-A",
@@ -291,8 +357,12 @@ public class LocalEventHardeningBaselineIntegrationTests
         var result = await executor.ExecuteAsync(record, CancellationToken.None);
 
         Assert.True(result.Success, result.ErrorMessage);
-        // Designed behavior: the handler executes under the recorded tenant (A), not the caller's (B).
+        // Designed behavior: the handler executes under the recorded tenant (A) — not the caller's (B) —
+        // and observes the restored correlation of the record.
         Assert.Equal("hardening-tenant-A", HardeningTenantProbeHandler.LastObservedTenantId);
+        Assert.Equal("hardening-correlation-146", HardeningTenantProbeHandler.LastObservedCorrelationId);
+        // The caller frame is restored after the attempt.
+        Assert.Equal("hardening-caller-tenant-B", tenant.Id);
     }
 
     // ── Governance/recorder separation baseline ──
@@ -357,4 +427,163 @@ public class LocalEventHardeningBaselineIntegrationTests
         Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
         Assert.Equal(0, fresh.RetryCount);
     }
+
+    // ── C05 baselines: missing recovery facilities must reject before handlers ──
+
+    [Fact]
+    public async Task Replay_with_nonnull_correlation_but_no_audit_facilities_must_reject_before_handlers()
+    {
+        await using var provider = LocalEventTestComposition.Build(
+            declare: builder => builder.Declare<HardeningNoFacilityProbeEvent>(replayable: true),
+            configure: services =>
+            {
+                // Tenant facilities exist; audit accessor/identity are deliberately absent.
+                services.AddSingleton<ICurrentTenant>(new HardeningCurrentTenant("hardening-tenant-A"));
+                services.AddSingleton<ITenantProvider>(new HardeningTenantProvider());
+                services.AddScoped<ILocalEventHandler<HardeningNoFacilityProbeEvent>, HardeningNoFacilityProbeHandler>();
+            });
+
+        Interlocked.Exchange(ref HardeningNoFacilityProbeHandler.Executions, 0);
+        var record = CreatePendingRecord<HardeningNoFacilityProbeEvent>(
+            LocalEventTestComposition.SerializeWithCodec(new HardeningNoFacilityProbeEvent()),
+            tenantId: "hardening-tenant-A",
+            correlationId: "hardening-correlation-146");
+
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        await store.EnqueueAsync(record, CancellationToken.None);
+
+        var executor = provider.GetRequiredService<ILocalDeadLetterReplayExecutor>();
+        var result = await executor.ExecuteAsync(record, CancellationToken.None);
+
+        // Designed behavior: a non-null persisted correlation must be restorable; with no audit
+        // accessor/identity capability the attempt is rejected before any handler runs and neither
+        // state nor budget change (no silent downgrade to an unassociated execution).
+        Assert.False(result.Success);
+        Assert.Equal(0, HardeningNoFacilityProbeHandler.Executions);
+        var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
+        Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
+        Assert.Equal(0, fresh.RetryCount);
+    }
+
+    [Fact]
+    public async Task Replay_with_nonnull_tenant_but_no_tenant_provider_must_reject_before_handlers()
+    {
+        await using var provider = LocalEventTestComposition.Build(
+            declare: builder => builder.Declare<HardeningNoFacilityProbeEvent>(replayable: true),
+            configure: services =>
+            {
+                // No ICurrentTenant/ITenantProvider: the recorded tenant cannot be validated/restored.
+                services.AddSingleton<IAuditOperationContextAccessor>(
+                    new HardeningAuditContextAccessor("hardening-caller-correlation"));
+                services.AddSingleton<IAuditIdentityGenerator, HardeningAuditIdentityGenerator>();
+                services.AddScoped<ILocalEventHandler<HardeningNoFacilityProbeEvent>, HardeningNoFacilityProbeHandler>();
+            });
+
+        Interlocked.Exchange(ref HardeningNoFacilityProbeHandler.Executions, 0);
+        var record = CreatePendingRecord<HardeningNoFacilityProbeEvent>(
+            LocalEventTestComposition.SerializeWithCodec(new HardeningNoFacilityProbeEvent()),
+            tenantId: "hardening-tenant-A",
+            correlationId: "hardening-correlation-146");
+
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        await store.EnqueueAsync(record, CancellationToken.None);
+
+        var executor = provider.GetRequiredService<ILocalDeadLetterReplayExecutor>();
+        var result = await executor.ExecuteAsync(record, CancellationToken.None);
+
+        // Designed behavior: a non-empty persisted TenantId without resolution capability is refused
+        // before any handler runs — it must not fall back to host execution.
+        Assert.False(result.Success);
+        Assert.Equal(0, HardeningNoFacilityProbeHandler.Executions);
+        var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
+        Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
+        Assert.Equal(0, fresh.RetryCount);
+    }
+
+    // ── H03 baselines: factory mutation after freeze (independent of R01/G01) ──
+
+    private static Func<System.Text.Json.Serialization.Metadata.JsonTypeInfo?> BuildMutableFactory()
+    {
+        var holder = new System.Text.Json.Serialization.Metadata.JsonTypeInfo?[]
+        {
+            LocalEventTestComposition.CodecFor<HardeningFactoryProbeEvent>(),
+        };
+        MutableCodecHolder.Holder = holder;
+        return () => Volatile.Read(ref MutableCodecHolder.Holder)[0];
+    }
+
+    private static ServiceProvider BuildFactoryMutationProvider()
+    {
+        return LocalEventTestComposition.Build(
+            declare: _ => { },
+            configure: services =>
+            {
+                var binding = LocalEventBinding.Create<HardeningFactoryProbeEvent>(
+                    new LocalEventInvoker<HardeningFactoryProbeEvent>((provider, @event, cancellationToken) =>
+                        LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),
+                    replayVersion: 1,
+                    replayable: true,
+                    codecFactory: BuildMutableFactory(),
+                    expectedHandlerTypes: null,
+                    legacyIdentities: null,
+                    sourceAssembly: "Hardening.Baseline");
+                services.AddSingleton<ILocalEventRegistrationContributor>(
+                    new HardeningManualContributor("factory-mutation", builder => builder.Add(binding)));
+                services.AddScoped<ILocalEventHandler<HardeningFactoryProbeEvent>, HardeningFactoryProbeHandler>();
+            });
+    }
+
+    [Fact]
+    public async Task Factory_mutation_after_freeze_must_not_break_failure_recording()
+    {
+        await using var provider = BuildFactoryMutationProvider();
+        // Freeze first with the valid codec, then mutate the factory's product — the frozen
+        // execution contract must survive (no runtime re-evaluation).
+        provider.GetRequiredService<ILocalEventDispatchRegistry>();
+        Volatile.Write(ref MutableCodecHolder.Holder, [null]);
+
+        HardeningFactoryProbeHandler.Behavior = static () => throw new InvalidOperationException("hardening factory failure");
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var bus = scope.ServiceProvider.GetRequiredService<ILocalEventBus>();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => bus.PublishAsync(new HardeningFactoryProbeEvent()));
+        }
+
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        var pending = await store.GetPendingAsync(0, 10, CancellationToken.None);
+        // Designed behavior: failure recording uses the frozen codec; a mutated factory must not make
+        // the record disappear.
+        Assert.Single(pending);
+    }
+
+    [Fact]
+    public async Task Factory_mutation_after_freeze_must_not_break_replay()
+    {
+        await using var provider = BuildFactoryMutationProvider();
+        provider.GetRequiredService<ILocalEventDispatchRegistry>();
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(
+            new HardeningFactoryProbeEvent(),
+            LocalEventTestComposition.CodecFor<HardeningFactoryProbeEvent>());
+        Volatile.Write(ref MutableCodecHolder.Holder, [null]);
+
+        HardeningFactoryProbeHandler.Behavior = static () => Task.CompletedTask;
+        Interlocked.Exchange(ref HardeningFactoryProbeHandler.Calls, 0);
+        var record = CreatePendingRecord<HardeningFactoryProbeEvent>(payload);
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        await store.EnqueueAsync(record, CancellationToken.None);
+
+        var executor = provider.GetRequiredService<ILocalDeadLetterReplayExecutor>();
+        var result = await executor.ExecuteAsync(record, CancellationToken.None);
+
+        // Designed behavior: replay decodes with the frozen codec and executes; a mutated factory must
+        // not turn the attempt into a rejection.
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(1, HardeningFactoryProbeHandler.Calls);
+    }
+}
+
+internal static class MutableCodecHolder
+{
+    public static System.Text.Json.Serialization.Metadata.JsonTypeInfo?[] Holder = [];
 }
