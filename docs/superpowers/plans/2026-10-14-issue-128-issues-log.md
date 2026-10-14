@@ -22,6 +22,15 @@
 - **查询面**：`FilterDescriptor` 在 `Application.Contracts/DTOs/Common`；反射式 `QueryExecutor<T>` 在 `Application.Contracts/Query`，`CrestAppServiceBase.cs:222` 调用 `ApplyFilters`。
 - **JsonContracts 接入点**：`CrestCreatesJsonContractGenerationDependsOn` hook 已存在于 `CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Common.props/.targets:73`，可直接建立显式 DependsOnTargets。
 
-### 待执行（S1 交付）
+### S1 增量 1：正式 Attribute 与真实单 driver 基线（2026-10-14）
 
-真实程序集引用编译探针与 GenerateCrudService(typeof(Entity)) partial service 入口；真实 MSBuild/官方 STJ 同轮不可见复现；mapper/compatibility input/closed envelope 负例；请求/响应/查询三类基线；CCCRUD 诊断族与 target/manifest schema 冻结。设计审查通过后推进 S2/S3。
+- **正式 Attribute 入库**：`src/Framework/Ddd/CrestCreates.Domain.Shared/Attributes/GenerateCrudServiceAttribute.cs`（sealed；`ctor(Type entityType)`；RoutePrefix/DtoNamespace/CapabilityIdPrefix/ExcludeProperties/FilterableProperties/SortableProperties，与 Spec §5.1 表面一致）。
+- **真实单 driver 基线**：`tests/Tooling/CrestCreates.CodeGenerator.Tests/CrudServiceGenerator/CrudServiceRealDeclarationBaselineTests.cs`——自建引用闭包（真实 Domain.Shared + 框架引用 + 完整默认 facade 集）、**不注入 helper stub、不串行 driver**，一个真实 `CSharpGeneratorDriver`：
+  - 绿灯（契约探针）：`[GenerateCrudService(typeof(Product))] partial ProductAppService` 在真实引用下编译通过（作者树零错误）。
+  - **约定红（纯净原因）**：生成 DTO 命名为 `ProductAppServiceDto` 且位于 `Shop.Application.Products.Dtos`——当前生成器把被标注的 service 类当作实体；设计契约要求 `ProductDto`（来自 `typeof(Product)`）。
+- 计数：CodeGenerator 全套 **369 通过 + 1 条约定红（370）**，无回归（既有 helper stub 用例不受正式 Attribute 影响——源声明优先遮蔽引用程序集）。
+- 暂缓并记录：legacy `ModuleInitializer` provider 断言在当前闭包下空真（`HasDynamicApiSupport` 需要 ASP.NET 类型），按“失败原因纯净”原则不保留空真基线；由 S1 增量 2 的**真实 MSBuild/官方 STJ 复现**（真实消费项目闭包）承接。
+
+### 待执行（S1 其余交付）
+
+真实 MSBuild/官方 STJ 同轮不可见复现（真实消费项目，含 ASP.NET 闭包）；mapper/compatibility input/closed response envelope 负例；请求、响应、带 Filter/Sort 查询三类独立基线（身份/权限/UoW/repository 前提满足）；CCCRUD 诊断族与 target/manifest schema 冻结。设计审查通过后推进 S2/S3。
