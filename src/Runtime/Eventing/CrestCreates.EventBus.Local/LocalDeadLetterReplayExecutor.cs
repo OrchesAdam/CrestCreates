@@ -145,9 +145,20 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         {
             prepared = binding.Invoker.Prepare(executionScope.ServiceProvider, (ILocalEvent)decoded, binding.ExpectedHandlerTypes);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
         {
-            await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            if (releaseProblem is not null)
+            {
+                cancel.Data["LocalEventReplayExecution"] = "NotStarted";
+                cancel.Data["LocalEventReplayRelease"] = releaseProblem.ToString();
+                _logger?.LogError(
+                    releaseProblem,
+                    "Replay preparation for dead letter message {MessageId} was interrupted by caller cancellation " +
+                    "and releasing the execution scope also failed. No handler was executed and the message state is unchanged.",
+                    message.MessageId);
+            }
+
             throw;
         }
         catch (Exception prepareFailure)
@@ -179,9 +190,22 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
             var store = stateScope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
             await store.MarkRetryingAsync(message.MessageId, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
         {
-            await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            cancel.Data["LocalEventReplayExecution"] = "NotStarted";
+            cancel.Data["LocalEventReplaySettlement"] = "MarkRetryingUnconfirmed";
+            if (releaseProblem is not null)
+            {
+                cancel.Data["LocalEventReplayRelease"] = releaseProblem.ToString();
+                _logger?.LogError(
+                    releaseProblem,
+                    "MarkRetrying for dead letter message {MessageId} was interrupted by caller cancellation " +
+                    "and releasing the execution scope also failed. No handler was executed and the persisted " +
+                    "state of the message is unconfirmed.",
+                    message.MessageId);
+            }
+
             _logger?.LogWarning(
                 "MarkRetrying for dead letter message {MessageId} was interrupted by caller cancellation; " +
                 "no handler was executed and the persisted state is unconfirmed, so it is not overwritten.",
@@ -215,18 +239,35 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         {
             await prepared.ExecuteAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
         {
             var releaseProblem = await TryDisposeScopeAsync(executionScope);
             var restored = await TryWriteStateAsync(
                 message with { Status = DeadLetterStatus.Pending },
                 "restore Pending after cooperative cancellation");
+
+            // The caller's cancellation is rethrown unchanged; release and restore facts stay
+            // observable on it (structured log + exception data) instead of being discarded.
+            cancel.Data["LocalEventReplayExecution"] = prepared.AnyHandlerInvoked ? "Failed" : "NotStarted";
+            cancel.Data["LocalEventReplaySettlement"] = restored.Ok
+                ? "RestorePendingConfirmed"
+                : $"RestorePendingUnconfirmed: {restored.Problem}";
             if (!restored.Ok)
             {
                 _logger?.LogError(
                     "Replay of dead letter message {MessageId} was cancelled and restoring Pending failed: {Problem}. " +
                     "The message state write failure is reported and not claimed as recovered.",
                     message.MessageId, restored.Problem);
+            }
+
+            if (releaseProblem is not null)
+            {
+                cancel.Data["LocalEventReplayRelease"] = releaseProblem.ToString();
+                _logger?.LogError(
+                    releaseProblem,
+                    "Replay of dead letter message {MessageId} was cancelled and releasing the execution scope " +
+                    "also failed; the release failure is preserved alongside the caller cancellation.",
+                    message.MessageId);
             }
 
             throw;

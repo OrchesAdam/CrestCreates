@@ -80,3 +80,17 @@
 - 测试迁移：单元 `LocalEventDispatchRegistryTests` 全迁移并新增 DI 贡献用例；S1 基线文件 H01/H02/P01 按目标语义改写转绿（新增同源冲突用例）；集成 `LocalEventTestComposition`/scoped-store/AotHost/Capability 测试同步；新增 `LocalEventHardeningStateMachineTests`（H04×2、P02×2、R02、P03、R03、R04，共 8 条）。
 - 计数：单元 42/42；集成 63 中 59 过 + **4 条 S3 范围内红**（上下文捕获/恢复/缺设施拒绝——按设计留待 S3）；Event 41/41、生成器全量 365/365、Capability 178/178、RabbitMQ 单元 58/58、RabbitMQ 真实 broker 集成 37/37、边界 173/178（5 项既有环境态）、全量构建 0 错误。
 - 回归修正记录：首轮批跑中 RabbitMQ 集成全红为本地 broker 容器停机（已重启后 37/37）；LocalEvent 原生门禁一度失败为 AotHost refusal 场景仍断言 #126 旧预算语义，已按 #146 R01 更新（坏 JSON 零预算、不入档）后门禁通过（S4 正式留证与证据 json）。
+
+## S2 实现审查 R1（PR #148，审查 head `ccae06f2`）
+
+审查结论：2×P1 + 1×P2，S2 暂不通过。三个审查探针按惯例逐字入库（`ReviewS2LifecycleProbes.cs`，入库基线 3/3 红 → 修复后 3/3 绿），并按审查要求补 4 条自带组合回归。
+
+| 发现 | 修订 | 落点与验证 |
+| --- | --- | --- |
+| S2-R1-LE146-01（P1）只读 options 不等于冻结 JsonTypeInfo | `BuildCodecIndex` 通过 options 只读校验后**锁定 metadata 本身**：`info.IsReadOnly` 为假时调用 `JsonTypeInfo.MakeReadOnly()`（冻结后属性重命名 / 增删属性 / 清空属性列表均抛 `InvalidOperationException`，序列化行为不变）；锁定抛错或锁定后仍报告可变 → 确定性违规拒绝；source-gen 实例本已只读（跳过，无副作用）。 | `LocalEventDispatchRegistry.BuildCodecIndex`；探针 `Readonly_options_must_not_leave_frozen_codec_metadata_mutable`（只读 options + 可变 metadata）转绿 |
+| S2-R1-LE146-02（P1）Channel 把成功后的释放错误当成可重放业务失败 | `ProcessEventAsync` 拆分生命周期：dispatcher 调用与 scope 释放不再共享 catch；**Handler 完成点即执行事实**——dispatcher 正常返回后释放异常只记结构化诊断，不进入 recorder、不产生可重放死信；业务失败 + 同时释放失败时业务失败仍恰好记录一条 Pending。 | `BackgroundChannelLocalEventBusConsumer`；探针 `Channel_success_must_not_become_replayable_failure_because_scope_release_throws` 转绿；自带回归 2 条（成功+释放失败零死信、业务失败+释放失败仍一条） |
+| S2-R1-LE146-03（P2）协作取消丢弃同时发生的释放错误 | 三个取消分支（Prepare / MarkRetrying / Execute）全部保留 `TryDisposeScopeAsync` 返回值：结构化错误日志 + 在被重抛的同一 `OperationCanceledException` 上附加 `Data` 事实（`LocalEventReplayExecution` / `LocalEventReplaySettlement` / `LocalEventReplayRelease`）；`throw;` 保持调用方取消语义。 | `LocalDeadLetterReplayExecutor`；探针 `Cooperative_cancellation_must_not_silently_drop_release_failure` 转绿；自带回归 2 条（取消+释放失败断言 Data 事实与恰好一次释放、取消+恢复写失败断言 `RestorePendingUnconfirmed` 且状态停在 Retrying） |
+
+- 探针入库：`ReviewS2LifecycleProbes.cs` 逐字 `cp` 入库（含 `ReviewDisposeState`/`ReviewThrowingRelease`/`ReviewCancelHandler`/`ReviewSuccessfulChannelHandler`/`ReviewLogs`），命名空间与既有集成套件一致、无生产测试扩展点。
+- 契约对照：Spec §4"codec metadata 及关联 options 在进入 binding 前变为只读；若无法安全锁定，冻结失败"与 H03 验收行"可变 metadata 被锁定或拒绝"为本轮实现补齐项，Spec 无需修订。
+- 修复后计数：单元 42/42；集成 70 中 66 过 + **4 条 S3 范围内红**（不变）；Event 41/41；Capability 178/178；CodeGenerator 365/365；JsonContracts 131/131；边界 173/178（5 项既有环境态）；LocalEvent 真实 NativeAOT 门禁通过。

@@ -7,8 +7,10 @@ using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Event;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.EventBus.Local;
+using CrestCreates.EventBus.Local.Channel;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace CrestCreates.EventBus.Local.Tests.Integration;
@@ -79,6 +81,44 @@ internal sealed class AsyncDisposableFailingHandler(CountingAsyncDisposable prob
             ? Task.FromException(new InvalidOperationException($"probe handler failure #{call}"))
             : Task.CompletedTask;
     }
+}
+
+internal sealed class CancellingReleaseHandler(CountingAsyncDisposable probe, CancellationTokenSource source)
+    : ILocalEventHandler<ReplayableDispatchEvent>
+{
+    public Task HandleAsync(ReplayableDispatchEvent @event, CancellationToken cancellationToken = default)
+    {
+        _ = probe.GetHashCode();
+        source.Cancel();
+        throw new OperationCanceledException(cancellationToken);
+    }
+}
+
+/// <summary>Delegating store that can fail the Pending-restore write after the caller cancels.</summary>
+internal sealed class FailRestoreEnqueueStore(InMemoryDeadLetterStore inner) : IDeadLetterStore
+{
+    public static bool FailPendingWrites;
+
+    public Task EnqueueAsync(DeadLetterMessage message, CancellationToken ct)
+        => FailPendingWrites && message.Status == DeadLetterStatus.Pending
+            ? Task.FromException(new InvalidOperationException("probe restore write failure"))
+            : inner.EnqueueAsync(message, ct);
+
+    public Task<IReadOnlyList<DeadLetterMessage>> GetPendingAsync(int skip, int take, CancellationToken ct)
+        => inner.GetPendingAsync(skip, take, ct);
+
+    public Task<DeadLetterMessage?> GetByIdAsync(string messageId, CancellationToken ct) => inner.GetByIdAsync(messageId, ct);
+
+    public Task MarkRetryingAsync(string messageId, CancellationToken ct) => inner.MarkRetryingAsync(messageId, ct);
+
+    public Task MarkRetriedAsync(string messageId, CancellationToken ct) => inner.MarkRetriedAsync(messageId, ct);
+
+    public Task MarkArchivedAsync(string messageId, CancellationToken ct) => inner.MarkArchivedAsync(messageId, ct);
+
+    public Task<int> CountAsync(DeadLetterStatus? status, CancellationToken ct) => inner.CountAsync(status, ct);
+
+    public Task<IReadOnlyList<DeadLetterMessage>> GetByEventNameAsync(string eventName, int skip, int take, CancellationToken ct)
+        => inner.GetByEventNameAsync(eventName, skip, take, ct);
 }
 
 /// <summary>Delegating store that commits MarkRetrying first and then throws (unconfirmed-write probe).</summary>
@@ -364,6 +404,194 @@ public class LocalEventHardeningStateMachineTests
             var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
             Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
             Assert.Equal(1, fresh.RetryCount);
+        }
+        finally
+        {
+            CountingAsyncDisposable.Reset();
+        }
+    }
+
+    // ── R05: cooperative cancellation keeps release/settlement facts observable ──
+
+    [Fact]
+    public async Task Cooperative_cancellation_keeps_release_and_restore_facts_on_the_cancelled_exception()
+    {
+        CountingAsyncDisposable.Reset(throwOnDispose: true);
+        try
+        {
+            using var cancel = new CancellationTokenSource();
+            await using var provider = LocalEventTestComposition.Build(
+                declare: builder => builder.Declare<ReplayableDispatchEvent>(replayable: true),
+                configure: services =>
+                {
+                    services.AddSingleton(cancel);
+                    services.AddScoped<CountingAsyncDisposable>();
+                    services.AddScoped<ILocalEventHandler<ReplayableDispatchEvent>, CancellingReleaseHandler>();
+                });
+
+            var store = provider.GetRequiredService<IDeadLetterStore>();
+            var record = LocalEventTestComposition.CreateModernMessage<ReplayableDispatchEvent>(
+                LocalEventTestComposition.SerializeWithCodec(new ReplayableDispatchEvent()),
+                LocalEventIdentity.BuildLocalReplayKey(typeof(ReplayableDispatchEvent)));
+            await store.EnqueueAsync(record, CancellationToken.None);
+
+            var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                provider.GetRequiredService<ILocalDeadLetterReplayExecutor>().ExecuteAsync(record, cancel.Token));
+
+            // The caller's cancellation is preserved; the release and restore facts ride on it.
+            Assert.Equal("Failed", error.Data["LocalEventReplayExecution"]);
+            Assert.Equal("RestorePendingConfirmed", error.Data["LocalEventReplaySettlement"]);
+            Assert.Contains("probe disposal failure", error.Data["LocalEventReplayRelease"]!.ToString(), StringComparison.Ordinal);
+            Assert.Equal(1, CountingAsyncDisposable.DisposeCount);
+            var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
+            Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
+        }
+        finally
+        {
+            CountingAsyncDisposable.Reset();
+        }
+    }
+
+    [Fact]
+    public async Task Cooperative_cancellation_with_failed_pending_restore_stays_observable_and_keeps_retrying_state()
+    {
+        FailRestoreEnqueueStore.FailPendingWrites = false;
+        try
+        {
+            using var cancel = new CancellationTokenSource();
+            await using var provider = LocalEventTestComposition.Build(
+                declare: builder => builder.Declare<ReplayableDispatchEvent>(replayable: true),
+                configure: services =>
+                {
+                    services.RemoveAll<IDeadLetterStore>();
+                    services.AddSingleton(sp => new FailRestoreEnqueueStore(
+                        new InMemoryDeadLetterStore(Microsoft.Extensions.Options.Options.Create(new LocalDeadLetterOptions()))));
+                    services.AddSingleton<IDeadLetterStore>(sp => sp.GetRequiredService<FailRestoreEnqueueStore>());
+                    services.AddSingleton(cancel);
+                    services.AddScoped<CountingAsyncDisposable>();
+                    services.AddScoped<ILocalEventHandler<ReplayableDispatchEvent>, CancellingReleaseHandler>();
+                });
+
+            var store = provider.GetRequiredService<IDeadLetterStore>();
+            var record = LocalEventTestComposition.CreateModernMessage<ReplayableDispatchEvent>(
+                LocalEventTestComposition.SerializeWithCodec(new ReplayableDispatchEvent()),
+                LocalEventIdentity.BuildLocalReplayKey(typeof(ReplayableDispatchEvent)));
+            await store.EnqueueAsync(record, CancellationToken.None);
+
+            FailRestoreEnqueueStore.FailPendingWrites = true;
+            OperationCanceledException error;
+            try
+            {
+                error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                    provider.GetRequiredService<ILocalDeadLetterReplayExecutor>().ExecuteAsync(record, cancel.Token));
+            }
+            finally
+            {
+                FailRestoreEnqueueStore.FailPendingWrites = false;
+            }
+
+            Assert.Equal("Failed", error.Data["LocalEventReplayExecution"]);
+            Assert.Contains("RestorePendingUnconfirmed", error.Data["LocalEventReplaySettlement"]!.ToString(), StringComparison.Ordinal);
+            // The unconfirmed restore is reported, not claimed as recovered: the MarkRetrying state stands.
+            var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
+            Assert.Equal(DeadLetterStatus.Retrying, fresh!.Status);
+        }
+        finally
+        {
+            FailRestoreEnqueueStore.FailPendingWrites = false;
+        }
+    }
+
+    // ── R06: channel path — release failures never rewrite the business fact ──
+
+    [Fact]
+    public async Task Channel_success_with_release_failure_leaves_no_dead_letter()
+    {
+        CountingAsyncDisposable.Reset(throwOnDispose: true);
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddScoped<CountingAsyncDisposable>();
+            services.AddScoped<ILocalEventHandler<ReplayableDispatchEvent>, ReleaseProbeHandler>();
+            services.AddCrestLocalChannelEventDispatch(builder => builder.Declare<ReplayableDispatchEvent>(
+                replayable: true, codecFactory: () => LocalEventTestComposition.CodecFor<ReplayableDispatchEvent>()));
+            await using var provider = services.BuildServiceProvider();
+
+            var consumer = provider.GetServices<IHostedService>().OfType<BackgroundChannelLocalEventBusConsumer>().Single();
+            await consumer.StartAsync(CancellationToken.None);
+            try
+            {
+                await using (var scope = provider.CreateAsyncScope())
+                {
+                    await scope.ServiceProvider.GetRequiredService<ILocalEventBus>().PublishAsync(new ReplayableDispatchEvent());
+                }
+
+                var store = provider.GetRequiredService<IDeadLetterStore>();
+                var until = DateTime.UtcNow.AddSeconds(5);
+                while (CountingAsyncDisposable.DisposeCount == 0 && DateTime.UtcNow < until)
+                {
+                    await Task.Delay(25);
+                }
+
+                Assert.Equal(1, CountingAsyncDisposable.DisposeCount);
+                Assert.Equal(0, await store.CountAsync(null, CancellationToken.None));
+            }
+            finally
+            {
+                await consumer.StopAsync(CancellationToken.None);
+            }
+        }
+        finally
+        {
+            CountingAsyncDisposable.Reset();
+        }
+    }
+
+    [Fact]
+    public async Task Channel_business_failure_with_release_failure_still_records_one_replayable_dead_letter()
+    {
+        CountingAsyncDisposable.Reset(throwOnDispose: true);
+        var control = new HandlerControl { ShouldFail = true };
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton(control);
+            services.AddScoped<CountingAsyncDisposable>();
+            services.AddScoped<ILocalEventHandler<ReplayableFailingEvent>, AsyncDisposableFailingHandler>();
+            services.AddCrestLocalChannelEventDispatch(builder => builder.Declare<ReplayableFailingEvent>(
+                replayable: true, codecFactory: () => LocalEventTestComposition.CodecFor<ReplayableFailingEvent>()));
+            await using var provider = services.BuildServiceProvider();
+
+            var consumer = provider.GetServices<IHostedService>().OfType<BackgroundChannelLocalEventBusConsumer>().Single();
+            await consumer.StartAsync(CancellationToken.None);
+            try
+            {
+                await using (var scope = provider.CreateAsyncScope())
+                {
+                    await scope.ServiceProvider.GetRequiredService<ILocalEventBus>().PublishAsync(new ReplayableFailingEvent());
+                }
+
+                var store = provider.GetRequiredService<IDeadLetterStore>();
+                var until = DateTime.UtcNow.AddSeconds(5);
+                while (await store.CountAsync(null, CancellationToken.None) == 0 && DateTime.UtcNow < until)
+                {
+                    await Task.Delay(25);
+                }
+
+                // The business failure is still recorded exactly once; the simultaneous release
+                // failure only adds diagnostics and never suppresses or duplicates the record.
+                Assert.Equal(1, control.Calls);
+                Assert.Equal(1, await store.CountAsync(null, CancellationToken.None));
+                var recorded = (await store.GetPendingAsync(0, 10, CancellationToken.None)).Single();
+                Assert.Equal(DeadLetterStatus.Pending, recorded.Status);
+                Assert.Contains("handler failure", recorded.ErrorMessage, StringComparison.Ordinal);
+            }
+            finally
+            {
+                await consumer.StopAsync(CancellationToken.None);
+            }
         }
         finally
         {

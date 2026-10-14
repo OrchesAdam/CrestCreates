@@ -206,6 +206,32 @@ internal sealed class LocalEventDispatchRegistry : ILocalEventDispatchRegistry
                     break;
                 }
 
+                // Read-only options do not make the metadata itself immutable: a hand-built typed
+                // JsonTypeInfo can still be reshaped (property renames, added members) after freeze,
+                // silently rewriting the persisted JSON contract. Take ownership by locking the
+                // metadata now; a lock that does not stick is rejected deterministically.
+                if (!info.IsReadOnly)
+                {
+                    try
+                    {
+                        info.MakeReadOnly();
+                    }
+                    catch (Exception metadataLockFailure)
+                    {
+                        groupProblem = $"a contribution (origin '{registration.Origin}') carries JSON type metadata " +
+                                       $"that cannot be locked ({metadataLockFailure.GetType().Name}: " +
+                                       $"{metadataLockFailure.Message}); a mutable execution contract must not be frozen";
+                        break;
+                    }
+
+                    if (!info.IsReadOnly)
+                    {
+                        groupProblem = $"a contribution (origin '{registration.Origin}') still reports mutable JSON " +
+                                       "type metadata after locking; a mutable execution contract must not be frozen";
+                        break;
+                    }
+                }
+
                 if (resolvedInfo is null)
                 {
                     resolvedInfo = info;

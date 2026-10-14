@@ -51,56 +51,97 @@ public sealed class BackgroundChannelLocalEventBusConsumer : BackgroundService
 
     private async Task ProcessEventAsync(ILocalEvent @event, CancellationToken stoppingToken)
     {
+        // Handler completion is the execution fact: once the dispatcher returns, the business work
+        // for this delivery is complete. Releasing the execution scope afterwards is reported
+        // independently and never rewrites that fact — a release fault after successful handlers
+        // must not turn a completed delivery into a replayable business failure.
+        Exception? dispatchFailure = null;
+        var scope = _serviceScopeFactory.CreateAsyncScope();
         try
         {
-            await using var scope = _serviceScopeFactory.CreateAsyncScope();
             var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
             await dispatcher.DispatchAsync(@event, stoppingToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            // Shutdown: do not record a dead letter for a canceled dispatch.
-        }
         catch (Exception failure)
         {
-            _logger?.LogError(failure, "Error processing local event of type {EventType}", @event.GetType().Name);
+            dispatchFailure = failure;
+        }
 
-            if (_recorder is null || stoppingToken.IsCancellationRequested)
+        var releaseFailure = await TryReleaseScopeAsync(scope).ConfigureAwait(false);
+        if (releaseFailure is not null)
+        {
+            _logger?.LogError(
+                releaseFailure,
+                "Releasing the execution scope for local event of type {EventType} failed (dispatch outcome: {Outcome}).",
+                @event.GetType().Name,
+                dispatchFailure is null
+                    ? "handlers completed successfully"
+                    : dispatchFailure is OperationCanceledException && stoppingToken.IsCancellationRequested
+                        ? "dispatch was canceled during shutdown"
+                        : "handlers reported a business failure");
+        }
+
+        if (dispatchFailure is null)
+        {
+            return;
+        }
+
+        if (dispatchFailure is OperationCanceledException && stoppingToken.IsCancellationRequested)
+        {
+            // Shutdown: do not record a dead letter for a canceled dispatch.
+            return;
+        }
+
+        _logger?.LogError(dispatchFailure, "Error processing local event of type {EventType}", @event.GetType().Name);
+
+        if (_recorder is null || stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (!_registry.TryGet(@event.GetType(), out var binding))
+        {
+            _logger?.LogWarning(
+                "Failed local event '{EventType}' has no dispatch registration; nothing was recorded.",
+                @event.GetType().FullName);
+            return;
+        }
+
+        try
+        {
+            var outcome = await _recorder
+                .TryRecordAsync(binding, @event, dispatchFailure, stoppingToken)
+                .ConfigureAwait(false);
+
+            if (outcome.Recorded)
             {
-                return;
+                _logger?.LogInformation(
+                    "Recorded failed channel local event '{EventName}' to the dead-letter store.",
+                    binding.LocalName);
             }
-
-            if (!_registry.TryGet(@event.GetType(), out var binding))
+            else if (outcome.Problem is not null)
             {
                 _logger?.LogWarning(
-                    "Failed local event '{EventType}' has no dispatch registration; nothing was recorded.",
-                    @event.GetType().FullName);
-                return;
+                    "Channel local event '{EventName}' failed and was not recorded to the dead-letter store: {Problem}",
+                    binding.LocalName, outcome.Problem);
             }
+        }
+        catch (Exception recordFailure)
+        {
+            _logger?.LogError(recordFailure, "Failed to record event to dead letter store");
+        }
+    }
 
-            try
-            {
-                var outcome = await _recorder
-                    .TryRecordAsync(binding, @event, failure, stoppingToken)
-                    .ConfigureAwait(false);
-
-                if (outcome.Recorded)
-                {
-                    _logger?.LogInformation(
-                        "Recorded failed channel local event '{EventName}' to the dead-letter store.",
-                        binding.LocalName);
-                }
-                else if (outcome.Problem is not null)
-                {
-                    _logger?.LogWarning(
-                        "Channel local event '{EventName}' failed and was not recorded to the dead-letter store: {Problem}",
-                        binding.LocalName, outcome.Problem);
-                }
-            }
-            catch (Exception recordFailure)
-            {
-                _logger?.LogError(recordFailure, "Failed to record event to dead letter store");
-            }
+    private static async Task<Exception?> TryReleaseScopeAsync(AsyncServiceScope scope)
+    {
+        try
+        {
+            await scope.DisposeAsync().ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception releaseFailure)
+        {
+            return releaseFailure;
         }
     }
 }
