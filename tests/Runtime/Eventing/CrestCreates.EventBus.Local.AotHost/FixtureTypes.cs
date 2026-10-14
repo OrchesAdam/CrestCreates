@@ -243,7 +243,11 @@ internal sealed class AotReleaseEvent : DomainEvent
 {
 }
 
-/// <summary>Manual-declaration governance probe; deliberately carries no [LocalEvent] attribute.</summary>
+/// <summary>
+/// Governance probe declared manually in the governed scenario (the generated contributor is not
+/// activated there); the attribute only provides the replay codec contract.
+/// </summary>
+[LocalEvent(Replayable = true)]
 internal sealed class AotGovernedEvent : DomainEvent
 {
 }
@@ -356,44 +360,47 @@ internal sealed class AotTenantProvider : ITenantProvider
         => Task.FromResult(_tenants.TryGetValue(tenantId, out var tenant) ? tenant : null);
 }
 
-internal sealed class AotCurrentTenant(string? hostTenantId) : ICurrentTenant
+/// <summary>
+/// Frame-isolated in-memory current tenant (AsyncLocal-backed like the production implementation):
+/// a background consumer task keeps the execution context it started with, so a missing channel
+/// restore is observable as host context instead of leaking the caller frame.
+/// </summary>
+internal sealed class AotCurrentTenant : ICurrentTenant
 {
-    public ITenantInfo? Tenant { get; private set; }
+    private readonly AsyncLocal<TenantHolder?> _current = new();
 
-    public string? Id { get; private set; }
+    public ITenantInfo? Tenant => _current.Value?.Tenant;
+
+    public string? Id => Tenant?.Id;
 
     public Task<IDisposable> ChangeAsync(string tenantId)
     {
-        var previous = (Id, Tenant);
-        Id = tenantId;
-        Tenant = new AotTenantInfo(tenantId);
+        var previous = _current.Value;
+        _current.Value = new TenantHolder { Tenant = new AotTenantInfo(tenantId) };
         return Task.FromResult<IDisposable>(new Restore(this, previous));
     }
 
     public IDisposable Change(ITenantInfo? tenant)
     {
-        var previous = (Id, Tenant);
-        Id = tenant?.Id;
-        Tenant = tenant;
+        var previous = _current.Value;
+        _current.Value = new TenantHolder { Tenant = tenant };
         return new Restore(this, previous);
     }
 
     public void SetTenantId(string tenantId)
     {
-        Id = tenantId;
-        Tenant = new AotTenantInfo(tenantId);
+        _current.Value = new TenantHolder { Tenant = new AotTenantInfo(tenantId) };
     }
 
-    private sealed class Restore(AotCurrentTenant owner, (string? Id, ITenantInfo? Tenant) previous) : IDisposable
+    private sealed class TenantHolder
     {
-        public void Dispose()
-        {
-            owner.Id = previous.Id;
-            owner.Tenant = previous.Tenant;
-        }
+        public ITenantInfo? Tenant { get; set; }
     }
 
-    public string? HostTenantId { get; } = hostTenantId;
+    private sealed class Restore(AotCurrentTenant owner, TenantHolder? previous) : IDisposable
+    {
+        public void Dispose() => owner._current.Value = previous;
+    }
 }
 
 internal sealed class AotAuditAccessor : IAuditOperationContextAccessor

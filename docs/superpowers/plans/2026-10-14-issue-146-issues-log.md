@@ -177,3 +177,13 @@
 ### 本轮验证计数（本地）
 
 LocalEvent integration（含 PG）**116/116**（`CREST_LOCAL_EVENT_PG_CONNECTION` 指向 podman PG）；单元 42/42、CodeGenerator 368/368、JsonContracts 131/131、边界 173–176/178（失败全部落在既有 ControlPlaneReferenceData 环境态组，5 个用例随环境态波动）、RabbitMQ unit 58/58 + 真实 broker 37/37、全量构建 0 错误同批记录。PR 描述与 #123 evidence matrix、memory.md 已同步。
+
+## S4 实现审查 R1（PR #148，审查 head `b34bd035`）
+
+审查结论：3×P2（两项 fixture 断言缺口 + 一项文档同步），S4 暂不放行；S3 通过结论保持。
+
+| 发现 | 修订 | 落点与验证 |
+| --- | --- | --- |
+| S4-R1-LE146-01（P2）Channel 观察值被 replay 覆盖、caller 关联帧未断言还原 | `AotCurrentTenant` 改为 AsyncLocal 帧隔离语义；consumer 任务在 caller 帧建立前启动，缺失 Channel 激活会观测为 host/null；调用方在 publish 前显式 Push correlation-C1 帧，**replay 前**断言消费帧观测到记录的 A/C1；replay 前调用方切到 tenant-B 并 Push 独立的 correlation-B 帧（含 OperationId），replay 后断言记录上下文、caller tenant/correlation/OperationId 全部还原。 | 变异自证（临时副本）：移除 consumer Activate → 场景失败（"consumer frame must restore the recorded tenant"）；仅移除 bridge audit Push → 场景失败（"must restore the recorded correlation"） |
+| S4-R1-LE146-02（P2）治理场景缺竞争版本 | 同一 payload/name 同时放 v1/v2：负例 v1 Deprecated + v2 Active → 必须 `GovernedDescriptorInactive`（零 Handler）且 **ProblemCode 精确断言**（去过滤实现会得到 Ambiguous 而失败）；新增 v1 钉住旧行（descriptorId=v1）重放拒绝且状态/预算不变；正例 v1 Active + v2 Deprecated → 必须放行。 | 变异自证：删除 `candidate.Version == binding.ReplayVersion` 过滤 → 场景失败（观察到非 Inactive 拒绝） |
+| S4-R1-LE146-03（P2）Spec/迁移表未同步显式治理装配与五秒截止 | Spec 升 **rev.3**：§3.3.1 改为 Host 显式 `AddCrestLocalEventGovernance()`（contracts-only 只贡献声明；生成器仅编译引用 Local runtime 时自动发出）+ Host 最小装配代码块；§3.3.2 增补统一五秒有界等待（含正在 bootstrap 的调用、调用方取消传播、NotReady 不缓存）；§9 迁移表增补装配行；计划 S4 节同步说明。保持既有已接受实现，不回归自动装配。 | 文档 diff：spec §3.3/§9 + 计划；生成器契约编译回归（contract-only 测试）保持通过 |

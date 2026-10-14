@@ -4,6 +4,7 @@
 - Issue：[#146](https://github.com/OrchesAdam/CrestCreates/issues/146)，总控 #121。
 - 设计基线：远端 master `5d3de8c544cfc888aca23124303494929c4a1c2c`（PR #145 合并），已通过 GitHub 合并信息及 `git ls-remote` 双重核对。
 - 状态：**rev.2 修订完成，待复审；尚未实现，未运行本设计新增验收测试。**
+- rev.3 修订（2026-10-14，对照 PR #148 S4 复审 S4-R1-LE146-03）：同步已接受的治理装配与 readiness 契约——§3.3.1 改为 Host 显式 `AddCrestLocalEventGovernance()` 装配（contracts-only 程序集只贡献声明；生成器仅在编译引用 Local runtime 时自动发出该调用），§3.3.2 增补统一五秒有界等待（含正在 bootstrap 的调用；调用方取消传播；NotReady 不缓存），§9 迁移表增补装配行。
 - rev.2 修订（对照 PR #148 设计审查 R1）：
   - R1-LE146-01（P1）→ §3.3 锁定独立 LocalEvent Host 的 registry 启动责任（复用既有 EventRegistry bootstrap 的注册/驱动契约；LocalEvent-only 与 LocalEvent+RabbitMQ、两种注册顺序的有限启动/恢复验收；非 hosted 契约不阻塞、不缓存）；新增验收 G06/G07。
   - R1-LE146-02（P2）→ §7.2 明确"非空持久 CorrelationId 必须恢复、缺能力执行前拒绝、无声明开关、不静默降级"；基线夹具补齐 tenant/correlation 设施并区分缺设施负例。
@@ -81,10 +82,19 @@
 
 新增 LocalEvent composition/readiness 检查，供 HostedService 与非 hosted 首次执行共享。仅存在 Governance.Required 时要求 EventRegistry 已经通过既有 bootstrap 完成 Built；**本索引不擅自创建第二套 registry，也不无条件依赖 RabbitMQ 启动顺序**。rev.2 锁定该责任的装配与驱动契约（R1-LE146-01）：
 
-1. **注册责任归 LocalEvent 组合入口**：当（且仅当）本 Host 存在 Governance.Required 声明时，Local 组合（`AddCrestLocalEventDispatch` 等价入口）以 TryAddEnumerable 注册**既有** `EventRegistryBootstrapper`（`CrestCreates.Event`，TaskId `event-registry`，IBootstrapTask）与**既有** `BootstrapCoordinator`（`CrestCreates.Metadata.Bootstrap`，IHostedService），并新增一个 `local-governance-readiness` IBootstrapTask，`Dependencies = ["event-registry"]`：其 ExecuteAsync 校验 registry `State == Built`，成功即置 readiness gate，失败即 fail closed。存在 Governance.Required 而无任何 descriptor provider 装配时，注册表以零 provider Built 属于**装配错误**：readiness 任务在启动期给出可操作诊断（"注册 descriptor provider / 调用事件所属程序集的 AddEventDescriptors()"），而不是把空注册表当就绪。
-2. **驱动顺序不靠 HostedService 注册顺序、也不阻塞**：所有任务由同一个 `BootstrapCoordinator.StartAsync` 拓扑执行；Channel consumer 的 intake 在任何消费前 `await` readiness gate（TaskCompletionSource 模式，参照 #127）；readiness 任务自身不得等待任何"尚未启动的后续 hosted service"（禁止在 StartAsync 内做跨 hosted service 等待）。LocalEvent+RabbitMQ 共存时两个组合各自 TryAddEnumerable 同一 coordinator（去重后唯一）与各自任务（`rabbitmq-bindings` 与 `local-governance-readiness` 都依赖 `event-registry`），因此**两种注册顺序等价**：coordinator 只运行一次、registry 只 Build 一次（`RegistryBase.Build` 幂等为兜底，主链是单次任务）；RabbitMQ 组合服务直接 Build 的现有事实与该任务兼容（任务看到已 Built 即通过）。
-3. **非 hosted 契约**：无 coordinator 的纯 ServiceProvider 场景，首次治理执行（admission/Prepare）前检查 Built——已 Built 通过；未 Built 抛可操作拒绝（指出应完成的既有 bootstrap，如调用方自行运行 BootstrapCoordinator 或等价初始化），**不缓存为永久失败**，bootstrap 完成后重试即通过；不得把"未就绪"静默降级为无治理执行。
-4. 普通本地事件（无 Governance.Required）不注册上述任何 bootstrap 组件，保持短路径——Local 组合不得为空通知类 Host 引入 registry/bootstrap 依赖。
+1. **注册责任归 Host 的显式 Local 组合入口（rev.3 同步实现）**：本 Host 存在 Governance.Required 声明时，Host 显式调用 `AddCrestLocalEventGovernance()`（`CrestCreates.EventBus.Local`）——它以 TryAddEnumerable 注册**既有** `EventRegistryBootstrapper`（`CrestCreates.Event`，TaskId `event-registry`，IBootstrapTask）与**既有** `BootstrapCoordinator`（`CrestCreates.Metadata.Bootstrap`，IHostedService），并新增一个 `local-governance-readiness` IBootstrapTask，`Dependencies = ["event-registry"]`：其 ExecuteAsync 校验 registry `State == Built`，成功即置 readiness gate，失败即 fail closed。存在 Governance.Required 而无任何 descriptor provider 装配时，注册表以零 provider Built 属于**装配错误**：readiness 任务在启动期给出可操作诊断（"注册 descriptor provider / 调用事件所属程序集的 AddEventDescriptors()"），而不是把空注册表当就绪。**依赖方向不变**：仅引用 `CrestCreates.EventBus.Abstractions` 的 contracts-only 程序集只贡献声明（其内联 `AddLocalEvents()` 不引用 Local runtime）；生成器仅在编译实际引用 `CrestCreates.EventBus.Local` 时才在 `AddLocalEvents()` 内自动发出 `AddCrestLocalEventGovernance(services)`。Host 最小装配（含消费 contracts-only 程序集事件的场景）：
+
+```csharp
+services.AddCrestLocalEventDispatch();
+services.AddLocalEvents();               // 各事件/Handler 程序集（contracts-only 亦可）
+services.AddCrestLocalEventGovernance(); // Host 侧唯一治理装配入口；自动装配只在同程序集引用 Local runtime 时发生
+// 事件所属程序集的 AddEventDescriptors() / descriptor provider 注册保持既有事件链约定
+```
+
+2. **统一五秒截止（rev.3 同步实现）**：admission 对 readiness gate 的等待统一有界——5 秒（与调用方 CT 链接），**正在 bootstrap 的调用同样受限**；界内未就绪即回落 `GovernanceRegistryNotReady` 可操作拒绝（不缓存，bootstrap 完成后重试通过），调用方取消继续按取消传播，gate fault 保持 fail-closed；不得无限等待或以稍后失败替代边界拒绝。
+3. **驱动顺序不靠 HostedService 注册顺序、也不阻塞**：所有任务由同一个 `BootstrapCoordinator.StartAsync` 拓扑执行；Channel consumer 的 intake 在任何消费前 `await` readiness gate（TaskCompletionSource 模式，参照 #127）；readiness 任务自身不得等待任何"尚未启动的后续 hosted service"（禁止在 StartAsync 内做跨 hosted service 等待）。LocalEvent+RabbitMQ 共存时两个组合各自 TryAddEnumerable 同一 coordinator（去重后唯一）与各自任务（`rabbitmq-bindings` 与 `local-governance-readiness` 都依赖 `event-registry`），因此**两种注册顺序等价**：coordinator 只运行一次、registry 只 Build 一次（`RegistryBase.Build` 幂等为兜底，主链是单次任务）；RabbitMQ 组合服务直接 Build 的现有事实与该任务兼容（任务看到已 Built 即通过）。
+4. **非 hosted 契约**：无 coordinator 的纯 ServiceProvider 场景，首次治理执行（admission/Prepare）前检查 Built——已 Built 通过；未 Built 抛可操作拒绝（指出应完成的既有 bootstrap，如调用方自行运行 BootstrapCoordinator 或等价初始化），**不缓存为永久失败**，bootstrap 完成后重试即通过；不得把"未就绪"静默降级为无治理执行。
+5. 普通本地事件（无 Governance.Required）不注册上述任何 bootstrap 组件，保持短路径——Local 组合不得为空通知类 Host 引入 registry/bootstrap 依赖。
 
 ## 4. 一次准备、同一批实例执行
 
@@ -288,6 +298,7 @@ Channel 成功返回只代表入队。在消费阶段，已接受事件的准备
 | 原接口/数据 | 新行为/迁移 |
 | --- | --- |
 | LocalEventJsonCodecRegistry.Register/Resolve | 同步迁移 generated/manual 贡献，旧文件移到 99_RecycleBin/issue-146-local-event-hardening |
+| 治理 bootstrap 装配 | Host 显式调用 `AddCrestLocalEventGovernance()`（contracts-only 程序集只贡献声明）；生成器仅在编译引用 Local runtime 时于 `AddLocalEvents()` 内自动发出该调用；admission 对 readiness 的等待统一 5 秒有界、NotReady 不缓存 |
 | LocalEventBinding.CodecFactory | 声明 DTO 保留工厂输入，frozen binding 仅 Codec；recorder/replay 不再取工厂 |
 | ProbeHandlerInstances + InvokeAsync(provider,...) | typed Prepare + 一次性 prepared invocation；更新生成产物及手工测试夹具 |
 | 默认 replay key | 未显式改 key 的事件完全保持；改稳定键必须加旧默认 key alias |

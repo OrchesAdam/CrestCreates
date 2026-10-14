@@ -1,4 +1,6 @@
 using System.Text.Json;
+using CrestCreates.Accountability.Abstractions.Context;
+using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Event;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstractions;
@@ -75,26 +77,24 @@ internal static class Program
         return services;
     }
 
-    private static void AddAotContext(IServiceCollection services, string? tenantId, string? correlationId)
+    private static void AddAotContext(IServiceCollection services, string? tenantId)
     {
+        // Deterministic facilities only: the tenant provider is seeded, while the caller frame
+        // (current tenant + audit correlation) starts empty so frame restorations are observable
+        // and a missing activation cannot hide behind a pre-seeded ambient value.
         var tenantProvider = new AotTenantProvider();
         if (tenantId is not null)
         {
             tenantProvider.Add(tenantId);
         }
 
-        var currentTenant = new AotCurrentTenant(hostTenantId: null);
-        if (tenantId is not null)
-        {
-            currentTenant.SetTenantId(tenantId);
-        }
-
+        var currentTenant = new AotCurrentTenant();
         services.AddSingleton(tenantProvider);
         services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(tenantProvider);
         services.AddSingleton(currentTenant);
         services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(currentTenant);
         services.AddSingleton<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(
-            new AotAuditAccessor(correlationId));
+            new AotAuditAccessor());
         services.AddSingleton<CrestCreates.Accountability.Abstractions.Identity.IAuditIdentityGenerator,
             AotIdentityGenerator>();
     }
@@ -286,7 +286,7 @@ internal static class Program
         builder.Services.AddCrestLocalChannelEventDispatch();
         builder.Services.AddLocalEvents();
         LocalEventJsonCodecContributions.AddCodecs(builder.Services);
-        AddAotContext(builder.Services, tenantId: null, correlationId: null);
+        AddAotContext(builder.Services, tenantId: null);
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -425,32 +425,47 @@ internal static class Program
 
     private static async Task GovernedVersionRefusalAsync()
     {
-        static (ServiceProvider Provider, AotControl Control) BuildGovernedProvider(DescriptorState state)
+        static (ServiceProvider Provider, AotControl Control) BuildGovernedProvider(
+            DescriptorState v1State,
+            DescriptorState v2State)
         {
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddSingleton<AotControl>();
 
-            // A manual registry with an empty validator set keeps the inactive exact version
-            // buildable (the kernel's chain validator would reject an all-inactive registry), while
-            // the governance admission still applies its own Active-state rule.
+            // A manual registry with an empty validator set keeps the state combinations buildable
+            // (the kernel's chain validator would reject an all-inactive registry), while the
+            // governance admission still applies its own exact-version and Active-state rules.
+            // Both versions share one payload/name so the v1 binding must not win by accident.
             var registry = new EventRegistry(new RegistryValidationEngine<GeneratedEventDescriptor>(
                 Array.Empty<IRegistryValidator<GeneratedEventDescriptor>>()));
             registry.Build(new IEventDescriptorProvider[]
             {
-                new AotDescriptorProvider(new GeneratedEventDescriptor
-                {
-                    Id = "evt_aot_governed_v1",
-                    Name = "aot.governed",
-                    Version = 1,
-                    State = state,
-                    PayloadType = typeof(AotGovernedEvent),
-                    Scope = EventScope.Local,
-                }),
+                new AotDescriptorProvider(
+                    new GeneratedEventDescriptor
+                    {
+                        Id = "evt_aot_governed_v1",
+                        Name = "aot.governed",
+                        Version = 1,
+                        State = v1State,
+                        PayloadType = typeof(AotGovernedEvent),
+                        Scope = EventScope.Local,
+                    },
+                    new GeneratedEventDescriptor
+                    {
+                        Id = "evt_aot_governed_v2",
+                        Name = "aot.governed",
+                        Version = 2,
+                        State = v2State,
+                        PayloadType = typeof(AotGovernedEvent),
+                        Scope = EventScope.Local,
+                    }),
             });
             services.AddSingleton(registry);
 
             services.AddCrestLocalEventDispatch(builder => builder.Declare<AotGovernedEvent>(
+                replayable: true,
+                codecFactory: () => LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(AotGovernedEvent)),
                 policy: new LocalEventPolicyOptions { Governance = LocalEventGovernance.Required }));
             services.AddScoped<ILocalEventHandler<AotGovernedEvent>, AotGovernedHandler>();
             services.AddCrestLocalEventGovernance();
@@ -458,22 +473,50 @@ internal static class Program
             return (provider, provider.GetRequiredService<AotControl>());
         }
 
-        await using (var inactive = BuildGovernedProvider(DescriptorState.Deprecated).Provider)
+        // Competing versions: exact v1 is Deprecated while v2 is Active — the exact version must
+        // be rejected. A version-filter-less implementation reports a different code (ambiguous),
+        // and a latest-Active-wins implementation admits and executes.
+        await using (var inactive = BuildGovernedProvider(DescriptorState.Deprecated, DescriptorState.Active).Provider)
         {
             var failure = await CaptureExceptionAsync(
                 () => inactive.GetRequiredService<ILocalEventBus>().PublishAsync(new AotGovernedEvent()));
             Check(failure is LocalEventAdmissionException admission &&
                   admission.ProblemCode == "GovernedDescriptorInactive",
-                $"an inactive exact version must be refused even when resolvable, observed {failure?.GetType().Name}");
+                $"the exact inactive version must be refused despite a competing Active v2, observed {failure?.GetType().Name}");
             Check(inactive.GetRequiredService<AotControl>().GovernedCalls == 0,
                 "refused governed publishes must not execute handlers");
+
+            // A persisted row pinned to v1 must be refused before MarkRetrying with state and
+            // budget untouched.
+            var store = inactive.GetRequiredService<IDeadLetterStore>();
+            var codec = (System.Text.Json.Serialization.Metadata.JsonTypeInfo<AotGovernedEvent>)
+                LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(AotGovernedEvent))!;
+            var seeded = SeedMessage(
+                store,
+                "aot-governed-v1-row",
+                LocalEventIdentity.BuildLocalReplayKey(typeof(AotGovernedEvent)),
+                JsonSerializer.SerializeToUtf8Bytes(new AotGovernedEvent(), codec),
+                payloadType: typeof(AotGovernedEvent));
+            var pinned = seeded with { EventDescriptorId = "evt_aot_governed_v1" };
+            await store.EnqueueAsync(pinned, CancellationToken.None);
+            var replayResult = await inactive.GetRequiredService<ILocalDeadLetterReplayExecutor>()
+                .ExecuteAsync(pinned, CancellationToken.None);
+            Check(!replayResult.Success && replayResult.ProblemCode == "GovernedDescriptorInactive",
+                $"the persisted v1 row must be refused against the inactive exact version, observed {replayResult.ProblemCode}");
+            Check(replayResult.Execution == LocalEventExecutionOutcome.NotStarted,
+                "refused governed replay must not start execution");
+            var fresh = await store.GetByIdAsync(seeded.MessageId, CancellationToken.None);
+            Check(fresh is { Status: DeadLetterStatus.Pending, RetryCount: 0 },
+                "refused governed replay must keep state and budget untouched");
         }
 
-        var (active, control) = BuildGovernedProvider(DescriptorState.Active);
+        // Exact v1 Active with a competing Deprecated v2: the exact version must admit and execute.
+        var (active, control) = BuildGovernedProvider(DescriptorState.Active, DescriptorState.Deprecated);
         await using (active)
         {
             await active.GetRequiredService<ILocalEventBus>().PublishAsync(new AotGovernedEvent());
-            Check(control.GovernedCalls == 1, "an active exact version must admit and execute");
+            Check(control.GovernedCalls == 1,
+                "the exact Active version must admit even with a competing deprecated v2");
         }
     }
 
@@ -487,7 +530,7 @@ internal static class Program
         builder.Services.AddCrestLocalChannelEventDispatch();
         builder.Services.AddLocalEvents();
         LocalEventJsonCodecContributions.AddCodecs(builder.Services);
-        AddAotContext(builder.Services, tenantId: "aot-tenant-a", correlationId: "aot-correlation-146");
+        AddAotContext(builder.Services, tenantId: "aot-tenant-a");
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -498,8 +541,16 @@ internal static class Program
             var store = host.Services.GetRequiredService<IDeadLetterStore>();
             var manager = host.Services.GetRequiredService<ILocalDeadLetterManager>();
             var callerTenant = host.Services.GetRequiredService<AotCurrentTenant>();
+            var callerAccessor = host.Services
+                .GetRequiredService<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>();
 
-            await eventBus.PublishAsync(new AotChannelEvent { Message = "ctx" });
+            // The consumer task started before any caller frame existed, so a missing channel
+            // activation is observable as host/null context instead of leaking this frame.
+            callerTenant.SetTenantId("aot-tenant-a");
+            using (callerAccessor.Push(NewAuditFrame("aot-publish-correlation", "aot-publisher")))
+            {
+                await eventBus.PublishAsync(new AotChannelEvent { Message = "ctx" });
+            }
 
             var deadline = DateTime.UtcNow.AddSeconds(10);
             DeadLetterMessage? pending = null;
@@ -516,24 +567,56 @@ internal static class Program
 
             Check(pending is not null, "the failing channel delivery must produce a dead letter record");
             Check(pending!.TenantId == "aot-tenant-a", $"the record must capture the published tenant, observed '{pending.TenantId}'");
-            Check(pending.CorrelationId == "aot-correlation-146", "the record must capture the published correlation");
+            Check(pending.CorrelationId == "aot-publish-correlation", "the record must capture the published correlation");
             Check(pending.LocalContextVersion == 1, "the record must carry the context format marker");
 
-            control.FailChannelEvent = false;
-            callerTenant.SetTenantId("aot-tenant-b");
-            var result = await manager.RetryAsync(pending.MessageId);
-            Check(result.Success, $"context replay must succeed: {result.ErrorMessage}");
+            // Consume-frame evidence BEFORE the replay overwrites the observation slots: the
+            // consumer must have executed under the recorded tenant and correlation.
             Check(control.LastObservedChannelTenantId == "aot-tenant-a",
-                $"replay must execute under the recorded tenant, observed '{control.LastObservedChannelTenantId}'");
-            Check(control.LastObservedChannelCorrelationId == "aot-correlation-146",
-                "replay must restore the recorded correlation");
-            Check(callerTenant.Id == "aot-tenant-b", "the caller tenant frame must be restored after the attempt");
+                $"the consumer frame must restore the recorded tenant, observed '{control.LastObservedChannelTenantId}'");
+            Check(control.LastObservedChannelCorrelationId == "aot-publish-correlation",
+                "the consumer frame must restore the recorded correlation");
+
+            control.FailChannelEvent = false;
+
+            // The caller moves to a different tenant and a different audit frame before replay.
+            callerTenant.SetTenantId("aot-tenant-b");
+            var callerOperationId = Guid.NewGuid().ToString("N");
+            using (callerAccessor.Push(new AuditOperationContext
+            {
+                CorrelationId = "aot-caller-correlation-B",
+                OperationId = callerOperationId,
+                Actor = new AuditActor { Kind = "user", Id = "aot-caller" },
+                InvocationSource = "aot-caller",
+            }))
+            {
+                var result = await manager.RetryAsync(pending.MessageId);
+                Check(result.Success, $"context replay must succeed: {result.ErrorMessage}");
+                Check(control.LastObservedChannelTenantId == "aot-tenant-a",
+                    $"replay must execute under the recorded tenant, observed '{control.LastObservedChannelTenantId}'");
+                Check(control.LastObservedChannelCorrelationId == "aot-publish-correlation",
+                    "replay must restore the recorded correlation, not the caller's");
+                Check(callerTenant.Id == "aot-tenant-b", "the caller tenant frame must be restored after the attempt");
+                Check(callerAccessor.Current?.CorrelationId == "aot-caller-correlation-B",
+                    "the caller audit correlation must be restored after the attempt");
+                Check(callerAccessor.Current?.OperationId == callerOperationId,
+                    "the caller audit operation frame must be left untouched");
+            }
         }
         finally
         {
             await host.StopAsync();
         }
     }
+
+    private static AuditOperationContext NewAuditFrame(string correlationId, string actorId)
+        => new()
+        {
+            CorrelationId = correlationId,
+            OperationId = Guid.NewGuid().ToString("N"),
+            Actor = new AuditActor { Kind = "system", Id = actorId },
+            InvocationSource = "aot-fixture",
+        };
 
     private static async Task AsyncReleaseOutcomeAsync()
     {

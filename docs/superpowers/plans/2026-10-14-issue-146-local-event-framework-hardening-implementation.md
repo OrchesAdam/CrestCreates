@@ -51,6 +51,8 @@ S3 落地记录（2026-10-14，同一分支）：新增 `LocalEventGovernanceAnd
 
 ## S4 — 证据、迁移与最后验收
 
+装配同步（S4 复审 S4-R1-LE146-03）：治理 bootstrap 由 Host 显式 `AddCrestLocalEventGovernance()` 装配（contracts-only 程序集只贡献声明；生成器仅在编译引用 Local runtime 时自动发出该调用）；readiness 等待统一 5 秒有界、NotReady 不缓存——Spec rev.3 §3.3/§9 已同步。
+
 - [ ] 更新 existing LocalEvent NativeAOT fixture 的分场景断言及 sentinel。
 - [ ] 在既有 Local.Tests.Integration 补 EF Core + Npgsql + PostgreSQL fixture（每测试独立 schema），从旧 schema 升级两次并测试 fresh-scope store，证明不是 EF InMemory / EnsureCreated 的空库模型测试；其他 Provider 单列未验证。
 - [ ] 重跑受影响 RabbitMQ unit / broker / trim / native，保留其独立 codec 格式与私有 validator 边界。
