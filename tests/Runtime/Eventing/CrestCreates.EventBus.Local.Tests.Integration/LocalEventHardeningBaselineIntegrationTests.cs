@@ -433,13 +433,19 @@ public class LocalEventHardeningBaselineIntegrationTests
     [Fact]
     public async Task Replay_with_nonnull_correlation_but_no_audit_facilities_must_reject_before_handlers()
     {
+        // The recorded tenant must be resolvable so that the ONLY missing condition stays the audit
+        // accessor/identity capability (R2-LE146-01): an unknown-tenant rejection must not be able to
+        // make this test pass.
+        var tenantProvider = new HardeningTenantProvider();
+        tenantProvider.Add("hardening-tenant-A");
+
         await using var provider = LocalEventTestComposition.Build(
             declare: builder => builder.Declare<HardeningNoFacilityProbeEvent>(replayable: true),
             configure: services =>
             {
                 // Tenant facilities exist; audit accessor/identity are deliberately absent.
                 services.AddSingleton<ICurrentTenant>(new HardeningCurrentTenant("hardening-tenant-A"));
-                services.AddSingleton<ITenantProvider>(new HardeningTenantProvider());
+                services.AddSingleton<ITenantProvider>(tenantProvider);
                 services.AddScoped<ILocalEventHandler<HardeningNoFacilityProbeEvent>, HardeningNoFacilityProbeHandler>();
             });
 
@@ -448,6 +454,12 @@ public class LocalEventHardeningBaselineIntegrationTests
             LocalEventTestComposition.SerializeWithCodec(new HardeningNoFacilityProbeEvent()),
             tenantId: "hardening-tenant-A",
             correlationId: "hardening-correlation-146");
+
+        // Fixture guard: the recorded tenant resolves and matches before execution, so a later
+        // fixture drift cannot silently reintroduce an unknown-tenant rejection path.
+        var resolvedTenant = await tenantProvider.GetTenantAsync(record.TenantId!, CancellationToken.None);
+        Assert.NotNull(resolvedTenant);
+        Assert.Equal(record.TenantId, resolvedTenant!.Id);
 
         var store = provider.GetRequiredService<IDeadLetterStore>();
         await store.EnqueueAsync(record, CancellationToken.None);

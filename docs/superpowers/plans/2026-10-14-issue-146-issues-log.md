@@ -57,3 +57,7 @@
 范围澄清（回应审查）：G01 只证明"非治理事件不被 advisory registry 的另一版本破坏记录"，**不等于**已交付 Governance.Required 精确版本拒绝（G02–G05 仍待 S3）。
 
 修订后计数：单元 37 过 + 3 基线失败（40）；集成 47 过 + 8 基线失败（55，原 4 + 缺设施 2 + H03 2）；既有零回归。
+
+## S1 设计审查 R2（PR #148，审查 head `d32f8b42`）
+
+- R2-LE146-01（P2）缺 audit 负例的 tenant provider 为空、未登记租户 A：按 Spec"先租户、后关联恢复"的检查顺序，"未知租户拒绝"足以单独满足 `Success=false`、零 Handler、Pending/预算不变，即使关联能力检查完全遗漏也可假绿。修订（按审查最小方案）：登记有效租户 A，使唯一缺失条件保持为 audit accessor/identity；并在调用 executor 前加**解析守卫**（provider 对记录 TenantId 解析非空且 Id Ordinal 匹配），防后续 fixture 漂移重新引入未知租户路径。保持 accessor/identity 未注册，继续断言零业务调用、Pending 与预算不变。修订后该用例仍按 S1 红色且失败原因纯净：今日观测为业务真实执行（Assert.False Expected False / Actual True）。S3 引入结构化 ProblemCode 后把关联能力缺失断言进一步收紧。
