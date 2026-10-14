@@ -248,7 +248,10 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
 
             // The caller's cancellation is rethrown unchanged; release and restore facts stay
             // observable on it (structured log + exception data) instead of being discarded.
-            cancel.Data["LocalEventReplayExecution"] = prepared.AnyHandlerInvoked ? "Failed" : "NotStarted";
+            // Caller-cooperative cancellation is an execution fact of its own (Spec §8): it is
+            // reported as Cancelled, with handler entry kept as a separate fact.
+            cancel.Data["LocalEventReplayExecution"] = LocalEventExecutionOutcome.Cancelled.ToString();
+            cancel.Data["LocalEventReplayAnyHandlerInvoked"] = prepared.AnyHandlerInvoked ? "true" : "false";
             cancel.Data["LocalEventReplaySettlement"] = restored.Ok
                 ? "RestorePendingConfirmed"
                 : $"RestorePendingUnconfirmed: {restored.Problem}";

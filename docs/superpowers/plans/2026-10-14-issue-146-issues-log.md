@@ -94,3 +94,11 @@
 - 探针入库：`ReviewS2LifecycleProbes.cs` 逐字 `cp` 入库（含 `ReviewDisposeState`/`ReviewThrowingRelease`/`ReviewCancelHandler`/`ReviewSuccessfulChannelHandler`/`ReviewLogs`），命名空间与既有集成套件一致、无生产测试扩展点。
 - 契约对照：Spec §4"codec metadata 及关联 options 在进入 binding 前变为只读；若无法安全锁定，冻结失败"与 H03 验收行"可变 metadata 被锁定或拒绝"为本轮实现补齐项，Spec 无需修订。
 - 修复后计数：单元 42/42；集成 70 中 66 过 + **4 条 S3 范围内红**（不变）；Event 41/41；Capability 178/178；CodeGenerator 365/365；JsonContracts 131/131；边界 173/178（5 项既有环境态）；LocalEvent 真实 NativeAOT 门禁通过。
+
+## S2 实现复审 R2（PR #148，审查 head `33ba7040`）
+
+审查结论：R1 三项（2×P1+1×P2）全部关闭；新增 1×P2，S2 门禁待修正。
+
+| 发现 | 修订 | 落点与验证 |
+| --- | --- | --- |
+| S2-R2-LE146-01（P2）执行中协作取消被记录为业务执行失败 | 执行期取消分支（`prepared.ExecuteAsync` 的 caller-cancellation catch）的 `Data["LocalEventReplayExecution"]` 由条件写入 `Failed/NotStarted` 改为按 Spec §8 / `LocalEventExecutionOutcome` 统一报 **`Cancelled`**；Handler 是否已进入保持独立事实 `Data["LocalEventReplayAnyHandlerInvoked"]`。Prepare / MarkRetrying 两个取消分支维持 `NotStarted`（与 §8 矩阵行一致：准备前停止 / MarkRetrying 未确认）。原 OCE 传播、释放错误保留、Pending 有界恢复与预算不变行为全部保持。 | `LocalDeadLetterReplayExecutor`；两条组合回归断言改为 `LocalEventExecutionOutcome.Cancelled.ToString()` 并新增 AnyHandlerInvoked 事实断言（审查在临时副本中改期望即复现 Expected Cancelled / Actual Failed） |

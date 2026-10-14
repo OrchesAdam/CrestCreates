@@ -439,7 +439,8 @@ public class LocalEventHardeningStateMachineTests
                 provider.GetRequiredService<ILocalDeadLetterReplayExecutor>().ExecuteAsync(record, cancel.Token));
 
             // The caller's cancellation is preserved; the release and restore facts ride on it.
-            Assert.Equal("Failed", error.Data["LocalEventReplayExecution"]);
+            Assert.Equal(LocalEventExecutionOutcome.Cancelled.ToString(), error.Data["LocalEventReplayExecution"]);
+            Assert.Equal("true", error.Data["LocalEventReplayAnyHandlerInvoked"]);
             Assert.Equal("RestorePendingConfirmed", error.Data["LocalEventReplaySettlement"]);
             Assert.Contains("probe disposal failure", error.Data["LocalEventReplayRelease"]!.ToString(), StringComparison.Ordinal);
             Assert.Equal(1, CountingAsyncDisposable.DisposeCount);
@@ -490,7 +491,8 @@ public class LocalEventHardeningStateMachineTests
                 FailRestoreEnqueueStore.FailPendingWrites = false;
             }
 
-            Assert.Equal("Failed", error.Data["LocalEventReplayExecution"]);
+            Assert.Equal(LocalEventExecutionOutcome.Cancelled.ToString(), error.Data["LocalEventReplayExecution"]);
+            Assert.Equal("true", error.Data["LocalEventReplayAnyHandlerInvoked"]);
             Assert.Contains("RestorePendingUnconfirmed", error.Data["LocalEventReplaySettlement"]!.ToString(), StringComparison.Ordinal);
             // The unconfirmed restore is reported, not claimed as recovered: the MarkRetrying state stands.
             var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
