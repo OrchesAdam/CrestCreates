@@ -60,6 +60,10 @@ public class CrudServiceRealDeclarationBaselineTests
         "CrestCreates.Application.Contracts",
         "CrestCreates.Core.Abstractions",
         "CrestCreates.DynamicApi",
+        "CrestCreates.Validation",
+        "Microsoft.AspNetCore.Http",
+        "Microsoft.AspNetCore.Routing",
+        "Microsoft.AspNetCore.Mvc.Core",
         "Rougamo",
     ];
 
@@ -82,6 +86,30 @@ public class CrudServiceRealDeclarationBaselineTests
             }
         }
 
+        // The ASP.NET shared-framework assemblies are not copied into the test output; resolve
+        // them deterministically from the runtime directory so the closure really contains the
+        // types the dynamic-API support check requires.
+        var aspNetCoreDirectory = System.IO.Path.GetDirectoryName(
+            typeof(Microsoft.AspNetCore.Http.HttpContext).Assembly.Location);
+        if (!string.IsNullOrEmpty(aspNetCoreDirectory))
+        {
+            foreach (var fileName in new[]
+                     {
+                         "Microsoft.AspNetCore.Http.dll",
+                         "Microsoft.AspNetCore.Http.Abstractions.dll",
+                         "Microsoft.AspNetCore.Routing.dll",
+                         "Microsoft.AspNetCore.Routing.Abstractions.dll",
+                         "Microsoft.AspNetCore.Mvc.Core.dll",
+                     })
+            {
+                var candidate = System.IO.Path.Combine(aspNetCoreDirectory, fileName);
+                if (System.IO.File.Exists(candidate))
+                {
+                    referencePaths.Add(candidate);
+                }
+            }
+        }
+
         var references = referencePaths
             .Distinct()
             .Select(path => MetadataReference.CreateFromFile(path))
@@ -95,8 +123,8 @@ public class CrudServiceRealDeclarationBaselineTests
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new CrudServiceSourceGenerator());
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out _);
-        return (updated, driver.GetRunResult());
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        return (compilation, driver.GetRunResult());
     }
 
     [Fact]
@@ -132,5 +160,31 @@ public class CrudServiceRealDeclarationBaselineTests
             "DTOs are derived from typeof(Product), never from the annotated service class");
         generated.Should().NotContain("class ProductAppServiceDto",
             "the annotated service class must not be treated as the entity");
+    }
+
+    [Fact]
+    public void Formal_crud_request_binding_must_not_route_through_the_legacy_body_helper()
+    {
+        // Designed behavior: the formal chain binds bodies through the typed
+        // CapabilityEndpointBodyReader contract with required-body semantics (empty/whitespace/null
+        // /bad JSON → 400, zero business). The current emission routes through the legacy
+        // DynamicApiGeneratedRuntime helper whose empty-body semantics materialize a default DTO.
+        var (closure, runResult) = RunRealDriver();
+        string[] requiredTypes =
+        [
+            "CrestCreates.DynamicApi.IDynamicApiGeneratedProvider",
+            "CrestCreates.Validation.Modules.IValidationService",
+            "Microsoft.AspNetCore.Routing.IEndpointRouteBuilder",
+            "Microsoft.AspNetCore.Http.HttpContext",
+            "Microsoft.AspNetCore.Mvc.FromServicesAttribute",
+        ];
+        var missing = requiredTypes.Where(type => closure.GetTypeByMetadataName(type) is null).ToArray();
+        missing.Should().BeEmpty("the harness closure must satisfy HasDynamicApiSupport so this baseline cannot pass vacuously; missing: "
+            + string.Join(", ", missing));
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
+
+        generated.Should().NotContain("DynamicApiGeneratedRuntime.ReadBodyAsync",
+            "formal CRUD must never bind request bodies through the legacy helper");
     }
 }

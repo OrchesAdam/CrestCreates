@@ -1883,4 +1883,39 @@ public sealed class AppServiceCompatibilityGeneratorTests
         bindings!.SourceText.Should().Contain("System.Array.Empty<global::MyApp.BookDto>()",
             "nullable array factory should use Array.Empty<T> with stripped ? suffix");
     }
+
+    [Fact]
+    public void Compatibility_result_contract_must_not_wrap_through_object_typed_output()
+    {
+        // #128 S1 baseline: the declared static return type must steer a typed, checked envelope
+        // (WrapResult<ProductDto> against its JsonTypeInfo). The current result contract emitter
+        // wraps the object-typed ctx.Output through the untyped overload, so the static return
+        // contract is not preserved on the wire path.
+        var source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace MyApp;
+
+            public class BookDto
+            {
+                public string Title { get; set; } = "";
+            }
+
+            [CrestService]
+            [CapabilityCompatibilityProjection]
+            public class BookAppService
+            {
+                public System.Threading.Tasks.Task<BookDto> CreateAsync(BookDto input, System.Threading.CancellationToken ct)
+                    => System.Threading.Tasks.Task.FromResult(input);
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(
+            source, additionalSources: BuildCompatibilityStubs());
+
+        var contracts = result.GetSourceByFileName("GeneratedAppServiceCompatibilityResultContracts_Book.g.cs");
+        contracts.Should().NotBeNull();
+        contracts!.SourceText.Should().NotContain("WrapResult(ctx.Output",
+            "the declared typed return must not be wrapped through the object-typed ctx.Output call");
+    }
 }
