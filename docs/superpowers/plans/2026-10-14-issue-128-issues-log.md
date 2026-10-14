@@ -40,6 +40,9 @@
 - **target/manifest schema 冻结**：`PrepareCrestCrudInputs` → `GenerateCrestCrudArtifacts` → `IncludeCrestCrudArtifacts` 三段接入既有 `CrestCreatesJsonContractGenerationDependsOn`；单一 `CrestCreates.Crud.g.cs` bundle + inputs/outputs manifests（owner、完整类型名、源位置、schema version、内容 hash）；compiler-visible marker 仅作核对，不单独作为完成证据。
 - 计数：CodeGenerator **369 通过 + 3 约定红（372）**；DynamicApi **73 通过 + 2 约定红（75）**；无既有用例回归。
 
-### 待执行（S1 其余交付）
+### S1 增量 3：真实 MSBuild/官方 STJ 复现（2026-10-14）
 
-真实 MSBuild/官方 STJ 同轮不可见复现（真实消费项目闭包：BuildTasks 前后阶段 + 官方 STJ 生成上下文缺失 CRUD roots 的可执行红灯）；mapper/compatibility input/closed envelope 的补充负例（与 MSBuild 复现同批）。设计审查通过后推进 S2/S3。
+- `CrudJsonContractMsBuildBaselineTests`（CodeGenerator.Tests）：**自建真实消费项目**（仓库内 `tests/artifacts/` 临时目录，gitignored；构建后清理）——真实 `[GenerateCrudService(typeof(Product))] partial` 声明 + 官方 `[JsonSerializable]` CRUD 根（ProductDto/CreateProductDto/UpdateProductDto，`JsonSerializerIsReflectionEnabledByDefault=false`）+ 完整编译闭包（CodeGenerator 以 Analyzer 接入 + Domain.Shared/Domain/Application.Contracts/Authorization.Abstractions/Core.Abstractions/Aop/Validation），跑真实 `dotnet build`。
+- **约定红（纯净原因）**：今天构建恰好以 **4 条 DTO 可见性错误**失败——`Shop.Application.Products.Contracts` 与三个 DTO 类型在同轮不可见（其余闭包全部编译通过，无其他错误）。设计契约：DTO 由前置物化进入普通 Compile，author/官方 STJ 根在同一构建内闭合、构建成功且生成上下文包含 `ProductDto`。
+- 备注：去掉 ASP.NET/DynamicApi 引用是让失败原因保持单点（Service-as-entity 的 legacy bundle 另有 CS0535 阻断缺陷，属当前实现事实，随迁移记录，不影响本复现）。mapper/compatibility input/closed envelope 的补充负例需要 JSON 工具链闭包，与 S2 的 root 闭合一起落。
+- 计数：CodeGenerator **369 通过 + 4 约定红（373）**，无既有用例回归。
