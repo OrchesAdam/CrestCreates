@@ -29,7 +29,7 @@ public static class DeadLetterSchemaUpgrade
         ArgumentNullException.ThrowIfNull(db);
         var count = await db.Database
             .SqlQueryRaw<int>(
-                $"SELECT COUNT(*)::int AS \"Value\" FROM information_schema.columns WHERE table_name = '{TableName}' AND column_name = '{LocalContextVersionColumn}'")
+                $"SELECT COUNT(*)::int AS \"Value\" FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '{TableName}' AND column_name = '{LocalContextVersionColumn}'")
             .SingleAsync(ct);
         return count > 0;
     }

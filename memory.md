@@ -22,18 +22,38 @@ never deleted; never output credentials.
 - JsonContracts build-time toolchain: `src/Tooling/CrestCreates.JsonContracts.BuildTasks`
   (+ `.BuildTasks.Core`, `.Tool`) generates deterministic JSON contract roots consumed
   by the official STJ source generator; no runtime reflection/scanner fallback.
-- LocalEvent typed dispatch + dead-letter replay (delivered by #126 via PR #142 on
-  2026-10-13, eight review rounds closed): single typed dispatch index
-  (`ILocalEventDispatchRegistry` / `LocalEventBinding` / `LocalEventInvoker`, freeze-time
-  merged validation; undeclared events fail deterministically, no fallback), per-assembly
-  generated registration (`AddLocalEvents()`, CCCLE001-005; explicit cross-assembly
-  activation contract, no scanning), replayable codecs statically bound by the JsonContracts
-  toolchain (`[LocalEvent(Replayable=true)]` discovery; CJC015/016/017 closure diagnostics
-  incl. polymorphic discriminator uniqueness and STJ-recoverable collection checks), shared
-  replay core (`LocalDeadLetterReplayExecutor`: re-read current state, precheck before state
-  transition, persisted retry budget, cancel-safe Pending restore), EF `LocalReplayKey`
-  additive column, `InMemoryDeadLetterStore` same-key update fix. Not pledged: replay
-  concurrency mutual exclusion, crash-leftover Retrying recovery, per-handler checkpoints.
+- LocalEvent typed dispatch + dead-letter replay (#126 delivered via PR #142 on 2026-10-13;
+  **#146 hardening S1-S4 delivered on branch `feat/issue-146-local-event-framework-hardening`
+  (PR #148, S2/S3 review R1-R3 closed with in-repo regression probes; merge pending review)**):
+  single typed dispatch index (`ILocalEventDispatchRegistry` / frozen `LocalEventBinding` /
+  `LocalEventInvoker.Prepare`, freeze-time merged validation; undeclared events fail
+  deterministically, no fallback), per-assembly generated registration (`AddLocalEvents()`,
+  CCCLE001-005; explicit cross-assembly activation contract, no scanning), **per-Host codec
+  declaration/contribution split (`LocalEventRegistration` + `LocalEventJsonCodecRegistration`
+  + `AddCodecs`; no process-global table; frozen `JsonTypeInfo` is locked with `MakeReadOnly`)**,
+  **one `Prepare` per execution resolving the whole handler batch (same instances execute;
+  transient constructed once)**, replayable codecs statically bound by the JsonContracts
+  toolchain (CJC015/016/017 closure diagnostics; camelCase invariant for LocalEvent),
+  shared replay core (`LocalDeadLetterReplayExecutor`: fresh re-read, decode+prepare before
+  `MarkRetrying`, independent Execution/StateWrite/Release facts, cancel-safe bounded Pending
+  restore with preserved release facts, corrupted/admission failures never consume budget),
+  EF `LocalReplayKey` additive column + **`LocalContextVersion` additive column with a
+  repeatable PostgreSQL upgrade script (real PG evidence: old schema upgraded twice, fresh-scope
+  round trip; other providers unverified)**, **stable replay keys + explicit same-version replay
+  aliases (attribute/builder/generator; unknown non-empty keys never fall back)**, **shared
+  admission core on publish/direct-dispatch/channel enqueue+consume/replay: exact Active
+  descriptor association, persisted descriptor-id match, explicit governed-history adoption,
+  tenant-mode matrix with authoritative tenant resolution and exact-id equality (empty/damaged
+  ids refused as such, never converted into host), context snapshots/work items persisted with
+  failures, LIFO context frames with independently protected unwind**, **explicit execution
+  checks and opt-in `IEventValidator` activation (freeze validates DI registration; implicit
+  publish-time validation removed with a migration diagnostic)**, **hosted governance
+  readiness via the existing bootstrap chain (`AddCrestLocalEventGovernance` =
+  `EventRegistryBootstrapper` + `BootstrapCoordinator` + `local-governance-readiness` gate,
+  bounded wait, zero-provider assembly error, not-ready never cached; generated emission only
+  when the compilation references the Local runtime)**. Not pledged: replay concurrency
+  mutual exclusion, crash-leftover Retrying recovery, per-handler checkpoints, cross-tenant
+  DLQ browsing, general payload migration.
 - RabbitMQ static bindings + canonical event contracts (delivered by #127, merged via PR #145 on
   2026-10-14; R1+R2 review rounds closed — 10 findings fixed with the reviewer probes in-repo;
   baseline code facts: the reflection subscription bridge returned empty in any real

@@ -153,3 +153,27 @@
 
 - **非调用方 OCE + 帧撤销失败误报 Release.Completed**：`Activate` 的 OCE 路径把清理失败以**异常对象**附加到 `Data["LocalEventContextCleanupFailure"]`（此前为字符串）；executor 新增 `ExtractFrameCleanupFailure`（同时识别 `LocalEventContextActivationException.CleanupFailure` 与 OCE Data），在**调用方取消分支**与**普通恢复失败分支**均合并进释放事实——非调用方 OCE 走 generic 恢复失败 → `ContextRestoreFailed` + `Release=Failed`；调用方同一 OCE 传播与清理事实保持。
 - 回归：`Non_caller_cancellation_with_failed_unwind_reports_release_failed`（调用方 token 未取消、Push 抛非调用方 OCE、撤销失败 → NotStarted + Release.Failed + Pending/预算 0）；上轮 13 条探针与 20 条 ReviewR1 套件全部保持转绿。
+
+## S4 — 证据、迁移与最后验收
+
+### 原生 fixture 扩展（Spec §12，分场景 sentinel）
+
+`CrestCreates.EventBus.Local.AotHost` 由五场景扩至 11 场景，每场景输出 `{scenario}:PASS`，门禁逐场景断言（泛化 OK 不能掩盖未执行负例）：
+
+1. `sync-typed-dispatch`、2. `failure-recording-and-manual-replay`、3. `background-retry-service`、4. `refusal-contracts`、5. `channel-full-chain`（原五场景保留）；
+6. `codec-isolation-and-conflict`：Host B 未激活 codec 贡献必失败 freeze（同进程 Host A 仍可分发）、同源不同 metadata 冲突拒绝；
+7. `single-preparation`：transient handler 每次执行恰好构造一次、预检实例即执行实例；
+8. `stable-key-and-alias`：显式稳定键冻结、旧默认键 alias 解析旧行并执行、原行键不被改写；
+9. `governed-version-refusal`：指定治理版本 Inactive 拒绝、Active 放行（手动 registry + 空 validator 集以保留可构建性）；
+10. `tenant-and-correlation-restore`：捕获（记录携带 TenantId/CorrelationId/ContextVersion=1）→ 消费恢复 → 重放在记录租户与关联下执行 → 调用方帧还原（确定性内存 provider/accessor，仅证框架协议）；
+11. `async-release-outcome`：恰好一次释放 + 成功后释放失败独立上报（Release=Failed、执行事实与 Retried 结算保持）。
+
+上一处 fixture 修正记录：生成器检出的机器可扫描断言 `AddLocalEvents()` 在本程序集总是发出 `AddCodecs`，故 Host B 形状改为手动声明（未激活任何贡献）；治理 registry 由内核链校验器拒绝全 Inactive，故场景用手动 registry + 空 validator 集构建，Admission 的 Active 规则不变。
+
+### 真实 PostgreSQL 升级证据（Spec §9）
+
+`LocalDeadLetterPostgreSqlUpgradeTests`（EF Core + Npgsql + 真实 PG，每测试独立 `itest_{guid}` schema；Testcontainers 或 `CREST_LOCAL_EVENT_PG_CONNECTION` 外接）：按升级前表结构（最终模型去掉 `LocalContextVersion`）建表并插入旧行 → 脚本执行**两次**（可重复）→ `information_schema`（current_schema）检测列 → fresh-scope store 读旧行（ContextVersion=null、key 保留）→ 写 v1 行往返（TenantId/CorrelationId/版本标记）+ Retried 状态迁移。SQLite/SqlServer 等 Provider 的 DDL 支持保持未验证声明；EF InMemory 不充当数据库证据。
+
+### 本轮验证计数（本地）
+
+LocalEvent integration（含 PG）**116/116**（`CREST_LOCAL_EVENT_PG_CONNECTION` 指向 podman PG）；单元 42/42、CodeGenerator 368/368、JsonContracts 131/131、边界 173–176/178（失败全部落在既有 ControlPlaneReferenceData 环境态组，5 个用例随环境态波动）、RabbitMQ unit 58/58 + 真实 broker 37/37、全量构建 0 错误同批记录。PR 描述与 #123 evidence matrix、memory.md 已同步。

@@ -58,6 +58,28 @@ public sealed class LocalEventTypedReplayNativeTests
             evidence["executionExitCode"] = execution.ExitCode;
             evidence["executionOutput"] = execution.Output;
             execution.ExitCode.Should().Be(0, execution.Output);
+
+            // Per-scenario sentinels: one PASS line per scenario, so a generic OK can never mask a
+            // scenario that silently stopped executing.
+            string[] scenarios =
+            [
+                "sync-typed-dispatch",
+                "failure-recording-and-manual-replay",
+                "background-retry-service",
+                "refusal-contracts",
+                "channel-full-chain",
+                "codec-isolation-and-conflict",
+                "single-preparation",
+                "stable-key-and-alias",
+                "governed-version-refusal",
+                "tenant-and-correlation-restore",
+                "async-release-outcome",
+            ];
+            foreach (var scenario in scenarios)
+            {
+                execution.Output.Should().Contain($"{scenario}:PASS", $"scenario '{scenario}' must execute natively");
+            }
+
             execution.Output.Should().Contain("CRESTCREATES_LOCALEVENT_TYPED_REPLAY_NATIVE_OK");
         }
         catch (Exception exception)
