@@ -156,7 +156,8 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         }
         catch (OperationCanceledException cancel) when (cancellationToken.IsCancellationRequested)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), ExtractFrameCleanupFailure(cancel));
             AttachCancellationFacts(cancel, "NotStarted", "ContextNotRestored", releaseProblem);
             throw;
         }
@@ -184,10 +185,14 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         }
         catch (Exception restoreFailure)
         {
-            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            // A non-caller OCE from the activation phase lands here too: its frame-unwind failure
+            // (attached when Activate could not return a frame) must reach the release outcome
+            // instead of being reported as a completed release.
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), ExtractFrameCleanupFailure(restoreFailure));
             _logger?.LogError(
                 restoreFailure,
-                "Replay of dead letter message {MessageId} failed while resolving its context before MarkRetrying; no handler was executed.",
+                "Replay of dead letter message {MessageId} failed while resolving or activating its context before MarkRetrying; no handler was executed.",
                 message.MessageId);
             return Reject(message,
                 $"context resolution failed before MarkRetrying: {restoreFailure.Message}", "ContextRestoreFailed",
@@ -464,6 +469,21 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
             (null, not null) => frameProblem,
             _ => new AggregateException("multiple release steps failed", scopeProblem, frameProblem),
         };
+
+    /// <summary>
+    /// Frame-unwind failures that happened inside Activate travel either on the dedicated
+    /// activation exception or attached to the original failure's Data (preserving a non-caller
+    /// cancellation's identity); both shapes must reach the release outcome.
+    /// </summary>
+    private static Exception? ExtractFrameCleanupFailure(Exception failure)
+    {
+        if (failure is LocalEventContextActivationException activationFailure)
+        {
+            return activationFailure.CleanupFailure;
+        }
+
+        return failure.Data["LocalEventContextCleanupFailure"] as Exception;
+    }
 
     private bool TryResolveBinding(
         DeadLetterMessage message,

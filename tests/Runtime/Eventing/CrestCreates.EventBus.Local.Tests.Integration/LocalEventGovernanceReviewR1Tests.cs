@@ -68,6 +68,14 @@ internal sealed class CancelThenThrowPushAccessor(CancellationTokenSource source
     }
 }
 
+internal sealed class NonCallerOcePushAccessor : CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor
+{
+    public CrestCreates.Accountability.Abstractions.Context.AuditOperationContext? Current => null;
+
+    public IDisposable Push(CrestCreates.Accountability.Abstractions.Context.AuditOperationContext context)
+        => throw new OperationCanceledException("probe non-caller cancellation");
+}
+
 internal sealed class ReviewGovernedProbeEvent : DomainEvent
 {
 }
@@ -616,6 +624,49 @@ public class LocalEventGovernanceReviewR1Tests
         Assert.Equal("ContextRestoreFailed", result.ProblemCode);
         // The tenant frame entered before the failing audit push was unwound in Activate itself.
         Assert.Equal("caller-tenant-B", tenant.Id);
+        var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
+        Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
+        Assert.Equal(0, fresh.RetryCount);
+    }
+
+    [Fact]
+    public async Task Non_caller_cancellation_with_failed_unwind_reports_release_failed()
+    {
+        var tenant = new HardeningCurrentTenant("caller-tenant-B", throwOnRestore: true);
+        var tenants = new FlakyTenantProvider();
+        tenants.Add("tenant-a");
+
+        await using var provider = LocalEventTestComposition.Build(
+            declare: builder => builder.Declare<ModeProbeEvent>(replayable: true),
+            configure: services =>
+            {
+                services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(tenant);
+                services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(tenants);
+                services.AddSingleton<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(
+                    new NonCallerOcePushAccessor());
+                services.AddSingleton<CrestCreates.Accountability.Abstractions.Identity.IAuditIdentityGenerator,
+                    HardeningAuditIdentityGenerator>();
+                services.AddScoped<ILocalEventHandler<ModeProbeEvent>, ModeProbeHandler>();
+                services.AddSingleton(new CurrentTenantProbeState());
+            });
+
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        var record = LocalEventTestComposition.CreateModernMessage<ModeProbeEvent>(
+            LocalEventTestComposition.SerializeWithCodec(new ModeProbeEvent()),
+            LocalEventIdentity.BuildLocalReplayKey(typeof(ModeProbeEvent)),
+            tenantId: "tenant-a",
+            correlationId: "review-correlation");
+        await store.EnqueueAsync(record, CancellationToken.None);
+
+        // The caller token is NOT cancelled: the OCE comes from another source, so this is an
+        // ordinary failure result — and the already-failed frame unwind must reach Release.
+        var result = await provider.GetRequiredService<ILocalDeadLetterReplayExecutor>()
+            .ExecuteAsync(record, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("ContextRestoreFailed", result.ProblemCode);
+        Assert.Equal(LocalEventExecutionOutcome.NotStarted, result.Execution);
+        Assert.Equal(LocalEventReleaseOutcome.Failed, result.Release);
         var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
         Assert.Equal(DeadLetterStatus.Pending, fresh!.Status);
         Assert.Equal(0, fresh.RetryCount);

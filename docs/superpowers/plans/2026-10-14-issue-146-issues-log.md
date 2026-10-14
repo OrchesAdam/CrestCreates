@@ -146,3 +146,10 @@
 | S3-R2-LE146-01（P1，承接 01 未闭环）边界只见服务存在、缺有效解析/精确 Id/关联能力 | `LocalEventContextBridge.ValidateRecoverabilityAsync`（返回解析出的 tenant）成为所有接受/执行边界共用前置：格式、损坏值、模式、（非空租户）provider 存在 + **权威解析 + Id Ordinal 相等**、（非空关联）audit accessor/identity 能力；admission 全边界调用，`ResolveAsync` 复用之并追加 ICurrentTenant 激活能力。 | 新回归：publish 正例（解析通过）；UnknownTenant（publish + enqueue 双边界、零副作用）；名称 fallback 得到不同 Id → TenantIdMismatch；有 correlation 无 identity generator → MissingAuditFacility |
 | S3-R2-LE146-02（P1）空持久租户被归一成 host 执行 | `FromPersisted` **保留原始 tenant 值**（不再归一）；`ValidateRecoverabilityAsync` 先拒绝损坏值（`InvalidTenantId`，空/空白，先于版本与模式判定、先于建 scope）——真正 null 才是明确 host；无全局 Normalize 授予 host 含义。 | 回归：Optional/HostOnly/Required × TenantId="" 三模式重放全部 `InvalidTenantId`、NotStarted、Pending/预算不变；Channel 损坏 work item 诊断行断言 "damaged" |
 | S3-R2-LE146-03（P2）激活+撤销双失败吞掉原取消并误报 Release.Completed | `Activate`：撤销失败时——原错误为 OCE → 保留 OCE 身份并把清理失败附加到 `Data["LocalEventContextCleanupFailure"]`；非取消 → 抛 `LocalEventContextActivationException`（携带 CleanupFailure）；executor 新增该异常分支：清理失败合并进 `Release=Failed`（不再只写日志/文本）。`DisposeAndCapture` 多失败聚合修正为完整 AggregateException。 | 回归：Push 普通失败+tenant 撤销失败 → `ContextRestoreFailed` + **Release=Failed** + NotStarted/Pending/预算 0；Push 阶段取消+撤销失败 → 原 OCE 正常传播且 `Data` 保留撤销失败、状态/预算不变 |
+
+## S3 实现审查 R3（PR #148，审查 head `47bd9c19`）
+
+审查结论：两项 P1 已关闭；剩余 1×P2（S3-R2-LE146-02 的非调用方 OCE 分支）。修订：
+
+- **非调用方 OCE + 帧撤销失败误报 Release.Completed**：`Activate` 的 OCE 路径把清理失败以**异常对象**附加到 `Data["LocalEventContextCleanupFailure"]`（此前为字符串）；executor 新增 `ExtractFrameCleanupFailure`（同时识别 `LocalEventContextActivationException.CleanupFailure` 与 OCE Data），在**调用方取消分支**与**普通恢复失败分支**均合并进释放事实——非调用方 OCE 走 generic 恢复失败 → `ContextRestoreFailed` + `Release=Failed`；调用方同一 OCE 传播与清理事实保持。
+- 回归：`Non_caller_cancellation_with_failed_unwind_reports_release_failed`（调用方 token 未取消、Push 抛非调用方 OCE、撤销失败 → NotStarted + Release.Failed + Pending/预算 0）；上轮 13 条探针与 20 条 ReviewR1 套件全部保持转绿。

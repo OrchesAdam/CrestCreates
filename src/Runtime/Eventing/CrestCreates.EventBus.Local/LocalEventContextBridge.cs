@@ -225,12 +225,13 @@ internal static class LocalEventContextBridge
                 throw;
             }
 
-            // The original failure keeps its identity: a caller cancellation stays an OCE (with the
-            // cleanup fact attached), and a non-cancellation failure is surfaced together with the
-            // cleanup failure so callers report Release.Failed instead of claiming a clean release.
+            // The original failure keeps its identity: a cancellation (caller-driven or not) stays
+            // an OCE with the cleanup fact attached, and a non-OCE failure is surfaced together with
+            // the cleanup failure so callers report Release.Failed instead of claiming a clean
+            // release.
             if (activationFailure is OperationCanceledException)
             {
-                activationFailure.Data["LocalEventContextCleanupFailure"] = cleanupFailure.ToString();
+                activationFailure.Data["LocalEventContextCleanupFailure"] = cleanupFailure;
                 throw;
             }
 
