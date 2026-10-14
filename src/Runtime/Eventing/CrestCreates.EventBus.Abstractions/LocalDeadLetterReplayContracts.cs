@@ -10,8 +10,9 @@ public readonly record struct LocalEventRecordOutcome(bool Recorded, string? Pro
 /// <summary>
 /// Shared failure-recording component used by the synchronous bus and the channel consumer.
 /// A record is only produced for replayable events with a resolved source-generated codec;
-/// serialization or store failures are reported to the caller and never overwrite the original
-/// handler failure.
+/// the record uses the accepted identity and the context snapshot captured at the acceptance
+/// boundary, and serialization or store failures are reported to the caller and never overwrite
+/// the original handler failure.
 /// </summary>
 public interface ILocalEventFailureRecorder
 {
@@ -19,6 +20,8 @@ public interface ILocalEventFailureRecorder
         LocalEventBinding binding,
         ILocalEvent @event,
         Exception failure,
+        LocalEventExecutionContextSnapshot snapshot,
+        LocalEventAcceptedIdentity acceptedIdentity,
         CancellationToken cancellationToken);
 }
 

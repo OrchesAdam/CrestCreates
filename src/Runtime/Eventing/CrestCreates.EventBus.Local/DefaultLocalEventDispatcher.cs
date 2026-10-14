@@ -24,7 +24,7 @@ public class DefaultLocalEventDispatcher : ILocalEventDispatcher
         _serviceProvider = serviceProvider;
     }
 
-    public Task DispatchAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+    public async Task DispatchAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(@event);
         cancellationToken.ThrowIfCancellationRequested();
@@ -34,17 +34,20 @@ public class DefaultLocalEventDispatcher : ILocalEventDispatcher
             throw new UnknownLocalEventException(@event.GetType());
         }
 
-        // Validate against the binding's fully merged expected-handler list — not the retained
-        // invoker's contributor-local closure — so a required handler contributed by any assembly is
-        // enforced before the first handler runs.
-        if (binding.ExpectedHandlerTypes.Count > 0)
+        // Direct dispatch borrows the caller's scope: the shared admission core (governance,
+        // explicit checks, activated validator) runs in this frame, then one Prepare resolves the
+        // whole handler batch and the same instances execute.
+        var snapshot = LocalEventContextBridge.Capture(_serviceProvider);
+        var admission = await LocalEventAdmission
+            .AdmitAsync(_serviceProvider, binding, @event, LocalEventExecutionSource.DirectDispatch, snapshot,
+                persistedDescriptorId: null, cancellationToken)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
         {
-            var instances = binding.Invoker.ProbeHandlerInstances(_serviceProvider);
-            LocalEventDispatch.ValidateRequiredHandlers(binding.EventType, binding.ExpectedHandlerTypes, instances);
+            throw new LocalEventAdmissionException(admission.ProblemCode!, admission.Problem!);
         }
 
-        var pending = binding.Invoker.InvokeAsync(_serviceProvider, @event, cancellationToken);
-        return pending.IsCompletedSuccessfully ? Task.CompletedTask : pending.AsTask();
+        await LocalEventExecution.ExecuteAsync(_serviceProvider, binding, @event, cancellationToken).ConfigureAwait(false);
     }
 
     public Task DispatchAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)

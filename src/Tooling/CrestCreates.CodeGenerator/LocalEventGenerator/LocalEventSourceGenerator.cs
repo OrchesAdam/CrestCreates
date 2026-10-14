@@ -23,6 +23,7 @@ public sealed class LocalEventSourceGenerator : IIncrementalGenerator
     internal const string LocalEventInterfaceMetadataName = "CrestCreates.EventBus.Abstractions.ILocalEvent";
     internal const string LocalEventAttributeMetadataName = "CrestCreates.EventBus.Abstractions.LocalEventAttribute";
     internal const string LegacyIdentityAttributeMetadataName = "CrestCreates.EventBus.Abstractions.LocalEventLegacyIdentityAttribute";
+    internal const string ReplayAliasAttributeMetadataName = "CrestCreates.EventBus.Abstractions.LocalEventReplayAliasAttribute";
     internal const string ToolchainPropertyName = "build_property.CrestCreatesLocalEventJsonContracts";
 
     public static class DiagnosticDescriptors
@@ -191,9 +192,29 @@ public sealed class LocalEventSourceGenerator : IIncrementalGenerator
             eventNames,
             handlersByEvent,
             declarations,
-            emitCodecContribution: hasToolchain && ownsReplayableEvent);
+            emitCodecContribution: hasToolchain && ownsReplayableEvent,
+            localRuntimeReferenced: ReferencesLocalRuntime(compilation));
 
         context.AddSource("LocalEventRegistration.g.cs", SourceText.From(source, Encoding.UTF8));
+    }
+
+    /// <summary>
+    /// The governance readiness registration lives in the Local runtime assembly; contract-only
+    /// assemblies that reference just the abstractions must stay compilable, so the call is only
+    /// emitted when the compilation actually references the Local runtime. Hosts composing
+    /// governance events from contract-only assemblies call AddCrestLocalEventGovernance explicitly.
+    /// </summary>
+    private static bool ReferencesLocalRuntime(Compilation compilation)
+    {
+        foreach (var reference in compilation.ReferencedAssemblyNames)
+        {
+            if (string.Equals(reference.Name, "CrestCreates.EventBus.Local", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Diagnostic ToDiagnostic(LocalEventDiagnostic diagnostic)

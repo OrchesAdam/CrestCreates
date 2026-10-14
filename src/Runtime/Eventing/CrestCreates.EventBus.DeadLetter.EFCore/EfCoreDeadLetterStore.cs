@@ -54,6 +54,7 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
         entity.MaxRetries = message.MaxRetries;
         entity.Status = message.Status.ToString();
         entity.LocalReplayKey = message.LocalReplayKey;
+        entity.LocalContextVersion = message.LocalContextVersion;
     }
 
     public async Task<IReadOnlyList<DeadLetterMessage>> GetPendingAsync(int skip, int take, CancellationToken ct)
@@ -138,5 +139,6 @@ public sealed class EfCoreDeadLetterStore : IDeadLetterStore
             e.RetryCount,
             e.MaxRetries,
             Enum.Parse<DeadLetterStatus>(e.Status),
-            e.LocalReplayKey);
+            e.LocalReplayKey,
+            e.LocalContextVersion);
 }

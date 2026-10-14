@@ -7,9 +7,14 @@ using CrestCreates.EventBus.Abstractions;
 
 namespace CrestCreates.EventBus.Local.Channel;
 
+/// <summary>
+/// Bounded channel of immutable work items. The payload travels together with the context snapshot
+/// and the accepted identity captured at the publish boundary; the consumer never re-reads the
+/// publishing ambient state.
+/// </summary>
 public class ChannelLocalEventQueue
 {
-    private readonly Channel<ILocalEvent> _channel;
+    private readonly Channel<LocalEventWorkItem> _channel;
 
     public ChannelLocalEventQueue(LocalEventBusOptions options)
     {
@@ -21,21 +26,21 @@ public class ChannelLocalEventQueue
             AllowSynchronousContinuations = true
         };
 
-        _channel = global::System.Threading.Channels.Channel.CreateBounded<ILocalEvent>(channelOptions);
+        _channel = global::System.Threading.Channels.Channel.CreateBounded<LocalEventWorkItem>(channelOptions);
     }
 
-    public ValueTask EnqueueAsync(ILocalEvent @event, CancellationToken cancellationToken = default)
+    public ValueTask EnqueueAsync(LocalEventWorkItem workItem, CancellationToken cancellationToken = default)
     {
-        return _channel.Writer.WriteAsync(@event, cancellationToken);
+        return _channel.Writer.WriteAsync(workItem, cancellationToken);
     }
 
-    public async IAsyncEnumerable<ILocalEvent> ReadAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<LocalEventWorkItem> ReadAllAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         while (await _channel.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            while (_channel.Reader.TryRead(out var @event))
+            while (_channel.Reader.TryRead(out var workItem))
             {
-                yield return @event;
+                yield return workItem;
             }
         }
     }

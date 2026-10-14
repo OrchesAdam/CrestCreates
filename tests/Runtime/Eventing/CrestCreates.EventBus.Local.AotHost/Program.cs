@@ -1,4 +1,6 @@
 using System.Text.Json;
+using CrestCreates.Accountability.Abstractions.Context;
+using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Event;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstractions;
@@ -6,6 +8,9 @@ using CrestCreates.EventBus.Local;
 using CrestCreates.EventBus.Local.Channel;
 using CrestCreates.Generated;
 using CrestCreates.Generated.CrestCreates_EventBus_Local_AotHost;
+using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.Registry;
+using CrestCreates.Metadata.Registry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -24,6 +29,12 @@ internal static class Program
         Run("background-retry-service", BackgroundRetryServiceAsync, failures);
         Run("refusal-contracts", RefusalContractsAsync, failures);
         Run("channel-full-chain", ChannelFullChainAsync, failures);
+        Run("codec-isolation-and-conflict", CodecIsolationAndConflictAsync, failures);
+        Run("single-preparation", SinglePreparationAsync, failures);
+        Run("stable-key-and-alias", StableKeyAndAliasAsync, failures);
+        Run("governed-version-refusal", GovernedVersionRefusalAsync, failures);
+        Run("tenant-and-correlation-restore", TenantAndCorrelationRestoreAsync, failures);
+        Run("async-release-outcome", AsyncReleaseOutcomeAsync, failures);
 
         if (failures.Count > 0)
         {
@@ -58,11 +69,34 @@ internal static class Program
         services.AddLogging();
         services.AddSingleton<AotControl>();
         services.AddScoped<AotScopedProbe>();
+        services.AddScoped<AotReleaseProbe>();
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
         services.AddCrestLocalEventDispatch();
         services.AddLocalEvents();
-        LocalEventJsonCodecContributions.Register();
+        LocalEventJsonCodecContributions.AddCodecs(services);
         return services;
+    }
+
+    private static void AddAotContext(IServiceCollection services, string? tenantId)
+    {
+        // Deterministic facilities only: the tenant provider is seeded, while the caller frame
+        // (current tenant + audit correlation) starts empty so frame restorations are observable
+        // and a missing activation cannot hide behind a pre-seeded ambient value.
+        var tenantProvider = new AotTenantProvider();
+        if (tenantId is not null)
+        {
+            tenantProvider.Add(tenantId);
+        }
+
+        var currentTenant = new AotCurrentTenant();
+        services.AddSingleton(tenantProvider);
+        services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ITenantProvider>(tenantProvider);
+        services.AddSingleton(currentTenant);
+        services.AddSingleton<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>(currentTenant);
+        services.AddSingleton<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>(
+            new AotAuditAccessor());
+        services.AddSingleton<CrestCreates.Accountability.Abstractions.Identity.IAuditIdentityGenerator,
+            AotIdentityGenerator>();
     }
 
     private static void Check(bool condition, string message)
@@ -211,8 +245,10 @@ internal static class Program
             store, "corrupt", LocalEventIdentity.BuildLocalReplayKey(typeof(AotProbeEvent)), "not-json"u8.ToArray());
         var corruptResult = await manager.RetryAsync(corruption.MessageId);
         var corrupted = await store.GetByIdAsync(corruption.MessageId, CancellationToken.None);
-        Check(!corruptResult.Success && corrupted!.RetryCount == 1 && corrupted.Status == DeadLetterStatus.Pending,
-            "corrupt payloads must count toward the retry budget and stay Pending until exhausted");
+        // #146 R01: decode happens before MarkRetrying — a corrupt payload is refused without
+        // consuming the retry budget and never archives.
+        Check(!corruptResult.Success && corrupted!.RetryCount == 0 && corrupted.Status == DeadLetterStatus.Pending,
+            "corrupt payloads must be refused before any state transition and must not consume the retry budget");
 
         var orphanPayload = JsonSerializer.SerializeToUtf8Bytes(
             new AotOrphanEvent(),
@@ -249,7 +285,8 @@ internal static class Program
         builder.Services.Configure<LocalDeadLetterOptions>(options => options.RetryIntervalSeconds = 30);
         builder.Services.AddCrestLocalChannelEventDispatch();
         builder.Services.AddLocalEvents();
-        LocalEventJsonCodecContributions.Register();
+        LocalEventJsonCodecContributions.AddCodecs(builder.Services);
+        AddAotContext(builder.Services, tenantId: null);
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -291,22 +328,348 @@ internal static class Program
         }
     }
 
+    private static async Task CodecIsolationAndConflictAsync()
+    {
+        // Host B: a replayable declaration whose codec contribution was never activated must fail
+        // the freeze — even though the owning assembly's codec exists in this process for Host A.
+        var isolatedServices = new ServiceCollection();
+        isolatedServices.AddLogging();
+        isolatedServices.AddCrestLocalEventDispatch(builder => builder.Declare<AotIsolatedEvent>(replayable: true));
+        await using (var isolatedProvider = isolatedServices.BuildServiceProvider())
+        {
+            var failure = CaptureException(
+                () => isolatedProvider.GetRequiredService<ILocalEventDispatchRegistry>());
+            Check(failure is LocalEventDispatchConfigurationException isolated &&
+                  isolated.Message.Contains("JSON", StringComparison.Ordinal),
+                "Host B must fail freeze without its own codec contribution");
+        }
+
+        // Host A: the owning assembly activates its contribution and dispatches.
+        await using (var hostA = CreateSyncServices().BuildServiceProvider())
+        {
+            await hostA.GetRequiredService<ILocalEventBus>().PublishAsync(new AotIsolatedEvent());
+            Check(hostA.GetRequiredService<AotControl>().IsolatedCalls == 1,
+                "Host A with its activated codec contribution must dispatch");
+        }
+
+        // Same origin contributing divergent metadata for one payload type must fail the freeze.
+        var conflictServices = CreateSyncServices();
+        conflictServices.AddCrestLocalEventDispatch(builder => builder.Declare<AotProbeEvent>(
+            replayable: true,
+            codecFactory: () => AotConflictCodecContext.Default.AotProbeEvent));
+        await using (var conflictProvider = conflictServices.BuildServiceProvider())
+        {
+            var failure = CaptureException(
+                () => conflictProvider.GetRequiredService<ILocalEventDispatchRegistry>());
+            Check(failure is LocalEventDispatchConfigurationException conflict &&
+                  conflict.Message.Contains("different codec metadata", StringComparison.Ordinal),
+                "divergent metadata from one origin must fail freeze regardless of order");
+        }
+    }
+
+    private static async Task SinglePreparationAsync()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<AotControl>();
+        services.AddCrestLocalEventDispatch(builder => builder.Declare<AotTransientEvent>(
+            replayable: true,
+            codecFactory: () => LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(AotTransientEvent))));
+        services.AddTransient<ILocalEventHandler<AotTransientEvent>, AotTransientHandler>();
+        await using var provider = services.BuildServiceProvider();
+
+        var control = provider.GetRequiredService<AotControl>();
+        using var scope = provider.CreateScope();
+        var eventBus = scope.ServiceProvider.GetRequiredService<ILocalEventBus>();
+
+        await eventBus.PublishAsync(new AotTransientEvent());
+        Check(control.TransientConstructions == 1, $"one execution must construct the transient handler exactly once, observed {control.TransientConstructions}");
+        var firstExecuted = control.LastTransientExecutedInstance;
+        Check(firstExecuted is AotTransientHandler, "the executed instance must be the transient handler");
+
+        await eventBus.PublishAsync(new AotTransientEvent());
+        Check(control.TransientConstructions == 2, "each execution resolves the whole batch exactly once");
+        Check(!ReferenceEquals(firstExecuted, control.LastTransientExecutedInstance),
+            "each execution must receive a fresh transient instance");
+    }
+
+    private static async Task StableKeyAndAliasAsync()
+    {
+        await using var provider = CreateSyncServices().BuildServiceProvider();
+        var control = provider.GetRequiredService<AotControl>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
+        var registry = provider.GetRequiredService<ILocalEventDispatchRegistry>();
+
+        Check(registry.TryGet(typeof(AotMigratingEvent), out var binding) && binding.LocalReplayKey == "aot.migrating",
+            "the explicit stable key must freeze verbatim");
+
+        const string defaultKey =
+            "CrestCreates.EventBus.Local.AotHost:CrestCreates.EventBus.Local.AotHost.AotMigratingEvent";
+        var codec = (System.Text.Json.Serialization.Metadata.JsonTypeInfo<AotMigratingEvent>)
+            LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(AotMigratingEvent))!;
+        var record = SeedMessage(
+            store,
+            "aot-migrating-old",
+            defaultKey,
+            JsonSerializer.SerializeToUtf8Bytes(new AotMigratingEvent { Message = "old-row" }, codec),
+            payloadType: typeof(AotMigratingEvent));
+
+        var result = await manager.RetryAsync(record.MessageId);
+        Check(result.Success, $"the explicit default-key alias must resolve old records: {result.ErrorMessage}");
+        Check(control.MigratingCalls == 1 && control.LastMigratingMessage == "old-row",
+            "alias replay must execute the handler with the current codec");
+        var fresh = await store.GetByIdAsync(record.MessageId, CancellationToken.None);
+        Check(fresh!.LocalReplayKey == defaultKey, "the original row must keep its historical key");
+    }
+
+    private static async Task GovernedVersionRefusalAsync()
+    {
+        static (ServiceProvider Provider, AotControl Control) BuildGovernedProvider(
+            DescriptorState v1State,
+            DescriptorState v2State)
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<AotControl>();
+
+            // A manual registry with an empty validator set keeps the state combinations buildable
+            // (the kernel's chain validator would reject an all-inactive registry), while the
+            // governance admission still applies its own exact-version and Active-state rules.
+            // Both versions share one payload/name so the v1 binding must not win by accident.
+            var registry = new EventRegistry(new RegistryValidationEngine<GeneratedEventDescriptor>(
+                Array.Empty<IRegistryValidator<GeneratedEventDescriptor>>()));
+            registry.Build(new IEventDescriptorProvider[]
+            {
+                new AotDescriptorProvider(
+                    new GeneratedEventDescriptor
+                    {
+                        Id = "evt_aot_governed_v1",
+                        Name = "aot.governed",
+                        Version = 1,
+                        State = v1State,
+                        PayloadType = typeof(AotGovernedEvent),
+                        Scope = EventScope.Local,
+                    },
+                    new GeneratedEventDescriptor
+                    {
+                        Id = "evt_aot_governed_v2",
+                        Name = "aot.governed",
+                        Version = 2,
+                        State = v2State,
+                        PayloadType = typeof(AotGovernedEvent),
+                        Scope = EventScope.Local,
+                    }),
+            });
+            services.AddSingleton(registry);
+
+            services.AddCrestLocalEventDispatch(builder => builder.Declare<AotGovernedEvent>(
+                replayable: true,
+                codecFactory: () => LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(AotGovernedEvent)),
+                policy: new LocalEventPolicyOptions { Governance = LocalEventGovernance.Required }));
+            services.AddScoped<ILocalEventHandler<AotGovernedEvent>, AotGovernedHandler>();
+            services.AddCrestLocalEventGovernance();
+            var provider = services.BuildServiceProvider();
+            return (provider, provider.GetRequiredService<AotControl>());
+        }
+
+        // Competing versions: exact v1 is Deprecated while v2 is Active — the exact version must
+        // be rejected. A version-filter-less implementation reports a different code (ambiguous),
+        // and a latest-Active-wins implementation admits and executes.
+        await using (var inactive = BuildGovernedProvider(DescriptorState.Deprecated, DescriptorState.Active).Provider)
+        {
+            var failure = await CaptureExceptionAsync(
+                () => inactive.GetRequiredService<ILocalEventBus>().PublishAsync(new AotGovernedEvent()));
+            Check(failure is LocalEventAdmissionException admission &&
+                  admission.ProblemCode == "GovernedDescriptorInactive",
+                $"the exact inactive version must be refused despite a competing Active v2, observed {failure?.GetType().Name}");
+            Check(inactive.GetRequiredService<AotControl>().GovernedCalls == 0,
+                "refused governed publishes must not execute handlers");
+
+            // A persisted row pinned to v1 must be refused before MarkRetrying with state and
+            // budget untouched.
+            var store = inactive.GetRequiredService<IDeadLetterStore>();
+            var codec = (System.Text.Json.Serialization.Metadata.JsonTypeInfo<AotGovernedEvent>)
+                LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(AotGovernedEvent))!;
+            var seeded = SeedMessage(
+                store,
+                "aot-governed-v1-row",
+                LocalEventIdentity.BuildLocalReplayKey(typeof(AotGovernedEvent)),
+                JsonSerializer.SerializeToUtf8Bytes(new AotGovernedEvent(), codec),
+                payloadType: typeof(AotGovernedEvent));
+            var pinned = seeded with { EventDescriptorId = "evt_aot_governed_v1" };
+            await store.EnqueueAsync(pinned, CancellationToken.None);
+            var replayResult = await inactive.GetRequiredService<ILocalDeadLetterReplayExecutor>()
+                .ExecuteAsync(pinned, CancellationToken.None);
+            Check(!replayResult.Success && replayResult.ProblemCode == "GovernedDescriptorInactive",
+                $"the persisted v1 row must be refused against the inactive exact version, observed {replayResult.ProblemCode}");
+            Check(replayResult.Execution == LocalEventExecutionOutcome.NotStarted,
+                "refused governed replay must not start execution");
+            var fresh = await store.GetByIdAsync(seeded.MessageId, CancellationToken.None);
+            Check(fresh is { Status: DeadLetterStatus.Pending, RetryCount: 0 },
+                "refused governed replay must keep state and budget untouched");
+        }
+
+        // Exact v1 Active with a competing Deprecated v2: the exact version must admit and execute.
+        var (active, control) = BuildGovernedProvider(DescriptorState.Active, DescriptorState.Deprecated);
+        await using (active)
+        {
+            await active.GetRequiredService<ILocalEventBus>().PublishAsync(new AotGovernedEvent());
+            Check(control.GovernedCalls == 1,
+                "the exact Active version must admit even with a competing deprecated v2");
+        }
+    }
+
+    private static async Task TenantAndCorrelationRestoreAsync()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Logging.ClearProviders();
+        builder.Services.AddSingleton<AotControl>();
+        builder.Services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+        builder.Services.Configure<LocalDeadLetterOptions>(options => options.RetryIntervalSeconds = 30);
+        builder.Services.AddCrestLocalChannelEventDispatch();
+        builder.Services.AddLocalEvents();
+        LocalEventJsonCodecContributions.AddCodecs(builder.Services);
+        AddAotContext(builder.Services, tenantId: "aot-tenant-a");
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var control = host.Services.GetRequiredService<AotControl>();
+            var eventBus = host.Services.GetRequiredService<ILocalEventBus>();
+            var store = host.Services.GetRequiredService<IDeadLetterStore>();
+            var manager = host.Services.GetRequiredService<ILocalDeadLetterManager>();
+            var callerTenant = host.Services.GetRequiredService<AotCurrentTenant>();
+            var callerAccessor = host.Services
+                .GetRequiredService<CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor>();
+
+            // The consumer task started before any caller frame existed, so a missing channel
+            // activation is observable as host/null context instead of leaking this frame.
+            callerTenant.SetTenantId("aot-tenant-a");
+            using (callerAccessor.Push(NewAuditFrame("aot-publish-correlation", "aot-publisher")))
+            {
+                await eventBus.PublishAsync(new AotChannelEvent { Message = "ctx" });
+            }
+
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            DeadLetterMessage? pending = null;
+            while (DateTime.UtcNow < deadline)
+            {
+                pending = (await store.GetPendingAsync(0, 10, CancellationToken.None)).FirstOrDefault();
+                if (pending is not null)
+                {
+                    break;
+                }
+
+                await Task.Delay(50);
+            }
+
+            Check(pending is not null, "the failing channel delivery must produce a dead letter record");
+            Check(pending!.TenantId == "aot-tenant-a", $"the record must capture the published tenant, observed '{pending.TenantId}'");
+            Check(pending.CorrelationId == "aot-publish-correlation", "the record must capture the published correlation");
+            Check(pending.LocalContextVersion == 1, "the record must carry the context format marker");
+
+            // Consume-frame evidence BEFORE the replay overwrites the observation slots: the
+            // consumer must have executed under the recorded tenant and correlation.
+            Check(control.LastObservedChannelTenantId == "aot-tenant-a",
+                $"the consumer frame must restore the recorded tenant, observed '{control.LastObservedChannelTenantId}'");
+            Check(control.LastObservedChannelCorrelationId == "aot-publish-correlation",
+                "the consumer frame must restore the recorded correlation");
+
+            control.FailChannelEvent = false;
+
+            // The caller moves to a different tenant and a different audit frame before replay.
+            callerTenant.SetTenantId("aot-tenant-b");
+            var callerOperationId = Guid.NewGuid().ToString("N");
+            using (callerAccessor.Push(new AuditOperationContext
+            {
+                CorrelationId = "aot-caller-correlation-B",
+                OperationId = callerOperationId,
+                Actor = new AuditActor { Kind = "user", Id = "aot-caller" },
+                InvocationSource = "aot-caller",
+            }))
+            {
+                var result = await manager.RetryAsync(pending.MessageId);
+                Check(result.Success, $"context replay must succeed: {result.ErrorMessage}");
+                Check(control.LastObservedChannelTenantId == "aot-tenant-a",
+                    $"replay must execute under the recorded tenant, observed '{control.LastObservedChannelTenantId}'");
+                Check(control.LastObservedChannelCorrelationId == "aot-publish-correlation",
+                    "replay must restore the recorded correlation, not the caller's");
+                Check(callerTenant.Id == "aot-tenant-b", "the caller tenant frame must be restored after the attempt");
+                Check(callerAccessor.Current?.CorrelationId == "aot-caller-correlation-B",
+                    "the caller audit correlation must be restored after the attempt");
+                Check(callerAccessor.Current?.OperationId == callerOperationId,
+                    "the caller audit operation frame must be left untouched");
+            }
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    private static AuditOperationContext NewAuditFrame(string correlationId, string actorId)
+        => new()
+        {
+            CorrelationId = correlationId,
+            OperationId = Guid.NewGuid().ToString("N"),
+            Actor = new AuditActor { Kind = "system", Id = actorId },
+            InvocationSource = "aot-fixture",
+        };
+
+    private static async Task AsyncReleaseOutcomeAsync()
+    {
+        await using var provider = CreateSyncServices().BuildServiceProvider();
+        var control = provider.GetRequiredService<AotControl>();
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
+
+        var codec = (System.Text.Json.Serialization.Metadata.JsonTypeInfo<AotReleaseEvent>)
+            LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(AotReleaseEvent))!;
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new AotReleaseEvent(), codec);
+
+        var ok = SeedMessage(
+            store, "aot-release-ok", LocalEventIdentity.BuildLocalReplayKey(typeof(AotReleaseEvent)), payload,
+            payloadType: typeof(AotReleaseEvent));
+        var okResult = await manager.RetryAsync(ok.MessageId);
+        Check(okResult.Success, $"release-positive replay must succeed: {okResult.ErrorMessage}");
+        Check(okResult.Release == LocalEventReleaseOutcome.Completed && control.ReleaseDisposes == 1,
+            "the async-only disposable must be released exactly once");
+
+        control.FailReleaseDispose = true;
+        var failing = SeedMessage(
+            store, "aot-release-fail", LocalEventIdentity.BuildLocalReplayKey(typeof(AotReleaseEvent)), payload,
+            payloadType: typeof(AotReleaseEvent));
+        var failingResult = await manager.RetryAsync(failing.MessageId);
+        Check(!failingResult.Success &&
+              failingResult.Execution == LocalEventExecutionOutcome.Completed &&
+              failingResult.Release == LocalEventReleaseOutcome.Failed,
+            "a release failure after success must be reported independently without rewriting the execution fact");
+        var failingRow = await store.GetByIdAsync(failing.MessageId, CancellationToken.None);
+        Check(failingRow!.Status == DeadLetterStatus.Retried,
+            "the completed execution must be settled as Retried and never re-queued as a business failure");
+        control.FailReleaseDispose = false;
+    }
+
     private static DeadLetterMessage SeedMessage(
         IDeadLetterStore store,
         string messageId,
         string replayKey,
         byte[] payload,
-        int version = 1)
+        int version = 1,
+        Type? payloadType = null)
     {
+        var type = payloadType ?? typeof(AotProbeEvent);
         var message = new DeadLetterMessage(
             messageId,
-            typeof(AotProbeEvent).FullName!,
+            type.FullName!,
             version,
             null,
             null,
             null,
             EventScope.Local,
-            typeof(AotProbeEvent).AssemblyQualifiedName!,
+            type.AssemblyQualifiedName!,
             payload,
             "seeded failure",
             null,
@@ -315,7 +678,8 @@ internal static class Program
             0,
             3,
             DeadLetterStatus.Pending,
-            LocalReplayKey: replayKey);
+            LocalReplayKey: replayKey,
+            LocalContextVersion: LocalEventExecutionContextSnapshot.CurrentContextVersion);
         store.EnqueueAsync(message, CancellationToken.None).GetAwaiter().GetResult();
         return message;
     }

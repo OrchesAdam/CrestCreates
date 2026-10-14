@@ -66,7 +66,7 @@ public class LocalEventCrossAssemblyTests
         var generated = result.GetSourceByFileName("LocalEventRegistration.g.cs")!;
         generated.SourceText.Should().Contain("global::Cross.Contracts.CrossEvent");
         generated.SourceText.Should().Contain("typeof(global::Cross.Handlers.CrossEventHandler)");
-        generated.SourceText.Should().NotContain("LocalEventJsonCodecContributions.Register");
+        generated.SourceText.Should().NotContain("LocalEventJsonCodecContributions.AddCodecs");
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class LocalEventCrossAssemblyTests
 
         var generated = result.GetSourceByFileName("LocalEventRegistration.g.cs")!;
         generated.SourceText.Should().Contain("global::Cross.Contracts.CrossEvent");
-        generated.SourceText.Should().NotContain("LocalEventJsonCodecContributions.Register");
+        generated.SourceText.Should().NotContain("LocalEventJsonCodecContributions.AddCodecs");
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class LocalEventCrossAssemblyTests
             });
 
         result.GetSourceByFileName("LocalEventRegistration.g.cs")!
-            .SourceText.Should().Contain("LocalEventJsonCodecContributions.Register();");
+            .SourceText.Should().Contain("LocalEventJsonCodecContributions.AddCodecs(services);");
     }
 
     [Fact]

@@ -41,7 +41,7 @@ public class LocalDeadLetterScopedStoreTests
         services.AddCrestLocalEventDispatch(declare);
         configure?.Invoke(services);
 
-        LocalEventJsonCodecContributions.Register();
+        LocalEventJsonCodecContributions.AddCodecs(services);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
     }

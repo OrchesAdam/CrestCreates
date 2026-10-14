@@ -28,7 +28,8 @@ public sealed record DeadLetterMessage(
     int RetryCount,
     int MaxRetries,
     DeadLetterStatus Status,
-    string? LocalReplayKey = null  // compile-time local replay lookup key; null on pre-migration records
+    string? LocalReplayKey = null,       // compile-time local replay lookup key; null on pre-migration records
+    int? LocalContextVersion = null      // context snapshot format marker; null on pre-migration records
 )
 {
     /// <summary>

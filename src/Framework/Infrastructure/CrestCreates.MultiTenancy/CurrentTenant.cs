@@ -38,9 +38,10 @@ namespace CrestCreates.MultiTenancy
             }));
         }
 
-        public IDisposable Change(ITenantInfo tenant)
+        public IDisposable Change(ITenantInfo? tenant)
         {
             var oldTenant = Tenant;
+            // null is the explicit host frame: recoverable, unlike a one-way reset.
             _currentTenant.Value = new TenantContextHolder { Tenant = tenant };
 
             return new DisposeAction(() =>

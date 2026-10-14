@@ -2,42 +2,36 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.DomainEvents;
-using CrestCreates.Event;
 using CrestCreates.Event.Abstractions;
 using CrestCreates.EventBus.Abstract;
 using CrestCreates.EventBus.Abstractions;
-using CrestCreates.Metadata.Abstractions.Registry;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.EventBus.Local;
 
 /// <summary>
-/// Synchronous local event bus. Membership is resolved in the unified dispatch registry before
-/// validation and dispatch; handler failures propagate to the caller and are additionally
-/// recorded through the shared typed dead-letter recorder when the event is replayable.
+/// Synchronous local event bus. Membership is resolved in the unified dispatch registry, the shared
+/// admission core (governance, explicit checks, activated validator) runs in the caller's frame and
+/// the context snapshot is captured before any handler runs. Handler failures propagate to the
+/// caller and are additionally recorded through the shared typed dead-letter recorder with the
+/// captured snapshot and the admitted identity; admission rejections never create a dead letter.
 /// </summary>
 public class DefaultLocalEventBus : ILocalEventBus, IEventBus
 {
     private readonly ILocalEventDispatchRegistry _registry;
-    private readonly ILocalEventDispatcher _dispatcher;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILocalEventFailureRecorder? _recorder;
-    private readonly IEventValidator? _validator;
-    private readonly IEventRegistry? _eventRegistry;
     private readonly ILogger<DefaultLocalEventBus>? _logger;
 
     public DefaultLocalEventBus(
         ILocalEventDispatchRegistry registry,
-        ILocalEventDispatcher dispatcher,
-        IEventValidator? validator = null,
+        IServiceProvider serviceProvider,
         ILocalEventFailureRecorder? recorder = null,
-        IEventRegistry? eventRegistry = null,
         ILogger<DefaultLocalEventBus>? logger = null)
     {
         _registry = registry;
-        _dispatcher = dispatcher;
-        _validator = validator;
+        _serviceProvider = serviceProvider;
         _recorder = recorder;
-        _eventRegistry = eventRegistry;
         _logger = logger;
     }
 
@@ -52,18 +46,30 @@ public class DefaultLocalEventBus : ILocalEventBus, IEventBus
             throw new UnknownLocalEventException(eventType);
         }
 
-        _validator?.ValidateOrThrow(ResolveCanonicalName(binding), @event);
+        // The snapshot is captured before any handler runs, so a handler mutating ambient context
+        // cannot change what a later failure record persists. A capture failure rejects the publish
+        // before acceptance and never creates a dead letter.
+        var snapshot = LocalEventContextBridge.Capture(_serviceProvider);
+
+        var admission = await LocalEventAdmission
+            .AdmitAsync(_serviceProvider, binding, @event, LocalEventExecutionSource.Publish, snapshot,
+                persistedDescriptorId: null, cancellationToken)
+            .ConfigureAwait(false);
+        if (!admission.Allowed)
+        {
+            throw new LocalEventAdmissionException(admission.ProblemCode!, admission.Problem!);
+        }
 
         try
         {
-            await _dispatcher.DispatchAsync(@event, cancellationToken).ConfigureAwait(false);
+            await LocalEventExecution.ExecuteAsync(_serviceProvider, binding, @event, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception failure) when (!IsCallerCancellation(failure, cancellationToken))
         {
             if (_recorder is not null)
             {
                 var outcome = await _recorder
-                    .TryRecordAsync(binding, @event, failure, cancellationToken)
+                    .TryRecordAsync(binding, @event, failure, snapshot, admission.Identity!, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (outcome.Recorded)
@@ -92,10 +98,10 @@ public class DefaultLocalEventBus : ILocalEventBus, IEventBus
     }
 
     Task IEventBus.PublishAsync(IDomainEvent @event, CancellationToken cancellationToken)
-        => PublishAsync(@event, cancellationToken);
+        => PublishAsync((ILocalEvent)@event, cancellationToken);
 
     Task IEventBus.PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken)
-        => PublishAsync(@event, cancellationToken);
+        => PublishAsync((ILocalEvent)@event, cancellationToken);
 
     void IEventBus.Subscribe<TEvent, THandler>()
     {
@@ -107,18 +113,4 @@ public class DefaultLocalEventBus : ILocalEventBus, IEventBus
 
     private static bool IsCallerCancellation(Exception failure, CancellationToken cancellationToken)
         => failure is OperationCanceledException && cancellationToken.IsCancellationRequested;
-
-    private string ResolveCanonicalName(LocalEventBinding binding)
-    {
-        if (_eventRegistry is { State: RegistryState.Built })
-        {
-            var descriptor = _eventRegistry.GetByPayloadType(binding.EventType);
-            if (descriptor is not null)
-            {
-                return descriptor.Name;
-            }
-        }
-
-        return binding.LocalName;
-    }
 }

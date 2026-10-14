@@ -5,6 +5,8 @@ namespace CrestCreates.CodeGenerator.LocalEventGenerator;
 
 internal sealed record LegacyIdentityInfo(string Name, int Version);
 
+internal sealed record ReplayAliasInfo(string Key, int Version);
+
 internal sealed record HandlerBindingInfo(
     string HandlerGlobalName,
     string HandlerMetadataName,
@@ -16,6 +18,10 @@ internal sealed record EventDeclarationInfo(
     string EventMetadataName,
     bool Replayable,
     int Version,
+    string? ReplayKey,
+    bool GovernanceRequired,
+    string TenantMode,
+    ImmutableArray<ReplayAliasInfo> ReplayAliases,
     ImmutableArray<LegacyIdentityInfo> LegacyIdentities,
     Location? Location,
     bool Owned);

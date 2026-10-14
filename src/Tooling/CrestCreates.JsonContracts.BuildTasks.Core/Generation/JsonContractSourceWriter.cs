@@ -49,7 +49,7 @@ public static class JsonContractSourceWriter
         if (model.LocalEventRoots.Count > 0)
         {
             sb.AppendLine();
-            WriteLocalEventCodecBlock(sb, model.LocalEventRoots);
+            WriteLocalEventCodecBlock(sb, model.LocalEventRoots, assemblyName);
         }
 
         if (model.IntegrationEventRoots.Count > 0)
@@ -61,7 +61,10 @@ public static class JsonContractSourceWriter
         return sb.ToString();
     }
 
-    private static void WriteLocalEventCodecBlock(System.Text.StringBuilder sb, List<JsonContractRootModel> roots)
+    private static void WriteLocalEventCodecBlock(
+        System.Text.StringBuilder sb,
+        List<JsonContractRootModel> roots,
+        string assemblyName)
     {
         sb.AppendLine($"namespace {JsonContractBuildConstants.LocalEventGeneratedNamespace}");
         sb.AppendLine("{");
@@ -77,20 +80,28 @@ public static class JsonContractSourceWriter
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        sb.AppendLine($"    /// <summary>Registers the source-generated local event codecs; called by the assembly's generated AddLocalEvents() extension.</summary>");
+        var escapedOrigin = assemblyName.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        sb.AppendLine($"    /// <summary>Registers the source-generated local event codecs as per-host service contributions; called by the assembly's generated AddLocalEvents() extension.</summary>");
         sb.AppendLine($"    internal static class {JsonContractBuildConstants.LocalEventCodecContributionsSimpleName}");
         sb.AppendLine("    {");
-        sb.AppendLine("        public static void Register()");
+        sb.AppendLine("        public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddCodecs(");
+        sb.AppendLine("            this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("        {");
 
         foreach (var root in roots.OrderBy(r => r.FullMetadataName, StringComparer.Ordinal))
         {
             var typeOf = JsonContractTypeNameWriter.WriteTypeofExpression(root.RootType);
-            sb.AppendLine($"            {JsonContractBuildConstants.LocalEventCodecRegistryFullName}.Register(");
-            sb.AppendLine($"                {typeOf},");
-            sb.AppendLine($"                static () => {JsonContractBuildConstants.LocalEventJsonContextSimpleName}.Default.GetTypeInfo({typeOf}));");
+            sb.AppendLine("            global::Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(");
+            sb.AppendLine("                services,");
+            sb.AppendLine($"                new {JsonContractBuildConstants.LocalEventCodecRegistrationFullName}");
+            sb.AppendLine("                {");
+            sb.AppendLine($"                    PayloadType = {typeOf},");
+            sb.AppendLine($"                    CodecFactory = static () => {JsonContractBuildConstants.LocalEventJsonContextSimpleName}.Default.GetTypeInfo({typeOf}),");
+            sb.AppendLine($"                    Origin = \"{escapedOrigin}\",");
+            sb.AppendLine("                });");
         }
 
+        sb.AppendLine("            return services;");
         sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine("}");

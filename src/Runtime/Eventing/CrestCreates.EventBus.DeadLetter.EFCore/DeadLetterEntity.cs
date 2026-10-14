@@ -21,4 +21,7 @@ public sealed class DeadLetterEntity
 
     /// <summary>Local replay lookup key ("assembly:metadataTypeName"); null on pre-migration records.</summary>
     public string? LocalReplayKey { get; set; }
+
+    /// <summary>Context snapshot format marker (additive nullable column); null on pre-migration records.</summary>
+    public int? LocalContextVersion { get; set; }
 }

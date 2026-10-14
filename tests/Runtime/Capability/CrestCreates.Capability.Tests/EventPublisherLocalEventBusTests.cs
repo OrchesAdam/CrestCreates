@@ -72,7 +72,7 @@ public class EventPublisherLocalEventBusTests
         binding.SourceAssembly.Should().Be("CrestCreates.Capability");
         binding.ExpectedHandlerTypes.Should().BeEmpty();
         binding.Replayable.Should().BeFalse();
-        binding.CodecFactory.Should().BeNull();
+        binding.Codec.Should().BeNull();
     }
 
     private static ServiceProvider Compose()

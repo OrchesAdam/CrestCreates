@@ -93,13 +93,13 @@ public sealed class LocalEventTypedDispatchArchitectureTests
         var expectations = new Dictionary<string, string[]>
         {
             [@"src/Runtime/Eventing/CrestCreates.EventBus.Local/DefaultLocalEventDispatcher.cs"] =
-                ["ILocalEventDispatchRegistry", "UnknownLocalEventException"],
+                ["ILocalEventDispatchRegistry", "UnknownLocalEventException", "LocalEventAdmission", "LocalEventExecution"],
             [@"src/Runtime/Eventing/CrestCreates.EventBus.Local/DefaultLocalEventBus.cs"] =
-                ["ILocalEventDispatchRegistry", "ILocalEventFailureRecorder"],
+                ["ILocalEventDispatchRegistry", "ILocalEventFailureRecorder", "LocalEventAdmission", "LocalEventExecution"],
             [@"src/Runtime/Eventing/CrestCreates.EventBus.Local.Channel/BackgroundChannelLocalEventBus.cs"] =
-                ["ILocalEventDispatchRegistry", "UnknownLocalEventException"],
+                ["ILocalEventDispatchRegistry", "UnknownLocalEventException", "LocalEventAdmission"],
             [@"src/Runtime/Eventing/CrestCreates.EventBus.Local.Channel/BackgroundChannelLocalEventBusConsumer.cs"] =
-                ["ILocalEventDispatcher", "ILocalEventFailureRecorder"],
+                ["ILocalEventDispatchRegistry", "ILocalEventFailureRecorder", "LocalEventAdmission", "LocalEventExecution"],
             [@"src/Runtime/Eventing/CrestCreates.EventBus.Local/DefaultLocalDeadLetterManager.cs"] =
                 ["ILocalDeadLetterReplayExecutor"],
             [@"src/Runtime/Eventing/CrestCreates.EventBus.Local.Channel/LocalDeadLetterBackgroundService.cs"] =

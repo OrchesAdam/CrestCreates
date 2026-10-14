@@ -58,7 +58,10 @@ public static class LocalEventServiceCollectionExtensions
 
         services.TryAddSingleton<ILocalEventDispatchRegistry>(provider => LocalEventDispatchRegistry.Freeze(
             provider.GetServices<ILocalEventRegistrationContributor>(),
-            provider.GetRequiredService<LocalEventDispatchConfiguration>().Callbacks));
+            provider.GetRequiredService<LocalEventDispatchConfiguration>().Callbacks,
+            provider.GetServices<LocalEventJsonCodecRegistration>().ToList(),
+            provider.GetService<IServiceProviderIsService>(),
+            provider.GetService<ILoggerFactory>()?.CreateLogger("CrestCreates.EventBus.Local.LocalEventDispatchRegistry")));
 
         services.Configure<LocalDeadLetterOptions>(_ => { });
         services.TryAddSingleton<IDeadLetterStore, InMemoryDeadLetterStore>();
@@ -67,7 +70,6 @@ public static class LocalEventServiceCollectionExtensions
         // from an explicit execution scope per operation and never capture it from the root provider.
         services.TryAddSingleton<ILocalEventFailureRecorder>(provider => new LocalEventDeadLetterRecorder(
             provider.GetService<IServiceScopeFactory>(),
-            provider.GetService<IEventRegistry>(),
             provider.GetService<IOptions<LocalDeadLetterOptions>>() ?? Options.Create(new LocalDeadLetterOptions()),
             provider.GetService<ILogger<LocalEventDeadLetterRecorder>>() ?? (ILogger)NullLogger.Instance));
 
