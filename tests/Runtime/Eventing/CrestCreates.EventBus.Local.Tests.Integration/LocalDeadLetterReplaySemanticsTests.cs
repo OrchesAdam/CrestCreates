@@ -158,13 +158,16 @@ public class LocalDeadLetterReplaySemanticsTests
     }
 
     [Fact]
-    public async Task CorruptPayload_CountsTowardBudget_AndArchivesAtLimit()
+    public async Task CorruptPayload_Is_Refused_Before_Any_State_Transition_And_Keeps_Budget()
     {
+        // #146 R01 revised the #126 semantics: decode/identity/prepare complete before MarkRetrying,
+        // so a corrupt payload is refused without consuming the retry budget and never archives.
+        var control = new HandlerControl();
         using var provider = LocalEventTestComposition.Build(
             declare: builder => builder.Declare<ReplayableFailingEvent>(replayable: true),
             configure: services =>
             {
-                services.AddSingleton(new HandlerControl());
+                services.AddSingleton(control);
                 services.AddScoped<ILocalEventHandler<ReplayableFailingEvent>, ReplayableFailingHandler>();
             });
         var store = provider.GetRequiredService<IDeadLetterStore>();
@@ -179,9 +182,12 @@ public class LocalDeadLetterReplaySemanticsTests
         var result = await manager.RetryAsync(message.MessageId);
 
         result.Success.Should().BeFalse();
+        result.ProblemCode.Should().Be("PayloadDecode");
+        result.Execution.Should().Be(LocalEventExecutionOutcome.NotStarted);
+        control.Calls.Should().Be(0);
         var updated = await store.GetByIdAsync(message.MessageId, CancellationToken.None);
-        updated!.Status.Should().Be(DeadLetterStatus.Archived);
-        updated.RetryCount.Should().Be(1);
+        updated!.Status.Should().Be(DeadLetterStatus.Pending);
+        updated.RetryCount.Should().Be(0);
         (await store.CountAsync(null, CancellationToken.None)).Should().Be(1);
     }
 

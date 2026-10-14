@@ -58,9 +58,8 @@ public class LocalEventMergedExpectedHandlerTests
         public string ContributorId { get; }
 
         public void Register(LocalEventDispatchRegistrationBuilder builder)
-            => builder.Add(LocalEventBinding.Create<MergedHandlerEvent>(
-                new LocalEventInvoker<MergedHandlerEvent>(static (provider, @event, cancellationToken) =>
-                    LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),
+            => builder.Add(LocalEventRegistration.Create<MergedHandlerEvent>(
+                new LocalEventInvoker<MergedHandlerEvent>(),
                 replayVersion: 1,
                 replayable: false,
                 codecFactory: null,

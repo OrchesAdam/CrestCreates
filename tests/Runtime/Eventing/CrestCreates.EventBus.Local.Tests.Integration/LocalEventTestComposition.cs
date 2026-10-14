@@ -28,8 +28,9 @@ internal static class LocalEventTestComposition
         services.AddCrestLocalEventDispatch(declare);
         configure?.Invoke(services);
 
-        // Mirrors the owning assembly's generated AddLocalEvents() activating its codec contribution.
-        LocalEventJsonCodecContributions.Register();
+        // Mirrors the owning assembly's generated AddLocalEvents() activating its per-host codec
+        // contribution (the generated AddCodecs() registers service contributions into this host).
+        LocalEventJsonCodecContributions.AddCodecs(services);
         return services.BuildServiceProvider();
     }
 

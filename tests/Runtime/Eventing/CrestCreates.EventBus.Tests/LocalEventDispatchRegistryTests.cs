@@ -31,19 +31,18 @@ public class LocalEventDispatchRegistryTests
         var exception = Assert.Throws<LocalEventDispatchConfigurationException>(
             () => provider.GetRequiredService<ILocalEventDispatchRegistry>());
 
-        Assert.Contains(exception.Violations, violation => violation.Contains("resolved no JSON type info"));
+        Assert.Contains(exception.Violations, violation => violation.Contains("has no JSON codec contribution"));
     }
 
     [Fact]
     public async Task Replayable_Declaration_With_Handwritten_Contract_Passes_Freeze()
     {
-        LocalEventJsonCodecRegistry.Register(
-            typeof(CodecContractProbeEvent),
-            static () => LocalEventTestContracts.Default.GetTypeInfo(typeof(CodecContractProbeEvent)));
-
         var services = new ServiceCollection();
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-        services.AddCrestLocalEventDispatch(builder => builder.Declare<CodecContractProbeEvent>(replayable: true, version: 2));
+        services.AddCrestLocalEventDispatch(builder => builder.Declare<CodecContractProbeEvent>(
+            replayable: true,
+            version: 2,
+            codecFactory: static () => LocalEventTestContracts.Default.GetTypeInfo(typeof(CodecContractProbeEvent))));
 
         using var provider = services.BuildServiceProvider();
         var registry = provider.GetRequiredService<ILocalEventDispatchRegistry>();
@@ -51,15 +50,35 @@ public class LocalEventDispatchRegistryTests
         Assert.True(registry.TryGet(typeof(CodecContractProbeEvent), out var binding));
         Assert.True(binding.Replayable);
         Assert.Equal(2, binding.ReplayVersion);
-        Assert.NotNull(binding.CodecFactory!());
+        Assert.NotNull(binding.Codec);
+    }
+
+    [Fact]
+    public async Task Replayable_Declaration_With_Per_Host_Codec_Contribution_Passes_Freeze()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IEventValidator, PassThroughEventValidator>();
+        services.AddSingleton(new LocalEventJsonCodecRegistration
+        {
+            PayloadType = typeof(CodecContractProbeEvent),
+            CodecFactory = static () => LocalEventTestContracts.Default.GetTypeInfo(typeof(CodecContractProbeEvent)),
+            Origin = "CodecContract.Owner",
+        });
+        services.AddCrestLocalEventDispatch(builder => builder.Declare<CodecContractProbeEvent>(replayable: true, version: 2));
+
+        using var provider = services.BuildServiceProvider();
+        var registry = provider.GetRequiredService<ILocalEventDispatchRegistry>();
+
+        Assert.True(registry.TryGet(typeof(CodecContractProbeEvent), out var binding));
+        Assert.NotNull(binding.Codec);
+        Assert.Equal(typeof(CodecContractProbeEvent), binding.Codec!.Type);
     }
 
     [Fact]
     public void Conflicting_Replayable_Flags_Across_Contributors_Fail_At_Freeze()
     {
-        var replayable = LocalEventBinding.Create<TestLocalEvent>(
-            new LocalEventInvoker<TestLocalEvent>(static (provider, @event, cancellationToken) =>
-                LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),
+        var replayable = LocalEventRegistration.Create<TestLocalEvent>(
+            new LocalEventInvoker<TestLocalEvent>(),
             1,
             replayable: true,
             codecFactory: null,
@@ -67,9 +86,8 @@ public class LocalEventDispatchRegistryTests
             legacyIdentities: null,
             sourceAssembly: "AssemblyA");
 
-        var dispatchOnly = LocalEventBinding.Create<TestLocalEvent>(
-            new LocalEventInvoker<TestLocalEvent>(static (provider, @event, cancellationToken) =>
-                LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),
+        var dispatchOnly = LocalEventRegistration.Create<TestLocalEvent>(
+            new LocalEventInvoker<TestLocalEvent>(),
             1,
             replayable: false,
             codecFactory: null,
@@ -128,10 +146,8 @@ public class LocalEventDispatchRegistryTests
     [Fact]
     public async Task Missing_Expected_Handler_Module_Fails_Before_Any_Handler_Runs()
     {
-        var contributor = new StaticBindingContributor("AssemblyExpected", LocalEventBinding.Create<TestLocalEvent>(
-            new LocalEventInvoker<TestLocalEvent>(static (provider, @event, cancellationToken) =>
-                LocalEventDispatch.InvokeHandlersAsync(
-                    provider, @event, cancellationToken, new[] { typeof(LocalEventDispatchRegistryTests.NeverRegisteredHandler) })),
+        var contributor = new StaticBindingContributor("AssemblyExpected", LocalEventRegistration.Create<TestLocalEvent>(
+            new LocalEventInvoker<TestLocalEvent>(),
             1,
             replayable: false,
             codecFactory: null,
@@ -160,9 +176,8 @@ public class LocalEventDispatchRegistryTests
     [Fact]
     public void Legacy_Alias_Colliding_With_Current_Identity_Fails_At_Freeze()
     {
-        var current = LocalEventBinding.Create<TestLocalEvent>(
-            new LocalEventInvoker<TestLocalEvent>(static (provider, @event, cancellationToken) =>
-                LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),
+        var current = LocalEventRegistration.Create<TestLocalEvent>(
+            new LocalEventInvoker<TestLocalEvent>(),
             1,
             replayable: false,
             codecFactory: null,
@@ -170,9 +185,8 @@ public class LocalEventDispatchRegistryTests
             legacyIdentities: null,
             sourceAssembly: "AssemblyCurrent");
 
-        var aliasing = LocalEventBinding.Create<CollidingAliasEvent>(
-            new LocalEventInvoker<CollidingAliasEvent>(static (provider, @event, cancellationToken) =>
-                LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),
+        var aliasing = LocalEventRegistration.Create<CollidingAliasEvent>(
+            new LocalEventInvoker<CollidingAliasEvent>(),
             1,
             replayable: false,
             codecFactory: null,
@@ -231,9 +245,9 @@ public class LocalEventDispatchRegistryTests
 
     private sealed class StaticBindingContributor : ILocalEventRegistrationContributor
     {
-        private readonly LocalEventBinding _binding;
+        private readonly LocalEventRegistration _binding;
 
-        public StaticBindingContributor(string contributorId, LocalEventBinding binding)
+        public StaticBindingContributor(string contributorId, LocalEventRegistration binding)
         {
             ContributorId = contributorId;
             _binding = binding;
@@ -247,10 +261,9 @@ public class LocalEventDispatchRegistryTests
 
 internal static class EventDispatchBinding
 {
-    public static LocalEventBinding Create(IReadOnlyList<Type>? expectedHandlerTypes = null)
-        => LocalEventBinding.Create<TestLocalEvent>(
-            new LocalEventInvoker<TestLocalEvent>((provider, @event, cancellationToken) =>
-                LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken, expectedHandlerTypes)),
+    public static LocalEventRegistration Create(IReadOnlyList<Type>? expectedHandlerTypes = null)
+        => LocalEventRegistration.Create<TestLocalEvent>(
+            new LocalEventInvoker<TestLocalEvent>(),
             1,
             replayable: false,
             codecFactory: null,

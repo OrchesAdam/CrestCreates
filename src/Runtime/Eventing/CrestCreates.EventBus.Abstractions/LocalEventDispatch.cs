@@ -1,64 +1,29 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.EventBus.Abstractions;
 
 /// <summary>
-/// Shared typed dispatch core. Handlers are resolved from the provider of the current scope in
-/// DI registration order; the first failure stops the sequence. The static base-class dispatch
-/// difference of the legacy dispatcher is intentionally retired: dispatch is always keyed by
-/// the exact runtime event type.
+/// Shared typed dispatch validation. The execution protocol itself lives on
+/// <see cref="LocalEventInvoker"/> (Prepare resolves the exact instance batch once; the prepared
+/// invocation executes that same batch); this class only provides the required-handler validation
+/// used by prepare and by legacy diagnostic surfaces.
 /// </summary>
 public static class LocalEventDispatch
 {
-    public static async ValueTask InvokeHandlersAsync<TEvent>(
-        IServiceProvider serviceProvider,
-        TEvent @event,
-        CancellationToken cancellationToken)
-        where TEvent : ILocalEvent
-        => await InvokeHandlersAsync(serviceProvider, @event, cancellationToken, expectedHandlerTypes: null)
-            .ConfigureAwait(false);
-
-    public static async ValueTask InvokeHandlersAsync<TEvent>(
-        IServiceProvider serviceProvider,
-        TEvent @event,
-        CancellationToken cancellationToken,
-        IReadOnlyList<Type>? expectedHandlerTypes)
-        where TEvent : ILocalEvent
-    {
-        ArgumentNullException.ThrowIfNull(serviceProvider);
-        ArgumentNullException.ThrowIfNull(@event);
-
-        var handlers = serviceProvider.GetServices<ILocalEventHandler<TEvent>>().ToList();
-
-        ValidateRequiredHandlers(typeof(TEvent), expectedHandlerTypes, handlers);
-
-        foreach (var handler in handlers)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await handler.HandleAsync(@event, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     /// <summary>
-    /// Validates that every expected handler type is satisfied by a resolved instance. Called by the
-    /// dispatcher with the binding's merged expected-handler list so that typed expected-handler
-    /// diagnostics apply uniformly after contributor merge — independent of which contributor's
-    /// invoker happened to be retained.
+    /// Validates that every expected handler type is satisfied by one of the prepared instances.
+    /// Called during Prepare with the binding's merged expected-handler list so that typed
+    /// expected-handler diagnostics apply uniformly after contributor merge.
     /// </summary>
-    public static void ValidateRequiredHandlers(
-        Type eventType,
+    public static void ValidateRequiredHandlers<TEvent>(
         IReadOnlyList<Type>? expectedHandlerTypes,
-        IReadOnlyList<object> handlerInstances)
+        IReadOnlyList<ILocalEventHandler<TEvent>> handlerInstances)
+        where TEvent : ILocalEvent
     {
-        ArgumentNullException.ThrowIfNull(eventType);
         ArgumentNullException.ThrowIfNull(handlerInstances);
 
-        if (expectedHandlerTypes is null)
+        if (expectedHandlerTypes is null || expectedHandlerTypes.Count == 0)
         {
             return;
         }
@@ -68,7 +33,7 @@ public static class LocalEventDispatch
             var satisfied = false;
             foreach (var handler in handlerInstances)
             {
-                if (expectedHandlerType.IsInstanceOfType(handler))
+                if (handler is not null && expectedHandlerType.IsInstanceOfType(handler))
                 {
                     satisfied = true;
                     break;
@@ -77,7 +42,7 @@ public static class LocalEventDispatch
 
             if (!satisfied)
             {
-                throw new LocalEventRequiredHandlerMissingException(eventType, expectedHandlerType);
+                throw new LocalEventRequiredHandlerMissingException(typeof(TEvent), expectedHandlerType);
             }
         }
     }

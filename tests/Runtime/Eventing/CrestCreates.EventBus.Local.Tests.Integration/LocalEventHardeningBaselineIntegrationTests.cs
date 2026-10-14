@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Accountability.Abstractions.Context;
@@ -199,10 +200,17 @@ internal sealed class HardeningAuditIdentityGenerator : IAuditIdentityGenerator
 
 // ── H03 factory-mutation probe ──
 
-[LocalEvent(Replayable = true)]
+/// <summary>
+/// Manual-declaration-only event: it intentionally carries no [LocalEvent] attribute so the
+/// assembly's generated codec contribution does not compete with the mutable manual factory that
+/// this probe owns (one payload type, one origin).
+/// </summary>
 internal sealed class HardeningFactoryProbeEvent : DomainEvent
 {
 }
+
+[JsonSerializable(typeof(HardeningFactoryProbeEvent))]
+internal partial class HardeningFactoryProbeJsonContext : JsonSerializerContext;
 
 internal sealed class HardeningFactoryProbeHandler : ILocalEventHandler<HardeningFactoryProbeEvent>
 {
@@ -518,7 +526,7 @@ public class LocalEventHardeningBaselineIntegrationTests
     {
         var holder = new System.Text.Json.Serialization.Metadata.JsonTypeInfo?[]
         {
-            LocalEventTestComposition.CodecFor<HardeningFactoryProbeEvent>(),
+            HardeningFactoryProbeJsonContext.Default.HardeningFactoryProbeEvent,
         };
         MutableCodecHolder.Holder = holder;
         return () => Volatile.Read(ref MutableCodecHolder.Holder)[0];
@@ -530,9 +538,8 @@ public class LocalEventHardeningBaselineIntegrationTests
             declare: _ => { },
             configure: services =>
             {
-                var binding = LocalEventBinding.Create<HardeningFactoryProbeEvent>(
-                    new LocalEventInvoker<HardeningFactoryProbeEvent>((provider, @event, cancellationToken) =>
-                        LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),
+                var registration = LocalEventRegistration.Create<HardeningFactoryProbeEvent>(
+                    new LocalEventInvoker<HardeningFactoryProbeEvent>(),
                     replayVersion: 1,
                     replayable: true,
                     codecFactory: BuildMutableFactory(),
@@ -540,7 +547,7 @@ public class LocalEventHardeningBaselineIntegrationTests
                     legacyIdentities: null,
                     sourceAssembly: "Hardening.Baseline");
                 services.AddSingleton<ILocalEventRegistrationContributor>(
-                    new HardeningManualContributor("factory-mutation", builder => builder.Add(binding)));
+                    new HardeningManualContributor("factory-mutation", builder => builder.Add(registration)));
                 services.AddScoped<ILocalEventHandler<HardeningFactoryProbeEvent>, HardeningFactoryProbeHandler>();
             });
     }
@@ -576,7 +583,7 @@ public class LocalEventHardeningBaselineIntegrationTests
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(
             new HardeningFactoryProbeEvent(),
-            LocalEventTestComposition.CodecFor<HardeningFactoryProbeEvent>());
+            HardeningFactoryProbeJsonContext.Default.HardeningFactoryProbeEvent);
         Volatile.Write(ref MutableCodecHolder.Holder, [null]);
 
         HardeningFactoryProbeHandler.Behavior = static () => Task.CompletedTask;

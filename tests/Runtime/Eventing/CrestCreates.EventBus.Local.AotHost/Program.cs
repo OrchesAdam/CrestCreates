@@ -61,7 +61,7 @@ internal static class Program
         services.AddSingleton<IEventValidator, PassThroughEventValidator>();
         services.AddCrestLocalEventDispatch();
         services.AddLocalEvents();
-        LocalEventJsonCodecContributions.Register();
+        LocalEventJsonCodecContributions.AddCodecs(services);
         return services;
     }
 
@@ -211,8 +211,10 @@ internal static class Program
             store, "corrupt", LocalEventIdentity.BuildLocalReplayKey(typeof(AotProbeEvent)), "not-json"u8.ToArray());
         var corruptResult = await manager.RetryAsync(corruption.MessageId);
         var corrupted = await store.GetByIdAsync(corruption.MessageId, CancellationToken.None);
-        Check(!corruptResult.Success && corrupted!.RetryCount == 1 && corrupted.Status == DeadLetterStatus.Pending,
-            "corrupt payloads must count toward the retry budget and stay Pending until exhausted");
+        // #146 R01: decode happens before MarkRetrying — a corrupt payload is refused without
+        // consuming the retry budget and never archives.
+        Check(!corruptResult.Success && corrupted!.RetryCount == 0 && corrupted.Status == DeadLetterStatus.Pending,
+            "corrupt payloads must be refused before any state transition and must not consume the retry budget");
 
         var orphanPayload = JsonSerializer.SerializeToUtf8Bytes(
             new AotOrphanEvent(),
@@ -249,7 +251,7 @@ internal static class Program
         builder.Services.Configure<LocalDeadLetterOptions>(options => options.RetryIntervalSeconds = 30);
         builder.Services.AddCrestLocalChannelEventDispatch();
         builder.Services.AddLocalEvents();
-        LocalEventJsonCodecContributions.Register();
+        LocalEventJsonCodecContributions.AddCodecs(builder.Services);
 
         using var host = builder.Build();
         await host.StartAsync();

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,10 +9,11 @@ using Microsoft.Extensions.Logging;
 namespace CrestCreates.EventBus.Local;
 
 /// <summary>
-/// Shared replay execution core: load → precheck (status/budget/identity/codec/handlers) →
-/// MarkRetrying → fresh-scope decode and dispatch → success/failure state update. Both the
-/// manual manager and the background retry service delegate here; replay re-enters the unified
-/// dispatcher directly and never re-publishes (which could produce a second dead letter).
+/// Shared replay execution core: load → precheck (status/budget/identity) → frozen-codec decode →
+/// one prepare of the whole handler batch inside a fresh async scope → MarkRetrying → execute the
+/// same instances → release the scope → independent settlement. Preparation and decode happen before
+/// any state transition, and every attempt reports execution, settlement and release facts
+/// independently. Replay re-enters the unified dispatch core directly and never re-publishes.
 /// </summary>
 internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExecutor
 {
@@ -43,34 +43,36 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         cancellationToken.ThrowIfCancellationRequested();
 
         // Re-read the current persisted state to avoid stale EF tracking cache from the caller's scope.
-        // Each attempt must see the current state, not a cached snapshot.
         await using (var readScope = _scopeFactory.CreateAsyncScope())
         {
             var freshStore = readScope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
             var freshMessage = await freshStore.GetByIdAsync(message.MessageId, cancellationToken);
             if (freshMessage is null)
             {
-                return Reject(message, $"message {message.MessageId} no longer exists in the store.");
+                return Reject(message, $"message {message.MessageId} no longer exists in the store.", "MessageMissing");
             }
+
             message = freshMessage;
         }
 
         if (message.MaxRetries < 1)
         {
             return Reject(message,
-                $"invalid persisted MaxRetries ({message.MaxRetries}); ordinary retry refused without state change.");
+                $"invalid persisted MaxRetries ({message.MaxRetries}); ordinary retry refused without state change.",
+                "InvalidMaxRetries");
         }
 
         if (message.RetryCount < 0 || message.RetryCount > message.MaxRetries)
         {
             return Reject(message,
                 $"invalid persisted RetryCount ({message.RetryCount}/{message.MaxRetries}); " +
-                "ordinary retry refused without state change.");
+                "ordinary retry refused without state change.",
+                "InvalidRetryCount");
         }
 
         if (message.Status != DeadLetterStatus.Pending)
         {
-            return Reject(message, $"status {message.Status} does not accept ordinary retry.");
+            return Reject(message, $"status {message.Status} does not accept ordinary retry.", "NotPending");
         }
 
         if (message.RetryCount >= message.MaxRetries)
@@ -86,116 +88,221 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
                 false,
                 write.Ok
                     ? "retry budget exhausted; message archived without executing handlers."
-                    : $"retry budget exhausted; archiving failed: {write.Problem}");
+                    : $"retry budget exhausted; archiving failed: {write.Problem}")
+            {
+                Execution = LocalEventExecutionOutcome.NotStarted,
+                StateWrite = write.Ok ? LocalEventStateWriteOutcome.Confirmed : LocalEventStateWriteOutcome.Unknown,
+                ProblemCode = "BudgetExhausted",
+            };
         }
 
         if (!TryResolveBinding(message, out var binding, out var resolveProblem))
         {
-            return Reject(message, resolveProblem!);
+            return Reject(message, resolveProblem!, "UnknownIdentity");
         }
 
         if (!binding!.Replayable)
         {
-            return Reject(message, $"event '{binding.LocalName}' is dispatch-only and cannot be replayed.");
+            return Reject(message, $"event '{binding.LocalName}' is dispatch-only and cannot be replayed.", "DispatchOnly");
         }
 
-        var typeInfo = binding.CodecFactory?.Invoke();
+        var typeInfo = binding.Codec;
         if (typeInfo is null)
         {
-            return Reject(message, $"event '{binding.LocalName}' resolved no JSON codec at replay time.");
-        }
-
-        if (typeInfo.Type != binding.EventType)
-        {
             return Reject(message,
-                $"codec for event '{binding.LocalName}' describes '{typeInfo.Type.FullName}'; identity mismatch.");
+                $"event '{binding.LocalName}' carries no frozen JSON codec; the replay cannot decode.", "MissingCodec");
         }
 
-        var handlerProblem = await ProbeHandlersAsync(binding, cancellationToken).ConfigureAwait(false);
-        if (handlerProblem is not null)
+        // Decode with the frozen codec BEFORE any state transition: a corrupt payload must leave the
+        // original state and budget untouched (MarkRetrying is never called for it).
+        object decoded;
+        try
         {
-            return Reject(message, handlerProblem);
+            decoded = JsonSerializer.Deserialize(message.Payload, typeInfo)
+                ?? throw new LocalEventPayloadDecodeException(
+                    $"payload of message {message.MessageId} deserialized to null");
+            if (!binding.EventType.IsInstanceOfType(decoded))
+            {
+                throw new LocalEventPayloadDecodeException(
+                    $"payload of message {message.MessageId} deserialized to '{decoded.GetType().FullName}' " +
+                    $"instead of '{binding.EventType.FullName}'");
+            }
+        }
+        catch (Exception decodeFailure) when (decodeFailure is JsonException or LocalEventPayloadDecodeException)
+        {
+            _logger?.LogWarning(
+                "Replay of dead letter message {MessageId} refused before any state transition: payload decode failed with {Failure}: {Message}.",
+                message.MessageId, decodeFailure.GetType().Name, decodeFailure.Message);
+            return Reject(message,
+                $"payload decode failed before any state transition: {decodeFailure.Message}", "PayloadDecode");
         }
 
-        await using (var stateScope = _scopeFactory.CreateAsyncScope())
+        // One fresh async scope owns the exact handler instances for this attempt: prepare the whole
+        // batch first, then MarkRetrying, then execute the same instances, then release.
+        var executionScope = _scopeFactory.CreateAsyncScope();
+        LocalEventPreparedInvocation prepared;
+        try
         {
+            prepared = binding.Invoker.Prepare(executionScope.ServiceProvider, (ILocalEvent)decoded, binding.ExpectedHandlerTypes);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await TryDisposeScopeAsync(executionScope);
+            throw;
+        }
+        catch (Exception prepareFailure)
+        {
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            _logger?.LogError(
+                prepareFailure,
+                "Replay preparation for dead letter message {MessageId} failed before MarkRetrying; no handler was executed and the message state is unchanged.",
+                message.MessageId);
+            return Reject(message,
+                $"handler preparation failed before MarkRetrying: {prepareFailure.Message}", "PrepareFailed",
+                releaseProblem, scopeOwned: true);
+        }
+
+        if (prepared.HandlerCount == 0)
+        {
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            return Reject(message,
+                $"event '{binding.LocalName}' resolved no handlers in the execution scope; a dead-letter replay " +
+                "requires at least one matching handler and must not be marked successful.", "ZeroHandlers",
+                releaseProblem, scopeOwned: true);
+        }
+
+        // MarkRetrying: an unconfirmed write means no execution. The old snapshot must not overwrite
+        // the unconfirmed persistent fact back to Pending.
+        try
+        {
+            await using var stateScope = _scopeFactory.CreateAsyncScope();
             var store = stateScope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
             await store.MarkRetryingAsync(message.MessageId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await TryDisposeScopeAsync(executionScope);
+            _logger?.LogWarning(
+                "MarkRetrying for dead letter message {MessageId} was interrupted by caller cancellation; " +
+                "no handler was executed and the persisted state is unconfirmed, so it is not overwritten.",
+                message.MessageId);
+            throw;
+        }
+        catch (Exception markFailure)
+        {
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
+            _logger?.LogError(
+                markFailure,
+                "MarkRetrying for dead letter message {MessageId} failed; no handler was executed and the persisted state is unconfirmed.",
+                message.MessageId);
+            var problem = $"MarkRetrying failed ({markFailure.Message}); no handler was executed and the persisted " +
+                          "state of the message is unconfirmed.";
+            if (releaseProblem is not null)
+            {
+                problem += $" (release failed: {releaseProblem.Message})";
+            }
+
+            return new DeadLetterRetryResult(message.MessageId, false, problem)
+            {
+                Execution = LocalEventExecutionOutcome.NotStarted,
+                StateWrite = LocalEventStateWriteOutcome.Unknown,
+                Release = releaseProblem is null ? LocalEventReleaseOutcome.Completed : LocalEventReleaseOutcome.Failed,
+                ProblemCode = "MarkRetryingUnconfirmed",
+            };
         }
 
         try
         {
-            await using (var scope = _scopeFactory.CreateAsyncScope())
-            {
-                var decoded = JsonSerializer.Deserialize(message.Payload, typeInfo)
-                    ?? throw new LocalEventPayloadDecodeException(
-                        $"payload of message {message.MessageId} deserialized to null");
-
-                if (!binding.EventType.IsInstanceOfType(decoded))
-                {
-                    throw new LocalEventPayloadDecodeException(
-                        $"payload of message {message.MessageId} deserialized to '{decoded.GetType().FullName}' " +
-                        $"instead of '{binding.EventType.FullName}'");
-                }
-
-                var dispatcher = scope.ServiceProvider.GetRequiredService<ILocalEventDispatcher>();
-                await dispatcher.DispatchAsync((ILocalEvent)decoded, cancellationToken).ConfigureAwait(false);
-            }
-
-            var successWrite = await TryWriteStateAsync(
-                message with { Status = DeadLetterStatus.Retried },
-                "record successful replay");
-
-            if (!successWrite.Ok)
-            {
-                _logger?.LogError(
-                    "Replay of dead letter message {MessageId} dispatched successfully but the Retried state write failed: {Problem}. The message remains Retrying; success must not be claimed.",
-                    message.MessageId, successWrite.Problem);
-                return new DeadLetterRetryResult(
-                    message.MessageId,
-                    false,
-                    $"handlers executed but the Retried state write failed: {successWrite.Problem}");
-            }
-
-            _logger?.LogInformation("Replayed dead letter message {MessageId} successfully.", message.MessageId);
-            return new DeadLetterRetryResult(message.MessageId, true, null);
+            await prepared.ExecuteAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
             var restored = await TryWriteStateAsync(
                 message with { Status = DeadLetterStatus.Pending },
                 "restore Pending after cooperative cancellation");
             if (!restored.Ok)
             {
                 _logger?.LogError(
-                    "Replay of dead letter message {MessageId} was cancelled and restoring Pending failed: {Problem}. The message state write failure is reported and not claimed as recovered.",
+                    "Replay of dead letter message {MessageId} was cancelled and restoring Pending failed: {Problem}. " +
+                    "The message state write failure is reported and not claimed as recovered.",
                     message.MessageId, restored.Problem);
             }
 
             throw;
         }
-        catch (Exception failure)
+        catch (Exception handlerFailure)
         {
+            var releaseProblem = await TryDisposeScopeAsync(executionScope);
             var newRetryCount = message.RetryCount + 1;
             var updated = message with
             {
                 RetryCount = newRetryCount,
                 Status = newRetryCount >= message.MaxRetries ? DeadLetterStatus.Archived : DeadLetterStatus.Pending,
-                ErrorMessage = failure.Message,
-                ExceptionType = failure.GetType().FullName,
+                ErrorMessage = handlerFailure.Message,
+                ExceptionType = handlerFailure.GetType().FullName,
             };
 
             var write = await TryWriteStateAsync(updated, "record failed replay attempt");
             _logger?.LogError(
-                failure,
-                "Replay attempt {RetryCount}/{MaxRetries} failed for dead letter message {MessageId}; state write succeeded: {Written}.",
-                newRetryCount, message.MaxRetries, message.MessageId, write.Ok);
+                handlerFailure,
+                "Replay attempt {RetryCount}/{MaxRetries} failed for dead letter message {MessageId}; state write succeeded: {Written}. Handler invoked: {AnyHandlerInvoked}.",
+                newRetryCount, message.MaxRetries, message.MessageId, write.Ok, prepared.AnyHandlerInvoked);
 
-            return new DeadLetterRetryResult(
-                message.MessageId,
-                false,
-                write.Ok ? failure.Message : $"{failure.Message} (state write failed: {write.Problem})");
+            var problem = write.Ok ? handlerFailure.Message : $"{handlerFailure.Message} (state write failed: {write.Problem})";
+            if (releaseProblem is not null)
+            {
+                problem += $" (release failed: {releaseProblem.Message})";
+            }
+
+            return new DeadLetterRetryResult(message.MessageId, false, problem)
+            {
+                Execution = LocalEventExecutionOutcome.Failed,
+                StateWrite = write.Ok ? LocalEventStateWriteOutcome.Confirmed : LocalEventStateWriteOutcome.Unknown,
+                Release = releaseProblem is null ? LocalEventReleaseOutcome.Completed : LocalEventReleaseOutcome.Failed,
+                AnyHandlerInvoked = prepared.AnyHandlerInvoked,
+                ProblemCode = "HandlerFailed",
+            };
         }
+
+        // Business success is recorded the moment the last handler returned; release and settlement
+        // are reported independently and never rewrite the execution fact.
+        var successReleaseProblem = await TryDisposeScopeAsync(executionScope);
+        var successWrite = await TryWriteStateAsync(
+            message with { Status = DeadLetterStatus.Retried },
+            "record successful replay");
+
+        if (!successWrite.Ok || successReleaseProblem is not null)
+        {
+            var problem = successWrite.Ok
+                ? "handlers executed but the execution scope release failed"
+                : $"handlers executed but the Retried state write failed: {successWrite.Problem}";
+            if (successReleaseProblem is not null)
+            {
+                problem += $" (release failed: {successReleaseProblem.Message})";
+            }
+
+            _logger?.LogError(
+                "Replay of dead letter message {MessageId} dispatched successfully but settlement/release reported a failure: {Problem}. The completed execution fact is preserved.",
+                message.MessageId, problem);
+            return new DeadLetterRetryResult(message.MessageId, false, problem)
+            {
+                Execution = LocalEventExecutionOutcome.Completed,
+                StateWrite = successWrite.Ok ? LocalEventStateWriteOutcome.Confirmed : LocalEventStateWriteOutcome.Unknown,
+                Release = successReleaseProblem is null ? LocalEventReleaseOutcome.Completed : LocalEventReleaseOutcome.Failed,
+                AnyHandlerInvoked = prepared.AnyHandlerInvoked,
+                ProblemCode = successWrite.Ok ? "ReleaseFailed" : "SettlementUnconfirmed",
+            };
+        }
+
+        _logger?.LogInformation("Replayed dead letter message {MessageId} successfully.", message.MessageId);
+        return new DeadLetterRetryResult(message.MessageId, true, null)
+        {
+            Execution = LocalEventExecutionOutcome.Completed,
+            StateWrite = LocalEventStateWriteOutcome.Confirmed,
+            Release = LocalEventReleaseOutcome.Completed,
+            AnyHandlerInvoked = prepared.AnyHandlerInvoked,
+        };
     }
 
     private bool TryResolveBinding(
@@ -234,40 +341,35 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         return false;
     }
 
-    private async Task<string?> ProbeHandlersAsync(LocalEventBinding binding, CancellationToken cancellationToken)
+    private static async Task<Exception?> TryDisposeScopeAsync(AsyncServiceScope scope)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        await using var scope = _scopeFactory.CreateAsyncScope();
-        IReadOnlyList<object> instances = binding.Invoker.ProbeHandlerInstances(scope.ServiceProvider);
-
-        if (instances.Count == 0)
+        try
         {
-            return $"event '{binding.LocalName}' resolved no handlers in a fresh scope; " +
-                   "a dead-letter replay requires at least one matching handler and must not be marked successful.";
+            await scope.DisposeAsync().ConfigureAwait(false);
+            return null;
         }
-
-        foreach (var expectedHandlerType in binding.ExpectedHandlerTypes)
+        catch (Exception releaseFailure)
         {
-            var satisfied = false;
-            foreach (var instance in instances)
-            {
-                if (expectedHandlerType.IsInstanceOfType(instance))
-                {
-                    satisfied = true;
-                    break;
-                }
-            }
-
-            if (!satisfied)
-            {
-                return $"event '{binding.LocalName}' declares required handler '{expectedHandlerType.FullName}' " +
-                       "but no instance assignable to it is registered; replay refused before any state transition.";
-            }
+            return releaseFailure;
         }
-
-        return null;
     }
+
+    private static DeadLetterRetryResult Reject(
+        DeadLetterMessage message,
+        string problem,
+        string problemCode,
+        Exception? releaseProblem = null,
+        bool scopeOwned = false)
+        => new(message.MessageId, false,
+            releaseProblem is null ? problem : $"{problem} (release failed: {releaseProblem.Message})")
+        {
+            Execution = LocalEventExecutionOutcome.NotStarted,
+            StateWrite = LocalEventStateWriteOutcome.NotAttempted,
+            Release = !scopeOwned
+                ? LocalEventReleaseOutcome.NotOwned
+                : releaseProblem is null ? LocalEventReleaseOutcome.Completed : LocalEventReleaseOutcome.Failed,
+            ProblemCode = problemCode,
+        };
 
     private async Task<(bool Ok, string? Problem)> TryWriteStateAsync(DeadLetterMessage updated, string description)
     {
@@ -288,9 +390,6 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
             return (false, writeFailure.Message);
         }
     }
-
-    private static DeadLetterRetryResult Reject(DeadLetterMessage message, string problem)
-        => new(message.MessageId, false, problem);
 }
 
 /// <summary>Deterministic payload decode failure (corrupt JSON, null or mismatched type).</summary>

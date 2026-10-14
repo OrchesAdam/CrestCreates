@@ -45,8 +45,10 @@ public class LocalEventCodecWriterTests : JsonContractCompilationTestBase
         output.Should().Contain("[global::System.Text.Json.Serialization.JsonSerializable(typeof(global::MyApp.ReplayableSalesEvent))]");
         output.Should().Contain("internal sealed partial class LocalEventJsonSerializerContext : global::System.Text.Json.Serialization.JsonSerializerContext");
         output.Should().Contain("internal static class LocalEventJsonCodecContributions");
-        output.Should().Contain("CrestCreates.EventBus.Abstractions.LocalEventJsonCodecRegistry.Register(");
-        output.Should().Contain("static () => LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(global::MyApp.ReplayableSalesEvent)));");
+        output.Should().Contain("CrestCreates.EventBus.Abstractions.LocalEventJsonCodecRegistration");
+        output.Should().Contain("PayloadType = typeof(global::MyApp.ReplayableSalesEvent)");
+        output.Should().Contain("Origin = \"TestAssembly\"");
+        output.Should().Contain("CodecFactory = static () => LocalEventJsonSerializerContext.Default.GetTypeInfo(typeof(global::MyApp.ReplayableSalesEvent)),");
     }
 
     [Fact]

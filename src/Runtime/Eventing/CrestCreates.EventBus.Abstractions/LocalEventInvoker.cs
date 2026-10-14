@@ -8,67 +8,101 @@ using Microsoft.Extensions.DependencyInjection;
 namespace CrestCreates.EventBus.Abstractions;
 
 /// <summary>
-/// Compile-time closed typed invocation entry of a local event registration. Implementations
-/// dispatch to handlers through the non-generic overload with a typed cast only; no reflection
-/// or dynamic member access is involved.
+/// Compile-time closed preparation entry of a local event registration. Prepare resolves the actual
+/// handler instances exactly once inside the caller's execution scope, validates the merged required
+/// list and returns a single-use invocation that holds those instances and the payload; execution
+/// never touches the service provider again.
 /// </summary>
 public abstract class LocalEventInvoker
 {
     /// <summary>True for host-side <c>typeof</c> declarations without a typed dispatcher.</summary>
     public virtual bool IsInert => false;
 
-    public abstract ValueTask InvokeAsync(
+    public abstract LocalEventPreparedInvocation Prepare(
         IServiceProvider serviceProvider,
-        ILocalEvent @event,
-        CancellationToken cancellationToken);
+        ILocalEvent payload,
+        IReadOnlyList<Type> requiredHandlers);
+}
 
-    /// <summary>
-    /// Resolves the current handler instances of the scope without invoking them; used by the
-    /// replay core to run missing-handler prechecks before any state transition.
-    /// </summary>
-    public abstract IReadOnlyList<object> ProbeHandlerInstances(IServiceProvider serviceProvider);
+/// <summary>
+/// One prepared, single-use execution batch: the exact handler instances resolved during Prepare and
+/// the typed payload. ExecuteAsync only iterates this array; it is not a cache or registry member.
+/// </summary>
+public abstract class LocalEventPreparedInvocation
+{
+    public abstract int HandlerCount { get; }
+
+    /// <summary>True once the first handler invocation has been entered.</summary>
+    public abstract bool AnyHandlerInvoked { get; }
+
+    public abstract ValueTask ExecuteAsync(CancellationToken cancellationToken);
 }
 
 public sealed class LocalEventInvoker<TEvent> : LocalEventInvoker
     where TEvent : ILocalEvent
 {
-    private readonly Func<IServiceProvider, TEvent, CancellationToken, ValueTask> _dispatch;
-
-    public LocalEventInvoker(Func<IServiceProvider, TEvent, CancellationToken, ValueTask> dispatch)
-    {
-        ArgumentNullException.ThrowIfNull(dispatch);
-        _dispatch = dispatch;
-    }
-
-    public override ValueTask InvokeAsync(
+    public override LocalEventPreparedInvocation Prepare(
         IServiceProvider serviceProvider,
-        ILocalEvent @event,
-        CancellationToken cancellationToken)
+        ILocalEvent payload,
+        IReadOnlyList<Type> requiredHandlers)
     {
         ArgumentNullException.ThrowIfNull(serviceProvider);
-        ArgumentNullException.ThrowIfNull(@event);
+        ArgumentNullException.ThrowIfNull(payload);
 
-        if (@event is not TEvent typedEvent)
+        if (payload is not TEvent typedEvent)
         {
             throw new InvalidOperationException(
                 $"Local event invoker for '{typeof(TEvent).FullName}' received an instance of " +
-                $"'{@event.GetType().FullName}'. The dispatch registry resolved the wrong binding.");
+                $"'{payload.GetType().FullName}'. The dispatch registry resolved the wrong binding.");
         }
 
-        return _dispatch(serviceProvider, typedEvent, cancellationToken);
+        // The single resolution of this execution: the exact instances that will run.
+        var handlers = serviceProvider.GetServices<ILocalEventHandler<TEvent>>().ToArray();
+        LocalEventDispatch.ValidateRequiredHandlers(requiredHandlers, handlers);
+
+        return new PreparedInvocation(handlers, typedEvent);
     }
 
-    public override IReadOnlyList<object> ProbeHandlerInstances(IServiceProvider serviceProvider)
+    private sealed class PreparedInvocation : LocalEventPreparedInvocation
     {
-        ArgumentNullException.ThrowIfNull(serviceProvider);
-        return serviceProvider.GetServices<ILocalEventHandler<TEvent>>().Cast<object>().ToArray();
+        private readonly ILocalEventHandler<TEvent>[] _handlers;
+        private readonly TEvent _payload;
+        private int _executed;
+
+        public PreparedInvocation(ILocalEventHandler<TEvent>[] handlers, TEvent payload)
+        {
+            _handlers = handlers;
+            _payload = payload;
+        }
+
+        public override int HandlerCount => _handlers.Length;
+
+        private bool _anyHandlerInvoked;
+
+        public override bool AnyHandlerInvoked => _anyHandlerInvoked;
+
+        public override async ValueTask ExecuteAsync(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Exchange(ref _executed, 1) == 1)
+            {
+                throw new InvalidOperationException(
+                    "A prepared local event invocation is single-use; it cannot be executed again.");
+            }
+
+            foreach (var handler in _handlers)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _anyHandlerInvoked = true;
+                await handler.HandleAsync(_payload, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 }
 
 /// <summary>
 /// Placeholder invoker for host-side <c>typeof</c> declarations: such a declaration carries only
 /// membership/codec capability. Handler fan-out comes from typing assemblies that contribute
-/// their own typed bindings; with no such contribution the event is a declared zero-handler
+/// their own typed registrations; with no such contribution the event is a declared zero-handler
 /// notification (no-op).
 /// </summary>
 internal sealed class InertLocalEventInvoker : LocalEventInvoker
@@ -81,12 +115,25 @@ internal sealed class InertLocalEventInvoker : LocalEventInvoker
 
     public override bool IsInert => true;
 
-    public override ValueTask InvokeAsync(
+    public override LocalEventPreparedInvocation Prepare(
         IServiceProvider serviceProvider,
-        ILocalEvent @event,
-        CancellationToken cancellationToken)
-        => ValueTask.CompletedTask;
+        ILocalEvent payload,
+        IReadOnlyList<Type> requiredHandlers)
+        => InertPreparedInvocation.Instance;
 
-    public override IReadOnlyList<object> ProbeHandlerInstances(IServiceProvider serviceProvider)
-        => Array.Empty<object>();
+    private sealed class InertPreparedInvocation : LocalEventPreparedInvocation
+    {
+        public static readonly InertPreparedInvocation Instance = new();
+
+        private InertPreparedInvocation()
+        {
+        }
+
+        public override int HandlerCount => 0;
+
+        public override bool AnyHandlerInvoked => false;
+
+        public override ValueTask ExecuteAsync(CancellationToken cancellationToken)
+            => ValueTask.CompletedTask;
+    }
 }

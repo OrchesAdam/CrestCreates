@@ -44,7 +44,8 @@ public class LocalEventSourceGeneratorTests
         generated.SourceText.Should().Contain("global::MyApp.OrderPlacedEvent");
         generated.SourceText.Should().Contain("global::MyApp.OrderPlacedHandler");
         generated.SourceText.Should().Contain("LocalEventInvoker<global::MyApp.OrderPlacedEvent>");
-        generated.SourceText.Should().Contain("LocalEventDispatch.InvokeHandlersAsync");
+        generated.SourceText.Should().Contain("LocalEventRegistration.Create<global::MyApp.OrderPlacedEvent>");
+        generated.SourceText.Should().Contain("new global::CrestCreates.EventBus.Abstractions.LocalEventInvoker<global::MyApp.OrderPlacedEvent>()");
         generated.SourceText.Should().Contain("_expectedHandlers0");
         generated.SourceText.Should().Contain("namespace CrestCreates.Generated.TestCompilation");
         generated.SourceText.Should().Contain("public static class LocalEventRegistrations");
@@ -155,8 +156,8 @@ public class LocalEventSourceGeneratorTests
 
         result.Diagnostics.Should().NotContain(diagnostic => diagnostic.Id == "CCCLE004");
         var generated = result.GetSourceByFileName("LocalEventRegistration.g.cs")!;
-        generated.SourceText.Should().Contain("LocalEventJsonCodecContributions.Register();");
-        generated.SourceText.Should().Contain("LocalEventJsonCodecRegistry.Resolve(typeof(global::MyApp.ReplayableEvent))");
+        generated.SourceText.Should().Contain("LocalEventJsonCodecContributions.AddCodecs(services);");
+        generated.SourceText.Should().NotContain("LocalEventJsonCodecRegistry");
         generated.SourceText.Should().Contain("\n                4,\n                true,");
     }
 

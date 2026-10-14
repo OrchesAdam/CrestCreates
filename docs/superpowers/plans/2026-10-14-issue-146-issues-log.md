@@ -61,3 +61,22 @@
 ## S1 设计审查 R2（PR #148，审查 head `d32f8b42`）
 
 - R2-LE146-01（P2）缺 audit 负例的 tenant provider 为空、未登记租户 A：按 Spec"先租户、后关联恢复"的检查顺序，"未知租户拒绝"足以单独满足 `Success=false`、零 Handler、Pending/预算不变，即使关联能力检查完全遗漏也可假绿。修订（按审查最小方案）：登记有效租户 A，使唯一缺失条件保持为 audit accessor/identity；并在调用 executor 前加**解析守卫**（provider 对记录 TenantId 解析非空且 Id Ordinal 匹配），防后续 fixture 漂移重新引入未知租户路径。保持 accessor/identity 未注册，继续断言零业务调用、Pending 与预算不变。修订后该用例仍按 S1 红色且失败原因纯净：今日观测为业务真实执行（Assert.False Expected False / Actual True）。S3 引入结构化 ProblemCode 后把关联能力缺失断言进一步收紧。
+
+## S2 — 生命周期收口（本切片，design-review 放行后实施）
+
+### 交付（对照 Spec §3/§4/§8）
+
+- **声明与冻结分离**：新增 `LocalEventRegistration`（builder 声明 DTO，携带装配期 codec 工厂与元数据）与 `LocalEventJsonCodecRegistration`（per-Host codec 贡献，`AddCodecs(IServiceCollection)`）；`LocalEventBinding` 成为真正 frozen 执行项（`Codec` 冻结期解析一次、无可变集合、无工厂/Provider/scope/Handler 引用；构造 internal + IVT）；旧 `LocalEventJsonCodecRegistry` 归档 `99_RecycleBin/issue-146-local-event-hardening/`（无全局表、无 fallback）。
+- **逐项冻结校验**：`Freeze` 不再按 ContributorId 跳过（H04：同 id 冲突不被吞、同贡献重复启用幂等，均有测试）；codec 贡献逐项校验（factory 结果非空/精确 Type/`Options.IsReadOnly`/同源同实例/跨源冲突，与注册顺序无关）；注册级元数据单值一致（Replayable/版本/来源合并为排序不可变集合）；replayable 无 codec → 含 AddLocalEvents 指引的确定性违规。
+- **单次准备、同一批实例**：`LocalEventInvoker<TEvent>` 改为统一泛型 Prepare 协议（单次 `GetServices<ILocalEventHandler<T>>().ToArray()`、required 前置校验、`LocalEventPreparedInvocation` 持有实例数组且单次执行、`AnyHandlerInvoked` 事实）；dispatcher/bus/Channel consumer/replay 全部经共用 `LocalEventExecution` 核心；P01（Transient 单次构造）转绿。
+- **重放状态机重排（Spec §8 矩阵）**：解码（frozen codec）与 Prepare 全部先于 `MarkRetrying`；`MarkRetrying` 未确认（提交后抛）→ NotStarted + StateWrite.Unknown + 零 Handler 且不回滚 Pending（R02 故障注入测试）；零 Handler/构造失败 → 拒绝且状态/预算不变（P02a/P02b）；成功 → Completed 事实先于释放，释放失败独立报告且不产生第二条死信（R03/P03：async-only disposable 恰好一次）；Handler 失败+释放失败 → Failed + Release.Failed + 预算只计一次（R04）；协作取消 → 有界恢复 Pending、重试计数不增加、向调用方传播。`DeadLetterRetryResult` additive：`Execution/StateWrite/Release/AnyHandlerInvoked/ProblemCode`（位置构造调用保持兼容）。
+- **recorder 迁移**：使用 binding 冻结身份与冻结 codec（不再 advisory `GetByPayloadType`、不再执行期调用工厂）；G01 转绿，H03（冻结后工厂变化）记录/重放两侧转绿。
+- **#126 语义修正用例**：`CorruptPayload_CountsTowardBudget_AndArchivesAtLimit` 按 #146 R01 更新为 `CorruptPayload_Is_Refused_Before_Any_State_Transition_And_Keeps_Budget`（坏 JSON 不计预算、不入档、零业务调用）。
+- **保留显式 validator 行为**：发布/Channel 入口的可选 validator 调用未动（S3 原子迁移治理策略时处理）。
+
+### 迁移面与结果（本地）
+
+- 工具链：`LocalEventCodeWriter` 生成 `LocalEventRegistration.Create<Event>()` + 无参闭合 invoker + `LocalEventJsonCodecContributions.AddCodecs(services)`；`JsonContractSourceWriter` 本地块同迁（LocalEvent JSON 命名策略不变：不加 camelCase）。CodeGenerator 定向 14/14、JsonContracts 131/131。
+- 测试迁移：单元 `LocalEventDispatchRegistryTests` 全迁移并新增 DI 贡献用例；S1 基线文件 H01/H02/P01 按目标语义改写转绿（新增同源冲突用例）；集成 `LocalEventTestComposition`/scoped-store/AotHost/Capability 测试同步；新增 `LocalEventHardeningStateMachineTests`（H04×2、P02×2、R02、P03、R03、R04，共 8 条）。
+- 计数：单元 42/42；集成 63 中 59 过 + **4 条 S3 范围内红**（上下文捕获/恢复/缺设施拒绝——按设计留待 S3）；Event 41/41、生成器全量 365/365、Capability 178/178、RabbitMQ 单元 58/58、RabbitMQ 真实 broker 集成 37/37、边界 173/178（5 项既有环境态）、全量构建 0 错误。
+- 回归修正记录：首轮批跑中 RabbitMQ 集成全红为本地 broker 容器停机（已重启后 37/37）；LocalEvent 原生门禁一度失败为 AotHost refusal 场景仍断言 #126 旧预算语义，已按 #146 R01 更新（坏 JSON 零预算、不入档）后门禁通过（S4 正式留证与证据 json）。

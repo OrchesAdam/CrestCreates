@@ -19,13 +19,13 @@ typed bridge 三程序集编译实验通过、bootstrap 挂接核对完成。**S
 
 ## S2 — Host codec 与单次准备
 
-- [ ] 引入 LocalEventRegistration / LocalEventJsonCodecRegistration；builder 输入与 frozen binding 分离。
-- [ ] 修改 JsonContractSourceWriter 与 LocalEventCodeWriter，生成 Host IServiceCollection 贡献；不改变 LocalEvent 既有 JSON 命名策略。
-- [ ] 逐项 codec/来源/重复声明校验，集合及 JsonTypeInfo/options 真正锁定。
-- [ ] typed Prepare 一次解析全部实际 Handler，required 检查后执行同一数组；借用与拥有 scope 分离。
-- [ ] 修改 dispatcher、同步 bus、Channel consumer、recorder、replay；解码/准备移到 MarkRetrying 前。
-- [ ] 增 additive 结果事实并把业务执行、结算写入、异步释放拆开；覆盖提交后抛错的故障注入。
-- [ ] 归档旧全局 codec / Probe 双解析等死契约，更新全部生成调用点和测试夹具。
+- [x] 引入 LocalEventRegistration / LocalEventJsonCodecRegistration；builder 输入与 frozen binding 分离。
+- [x] 修改 JsonContractSourceWriter 与 LocalEventCodeWriter，生成 Host IServiceCollection 贡献；不改变 LocalEvent 既有 JSON 命名策略。
+- [x] 逐项 codec/来源/重复声明校验，集合及 JsonTypeInfo/options 真正锁定（H01/H02/H04 测试）。
+- [x] typed Prepare 一次解析全部实际 Handler，required 检查后执行同一数组；借用与拥有 scope 分离（P01/P03 测试）。
+- [x] 修改 dispatcher、同步 bus、Channel consumer、recorder、replay；解码/准备移到 MarkRetrying 前（R01/P02 测试）。
+- [x] 增 additive 结果事实并把业务执行、结算写入、异步释放拆开；覆盖提交后抛错的故障注入（R02/R03/R04 测试）。
+- [x] 归档旧全局 codec / Probe 双解析等死契约（99_RecycleBin/issue-146-local-event-hardening），更新全部生成调用点和测试夹具。
 - [ ] S2 独立提交时仍保留既有显式 validator 行为；治理/策略切换随 S3 原子迁移，不能在中间提交静默移除检查。
 
 验证：Spec H01–H04、P01–P04、R01–R04（不依赖 S3 的部分），原 LocalEvent/JsonContracts/CodeGenerator 回归。

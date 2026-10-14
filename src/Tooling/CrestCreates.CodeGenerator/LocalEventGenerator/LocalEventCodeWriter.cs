@@ -46,16 +46,15 @@ internal static class LocalEventCodeWriter
 
             var version = declaration?.Version ?? 1;
             var replayable = declaration?.Replayable ?? false;
-            var codecArgument = replayable
-                ? $"static () => global::CrestCreates.EventBus.Abstractions.LocalEventJsonCodecRegistry.Resolve(typeof({eventGlobalName}))"
-                : "null";
+            // The codec arrives through the owning assembly's per-host AddCodecs() contribution,
+            // resolved exactly once at freeze; the declaration carries no runtime factory.
+            const string codecArgument = "null";
             var legacyArgument = BuildLegacyIdentities(declaration);
             var replayableText = replayable ? "true" : "false";
 
             builder.AppendLine();
-            builder.AppendLine($"            builder.Add(global::CrestCreates.EventBus.Abstractions.LocalEventBinding.Create<{eventGlobalName}>(");
-            builder.AppendLine($"                new global::CrestCreates.EventBus.Abstractions.LocalEventInvoker<{eventGlobalName}>(static (provider, @event, cancellationToken) =>");
-            builder.AppendLine($"                    global::CrestCreates.EventBus.Abstractions.LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),");
+            builder.AppendLine($"            builder.Add(global::CrestCreates.EventBus.Abstractions.LocalEventRegistration.Create<{eventGlobalName}>(");
+            builder.AppendLine($"                new global::CrestCreates.EventBus.Abstractions.LocalEventInvoker<{eventGlobalName}>(),");
             builder.AppendLine($"                {version},");
             builder.AppendLine($"                {replayableText},");
             builder.AppendLine($"                {codecArgument},");
@@ -154,7 +153,7 @@ internal static class LocalEventCodeWriter
 
         if (emitCodecContribution)
         {
-            builder.AppendLine("            global::CrestCreates.Generated.LocalEventJsonCodecContributions.Register();");
+            builder.AppendLine("            global::CrestCreates.Generated.LocalEventJsonCodecContributions.AddCodecs(services);");
         }
 
         builder.AppendLine("            return services;");

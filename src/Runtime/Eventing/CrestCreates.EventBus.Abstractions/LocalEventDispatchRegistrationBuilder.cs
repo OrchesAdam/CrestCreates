@@ -6,52 +6,55 @@ namespace CrestCreates.EventBus.Abstractions;
 
 /// <summary>
 /// Shared registration surface for generated contributors and explicit manual assembly.
-/// Both paths write into the same builder and are subject to the same conflict validation at
-/// freeze time — this is not a second dispatcher.
+/// Both paths write declarations into the same builder and are subject to the same conflict
+/// validation at freeze time — this is not a second dispatcher. Registrations carry assembly-time
+/// codec inputs and metadata only; freeze produces the frozen bindings.
 /// </summary>
 public sealed class LocalEventDispatchRegistrationBuilder
 {
-    private readonly List<LocalEventBinding> _bindings = new();
+    private readonly List<LocalEventRegistration> _registrations = new();
 
-    public IReadOnlyList<LocalEventBinding> Bindings => _bindings;
+    public IReadOnlyList<LocalEventRegistration> Registrations => _registrations;
 
-    public void Add(LocalEventBinding binding)
+    public void Add(LocalEventRegistration registration)
     {
-        ArgumentNullException.ThrowIfNull(binding);
-        _bindings.Add(binding);
+        ArgumentNullException.ThrowIfNull(registration);
+        _registrations.Add(registration);
     }
 
     /// <summary>
     /// Declares an event without a generated contributor. Handlers registered through DI are
     /// dispatched in DI registration order; typed expected-handler diagnostics require a
-    /// generated contributor.
+    /// generated contributor. An optional manual typed codec factory participates in the same
+    /// freeze-time validation as generated per-host codec contributions.
     /// </summary>
-    public LocalEventBinding Declare<TEvent>(
+    public LocalEventRegistration Declare<TEvent>(
         bool replayable = false,
         int version = 1,
-        IReadOnlyList<LocalEventLegacyIdentity>? legacyIdentities = null)
+        IReadOnlyList<LocalEventLegacyIdentity>? legacyIdentities = null,
+        Func<JsonTypeInfo?>? codecFactory = null)
         where TEvent : ILocalEvent
     {
-        var binding = LocalEventBinding.Create(
-            new LocalEventInvoker<TEvent>(static (provider, @event, cancellationToken) =>
-                LocalEventDispatch.InvokeHandlersAsync(provider, @event, cancellationToken)),
+        var registration = LocalEventRegistration.Create(
+            new LocalEventInvoker<TEvent>(),
             typeof(TEvent),
             version,
             replayable,
-            replayable ? static () => LocalEventJsonCodecRegistry.Resolve(typeof(TEvent)) : null,
+            codecFactory,
             expectedHandlerTypes: null,
             legacyIdentities,
             SourceAssemblyOf(typeof(TEvent)));
-        Add(binding);
-        return binding;
+        Add(registration);
+        return registration;
     }
 
     /// <summary>Declares a third-party event type for membership/codec capability only.</summary>
-    public LocalEventBinding Declare(
+    public LocalEventRegistration Declare(
         Type eventType,
         bool replayable = false,
         int version = 1,
-        IReadOnlyList<LocalEventLegacyIdentity>? legacyIdentities = null)
+        IReadOnlyList<LocalEventLegacyIdentity>? legacyIdentities = null,
+        Func<JsonTypeInfo?>? codecFactory = null)
     {
         ArgumentNullException.ThrowIfNull(eventType);
         if (!typeof(ILocalEvent).IsAssignableFrom(eventType))
@@ -60,21 +63,18 @@ public sealed class LocalEventDispatchRegistrationBuilder
                 $"Type '{eventType.FullName}' does not implement {nameof(ILocalEvent)}.", nameof(eventType));
         }
 
-        var binding = LocalEventBinding.Create(
+        var registration = LocalEventRegistration.Create(
             InertLocalEventInvoker.Instance,
             eventType,
             version,
             replayable,
-            replayable ? CreateCodecFactory(eventType) : null,
+            codecFactory,
             expectedHandlerTypes: null,
             legacyIdentities,
             SourceAssemblyOf(eventType));
-        Add(binding);
-        return binding;
+        Add(registration);
+        return registration;
     }
-
-    internal static Func<JsonTypeInfo?> CreateCodecFactory(Type eventType)
-        => () => LocalEventJsonCodecRegistry.Resolve(eventType);
 
     private static string SourceAssemblyOf(Type type) => type.Assembly.GetName().Name ?? string.Empty;
 }
