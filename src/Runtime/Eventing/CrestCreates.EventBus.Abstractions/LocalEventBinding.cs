@@ -22,6 +22,7 @@ public sealed class LocalEventBinding
         ImmutableArray<Type> expectedHandlerTypes,
         ImmutableArray<LocalEventLegacyIdentity> legacyIdentities,
         ImmutableArray<LocalEventReplayAlias> replayAliases,
+        ImmutableArray<Type> executionCheckTypes,
         LocalEventPolicyOptions policy,
         string sourceAssembly)
     {
@@ -35,9 +36,9 @@ public sealed class LocalEventBinding
         ExpectedHandlerTypes = expectedHandlerTypes;
         LegacyIdentities = legacyIdentities;
         ReplayAliases = replayAliases;
+        ExecutionCheckTypes = ImmutableArray.CreateRange(executionCheckTypes);
         Governance = policy.Governance;
         TenantMode = policy.TenantMode;
-        ExecutionCheckTypes = policy.ExecutionCheckTypes;
         UseEventValidator = policy.UseEventValidator;
         AllowHistoricalHostContext = policy.AllowHistoricalHostContext;
         AdoptGovernedHistory = policy.AdoptGovernedHistory;
@@ -74,7 +75,7 @@ public sealed class LocalEventBinding
 
     public LocalEventTenantMode TenantMode { get; }
 
-    /// <summary>Scoped execution checks activated for this event; DI registration is validated at freeze.</summary>
+    /// <summary>Locked immutable copy of the merged execution-check set; the caller's original collection is never referenced.</summary>
     public IReadOnlyList<Type> ExecutionCheckTypes { get; }
 
     public bool UseEventValidator { get; }

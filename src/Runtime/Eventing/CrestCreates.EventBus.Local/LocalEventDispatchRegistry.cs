@@ -113,6 +113,7 @@ internal sealed class LocalEventDispatchRegistry : ILocalEventDispatchRegistry
                 registration.ExpectedHandlerTypes.ToImmutableArray(),
                 registration.LegacyIdentities.ToImmutableArray(),
                 registration.ReplayAliases.ToImmutableArray(),
+                registration.ExecutionCheckTypes.ToImmutableArray(),
                 registration.Policy,
                 registration.SourceAssembly);
             frozen[registration.EventType] = binding;

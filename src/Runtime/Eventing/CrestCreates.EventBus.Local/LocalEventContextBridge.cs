@@ -77,7 +77,7 @@ internal static class LocalEventContextBridge
                     "the record is preserved and refused.");
             }
 
-            if (snapshot.TenantId is null && !binding.AllowHistoricalHostContext)
+            if (string.IsNullOrEmpty(snapshot.TenantId) && !binding.AllowHistoricalHostContext)
             {
                 throw new LocalEventContextRestoreException(
                     "HistoricalContextNotRecognized",
@@ -86,16 +86,18 @@ internal static class LocalEventContextBridge
             }
         }
 
+        // Missing and invalid tenant ids are handled uniformly: an empty id is never a valid tenant
+        // and is never converted into an executable host.
         switch (binding.TenantMode)
         {
-            case LocalEventTenantMode.HostOnly when snapshot.TenantId is not null:
+            case LocalEventTenantMode.HostOnly when !string.IsNullOrEmpty(snapshot.TenantId):
                 throw new LocalEventContextRestoreException(
                     "TenantModeHostOnly",
                     $"event '{binding.LocalName}' is host-only but the record carries tenant '{snapshot.TenantId}'.");
-            case LocalEventTenantMode.Required when snapshot.TenantId is null:
+            case LocalEventTenantMode.Required when string.IsNullOrEmpty(snapshot.TenantId):
                 throw new LocalEventContextRestoreException(
                     "TenantModeRequired",
-                    $"event '{binding.LocalName}' requires a tenant but the record carries no tenant id.");
+                    $"event '{binding.LocalName}' requires a tenant but the record carries no valid tenant id.");
         }
 
         ITenantInfo? tenant = null;
@@ -149,7 +151,9 @@ internal static class LocalEventContextBridge
 
     /// <summary>
     /// Sync phase, executed in the real execution frame: activates tenant and association frames
-    /// and returns the LIFO frame that restores the caller state.
+    /// and returns the LIFO frame that restores the caller state. A failure in a later step is the
+    /// responsibility of this method: frames already entered are unwound LIFO before the original
+    /// error is rethrown, with cleanup failures kept as independent facts.
     /// </summary>
     public static LocalEventContextFrame Activate(
         IServiceProvider provider,
@@ -157,30 +161,65 @@ internal static class LocalEventContextBridge
     {
         var disposers = new List<IDisposable>(2);
 
-        var currentTenant = provider.GetService<ICurrentTenant>();
-        if (currentTenant is not null)
+        try
         {
-            // resolution.Tenant == null means explicit host: the caller's tenant is cleared for the
-            // duration of the execution and restored afterwards (recoverable Change frame).
-            disposers.Add(currentTenant.Change(resolution.Tenant));
-        }
-
-        if (resolution.AuditAccessor is not null && resolution.IdentityGenerator is not null)
-        {
-            var snapshot = resolution.Snapshot;
-            var correlation = snapshot.CorrelationId ?? resolution.IdentityGenerator.CreateOperationId();
-            var actor = resolution.AuditAccessor.Current?.Actor ?? BackgroundActor;
-            disposers.Add(resolution.AuditAccessor.Push(new AuditOperationContext
+            var currentTenant = provider.GetService<ICurrentTenant>();
+            if (currentTenant is not null)
             {
-                CorrelationId = correlation,
-                OperationId = resolution.IdentityGenerator.CreateOperationId(),
-                Actor = actor,
-                InvocationSource = "local-event-execution",
-                TenantId = snapshot.TenantId,
-            }));
+                // resolution.Tenant == null means explicit host: the caller's tenant is cleared for
+                // the duration of the execution and restored afterwards (recoverable Change frame).
+                disposers.Add(currentTenant.Change(resolution.Tenant));
+            }
+
+            if (resolution.AuditAccessor is not null && resolution.IdentityGenerator is not null)
+            {
+                var snapshot = resolution.Snapshot;
+                var correlation = snapshot.CorrelationId ?? resolution.IdentityGenerator.CreateOperationId();
+                var actor = resolution.AuditAccessor.Current?.Actor ?? BackgroundActor;
+                disposers.Add(resolution.AuditAccessor.Push(new AuditOperationContext
+                {
+                    CorrelationId = correlation,
+                    OperationId = resolution.IdentityGenerator.CreateOperationId(),
+                    Actor = actor,
+                    InvocationSource = "local-event-execution",
+                    TenantId = snapshot.TenantId,
+                }));
+            }
+        }
+        catch (Exception activationFailure)
+        {
+            var cleanupFailure = UnwindDisposers(disposers);
+            if (cleanupFailure is not null)
+            {
+                throw new AggregateException(
+                    $"context activation failed ({activationFailure.Message}) and restoring the already-entered " +
+                    "frames also failed; both facts are reported.",
+                    activationFailure, cleanupFailure);
+            }
+
+            throw;
         }
 
         return new LocalEventContextFrame(disposers);
+    }
+
+    private static Exception? UnwindDisposers(List<IDisposable> disposers)
+    {
+        Exception? first = null;
+        for (var index = disposers.Count - 1; index >= 0; index--)
+        {
+            try
+            {
+                disposers[index].Dispose();
+            }
+            catch (Exception failure)
+            {
+                first ??= failure;
+            }
+        }
+
+        disposers.Clear();
+        return first;
     }
 }
 

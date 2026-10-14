@@ -120,3 +120,19 @@
 - 新增集成 `LocalEventGovernanceAndContextTests` 22 条（I01×2/I02/I03×2、G02×2、G03×2、G04、G05×3、G06×3、G07、C02×2、C03×2、C04/C05 组合、Channel 捕获恢复）；EF 模型 +2（可空列、往返含 legacy null 保真）。
 - 4 条 S3 约定红基线（recorder 捕获、A/B tenant 恢复、缺 provider/audit 拒绝）全部转绿；5 条旧夹具按目标语义修正：modern 记录带 ContextVersion=1（`CreateModernMessage`/AotHost SeedMessage/H03 用例），legacy 工厂保持 null，两条 legacy 身份语义用例补显式历史 host 策略。
 - 计数：单元 42/42；集成 **94/94**；CodeGenerator 367/367（+2 策略发射）；JsonContracts 131/131；LocalEvent 真实 NativeAOT 门禁在本 head 通过（linux-x64）；全量构建 0 错误；边界/Event/Capability/RabbitMQ 单元见同批日志。
+
+## S3 实现审查 R1（PR #148，审查 head `73bb4213`）
+
+审查结论：4×P1 + 3×P2，S3 暂不通过；11 条独立运行期契约探针 + 抽象依赖编译对照全部复现。修订逐项如下，并新增 `LocalEventGovernanceReviewR1Tests`（12 条）转稳定回归。
+
+| 发现 | 修订 | 落点与验证 |
+| --- | --- | --- |
+| S3-R1-LE146-01（P1）租户模式未覆盖发布/直接分发/入队边界 | `LocalEventAdmission` 前置"上下文格式与租户可恢复性"：HostOnly 有租户 / Required 无有效租户 / 非空租户但缺 `ITenantProvider`（Optional 亦拒）在**所有接受边界**（同步发布、直接 dispatcher、Channel 入队）拒绝，零 Handler、零入队副作用；消费侧 `ResolveAsync` 复查保留。 | 3 边界 × 3 模式矩阵回归（publish/direct/enqueue 各断言 ProblemCode、零业务、Channel 负例断言队列无副作用） |
+| S3-R1-LE146-02（P1）冻结 binding 仍引用可变执行检查列表 | `LocalEventBinding` 改收 `ImmutableArray<Type> executionCheckTypes` 并在构造时 `CreateRange` 独立复制；Freeze 传入 `registration.ExecutionCheckTypes.ToImmutableArray()`；宿主原集合在冻结后清空不再影响 binding。 | 回归：freeze 后 Clear 原 List，binding 检查数不变且分发仍被拒绝 |
+| S3-R1-LE146-03（P1）Required 的空 TenantId 绕过校验按 host 重放 | 新增 `LocalEventExecutionContextSnapshot.FromPersisted`（空/空白 id 归一为 null）与 `Capture` 归一；`ResolveAsync`/admission 的模式判定统一用 `IsNullOrEmpty`：Required 不允许空串，损坏值不再被转换成可执行 host。 | 回归：v1 + Required + TenantId="" 的重放拒绝且预算/状态不变；Channel 空租户 work item 落一条诊断行、零业务 |
+| S3-R1-LE146-04（P1）治理属性令仅引用抽象的契约程序集编译失败 | 生成器仅当编译实际引用 `CrestCreates.EventBus.Local` 时才在内联 `AddLocalEvents()` 发出 `AddCrestLocalEventGovernance(services)`（`ReferencesLocalRuntime`）；契约程序集只贡献抽象侧治理声明，Host 的 Local 组合显式装配。 | 生成器回归：仅 Abstractions 引用 + Governance.Required 编译 0 错误且生成文本不含 Local；含 Local 引用仍发出调用 |
+| S3-R1-LE146-05（P2）非 hosted 治理调用一直等待未启动的 gate | admission 对 readiness gate 采用**有界等待**（5s，链接调用方 CT）：gate 未在界内就绪则回落 `GovernanceRegistryNotReady` 可操作拒绝且不缓存；调用方取消仍按取消传播；gate fault 保持 fail-closed。 | 回归：组合了治理但未驱动 coordinator 的 provider → 有界拒绝（含耗时上界断言）→ 启动 coordinator 后重试通过 |
+| S3-R1-LE146-06（P2）重放 admission 普通异常跳过 scope/帧清理 | executor 对 `AdmitAsync` 增加普通异常分支：LIFO 释放业务 scope 与 context frame、记录独立释放事实，返回 `AdmissionFailed`（Execution=NotStarted、不动预算、不建新死信）。 | 回归：check 工厂"先解析可释放对象再抛"→ 释放恰好一次、tenant frame 恢复、行保持 Pending/预算 0 |
+| S3-R1-LE146-07（P2）上下文激活第二步失败遗失 tenant frame | `Activate` 对部分成功的取得过程负责：后续步骤（identity/Push）抛错时按 LIFO 撤销已进入的帧并清空，原错误保持；清理也失败则 AggregateException 双事实报告。 | 回归：audit Push 抛错 → replay 返回 `ContextRestoreFailed`、租户帧恢复至调用方、行/预算不变 |
+
+修复后本地计数：单元 42/42；集成 **106/106**（+12 回归）；CodeGenerator 全量、JsonContracts、LocalEvent 真实 NativeAOT 门禁、全量构建见同批日志；边界/Event/Capability/RabbitMQ 单元不受本修订影响、S3 落地时计数保持。

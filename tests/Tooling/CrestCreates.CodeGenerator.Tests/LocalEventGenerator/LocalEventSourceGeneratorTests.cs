@@ -138,6 +138,30 @@ public class LocalEventSourceGeneratorTests
     }
 
     [Fact]
+    public void ContractOnly_Assembly_With_Governance_Attributes_Compiles_Without_The_Local_Runtime()
+    {
+        var source = """
+            using CrestCreates.EventBus.Abstractions;
+
+            namespace MyApp;
+
+            [LocalEvent(Governance = LocalEventGovernance.Required, TenantMode = LocalEventTenantMode.Required, ReplayKey = "contracts.ordered")]
+            public sealed class ContractOrderedEvent : ILocalEvent { }
+            """;
+
+        // Abstractions-only: the generated extension must not reference the Local runtime.
+        var result = SourceGeneratorTestHelper.RunGenerator<LocalEventSourceGenerator>(
+            source, additionalReferences: EventingReferences);
+
+        result.CompilationSuccess.Should().BeTrue(Describe(result));
+        result.GetErrors().Should().BeEmpty();
+        var generated = result.GetSourceByFileName("LocalEventRegistration.g.cs")!;
+        generated.SourceText.Should().Contain("Governance = global::CrestCreates.EventBus.Abstractions.LocalEventGovernance.Required");
+        generated.SourceText.Should().NotContain("AddCrestLocalEventGovernance");
+        generated.SourceText.Should().NotContain("CrestCreates.EventBus.Local");
+    }
+
+    [Fact]
     public void Plain_Declarations_Emit_No_Policy_Argument_Nor_Governance_Registration()
     {
         var result = SourceGeneratorTestHelper.RunGenerator<LocalEventSourceGenerator>(

@@ -143,7 +143,7 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
         // activate the persisted context in this frame, run the shared admission checks, prepare the
         // whole batch, then MarkRetrying, then execute the same instances, then release.
         var executionScope = _scopeFactory.CreateAsyncScope();
-        var replaySnapshot = new LocalEventExecutionContextSnapshot(
+        var replaySnapshot = LocalEventExecutionContextSnapshot.FromPersisted(
             message.LocalContextVersion, message.TenantId, message.CorrelationId);
 
         LocalEventContextFrame contextFrame;
@@ -194,6 +194,21 @@ internal sealed class LocalDeadLetterReplayExecutor : ILocalDeadLetterReplayExec
                 await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
             AttachCancellationFacts(cancel, "NotStarted", "AdmissionNotCompleted", releaseProblem);
             throw;
+        }
+        catch (Exception admissionFailure)
+        {
+            // A throwing admission (e.g. an execution-check factory that fails during scoped
+            // resolution) must release the owned scope and context frame LIFO instead of bypassing
+            // cleanup, and reports execution as not started without touching the budget.
+            var releaseProblem = CombineReleaseProblems(
+                await TryDisposeScopeAsync(executionScope), contextFrame.DisposeAndCapture());
+            _logger?.LogError(
+                admissionFailure,
+                "Replay admission for dead letter message {MessageId} threw before MarkRetrying; no handler was executed and the message state is unchanged.",
+                message.MessageId);
+            return Reject(message,
+                $"admission failed before MarkRetrying: {admissionFailure.Message}", "AdmissionFailed",
+                releaseProblem, scopeOwned: true);
         }
 
         if (!admission.Allowed)

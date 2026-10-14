@@ -12,7 +12,8 @@ internal static class LocalEventCodeWriter
         IReadOnlyList<string> eventNames,
         IReadOnlyDictionary<string, List<HandlerBindingInfo>> handlersByEvent,
         IReadOnlyDictionary<string, EventDeclarationInfo> declarations,
-        bool emitCodecContribution)
+        bool emitCodecContribution,
+        bool localRuntimeReferenced = true)
     {
         var escapedAssembly = EscapeString(assemblyName);
         var contributorId = SanitizeIdentifier(assemblyName);
@@ -82,7 +83,7 @@ internal static class LocalEventCodeWriter
         builder.AppendLine("}");
         builder.AppendLine();
 
-        AppendExtension(builder, extensionNamespace, contributorId, eventNames, handlersByEvent, declarations, emitCodecContribution);
+        AppendExtension(builder, extensionNamespace, contributorId, eventNames, handlersByEvent, declarations, emitCodecContribution, localRuntimeReferenced);
         return builder.ToString();
     }
 
@@ -159,9 +160,11 @@ internal static class LocalEventCodeWriter
         IReadOnlyList<string> eventNames,
         IReadOnlyDictionary<string, List<HandlerBindingInfo>> handlersByEvent,
         IReadOnlyDictionary<string, EventDeclarationInfo> declarations,
-        bool emitCodecContribution)
+        bool emitCodecContribution,
+        bool localRuntimeReferenced)
     {
-        var requiresGovernance = declarations.Values.Any(declaration => declaration.GovernanceRequired);
+        var requiresGovernance = localRuntimeReferenced
+            && declarations.Values.Any(declaration => declaration.GovernanceRequired);
         builder.AppendLine($"namespace {extensionNamespace}");
         builder.AppendLine("{");
         builder.AppendLine("    /// <summary>");

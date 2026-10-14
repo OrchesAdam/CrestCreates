@@ -20,7 +20,20 @@ public sealed record LocalEventExecutionContextSnapshot(
     public static LocalEventExecutionContextSnapshot Host { get; } = new(CurrentContextVersion, null, null);
 
     public static LocalEventExecutionContextSnapshot Capture(string? tenantId, string? correlationId)
-        => new(CurrentContextVersion, tenantId, correlationId);
+        => new(CurrentContextVersion, Normalize(tenantId), Normalize(correlationId));
+
+    /// <summary>
+    /// Snapshot view of a persisted row: empty/whitespace ids are normalized to null so a damaged
+    /// value can never masquerade as an explicit host or bypass the tenant-mode checks.
+    /// </summary>
+    public static LocalEventExecutionContextSnapshot FromPersisted(
+        int? contextVersion,
+        string? tenantId,
+        string? correlationId)
+        => new(contextVersion, Normalize(tenantId), Normalize(correlationId));
+
+    private static string? Normalize(string? value)
+        => string.IsNullOrEmpty(value) ? null : value;
 }
 
 /// <summary>

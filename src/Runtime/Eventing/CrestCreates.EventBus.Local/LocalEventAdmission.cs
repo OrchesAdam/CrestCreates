@@ -32,6 +32,9 @@ internal readonly record struct LocalEventAdmissionResult(
 /// </summary>
 internal static class LocalEventAdmission
 {
+    /// <summary>Bound for waiting on the hosted readiness gate at an execution boundary.</summary>
+    private static readonly TimeSpan GovernanceReadinessWait = TimeSpan.FromSeconds(5);
+
     public static async Task<LocalEventAdmissionResult> AdmitAsync(
         IServiceProvider provider,
         LocalEventBinding binding,
@@ -42,6 +45,32 @@ internal static class LocalEventAdmission
         CancellationToken cancellationToken)
     {
         GeneratedEventDescriptor? descriptor = null;
+
+        // Context format and tenant recoverability come before governance (Spec §6): every
+        // accept/execute boundary enforces the tenant mode against the captured snapshot, and a
+        // captured tenant that cannot be re-validated later is refused at its own boundary —
+        // a borrowed caller scope does not skip policy validation.
+        var hasTenant = !string.IsNullOrEmpty(snapshot.TenantId);
+        switch (binding.TenantMode)
+        {
+            case LocalEventTenantMode.HostOnly when hasTenant:
+                return LocalEventAdmissionResult.Reject(
+                    "TenantModeHostOnly",
+                    $"event '{binding.LocalName}' is host-only but the request carries tenant '{snapshot.TenantId}'.");
+            case LocalEventTenantMode.Required when !hasTenant:
+                return LocalEventAdmissionResult.Reject(
+                    "TenantModeRequired",
+                    $"event '{binding.LocalName}' requires a tenant but the request carries no valid tenant id.");
+        }
+
+        if (hasTenant && provider.GetService<CrestCreates.MultiTenancy.Abstract.ITenantProvider>() is null)
+        {
+            return LocalEventAdmissionResult.Reject(
+                "MissingTenantProvider",
+                $"event '{binding.LocalName}' carries tenant '{snapshot.TenantId}' but this host has no " +
+                "ITenantProvider; the tenant could not be re-validated by a later execution and the request " +
+                "is refused now.");
+        }
 
         if (binding.Governance == LocalEventGovernance.Required)
         {
@@ -54,12 +83,23 @@ internal static class LocalEventAdmission
             if (registry.State != RegistryState.Built)
             {
                 // Hosted composition: the coordinator gate covers the startup window (signalled only
-                // after the registry task ran). Non-hosted: there is no gate and the actionable
-                // rejection below applies — never cached, so a later bootstrap retry passes.
+                // after the registry task ran). The wait is bounded so a composed-but-never-driven
+                // provider (pure ServiceProvider, coordinator not started) rejects with the same
+                // actionable message instead of hanging on a gate that will never signal. The
+                // not-ready state is never cached, so a later bootstrap retry passes.
                 var readiness = provider.GetService<LocalEventGovernanceReadiness>();
                 if (readiness is not null)
                 {
-                    await readiness.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    using var bounded = new CancellationTokenSource(GovernanceReadinessWait);
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, bounded.Token);
+                    try
+                    {
+                        await readiness.WaitAsync(linked.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (bounded.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                    {
+                        // Gate never signalled within the bound: fall through to the rejection below.
+                    }
                 }
 
                 if (registry.State != RegistryState.Built)
