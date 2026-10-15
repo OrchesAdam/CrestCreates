@@ -6,7 +6,6 @@ using System.Text;
 using CrestCreates.JsonContracts.BuildTasks.Semantic;
 using CrestCreates.Tooling.CrudGeneration;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 
 namespace CrestCreates.JsonContracts.BuildTasks.Crud;
 
@@ -109,7 +108,7 @@ public sealed class CrudPrecompileEngine
                     OwnerAssemblyName: assemblyName,
                     OwnerServiceFullName: model.ServiceFullName,
                     ArtifactHintName: artifact.HintName,
-                    DeclaredTypeFullNames: DeclaredTypeNames(artifact.Source, model),
+                    DeclaredTypeFullNames: CrudArtifactEmitter.DeclaredTypeFullNames(artifact.Source),
                     SourceLocation: model.DeclarationLocation.ToString(),
                     ModelSchemaVersion: CrudGenerationModel.ModelSchemaVersion,
                     ContentHash: Sha256(artifact.Source)));
@@ -124,30 +123,9 @@ public sealed class CrudPrecompileEngine
             build.Models);
     }
 
-    /// <summary>
-    /// Declared type names are read back from the emitted source, so the manifest records what the
-    /// producer actually declared rather than a name the emitter merely intended.
-    /// </summary>
-    private static IReadOnlyList<string> DeclaredTypeNames(string source, CrudGenerationModel model)
-    {
-        var tree = CSharpSyntaxTree.ParseText(source);
-        return tree.GetRoot()
-            .DescendantNodes()
-            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax>()
-            .Select(declaration =>
-            {
-                var namespaceName = declaration.Ancestors()
-                    .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.NamespaceDeclarationSyntax>()
-                    .LastOrDefault()?.Name?.ToString();
-                var owner = model.OwnerAssemblyName + "|" + model.ServiceFullName;
-                return string.IsNullOrEmpty(namespaceName)
-                    ? owner + "|" + declaration.Identifier.ValueText
-                    : owner + "|" + namespaceName + "." + declaration.Identifier.ValueText;
-            })
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-    }
-
+    // Declared type names come from CrudArtifactEmitter.DeclaredTypeFullNames, the one rule shared with
+    // the analyzer and the ownership tests, so the manifest can never record a name the producer did not
+    // actually declare.
     private static bool IsError(string id) => id != CrudDiagnosticIds.Info;
 
     private static string Sha256(string content) =>

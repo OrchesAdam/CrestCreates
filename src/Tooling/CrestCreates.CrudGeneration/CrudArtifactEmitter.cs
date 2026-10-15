@@ -123,6 +123,38 @@ public static class CrudArtifactEmitter
         return builder.ToString();
     }
 
+    /// <summary>
+    /// The plain fully-qualified type names one artifact declares, read back from the emitted source so
+    /// the outputs manifest records what the producer actually declared rather than a name the emitter
+    /// merely intended. The owner identity (assembly + service full name) is a sibling field of the
+    /// manifest entry, never part of these names: §5.1 keeps ownership out of the type identity so a
+    /// consumer can ask one question — "is this exact type already owned?" — by fully-qualified name.
+    /// This is the only place the rule exists; the precompile stage and the ownership tests read it here.
+    /// </summary>
+    public static IReadOnlyList<string> DeclaredTypeFullNames(string source)
+    {
+        if (string.IsNullOrEmpty(source))
+        {
+            return Array.Empty<string>();
+        }
+
+        var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
+        return tree.GetRoot()
+            .DescendantNodes()
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax>()
+            .Select(declaration =>
+            {
+                var namespaceName = declaration.Ancestors()
+                    .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.NamespaceDeclarationSyntax>()
+                    .LastOrDefault()?.Name?.ToString();
+                return string.IsNullOrEmpty(namespaceName)
+                    ? declaration.Identifier.ValueText
+                    : namespaceName + "." + declaration.Identifier.ValueText;
+            })
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
     // ---- 1. contracts DTOs ---------------------------------------------------------------------
 
     private static CrudArtifact EmitReadDto(CrudGenerationModel model)

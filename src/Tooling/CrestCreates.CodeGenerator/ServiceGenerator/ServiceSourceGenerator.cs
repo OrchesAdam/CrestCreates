@@ -6,6 +6,7 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using CrestCreates.CodeGenerator.CrudServiceGenerator;
 
 namespace CrestCreates.CodeGenerator.ServiceGenerator
 {
@@ -22,8 +23,17 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
+            // #128 S2 item ①: artifacts owned by the CRUD precompile manifest are skipped here, because
+            // formal CRUD activation is an explicit per-assembly contribution and must not also be
+            // auto-registered or get a second interface file.
+            var ownedCrudArtifacts = context.AdditionalTextsProvider
+                .Collect()
+                .Select(static (texts, _) => CrudArtifactOwnership.Read(texts));
+
             // 注册源代码生成
-            context.RegisterSourceOutput(serviceClasses, ExecuteGeneration);
+            context.RegisterSourceOutput(
+                serviceClasses.Combine(ownedCrudArtifacts),
+                ExecuteGeneration);
         }
 
         private static bool IsServiceCandidate(SyntaxNode node)
@@ -92,8 +102,12 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
             return null;
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, ImmutableArray<INamedTypeSymbol?> serviceClasses)
+        private void ExecuteGeneration(
+            SourceProductionContext context,
+            (ImmutableArray<INamedTypeSymbol?> ServiceClasses, ImmutableSortedSet<string> OwnedCrudArtifacts) input)
         {
+            var serviceClasses = input.ServiceClasses;
+            var ownedCrudArtifacts = input.OwnedCrudArtifacts;
             if (serviceClasses.IsDefaultOrEmpty)
                 return;
 
@@ -113,13 +127,13 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                     // 仅对带有Service属性的类生成完整代码，保持向后兼容
                     if (HasServiceAttribute(service))
                     {
-                        GenerateServiceInterface(context, service);
+                        GenerateServiceInterface(context, service, ownedCrudArtifacts);
                         GenerateServiceExceptions(context, service);
                         GenerateValidators(context, service, generatedValidatorKeys);
                     }
                 }
 
-                GenerateServiceRegistration(context, uniqueServices.ToArray());
+                GenerateServiceRegistration(context, uniqueServices.ToArray(), ownedCrudArtifacts);
             }
             catch (Exception ex)
             {
@@ -367,7 +381,10 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
             context.AddSource($"{exceptionClassName}.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateServiceRegistration(SourceProductionContext context, INamedTypeSymbol[] serviceClasses)
+        private void GenerateServiceRegistration(
+            SourceProductionContext context,
+            INamedTypeSymbol[] serviceClasses,
+            ImmutableSortedSet<string> ownedCrudArtifacts)
         {
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
@@ -396,6 +413,14 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
             foreach (var service in serviceClasses)
             {
                 var serviceType = service.ToDisplayString();
+
+                // §6.1: a service whose implementation type is owned by the CRUD manifest is activated by
+                // the explicit per-assembly CRUD contribution, so it must not appear in this collection.
+                if (ownedCrudArtifacts.Contains(serviceType))
+                {
+                    continue;
+                }
+
                 bool hasInterface = false;
                 string? interfaceType = null;
                 
@@ -450,10 +475,20 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
         }
 
         // 生成服务接口
-        private void GenerateServiceInterface(SourceProductionContext context, INamedTypeSymbol serviceClass)
+        private void GenerateServiceInterface(
+            SourceProductionContext context,
+            INamedTypeSymbol serviceClass,
+            ImmutableSortedSet<string> ownedCrudArtifacts)
         {
             var serviceName = serviceClass.Name;
             var namespaceName = serviceClass.ContainingNamespace.ToDisplayString();
+
+            // §6.1: the CRUD precompile manifest already owns this interface type, so a second file with
+            // the same fully-qualified name must not be emitted.
+            if (ownedCrudArtifacts.Contains($"{namespaceName}.I{serviceName}"))
+            {
+                return;
+            }
             
             // 检查是否已经有接口
             var hasInterface = serviceClass.Interfaces.Any(i => 

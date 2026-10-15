@@ -194,6 +194,99 @@ public class CrudJsonContractMsBuildBaselineTests
             "the legacy service-as-entity bundle must not take ownership back");
     }
 
+    [Fact]
+    public async Task Entity_and_formal_crud_in_one_project_must_build_without_duplicate_types()
+    {
+        // §6.1 end-to-end: the project really carries both producers for the same fully-qualified types —
+        // [Entity] Product (EntitySourceGenerator) and the formal CRUD declaration whose owned names the
+        // outputs manifest hands to the compiler as an AdditionalFile. Zero CS0101/CS0433/CS0121 is only
+        // reachable if the manifest reached Roslyn and the owned artifacts were skipped, because the
+        // unowned artifacts of the same run prove the generator executed.
+        var probe = await RunProbeAsync(withToolchain: true, source: EntityCollisionSource);
+
+        // The generated DTOs and mapping seeds are all `partial`, so an unskipped duplicate merges into
+        // one type and surfaces as a duplicate-member error rather than a duplicate-type one; both shapes
+        // are booked, because which one appears depends on which artifact failed to be skipped.
+        probe.Output.Should().NotContain("CS0102",
+            "the entity generator must not emit a second copy of a manifest-owned type; errors: "
+            + string.Join(" | ", ErrorLines(probe.Output)));
+        probe.Output.Should().NotContain("CS0101",
+            "one contract type must be declared by exactly one input");
+        probe.Output.Should().NotContain("CS0433",
+            "one fully-qualified CRUD contract type must exist in exactly one input");
+        probe.Output.Should().NotContain("CS0121",
+            "the call sites must not become ambiguous between two generated copies of a contract type");
+
+        probe.EntityGeneratorFiles.Should().Contain(
+            name => name.StartsWith("OrderDto", StringComparison.Ordinal),
+            "EntitySourceGenerator ran in this build, so the Product skips are a real ownership decision; "
+            + "observed: " + string.Join(" | ", probe.EntityGeneratorFiles));
+        probe.EntityGeneratorFiles.Should().NotContain(
+            name => name == "ProductDto.g.cs" || name == "CreateProductDto.g.cs"
+                                 || name == "UpdateProductDto.g.cs" || name == "ProductObjectMappings.g.cs",
+            "those four artifacts are owned by the CRUD manifest of this assembly");
+
+        var singleDtoDeclarations = probe.MaterializedContractDeclarations.Count(
+            text => text.Contains("public partial class ProductDto", StringComparison.Ordinal));
+        singleDtoDeclarations.Should().Be(1,
+            "Shop.Catalog.Dtos.ProductDto is declared once, by the CRUD bundle, not twice");
+
+        probe.ExitCode.Should().Be(0, "the collision project must build; observed:\n" + probe.Output);
+    }
+
+    /// <summary>
+    /// Both producers target the same four fully-qualified types: an entity outside ".Domain.Entities"
+    /// puts its DTOs in "&lt;entity namespace&gt;.Dtos" and its mapping seeds in
+    /// "&lt;entity namespace&gt;.Mappings", which is exactly what the CRUD surface materializes here.
+    /// <c>Order</c> has no CRUD declaration, so its artifacts stay the in-build control. The audit
+    /// members are the ones the existing audited-entity shape carries, because the plain [Entity] path
+    /// emits audit mapping/extension members for them (§6.1 must not change that either).
+    /// </summary>
+    private const string EntityCollisionSource = """
+        using System;
+        using CrestCreates.Domain.Shared.Attributes;
+
+        namespace Shop.Catalog
+        {
+            [Entity]
+            public class Product
+            {
+                public Guid Id { get; set; }
+                public string Name { get; set; } = string.Empty;
+                public decimal Price { get; set; }
+                public DateTime CreationTime { get; set; }
+                public Guid? CreatorId { get; set; }
+                public DateTime? LastModificationTime { get; set; }
+                public Guid? LastModifierId { get; set; }
+            }
+
+            [GenerateCrudService(typeof(Product), DtoNamespace = "Shop.Catalog.Dtos")]
+            public partial class ProductAppService
+            {
+            }
+
+            [Entity]
+            public class Order
+            {
+                public Guid Id { get; set; }
+                public string Reference { get; set; } = string.Empty;
+                public DateTime CreationTime { get; set; }
+                public Guid? CreatorId { get; set; }
+                public DateTime? LastModificationTime { get; set; }
+                public Guid? LastModifierId { get; set; }
+            }
+        }
+        """;
+
+    // The plain [Entity] path additionally emits EF Core mapping/repository and validator files, so the
+    // collision project carries the references those generated files compile against.
+    private const string EntityClosureReferences = """
+          <ItemGroup>
+            <ProjectReference Include="__ROOT__/src/Persistence/CrestCreates.Data.EFCore/CrestCreates.Data.EFCore.csproj" />
+            <ProjectReference Include="__ROOT__/src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
+          </ItemGroup>
+        """;
+
     private static readonly string IntermediateRelativePath =
         Path.Combine("obj", "Debug", "net10.0");
 
@@ -205,9 +298,14 @@ public class CrudJsonContractMsBuildBaselineTests
         IReadOnlyList<string> StjFiles,
         string BundleSource,
         string JsonContractsSource,
-        string OutputsManifest);
+        string OutputsManifest,
+        IReadOnlyList<string> EntityGeneratorFiles,
+        IReadOnlyList<string> MaterializedContractDeclarations);
 
-    private static async Task<ProbeBuild> RunProbeAsync(bool withToolchain)
+    private static async Task<ProbeBuild> RunProbeAsync(
+        bool withToolchain,
+        string? source = null,
+        string? extraReferences = null)
     {
         var repoRoot = FindRepoRoot();
         await EnsureToolchainAsync(repoRoot);
@@ -220,8 +318,16 @@ public class CrudJsonContractMsBuildBaselineTests
             var project = ProjectFile
                 .Replace("__ROOT__", repoRoot.Replace('\\', '/'))
                 .Replace("__IMPORTS__", withToolchain ? ToolchainImports.Replace("__ROOT__", repoRoot.Replace('\\', '/')) : string.Empty);
+            if (!string.IsNullOrEmpty(extraReferences))
+            {
+                project = project.Replace(
+                    "</Project>",
+                    extraReferences.Replace("__ROOT__", repoRoot.Replace('\\', '/')) + "\n</Project>");
+            }
+
             await File.WriteAllTextAsync(Path.Combine(probeDirectory, "Probe.csproj"), project);
-            await File.WriteAllTextAsync(Path.Combine(probeDirectory, "Declaration.cs"), DeclarationSource);
+            await File.WriteAllTextAsync(
+                Path.Combine(probeDirectory, "Declaration.cs"), source ?? DeclarationSource);
 
             var buildResult = await RunDotnetAsync(
                 repoRoot,
@@ -238,7 +344,9 @@ public class CrudJsonContractMsBuildBaselineTests
                 ReadGenerated(probeDirectory, "System.Text.Json.SourceGeneration"),
                 ReadOptional(Path.Combine(probeDirectory, IntermediateRelativePath, "CrestCreates.Crud.g.cs")),
                 ReadOptional(Path.Combine(probeDirectory, IntermediateRelativePath, "CrestCreates.JsonContracts.g.cs")),
-                ReadOptional(Path.Combine(probeDirectory, IntermediateRelativePath, "CrestCreates.Crud.outputs.json")));
+                ReadOptional(Path.Combine(probeDirectory, IntermediateRelativePath, "CrestCreates.Crud.outputs.json")),
+                ReadGeneratedFileNames(probeDirectory, "EntitySourceGenerator"),
+                ReadCompilerInputs(probeDirectory));
         }
         finally
         {
@@ -288,6 +396,48 @@ public class CrudJsonContractMsBuildBaselineTests
             .Where(path => path.Contains(generatorFolderFragment, StringComparison.Ordinal))
             .Select(File.ReadAllText)
             .ToArray();
+    }
+
+    /// <summary>The hint names one generator emitted in this build.</summary>
+    private static IReadOnlyList<string> ReadGeneratedFileNames(
+        string probeDirectory,
+        string generatorFolderFragment)
+    {
+        var intermediateRoot = Path.Combine(probeDirectory, "obj");
+        if (!Directory.Exists(intermediateRoot))
+        {
+            return Array.Empty<string>();
+        }
+
+        return Directory
+            .EnumerateFiles(intermediateRoot, "*.g.cs", SearchOption.AllDirectories)
+            .Where(path => path.Contains(generatorFolderFragment, StringComparison.Ordinal))
+            .Select(path => Path.GetFileName(path) ?? string.Empty)
+            .Where(name => name.Length > 0)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Everything that reached the compiler as source in this build: the authored file, the materialized
+    /// CRUD bundle and every generator output. Duplicate contract types are counted over this set, not
+    /// over one generator's folder, because ownership means "declared exactly once anywhere".
+    /// </summary>
+    private static IReadOnlyList<string> ReadCompilerInputs(string probeDirectory)
+    {
+        var paths = new List<string>();
+        var authored = Path.Combine(probeDirectory, "Declaration.cs");
+        if (File.Exists(authored))
+        {
+            paths.Add(authored);
+        }
+
+        var intermediateRoot = Path.Combine(probeDirectory, "obj");
+        if (Directory.Exists(intermediateRoot))
+        {
+            paths.AddRange(Directory.EnumerateFiles(intermediateRoot, "*.g.cs", SearchOption.AllDirectories));
+        }
+
+        return paths.Select(File.ReadAllText).ToArray();
     }
 
     private static bool IsGeneratedFileDiagnostic(string line) =>

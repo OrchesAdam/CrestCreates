@@ -117,6 +117,9 @@
     <Touch Files="$(_CrestCrudStampFullPath)" AlwaysCreate="true" />
   </Target>
 
+  <!-- The bundle becomes ordinary Compile input, while the outputs manifest travels as an AdditionalFile:
+       it is not C# source, and the Entity/Service generators must read the ownership identity the
+       precompile stage actually produced instead of guessing which artifacts it owns (§6.1). -->
   <Target Name="IncludeCrestCrudArtifacts"
           DependsOnTargets="GenerateCrestCrudSurface"
           Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
@@ -124,6 +127,9 @@
       <Compile Remove="$(_CrestCrudBundleFullPath)" />
       <Compile Include="$(_CrestCrudBundleFullPath)"
                Condition="Exists('$(_CrestCrudBundleFullPath)')" />
+      <AdditionalFiles Remove="$(_CrestCrudOutputsManifestFullPath)" />
+      <AdditionalFiles Include="$(_CrestCrudOutputsManifestFullPath)"
+                       Condition="Exists('$(_CrestCrudOutputsManifestFullPath)')" />
     </ItemGroup>
   </Target>
 
