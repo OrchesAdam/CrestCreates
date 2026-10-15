@@ -107,5 +107,20 @@
 - **正向与单项反例入库**：`Complete_declared_model_must_satisfy_both_response_and_input_contracts`（完整声明模型必须零违规，并断言该模型 compilation 无错误、闭包守卫为空——证明 checker 能接受正确模型，红例不是"永远不可能通过"）；`Response_root_contract_must_reject_each_single_missing_root`（8 例：dto/create/update/list/page/dto-envelope/page-envelope/void，每次只删一个 `[JsonSerializable]` 注册，必须点名该闭合类型）；`Input_envelope_contract_must_reject_a_missing_capability_input_root`（update-input/delete-input，声明存在但未注册为 root 必须被输入契约拒绝）。R4 的 9 例结构反例保持。
 - **审查探针入库**：`tests/.../CrudServiceGenerator/ReviewR5ResponseRootProbes.cs` 逐字收录 R5 复审评论附带的探针（完整响应模型 / 仅移除分页外层 root / 完整输入模型）。在 `94c24031` 上前者为 pass、后者 fail（checker 零违规）；在当前 head 三项全部通过。
 - 说明：本轮试图在本地临时把矩阵项置空以自证新反例的判别力，被权限分类器判定为"故意破坏测试"而阻止，未执行；判别力证据为审查者在本头的独立对照（零违规）+ 该对照用例在本头的失败事实，以及入库探针的原样复现。
-- 计数：CodeGenerator **397 通过 + 8 约定红（405，0 skipped）**；DynamicApi **73 通过 + 2 约定红（75，0 skipped）**；无既有用例回归。8 条红与增量 8 登记的名称一致，未新增或改口。
-- S1 退出状态：R1–R5 全部 P2 关闭；响应 roots 以矩阵维护且每项单独可验，真实 metadata 生成仍按约定由 S2 端到端红验收。设计审查通过后可推进 S2。
+- 计数：CodeGenerator **400 通过 + 8 约定红（408，0 skipped）**（含已入库的 3 个 ReviewR5 审查探针；主套件为 397 + 8 / 405）；DynamicApi **73 通过 + 2 约定红（75，0 skipped）**；无既有用例回归。8 条红与增量 8 登记的名称一致，未新增或改口。
+- S1 退出状态：R1–R5 全部 P2 关闭；响应 roots 以矩阵维护且每项单独可验，真实 metadata 生成仍按约定由 S2 端到端红验收。
+
+## S1 放行与 S2 交接（2026-10-15，R6 复审通过）
+
+- R6 复审在精确 head `2ca5e9b3` 独立复跑：CodeGenerator **400 + 8 / 408**、DynamicApi **73 + 2 / 75**，root 删除矩阵/完整模型/既有反例全部通过，未发现新增 P1/P2。**S1 设计/基线门禁通过，可进入 S2**；放行不代表八条契约红已实现，也不代表 S2/S3/S4 或 NativeAOT 验收通过。
+- S2 必须转绿的八条红（名称集合与上一轮完全一致，不重命名、不改口）：
+  1. `Generated_dtos_must_be_named_after_the_entity_not_the_service`
+  2. `Real_msbuild_producer_output_must_match_formal_naming_contract`
+  3. `Formal_crud_request_binding_must_not_route_through_the_legacy_body_helper`
+  4. `Compatibility_result_contract_must_not_wrap_through_object_typed_output`
+  5. `Formal_crud_must_emit_typed_input_envelopes_for_update_and_delete`
+  6. `Formal_crud_must_emit_typed_response_envelopes_as_json_roots`
+  7. `Current_msbuild_build_must_not_depend_on_same_round_mapping_output`
+  8. `Formal_msbuild_build_must_close_crud_json_roots_in_the_same_build`
+- S2 范围（按既有 Spec/计划，不开第二条主链）：从同一 CrudGenerationModel/emitters 物化普通 Compile bundle，范围覆盖 DTO/interface/service/mapping seeds/compatibility input/result/activation（不能只搬 DTO 而留下 mapping 同轮依赖，即红例 7）；显式串起 CRUD precompile → Include Compile → JsonContracts → 官方 STJ/其余 SG 的单次 CoreCompile；旧 `CrudServiceSourceGenerator` 对正式声明收口为诊断入口；测试改为读取普通 Compile 的 producer 产物并复用本轮契约检查（不为 `GeneratedTrees` 非空保留旧 SG bundle 断言）；验证 clean/声明移除/缺输出修复/增量/design-time/TFM·RID/package 首次消费与 ownership·provenance。声明层正向模型只证明检查器行为，真实官方 metadata 闭合必须由正式 MSBuild 证据承担（红例 8）。
+- DynamicApi 两条查询红仍属 S1 记账范围之外的 §8 工作，按计划在 S2/S3 的 filter 归一与编译期字段访问处处置；本轮不为其改口径。
