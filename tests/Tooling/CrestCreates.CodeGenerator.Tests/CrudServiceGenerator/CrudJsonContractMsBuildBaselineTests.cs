@@ -10,15 +10,19 @@ using Xunit;
 namespace CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
 
 /// <summary>
-/// #128 S1 baselines at real-MSBuild level. Every case creates its own random probe directory, writes
-/// the sources, runs <c>dotnet build</c> to completion and only then reads the producer and STJ
-/// artifacts of that same build — reading intermediate output before the build is not evidence.
-/// The claims are booked separately: the harness/closure control, the same-round mapping gap, the
-/// recorded STJ failure fact, the formal end-to-end contract (one build must close the roots) and
-/// the producer naming gap.
+/// #128 S2 baselines at real-MSBuild level. Every case writes a fresh random probe directory, runs
+/// <c>dotnet build</c> to completion and only then reads the artifacts of that same build. The claims
+/// are booked apart: the harness/closure control, the producer naming contract, the end of the
+/// same-round mapping dependency, the closed CRUD root matrix in one build, and the fail-closed
+/// counterfactual for a formal declaration whose toolchain is not assembled.
 /// </summary>
 public class CrudJsonContractMsBuildBaselineTests
 {
+    private const string ToolchainImports = """
+        <Import Project="__ROOT__/src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.props" />
+        <Import Project="__ROOT__/src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.targets" />
+        """;
+
     private const string ProjectFile = """
         <Project Sdk="Microsoft.NET.Sdk">
           <PropertyGroup>
@@ -27,6 +31,7 @@ public class CrudJsonContractMsBuildBaselineTests
             <ImplicitUsings>enable</ImplicitUsings>
             <OutputType>Library</OutputType>
             <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+            <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
           </PropertyGroup>
           <ItemGroup>
             <ProjectReference Include="__ROOT__/src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
@@ -34,10 +39,13 @@ public class CrudJsonContractMsBuildBaselineTests
             <ProjectReference Include="__ROOT__/src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
             <ProjectReference Include="__ROOT__/src/Framework/Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
             <ProjectReference Include="__ROOT__/src/Framework/Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
+            <ProjectReference Include="__ROOT__/src/Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
             <ProjectReference Include="__ROOT__/src/Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
             <ProjectReference Include="__ROOT__/src/Framework/Infrastructure/CrestCreates.Aop/CrestCreates.Aop.csproj" />
             <ProjectReference Include="__ROOT__/src/Framework/Infrastructure/CrestCreates.Validation/CrestCreates.Validation.csproj" />
+            <ProjectReference Include="__ROOT__/src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
           </ItemGroup>
+        __IMPORTS__
         </Project>
         """;
 
@@ -64,193 +72,173 @@ public class CrudJsonContractMsBuildBaselineTests
         }
         """;
 
-    // Roots written with the names the producer emits today, so the recorded failure fact is
-    // attributable to STJ metadata generation rather than to the naming gap.
-    private const string CurrentNameJsonRootsSource = """
-        using System.Text.Json.Serialization;
-        using Shop.Application.Products.Dtos;
-
-        namespace Shop.Serialization;
-
-        [JsonSerializable(typeof(ProductAppServiceDto))]
-        [JsonSerializable(typeof(CreateProductAppServiceDto))]
-        [JsonSerializable(typeof(UpdateProductAppServiceDto))]
-        internal partial class ProbeJsonContext : JsonSerializerContext
-        {
-        }
-        """;
-
-    private static readonly string[] CurrentNameRootTypes =
+    /// <summary>
+    /// The §7.1 matrix that must be registered by the JsonContracts stage and then closed by the
+    /// official STJ generator inside the same CoreCompile.
+    /// </summary>
+    private static readonly string[] RequiredCrudRoots =
     [
-        "ProductAppServiceDto",
-        "CreateProductAppServiceDto",
-        "UpdateProductAppServiceDto",
+        "global::Shop.Application.Products.Contracts.ProductDto",
+        "global::Shop.Application.Products.Contracts.CreateProductDto",
+        "global::Shop.Application.Products.Contracts.UpdateProductDto",
+        "global::Shop.Application.Products.Contracts.ProductListRequestDto",
+        "global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>",
+        "global::CrestCreates.DynamicApi.DynamicApiResponse<global::Shop.Application.Products.Contracts.ProductDto>",
+        "global::CrestCreates.DynamicApi.DynamicApiResponse<global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>>",
+        "global::CrestCreates.DynamicApi.DynamicApiResponse",
+        "global::CrestCreates.Generated.ProductAppService_Update_CompatibilityInput",
+        "global::CrestCreates.Generated.ProductAppService_Delete_CompatibilityInput",
     ];
 
     [Fact]
     public async Task Clean_probe_directory_exposes_the_same_build_producer_output_and_a_sound_closure()
     {
-        // Harness control (R4-CRUD128-01): fresh random directory, one real build, artifacts read
-        // only after it completed. The authored declaration must contribute no diagnostic at all, so
-        // every other case in this file is attributable to the generated chain, not to the probe or
-        // to a missing reference.
-        var probe = await RunProbeAsync(writeJsonRoots: null);
+        var probe = await RunProbeAsync(withToolchain: true);
 
         probe.ProducerFiles.Should().NotBeEmpty(
-            "the CRUD generator must materialize output inside the build that is being inspected");
-        probe.ProducerOutput.Should().Contain("class ProductAppServiceDto",
-            "the producer output read after the build must be this build's own CRUD bundle");
-
+            "the CRUD producer must materialize output inside the build that is being inspected");
         DiagnosticsIn(probe.Output, "Declaration.cs").Should().BeEmpty(
             "the authored formal declaration and the reference closure must compile; observed:\n" + probe.Output);
 
-        var blockingErrors = ErrorLines(probe.Output);
-        blockingErrors.Should().OnlyContain(line => IsGeneratedBundleDiagnostic(line),
-            "no build error may come from authored input or from an unresolved reference; observed: "
-            + string.Join(" | ", blockingErrors));
-    }
-
-    [Fact]
-    public async Task Current_msbuild_build_must_not_depend_on_same_round_mapping_output()
-    {
-        // Recorded gap, booked apart from the JSON roots: the CRUD surface the generator emits calls
-        // mapping members (ProductAppServiceObjectMappings.ToTarget/Apply) and entity identity that
-        // only exist if another producer output is visible in the same compilation. A consumer
-        // project with nothing but the formal declaration must therefore build today, and does not.
-        var probe = await RunProbeAsync(writeJsonRoots: null);
-
-        DiagnosticsIn(probe.Output, "Declaration.cs").Should().BeEmpty(
-            "the failure must not be attributed to the authored declaration; observed:\n" + probe.Output);
-
-        probe.ExitCode.Should().Be(0,
-            "the generated CRUD surface must not depend on same-round mapping output; observed:\n" + probe.Output);
-    }
-
-    [Fact]
-    public async Task Current_msbuild_build_fails_because_stj_generates_no_metadata_for_the_same_round_dtos()
-    {
-        // Recorded failure fact: the DTOs exist only inside the generator round, so the official STJ
-        // generator runs without their metadata. Attribution is per location: the authored roots file
-        // must fail only with SYSLIB1030 naming each declared root, and the STJ output of this same
-        // build must carry no JsonTypeInfo for those types. Unrelated errors (the legacy bundle) are
-        // located elsewhere and cannot satisfy this case.
-        var probe = await RunProbeAsync(CurrentNameJsonRootsSource);
-
-        probe.ExitCode.Should().NotBe(0,
-            "the build must fail while the CRUD surface depends on same-round generator output");
-
-        var rootsDiagnostics = DiagnosticsIn(probe.Output, "JsonRoots.cs");
-        rootsDiagnostics.Should().OnlyContain(
-            line => line.Contains("SYSLIB1030", StringComparison.Ordinal),
-            "the authored roots may only fail because STJ generated no metadata for them; observed: "
-            + string.Join(" | ", rootsDiagnostics));
-
-        foreach (var declaredRoot in CurrentNameRootTypes)
-        {
-            probe.ProducerOutput.Should().Contain("class " + declaredRoot,
-                $"the producer must have generated '{declaredRoot}' in this same build");
-            rootsDiagnostics.Should().Contain(
-                line => line.Contains(declaredRoot, StringComparison.Ordinal),
-                $"'{declaredRoot}' must be named by the SYSLIB1030 diagnostics on the authored roots");
-        }
-
-        probe.StjFiles.Should().NotBeEmpty(
-            "the official STJ generator must have run in this build, otherwise metadata absence is not evidence");
-        probe.StjFiles.Should().NotContain(
-            content => content.Contains("JsonTypeInfo<global::Shop.Application.Products.Dtos.ProductAppServiceDto>"),
-            "STJ must not generate metadata for same-round generator output; if that metadata exists "
-            + "this case no longer proves same-round invisibility");
-    }
-
-    [Fact]
-    public async Task Formal_msbuild_build_must_close_crud_json_roots_in_the_same_build()
-    {
-        // Designed end-to-end contract (§6.2/§7.1): the CRUD DTOs and mapping seeds are materialized
-        // before ordinary compilation, so one build resolves the formal roots, the official STJ
-        // generator closes them, and the bundle compiles. Today the same build fails, which is the
-        // gap this baseline books for S2.
-        var probe = await RunProbeAsync(FormalJsonRootsSource);
-
-        probe.ExitCode.Should().Be(0,
-            "one build must close the CRUD JSON roots and the generated surface; observed:\n" + probe.Output);
-
-        DiagnosticsIn(probe.Output, "JsonRoots.cs").Should().BeEmpty(
-            "the declared formal roots must resolve inside the same build");
-
-        probe.StjFiles.Should().NotBeEmpty("the official STJ generator must contribute the metadata");
-        probe.StjFiles.Should().Contain(
-            content => content.Contains("JsonTypeInfo<global::Shop.Application.Products.Contracts.ProductDto>"),
-            "the STJ output must carry metadata for the formal ProductDto root");
+        ErrorLines(probe.Output).Should().OnlyContain(
+            line => IsGeneratedFileDiagnostic(line),
+            "no build error may come from authored input or an unresolved reference; observed: "
+            + string.Join(" | ", ErrorLines(probe.Output)));
     }
 
     [Fact]
     public async Task Real_msbuild_producer_output_must_match_formal_naming_contract()
     {
-        // Naming gap booked on its own (§5.1): DTOs are named after typeof(Product) and live in the
-        // Contracts namespace below the declaring service namespace, never after the service class.
-        var probe = await RunProbeAsync(writeJsonRoots: null);
+        // §5.1: DTOs are named after typeof(Product) and live in the Contracts namespace below the
+        // declaring service namespace. The materialized surface is read as ordinary Compile output.
+        var probe = await RunProbeAsync(withToolchain: true);
 
-        probe.ProducerFiles.Should().NotBeEmpty("the CRUD generator must produce output");
-        probe.ProducerOutput.Should().Contain("class ProductDto",
-            "DTOs must be named after typeof(Product), not the service class");
-        probe.ProducerOutput.Should().Contain("namespace Shop.Application.Products.Contracts",
-            "DTOs must be in the Contracts namespace per the formal contract");
-        probe.ProducerOutput.Should().NotContain("class ProductAppServiceDto",
-            "the service class must not be treated as the entity");
+        var bundle = probe.BundleSource;
+        bundle.Should().Contain("class ProductDto",
+            "DTOs are derived from typeof(Product), never from the annotated service class");
+        bundle.Should().Contain("namespace Shop.Application.Products.Contracts",
+            "the default DTO namespace is the declaring service namespace plus Contracts");
+        bundle.Should().NotContain("class ProductAppServiceDto",
+            "the annotated service class must never be treated as the entity");
     }
 
-    private const string FormalJsonRootsSource = """
-        using System.Text.Json.Serialization;
-        using Shop.Application.Products.Contracts;
+    [Fact]
+    public async Task Current_msbuild_build_must_not_depend_on_same_round_mapping_output()
+    {
+        // The CRUD surface used to call mapper members produced by another generator in the same
+        // round, so a consumer project could not compile. The materialized bundle plus the sibling
+        // generators inside one CoreCompile must build.
+        var probe = await RunProbeAsync(withToolchain: true);
 
-        namespace Shop.Serialization;
+        probe.ExitCode.Should().Be(0,
+            "the generated CRUD surface must compile against the mapping output of the same build; observed:\n"
+            + probe.Output);
+    }
 
-        [JsonSerializable(typeof(ProductDto))]
-        [JsonSerializable(typeof(CreateProductDto))]
-        [JsonSerializable(typeof(UpdateProductDto))]
-        [JsonSerializable(typeof(ProductListRequestDto))]
-        internal partial class ProbeJsonContext : JsonSerializerContext
+    [Fact]
+    public async Task Formal_msbuild_build_must_close_crud_json_roots_in_the_same_build()
+    {
+        var probe = await RunProbeAsync(withToolchain: true);
+
+        probe.ExitCode.Should().Be(0, "one build must close the CRUD JSON roots; observed:\n" + probe.Output);
+        probe.Output.Should().NotContain("SYSLIB1030",
+            "STJ must not report missing metadata for the materialized CRUD surface");
+
+        var jsonContractsSource = probe.JsonContractsSource;
+        jsonContractsSource.Should().NotBeEmpty("the JsonContracts stage must produce a generated file");
+        foreach (var required in RequiredCrudRoots)
         {
+            jsonContractsSource.Should().Contain(
+                $"[global::System.Text.Json.Serialization.JsonSerializable(typeof({required}))]",
+                $"the root matrix must register '{required}' on the generated CRUD context");
         }
-        """;
+
+        jsonContractsSource.Should().Contain("CrestCreatesCrudJsonSerializerContext",
+            "the CRUD roots must be registered on one generated context");
+        jsonContractsSource.Should().Contain(
+            "JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)",
+            "HTTP CRUD uses the camelCase policy of §7.1");
+
+        probe.StjFiles.Should().NotBeEmpty("the official STJ generator must contribute the metadata");
+        probe.StjFiles.Should().Contain(
+            content => content.Contains(
+                "JsonTypeInfo<global::Shop.Application.Products.Contracts.ProductDto>", StringComparison.Ordinal),
+            "the official generator must emit metadata for the formal ProductDto root");
+        probe.StjFiles.Should().Contain(
+            content => content.Contains(
+                "JsonTypeInfo<global::CrestCreates.DynamicApi.DynamicApiResponse<global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>>>",
+                StringComparison.Ordinal),
+            "the typed paged result envelope must have real metadata, not only a declared root");
+
+        var outputsManifest = probe.OutputsManifest;
+        outputsManifest.Should().Contain("\"OwnerServiceFullName\":\"Shop.Application.Products.ProductAppService\"",
+            "every artifact must carry its owner identity (§6.2 provenance)");
+        outputsManifest.Should().Contain("\"ContentHash\":\"sha256:",
+            "artifacts must carry a content hash for incremental and manifest verification");
+    }
+
+    [Fact]
+    public async Task Formal_declaration_without_the_crud_toolchain_must_fail_and_never_fall_back()
+    {
+        // Counterfactual booked apart from the closure case: the pre-S2 world where the CRUD surface
+        // silently disappeared must now be a deterministic build error, never a legacy fallback.
+        var probe = await RunProbeAsync(withToolchain: false);
+
+        probe.ExitCode.Should().NotBe(0,
+            "a formal CRUD declaration without the precompile + JSON toolchain must fail the build");
+        probe.Output.Should().Contain("CCCRUD002",
+            "the failure must be the assembled-toolchain diagnostic, not an unrelated error");
+        probe.BundleSource.Should().BeEmpty(
+            "nothing may be materialized without the CRUD precompile toolchain");
+        probe.Output.Should().NotContain("class ProductAppServiceDto",
+            "the legacy service-as-entity bundle must not take ownership back");
+    }
+
+    private static readonly string IntermediateRelativePath =
+        Path.Combine("obj", "Debug", "net10.0");
 
     private sealed record ProbeBuild(
+        string Directory,
         int ExitCode,
         string Output,
         IReadOnlyList<string> ProducerFiles,
-        IReadOnlyList<string> StjFiles)
-    {
-        public string ProducerOutput { get; } = string.Join("\n", ProducerFiles);
-    }
+        IReadOnlyList<string> StjFiles,
+        string BundleSource,
+        string JsonContractsSource,
+        string OutputsManifest);
 
-    private static async Task<ProbeBuild> RunProbeAsync(string? writeJsonRoots)
+    private static async Task<ProbeBuild> RunProbeAsync(bool withToolchain)
     {
         var repoRoot = FindRepoRoot();
+        await EnsureToolchainAsync(repoRoot);
+
         var probeDirectory = Path.Combine(
-            repoRoot, "tests", "artifacts", "issue128-msbuild-" + Guid.NewGuid().ToString("N")[..8]);
+            repoRoot, "tests", "artifacts", "issue128-s2-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(probeDirectory);
         try
         {
-            await File.WriteAllTextAsync(
-                Path.Combine(probeDirectory, "Probe.csproj"),
-                ProjectFile.Replace("__ROOT__", repoRoot.Replace('\\', '/')));
+            var project = ProjectFile
+                .Replace("__ROOT__", repoRoot.Replace('\\', '/'))
+                .Replace("__IMPORTS__", withToolchain ? ToolchainImports.Replace("__ROOT__", repoRoot.Replace('\\', '/')) : string.Empty);
+            await File.WriteAllTextAsync(Path.Combine(probeDirectory, "Probe.csproj"), project);
             await File.WriteAllTextAsync(Path.Combine(probeDirectory, "Declaration.cs"), DeclarationSource);
-            if (writeJsonRoots is not null)
-            {
-                await File.WriteAllTextAsync(Path.Combine(probeDirectory, "JsonRoots.cs"), writeJsonRoots);
-            }
 
             var buildResult = await RunDotnetAsync(
                 repoRoot,
                 $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo",
                 TimeSpan.FromMinutes(12));
 
-            // R4-CRUD128-01: the artifacts of this same build are read only after it completed.
+            // The probe directory is deleted once the build is inspected, so every artifact the
+            // assertions talk about is read here, from this same build.
             return new ProbeBuild(
+                probeDirectory,
                 buildResult.ExitCode,
                 buildResult.Output,
                 ReadGenerated(probeDirectory, "CrestCreates.CodeGenerator"),
-                ReadGenerated(probeDirectory, "System.Text.Json.SourceGeneration"));
+                ReadGenerated(probeDirectory, "System.Text.Json.SourceGeneration"),
+                ReadOptional(Path.Combine(probeDirectory, IntermediateRelativePath, "CrestCreates.Crud.g.cs")),
+                ReadOptional(Path.Combine(probeDirectory, IntermediateRelativePath, "CrestCreates.JsonContracts.g.cs")),
+                ReadOptional(Path.Combine(probeDirectory, IntermediateRelativePath, "CrestCreates.Crud.outputs.json")));
         }
         finally
         {
@@ -258,11 +246,34 @@ public class CrudJsonContractMsBuildBaselineTests
             {
                 Directory.Delete(probeDirectory, recursive: true);
             }
-            catch (Exception)
+            catch (IOException)
             {
             }
         }
     }
+
+    /// <summary>
+    /// The repository transport resolves the task and tool from their build outputs, so the probe must
+    /// not depend on someone having built them earlier in the session.
+    /// </summary>
+    private static async Task EnsureToolchainAsync(string repoRoot)
+    {
+        var taskAssembly = Path.Combine(
+            repoRoot, "src", "Tooling", "CrestCreates.JsonContracts.BuildTasks", "bin", "Debug", "net10.0",
+            "CrestCreates.JsonContracts.BuildTasks.dll");
+        if (File.Exists(taskAssembly))
+        {
+            return;
+        }
+
+        await RunDotnetAsync(
+            repoRoot,
+            "build \"src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj\" -p:NuGetAudit=false --nologo -v q",
+            TimeSpan.FromMinutes(12));
+    }
+
+    private static string ReadOptional(string path) =>
+        File.Exists(path) ? File.ReadAllText(path) : string.Empty;
 
     private static IReadOnlyList<string> ReadGenerated(string probeDirectory, string generatorFolderFragment)
     {
@@ -279,9 +290,8 @@ public class CrudJsonContractMsBuildBaselineTests
             .ToArray();
     }
 
-    private static bool IsGeneratedBundleDiagnostic(string line) =>
-        line.Contains(".g.cs(", StringComparison.Ordinal)
-        || line.Contains("source-generators", StringComparison.Ordinal);
+    private static bool IsGeneratedFileDiagnostic(string line) =>
+        line.Contains(".g.cs(", StringComparison.Ordinal) || line.Contains("source-generators", StringComparison.Ordinal);
 
     private static IReadOnlyList<string> DiagnosticsIn(string output, string fileName) =>
         OutputLines(output)

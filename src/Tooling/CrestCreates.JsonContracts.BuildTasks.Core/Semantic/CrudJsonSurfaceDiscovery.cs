@@ -31,21 +31,8 @@ public sealed class CrudJsonSurfaceDiscovery
         var build = CrudGenerationModelBuilder.Build(compilation, assemblyName);
         ReconcileWithPrecompileManifest(build.Models, crudOutputsManifestJson, assemblyName);
 
-        foreach (var issue in build.Diagnostics)
-        {
-            _diagnostics.Add(new JsonContractDiagnostic
-            {
-                Id = issue.Id,
-                Severity = JsonContractDiagnosticSeverity.Error,
-                Message = issue.Message,
-                FilePath = issue.Location?.Path ?? string.Empty,
-                Line = issue.Location?.Line ?? 0,
-                Column = issue.Location?.Column ?? 0,
-            });
-        }
-
-        // The result-envelope contract types are only required when this compilation actually
-        // declares CRUD: a contracts-only or Abstractions project must not fail for types it never uses.
+        // The result-envelope contract types are required only when this compilation actually
+        // declares CRUD, so a contracts-only project never fails for types it cannot use.
         if (build.Models.Count == 0)
         {
             return roots;
