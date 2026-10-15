@@ -25,7 +25,8 @@ public sealed class JsonContractGenerationEngine
         IReadOnlyList<string> defineConstants,
         string nullable,
         bool allowUnsafeBlocks,
-        string manifestAccessibility)
+        string manifestAccessibility,
+        string? crudOutputsManifestJson = null)
     {
         var compilation = JsonContractCompilationFactory.Create(
             assemblyName,
@@ -48,7 +49,7 @@ public sealed class JsonContractGenerationEngine
         model.Diagnostics.AddRange(integrationEventDiscovery.Diagnostics);
 
         var crudDiscovery = new CrudJsonSurfaceDiscovery();
-        model.CrudRoots.AddRange(crudDiscovery.Discover(compilation, assemblyName));
+        model.CrudRoots.AddRange(crudDiscovery.Discover(compilation, assemblyName, crudOutputsManifestJson));
         model.Diagnostics.AddRange(crudDiscovery.Diagnostics);
 
         var accessibility = JsonContractSurfaceModelBuilder.ParseManifestAccessibility(manifestAccessibility);

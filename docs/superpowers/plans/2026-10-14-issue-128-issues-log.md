@@ -138,7 +138,14 @@
 
 真实构建证据（干净 obj、`tests/artifacts/probe2` 仓库内探针，导入 Repository props/targets）：CRUD bundle 19KB 物化、inputs/outputs manifest 与 stamp 生成、DTO/mapping 被 JsonContracts 正常发现；既有消费者 `CrestCreates.DynamicApi`、`CrestCreates.Accountability.Abstractions`、`samples/LibraryManagement/LibraryManagement.Application` 均 Build succeeded，工具链新链对存量工程无附带破坏。
 
-未闭合缺陷（下一轮第一件事，不含糊）：同一探针里 bundle 第 372/393 行确实声明了 `CrestCreates.Generated.ProductAppService_Update_CompatibilityInput` / `_Delete_CompatibilityInput`，但 JSON 发现侧对这些类型报 CCCRUD002「不在编译输入中」；同一文件里的 DTO 类型却能解析。需要把发现侧的类型解析换成与 S1 探针一致的逐引用程序集/命名空间走查，并区分「`GetTypeByMetadataName` 因歧义返回 null」与「符号真缺失」两种情形后再定位；在这一点查清前，不移动相关红例的口径。
+未闭合缺陷（已缩小，且存在**假绿风险**，不含糊）：
+
+- 已修：JSON 发现侧原先拿 `model.EnvelopeName(...)`（**短名**）当 FQN 查类型，命名空间走查必然 0 命中，于是把 bundle 里真实存在的 capability input envelope 报成 CCCRUD002。现在改用 `CrudEnvelopeConvention.EnvelopeFullName(...)`；同时把 `Compilation.GetTypeByMetadataName`（歧义与缺失都返回 null）换成「源程序集 + 逐个引用程序集」的命名空间走查，多命中直接按 §9 原义报 CCCRUD003「一个 CRUD 契约类型只能有一个 owner」，并把无 CRUD 声明的工程从 envelope 引用检查里排除（此前 Abstractions 类项目会被误报 CCCRUD005）。
+- 仍未闭合：修完后 `tests/artifacts/probe2` 变 Build succeeded，但生成的 `CrestCreates.JsonContracts.g.cs` 里 `CrestCreatesCrudJsonSerializerContext` 命中数为 **0**，说明 JSON 步的 `CrudGenerationModelBuilder.Build` 这次返回 0 个模型（更早一次它确实返回过模型并报出 envelope 缺失）。也就是当前"构建成功"不等于根闭合——这个绿不能被当作 red 8 的证据。
+- 防假绿守卫（已写、**尚未证明生效**）：`WriteCrestCrudInputManifest`/`GenerateCrestCrudArtifacts` 之外，`GenerateJsonContracts` 现在把 `$(IntermediateOutputPath)CrestCreates.Crud.outputs.json` 随请求传给工具，`CrudJsonSurfaceDiscovery.ReconcileWithPrecompileManifest` 对 manifest 里的 `OwnerServiceFullName` 与 JSON 步发现的 owner 做对账，缺失即 CCCRUD008。实测：探针仍 Build succeeded 且不报 CCCRUD008 ⇒ 守卫链路某处没接通（候选：task 读不到该相对路径、请求字段未落、或引擎参数默认值），必须先让守卫真的开火，再谈 roots。`CrestCreates.JsonContracts.g.cs` 目前只有 39 字节、`CrestCreatesCrudJsonSerializerContext` 命中 0，因此 red 8 不能声称，red 5/6 也仍是正当红。
+- 附带待办：`CrestCreates.CodeGenerator` 里 CCCRUD001–008 触发 RS2008（analyzer release tracking 未登记），需要在 AnalyzerReleases.Unshipped 里登记；不影响构建，但不能长期挂着。
+- 本轮另修一处我自己引入的仓库级破坏：CRUD targets 里用了不存在的 MSBuild 函数 `HasPathRootedPath`，一度让所有导入 JSON 工具链的工程构建失败（`CrestCreates.Accountability.Abstractions` 首先命中），已换成 `$([System.IO.Path]::IsPathRooted(...))` 并复验 DynamicApi / Accountability.Abstractions / LibraryManagement.Application 均 Build succeeded。
+- 本地提交 458b4c2f、cb92ec8f **未推送**：S2 未闭合前不把混合口径推给审查。
 
 测试迁移（S2-5，部分）：driver 层 4 条契约红改为读取 producer 产物（`CrudPrecompileProducer`）；其中 `Formal_crud_request_binding_must_not_route_through_the_legacy_body_helper` 与 `Generated_dtos_must_be_named_after_the_entity_not_the_service` 因新产物真实转绿（断言的是物化 surface 含 `class ProductDto` + `.Contracts`，不含 `ProductAppServiceDto`，且不含 legacy body helper/CompatibilityBodyReader）；输入信封与响应 roots 两条仍红，原因即上面的未闭合缺陷。harness 里不再断言 bundle 编译错误——mapper 成员由 sibling generator 在真实 CoreCompile 里补，这条声称归 MSBuild 证据。
 

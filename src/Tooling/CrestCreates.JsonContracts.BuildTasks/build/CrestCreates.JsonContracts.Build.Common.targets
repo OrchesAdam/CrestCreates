@@ -131,7 +131,8 @@
         TargetFramework="$(TargetFramework)"
         ManifestAccessibility="$(CrestCreatesJsonContractManifestAccessibility)"
         TaskSemanticVersion="$(CrestCreatesJsonContractsTaskSemanticVersion)"
-        ToolPath="$(CrestCreatesJsonContractsToolPath)">
+        ToolPath="$(CrestCreatesJsonContractsToolPath)"
+        CrudOutputsManifestPath="$(IntermediateOutputPath)CrestCreates.Crud.outputs.json">
       <Output TaskParameter="GeneratedContextCount" PropertyName="CrestCreatesJsonContractGeneratedContextCount" />
       <Output TaskParameter="GeneratedSurfaceRootCount" PropertyName="CrestCreatesJsonContractGeneratedSurfaceRootCount" />
       <Output TaskParameter="GeneratedExplicitRootCount" PropertyName="CrestCreatesJsonContractGeneratedExplicitRootCount" />

@@ -22,10 +22,14 @@ public sealed class CrudJsonSurfaceDiscovery
 
     public IReadOnlyList<JsonContractDiagnostic> Diagnostics => _diagnostics;
 
-    public List<JsonContractRootModel> Discover(CSharpCompilation compilation, string assemblyName)
+    public List<JsonContractRootModel> Discover(
+        CSharpCompilation compilation,
+        string assemblyName,
+        string? crudOutputsManifestJson)
     {
         var roots = new List<JsonContractRootModel>();
         var build = CrudGenerationModelBuilder.Build(compilation, assemblyName);
+        ReconcileWithPrecompileManifest(build.Models, crudOutputsManifestJson, assemblyName);
 
         foreach (var issue in build.Diagnostics)
         {
@@ -170,6 +174,49 @@ public sealed class CrudJsonSurfaceDiscovery
         }
 
         AddRoot(roots, type, model);
+    }
+
+    /// <summary>
+    /// §9 CCCRUD008: the JSON roots must agree with the CRUD precompile's own outputs manifest. A
+    /// build that "succeeds" because the CRUD surface silently disappeared is the exact false green
+    /// this stage must not be able to produce.
+    /// </summary>
+    private void ReconcileWithPrecompileManifest(
+        IReadOnlyList<CrudGenerationModel> models,
+        string? crudOutputsManifestJson,
+        string assemblyName)
+    {
+        if (string.IsNullOrWhiteSpace(crudOutputsManifestJson))
+        {
+            return;
+        }
+
+        using var document = System.Text.Json.JsonDocument.Parse(crudOutputsManifestJson);
+        if (!document.RootElement.TryGetProperty("Entries", out var entries)
+            || entries.ValueKind != System.Text.Json.JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var declaredOwners = entries.EnumerateArray()
+            .Select(entry => entry.TryGetProperty("OwnerServiceFullName", out var owner)
+                ? owner.GetString() ?? string.Empty
+                : string.Empty)
+            .Where(owner => owner.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var discovered = models.Select(model => model.ServiceFullName).ToHashSet(StringComparer.Ordinal);
+        foreach (var owner in declaredOwners.Where(owner => !discovered.Contains(owner)))
+        {
+            _diagnostics.Add(new JsonContractDiagnostic
+            {
+                Id = CrudDiagnosticIds.LegacyContractMismatch,
+                Severity = JsonContractDiagnosticSeverity.Error,
+                Message = $"'{owner}' owns materialized CRUD artifacts in assembly '{assemblyName}', "
+                    + "but the JSON contract stage found no CRUD surface for it; the root matrix is not closed.",
+            });
+        }
     }
 
     private static INamedTypeSymbol? ResolveType(CSharpCompilation compilation, string fullMetadataName)

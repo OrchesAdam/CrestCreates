@@ -149,7 +149,8 @@ internal static class Program
             defineConstants,
             request.Nullable ?? "enable",
             request.AllowUnsafeBlocks,
-            request.ManifestAccessibility ?? "Internal");
+            request.ManifestAccessibility ?? "Internal",
+            request.CrudOutputsManifestJson);
 
         var diagnostics = result.Diagnostics.Select(d => new ToolDiagnosticDto
         {
@@ -197,6 +198,9 @@ internal sealed class GenerateRequest
     public string? Nullable { get; set; }
     public bool AllowUnsafeBlocks { get; set; }
     public string? ManifestAccessibility { get; set; }
+
+    /// <summary>CRUD precompile outputs manifest, used to reconcile the root matrix against owners.</summary>
+    public string? CrudOutputsManifestJson { get; set; }
 }
 
 internal sealed class SourceDto
