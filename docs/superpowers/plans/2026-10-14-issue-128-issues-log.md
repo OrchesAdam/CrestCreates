@@ -226,3 +226,13 @@
 - CodeGenerator 全套 **445 通过 / 0 失败 / 445，0 skipped**：S1 立下的三条契约红（命名与 roots 由 S2 实现转绿、`FilterDescriptor` wire 由 S3-1 转绿、object 静态结果契约由 S3-2 转绿）已全部退役，未改口径、未放宽断言。
 - DynamicApi **100/100**（原 73+2 红 → 两红转绿 + 27 条新增：20 条 wire 域 + 5 条 typed result 运行时 + 2 条原有的其他用例计数随套件更新）。
 - JsonContracts 单元 **131/131**；PackageTests（真实消费工程构建/pack）**29/29**，两套都在 S3-1/S3-2 之后复跑过。
+
+## S3 增量 4：ExplicitHost 运行时面（S3-3 步骤 A 完成）
+
+- 新增（`CrestCreates.DynamicApi`）：`CapabilityEndpointContribution`（不可变、无 Host 捕获的生成物载体：owner assembly、capability/endpoint descriptors、bindings、handler bindings、result bindings、body types、required identities）与三个键值/身份记录（`CapabilityEndpointHandlerBinding`、`CapabilityEndpointResultBinding`、`CapabilityEndpointRequiredIdentity{IdentityId, Owner, Action, TypeName, Version}`）。
+- `CapabilityEndpointHostActivation`（DI 单例）：本 Host 贡献的唯一聚合；**host-first** 查找 binding/handler/result mapper，legacy 静态注册表降为兼容回退；重复 owner 在构造期确定性失败，不做静默合并。
+- `CapabilityEndpointExtensions.AddCrestCapabilityEndpointContribution` 用 `TryAddEnumerable` 注册（同生成类型重复调用幂等）；`MapCrestCapabilityEndpoints` 改为两段解析（先 host 聚合后 legacy），按 `(endpointId, version)` 去重；**被贡献拥有的 endpoint 必须同时具备 binding/handler/result mapper，缺一即 fail-closed**，不走通用 fallback。
+- `CapabilityEndpointRegistryBootstrapper`：静态 providers + 本 Host 贡献合并进**同一次** Build；已 Built 时只做必需 identities/owned endpoint 的核对（不突变冻结 registry）；`_ready` 仅成功后提交；`Failed` 不再永久毒化（`BuildRetryable` 把终态 Failed 复位为该 Host 作用域的重试，共享 `RegistryBase` 的 "Restart required" 语义与既有测试保持不变）。
+- 记录两处与定型文本的差异（实现细节，非口径偏离）：贡献类型命名为 `CapabilityEndpointContribution`（合并了原计划的 provider 概念，避免双注册面）；`TryAddEnumerable` 要求贡献是**每程序集的具体类型**（不能用服务类型本身实例化），这正是生成物形状，已在实现里注明。
+- 证据：DynamicApi **109/109**（新增 9 例：两 Host 隔离且无静态泄漏、贡献注册幂等、必需 identity 缺失→确定性失败且不映射、第二次 Map 不重复映射、缺 result mapper/handler 均 fail-closed、Build 失败不复用、host 覆盖 legacy、body types 合并）；CodeGenerator 仍 **445/445**；`CompatibilityProjection.E2E.Tests` 9/9；`CapabilityEndpoint.AotFixture` 构建 0 错误。
+- 环境已知项（非本轮引入）：`CrestCreates.Web.Tests` 4 例文件扫描测试在 git worktree 下失败——其 `FindRepoRoot()` 要求 `.git` 是目录，而 worktree 的 `.git` 是文件，断言前即抛；扫描目标文件已人工核对不含被禁 legacy 符号。
