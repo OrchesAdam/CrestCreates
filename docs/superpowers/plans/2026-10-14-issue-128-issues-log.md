@@ -201,3 +201,22 @@
 - 兼容投影的 result emitter 改为：非 void 先做**受检强类型转换**（`(T)ctx.Output!` / GET 用 `ctx.Output as T`），再调用 typed overload，并把 envelope 元数据从 `Require<T>` 取；旧的 `WrapResult(ctx.Output, serviceProvider)` 形态在正式 CRUD 生成物中彻底消失。既有正例测试里断言旧形态的三条断言同步改为 typed 契约（并新增“绝不出现 object 形态”的断言）。
 - 测试：`TypedResultContractTests`（DynamicApi.Tests，5 例）用真实 DI host（`JsonOptions` 只挂源生成 context、无反射 resolver）执行 `IResult`：typed 结果 200 + camelCase body、GET null → 404 且无 data、void → 200 无 data、**缺元数据必须 fail-closed**、null 元数据引用的重载必须拒绝。DynamicApi 套件 **100/100**。
 - 回归：AppServiceCompatibilityGenerator 定向 42/42（含转绿的记账红）；PackageTests 29/29（S3-1 的 FilterDescriptor 变更后复跑）；CodeGenerator 全套在本轮后台复跑，结果随后记录。
+
+## S3 增量 3：ExplicitHost 激活面勘察结论与契约定型（S3-3/S3-4 执行依据）
+
+勘察（读现有代码，不改码）确认的现状：
+
+- 兼容投影全部发射 `[ModuleInitializer]` → **进程级静态注册**：`DescriptorProviderRegistry`（capability + endpoint descriptors）、`CapabilityEndpointBindingRegistry`（重复注册直接抛）、`CapabilityEndpointJsonContractRegistry`（body types）、`CapabilityHandlerResolverProvider`（invokers）、`CapabilityEndpointResultContractRegistration`（result mappers）、`AppServiceCompatibilityProjectionManifestRegistry`。没有一个 emitter 现在发 DI 扩展。
+- 运行期：`CapabilityEndpointRegistry` / `CapabilityEndpointRegistryBootstrapper` / `CapabilityEndpointResultContractRegistry` 是 DI 单例（每 Host 一份 ✓），但 bootstrapper **只**读静态 provider bag；`EnsureBuilt` 之后新增的 provider 被静默忽略；一次 `Failed` build 会永久毒化（"Restart required"）；binding/json/result 三处仍是进程全局，跨 Host 泄漏与进程级重复注册抛错因此保留；`MapCrestCapabilityEndpoints` 第二次调用会重复映射路由（无 mapped-key 去重）。
+- 现有 `ICapabilityEndpointDescriptorProvider` 只被 ModuleInitializer 喂；唯一的 DI 显式装配范式是 **LocalEvent**：生成 `ILocalEventRegistrationContributor` 贡献 + `AddLocalEvents(this IServiceCollection)`（`TryAddEnumerable`）+ 运行期 freeze 消费 DI，重名冲突走确定性诊断（CCCLE/CCCEV）而不是跳过。RabbitMQ 用“合并进同一 builder + 显式 provider”。→ CRUD 的 ExplicitHost 就照 LocalEvent 形状做。
+- legacy CRUD 激活（`GeneratedCrudRegistration_*` + `DynamicApiGeneratedRegistryStore`）只服务旧链路；正式声明下它消失不影响 `MapCrestCapabilityEndpoints`。
+
+定型契约（S3-3 实现时按此执行，不另开第二注册面）：
+
+1. 运行期新增**每 Host 激活聚合**（DI 单例）：`CapabilityEndpointHostActivation`，由 `IEnumerable<ICapabilityEndpointGeneratorContribution>` 构造；贡献对象是**不可变、无 Host 捕获**的生成物，字段为：capability/endpoint descriptors、`(endpointId, version)` → binding contract、capabilityId → invoker、`(endpointId, version)` → result mapper、body types、`RequiredIdentityIds`。
+2. 生成侧每程序集一个贡献类 + `AddGeneratedCrud(this IServiceCollection)`（`TryAddEnumerable`，幂等）；CRUD registration mode 固定 ExplicitHost，兼容 emitter 增加该模式（legacy 消费者保持 ModuleInitializer 不变）。
+3. Map 路径（`MapCrestCapabilityEndpoints`）改为：静态 legacy 注册 + 本 Host 贡献合并 → 校验 `RequiredIdentityIds`（缺失即拒绝并指明 owner/action/type）→ registry 未 Built 时一次 Build（含贡献 descriptors），已 Built 则核对必需 identities/shape——**不得增量突变已冻结 registry，也不建第二个 registry**；ready 只在成功后提交，失败不永久缓存（Bootstrapper 的 `_built`/Failed 语义按此改造）。
+4. per-Host 隔离：binding/invoker/result/body-type 查找优先走本 Host 聚合，legacy 静态注册只作为既有兼容消费者的来源；正式 CRUD 不得依赖静态注册可见性。第二次 Map 需按 (endpointId, version) 去重。
+5. 迁移清单（改测试而不是放宽断言）：`AppServiceCompatibilityGeneratorTests` 中 ModuleInitializer 断言、`CapabilityEndpointIntegrationTests` 里靠反射清静态 provider 的隔离手法、`CompatibilityProjection.E2E.Tests` 与 `CapabilityEndpoint.AotFixture` 的 Program 装配，都要迁到 DI 贡献/显式 AddGeneratedCrud。
+
+这一条落地前不动 S3-5..S3-7 的顺序；S3-2 的 typed result 与 S3-1 的 wire 域已经是它们的前置。
