@@ -98,33 +98,53 @@ public class CrudJsonContractMsBuildBaselineTests
 
             // Precondition: verify the producer actually runs and generates types. This separates
             // "producer didn't run" from "STJ can't see same-round output".
-            var buildResult = await RunDotnetAsync(
-                repoRoot,
-                $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo --verbosity quiet",
-                TimeSpan.FromMinutes(12));
-
             var generatedFiles = Directory
                 .EnumerateFiles(Path.Combine(probeDirectory, "obj"), "*.g.cs", SearchOption.AllDirectories)
                 .Where(path => path.Contains("CrestCreates.CodeGenerator", StringComparison.Ordinal))
                 .Select(File.ReadAllText)
                 .ToList();
+
+            // R2-CRUD128-01 + R3-CRUD128-01: Run the build and check for specific STJ diagnostics
+            // (SYSLIB1030) and metadata absence, not just build failure + name substring.
+            // Unrelated compilation errors must not satisfy the assertion.
+            var buildResult = await RunDotnetAsync(
+                repoRoot,
+                $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo",
+                TimeSpan.FromMinutes(12));
+
             generatedFiles.Should().NotBeEmpty("the CRUD generator must produce output for the probe declaration");
             var generatedContent = string.Join("\n", generatedFiles);
             generatedContent.Should().Contain("ProductAppServiceDto",
                 "the producer must generate the DTO types (confirms generator ran and produced the types referenced by STJ roots)");
 
-            // R2-CRUD128-01: Now that we've confirmed the producer generated ProductAppServiceDto and
-            // the STJ roots reference those exact types, the build must fail because STJ cannot see
-            // same-round generator output. This proves same-round invisibility separately from naming errors.
             // The build must fail because STJ cannot see the producer's output in the same round.
-            // We expect SYSLIB1030 (STJ cannot serialize type) or CS0246 (type not found in STJ context).
             buildResult.ExitCode.Should().NotBe(0,
-                "the build must fail because STJ cannot see same-round generator output; observed build output:\n"
-                + buildResult.Output);
+                "the build must fail because STJ cannot see same-round generator output");
 
-            // Verify the failure is on the DTO types (not naming errors, since we reference actual names)
-            buildResult.Output.Should().Contain("ProductAppServiceDto",
-                "the failure must be on the DTO types that the producer generated but STJ cannot see in the same round");
+            // R3-CRUD128-01: Verify the failure is due to STJ same-round invisibility, not unrelated errors.
+            // Check for SYSLIB1030 (STJ cannot serialize type) or CS0246 (type not found in STJ context)
+            // specifically on the DTO types.
+            var hasStjDiagnostic = buildResult.Output.Contains("SYSLIB1030") ||
+                (buildResult.Output.Contains("CS0246") && buildResult.Output.Contains("ProductAppServiceDto"));
+
+            hasStjDiagnostic.Should().BeTrue(
+                "the build failure must be due to STJ same-round invisibility (SYSLIB1030 or CS0246 on DTO types), " +
+                "not unrelated compilation errors. Observed output:\n" + buildResult.Output);
+
+            // Verify no STJ metadata was generated for the DTO types
+            var stjMetadataFiles = Directory
+                .EnumerateFiles(Path.Combine(probeDirectory, "obj"), "*.g.cs", SearchOption.AllDirectories)
+                .Where(path => path.Contains("System.Text.Json.SourceGeneration", StringComparison.Ordinal))
+                .Select(File.ReadAllText)
+                .ToList();
+
+            var hasDtoMetadata = stjMetadataFiles.Any(content =>
+                content.Contains("ProductAppServiceDto") &&
+                content.Contains("JsonTypeInfo<global::Shop.Application.Products.Dtos.ProductAppServiceDto>"));
+
+            hasDtoMetadata.Should().BeFalse(
+                "STJ must not generate metadata for same-round generator output; " +
+                "if metadata exists, the test is not proving same-round invisibility");
         }
         finally
         {

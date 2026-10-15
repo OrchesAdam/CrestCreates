@@ -123,8 +123,9 @@ public class CrudServiceRealDeclarationBaselineTests
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new CrudServiceSourceGenerator());
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
-        return (compilation, driver.GetRunResult());
+        // R3-CRUD128-02: Capture the updated compilation so symbol checks can see generated types
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updatedCompilation, out _);
+        return (updatedCompilation, driver.GetRunResult());
     }
 
     [Fact]
@@ -487,8 +488,9 @@ public class CrudServiceRealDeclarationBaselineTests
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new CrudServiceSourceGenerator());
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
-        return (compilation, driver.GetRunResult());
+        // R3-CRUD128-02: Capture the updated compilation so symbol checks can see generated types
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updatedCompilation, out _);
+        return (updatedCompilation, driver.GetRunResult());
     }
 
     [Fact]
@@ -522,25 +524,55 @@ public class CrudServiceRealDeclarationBaselineTests
         // - Delete: DynamicApiResponse (void)
         // - Get not-found: DynamicApiResponse (void/404)
         // The current generator wraps through object-typed ctx.Output instead.
-        // R2-CRUD128-03: Use Roslyn symbols to verify actual JsonTypeInfo fields, not just regex.
+        // R3-CRUD128-03: Use symbol-based assertions, not regex on source text.
         var (compilation, runResult) = RunRealDriver();
         runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
 
-        // Verify JsonTypeInfo fields exist for the response envelopes
-        var jsonTypeInfoFields = compilation.GetSymbolsWithName("JsonTypeInfo", SymbolFilter.Member)
-            .OfType<IFieldSymbol>()
-            .Where(f => f.Type.Name == "JsonTypeInfo")
+        // R3-CRUD128-03: Verify JsonTypeInfo fields exist with correct type parameters using symbols.
+        // Get all fields whose type is JsonTypeInfo<T> and check their type arguments.
+        var allTypes = compilation.GetSymbolsWithName(_ => true, SymbolFilter.Type)
+            .OfType<INamedTypeSymbol>()
             .ToList();
 
-        // Check for typed response envelope usage in actual code (not comments)
-        var generatedContent = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
+        // Look for fields in generated types that are JsonTypeInfo<DynamicApiResponse<...>>
+        var jsonTypeInfoFields = allTypes
+            .SelectMany(t => t.GetMembers().OfType<IFieldSymbol>())
+            .Where(f => f.Type is INamedTypeSymbol namedType &&
+                        namedType.Name == "JsonTypeInfo" &&
+                        namedType.TypeArguments.Length == 1)
+            .Select(f => (Field: f, TypeArg: ((INamedTypeSymbol)f.Type).TypeArguments[0]))
+            .ToList();
 
-        // Verify the typed envelopes are used in actual field/variable declarations
-        generatedContent.Should().MatchRegex(@"\bJsonTypeInfo<DynamicApiResponse<ProductDto>>\s+\w+\s*[=;]",
-            "Get/Create/Update response envelope must have an actual JsonTypeInfo field declaration");
-        generatedContent.Should().MatchRegex(@"\bJsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>>\s+\w+\s*[=;]",
-            "Search response envelope must have an actual JsonTypeInfo field declaration");
-        generatedContent.Should().MatchRegex(@"\bJsonTypeInfo<DynamicApiResponse>\s+\w+\s*[=;]",
-            "Delete/404 void response envelope must have an actual JsonTypeInfo field declaration");
+        // Check for typed response envelope: JsonTypeInfo<DynamicApiResponse<ProductDto>>
+        var getResponseEnvelope = jsonTypeInfoFields
+            .Where(f => f.TypeArg is INamedTypeSymbol namedType &&
+                        namedType.Name == "DynamicApiResponse" &&
+                        namedType.TypeArguments.Length == 1 &&
+                        namedType.TypeArguments[0].Name == "ProductDto")
+            .ToList();
+        getResponseEnvelope.Should().NotBeEmpty(
+            "Get/Create/Update response envelope must have JsonTypeInfo<DynamicApiResponse<ProductDto>> field");
+
+        // Check for paged response envelope: JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>>
+        var searchResponseEnvelope = jsonTypeInfoFields
+            .Where(f => f.TypeArg is INamedTypeSymbol namedType &&
+                        namedType.Name == "DynamicApiResponse" &&
+                        namedType.TypeArguments.Length == 1 &&
+                        namedType.TypeArguments[0] is INamedTypeSymbol pagedType &&
+                        pagedType.Name == "PagedResultDto" &&
+                        pagedType.TypeArguments.Length == 1 &&
+                        pagedType.TypeArguments[0].Name == "ProductDto")
+            .ToList();
+        searchResponseEnvelope.Should().NotBeEmpty(
+            "Search response envelope must have JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>> field");
+
+        // Check for void response envelope: JsonTypeInfo<DynamicApiResponse>
+        var voidResponseEnvelope = jsonTypeInfoFields
+            .Where(f => f.TypeArg is INamedTypeSymbol namedType &&
+                        namedType.Name == "DynamicApiResponse" &&
+                        namedType.TypeArguments.Length == 0)
+            .ToList();
+        voidResponseEnvelope.Should().NotBeEmpty(
+            "Delete/404 void response envelope must have JsonTypeInfo<DynamicApiResponse> field");
     }
 }

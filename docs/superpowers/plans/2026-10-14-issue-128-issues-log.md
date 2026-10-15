@@ -76,3 +76,11 @@
 - **R2-CRUD128-03 [P2] 信封基线使用 Roslyn symbols**：输入/响应信封基线从正则匹配改为 Roslyn symbol 验证——`compilation.GetSymbolsWithName("UpdateProductInput", SymbolFilter.Type)` 确认实际类型声明存在，杜绝注释假绿。响应信封基线同时保留正则检查 `JsonTypeInfo<...>\s+\w+\s*[=;]` 验证实际字段声明。
 - 计数：CodeGenerator **376 通过 + 6 约定红（382）**；DynamicApi **73 通过 + 2 约定红（75）**；无既有用例回归。所有红灯失败原因纯净，符合声称的能力缺口。
 - S1 退出状态：R1 + R2 全部 P2 关闭；设计审查通过后可推进 S2。
+
+### S1 增量 7：R3 审查修复（2026-10-15）
+
+- **R3-CRUD128-01 [P2] MSBuild 诊断归因**：`CrudJsonContractMsBuildBaselineTests` 增加精确 STJ 诊断检查（SYSLIB1030 或 CS0246 on DTO types），并验证 STJ 未生成 DTO metadata（`JsonTypeInfo<global::Shop.Application.Products.Dtos.ProductAppServiceDto>` 不存在）。无关编译错误不再能满足断言，必须证明 STJ 同轮不可见。
+- **R3-CRUD128-02 [P2] 捕获更新后 compilation**：`RunRealDriver` 和 `RunRealDriverWithSource` helper 改为捕获 `out var updatedCompilation`，返回包含生成类型的 compilation。输入信封符号检查现在可以看到生成的类型。
+- **R3-CRUD128-03 [P2] 响应信封符号断言**：删除源码正则匹配，改为 Roslyn symbol 断言——遍历所有 `INamedTypeSymbol` 的 `IFieldSymbol` 成员，检查 `JsonTypeInfo<T>` 字段的类型参数（`DynamicApiResponse<ProductDto>`、`DynamicApiResponse<PagedResultDto<ProductDto>>`、`DynamicApiResponse`）。注释无法通过符号断言。
+- 计数：CodeGenerator **375 通过 + 7 约定红（382）**；DynamicApi **73 通过 + 2 约定红（75）**；无既有用例回归。所有红灯失败原因纯净，符合声称的能力缺口。
+- S1 退出状态：R1 + R2 + R3 全部 P2 关闭；设计审查通过后可推进 S2。
