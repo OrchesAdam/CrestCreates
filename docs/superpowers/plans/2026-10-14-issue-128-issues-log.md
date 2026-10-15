@@ -182,3 +182,5 @@
 附带修复已记录的 PackageTests locale 假失败：断言 CS0122，替代本地化英文 inaccessible。未修改 CI，未实施 S3 的 object-result/有限 filter 归一或 S4 的 GeneratedCrud 原生验收。
 
 验证（当前源代码）：定向 39/39；CodeGenerator 全套 444 pass + 1 个 S3 约定红 / 445，0 skipped；JsonContracts 单元 131/131；PackageTests 29/29（zh-Hans locale，CS0122 断言成立）；DynamicApi 73 pass + 2 个 S3 查询约定红 / 75。两个 driver roots 旧红已通过生产两阶段 CLI + 同一 STJ/ObjectMapping driver 真正转绿；未更改 S3 红例名称或含义。
+
+- 最终补证：实现提交 2580129438a31af4ed2557595d3c9ce56e09b0e9，Release 两阶段 driver 3/3；LocalEvent 真实 NativeAOT publish/link/run 1/1（linux-x64，11 场景+sentinel，publish/run 均 0，无 IL2026/IL3050，evidence sha 精确绑定实现提交）。②③及本轮审查修复完成，S3/S4 尚未实施。报告 docs/review/2026-10-15-issue-128-s2-review-and-completion.md。
