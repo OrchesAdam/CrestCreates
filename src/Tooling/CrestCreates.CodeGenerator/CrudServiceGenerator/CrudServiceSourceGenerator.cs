@@ -7,6 +7,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using CrestCreates.Tooling.CrudGeneration;
 
 namespace CrestCreates.CodeGenerator.CrudServiceGenerator
 {
@@ -25,7 +26,15 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
-            var compilationAndClasses = context.CompilationProvider.Combine(entityClasses);
+            // The CRUD precompile + JSON transport marker decides whether a formal declaration is
+            // allowed to exist at all; the analyzer never falls back to the legacy surface.
+            var toolchainAssembled = context.AnalyzerConfigOptionsProvider.Select(static (provider, _) =>
+                provider.GlobalOptions.TryGetValue(
+                    "build_property.CrestCreatesCrudJsonToolchain", out var value) && value == "true");
+
+            var compilationAndClasses = context.CompilationProvider
+                .Combine(entityClasses)
+                .Combine(toolchainAssembled);
 
             context.RegisterSourceOutput(compilationAndClasses, ExecuteGeneration);
         }
@@ -158,10 +167,27 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             return defaultValue;
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, (Compilation Compilation, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> Classes) input)
+        private void ExecuteGeneration(
+            SourceProductionContext context,
+            ((Compilation Compilation, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> Classes) Combined, bool ToolchainAssembled) input)
         {
-            var (compilation, entityClasses) = input;
+            var (combined, toolchainAssembled) = input;
+            var (compilation, entityClasses) = combined;
             if (entityClasses.IsDefaultOrEmpty) return;
+
+            // #128 S2: a formal [GenerateCrudService(typeof(Entity))] declaration is materialized by
+            // the CRUD precompile stage as ordinary Compile input. This generator keeps only the
+            // declaration and assembly-consistency diagnostics for it; emitting a second surface here
+            // is exactly the double track the design closes.
+            var formalDeclarations = entityClasses
+                .Where(info => info.HasValue)
+                .Select(info => info!.Value.Symbol)
+                .Where(IsFormalDeclaration)
+                .ToImmutableHashSet(SymbolEqualityComparer.Default);
+            if (!formalDeclarations.IsEmpty)
+            {
+                ReportFormalDeclarationDiagnostics(context, compilation, formalDeclarations.Count, toolchainAssembled);
+            }
 
             var hasMultiTenant = compilation.GetTypeByMetadataName("CrestCreates.DataFilter.Entities.IMultiTenant") != null;
             var hasDynamicApi = HasDynamicApiSupport(compilation);
@@ -175,6 +201,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
 
                 var (entityClass, generateAsBaseClass, isUsingNewAttribute) = entityInfo.Value;
                 var entityFullName = entityClass.ToDisplayString();
+                if (formalDeclarations.Contains(entityClass)) continue;
                 if (processedEntities.Contains(entityFullName)) continue;
 
                 processedEntities.Add(entityFullName);
@@ -226,6 +253,58 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 }
             }
         }
+
+        /// <summary>
+        /// Formal recognition is by the attribute's metadata full name and symbol identity; the test
+        /// stub with the same short name is not a delivered contract (§5.1).
+        /// </summary>
+        /// <summary>
+        /// Formal recognition is by the attribute's metadata full name and symbol identity, plus the
+        /// delivered <c>typeof(Entity)</c> constructor shape (§5.1). The test stub shares the full name
+        /// but has no entity-typed constructor argument, so it stays on the legacy path and is never
+        /// mistaken for the delivered contract.
+        /// </summary>
+        private static bool IsFormalDeclaration(INamedTypeSymbol type) => type.GetAttributes().Any(data =>
+            data.AttributeClass?.ToDisplayString() == CrudGenerationModelBuilder.AttributeFullName
+            && data.ConstructorArguments.Length == 1
+            && data.ConstructorArguments[0].Value is INamedTypeSymbol);
+
+        private static void ReportFormalDeclarationDiagnostics(
+            SourceProductionContext context,
+            Compilation compilation,
+            int formalDeclarationCount,
+            bool toolchainAssembled)
+        {
+            var build = CrudGenerationModelBuilder.Build(compilation, compilation.AssemblyName ?? string.Empty);
+            foreach (var issue in build.Diagnostics)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    MapDescriptor(issue.Id),
+                    Location.None,
+                    issue.Message));
+            }
+
+            if (!toolchainAssembled && formalDeclarationCount > 0)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    CrudServiceDiagnostics.PrecompileTransportMissing,
+                    Location.None,
+                    $"{formalDeclarationCount} formal CRUD declaration(s) exist but the CRUD precompile and JSON contract toolchain is not imported by this project."));
+            }
+        }
+
+        private static DiagnosticDescriptor MapDescriptor(string id) => id switch
+        {
+            CrudDiagnosticIds.DeclarationUnsupported => CrudServiceDiagnostics.InvalidDeclaration,
+            CrudDiagnosticIds.ToolchainNotAssembled => CrudServiceDiagnostics.PrecompileTransportMissing,
+            CrudDiagnosticIds.OwnerIdentityConflict => CrudServiceDiagnostics.IdentityConflict,
+            CrudDiagnosticIds.StaticClosureUnsupported => CrudServiceDiagnostics.StaticClosureUnsupported,
+            CrudDiagnosticIds.RequiredReferenceMissing => CrudServiceDiagnostics.MissingRequiredReference,
+            CrudDiagnosticIds.PrecompileStateInvalid => CrudServiceDiagnostics.PrecompileInputCorrupted,
+            CrudDiagnosticIds.QueryConfigurationUnsupported => CrudServiceDiagnostics.FilterSortUnsupported,
+            CrudDiagnosticIds.LegacyContractMismatch => CrudServiceDiagnostics.LegacySerializationInconsistent,
+            _ => CrudServiceDiagnostics.InvalidDeclaration,
+        };
 
         private static bool HasDynamicApiSupport(Compilation compilation)
         {

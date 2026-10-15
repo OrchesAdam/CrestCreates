@@ -11,4 +11,5 @@ public enum JsonContractRootSourceKind
     Explicit,
     LocalEvent,
     IntegrationEvent,
+    CrudSurface,
 }

@@ -58,6 +58,12 @@ public static class JsonContractSourceWriter
             WriteIntegrationEventCodecBlock(sb, model.IntegrationEventRoots, assemblyName);
         }
 
+        if (model.CrudRoots.Count > 0)
+        {
+            sb.AppendLine();
+            WriteCrudRootBlock(sb, model.CrudRoots, assemblyName);
+        }
+
         return sb.ToString();
     }
 
@@ -103,6 +109,33 @@ public static class JsonContractSourceWriter
 
         sb.AppendLine("            return services;");
         sb.AppendLine("        }");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+    }
+
+    /// <summary>
+    /// #128 S2: the CRUD roots become one internal context in the generated file, so the official STJ
+    /// generator closes the DTOs, the paged payload, the typed and void envelopes and the composed
+    /// capability inputs in the same CoreCompile. HTTP uses the camelCase policy of §7.1.
+    /// </summary>
+    private static void WriteCrudRootBlock(
+        System.Text.StringBuilder sb,
+        List<JsonContractRootModel> roots,
+        string assemblyName)
+    {
+        sb.AppendLine($"namespace {JsonContractBuildConstants.LocalEventGeneratedNamespace}");
+        sb.AppendLine("{");
+
+        foreach (var root in roots.OrderBy(r => r.FullMetadataName, StringComparer.Ordinal))
+        {
+            var origin = root.Provenance.Origins.FirstOrDefault();
+            sb.AppendLine($"    // CRUD root from {(origin?.DeclaringSurface ?? assemblyName)}");
+            sb.AppendLine($"    [global::System.Text.Json.Serialization.JsonSerializable({JsonContractTypeNameWriter.WriteTypeofExpression(root.RootType)})]");
+        }
+
+        sb.AppendLine("    [global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]");
+        sb.AppendLine($"    internal sealed partial class {JsonContractBuildConstants.CrudJsonContextSimpleName} : global::System.Text.Json.Serialization.JsonSerializerContext");
+        sb.AppendLine("    {");
         sb.AppendLine("    }");
         sb.AppendLine("}");
     }

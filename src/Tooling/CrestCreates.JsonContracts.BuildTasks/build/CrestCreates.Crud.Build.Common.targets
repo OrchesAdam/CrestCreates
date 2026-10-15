@@ -1,0 +1,137 @@
+<Project>
+  <!-- #128 S2: CRUD precompile chain. The produced bundle is ordinary Compile input that lands before
+       PrepareCrestCreatesJsonContractInputs collects @(Compile), so JsonContracts discovers the real
+       CRUD surface and the official STJ generator closes it inside the same CoreCompile. -->
+  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.WriteCrestCrudInputManifest"
+             AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)"
+             Runtime="NET"
+             Architecture="*" />
+  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateCrestCrudArtifacts"
+             AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)"
+             Runtime="NET"
+             Architecture="*" />
+
+  <PropertyGroup>
+    <CrestCreatesCrudModelSchemaVersion Condition="'$(CrestCreatesCrudModelSchemaVersion)' == ''">crud-model-v1</CrestCreatesCrudModelSchemaVersion>
+  </PropertyGroup>
+
+  <Target Name="SetCrestCrudPaths"
+          Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <PropertyGroup>
+      <_CrestCrudAllowedOutputRoot>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)'))</_CrestCrudAllowedOutputRoot>
+      <CrestCrudBundleFile Condition="'$(CrestCrudBundleFile)' == ''">$(IntermediateOutputPath)CrestCreates.Crud.g.cs</CrestCrudBundleFile>
+      <CrestCrudInputManifest Condition="'$(CrestCrudInputManifest)' == ''">$(IntermediateOutputPath)CrestCreates.Crud.inputs.json</CrestCrudInputManifest>
+      <CrestCrudOutputsManifest Condition="'$(CrestCrudOutputsManifest)' == ''">$(IntermediateOutputPath)CrestCreates.Crud.outputs.json</CrestCrudOutputsManifest>
+      <CrestCrudGenerationStamp Condition="'$(CrestCrudGenerationStamp)' == ''">$(IntermediateOutputPath)CrestCreates.Crud.stamp</CrestCrudGenerationStamp>
+      <CrestCrudTemporaryDirectory Condition="'$(CrestCrudTemporaryDirectory)' == ''">$(IntermediateOutputPath)CrestCreates.Crud.tmp</CrestCrudTemporaryDirectory>
+
+      <_CrestCrudBundleFullPath>$([System.IO.Path]::GetFullPath('$(CrestCrudBundleFile)'))</_CrestCrudBundleFullPath>
+      <_CrestCrudInputManifestFullPath>$([System.IO.Path]::GetFullPath('$(CrestCrudInputManifest)'))</_CrestCrudInputManifestFullPath>
+      <_CrestCrudOutputsManifestFullPath>$([System.IO.Path]::GetFullPath('$(CrestCrudOutputsManifest)'))</_CrestCrudOutputsManifestFullPath>
+      <_CrestCrudStampFullPath>$([System.IO.Path]::GetFullPath('$(CrestCrudGenerationStamp)'))</_CrestCrudStampFullPath>
+      <_CrestCrudTemporaryFullPath>$([System.IO.Path]::GetFullPath('$(CrestCrudTemporaryDirectory)'))</_CrestCrudTemporaryFullPath>
+      <_CrestCrudSourceGeneratorDirectory>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)source-generators'))</_CrestCrudSourceGeneratorDirectory>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="ValidateCrestCrudPaths"
+          DependsOnTargets="SetCrestCrudPaths"
+          Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <Error Condition="'$(_CrestCrudAllowedOutputRoot)' == '' OR !$([System.IO.Path]::IsPathRooted('$(_CrestCrudAllowedOutputRoot)'))"
+           Code="CCCRUD006"
+           Text="IntermediateOutputPath must resolve to an absolute allowed output root for CRUD precompile." />
+    <Error Condition="!$([System.IO.Path]::GetFullPath('$(CrestCrudBundleFile)').StartsWith($(_CrestCrudAllowedOutputRoot))) OR !$([System.IO.Path]::GetFullPath('$(CrestCrudOutputsManifest)').StartsWith($(_CrestCrudAllowedOutputRoot))) OR !$([System.IO.Path]::GetFullPath('$(CrestCrudTemporaryDirectory)').StartsWith($(_CrestCrudAllowedOutputRoot)))"
+           Code="CCCRUD006"
+           Text="Every CRUD precompile artifact (bundle, manifests, temporary directory) must live inside IntermediateOutputPath." />
+  </Target>
+
+  <!-- Hooked into the JSON chain so it always runs before the JSON inputs are collected. -->
+  <Target Name="PrepareCrestCrudInputs"
+          DependsOnTargets="SetCrestCreatesJsonContractPaths;ValidateCrestCrudPaths;ValidateCrestCreatesJsonContractTransport"
+          Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <ItemGroup>
+      <CrestCrudCompileSources Remove="@(CrestCrudCompileSources)" />
+      <CrestCrudCompileSources Include="@(Compile)"
+              Exclude="$(_CrestCrudBundleFullPath);$(_CrestCrudInputManifestFullPath);$(_CrestCrudOutputsManifestFullPath);$(_CrestCrudSourceGeneratorDirectory)/**;$(_CrestCreatesJsonContractGeneratedFullPath)" />
+      <CrestCrudReferenceAssemblies Remove="@(CrestCrudReferenceAssemblies)" />
+      <CrestCrudReferenceAssemblies Include="@(ReferencePathWithRefAssemblies)" />
+    </ItemGroup>
+    <MakeDir Directories="$(_CrestCrudTemporaryFullPath)" />
+  </Target>
+
+  <Target Name="WriteCrestCrudInputManifest"
+          DependsOnTargets="PrepareCrestCrudInputs"
+          Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true' AND '$(DesignTimeBuild)' != 'true'">
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.WriteCrestCrudInputManifest
+        SourceFiles="@(CrestCrudCompileSources)"
+        ReferencePaths="@(CrestCrudReferenceAssemblies)"
+        OutputPath="$(_CrestCrudInputManifestFullPath)"
+        AllowedOutputRoot="$(_CrestCrudAllowedOutputRoot)"
+        TemporaryDirectory="$(_CrestCrudTemporaryFullPath)"
+        AssemblyName="$(AssemblyName)"
+        LangVersion="$(LangVersion)"
+        DefineConstants="$(DefineConstants)"
+        Nullable="$(Nullable)"
+        AllowUnsafeBlocks="$(AllowUnsafeBlocks)"
+        TargetFramework="$(TargetFramework)"
+        Configuration="$(Configuration)"
+        ModelSchemaVersion="$(CrestCreatesCrudModelSchemaVersion)"
+        ToolSemanticVersion="$(CrestCreatesJsonContractsTaskSemanticVersion)"
+        ToolAssemblyPath="$(CrestCreatesJsonContractsToolPath)">
+      <Output TaskParameter="OutputChanged" PropertyName="CrestCrudInputManifestChanged" />
+    </CrestCreates.JsonContracts.BuildTasks.Tasks.WriteCrestCrudInputManifest>
+  </Target>
+
+  <Target Name="InvalidateMissingCrestCrudOutput"
+          DependsOnTargets="SetCrestCrudPaths"
+          Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true' AND '$(DesignTimeBuild)' != 'true' AND Exists('$(_CrestCrudStampFullPath)') AND !Exists('$(_CrestCrudBundleFullPath)')">
+    <Delete Files="$(_CrestCrudStampFullPath)" />
+  </Target>
+
+  <Target Name="GenerateCrestCrudSurface"
+          DependsOnTargets="PrepareCrestCrudInputs;WriteCrestCrudInputManifest;InvalidateMissingCrestCrudOutput"
+          Inputs="@(CrestCrudCompileSources);@(CrestCrudReferenceAssemblies);$(_CrestCrudInputManifestFullPath);$(CrestCreatesJsonContractsSelectedTaskAssembly);$(CrestCreatesJsonContractsToolPath)"
+          Outputs="$(_CrestCrudStampFullPath)"
+          Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true' AND '$(DesignTimeBuild)' != 'true'">
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateCrestCrudArtifacts
+        SourceFiles="@(CrestCrudCompileSources)"
+        ReferencePaths="@(CrestCrudReferenceAssemblies)"
+        BundlePath="$(_CrestCrudBundleFullPath)"
+        OutputsManifestPath="$(_CrestCrudOutputsManifestFullPath)"
+        AllowedOutputRoot="$(_CrestCrudAllowedOutputRoot)"
+        TemporaryDirectory="$(_CrestCrudTemporaryFullPath)"
+        AssemblyName="$(AssemblyName)"
+        LangVersion="$(LangVersion)"
+        DefineConstants="$(DefineConstants)"
+        Nullable="$(Nullable)"
+        AllowUnsafeBlocks="$(AllowUnsafeBlocks)"
+        TargetFramework="$(TargetFramework)"
+        ExpectedModelSchemaVersion="$(CrestCreatesCrudModelSchemaVersion)"
+        ValidateOnly="$(CrestCreatesCodeGenerationIsDisabled)"
+        ToolPath="$(CrestCreatesJsonContractsToolPath)">
+      <Output TaskParameter="DeclarationCount" PropertyName="CrestCrudDeclarationCount" />
+      <Output TaskParameter="ArtifactCount" PropertyName="CrestCrudArtifactCount" />
+      <Output TaskParameter="OutputChanged" PropertyName="CrestCrudOutputChanged" />
+    </CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateCrestCrudArtifacts>
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(_CrestCrudStampFullPath)'))" />
+    <Touch Files="$(_CrestCrudStampFullPath)" AlwaysCreate="true" />
+  </Target>
+
+  <Target Name="IncludeCrestCrudArtifacts"
+          DependsOnTargets="GenerateCrestCrudSurface"
+          Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <ItemGroup>
+      <Compile Remove="$(_CrestCrudBundleFullPath)" />
+      <Compile Include="$(_CrestCrudBundleFullPath)"
+               Condition="Exists('$(_CrestCrudBundleFullPath)')" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CleanCrestCrudArtifacts"
+          DependsOnTargets="SetCrestCrudPaths"
+          AfterTargets="Clean"
+          Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <Delete Files="$(_CrestCrudBundleFullPath);$(_CrestCrudInputManifestFullPath);$(_CrestCrudOutputsManifestFullPath);$(_CrestCrudStampFullPath)" />
+    <RemoveDir Directories="$(_CrestCrudTemporaryFullPath)" Condition="Exists('$(_CrestCrudTemporaryFullPath)')" />
+  </Target>
+</Project>

@@ -12,6 +12,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- #128 S2: the CRUD model/emitters are one implementation, source-linked into the analyzer and
+         the build-time tool so field rules, routes and identity can never drift apart. -->
+    <Compile Include="..\CrestCreates.CrudGeneration\*.cs" Link="CrudGeneration\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />

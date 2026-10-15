@@ -15,6 +15,9 @@ internal static class JsonContractBuildConstants
     public const string CrestEventAttributeFullName = "CrestCreates.Event.Abstractions.CrestEventAttribute";
     public const string EventJsonCodecRegistrationFullName = "CrestCreates.Event.Abstractions.EventJsonCodecRegistration";
     public const string EventJsonContextSimpleName = "EventJsonSerializerContext";
+
+    /// <summary>#128: the single generated context that carries the CRUD root matrix.</summary>
+    public const string CrudJsonContextSimpleName = "CrestCreatesCrudJsonSerializerContext";
     public const string EventJsonCodecContributionsSimpleName = "EventJsonCodecContributions";
     public const string TaskFullName = "System.Threading.Tasks.Task";
     public const string ValueTaskFullName = "System.Threading.Tasks.ValueTask";

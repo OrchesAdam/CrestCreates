@@ -203,13 +203,23 @@ public class CrudServiceRealDeclarationBaselineTests
         // Designed behavior: the annotated class is the service; ProductDto (derived from
         // typeof(Product)) is the generated contract. The current generator treats the annotated
         // class itself as the entity.
-        var (_, runResult, _) = RunRealDriver();
-        var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
+        // R4/S2-5 migration: the formal surface is materialized by the CRUD precompile producer as
+        // ordinary Compile input, so naming is asserted on that output — not on one generator round.
+        var producer = CrudPrecompileProducer.Run(DeclarationSource, ClosureReferences());
 
-        generated.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
-        generated.Should().Contain("class ProductDto",
+        producer.Diagnostics.Should().BeEmpty(
+            "the formal declaration must build a model without CCCRUD diagnostics: "
+            + string.Join(" | ", producer.Diagnostics.Select(issue => issue.ToDisplayString())));
+        // Bundle compilation is proven at real-MSBuild level, where the sibling generators run in the
+        // same CoreCompile and can supply the mapper members the surface calls. Asserting it here
+        // would only measure which references this harness happens to carry.
+
+        var materialized = string.Join("\n", producer.BundleTrees.Select(tree => tree.ToString()));
+        materialized.Should().Contain("class ProductDto",
             "DTOs are derived from typeof(Product), never from the annotated service class");
-        generated.Should().NotContain("class ProductAppServiceDto",
+        materialized.Should().Contain("namespace Shop.Application.Products.Contracts",
+            "the default DTO namespace is the declaring service namespace plus Contracts (§5.1)");
+        materialized.Should().NotContain("class ProductAppServiceDto",
             "the annotated service class must not be treated as the entity");
     }
 
@@ -220,7 +230,9 @@ public class CrudServiceRealDeclarationBaselineTests
         // CapabilityEndpointBodyReader contract with required-body semantics (empty/whitespace/null
         // /bad JSON → 400, zero business). The current emission routes through the legacy
         // DynamicApiGeneratedRuntime helper whose empty-body semantics materialize a default DTO.
-        var (closure, runResult, _) = RunRealDriver();
+        var producer = CrudPrecompileProducer.Run(DeclarationSource, ClosureReferences());
+        producer.BundleTrees.Should().NotBeEmpty("the formal declaration must materialize the CRUD surface");
+        var closure = producer.Compilation;
         string[] requiredTypes =
         [
             "CrestCreates.DynamicApi.IDynamicApiGeneratedProvider",
@@ -233,10 +245,12 @@ public class CrudServiceRealDeclarationBaselineTests
         missing.Should().BeEmpty("the harness closure must satisfy HasDynamicApiSupport so this baseline cannot pass vacuously; missing: "
             + string.Join(", ", missing));
 
-        var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
+        var materialized = string.Join("\n", producer.BundleTrees.Select(tree => tree.ToString()));
 
-        generated.Should().NotContain("DynamicApiGeneratedRuntime.ReadBodyAsync",
+        materialized.Should().NotContain("DynamicApiGeneratedRuntime.ReadBodyAsync",
             "formal CRUD must never bind request bodies through the legacy helper");
+        materialized.Should().NotContain("CompatibilityBodyReader",
+            "formal CRUD must never bind request bodies through the legacy compatibility reader");
     }
 
     [Fact]
@@ -245,8 +259,13 @@ public class CrudServiceRealDeclarationBaselineTests
         // Designed contract (§7.1/§7.4): each route/body/header composition is a producer-declared
         // compatibility input envelope owned by service+action, with the route identity and the body
         // member at their static types, registered as a JSON root for the mapper's SerializeToElement.
-        var (compilation, runResult, producerTrees) = RunRealDriver(ConcurrencyDeclarationSource);
-        runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+        var output = CrudPrecompileProducer.Run(ConcurrencyDeclarationSource, ClosureReferences());
+        output.BundleTrees.Should().NotBeEmpty("the formal declaration must materialize the CRUD surface");
+        output.Diagnostics.Should().BeEmpty(
+            "the concurrency CRUD declaration must build a clean model: "
+            + string.Join(" | ", output.Diagnostics.Select(issue => issue.ToDisplayString())));
+        var compilation = output.Compilation;
+        IReadOnlyCollection<SyntaxTree> producerTrees = output.BundleTrees;
 
         CrudFormalContractProbe.ClosureViolations(compilation).Should().BeEmpty(
             "the harness closure must expose the referenced JSON and envelope contract types");
@@ -265,8 +284,10 @@ public class CrudServiceRealDeclarationBaselineTests
         // DynamicApiResponse<ProductDto>, DynamicApiResponse<PagedResultDto<ProductDto>>,
         // DynamicApiResponse (void/404) and ProductDto. The current generator wraps through
         // object-typed ctx.Output and registers nothing.
-        var (compilation, runResult, producerTrees) = RunRealDriver();
-        runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+        var output = CrudPrecompileProducer.Run(DeclarationSource, ClosureReferences());
+        output.BundleTrees.Should().NotBeEmpty("the formal declaration must materialize the CRUD surface");
+        var compilation = output.Compilation;
+        IReadOnlyCollection<SyntaxTree> producerTrees = output.BundleTrees;
 
         CrudFormalContractProbe.ClosureViolations(compilation).Should().BeEmpty(
             "the harness closure must expose the referenced JSON and envelope contract types");

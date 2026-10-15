@@ -124,3 +124,22 @@
   8. `Formal_msbuild_build_must_close_crud_json_roots_in_the_same_build`
 - S2 范围（按既有 Spec/计划，不开第二条主链）：从同一 CrudGenerationModel/emitters 物化普通 Compile bundle，范围覆盖 DTO/interface/service/mapping seeds/compatibility input/result/activation（不能只搬 DTO 而留下 mapping 同轮依赖，即红例 7）；显式串起 CRUD precompile → Include Compile → JsonContracts → 官方 STJ/其余 SG 的单次 CoreCompile；旧 `CrudServiceSourceGenerator` 对正式声明收口为诊断入口；测试改为读取普通 Compile 的 producer 产物并复用本轮契约检查（不为 `GeneratedTrees` 非空保留旧 SG bundle 断言）；验证 clean/声明移除/缺输出修复/增量/design-time/TFM·RID/package 首次消费与 ownership·provenance。声明层正向模型只证明检查器行为，真实官方 metadata 闭合必须由正式 MSBuild 证据承担（红例 8）。
 - DynamicApi 两条查询红仍属 S1 记账范围之外的 §8 工作，按计划在 S2/S3 的 filter 归一与编译期字段访问处处置；本轮不为其改口径。
+
+## S2 增量 10：前置物化与 JSON 契约主链（进行中，未放行）
+
+本轮落地 S2 骨架并跑到真实构建证据，**尚有 1 个未闭合缺陷**，因此标记为进行中、不宣称任何退出。
+
+已完成并经构建验证：
+
+- **共享模型（S2-1）**：新增 `src/Tooling/CrestCreates.CrudGeneration/`（纯源集，无 csproj），`CrudGenerationModel` + `CrudGenerationModelBuilder` + `CrudArtifactEmitter` 同一份实现 source-link 进 `CrestCreates.CodeGenerator`（netstandard2.0）与 `CrestCreates.JsonContracts.BuildTasks.Core`（net10.0）。模型一次定义：实体与声明 service 分离、默认 DTO 落 `<service ns>.Contracts`（`DtoNamespace` 覆盖）、Read/Create/Update 字段排除表、§7.4 五动作 route/permission/capability 表、capability input envelope 命名（沿用既有 `{Service}_{Action}_CompatibilityInput`）、CCCRUD001–008 纯数据诊断。正式声明只按 attribute 的 metadata full name + `typeof(Entity)` 构造形态 + symbol identity 识别；旧测试 stub 同短名不再被当作契约。
+- **前置物化链（S2-2）**：Tool 新增 `prepare-crud`（`CrudPrecompileEngine` + transport，引用集合为空即 CCCRUD006 fail-closed；`CrestCreatesCodeGeneration=false` + 仍有正式声明 → CCCRUD002 确定性失败）；BuildTasks 新增 `WriteCrestCrudInputManifest`（源/引用**内容 sha256** + langversion/constants/nullable/TFM/configuration/model/tool 版本）与 `GenerateCrestCrudArtifacts`（路径信任、有界超时、write-if-changed、声明数>0 而 bundle 为空即失败、输出 owner/FQN/源位置/schema/content-hash manifest）；`build/CrestCreates.Crud.Build.Common.targets` 定义 `PrepareCrestCrudInputs → GenerateCrestCrudSurface → IncludeCrestCrudArtifacts` 并显式追加进既有 `CrestCreatesJsonContractGenerationDependsOn`（bundle 与 `source-generators` 目录被排除出下一次输入）；新增 `CrestCreatesCrudJsonToolchain` compiler-visible marker。
+- **旧链路收口（S2-4）**：`CrudServiceSourceGenerator` 对正式声明只跑共享 builder 报 CCCRUD 诊断、不再 AddSource 任何产物；marker 缺失即 CCCRUD002。legacy/stub 旧 bundle 路径保留给尚未迁移的旧测试（S4 归档），未变成正式主链第二轨。
+- **JSON 侧（S2-3，进行中）**：`CrudJsonSurfaceDiscovery` + `JsonContractRootSourceKind.CrudSurface` + writer 的 `WriteCrudRootBlock`：由同一模型在真实 compilation 中解析 DTO/Create/Update/ListRequest/两个 capability input envelope，并按引用程序集 open generic `Construct` 出 `PagedResultDto<Dto>`、`DynamicApiResponse<Dto>`、`DynamicApiResponse<PagedResultDto<Dto>>`、void envelope，写入一个 `CrestCreates.Generated.CrestCreatesCrudJsonSerializerContext`（camelCase，internal）；public DTO 与 internal envelope 的可访问性分别校验；缺声明报 CCCRUD002，缺引用报 CCCRUD005（且只在存在 CRUD 声明时要求，Abstractions 类项目不再被误伤）。
+
+真实构建证据（干净 obj、`tests/artifacts/probe2` 仓库内探针，导入 Repository props/targets）：CRUD bundle 19KB 物化、inputs/outputs manifest 与 stamp 生成、DTO/mapping 被 JsonContracts 正常发现；既有消费者 `CrestCreates.DynamicApi`、`CrestCreates.Accountability.Abstractions`、`samples/LibraryManagement/LibraryManagement.Application` 均 Build succeeded，工具链新链对存量工程无附带破坏。
+
+未闭合缺陷（下一轮第一件事，不含糊）：同一探针里 bundle 第 372/393 行确实声明了 `CrestCreates.Generated.ProductAppService_Update_CompatibilityInput` / `_Delete_CompatibilityInput`，但 JSON 发现侧对这些类型报 CCCRUD002「不在编译输入中」；同一文件里的 DTO 类型却能解析。需要把发现侧的类型解析换成与 S1 探针一致的逐引用程序集/命名空间走查，并区分「`GetTypeByMetadataName` 因歧义返回 null」与「符号真缺失」两种情形后再定位；在这一点查清前，不移动相关红例的口径。
+
+测试迁移（S2-5，部分）：driver 层 4 条契约红改为读取 producer 产物（`CrudPrecompileProducer`）；其中 `Formal_crud_request_binding_must_not_route_through_the_legacy_body_helper` 与 `Generated_dtos_must_be_named_after_the_entity_not_the_service` 因新产物真实转绿（断言的是物化 surface 含 `class ProductDto` + `.Contracts`，不含 `ProductAppServiceDto`，且不含 legacy body helper/CompatibilityBodyReader）；输入信封与响应 roots 两条仍红，原因即上面的未闭合缺陷。harness 里不再断言 bundle 编译错误——mapper 成员由 sibling generator 在真实 CoreCompile 里补，这条声称归 MSBuild 证据。
+
+当前计数（未放行）：CodeGenerator **400 通过 + 8 失败 / 408，0 skipped**；其中 5 条 MSBuild 探针失败是因为它们仍按 S1「未导入工具链」的旧前提书写，需要重写为「导入工具链的一次构建」证据（含 red 2/7/8 的正向闭合），不是实现回归；1 条 `Compatibility_result_contract_must_not_wrap_through_object_typed_output` 属 S3 typed result 范围；DynamicApi 73 + 2 未变。未做：探针改造、Entity/ServiceRegistration 的 manifest-owner 跳过标记、design-time 轻量生成、clean/增量/声明移除/TFM·RID/package 首消费矩阵（S2-6）。

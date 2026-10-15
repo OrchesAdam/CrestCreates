@@ -159,4 +159,13 @@
     <RemoveDir Directories="$(_CrestCreatesJsonContractTemporaryFullPath)"
                Condition="Exists('$(_CrestCreatesJsonContractTemporaryFullPath)')" />
   </Target>
+
+
+  <!-- #128 S2: the CRUD precompile chain rides the same transport import, for package and repository
+       consumers alike. -->
+  <Import Project="$(MSBuildThisFileDirectory)CrestCreates.Crud.Build.Common.targets"
+          Condition="'$(_CrestCreatesCrudTargetsImported)' != 'true'" />
+  <PropertyGroup>
+    <_CrestCreatesCrudTargetsImported>true</_CrestCreatesCrudTargetsImported>
+  </PropertyGroup>
 </Project>
