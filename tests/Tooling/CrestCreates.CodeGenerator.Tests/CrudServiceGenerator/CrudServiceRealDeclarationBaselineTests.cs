@@ -310,6 +310,47 @@ public class CrudServiceRealDeclarationBaselineTests
     }
 
     [Fact]
+    public void Entity_with_private_setter_on_platform_fields_must_not_emit_CCCRUD004()
+    {
+        // R2-CRUD128-02: Platform-managed fields (TenantId, CreationTime, IsDeleted, etc.) do not
+        // participate in Create/Update input mapping, so private setters on them must not trigger CCCRUD004.
+        var platformFieldsSource = """
+            using System;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Domain.Entities
+            {
+                public class Product
+                {
+                    public Guid Id { get; set; }
+                    public string Name { get; set; } = string.Empty;
+                    public Guid TenantId { get; private set; }
+                    public DateTime CreationTime { get; private set; }
+                    public bool IsDeleted { get; private set; }
+                }
+            }
+
+            namespace Shop.Application.Products
+            {
+                using CrestCreates.Domain.Shared.Attributes;
+
+                [GenerateCrudService(typeof(Shop.Domain.Entities.Product), RoutePrefix = "/api/products")]
+                public partial class ProductAppService
+                {
+                }
+            }
+            """;
+
+        var (_, runResult) = RunRealDriverWithSource(platformFieldsSource);
+
+        var diagnostics = runResult.Diagnostics
+            .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
+            .ToList();
+
+        diagnostics.Should().BeEmpty("platform-managed fields must not trigger CCCRUD004");
+    }
+
+    [Fact]
     public void Entity_without_parameterless_constructor_must_emit_CCCRUD004()
     {
         // Designed behavior: entities without a public parameterless constructor cannot be
@@ -457,23 +498,18 @@ public class CrudServiceRealDeclarationBaselineTests
         // that combine route/body/header parameters. The CapabilityEndpointMapper performs
         // SerializeToElement on the actual input, so the envelope type must be a JSON root.
         // The current generator does not emit these typed envelopes.
-        var (_, runResult) = RunRealDriver();
-        var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
+        // R2-CRUD128-03: Use Roslyn symbols to verify actual type declarations, not just regex.
+        var (compilation, runResult) = RunRealDriver();
+        runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
 
-        generated.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+        // Parse the generated code and verify actual type declarations exist
+        var generatedTypes = compilation.GetSymbolsWithName("UpdateProductInput", SymbolFilter.Type).ToList();
+        generatedTypes.Should().NotBeEmpty("UpdateProductInput must be declared as an actual type, not just mentioned in comments");
+        generatedTypes.Should().OnlyContain(t => t is INamedTypeSymbol, "envelope must be a class/record/struct");
 
-        // Semantic check: input envelope types must be declared as classes/records with members
-        // for route/body/header parameters, not just mentioned in comments or strings.
-        generated.Should().MatchRegex(@"(class|record)\s+UpdateProductInput\s*\{",
-            "Update action must emit a typed input envelope class/record with members");
-        generated.Should().MatchRegex(@"(class|record)\s+DeleteProductInput\s*\{",
-            "Delete action must emit a typed input envelope class/record with members");
-
-        // The envelopes must have properties for the combined input (Id from route, body fields)
-        generated.Should().Contain("UpdateProductInput",
-            "Update input envelope type must be referenced");
-        generated.Should().Contain("DeleteProductInput",
-            "Delete input envelope type must be referenced");
+        generatedTypes = compilation.GetSymbolsWithName("DeleteProductInput", SymbolFilter.Type).ToList();
+        generatedTypes.Should().NotBeEmpty("DeleteProductInput must be declared as an actual type, not just mentioned in comments");
+        generatedTypes.Should().OnlyContain(t => t is INamedTypeSymbol, "envelope must be a class/record/struct");
     }
 
     [Fact]
@@ -486,24 +522,25 @@ public class CrudServiceRealDeclarationBaselineTests
         // - Delete: DynamicApiResponse (void)
         // - Get not-found: DynamicApiResponse (void/404)
         // The current generator wraps through object-typed ctx.Output instead.
-        var (_, runResult) = RunRealDriver();
-        var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
+        // R2-CRUD128-03: Use Roslyn symbols to verify actual JsonTypeInfo fields, not just regex.
+        var (compilation, runResult) = RunRealDriver();
+        runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
 
-        generated.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+        // Verify JsonTypeInfo fields exist for the response envelopes
+        var jsonTypeInfoFields = compilation.GetSymbolsWithName("JsonTypeInfo", SymbolFilter.Member)
+            .OfType<IFieldSymbol>()
+            .Where(f => f.Type.Name == "JsonTypeInfo")
+            .ToList();
 
-        // Semantic check: JsonTypeInfo must be used in actual code (method signatures, field declarations),
-        // not just mentioned in comments. Check for typed usage patterns.
-        generated.Should().MatchRegex(@"JsonTypeInfo<DynamicApiResponse<ProductDto>>\s+\w+",
-            "Get/Create/Update response envelope must be a JSON root with actual typed usage");
-        generated.Should().MatchRegex(@"JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>>\s+\w+",
-            "Search response envelope must be a JSON root with actual typed usage");
-        generated.Should().MatchRegex(@"JsonTypeInfo<DynamicApiResponse>\s+\w+",
-            "Delete/404 void response envelope must be a JSON root with actual typed usage");
+        // Check for typed response envelope usage in actual code (not comments)
+        var generatedContent = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
 
-        // Verify the typed envelopes are used in method signatures or field declarations, not just comments
-        generated.Should().Contain("DynamicApiResponse<ProductDto>",
-            "typed response envelope must be present");
-        generated.Should().Contain("DynamicApiResponse<PagedResultDto<ProductDto>>",
-            "typed paged response envelope must be present");
+        // Verify the typed envelopes are used in actual field/variable declarations
+        generatedContent.Should().MatchRegex(@"\bJsonTypeInfo<DynamicApiResponse<ProductDto>>\s+\w+\s*[=;]",
+            "Get/Create/Update response envelope must have an actual JsonTypeInfo field declaration");
+        generatedContent.Should().MatchRegex(@"\bJsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>>\s+\w+\s*[=;]",
+            "Search response envelope must have an actual JsonTypeInfo field declaration");
+        generatedContent.Should().MatchRegex(@"\bJsonTypeInfo<DynamicApiResponse>\s+\w+\s*[=;]",
+            "Delete/404 void response envelope must have an actual JsonTypeInfo field declaration");
     }
 }

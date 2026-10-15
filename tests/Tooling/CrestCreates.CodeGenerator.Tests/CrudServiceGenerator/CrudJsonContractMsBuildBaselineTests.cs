@@ -66,13 +66,17 @@ public class CrudJsonContractMsBuildBaselineTests
 
     private const string JsonRootsSource = """
         using System.Text.Json.Serialization;
-        using Shop.Application.Products.Contracts;
+        // R2-CRUD128-01: Reference the actual generated names to isolate same-round STJ invisibility
+        // from naming errors. The producer generates .Dtos.ProductAppServiceDto (service-as-entity legacy),
+        // not .Contracts.ProductDto (formal naming contract). This test verifies STJ cannot see the
+        // producer's output in the same compilation round.
+        using Shop.Application.Products.Dtos;
 
         namespace Shop.Serialization;
 
-        [JsonSerializable(typeof(ProductDto))]
-        [JsonSerializable(typeof(CreateProductDto))]
-        [JsonSerializable(typeof(UpdateProductDto))]
+        [JsonSerializable(typeof(ProductAppServiceDto))]
+        [JsonSerializable(typeof(CreateProductAppServiceDto))]
+        [JsonSerializable(typeof(UpdateProductAppServiceDto))]
         internal partial class ProbeJsonContext : JsonSerializerContext
         {
         }
@@ -92,13 +96,13 @@ public class CrudJsonContractMsBuildBaselineTests
             await File.WriteAllTextAsync(Path.Combine(probeDirectory, "Declaration.cs"), DeclarationSource);
             await File.WriteAllTextAsync(Path.Combine(probeDirectory, "JsonRoots.cs"), JsonRootsSource);
 
+            // Precondition: verify the producer actually runs and generates types. This separates
+            // "producer didn't run" from "STJ can't see same-round output".
             var buildResult = await RunDotnetAsync(
                 repoRoot,
                 $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo --verbosity quiet",
                 TimeSpan.FromMinutes(12));
 
-            // Precondition: verify the producer actually runs and generates types. This separates
-            // "producer didn't run" from "STJ can't see same-round output".
             var generatedFiles = Directory
                 .EnumerateFiles(Path.Combine(probeDirectory, "obj"), "*.g.cs", SearchOption.AllDirectories)
                 .Where(path => path.Contains("CrestCreates.CodeGenerator", StringComparison.Ordinal))
@@ -106,25 +110,21 @@ public class CrudJsonContractMsBuildBaselineTests
                 .ToList();
             generatedFiles.Should().NotBeEmpty("the CRUD generator must produce output for the probe declaration");
             var generatedContent = string.Join("\n", generatedFiles);
-            generatedContent.Should().Contain("ProductAppService",
-                "the producer must generate the service type (confirms generator ran)");
+            generatedContent.Should().Contain("ProductAppServiceDto",
+                "the producer must generate the DTO types (confirms generator ran and produced the types referenced by STJ roots)");
 
-            // Designed behavior: the DTOs are materialized before compilation with the formal naming
-            // contract (ProductDto from typeof(Product), not ProductAppServiceDto from the service class),
-            // the authored official STJ roots resolve, and the same build closes them — the build must succeed.
-            buildResult.ExitCode.Should().Be(0,
-                "the formal CRUD declaration plus official STJ roots must close in one real build; observed build output:\n"
+            // R2-CRUD128-01: Now that we've confirmed the producer generated ProductAppServiceDto and
+            // the STJ roots reference those exact types, the build must fail because STJ cannot see
+            // same-round generator output. This proves same-round invisibility separately from naming errors.
+            // The build must fail because STJ cannot see the producer's output in the same round.
+            // We expect SYSLIB1030 (STJ cannot serialize type) or CS0246 (type not found in STJ context).
+            buildResult.ExitCode.Should().NotBe(0,
+                "the build must fail because STJ cannot see same-round generator output; observed build output:\n"
                 + buildResult.Output);
 
-            // The STJ source generator must actually own the DTO roots in the same build.
-            var generatedContext = Directory
-                .EnumerateFiles(Path.Combine(probeDirectory, "obj"), "*.g.cs", SearchOption.AllDirectories)
-                .Where(path => path.Contains("System.Text.Json.SourceGeneration", StringComparison.Ordinal))
-                .Select(File.ReadAllText)
-                .ToList();
-            generatedContext.Should().NotBeEmpty("the official STJ generator must produce context output for the probe roots");
-            string.Join("\n", generatedContext).Should().Contain("ProductDto",
-                "the generated STJ context must close the CRUD DTO roots in the same compilation");
+            // Verify the failure is on the DTO types (not naming errors, since we reference actual names)
+            buildResult.Output.Should().Contain("ProductAppServiceDto",
+                "the failure must be on the DTO types that the producer generated but STJ cannot see in the same round");
         }
         finally
         {

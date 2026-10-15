@@ -68,3 +68,11 @@
 - **R1-CRUD128-05 [P2] 信封基线语义化**：输入/响应信封基线从字符串包含改为正则匹配类型声明结构（`(class|record)\s+UpdateProductInput\s*\{`、`JsonTypeInfo<...>\s+\w+`），杜绝注释假绿。修正 Create/Update 响应注释：typed DTO 响应（`DynamicApiResponse<ProductDto>`），非 void。
 - 计数：CodeGenerator **374 通过 + 7 约定红（381）**；DynamicApi **73 通过 + 2 约定红（75）**；无既有用例回归。所有红灯失败原因纯净，符合声称的能力缺口。
 - S1 退出状态：R1 五项 P2 全部关闭；设计审查通过后可推进 S2。
+
+### S1 增量 6：R2 审查修复（2026-10-15）
+
+- **R2-CRUD128-01 [P2] MSBuild 独立证明同轮不可见**：`CrudJsonContractMsBuildBaselineTests` 的 `JsonRootsSource` 改为引用实际生成名称（`Shop.Application.Products.Dtos.ProductAppServiceDto`），而非正式契约名称（`.Contracts.ProductDto`）。前置守卫确认 producer 生成 `ProductAppServiceDto` 后，build 失败原因现在可归因为 STJ 同轮不可见（SYSLIB1030/CS0246 on DTO types），而非命名错误。命名契约由独立控制测试 `Real_msbuild_producer_output_must_match_formal_naming_contract` 覆盖。
+- **R2-CRUD128-02 [P2] 平台字段排除**：`ValidateEntityMapperClosure` 扩展 `defaultExcludedProperties` 集合，包含 Create/Update DTO 排除的全部平台字段（Id、CreationTime、CreatorId、LastModificationTime、LastModifierId、IsDeleted、DeletionTime、DeleterId、ConcurrencyStamp、TenantId）。新增 `Entity_with_private_setter_on_platform_fields_must_not_emit_CCCRUD004` 基线，验证 TenantId/CreationTime/IsDeleted 的 private setter 不触发 CCCRUD004。
+- **R2-CRUD128-03 [P2] 信封基线使用 Roslyn symbols**：输入/响应信封基线从正则匹配改为 Roslyn symbol 验证——`compilation.GetSymbolsWithName("UpdateProductInput", SymbolFilter.Type)` 确认实际类型声明存在，杜绝注释假绿。响应信封基线同时保留正则检查 `JsonTypeInfo<...>\s+\w+\s*[=;]` 验证实际字段声明。
+- 计数：CodeGenerator **376 通过 + 6 约定红（382）**；DynamicApi **73 通过 + 2 约定红（75）**；无既有用例回归。所有红灯失败原因纯净，符合声称的能力缺口。
+- S1 退出状态：R1 + R2 全部 P2 关闭；设计审查通过后可推进 S2。

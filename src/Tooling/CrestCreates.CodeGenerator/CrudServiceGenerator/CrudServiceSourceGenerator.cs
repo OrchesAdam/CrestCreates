@@ -947,10 +947,17 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
 
             // R1-CRUD128-03: Only validate properties that participate in Create/Update input mapping.
             // Exclude: Id (output-only), ExcludeProperties, navigation properties, platform exclusions.
+            // R2-CRUD128-02: Use the same exclusion list as Create/Update DTOs to avoid false rejections.
+            var defaultExcludedProperties = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId",
+                "IsDeleted", "DeletionTime", "DeleterId", "ConcurrencyStamp", "TenantId"
+            };
+
             var inputProperties = entityProperties
                 .Where(p => !s_platformExclusions.Contains(p.Name))
+                .Where(p => !defaultExcludedProperties.Contains(p.Name))
                 .Where(p => !excludeProperties.Contains(p.Name))
-                .Where(p => p.Name != "Id") // Id is output-only, not written from Create/Update
                 .Where(p => !IsNavigationProperty(p))
                 .ToList();
 
