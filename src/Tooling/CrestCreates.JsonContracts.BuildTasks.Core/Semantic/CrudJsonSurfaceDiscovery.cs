@@ -47,10 +47,9 @@ public sealed class CrudJsonSurfaceDiscovery
             return roots;
         }
 
-        var envelopeOpen = compilation.GetTypeByMetadataName(
-            "CrestCreates.DynamicApi.DynamicApiResponse`1");
-        var voidEnvelope = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.DynamicApiResponse");
-        var pagedOpen = compilation.GetTypeByMetadataName(
+        var envelopeOpen = ResolveType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse`1");
+        var voidEnvelope = ResolveType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse");
+        var pagedOpen = ResolveType(compilation,
             "CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto`1");
 
         if (envelopeOpen is null || voidEnvelope is null || pagedOpen is null)
@@ -73,10 +72,10 @@ public sealed class CrudJsonSurfaceDiscovery
             AddDeclaredRoot(roots, compilation, model, model.CreateDtoFullName, "public", required: true);
             AddDeclaredRoot(roots, compilation, model, model.UpdateDtoFullName, "public", required: true);
             AddDeclaredRoot(roots, compilation, model, model.ListRequestFullName, "public", required: true);
-            AddDeclaredRoot(roots, compilation, model, model.EnvelopeName("Update"), "internal", required: true);
-            AddDeclaredRoot(roots, compilation, model, model.EnvelopeName("Delete"), "internal", required: true);
+            AddDeclaredRoot(roots, compilation, model, CrudEnvelopeConvention.EnvelopeFullName(model.ServiceClassName, "Update"), "internal", required: true);
+            AddDeclaredRoot(roots, compilation, model, CrudEnvelopeConvention.EnvelopeFullName(model.ServiceClassName, "Delete"), "internal", required: true);
 
-            var readDto = compilation.GetTypeByMetadataName(model.ReadDtoFullName);
+            var readDto = ResolveType(compilation, model.ReadDtoFullName);
             if (readDto is null)
             {
                 continue;
@@ -100,7 +99,26 @@ public sealed class CrudJsonSurfaceDiscovery
         string expectedAccessibility,
         bool required)
     {
-        var type = compilation.GetTypeByMetadataName(fullMetadataName);
+        var candidates = ResolveCandidates(compilation, fullMetadataName);
+        var type = candidates.Count switch
+        {
+            0 => null,
+            1 => candidates[0],
+            _ => candidates.First(candidate => candidate.ContainingAssembly != compilation.Assembly),
+        };
+        if (candidates.Count > 1)
+        {
+            _diagnostics.Add(new JsonContractDiagnostic
+            {
+                Id = CrudDiagnosticIds.OwnerIdentityConflict,
+                Severity = JsonContractDiagnosticSeverity.Error,
+                Message = $"'{fullMetadataName}' is declared by {candidates.Count} inputs: "
+                    + string.Join(", ", candidates.Select(candidate => candidate.ContainingAssembly?.Name))
+                    + ". One CRUD contract type must have exactly one owner.",
+            });
+            return;
+        }
+
         if (type is null)
         {
             if (required)
@@ -110,7 +128,9 @@ public sealed class CrudJsonSurfaceDiscovery
                     Id = CrudDiagnosticIds.ToolchainNotAssembled,
                     Severity = JsonContractDiagnosticSeverity.Error,
                     Message = $"'{fullMetadataName}' is declared by a formal CRUD service but is not "
-                        + "present in the compilation input; the CRUD precompile output is missing or stale.",
+                        + "present in the compilation input; the CRUD precompile output is missing or stale. "
+                        + $"Source trees seen: {compilation.SyntaxTrees.Count()}, "
+                        + $"root namespaces: {string.Join(", ", compilation.Assembly.GlobalNamespace.GetNamespaceMembers().Select(ns => ns.Name))}.",
                     FilePath = model.DeclarationLocation.Path,
                     Line = model.DeclarationLocation.Line,
                     Column = model.DeclarationLocation.Column,
@@ -150,6 +170,77 @@ public sealed class CrudJsonSurfaceDiscovery
         }
 
         AddRoot(roots, type, model);
+    }
+
+    private static INamedTypeSymbol? ResolveType(CSharpCompilation compilation, string fullMetadataName)
+    {
+        var candidates = ResolveCandidates(compilation, fullMetadataName);
+        return candidates.Count == 0 ? null : candidates[0];
+    }
+
+    /// <summary>
+    /// Resolves a CRUD contract type by walking the source assembly and then each referenced assembly.
+    /// <c>Compilation.GetTypeByMetadataName</c> collapses ambiguity and absence into one null, which
+    /// would let a duplicate owner or a stale bundle look like "materialization missing".
+    /// </summary>
+    private static IReadOnlyList<INamedTypeSymbol> ResolveCandidates(
+        CSharpCompilation compilation,
+        string fullMetadataName)
+    {
+        var lastDot = fullMetadataName.LastIndexOf('.');
+        var namespaceName = fullMetadataName[..Math.Max(lastDot, 0)];
+        var metadataName = fullMetadataName[(lastDot + 1)..];
+        var arity = 0;
+        var backtick = metadataName.IndexOf('`');
+        if (backtick >= 0)
+        {
+            arity = int.Parse(metadataName[(backtick + 1)..]);
+            metadataName = metadataName[..backtick];
+        }
+
+        List<INamedTypeSymbol> candidates = [];
+        foreach (var @namespace in EnumerateNamespaces(compilation.Assembly.GlobalNamespace))
+        {
+            if (@namespace.ToDisplayString() != namespaceName)
+            {
+                continue;
+            }
+
+            candidates.AddRange(@namespace.GetTypeMembers(metadataName).Where(type => type.Arity == arity));
+        }
+
+        foreach (var reference in compilation.References)
+        {
+            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
+            {
+                continue;
+            }
+
+            foreach (var @namespace in EnumerateNamespaces(assembly.GlobalNamespace))
+            {
+                if (@namespace.ToDisplayString() != namespaceName)
+                {
+                    continue;
+                }
+
+                candidates.AddRange(@namespace.GetTypeMembers(metadataName).Where(type => type.Arity == arity));
+                break;
+            }
+        }
+
+        return candidates;
+    }
+
+    private static IEnumerable<INamespaceSymbol> EnumerateNamespaces(INamespaceSymbol root)
+    {
+        yield return root;
+        foreach (var child in root.GetNamespaceMembers())
+        {
+            foreach (var nested in EnumerateNamespaces(child))
+            {
+                yield return nested;
+            }
+        }
     }
 
     private static void AddRoot(List<JsonContractRootModel> roots, ITypeSymbol type, CrudGenerationModel model)
