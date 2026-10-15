@@ -187,4 +187,183 @@ public class CrudServiceRealDeclarationBaselineTests
         generated.Should().NotContain("DynamicApiGeneratedRuntime.ReadBodyAsync",
             "formal CRUD must never bind request bodies through the legacy helper");
     }
+
+    [Fact]
+    public void Entity_with_private_setter_properties_must_emit_CCCRUD004()
+    {
+        // Designed behavior: entities with properties that lack public setters cannot be
+        // statically mapped by the generated mapper. The generator must emit CCCRUD004 and
+        // skip generation for that entity rather than producing an incomplete mapping.
+        var privateSetterSource = """
+            using System;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Domain.Entities
+            {
+                public class Product
+                {
+                    public Guid Id { get; set; }
+                    public string Name { get; private set; } = string.Empty;
+                    public decimal Price { get; set; }
+                }
+            }
+
+            namespace Shop.Application.Products
+            {
+                using CrestCreates.Domain.Shared.Attributes;
+
+                [GenerateCrudService(typeof(Shop.Domain.Entities.Product), RoutePrefix = "/api/products")]
+                public partial class ProductAppService
+                {
+                }
+            }
+            """;
+
+        var (_, runResult) = RunRealDriverWithSource(privateSetterSource);
+
+        var diagnostics = runResult.Diagnostics
+            .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
+            .ToList();
+
+        diagnostics.Should().NotBeEmpty("an entity with private setters must trigger CCCRUD004");
+        diagnostics.Should().ContainSingle("one diagnostic per entity");
+        diagnostics[0].GetMessage().Should().Contain("Name",
+            "the diagnostic must identify the unmappable property");
+    }
+
+    [Fact]
+    public void Entity_without_parameterless_constructor_must_emit_CCCRUD004()
+    {
+        // Designed behavior: entities without a public or protected parameterless constructor
+        // cannot be constructed by the generated mapper. The generator must emit CCCRUD004.
+        var noCtorSource = """
+            using System;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Domain.Entities
+            {
+                public class Product
+                {
+                    public Product(string name) { Name = name; }
+                    public Guid Id { get; set; }
+                    public string Name { get; set; }
+                    public decimal Price { get; set; }
+                }
+            }
+
+            namespace Shop.Application.Products
+            {
+                using CrestCreates.Domain.Shared.Attributes;
+
+                [GenerateCrudService(typeof(Shop.Domain.Entities.Product), RoutePrefix = "/api/products")]
+                public partial class ProductAppService
+                {
+                }
+            }
+            """;
+
+        var (_, runResult) = RunRealDriverWithSource(noCtorSource);
+
+        var diagnostics = runResult.Diagnostics
+            .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
+            .ToList();
+
+        diagnostics.Should().NotBeEmpty("an entity without a parameterless constructor must trigger CCCRUD004");
+        diagnostics.Should().ContainSingle("one diagnostic per entity");
+        diagnostics[0].GetMessage().Should().Contain("parameterless constructor",
+            "the diagnostic must identify the missing constructor");
+    }
+
+    private static (Compilation Compilation, GeneratorDriverRunResult RunResult) RunRealDriverWithSource(string source)
+    {
+        var referencePaths = new List<string> { typeof(object).Assembly.Location };
+        referencePaths.Add(typeof(GenerateCrudServiceAttribute).Assembly.Location);
+        foreach (var referenceName in DeclaredReferenceNames)
+        {
+            try
+            {
+                referencePaths.Add(System.Reflection.Assembly.Load(referenceName).Location);
+            }
+            catch (Exception)
+            {
+                // Unavailable optional reference
+            }
+        }
+
+        var aspNetCoreDirectory = System.IO.Path.GetDirectoryName(
+            typeof(Microsoft.AspNetCore.Http.HttpContext).Assembly.Location);
+        if (!string.IsNullOrEmpty(aspNetCoreDirectory))
+        {
+            foreach (var fileName in new[]
+                     {
+                         "Microsoft.AspNetCore.Http.dll",
+                         "Microsoft.AspNetCore.Http.Abstractions.dll",
+                         "Microsoft.AspNetCore.Routing.dll",
+                         "Microsoft.AspNetCore.Routing.Abstractions.dll",
+                         "Microsoft.AspNetCore.Mvc.Core.dll",
+                     })
+            {
+                var candidate = System.IO.Path.Combine(aspNetCoreDirectory, fileName);
+                if (System.IO.File.Exists(candidate))
+                {
+                    referencePaths.Add(candidate);
+                }
+            }
+        }
+
+        var references = referencePaths
+            .Distinct()
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .Cast<MetadataReference>()
+            .ToArray();
+
+        var trees = new[] { CSharpSyntaxTree.ParseText(source) };
+        var compilation = CSharpCompilation.Create(
+            "RealCrudDeclarationBaseline",
+            trees,
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(new CrudServiceSourceGenerator());
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        return (compilation, driver.GetRunResult());
+    }
+
+    [Fact]
+    public void Formal_crud_must_emit_typed_input_envelopes_for_update_and_delete()
+    {
+        // Designed behavior (§7.1): Update and Delete actions must emit typed input envelopes
+        // that combine route/body/header parameters. The CapabilityEndpointMapper performs
+        // SerializeToElement on the actual input, so the envelope type must be a JSON root.
+        // The current generator does not emit these typed envelopes.
+        var (_, runResult) = RunRealDriver();
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
+
+        generated.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+        generated.Should().Contain("UpdateProductInput",
+            "Update action must emit a typed input envelope combining route/body/header");
+        generated.Should().Contain("DeleteProductInput",
+            "Delete action must emit a typed input envelope combining route/body/header");
+    }
+
+    [Fact]
+    public void Formal_crud_must_emit_typed_response_envelopes_as_json_roots()
+    {
+        // Designed behavior (§7.1-7.4): All response envelopes must be emitted as JSON roots:
+        // - DynamicApiResponse<ProductDto> for Get
+        // - DynamicApiResponse<PagedResultDto<ProductDto>> for Search
+        // - DynamicApiResponse (void) for Create/Update/Delete success
+        // - DynamicApiResponse (void/404) for Get not-found
+        // The current generator wraps through object-typed ctx.Output instead.
+        var (_, runResult) = RunRealDriver();
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
+
+        generated.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+        generated.Should().Contain("JsonTypeInfo<DynamicApiResponse<ProductDto>>",
+            "Get response envelope must be a JSON root");
+        generated.Should().Contain("JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>>",
+            "Search response envelope must be a JSON root");
+        generated.Should().Contain("JsonTypeInfo<DynamicApiResponse>",
+            "void/404 response envelope must be a JSON root");
+    }
 }

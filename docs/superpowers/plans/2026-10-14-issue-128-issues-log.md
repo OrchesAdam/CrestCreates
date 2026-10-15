@@ -46,3 +46,15 @@
 - **约定红（纯净原因）**：今天构建恰好以 **4 条 DTO 可见性错误**失败——`Shop.Application.Products.Contracts` 与三个 DTO 类型在同轮不可见（其余闭包全部编译通过，无其他错误）。设计契约：DTO 由前置物化进入普通 Compile，author/官方 STJ 根在同一构建内闭合、构建成功且生成上下文包含 `ProductDto`。
 - 备注：去掉 ASP.NET/DynamicApi 引用是让失败原因保持单点（Service-as-entity 的 legacy bundle 另有 CS0535 阻断缺陷，属当前实现事实，随迁移记录，不影响本复现）。mapper/compatibility input/closed envelope 的补充负例需要 JSON 工具链闭包，与 S2 的 root 闭合一起落。
 - 计数：CodeGenerator **369 通过 + 4 约定红（373）**，无既有用例回归。
+
+### S1 增量 4：诊断登记、mapper 负例与信封基线（2026-10-14）
+
+- **CCCRUD001–008 诊断登记**：`src/Tooling/CrestCreates.CodeGenerator/CrudServiceGenerator/CrudServiceDiagnosticCodes.cs`（const string 值）+ `CrudServiceDiagnostics.cs`（DiagnosticDescriptor 对象），按 Spec §9 冻结登记到集中诊断目录，全仓零冲突。
+- **CCCRUD004 发射实现**：`CrudServiceSourceGenerator.ValidateEntityMapperClosure` 从 Attribute 构造参数提取真实实体类型（`ExtractEntityTypeFromAttribute`），校验 parameterless constructor 与 public setter 闭包；不满足时发射 CCCRUD004 并跳过该实体的生成，不产出空 mapping 假装支持。
+- **mapper 负例基线（绿 ×2）**：`CrudServiceRealDeclarationBaselineTests` 新增——
+  - `Entity_with_private_setter_properties_must_emit_CCCRUD004`：实体含 `private set` 属性，断言发射 CCCRUD004 且诊断消息识别该属性名。
+  - `Entity_without_parameterless_constructor_must_emit_CCCRUD004`：实体无 public/protected parameterless constructor，断言发射 CCCRUD004 且诊断消息识别缺失构造器。
+- **输入信封基线（红）**：`Formal_crud_must_emit_typed_input_envelopes_for_update_and_delete`——设计契约（§7.1）：Update/Delete 必须发射 typed input envelope 组合 route/body/header（CapabilityEndpointMapper 对实际 input 做 SerializeToElement）；当前生成器未发射 `UpdateProductInput` / `DeleteProductInput`。
+- **响应信封基线（红）**：`Formal_crud_must_emit_typed_response_envelopes_as_json_roots`——设计契约（§7.1–7.4）：所有响应信封必须作为 JSON root 发射（`DynamicApiResponse<ProductDto>`、`DynamicApiResponse<PagedResultDto<ProductDto>>`、`DynamicApiResponse` void/404）；当前生成器通过 object 静态类型 `ctx.Output` 包装。
+- 计数：CodeGenerator **371 通过 + 6 约定红（377）**；DynamicApi **73 通过 + 2 约定红（75）**；无既有用例回归。
+- S1 退出状态：真实 Attribute/owner/projection 模型编译样例 ✓；真实 MSBuild+STJ 失败用例 ✓；response/page/query/input-envelope/response-envelope 最小负例 ✓；CCCRUD001–008 诊断登记与 mapper 闭包校验 ✓；完整迁移表待 S2 落。设计审查通过后可推进 S2。

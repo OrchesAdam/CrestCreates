@@ -186,6 +186,12 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     var idType = GetEntityIdType(entityClass);
                     var properties = GetEntityProperties(entityClass);
 
+                    // Validate entity can be statically mapped (CCCRUD004)
+                    if (!ValidateEntityMapperClosure(context, entityClass, properties))
+                    {
+                        continue;
+                    }
+
                     // Generate DTOs
                     GenerateEntityDto(context, entityClass, entityName, namespaceName, properties);
                     GenerateCreateEntityDto(context, entityClass, entityName, namespaceName, properties);
@@ -903,6 +909,77 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             }
 
             return properties;
+        }
+
+        private bool ValidateEntityMapperClosure(
+            SourceProductionContext context,
+            INamedTypeSymbol serviceClass,
+            List<IPropertySymbol> properties)
+        {
+            // Extract the actual entity type from the attribute's constructor argument
+            var entityType = ExtractEntityTypeFromAttribute(serviceClass);
+            if (entityType is null)
+            {
+                // Fall back to validating the service class itself (legacy behavior)
+                entityType = serviceClass;
+            }
+
+            // Re-collect properties from the actual entity type
+            var entityProperties = GetEntityProperties(entityType);
+
+            var hasParameterlessCtor = entityType.Constructors.Any(c =>
+                c.Parameters.Length == 0 &&
+                (c.DeclaredAccessibility == Accessibility.Public ||
+                 c.DeclaredAccessibility == Accessibility.Protected));
+
+            if (!hasParameterlessCtor)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    CrudServiceDiagnostics.StaticClosureUnsupported,
+                    entityType.Locations.FirstOrDefault(),
+                    $"Entity '{entityType.Name}' does not have a public or protected parameterless constructor; " +
+                    "generated mapper cannot construct it."));
+                return false;
+            }
+
+            var unmappableProperties = entityProperties
+                .Where(p => p.SetMethod == null || p.SetMethod.DeclaredAccessibility != Accessibility.Public)
+                .Where(p => !s_platformExclusions.Contains(p.Name))
+                .Select(p => p.Name)
+                .ToList();
+
+            if (unmappableProperties.Count > 0)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    CrudServiceDiagnostics.StaticClosureUnsupported,
+                    entityType.Locations.FirstOrDefault(),
+                    $"Entity '{entityType.Name}' has properties without public setters: {string.Join(", ", unmappableProperties)}; " +
+                    "generated mapper cannot assign them."));
+                return false;
+            }
+
+            return true;
+        }
+
+        private static INamedTypeSymbol? ExtractEntityTypeFromAttribute(INamedTypeSymbol serviceClass)
+        {
+            foreach (var attr in serviceClass.GetAttributes())
+            {
+                if (attr.AttributeClass is null) continue;
+                var name = attr.AttributeClass.Name;
+                var fullName = attr.AttributeClass.ToDisplayString();
+                if (!(name == "GenerateCrudServiceAttribute" || name == "GenerateCrudService" ||
+                      fullName.EndsWith(".GenerateCrudServiceAttribute") || fullName.EndsWith(".GenerateCrudService")))
+                    continue;
+
+                // The first constructor argument is typeof(Entity)
+                if (attr.ConstructorArguments.Length > 0 &&
+                    attr.ConstructorArguments[0].Value is INamedTypeSymbol entityType)
+                {
+                    return entityType;
+                }
+            }
+            return null;
         }
 
         private static List<IPropertySymbol> GetQueryableProperties(List<IPropertySymbol> properties)
