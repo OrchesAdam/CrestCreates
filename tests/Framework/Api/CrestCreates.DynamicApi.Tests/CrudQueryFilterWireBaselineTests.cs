@@ -23,8 +23,9 @@ internal partial class FilterProbeJsonContext : JsonSerializerContext
 /// #128 S1 baselines for the bounded search/filter wire contract: scalar and same-type scalar-array
 /// values must pass the finite wire normalizer and resolve to a bounded representation (CLR scalar /
 /// CLR array, or the constrained JsonElement staging explicitly allowed into
-/// <see cref="FilterDescriptor.Value"/>). Today the setter rejects the JsonElement that STJ restores
-/// into the object-typed member, so a real search payload fails deserialization outright.
+/// <see cref="FilterDescriptor.Value"/>). These cases were booked red in S1 because the setter rejected
+/// the JsonElement that STJ restores into the object-typed member; the S3 finite wire converter now
+/// satisfies that contract, and the cases stay as the wire regression for it.
 /// </summary>
 public class CrudQueryFilterWireBaselineTests
 {

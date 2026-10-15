@@ -184,3 +184,12 @@
 验证（当前源代码）：定向 39/39；CodeGenerator 全套 444 pass + 1 个 S3 约定红 / 445，0 skipped；JsonContracts 单元 131/131；PackageTests 29/29（zh-Hans locale，CS0122 断言成立）；DynamicApi 73 pass + 2 个 S3 查询约定红 / 75。两个 driver roots 旧红已通过生产两阶段 CLI + 同一 STJ/ObjectMapping driver 真正转绿；未更改 S3 红例名称或含义。
 
 - 最终补证：实现提交 2580129438a31af4ed2557595d3c9ce56e09b0e9，Release 两阶段 driver 3/3；LocalEvent 真实 NativeAOT publish/link/run 1/1（linux-x64，11 场景+sentinel，publish/run 均 0，无 IL2026/IL3050，evidence sha 精确绑定实现提交）。②③及本轮审查修复完成，S3/S4 尚未实施。报告 docs/review/2026-10-15-issue-128-s2-review-and-completion.md。
+
+## S3 增量 1：FilterDescriptor 有限 wire 值域（两条记账红转绿）
+
+- 新增 `FilterValueDomain`（`Application.Contracts/DTOs/Common`）：唯一的有界判定——null、标量、**同类**标量数组；对象、嵌套数组、异构数组、数组内 null 元素、非有界元素一律拒绝。`FilterDescriptor.Value` 的 setter 改用它，且显式允许**受限 JsonElement 暂存**进入（§8 明确推荐）。
+- 新增 `FilterDescriptorJsonConverter` 并以类型级 `[JsonConverter]` 挂在 `FilterDescriptor` 上（不引入全局 `JsonConverter<object>`，也不需要 wire context 额外注册；源生成 STJ 元数据自动走它）：`field` 必须是字符串；`operator` 接受数字与名称、未定义值确定性拒绝；`value` 用 `JsonDocument.ParseValue` 读出后按有界判定，克隆脱离 pooled doc 再交给 setter 复验；未知成员忽略（前向兼容）。写路径：暂存 JsonElement 原样写出，CLR 值按标量渲染（TimeSpan 用不变文化的 `c` 格式）。
+- **有意扩展，须记录**：CLR 域新增 `decimal`/`double`/`float` 标量。此前 `new FilterDescriptor("Price", Equals, 19.5m)` 会抛（`IsPrimitive` 不含 decimal），§8 的值域明确要求 decimal 且实体价格字段就是 decimal；仍是**有界**集合，未引入任意 object/converter fallback。这是行为放宽，不是回归掩盖。
+- 拒绝语义与 §7.3 对齐：wire 侧拒绝是 `JsonException`，类型化 body reader（`ReadNativeBodyAsync` 的 required 语义）会把它变成 **400 且零业务**；S3-3 的 binder 直接吃到这条路径。
+- 测试：DynamicApi 由 73+2/75 → **95/95**（两条记账红转绿；新增 `FilterDescriptorWireDomainTests` 20 例：数字精确文本原样保留——long 极值与 28 位 decimal、同类数组不被猜类型、CLR 兼容面、对象/异构/嵌套/null 元素/未定义 operator/非对象 filter 的拒绝对照、JsonElement 与 CLR 两种写往返、未知成员忽略）。
+- 回归确认：CodeGenerator **444 通过 + 1 红 / 445**（唯一红仍是兼容投影的 object 静态结果契约，属 S3-2，未改口径）；JsonContracts 单元 **131/131**；PackageTests（真实消费工程编译）在本轮后台复跑，结果随后记录。

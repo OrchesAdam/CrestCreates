@@ -1,10 +1,18 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace CrestCreates.Application.Contracts.DTOs.Common;
 
 /// <summary>
 /// 过滤描述符
 /// </summary>
+/// <remarks>
+/// #128 S3: the JSON wire contract of this type is owned by <see cref="FilterDescriptorJsonConverter"/>,
+/// which bounds the value domain to null/scalar/same-kind scalar arrays staged as a constrained
+/// <see cref="System.Text.Json.JsonElement"/> (§8). CLR callers keep the existing scalar and collection
+/// surface, bounded by the same rule through the setter.
+/// </remarks>
+[JsonConverter(typeof(FilterDescriptorJsonConverter))]
 public class FilterDescriptor
 {
     /// <summary>
@@ -26,7 +34,7 @@ public class FilterDescriptor
         get => _value;
         set
         {
-            if (value != null && !IsValidValueType(value))
+            if (value != null && !FilterValueDomain.IsStorableValue(value))
             {
                 throw new System.ArgumentException($"不支持的过滤值类型: {value.GetType()}");
             }
@@ -52,19 +60,5 @@ public class FilterDescriptor
         Field = field;
         Operator = @operator;
         Value = value;
-    }
-
-    private bool IsValidValueType(object value)
-    {
-        return value is string
-            || value.GetType().IsPrimitive
-            || value is System.DateTime
-            || value is System.DateTimeOffset
-            || value is System.TimeSpan
-            || value is System.Guid
-            || value is IEnumerable<string>
-            || value is IEnumerable<System.Guid>
-            || value is IEnumerable<int>
-            || value is IEnumerable<long>;
     }
 }
