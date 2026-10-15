@@ -28,7 +28,8 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             // #128 S2 item ①: the CRUD precompile manifest owns the concrete artifacts it materialized.
             var ownedCrudArtifacts = context.AdditionalTextsProvider
                 .Collect()
-                .Select(static (texts, _) => CrudArtifactOwnership.Read(texts));
+                .Select(static (texts, _) => CrudArtifactOwnership.Read(texts))
+                .WithComparer(CrudArtifactOwnership.ContentComparer);
 
             var compilationAndClasses = context.CompilationProvider
                 .Combine(entityClasses)

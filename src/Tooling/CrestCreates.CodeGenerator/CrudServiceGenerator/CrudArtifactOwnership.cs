@@ -1,6 +1,8 @@
 #nullable enable
 using System;
 using System.Collections.Immutable;
+using System.Collections.Generic;
+using System.IO;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 
@@ -52,7 +54,7 @@ public static class CrudArtifactOwnership
         {
             if (additionalText is null
                 || string.IsNullOrEmpty(additionalText.Path)
-                || !additionalText.Path.EndsWith(ManifestFileName, StringComparison.Ordinal))
+                || !string.Equals(Path.GetFileName(additionalText.Path), ManifestFileName, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -72,6 +74,21 @@ public static class CrudArtifactOwnership
         return owned is null || owned.Count == 0 ? None : owned.ToImmutable();
     }
 
+    /// <summary>Ownership content, rather than a newly allocated set, controls incremental invalidation.</summary>
+    public static IEqualityComparer<ImmutableSortedSet<string>> ContentComparer { get; } = new SetComparer();
+
+    private sealed class SetComparer : IEqualityComparer<ImmutableSortedSet<string>>
+    {
+        public bool Equals(ImmutableSortedSet<string>? x, ImmutableSortedSet<string>? y) =>
+            ReferenceEquals(x, y) || (x is not null && y is not null && x.SetEquals(y));
+        public int GetHashCode(ImmutableSortedSet<string> value)
+        {
+            var hash = 17;
+            foreach (var name in value) hash = unchecked(hash * 31 + StringComparer.Ordinal.GetHashCode(name));
+            return hash;
+        }
+    }
+
     private static bool TryReadDeclaredTypes(AdditionalText additionalText, out ImmutableArray<string> types)
     {
         types = ImmutableArray<string>.Empty;
@@ -84,7 +101,11 @@ public static class CrudArtifactOwnership
             }
 
             using var document = JsonDocument.Parse(text.ToString());
-            if (!document.RootElement.TryGetProperty(EntriesProperty, out var entries)
+            if (!document.RootElement.TryGetProperty("SchemaVersion", out var schema)
+                || schema.GetString() != "crud-artifacts-v1"
+                || !document.RootElement.TryGetProperty("ModelSchemaVersion", out var model)
+                || model.GetString() != CrestCreates.Tooling.CrudGeneration.CrudGenerationModel.ModelSchemaVersion
+                || !document.RootElement.TryGetProperty(EntriesProperty, out var entries)
                 || entries.ValueKind != JsonValueKind.Array)
             {
                 // No entries section is "nothing owned" (a project without CRUD declarations), never a

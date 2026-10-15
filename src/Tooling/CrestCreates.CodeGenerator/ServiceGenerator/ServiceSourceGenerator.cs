@@ -28,7 +28,8 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
             // auto-registered or get a second interface file.
             var ownedCrudArtifacts = context.AdditionalTextsProvider
                 .Collect()
-                .Select(static (texts, _) => CrudArtifactOwnership.Read(texts));
+                .Select(static (texts, _) => CrudArtifactOwnership.Read(texts))
+                .WithComparer(CrudArtifactOwnership.ContentComparer);
 
             // 注册源代码生成
             context.RegisterSourceOutput(

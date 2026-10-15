@@ -79,7 +79,7 @@ public sealed class ManifestAccessibilityContractTests(JsonContractBuildFixture 
             timeout: TimeSpan.FromMinutes(2));
 
         result.ExitCode.Should().NotBe(0);
-        (result.StandardOutput + result.StandardError).Should().Contain("inaccessible");
+        (result.StandardOutput + result.StandardError).Should().Contain("CS0122");
     }
 
     [Fact]

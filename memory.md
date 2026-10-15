@@ -210,3 +210,5 @@ never deleted; never output credentials.
   (revision table, #103–#108 absorption mapping, B12 verdict).
 - Old quota/wake automation, worktree/agent dispatch instructions and private
   connection material are intentionally not carried forward; see the archive.
+
+- 2026-10-15：#128 基于 cf44e947 完成①整体审查修复及②CRUD lifecycle/③跨进程两阶段 harness：完整输入/bundle/manifest hash 成功状态、设计时隔离且生成当前 CRUD/JSON、最终配置/RID 指纹、五类路径边界、实际 manifest+物化类型装配门禁、双向 provenance/框架类型身份校验、ownership 内容 comparer、外部包首消费与 TFM/RID 构建矩阵。当前 CodeGenerator 444 pass + 1 S3 object-result 红/445，JSON 单元 131/131，PackageTests 非英文 locale 29/29，DynamicApi 73 pass + 2 S3 查询红/75。S2 两个 driver roots 旧红转绿；S3/S4 尚未实施，CI 保持暂停。

@@ -39,10 +39,8 @@ public static class CrudArtifactEmitter
     private const string PermissionNameNamespace = "CrestCreates.Core.Abstractions.Identity";
 
     /// <summary>
-    /// Tenant marker the ported audit/ownership branches stamp. The model flag <c>EntityHasTenantId</c>
-    /// keys on the Domain.Shared auditing interface name, while the framework's tenant entities implement
-    /// this one; the branch is emitted fully qualified so no imported namespace can make the short name
-    /// ambiguous. The mismatch itself has to be closed in the model (flagged in the S2 handover).
+    /// The shared model recognizes this exact tenant interface. Emit its fully-qualified identity so
+    /// consumer namespace imports cannot change the generated tenant boundary.
     /// </summary>
     private const string MultiTenantInterface = "global::CrestCreates.DataFilter.Entities.IMultiTenant";
 

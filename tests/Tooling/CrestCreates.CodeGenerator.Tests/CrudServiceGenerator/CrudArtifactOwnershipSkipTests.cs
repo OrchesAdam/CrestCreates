@@ -334,6 +334,30 @@ public class CrudArtifactOwnershipSkipTests
             .Should().BeEmpty("a manifest without entries owns nothing");
     }
 
+    [Theory]
+    [InlineData("Archived.CrestCreates.Crud.outputs.json", false)]
+    [InlineData("CrestCreates.Crud.outputs.json", true)]
+    public void Foreign_filename_or_unsupported_schema_must_not_claim_ownership(string name, bool unknownSchema)
+    {
+        var json = ManifestJson(EntityCollisionSource);
+        if (unknownSchema) json = json.Replace("crud-artifacts-v1", "future-schema");
+        var owned = CrudArtifactOwnership.Read(ImmutableArray.Create<AdditionalText>(
+            new InMemoryAdditionalText("/obj/" + name, json)));
+        owned.Should().BeSameAs(CrudArtifactOwnership.None);
+        RunEntityGenerator(EntityCollisionSource, json, name).Should().ContainKey("ProductDto.g.cs");
+    }
+
+    [Fact]
+    public void Incremental_comparer_must_compare_nonempty_ownership_by_content()
+    {
+        var first = OwnedSetOf(ManifestJson(EntityCollisionSource));
+        var second = OwnedSetOf(ManifestJson(EntityCollisionSource));
+        CrudArtifactOwnership.ContentComparer.Equals(first, second).Should().BeTrue();
+        CrudArtifactOwnership.ContentComparer.GetHashCode(first)
+            .Should().Be(CrudArtifactOwnership.ContentComparer.GetHashCode(second));
+        CrudArtifactOwnership.ContentComparer.Equals(first, CrudArtifactOwnership.None).Should().BeFalse();
+    }
+
     private static ImmutableSortedSet<string> OwnedSetOf(string manifestJson) =>
         CrudArtifactOwnership.Read(ImmutableArray.Create<AdditionalText>(new InMemoryAdditionalText(
             "/obj/Debug/net10.0/" + CrudArtifactOwnership.ManifestFileName, manifestJson)));

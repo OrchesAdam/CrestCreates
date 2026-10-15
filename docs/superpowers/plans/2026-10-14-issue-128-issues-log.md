@@ -161,3 +161,24 @@
 - 既存环境敏感（非本轮引入，记录不掩盖）：`PackageTests.Build_InternalManifestRemainsAssemblyScoped` 断言 MSBuild 英文子串 "inaccessible"，在非英文 locale 下会假失败；`DOTNET_CLI_UI_LANGUAGE=en` 下该套 29/29。应改为断言错误码而非本地化文本，留作独立小修。
 
 当前计数：CodeGenerator **405 通过 + 3 失败 / 408，0 skipped**；DynamicApi **73 通过 + 2 失败 / 75，0 skipped**；JsonContracts 单元 **131/131**；JsonContracts 真实构建 PackageTests **29/29**（含 package/repository transport、增量、multi-targeting、global usings、package layout 不泄漏 task 程序集）。3 条 CodeGenerator 失败：`Formal_crud_must_emit_typed_input_envelopes_for_update_and_delete` 与 `Formal_crud_must_emit_typed_response_envelopes_as_json_roots` 仍在 driver 层要求 context/roots，而 root 注册按新主链归 JsonContracts 阶段（真实构建证据已 5/5 通过），下一步按已记录的跨进程方案把两阶段跑进 harness，不在检查器开洞；`Compatibility_result_contract_must_not_wrap_through_object_typed_output` 属 S3 typed result 范围。PackageTests 不覆盖 CRUD 专属场景：bundle 缺失自愈、声明移除后空 bundle、design-time 轻量生成、CRUD manifest owner/provenance 对账、外部全新目录一次构建——仍属 S2-6 待做。
+
+
+### S2 增量 12：整体审查修复、②生命周期与③两阶段 driver
+
+基于 cf44e947，由当前任务独立实施与验证。①的逐产物 FQN 跳过方向保留，补齐以下审查发现：
+
+- 输出完整性：原 stamp 只验证 bundle 是否存在，未绑定 outputs manifest。新增 `CrestCrudGenerationState`，把完整输入 manifest、bundle 与 outputs manifest 的内容 hash 绑定到成功 stamp；缺失/篡改任一输出即失效并重新生成。失败不写新成功状态。
+- 增量身份：输入 fingerprint 补最终 generation-disabled 值、RID、task assembly hash；模型 schema 版本由 CLI 明确验证，未知版本 CCCRUD006。configuration/TFM/源和引用内容继续参与输入集合。
+- 路径边界：bundle/input/output/stamp/temp 五种覆盖路径都按相对 SDK intermediate root 校验，拒绝仅字符串前缀相同的兄弟目录；不再留下 input/stamp 未校验的缺口。
+- design-time：CRUD 与 JSON 都以当前输入生成到独立 `design-time/` 分区，真实 build 的输出/stamp 不被 IDE 复用或覆盖；IDE 控制按 SDK Compile/SkipCompilerExecution 执行。
+- 实际装配：正式 CRUD analyzer 同时核对 transport marker、schema 合法的 manifest 归属与编译中真实物化类型；布尔 marker 单独不能使空声明通过。
+- provenance：JSON 阶段按 schema、owner assembly/service、完整 hint/type 集合、artifact hash 做双向对账；缺 manifest、旧/额外 owner 或不匹配产物报告 CCCRUD008。框架 envelope 类型必须唯一来自引用程序集，源内同名 shadow 或歧义报告 CCCRUD003。
+- ownership reader：精确文件名与支持的 schema 才可声明归属，异常/外来文件仍回到同一个空集；Entity/Service/正式 CRUD 管线使用内容 comparer，不能以非空 ImmutableSortedSet 的引用相等或“确定序”冒充增量值稳定性。
+
+②：新增真实 CRUD 构建矩阵，覆盖 clean/no-op、bundle/manifest 缺失自愈、manifest 改动、保留时间戳的内容修改、源文件改名、声明移除、禁用生成/未知 schema、design-time 隔离、TFM/RID、五种路径边界、布尔 marker 反事实与全新外部包首次消费。TFM/RID 在独立 repository-transport 消费工程验证，应用依赖复制为 binary references，不把仓库全局 analyzer ProjectReference 的既有框架传播问题混成工具链失败。
+
+③：`CrudPrecompileProducer` 通过生产 CLI 的 prepare-crud / generate 两个命令在子进程物化普通源码，再让官方 STJ 与 ObjectMapping generator 在一个真实 driver 中共同消费；测试仅 build-reference tool 项目，未将 source-linked Core 与 analyzer 共同引为运行时引用。原输入/响应 roots 两条基线转绿。CLI 负例覆盖缺 manifest、未知 schema、错误 owner/type/hash 与框架 shadow。
+
+附带修复已记录的 PackageTests locale 假失败：断言 CS0122，替代本地化英文 inaccessible。未修改 CI，未实施 S3 的 object-result/有限 filter 归一或 S4 的 GeneratedCrud 原生验收。
+
+验证（当前源代码）：定向 39/39；CodeGenerator 全套 444 pass + 1 个 S3 约定红 / 445，0 skipped；JsonContracts 单元 131/131；PackageTests 29/29（zh-Hans locale，CS0122 断言成立）；DynamicApi 73 pass + 2 个 S3 查询约定红 / 75。两个 driver roots 旧红已通过生产两阶段 CLI + 同一 STJ/ObjectMapping driver 真正转绿；未更改 S3 红例名称或含义。

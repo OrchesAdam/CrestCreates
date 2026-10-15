@@ -16,14 +16,15 @@ namespace CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
 /// same-round mapping dependency, the closed CRUD root matrix in one build, and the fail-closed
 /// counterfactual for a formal declaration whose toolchain is not assembled.
 /// </summary>
+[Collection("CrudBuild")]
 public class CrudJsonContractMsBuildBaselineTests
 {
-    private const string ToolchainImports = """
+    internal const string ToolchainImports = """
         <Import Project="__ROOT__/src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.props" />
         <Import Project="__ROOT__/src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.targets" />
         """;
 
-    private const string ProjectFile = """
+    internal const string ProjectFile = """
         <Project Sdk="Microsoft.NET.Sdk">
           <PropertyGroup>
             <TargetFramework>net10.0</TargetFramework>
@@ -49,7 +50,7 @@ public class CrudJsonContractMsBuildBaselineTests
         </Project>
         """;
 
-    private const string DeclarationSource = """
+    internal const string DeclarationSource = """
         using System;
         using CrestCreates.Domain.Shared.Attributes;
 

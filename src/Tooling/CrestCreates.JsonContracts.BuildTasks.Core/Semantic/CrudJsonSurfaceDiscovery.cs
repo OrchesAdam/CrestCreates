@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using CrestCreates.JsonContracts.BuildTasks.Diagnostics;
 using CrestCreates.JsonContracts.BuildTasks.Model;
 using CrestCreates.Tooling.CrudGeneration;
@@ -38,9 +41,9 @@ public sealed class CrudJsonSurfaceDiscovery
             return roots;
         }
 
-        var envelopeOpen = ResolveType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse`1");
-        var voidEnvelope = ResolveType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse");
-        var pagedOpen = ResolveType(compilation,
+        var envelopeOpen = ResolveFrameworkType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse`1");
+        var voidEnvelope = ResolveFrameworkType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse");
+        var pagedOpen = ResolveFrameworkType(compilation,
             "CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto`1");
 
         if (envelopeOpen is null || voidEnvelope is null || pagedOpen is null)
@@ -131,6 +134,12 @@ public sealed class CrudJsonSurfaceDiscovery
             return;
         }
 
+        if (!SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, compilation.Assembly))
+        {
+            ManifestError($"'{fullMetadataName}' must be declared by its current CRUD owner, not a referenced assembly.");
+            return;
+        }
+
         if (type is IErrorTypeSymbol)
         {
             _diagnostics.Add(new JsonContractDiagnostic
@@ -175,35 +184,75 @@ public sealed class CrudJsonSurfaceDiscovery
     {
         if (string.IsNullOrWhiteSpace(crudOutputsManifestJson))
         {
+            if (models.Count > 0) ManifestError("A formal CRUD surface requires its precompile outputs manifest.");
             return;
         }
 
-        using var document = System.Text.Json.JsonDocument.Parse(crudOutputsManifestJson);
-        if (!document.RootElement.TryGetProperty("Entries", out var entries)
-            || entries.ValueKind != System.Text.Json.JsonValueKind.Array)
+        try
         {
-            return;
+            using var document = JsonDocument.Parse(crudOutputsManifestJson);
+            var root = document.RootElement;
+            if (root.GetProperty("SchemaVersion").GetString() != "crud-artifacts-v1"
+                || root.GetProperty("ModelSchemaVersion").GetString() != CrudGenerationModel.ModelSchemaVersion)
+            {
+                ManifestError("Unsupported CRUD outputs manifest schema.");
+                return;
+            }
+            var expected = models.SelectMany(model => CrudArtifactEmitter.Emit(model).Select(artifact =>
+                (Model: model, Artifact: artifact))).ToDictionary(
+                item => (item.Model.ServiceFullName, item.Artifact.HintName));
+            var seen = new HashSet<(string Owner, string Hint)>();
+            foreach (var entry in root.GetProperty("Entries").EnumerateArray())
+            {
+                var key = (entry.GetProperty("OwnerServiceFullName").GetString()!,
+                    entry.GetProperty("ArtifactHintName").GetString()!);
+                if (!seen.Add(key) || !expected.TryGetValue(key, out var item)
+                    || entry.GetProperty("OwnerAssemblyName").GetString() != assemblyName
+                    || entry.GetProperty("ModelSchemaVersion").GetString() != CrudGenerationModel.ModelSchemaVersion)
+                {
+                    ManifestError("CRUD artifact owner, schema or identity does not match the current declaration.");
+                    continue;
+                }
+                var names = entry.GetProperty("DeclaredTypeFullNames").EnumerateArray()
+                    .Select(value => value.GetString()!).OrderBy(value => value, StringComparer.Ordinal);
+                var expectedNames = CrudArtifactEmitter.DeclaredTypeFullNames(item.Artifact.Source)
+                    .OrderBy(value => value, StringComparer.Ordinal);
+                var hash = "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(item.Artifact.Source))).ToLowerInvariant();
+                if (!names.SequenceEqual(expectedNames, StringComparer.Ordinal)
+                    || entry.GetProperty("ContentHash").GetString() != hash)
+                    ManifestError("CRUD artifact declared types or content hash do not match the current producer model.");
+            }
+            if (seen.Count != expected.Count || expected.Keys.Any(key => !seen.Contains(key)))
+                ManifestError("The CRUD outputs manifest does not cover the complete current artifact set.");
         }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException)
+        {
+            ManifestError("Invalid CRUD outputs manifest: " + ex.GetType().Name);
+        }
+    }
 
-        var declaredOwners = entries.EnumerateArray()
-            .Select(entry => entry.TryGetProperty("OwnerServiceFullName", out var owner)
-                ? owner.GetString() ?? string.Empty
-                : string.Empty)
-            .Where(owner => owner.Length > 0)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+    private void ManifestError(string message) => _diagnostics.Add(new JsonContractDiagnostic
+    {
+        Id = CrudDiagnosticIds.LegacyContractMismatch,
+        Severity = JsonContractDiagnosticSeverity.Error,
+        Message = message,
+    });
 
-        var discovered = models.Select(model => model.ServiceFullName).ToHashSet(StringComparer.Ordinal);
-        foreach (var owner in declaredOwners.Where(owner => !discovered.Contains(owner)))
+    private INamedTypeSymbol? ResolveFrameworkType(CSharpCompilation compilation, string fullMetadataName)
+    {
+        var candidates = ResolveCandidates(compilation, fullMetadataName);
+        if (candidates.Count != 1
+            || SymbolEqualityComparer.Default.Equals(candidates[0].ContainingAssembly, compilation.Assembly))
         {
             _diagnostics.Add(new JsonContractDiagnostic
             {
-                Id = CrudDiagnosticIds.LegacyContractMismatch,
+                Id = CrudDiagnosticIds.OwnerIdentityConflict,
                 Severity = JsonContractDiagnosticSeverity.Error,
-                Message = $"'{owner}' owns materialized CRUD artifacts in assembly '{assemblyName}', "
-                    + "but the JSON contract stage found no CRUD surface for it; the root matrix is not closed.",
+                Message = $"Framework contract '{fullMetadataName}' must resolve uniquely from a referenced assembly.",
             });
+            return null;
         }
+        return candidates[0];
     }
 
     private static INamedTypeSymbol? ResolveType(CSharpCompilation compilation, string fullMetadataName)

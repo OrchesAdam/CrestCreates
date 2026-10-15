@@ -32,9 +32,13 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 provider.GlobalOptions.TryGetValue(
                     "build_property.CrestCreatesCrudJsonToolchain", out var value) && value == "true");
 
+            var ownedArtifacts = context.AdditionalTextsProvider.Collect()
+                .Select(static (texts, _) => CrudArtifactOwnership.Read(texts))
+                .WithComparer(CrudArtifactOwnership.ContentComparer);
+
             var compilationAndClasses = context.CompilationProvider
                 .Combine(entityClasses)
-                .Combine(toolchainAssembled);
+                .Combine(toolchainAssembled.Combine(ownedArtifacts));
 
             context.RegisterSourceOutput(compilationAndClasses, ExecuteGeneration);
         }
@@ -169,9 +173,10 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
 
         private void ExecuteGeneration(
             SourceProductionContext context,
-            ((Compilation Compilation, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> Classes) Combined, bool ToolchainAssembled) input)
+            ((Compilation Compilation, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> Classes) Combined, (bool ToolchainAssembled, ImmutableSortedSet<string> OwnedArtifacts) State) input)
         {
-            var (combined, toolchainAssembled) = input;
+            var (combined, state) = input;
+            var (toolchainAssembled, ownedArtifacts) = state;
             var (compilation, entityClasses) = combined;
             if (entityClasses.IsDefaultOrEmpty) return;
 
@@ -186,7 +191,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 .ToImmutableHashSet(SymbolEqualityComparer.Default);
             if (!formalDeclarations.IsEmpty)
             {
-                ReportFormalDeclarationDiagnostics(context, compilation, formalDeclarations.Count, toolchainAssembled);
+                ReportFormalDeclarationDiagnostics(context, compilation, formalDeclarations.Count, toolchainAssembled, ownedArtifacts);
             }
 
             var hasMultiTenant = compilation.GetTypeByMetadataName("CrestCreates.DataFilter.Entities.IMultiTenant") != null;
@@ -273,7 +278,8 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             SourceProductionContext context,
             Compilation compilation,
             int formalDeclarationCount,
-            bool toolchainAssembled)
+            bool toolchainAssembled,
+            ImmutableSortedSet<string> ownedArtifacts)
         {
             var build = CrudGenerationModelBuilder.Build(compilation, compilation.AssemblyName ?? string.Empty);
             foreach (var issue in build.Diagnostics)
@@ -284,12 +290,18 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     issue.Message));
             }
 
-            if (!toolchainAssembled && formalDeclarationCount > 0)
+            var actualSurface = build.Models.All(model =>
+                CrudArtifactEmitter.Emit(model)
+                    .SelectMany(artifact => CrudArtifactEmitter.DeclaredTypeFullNames(artifact.Source))
+                    .All(name => ownedArtifacts.Contains(name)
+                        && compilation.GetTypeByMetadataName(name) is INamedTypeSymbol type
+                        && SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, compilation.Assembly)));
+            if ((!toolchainAssembled || !actualSurface) && formalDeclarationCount > 0)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
                     CrudServiceDiagnostics.PrecompileTransportMissing,
                     Location.None,
-                    $"{formalDeclarationCount} formal CRUD declaration(s) exist but the CRUD precompile and JSON contract toolchain is not imported by this project."));
+                    $"{formalDeclarationCount} formal CRUD declaration(s) require the precompile/JSON toolchain, a valid ownership manifest and current materialized Compile artifacts."));
             }
         }
 

@@ -45,6 +45,12 @@ public sealed class WriteCrestCrudInputManifest : ITask
 
     public string Configuration { get; set; } = string.Empty;
 
+    public string RuntimeIdentifier { get; set; } = string.Empty;
+
+    public bool ValidateOnly { get; set; }
+
+    public string TaskAssemblyPath { get; set; } = string.Empty;
+
     public string ModelSchemaVersion { get; set; } = string.Empty;
 
     public string ToolSemanticVersion { get; set; } = string.Empty;
@@ -75,6 +81,9 @@ public sealed class WriteCrestCrudInputManifest : ITask
             writer.WriteString("assemblyName", AssemblyName);
             writer.WriteString("targetFramework", TargetFramework);
             writer.WriteString("configuration", Configuration);
+            writer.WriteString("runtimeIdentifier", RuntimeIdentifier);
+            writer.WriteBoolean("validateOnly", ValidateOnly);
+            writer.WriteString("taskAssemblyHash", HashFile(TaskAssemblyPath));
             writer.WriteString("langVersion", LangVersion);
             writer.WriteString("nullable", Nullable);
             writer.WriteBoolean("allowUnsafeBlocks", AllowUnsafeBlocks);

@@ -61,7 +61,11 @@ internal static class Program
             return 4;
         }
 
-        var result = new CrudPrecompileEngine().Run(
+        var result = !string.IsNullOrEmpty(request.ExpectedModelSchemaVersion)
+            && request.ExpectedModelSchemaVersion != CrestCreates.Tooling.CrudGeneration.CrudGenerationModel.ModelSchemaVersion
+            ? CrudPrecompileResult.Failed([new CrudToolDiagnostic("CCCRUD006",
+                "The requested CRUD model schema version is unsupported.", null, 0, 0)])
+            : new CrudPrecompileEngine().Run(
             request.AssemblyName ?? "",
             request.Sources?.Select(source => (source.Path, source.Text)).ToList() ?? [],
             request.ReferencePaths ?? [],
