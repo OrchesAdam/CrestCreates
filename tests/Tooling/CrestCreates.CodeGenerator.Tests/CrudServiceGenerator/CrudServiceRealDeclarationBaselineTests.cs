@@ -14,8 +14,11 @@ namespace CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
 /// #128 S1 baselines for the formal entry point: a real, referenced
 /// <c>[GenerateCrudService(typeof(Entity))]</c> partial service declaration (never the removed
 /// test-helper stub). The harness builds its own compilation closure and runs one real generator
-/// driver — the helper's stub-injection and serial-driver path is deliberately not used. The two
-/// red baselines assert the designed contract that the current generator does not satisfy yet.
+/// driver — the helper's stub-injection and serial-driver path is deliberately not used. The
+/// contract baselines assert the designed wire model through <see cref="CrudFormalContractProbe"/>:
+/// referenced-assembly symbol identity, producer ownership and required members, so neither comments,
+/// same-short-name fakes nor uninitialized members can satisfy them. Each contract also has a
+/// reverse control that runs the same checker over a mutation and must report the targeted violation.
 /// </summary>
 public class CrudServiceRealDeclarationBaselineTests
 {
@@ -44,6 +47,37 @@ public class CrudServiceRealDeclarationBaselineTests
         }
         """;
 
+    // §7.4: Delete composes the route identity with the If-Match concurrency header, so the
+    // capability-input baselines use a concurrency entity; the plain probe above stays the input of
+    // the naming and request-binding baselines.
+    private const string ConcurrencyDeclarationSource = """
+        using System;
+        using CrestCreates.Domain.Shared.Attributes;
+        using CrestCreates.Domain.Shared.Entities.Auditing;
+
+        namespace Shop.Domain.Entities
+        {
+            public class Product : IHasConcurrencyStamp
+            {
+                public Guid Id { get; set; }
+                public string Name { get; set; } = string.Empty;
+                public decimal Price { get; set; }
+                public string ConcurrencyStamp { get; set; } = string.Empty;
+            }
+        }
+
+        namespace Shop.Application.Products
+        {
+            [GenerateCrudService(typeof(Shop.Domain.Entities.Product), RoutePrefix = "/api/products")]
+            public partial class ProductAppService
+            {
+            }
+        }
+        """;
+
+    private static readonly CrudFormalContractProbe.Model ContractModel =
+        new("ProductAppService", "Product", "Shop.Application.Products");
+
     private static readonly string[] DeclaredReferenceNames =
     [
         "System.Runtime",
@@ -55,6 +89,7 @@ public class CrudServiceRealDeclarationBaselineTests
         "System.Threading.Tasks",
         "System.ComponentModel",
         "System.ComponentModel.Annotations",
+        "System.Text.Json",
         "CrestCreates.Domain",
         "CrestCreates.Authorization.Abstractions",
         "CrestCreates.Application.Contracts",
@@ -67,9 +102,7 @@ public class CrudServiceRealDeclarationBaselineTests
         "Rougamo",
     ];
 
-    private static readonly SyntaxTree[] AuthoredTrees = [CSharpSyntaxTree.ParseText(DeclarationSource)];
-
-    private static (Compilation Compilation, GeneratorDriverRunResult RunResult) RunRealDriver()
+    private static IReadOnlyList<MetadataReference> ClosureReferences()
     {
         var referencePaths = new List<string> { typeof(object).Assembly.Location };
         referencePaths.Add(typeof(GenerateCrudServiceAttribute).Assembly.Location);
@@ -110,23 +143,38 @@ public class CrudServiceRealDeclarationBaselineTests
             }
         }
 
-        var references = referencePaths
+        return referencePaths
             .Distinct()
-            .Select(path => MetadataReference.CreateFromFile(path))
-            .Cast<MetadataReference>()
+            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
             .ToArray();
+    }
 
+    private static (
+        Compilation Compilation,
+        GeneratorDriverRunResult RunResult,
+        IReadOnlyCollection<SyntaxTree> ProducerTrees) RunRealDriver(
+            string source = DeclarationSource)
+    {
         var compilation = CSharpCompilation.Create(
             "RealCrudDeclarationBaseline",
-            AuthoredTrees,
-            references,
+            [CSharpSyntaxTree.ParseText(source)],
+            ClosureReferences(),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
         GeneratorDriver driver = CSharpGeneratorDriver.Create(new CrudServiceSourceGenerator());
-        // R3-CRUD128-02: Capture the updated compilation so symbol checks can see generated types
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updatedCompilation, out _);
-        return (updatedCompilation, driver.GetRunResult());
+        var runResult = driver.GetRunResult();
+        return (updatedCompilation, runResult, runResult.GeneratedTrees.ToHashSet());
     }
+
+    /// <summary>
+    /// Trees the harness authored (the only non-producer inputs), so error attribution never depends
+    /// on parsing the same text twice and getting a different tree instance.
+    /// </summary>
+    private static IReadOnlyCollection<SyntaxTree> AuthoredTreesOf(
+        Compilation compilation,
+        IReadOnlyCollection<SyntaxTree> producerTrees) =>
+        compilation.SyntaxTrees.Except(producerTrees).ToArray();
 
     [Fact]
     public void Real_referenced_attribute_declaration_compiles_from_a_real_assembly_reference()
@@ -134,12 +182,14 @@ public class CrudServiceRealDeclarationBaselineTests
         // The formal entry must be usable from a real Domain.Shared reference (the helper stub is
         // not the public API). Only errors located in the authored trees count: generated-tree
         // errors are the object of the other baselines.
-        var (updated, _) = RunRealDriver();
+        var (updated, _, producerTrees) = RunRealDriver();
+        var authoredTrees = AuthoredTreesOf(updated, producerTrees);
+        authoredTrees.Should().HaveCount(1, "the probe authors exactly one declaration tree");
 
         var authoredErrors = updated.GetDiagnostics()
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error
                                  && diagnostic.Location.SourceTree is { } tree
-                                 && AuthoredTrees.Contains(tree))
+                                 && authoredTrees.Contains(tree))
             .Select(diagnostic => diagnostic.ToString())
             .ToList();
         authoredErrors.Should().BeEmpty(
@@ -153,7 +203,7 @@ public class CrudServiceRealDeclarationBaselineTests
         // Designed behavior: the annotated class is the service; ProductDto (derived from
         // typeof(Product)) is the generated contract. The current generator treats the annotated
         // class itself as the entity.
-        var (_, runResult) = RunRealDriver();
+        var (_, runResult, _) = RunRealDriver();
         var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
 
         generated.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
@@ -170,7 +220,7 @@ public class CrudServiceRealDeclarationBaselineTests
         // CapabilityEndpointBodyReader contract with required-body semantics (empty/whitespace/null
         // /bad JSON → 400, zero business). The current emission routes through the legacy
         // DynamicApiGeneratedRuntime helper whose empty-body semantics materialize a default DTO.
-        var (closure, runResult) = RunRealDriver();
+        var (closure, runResult, _) = RunRealDriver();
         string[] requiredTypes =
         [
             "CrestCreates.DynamicApi.IDynamicApiGeneratedProvider",
@@ -188,6 +238,265 @@ public class CrudServiceRealDeclarationBaselineTests
         generated.Should().NotContain("DynamicApiGeneratedRuntime.ReadBodyAsync",
             "formal CRUD must never bind request bodies through the legacy helper");
     }
+
+    [Fact]
+    public void Formal_crud_must_emit_typed_input_envelopes_for_update_and_delete()
+    {
+        // Designed contract (§7.1/§7.4): each route/body/header composition is a producer-declared
+        // compatibility input envelope owned by service+action, with the route identity and the body
+        // member at their static types, registered as a JSON root for the mapper's SerializeToElement.
+        var (compilation, runResult, producerTrees) = RunRealDriver(ConcurrencyDeclarationSource);
+        runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+
+        CrudFormalContractProbe.ClosureViolations(compilation).Should().BeEmpty(
+            "the harness closure must expose the referenced JSON and envelope contract types");
+
+        CrudFormalContractProbe
+            .InputEnvelopeViolations(compilation, producerTrees, ContractModel)
+            .Should().BeEmpty(
+                "formal CRUD must emit the Update/Delete capability input envelopes and register them as roots");
+    }
+
+    [Fact]
+    public void Formal_crud_must_emit_typed_response_envelopes_as_json_roots()
+    {
+        // Designed contract (§7.1/§7.3): the generated bundle declares an official
+        // JsonSerializerContext whose roots are the closed formal result envelopes
+        // DynamicApiResponse<ProductDto>, DynamicApiResponse<PagedResultDto<ProductDto>>,
+        // DynamicApiResponse (void/404) and ProductDto. The current generator wraps through
+        // object-typed ctx.Output and registers nothing.
+        var (compilation, runResult, producerTrees) = RunRealDriver();
+        runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+
+        CrudFormalContractProbe.ClosureViolations(compilation).Should().BeEmpty(
+            "the harness closure must expose the referenced JSON and envelope contract types");
+
+        CrudFormalContractProbe
+            .ResponseRootViolations(compilation, producerTrees, ContractModel)
+            .Should().BeEmpty(
+                "formal CRUD must register the closed typed response envelopes as roots on the official context");
+    }
+
+    [Theory]
+    [InlineData("empty-shells")]
+    [InlineData("wrong-owner")]
+    [InlineData("missing-member")]
+    [InlineData("wrong-member-type")]
+    [InlineData("not-producer-owned")]
+    public void Input_envelope_contract_must_reject_structural_mutation(string mutation)
+    {
+        // R4-CRUD128-02 reverse control: the same checker that drives the contract baseline must
+        // report the targeted violation for each structural mutation.
+        var (source, expectedReason) = InputEnvelopeMutation(mutation);
+        var compilation = CrudFormalContractProbe.AuthoredCompilation(source, ClosureReferences());
+        var producerTrees = mutation == "not-producer-owned"
+            ? Array.Empty<SyntaxTree>()
+            : compilation.SyntaxTrees.ToArray();
+
+        var violations = CrudFormalContractProbe.InputEnvelopeViolations(
+            compilation, producerTrees, ContractModel);
+
+        violations.Should().Contain(
+            reason => reason.Contains(expectedReason, StringComparison.Ordinal),
+            $"mutation '{mutation}' must fail on '{expectedReason}'; observed: {string.Join(" | ", violations)}");
+    }
+
+    [Theory]
+    [InlineData("fake-contracts")]
+    [InlineData("fake-base-context")]
+    [InlineData("empty-official-context")]
+    [InlineData("object-envelope-root")]
+    public void Response_root_contract_must_reject_structural_mutation(string mutation)
+    {
+        // R4-CRUD128-03 reverse control: same-name fakes, an official context without roots and an
+        // object-typed envelope must each be rejected by the identity-based root checks.
+        var (source, expectedReason) = ResponseRootMutation(mutation);
+        var compilation = CrudFormalContractProbe.AuthoredCompilation(source, ClosureReferences());
+
+        var violations = CrudFormalContractProbe.ResponseRootViolations(
+            compilation, compilation.SyntaxTrees.ToArray(), ContractModel);
+
+        violations.Should().Contain(
+            reason => reason.Contains(expectedReason, StringComparison.Ordinal),
+            $"mutation '{mutation}' must fail on '{expectedReason}'; observed: {string.Join(" | ", violations)}");
+    }
+
+    private static (string Source, string ExpectedReason) InputEnvelopeMutation(string mutation) => mutation switch
+    {
+        "empty-shells" => ("""
+            namespace ReviewUnrelated
+            {
+                public class UpdateProductInput { }
+                public class DeleteProductInput { }
+            }
+            """, "must declare the Update capability input envelope"),
+        "wrong-owner" => ("""
+            namespace Shop.Application.Products.Contracts
+            {
+                public class UpdateProductDto { }
+            }
+
+            namespace ReviewUnrelated
+            {
+                internal sealed class OtherAppService_Update_CompatibilityInput
+                {
+                    public global::System.Guid Id { get; init; }
+                    public global::Shop.Application.Products.Contracts.UpdateProductDto Input { get; init; } = default!;
+                }
+            }
+            """, "must declare the Update capability input envelope"),
+        "missing-member" => ("""
+            namespace Shop.Application.Products.Contracts
+            {
+                public class UpdateProductDto { }
+            }
+
+            namespace CrestCreates.Generated
+            {
+                internal sealed class ProductAppService_Update_CompatibilityInput
+                {
+                    public global::System.Guid Id { get; init; }
+                }
+
+                internal sealed class ProductAppService_Delete_CompatibilityInput
+                {
+                    public global::System.Guid Id { get; init; }
+                    public global::System.String? IfMatch { get; init; }
+                }
+            }
+            """, "must expose the input member 'Input'"),
+        "wrong-member-type" => ("""
+            namespace Shop.Application.Products.Contracts
+            {
+                public class UpdateProductDto { }
+            }
+
+            namespace CrestCreates.Generated
+            {
+                internal sealed class ProductAppService_Update_CompatibilityInput
+                {
+                    public global::System.String Id { get; init; } = global::System.String.Empty;
+                    public object Input { get; init; } = default!;
+                }
+
+                internal sealed class ProductAppService_Delete_CompatibilityInput
+                {
+                    public global::System.Guid Id { get; init; }
+                    public global::System.String? IfMatch { get; init; }
+                }
+            }
+            """, "must be statically typed 'System.Guid'"),
+        "not-producer-owned" => (FormalEnvelopes + RootedContext, "must declare the Update capability input envelope"),
+        _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+    };
+
+    private const string FormalEnvelopes = """
+        namespace Shop.Application.Products.Contracts
+        {
+            public class ProductDto { }
+            public class UpdateProductDto { }
+        }
+
+        namespace CrestCreates.Generated
+        {
+            internal sealed class ProductAppService_Update_CompatibilityInput
+            {
+                public global::System.Guid Id { get; init; }
+                public global::Shop.Application.Products.Contracts.UpdateProductDto Input { get; init; } = default!;
+            }
+
+            internal sealed class ProductAppService_Delete_CompatibilityInput
+            {
+                public global::System.Guid Id { get; init; }
+                public global::System.String? IfMatch { get; init; }
+            }
+        }
+        """;
+
+    private const string RootedContext = """
+        namespace CrestCreates.Generated
+        {
+            [System.Text.Json.Serialization.JsonSerializable(typeof(global::CrestCreates.Generated.ProductAppService_Update_CompatibilityInput))]
+            [System.Text.Json.Serialization.JsonSerializable(typeof(global::CrestCreates.Generated.ProductAppService_Delete_CompatibilityInput))]
+            internal partial class CrudProbeJsonContext : System.Text.Json.Serialization.JsonSerializerContext
+            {
+                internal CrudProbeJsonContext(global::System.Text.Json.JsonSerializerOptions options) : base(options)
+                {
+                }
+            }
+        }
+        """;
+
+    private static (string Source, string ExpectedReason) ResponseRootMutation(string mutation) => mutation switch
+    {
+        "fake-contracts" => ("""
+            namespace ReviewUnrelated
+            {
+                public class JsonTypeInfo<T> { }
+                public class DynamicApiResponse<T> { }
+                public class DynamicApiResponse { }
+                public class PagedResultDto<T> { }
+                public class ProductDto { }
+
+                public class UnusedFields
+                {
+                    public JsonTypeInfo<DynamicApiResponse<ProductDto>> DtoInfo;
+                    public JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>> PageInfo;
+                    public JsonTypeInfo<DynamicApiResponse> VoidInfo;
+                }
+            }
+            """, "must declare a generated context derived from the referenced"),
+        "fake-base-context" => ("""
+            namespace Shop.Application.Products.Contracts
+            {
+                public class ProductDto { }
+            }
+
+            namespace ReviewUnrelated
+            {
+                public abstract class JsonSerializerContext { }
+            }
+
+            namespace CrestCreates.Generated
+            {
+                internal sealed class CrudProbeJsonContext : global::ReviewUnrelated.JsonSerializerContext
+                {
+                }
+            }
+            """, "must declare a generated context derived from the referenced"),
+        "empty-official-context" => (FormalReadDto + """
+            namespace CrestCreates.Generated
+            {
+                internal partial class CrudProbeJsonContext : System.Text.Json.Serialization.JsonSerializerContext
+                {
+                    internal CrudProbeJsonContext(global::System.Text.Json.JsonSerializerOptions options) : base(options)
+                    {
+                    }
+                }
+            }
+            """, "must be registered as a [JsonSerializable] root"),
+        "object-envelope-root" => (FormalReadDto + """
+            namespace CrestCreates.Generated
+            {
+                [System.Text.Json.Serialization.JsonSerializable(typeof(global::System.Object))]
+                [System.Text.Json.Serialization.JsonSerializable(typeof(global::CrestCreates.DynamicApi.DynamicApiResponse<object>))]
+                internal partial class CrudProbeJsonContext : System.Text.Json.Serialization.JsonSerializerContext
+                {
+                    internal CrudProbeJsonContext(global::System.Text.Json.JsonSerializerOptions options) : base(options)
+                    {
+                    }
+                }
+            }
+            """, "DynamicApiResponse<object> is not a formal CRUD result envelope"),
+        _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+    };
+
+    private const string FormalReadDto = """
+        namespace Shop.Application.Products.Contracts
+        {
+            public class ProductDto { }
+        }
+        """;
 
     [Fact]
     public void Entity_with_private_setter_on_input_property_must_emit_CCCRUD004()
@@ -220,7 +529,7 @@ public class CrudServiceRealDeclarationBaselineTests
             }
             """;
 
-        var (_, runResult) = RunRealDriverWithSource(privateSetterSource);
+        var (_, runResult, _) = RunRealDriver(privateSetterSource);
 
         var diagnostics = runResult.Diagnostics
             .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
@@ -262,7 +571,7 @@ public class CrudServiceRealDeclarationBaselineTests
             }
             """;
 
-        var (_, runResult) = RunRealDriverWithSource(protectedIdSource);
+        var (_, runResult, _) = RunRealDriver(protectedIdSource);
 
         var diagnostics = runResult.Diagnostics
             .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
@@ -301,7 +610,7 @@ public class CrudServiceRealDeclarationBaselineTests
             }
             """;
 
-        var (_, runResult) = RunRealDriverWithSource(excludedSource);
+        var (_, runResult, _) = RunRealDriver(excludedSource);
 
         var diagnostics = runResult.Diagnostics
             .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
@@ -342,7 +651,7 @@ public class CrudServiceRealDeclarationBaselineTests
             }
             """;
 
-        var (_, runResult) = RunRealDriverWithSource(platformFieldsSource);
+        var (_, runResult, _) = RunRealDriver(platformFieldsSource);
 
         var diagnostics = runResult.Diagnostics
             .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
@@ -382,7 +691,7 @@ public class CrudServiceRealDeclarationBaselineTests
             }
             """;
 
-        var (_, runResult) = RunRealDriverWithSource(noCtorSource);
+        var (_, runResult, _) = RunRealDriver(noCtorSource);
 
         var diagnostics = runResult.Diagnostics
             .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
@@ -425,7 +734,7 @@ public class CrudServiceRealDeclarationBaselineTests
             }
             """;
 
-        var (_, runResult) = RunRealDriverWithSource(protectedCtorSource);
+        var (_, runResult, _) = RunRealDriver(protectedCtorSource);
 
         var diagnostics = runResult.Diagnostics
             .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
@@ -435,144 +744,5 @@ public class CrudServiceRealDeclarationBaselineTests
         diagnostics.Should().ContainSingle("one diagnostic per entity");
         diagnostics[0].GetMessage().Should().Contain("public parameterless constructor",
             "the diagnostic must specify that a public constructor is required");
-    }
-
-    private static (Compilation Compilation, GeneratorDriverRunResult RunResult) RunRealDriverWithSource(string source)
-    {
-        var referencePaths = new List<string> { typeof(object).Assembly.Location };
-        referencePaths.Add(typeof(GenerateCrudServiceAttribute).Assembly.Location);
-        foreach (var referenceName in DeclaredReferenceNames)
-        {
-            try
-            {
-                referencePaths.Add(System.Reflection.Assembly.Load(referenceName).Location);
-            }
-            catch (Exception)
-            {
-                // Unavailable optional reference
-            }
-        }
-
-        var aspNetCoreDirectory = System.IO.Path.GetDirectoryName(
-            typeof(Microsoft.AspNetCore.Http.HttpContext).Assembly.Location);
-        if (!string.IsNullOrEmpty(aspNetCoreDirectory))
-        {
-            foreach (var fileName in new[]
-                     {
-                         "Microsoft.AspNetCore.Http.dll",
-                         "Microsoft.AspNetCore.Http.Abstractions.dll",
-                         "Microsoft.AspNetCore.Routing.dll",
-                         "Microsoft.AspNetCore.Routing.Abstractions.dll",
-                         "Microsoft.AspNetCore.Mvc.Core.dll",
-                     })
-            {
-                var candidate = System.IO.Path.Combine(aspNetCoreDirectory, fileName);
-                if (System.IO.File.Exists(candidate))
-                {
-                    referencePaths.Add(candidate);
-                }
-            }
-        }
-
-        var references = referencePaths
-            .Distinct()
-            .Select(path => MetadataReference.CreateFromFile(path))
-            .Cast<MetadataReference>()
-            .ToArray();
-
-        var trees = new[] { CSharpSyntaxTree.ParseText(source) };
-        var compilation = CSharpCompilation.Create(
-            "RealCrudDeclarationBaseline",
-            trees,
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(new CrudServiceSourceGenerator());
-        // R3-CRUD128-02: Capture the updated compilation so symbol checks can see generated types
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updatedCompilation, out _);
-        return (updatedCompilation, driver.GetRunResult());
-    }
-
-    [Fact]
-    public void Formal_crud_must_emit_typed_input_envelopes_for_update_and_delete()
-    {
-        // Designed behavior (§7.1): Update and Delete actions must emit typed input envelopes
-        // that combine route/body/header parameters. The CapabilityEndpointMapper performs
-        // SerializeToElement on the actual input, so the envelope type must be a JSON root.
-        // The current generator does not emit these typed envelopes.
-        // R2-CRUD128-03: Use Roslyn symbols to verify actual type declarations, not just regex.
-        var (compilation, runResult) = RunRealDriver();
-        runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
-
-        // Parse the generated code and verify actual type declarations exist
-        var generatedTypes = compilation.GetSymbolsWithName("UpdateProductInput", SymbolFilter.Type).ToList();
-        generatedTypes.Should().NotBeEmpty("UpdateProductInput must be declared as an actual type, not just mentioned in comments");
-        generatedTypes.Should().OnlyContain(t => t is INamedTypeSymbol, "envelope must be a class/record/struct");
-
-        generatedTypes = compilation.GetSymbolsWithName("DeleteProductInput", SymbolFilter.Type).ToList();
-        generatedTypes.Should().NotBeEmpty("DeleteProductInput must be declared as an actual type, not just mentioned in comments");
-        generatedTypes.Should().OnlyContain(t => t is INamedTypeSymbol, "envelope must be a class/record/struct");
-    }
-
-    [Fact]
-    public void Formal_crud_must_emit_typed_response_envelopes_as_json_roots()
-    {
-        // Designed behavior (§7.1-7.4): All response envelopes must be emitted as JSON roots:
-        // - Get: DynamicApiResponse<ProductDto> (typed DTO, not void)
-        // - Search: DynamicApiResponse<PagedResultDto<ProductDto>>
-        // - Create/Update: DynamicApiResponse<ProductDto> (typed DTO, not void — R1-CRUD128-05)
-        // - Delete: DynamicApiResponse (void)
-        // - Get not-found: DynamicApiResponse (void/404)
-        // The current generator wraps through object-typed ctx.Output instead.
-        // R3-CRUD128-03: Use symbol-based assertions, not regex on source text.
-        var (compilation, runResult) = RunRealDriver();
-        runResult.GeneratedTrees.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
-
-        // R3-CRUD128-03: Verify JsonTypeInfo fields exist with correct type parameters using symbols.
-        // Get all fields whose type is JsonTypeInfo<T> and check their type arguments.
-        var allTypes = compilation.GetSymbolsWithName(_ => true, SymbolFilter.Type)
-            .OfType<INamedTypeSymbol>()
-            .ToList();
-
-        // Look for fields in generated types that are JsonTypeInfo<DynamicApiResponse<...>>
-        var jsonTypeInfoFields = allTypes
-            .SelectMany(t => t.GetMembers().OfType<IFieldSymbol>())
-            .Where(f => f.Type is INamedTypeSymbol namedType &&
-                        namedType.Name == "JsonTypeInfo" &&
-                        namedType.TypeArguments.Length == 1)
-            .Select(f => (Field: f, TypeArg: ((INamedTypeSymbol)f.Type).TypeArguments[0]))
-            .ToList();
-
-        // Check for typed response envelope: JsonTypeInfo<DynamicApiResponse<ProductDto>>
-        var getResponseEnvelope = jsonTypeInfoFields
-            .Where(f => f.TypeArg is INamedTypeSymbol namedType &&
-                        namedType.Name == "DynamicApiResponse" &&
-                        namedType.TypeArguments.Length == 1 &&
-                        namedType.TypeArguments[0].Name == "ProductDto")
-            .ToList();
-        getResponseEnvelope.Should().NotBeEmpty(
-            "Get/Create/Update response envelope must have JsonTypeInfo<DynamicApiResponse<ProductDto>> field");
-
-        // Check for paged response envelope: JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>>
-        var searchResponseEnvelope = jsonTypeInfoFields
-            .Where(f => f.TypeArg is INamedTypeSymbol namedType &&
-                        namedType.Name == "DynamicApiResponse" &&
-                        namedType.TypeArguments.Length == 1 &&
-                        namedType.TypeArguments[0] is INamedTypeSymbol pagedType &&
-                        pagedType.Name == "PagedResultDto" &&
-                        pagedType.TypeArguments.Length == 1 &&
-                        pagedType.TypeArguments[0].Name == "ProductDto")
-            .ToList();
-        searchResponseEnvelope.Should().NotBeEmpty(
-            "Search response envelope must have JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>> field");
-
-        // Check for void response envelope: JsonTypeInfo<DynamicApiResponse>
-        var voidResponseEnvelope = jsonTypeInfoFields
-            .Where(f => f.TypeArg is INamedTypeSymbol namedType &&
-                        namedType.Name == "DynamicApiResponse" &&
-                        namedType.TypeArguments.Length == 0)
-            .ToList();
-        voidResponseEnvelope.Should().NotBeEmpty(
-            "Delete/404 void response envelope must have JsonTypeInfo<DynamicApiResponse> field");
     }
 }
