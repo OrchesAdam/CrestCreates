@@ -220,3 +220,9 @@
 5. 迁移清单（改测试而不是放宽断言）：`AppServiceCompatibilityGeneratorTests` 中 ModuleInitializer 断言、`CapabilityEndpointIntegrationTests` 里靠反射清静态 provider 的隔离手法、`CompatibilityProjection.E2E.Tests` 与 `CapabilityEndpoint.AotFixture` 的 Program 装配，都要迁到 DI 贡献/显式 AddGeneratedCrud。
 
 这一条落地前不动 S3-5..S3-7 的顺序；S3-2 的 typed result 与 S3-1 的 wire 域已经是它们的前置。
+
+## S3 计数（本轮收口）
+
+- CodeGenerator 全套 **445 通过 / 0 失败 / 445，0 skipped**：S1 立下的三条契约红（命名与 roots 由 S2 实现转绿、`FilterDescriptor` wire 由 S3-1 转绿、object 静态结果契约由 S3-2 转绿）已全部退役，未改口径、未放宽断言。
+- DynamicApi **100/100**（原 73+2 红 → 两红转绿 + 27 条新增：20 条 wire 域 + 5 条 typed result 运行时 + 2 条原有的其他用例计数随套件更新）。
+- JsonContracts 单元 **131/131**；PackageTests（真实消费工程构建/pack）**29/29**，两套都在 S3-1/S3-2 之后复跑过。
