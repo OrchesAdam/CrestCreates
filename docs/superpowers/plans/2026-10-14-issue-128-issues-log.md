@@ -58,3 +58,13 @@
 - **响应信封基线（红）**：`Formal_crud_must_emit_typed_response_envelopes_as_json_roots`——设计契约（§7.1–7.4）：所有响应信封必须作为 JSON root 发射（`DynamicApiResponse<ProductDto>`、`DynamicApiResponse<PagedResultDto<ProductDto>>`、`DynamicApiResponse` void/404）；当前生成器通过 object 静态类型 `ctx.Output` 包装。
 - 计数：CodeGenerator **371 通过 + 6 约定红（377）**；DynamicApi **73 通过 + 2 约定红（75）**；无既有用例回归。
 - S1 退出状态：真实 Attribute/owner/projection 模型编译样例 ✓；真实 MSBuild+STJ 失败用例 ✓；response/page/query/input-envelope/response-envelope 最小负例 ✓；CCCRUD001–008 诊断登记与 mapper 闭包校验 ✓；完整迁移表待 S2 落。设计审查通过后可推进 S2。
+
+### S1 增量 5：R1 审查修复（2026-10-15）
+
+- **R1-CRUD128-01 [P2] 查询红例触达 Value setter**：`CrudQueryFilterWireBaselineTests` 的 `FilterProbeJsonContext` 增加 `[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]`，使 JSON 属性绑定与 wire 一致（camelCase `filters/field/operator/value`）。两条红例现在正确失败于 `FilterDescriptor.Value` setter 的 `ArgumentException: 不支持的过滤值类型: System.Text.Json.JsonElement`，而非 Filters 集合为空。
+- **R1-CRUD128-02 [P2] MSBuild 基线分离命名与同轮不可见**：`CrudJsonContractMsBuildBaselineTests` 增加前置守卫——先验证 producer 确实运行并生成 `ProductAppService`（确认生成器运行），再检查 build 成功与 STJ 闭合。新增 `Real_msbuild_producer_output_must_match_formal_naming_contract` 控制测试，独立验证 producer 输出命名契约（`class ProductDto` + `namespace Shop.Application.Products.Contracts`，不含 `class ProductAppServiceDto`），将命名缺口与同轮 STJ 不可见分离为可归因证据。
+- **R1-CRUD128-03 [P2] mapper 校验尊重 ExcludeProperties 与输出只读属性**：`ValidateEntityMapperClosure` 提取 `ExcludeProperties`（`ExtractExcludePropertiesFromAttribute`），仅校验参与 Create/Update 输入映射的属性——排除 Id（输出只读）、ExcludeProperties、导航属性、平台排除字段。新增两个正向基线：`Entity_with_protected_id_setter_must_not_emit_CCCRUD004`（Id protected setter 不触发）、`Entity_with_excluded_private_setter_must_not_emit_CCCRUD004`（排除字段 private setter 不触发）。
+- **R1-CRUD128-04 [P2] 构造器校验仅接受 public**：`hasParameterlessCtor` 改为仅接受 `Accessibility.Public`（不再接受 protected），因 mapper 是静态类型 `new TTarget { ... }` 无法调用 protected 构造器。新增 `Entity_with_protected_only_parameterless_constructor_must_emit_CCCRUD004` 基线，验证 protected-only 构造器触发 CCCRUD004。诊断消息修正为 "public parameterless constructor"。
+- **R1-CRUD128-05 [P2] 信封基线语义化**：输入/响应信封基线从字符串包含改为正则匹配类型声明结构（`(class|record)\s+UpdateProductInput\s*\{`、`JsonTypeInfo<...>\s+\w+`），杜绝注释假绿。修正 Create/Update 响应注释：typed DTO 响应（`DynamicApiResponse<ProductDto>`），非 void。
+- 计数：CodeGenerator **374 通过 + 7 约定红（381）**；DynamicApi **73 通过 + 2 约定红（75）**；无既有用例回归。所有红灯失败原因纯净，符合声称的能力缺口。
+- S1 退出状态：R1 五项 P2 全部关闭；设计审查通过后可推进 S2。

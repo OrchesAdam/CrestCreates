@@ -97,8 +97,21 @@ public class CrudJsonContractMsBuildBaselineTests
                 $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo --verbosity quiet",
                 TimeSpan.FromMinutes(12));
 
-            // Designed behavior: the DTOs are materialized before compilation, the authored official
-            // STJ roots resolve, and the same build closes them — the build must succeed.
+            // Precondition: verify the producer actually runs and generates types. This separates
+            // "producer didn't run" from "STJ can't see same-round output".
+            var generatedFiles = Directory
+                .EnumerateFiles(Path.Combine(probeDirectory, "obj"), "*.g.cs", SearchOption.AllDirectories)
+                .Where(path => path.Contains("CrestCreates.CodeGenerator", StringComparison.Ordinal))
+                .Select(File.ReadAllText)
+                .ToList();
+            generatedFiles.Should().NotBeEmpty("the CRUD generator must produce output for the probe declaration");
+            var generatedContent = string.Join("\n", generatedFiles);
+            generatedContent.Should().Contain("ProductAppService",
+                "the producer must generate the service type (confirms generator ran)");
+
+            // Designed behavior: the DTOs are materialized before compilation with the formal naming
+            // contract (ProductDto from typeof(Product), not ProductAppServiceDto from the service class),
+            // the authored official STJ roots resolve, and the same build closes them — the build must succeed.
             buildResult.ExitCode.Should().Be(0,
                 "the formal CRUD declaration plus official STJ roots must close in one real build; observed build output:\n"
                 + buildResult.Output);
@@ -112,6 +125,57 @@ public class CrudJsonContractMsBuildBaselineTests
             generatedContext.Should().NotBeEmpty("the official STJ generator must produce context output for the probe roots");
             string.Join("\n", generatedContext).Should().Contain("ProductDto",
                 "the generated STJ context must close the CRUD DTO roots in the same compilation");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(probeDirectory, recursive: true);
+            }
+            catch (Exception)
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Real_msbuild_producer_output_must_match_formal_naming_contract()
+    {
+        // Control test: verify the producer generates types with the formal naming (ProductDto from
+        // typeof(Product)), not the legacy service-as-entity naming (ProductAppServiceDto). This
+        // isolates the naming gap from the same-round STJ invisibility gap.
+        var repoRoot = FindRepoRoot();
+        var probeDirectory = Path.Combine(repoRoot, "tests", "artifacts", "issue128-msbuild-naming-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(probeDirectory);
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(probeDirectory, "Probe.csproj"),
+                ProjectFile.Replace("__ROOT__", repoRoot.Replace('\\', '/')));
+            await File.WriteAllTextAsync(Path.Combine(probeDirectory, "Declaration.cs"), DeclarationSource);
+
+            var buildResult = await RunDotnetAsync(
+                repoRoot,
+                $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo --verbosity quiet",
+                TimeSpan.FromMinutes(12));
+
+            // The build may fail for other reasons (mapping, legacy bundle), but we only check the
+            // producer output naming here.
+            var generatedFiles = Directory
+                .EnumerateFiles(Path.Combine(probeDirectory, "obj"), "*.g.cs", SearchOption.AllDirectories)
+                .Where(path => path.Contains("CrestCreates.CodeGenerator", StringComparison.Ordinal))
+                .Select(File.ReadAllText)
+                .ToList();
+            generatedFiles.Should().NotBeEmpty("the CRUD generator must produce output");
+            var generatedContent = string.Join("\n", generatedFiles);
+
+            // Formal naming contract: DTOs named after the entity, in Contracts namespace
+            generatedContent.Should().Contain("class ProductDto",
+                "DTOs must be named after typeof(Product), not the service class");
+            generatedContent.Should().Contain("namespace Shop.Application.Products.Contracts",
+                "DTOs must be in the Contracts namespace per formal contract");
+            generatedContent.Should().NotContain("class ProductAppServiceDto",
+                "the service class must not be treated as the entity");
         }
         finally
         {

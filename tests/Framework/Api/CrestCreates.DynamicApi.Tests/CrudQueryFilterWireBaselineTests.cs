@@ -14,6 +14,7 @@ internal sealed class FilterProbeRequest
 }
 
 [JsonSerializable(typeof(FilterProbeRequest))]
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 internal partial class FilterProbeJsonContext : JsonSerializerContext
 {
 }

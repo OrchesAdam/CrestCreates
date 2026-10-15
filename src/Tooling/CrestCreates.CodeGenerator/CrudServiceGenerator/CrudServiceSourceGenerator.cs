@@ -924,27 +924,38 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 entityType = serviceClass;
             }
 
+            // Extract ExcludeProperties from the attribute
+            var excludeProperties = ExtractExcludePropertiesFromAttribute(serviceClass);
+
             // Re-collect properties from the actual entity type
             var entityProperties = GetEntityProperties(entityType);
 
-            var hasParameterlessCtor = entityType.Constructors.Any(c =>
+            // R1-CRUD128-04: Only public parameterless constructors are callable from the static mapper
+            var hasPublicParameterlessCtor = entityType.Constructors.Any(c =>
                 c.Parameters.Length == 0 &&
-                (c.DeclaredAccessibility == Accessibility.Public ||
-                 c.DeclaredAccessibility == Accessibility.Protected));
+                c.DeclaredAccessibility == Accessibility.Public);
 
-            if (!hasParameterlessCtor)
+            if (!hasPublicParameterlessCtor)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
                     CrudServiceDiagnostics.StaticClosureUnsupported,
                     entityType.Locations.FirstOrDefault(),
-                    $"Entity '{entityType.Name}' does not have a public or protected parameterless constructor; " +
+                    $"Entity '{entityType.Name}' does not have a public parameterless constructor; " +
                     "generated mapper cannot construct it."));
                 return false;
             }
 
-            var unmappableProperties = entityProperties
-                .Where(p => p.SetMethod == null || p.SetMethod.DeclaredAccessibility != Accessibility.Public)
+            // R1-CRUD128-03: Only validate properties that participate in Create/Update input mapping.
+            // Exclude: Id (output-only), ExcludeProperties, navigation properties, platform exclusions.
+            var inputProperties = entityProperties
                 .Where(p => !s_platformExclusions.Contains(p.Name))
+                .Where(p => !excludeProperties.Contains(p.Name))
+                .Where(p => p.Name != "Id") // Id is output-only, not written from Create/Update
+                .Where(p => !IsNavigationProperty(p))
+                .ToList();
+
+            var unmappableProperties = inputProperties
+                .Where(p => p.SetMethod == null || p.SetMethod.DeclaredAccessibility != Accessibility.Public)
                 .Select(p => p.Name)
                 .ToList();
 
@@ -953,12 +964,36 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 context.ReportDiagnostic(Diagnostic.Create(
                     CrudServiceDiagnostics.StaticClosureUnsupported,
                     entityType.Locations.FirstOrDefault(),
-                    $"Entity '{entityType.Name}' has properties without public setters: {string.Join(", ", unmappableProperties)}; " +
+                    $"Entity '{entityType.Name}' has input properties without public setters: {string.Join(", ", unmappableProperties)}; " +
                     "generated mapper cannot assign them."));
                 return false;
             }
 
             return true;
+        }
+
+        private static HashSet<string> ExtractExcludePropertiesFromAttribute(INamedTypeSymbol serviceClass)
+        {
+            foreach (var attr in serviceClass.GetAttributes())
+            {
+                if (attr.AttributeClass is null) continue;
+                var name = attr.AttributeClass.Name;
+                var fullName = attr.AttributeClass.ToDisplayString();
+                if (!(name == "GenerateCrudServiceAttribute" || name == "GenerateCrudService" ||
+                      fullName.EndsWith(".GenerateCrudServiceAttribute") || fullName.EndsWith(".GenerateCrudService")))
+                    continue;
+
+                var namedArg = attr.NamedArguments.FirstOrDefault(a => a.Key == "ExcludeProperties");
+                if (namedArg.Value.Kind == TypedConstantKind.Array)
+                {
+                    return new HashSet<string>(
+                        namedArg.Value.Values
+                            .Where(v => v.Value is string)
+                            .Select(v => (string)v.Value!),
+                        StringComparer.Ordinal);
+                }
+            }
+            return new HashSet<string>(StringComparer.Ordinal);
         }
 
         private static INamedTypeSymbol? ExtractEntityTypeFromAttribute(INamedTypeSymbol serviceClass)

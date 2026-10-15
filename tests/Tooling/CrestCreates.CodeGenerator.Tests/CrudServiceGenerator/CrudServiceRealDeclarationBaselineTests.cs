@@ -189,11 +189,11 @@ public class CrudServiceRealDeclarationBaselineTests
     }
 
     [Fact]
-    public void Entity_with_private_setter_properties_must_emit_CCCRUD004()
+    public void Entity_with_private_setter_on_input_property_must_emit_CCCRUD004()
     {
-        // Designed behavior: entities with properties that lack public setters cannot be
-        // statically mapped by the generated mapper. The generator must emit CCCRUD004 and
-        // skip generation for that entity rather than producing an incomplete mapping.
+        // Designed behavior: entities with input properties (not Id, not excluded) that lack public
+        // setters cannot be statically mapped by the generated mapper. The generator must emit
+        // CCCRUD004 and skip generation for that entity rather than producing an incomplete mapping.
         var privateSetterSource = """
             using System;
             using CrestCreates.Domain.Shared.Attributes;
@@ -202,7 +202,7 @@ public class CrudServiceRealDeclarationBaselineTests
             {
                 public class Product
                 {
-                    public Guid Id { get; set; }
+                    public Guid Id { get; protected set; }
                     public string Name { get; private set; } = string.Empty;
                     public decimal Price { get; set; }
                 }
@@ -225,17 +225,95 @@ public class CrudServiceRealDeclarationBaselineTests
             .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
             .ToList();
 
-        diagnostics.Should().NotBeEmpty("an entity with private setters must trigger CCCRUD004");
+        diagnostics.Should().NotBeEmpty("an entity with private setters on input properties must trigger CCCRUD004");
         diagnostics.Should().ContainSingle("one diagnostic per entity");
         diagnostics[0].GetMessage().Should().Contain("Name",
-            "the diagnostic must identify the unmappable property");
+            "the diagnostic must identify the unmappable input property");
+    }
+
+    [Fact]
+    public void Entity_with_protected_id_setter_must_not_emit_CCCRUD004()
+    {
+        // Designed behavior: Id is output-only (not written from Create/Update), so a protected
+        // setter on Id is acceptable and must not trigger CCCRUD004.
+        var protectedIdSource = """
+            using System;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Domain.Entities
+            {
+                public class Product
+                {
+                    public Guid Id { get; protected set; }
+                    public string Name { get; set; } = string.Empty;
+                    public decimal Price { get; set; }
+                }
+            }
+
+            namespace Shop.Application.Products
+            {
+                using CrestCreates.Domain.Shared.Attributes;
+
+                [GenerateCrudService(typeof(Shop.Domain.Entities.Product), RoutePrefix = "/api/products")]
+                public partial class ProductAppService
+                {
+                }
+            }
+            """;
+
+        var (_, runResult) = RunRealDriverWithSource(protectedIdSource);
+
+        var diagnostics = runResult.Diagnostics
+            .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
+            .ToList();
+
+        diagnostics.Should().BeEmpty("Id with protected setter is output-only and must not trigger CCCRUD004");
+    }
+
+    [Fact]
+    public void Entity_with_excluded_private_setter_must_not_emit_CCCRUD004()
+    {
+        // Designed behavior: properties listed in ExcludeProperties do not participate in input
+        // mapping, so private setters on them must not trigger CCCRUD004.
+        var excludedSource = """
+            using System;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Domain.Entities
+            {
+                public class Product
+                {
+                    public Guid Id { get; set; }
+                    public string Name { get; set; } = string.Empty;
+                    public string Secret { get; private set; } = string.Empty;
+                }
+            }
+
+            namespace Shop.Application.Products
+            {
+                using CrestCreates.Domain.Shared.Attributes;
+
+                [GenerateCrudService(typeof(Shop.Domain.Entities.Product), RoutePrefix = "/api/products", ExcludeProperties = new[] { "Secret" })]
+                public partial class ProductAppService
+                {
+                }
+            }
+            """;
+
+        var (_, runResult) = RunRealDriverWithSource(excludedSource);
+
+        var diagnostics = runResult.Diagnostics
+            .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
+            .ToList();
+
+        diagnostics.Should().BeEmpty("excluded properties must not trigger CCCRUD004");
     }
 
     [Fact]
     public void Entity_without_parameterless_constructor_must_emit_CCCRUD004()
     {
-        // Designed behavior: entities without a public or protected parameterless constructor
-        // cannot be constructed by the generated mapper. The generator must emit CCCRUD004.
+        // Designed behavior: entities without a public parameterless constructor cannot be
+        // constructed by the generated mapper. The generator must emit CCCRUD004.
         var noCtorSource = """
             using System;
             using CrestCreates.Domain.Shared.Attributes;
@@ -272,6 +350,49 @@ public class CrudServiceRealDeclarationBaselineTests
         diagnostics.Should().ContainSingle("one diagnostic per entity");
         diagnostics[0].GetMessage().Should().Contain("parameterless constructor",
             "the diagnostic must identify the missing constructor");
+    }
+
+    [Fact]
+    public void Entity_with_protected_only_parameterless_constructor_must_emit_CCCRUD004()
+    {
+        // Designed behavior (R1-CRUD128-04): the mapper is a static type that does `new TTarget { ... }`,
+        // which cannot call protected constructors. Only public parameterless constructors are accepted.
+        var protectedCtorSource = """
+            using System;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Domain.Entities
+            {
+                public class Product
+                {
+                    protected Product() { }
+                    public Guid Id { get; set; }
+                    public string Name { get; set; } = string.Empty;
+                    public decimal Price { get; set; }
+                }
+            }
+
+            namespace Shop.Application.Products
+            {
+                using CrestCreates.Domain.Shared.Attributes;
+
+                [GenerateCrudService(typeof(Shop.Domain.Entities.Product), RoutePrefix = "/api/products")]
+                public partial class ProductAppService
+                {
+                }
+            }
+            """;
+
+        var (_, runResult) = RunRealDriverWithSource(protectedCtorSource);
+
+        var diagnostics = runResult.Diagnostics
+            .Where(d => d.Id == CrudServiceDiagnosticCodes.StaticClosureUnsupportedValue)
+            .ToList();
+
+        diagnostics.Should().NotBeEmpty("an entity with only a protected parameterless constructor must trigger CCCRUD004");
+        diagnostics.Should().ContainSingle("one diagnostic per entity");
+        diagnostics[0].GetMessage().Should().Contain("public parameterless constructor",
+            "the diagnostic must specify that a public constructor is required");
     }
 
     private static (Compilation Compilation, GeneratorDriverRunResult RunResult) RunRealDriverWithSource(string source)
@@ -340,30 +461,49 @@ public class CrudServiceRealDeclarationBaselineTests
         var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
 
         generated.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
+
+        // Semantic check: input envelope types must be declared as classes/records with members
+        // for route/body/header parameters, not just mentioned in comments or strings.
+        generated.Should().MatchRegex(@"(class|record)\s+UpdateProductInput\s*\{",
+            "Update action must emit a typed input envelope class/record with members");
+        generated.Should().MatchRegex(@"(class|record)\s+DeleteProductInput\s*\{",
+            "Delete action must emit a typed input envelope class/record with members");
+
+        // The envelopes must have properties for the combined input (Id from route, body fields)
         generated.Should().Contain("UpdateProductInput",
-            "Update action must emit a typed input envelope combining route/body/header");
+            "Update input envelope type must be referenced");
         generated.Should().Contain("DeleteProductInput",
-            "Delete action must emit a typed input envelope combining route/body/header");
+            "Delete input envelope type must be referenced");
     }
 
     [Fact]
     public void Formal_crud_must_emit_typed_response_envelopes_as_json_roots()
     {
         // Designed behavior (§7.1-7.4): All response envelopes must be emitted as JSON roots:
-        // - DynamicApiResponse<ProductDto> for Get
-        // - DynamicApiResponse<PagedResultDto<ProductDto>> for Search
-        // - DynamicApiResponse (void) for Create/Update/Delete success
-        // - DynamicApiResponse (void/404) for Get not-found
+        // - Get: DynamicApiResponse<ProductDto> (typed DTO, not void)
+        // - Search: DynamicApiResponse<PagedResultDto<ProductDto>>
+        // - Create/Update: DynamicApiResponse<ProductDto> (typed DTO, not void — R1-CRUD128-05)
+        // - Delete: DynamicApiResponse (void)
+        // - Get not-found: DynamicApiResponse (void/404)
         // The current generator wraps through object-typed ctx.Output instead.
         var (_, runResult) = RunRealDriver();
         var generated = string.Join("\n", runResult.GeneratedTrees.Select(tree => tree.ToString()));
 
         generated.Should().NotBeEmpty("the formal declaration must generate the CRUD bundle");
-        generated.Should().Contain("JsonTypeInfo<DynamicApiResponse<ProductDto>>",
-            "Get response envelope must be a JSON root");
-        generated.Should().Contain("JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>>",
-            "Search response envelope must be a JSON root");
-        generated.Should().Contain("JsonTypeInfo<DynamicApiResponse>",
-            "void/404 response envelope must be a JSON root");
+
+        // Semantic check: JsonTypeInfo must be used in actual code (method signatures, field declarations),
+        // not just mentioned in comments. Check for typed usage patterns.
+        generated.Should().MatchRegex(@"JsonTypeInfo<DynamicApiResponse<ProductDto>>\s+\w+",
+            "Get/Create/Update response envelope must be a JSON root with actual typed usage");
+        generated.Should().MatchRegex(@"JsonTypeInfo<DynamicApiResponse<PagedResultDto<ProductDto>>>\s+\w+",
+            "Search response envelope must be a JSON root with actual typed usage");
+        generated.Should().MatchRegex(@"JsonTypeInfo<DynamicApiResponse>\s+\w+",
+            "Delete/404 void response envelope must be a JSON root with actual typed usage");
+
+        // Verify the typed envelopes are used in method signatures or field declarations, not just comments
+        generated.Should().Contain("DynamicApiResponse<ProductDto>",
+            "typed response envelope must be present");
+        generated.Should().Contain("DynamicApiResponse<PagedResultDto<ProductDto>>",
+            "typed paged response envelope must be present");
     }
 }
