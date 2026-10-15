@@ -781,6 +781,17 @@ public sealed class AppServiceCompatibilityGeneratorTests
                     public static object WrapResult(object? value, System.IServiceProvider? serviceProvider = null) => null!;
                     public static object WrapGetResult(object? value, System.IServiceProvider? serviceProvider = null) => null!;
                     public static object WrapVoidResult(System.IServiceProvider? serviceProvider = null) => null!;
+
+                    // #128 S3 typed, no-fallback overloads the generated result contract selects.
+                    public static object WrapResult<T>(
+                        T value,
+                        System.Text.Json.Serialization.Metadata.JsonTypeInfo<global::CrestCreates.DynamicApi.DynamicApiResponse<T>> envelopeTypeInfo) => null!;
+                    public static object WrapGetResult<T>(
+                        T? value,
+                        System.Text.Json.Serialization.Metadata.JsonTypeInfo<global::CrestCreates.DynamicApi.DynamicApiResponse<T>> envelopeTypeInfo,
+                        System.Text.Json.Serialization.Metadata.JsonTypeInfo<global::CrestCreates.DynamicApi.DynamicApiResponse> notFoundTypeInfo) => null!;
+                    public static object WrapVoidResult(
+                        System.Text.Json.Serialization.Metadata.JsonTypeInfo<global::CrestCreates.DynamicApi.DynamicApiResponse> envelopeTypeInfo) => null!;
                 }
 
                 public static class CompatibilityBodyReader
@@ -799,6 +810,11 @@ public sealed class AppServiceCompatibilityGeneratorTests
                 {
                     public static System.Text.Json.Serialization.Metadata.JsonTypeInfo<T>? Resolve<T>(
                         Microsoft.AspNetCore.Http.HttpContext context) => null;
+
+                    // #128 S3: the fail-closed typed accessor the generated contracts call.
+                    public static System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> Require<T>(
+                        System.IServiceProvider serviceProvider) =>
+                        throw new System.InvalidOperationException("stub");
                 }
 
                 public static class CapabilityEndpointBodyReader
@@ -1682,12 +1698,22 @@ public sealed class AppServiceCompatibilityGeneratorTests
 
         var contracts = result.GetSourceByFileName("GeneratedAppServiceCompatibilityResultContracts_Book.g.cs");
         contracts.Should().NotBeNull();
-        contracts!.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapResult(ctx.Output, serviceProvider)",
-            "POST non-void actions should use WrapResult with the host service provider");
-        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapGetResult(ctx.Output, serviceProvider)",
-            "GET non-void actions should use WrapGetResult with the host service provider");
-        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapVoidResult(serviceProvider)",
-            "void-return actions should use WrapVoidResult with the host service provider");
+        // #128 S3: the shape is now the typed, no-fallback contract — a checked cast of the declared
+        // return type plus the required envelope metadata, never the object-typed overload.
+        contracts!.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapResult<",
+            "POST non-void actions must wrap through the typed overload");
+        contracts.SourceText.Should().Contain("ctx.Output!,",
+            "POST non-void actions must route the handler output through a checked cast");
+        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapGetResult<",
+            "GET non-void actions must wrap through the typed GET overload");
+        contracts.SourceText.Should().Contain("ctx.Output as ",
+            "GET non-void actions must take the nullable typed value, not the object-typed output");
+        contracts.SourceText.Should().Contain("CompatibilityHttpResultMapper.WrapVoidResult(CapabilityEndpointJsonTypeInfoResolver.Require<",
+            "void-return actions must use the typed void overload with required metadata");
+        contracts.SourceText.Should().Contain("CapabilityEndpointJsonTypeInfoResolver.Require<global::CrestCreates.DynamicApi.DynamicApiResponse",
+            "every envelope must come from the fail-closed typed metadata accessor");
+        contracts.SourceText.Should().NotContain("WrapResult(ctx.Output",
+            "the object-typed overload must never be selected by the generated contract");
     }
 
     [Fact]

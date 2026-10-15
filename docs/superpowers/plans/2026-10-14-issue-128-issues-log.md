@@ -193,3 +193,11 @@
 - 拒绝语义与 §7.3 对齐：wire 侧拒绝是 `JsonException`，类型化 body reader（`ReadNativeBodyAsync` 的 required 语义）会把它变成 **400 且零业务**；S3-3 的 binder 直接吃到这条路径。
 - 测试：DynamicApi 由 73+2/75 → **95/95**（两条记账红转绿；新增 `FilterDescriptorWireDomainTests` 20 例：数字精确文本原样保留——long 极值与 28 位 decimal、同类数组不被猜类型、CLR 兼容面、对象/异构/嵌套/null 元素/未定义 operator/非对象 filter 的拒绝对照、JsonElement 与 CLR 两种写往返、未知成员忽略）。
 - 回归确认：CodeGenerator **444 通过 + 1 红 / 445**（唯一红仍是兼容投影的 object 静态结果契约，属 S3-2，未改口径）；JsonContracts 单元 **131/131**；PackageTests（真实消费工程编译）在本轮后台复跑，结果随后记录。
+
+## S3 增量 2：typed result 契约（第 3 条记账红转绿）
+
+- 运行时（`CrestCreates.DynamicApi`）新增 §7.3 的 typed、无 fallback overload：`WrapResult<T>(T, JsonTypeInfo<DynamicApiResponse<T>>)`、`WrapGetResult<T>(T?, JsonTypeInfo<DynamicApiResponse<T>>, JsonTypeInfo<DynamicApiResponse>)`、`WrapVoidResult(JsonTypeInfo<DynamicApiResponse>)`；全部直接 `Results.Json(envelope, info, statusCode)`，不经过旧的 `MapAotJson`（那条路径带反射 fallback，仍是 legacy 消费者专属）。
+- 元数据访问走 `CapabilityEndpointJsonTypeInfoResolver.Require<T>(IServiceProvider)`：先在 host 的 `JsonOptions` 里解析，`NotSupportedException`（resolver 没有该类型元数据）与 null 一律收敛为**同一条确定性 `InvalidOperationException`**，这就是 §7.3 的 fail-closed；不会退到 reflection resolver 猜。
+- 兼容投影的 result emitter 改为：非 void 先做**受检强类型转换**（`(T)ctx.Output!` / GET 用 `ctx.Output as T`），再调用 typed overload，并把 envelope 元数据从 `Require<T>` 取；旧的 `WrapResult(ctx.Output, serviceProvider)` 形态在正式 CRUD 生成物中彻底消失。既有正例测试里断言旧形态的三条断言同步改为 typed 契约（并新增“绝不出现 object 形态”的断言）。
+- 测试：`TypedResultContractTests`（DynamicApi.Tests，5 例）用真实 DI host（`JsonOptions` 只挂源生成 context、无反射 resolver）执行 `IResult`：typed 结果 200 + camelCase body、GET null → 404 且无 data、void → 200 无 data、**缺元数据必须 fail-closed**、null 元数据引用的重载必须拒绝。DynamicApi 套件 **100/100**。
+- 回归：AppServiceCompatibilityGenerator 定向 42/42（含转绿的记账红）；PackageTests 29/29（S3-1 的 FilterDescriptor 变更后复跑）；CodeGenerator 全套在本轮后台复跑，结果随后记录。
