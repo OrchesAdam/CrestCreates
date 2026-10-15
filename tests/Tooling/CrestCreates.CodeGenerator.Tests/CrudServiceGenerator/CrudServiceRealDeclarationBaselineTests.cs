@@ -321,6 +321,146 @@ public class CrudServiceRealDeclarationBaselineTests
             $"mutation '{mutation}' must fail on '{expectedReason}'; observed: {string.Join(" | ", violations)}");
     }
 
+    [Fact]
+    public void Complete_declared_model_must_satisfy_both_response_and_input_contracts()
+    {
+        // R5-CRUD128-01 positive control: the checkers must accept a model that registers every
+        // required root, so the contract reds cannot be read as "no declaration can ever pass".
+        var compilation = ProbeCompilationOf(ResponseRootModelSource());
+
+        CrudFormalContractProbe.ClosureViolations(compilation).Should().BeEmpty();
+        compilation.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .Select(diagnostic => diagnostic.ToString())
+            .Should().BeEmpty("the control model must be a sound compilation, not a broken one");
+
+        CrudFormalContractProbe
+            .ResponseRootViolations(compilation, compilation.SyntaxTrees.ToArray(), ContractModel)
+            .Should().BeEmpty();
+        CrudFormalContractProbe
+            .InputEnvelopeViolations(compilation, compilation.SyntaxTrees.ToArray(), ContractModel)
+            .Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("dto", "global::Shop.Application.Products.Contracts.ProductDto")]
+    [InlineData("page", "global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>")]
+    [InlineData("dto-envelope", "global::CrestCreates.DynamicApi.DynamicApiResponse<global::Shop.Application.Products.Contracts.ProductDto>")]
+    [InlineData("page-envelope", "global::CrestCreates.DynamicApi.DynamicApiResponse<global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>>")]
+    [InlineData("void", "global::CrestCreates.DynamicApi.DynamicApiResponse")]
+    [InlineData("create-dto", "global::Shop.Application.Products.Contracts.CreateProductDto")]
+    [InlineData("update-dto", "global::Shop.Application.Products.Contracts.UpdateProductDto")]
+    [InlineData("list-request", "global::Shop.Application.Products.Contracts.ProductListRequestDto")]
+    public void Response_root_contract_must_reject_each_single_missing_root(string omittedRoot, string expectedRootText)
+    {
+        // R5-CRUD128-01: every member of the required-root matrix is individually necessary. The
+        // model is complete except for one [JsonSerializable] registration, so the reported reason
+        // must name that closed type — a registered inner payload cannot cover an absent envelope.
+        var compilation = ProbeCompilationOf(ResponseRootModelSource(except: omittedRoot));
+
+        var violations = CrudFormalContractProbe.ResponseRootViolations(
+            compilation, compilation.SyntaxTrees.ToArray(), ContractModel);
+
+        violations.Should().Contain(
+            reason => reason.Contains(expectedRootText, StringComparison.Ordinal)
+                      && reason.Contains("must be registered as a [JsonSerializable] root", StringComparison.Ordinal),
+            $"omitting '{omittedRoot}' must be reported on '{expectedRootText}'; observed: "
+            + string.Join(" | ", violations));
+    }
+
+    [Theory]
+    [InlineData("update-input")]
+    [InlineData("delete-input")]
+    public void Input_envelope_contract_must_reject_a_missing_capability_input_root(string omittedRoot)
+    {
+        // §7.1: the composed capability input is serialized by the mapper, so declaring the envelope
+        // is not enough — its root registration is separately required.
+        var compilation = ProbeCompilationOf(ResponseRootModelSource(except: omittedRoot));
+
+        var violations = CrudFormalContractProbe.InputEnvelopeViolations(
+            compilation, compilation.SyntaxTrees.ToArray(), ContractModel);
+
+        violations.Should().Contain(
+            reason => reason.Contains("ProductAppService", StringComparison.Ordinal)
+                      && reason.Contains("must be registered as a [JsonSerializable] root", StringComparison.Ordinal),
+            $"omitting the '{omittedRoot}' root must be reported by the input contract; observed: "
+            + string.Join(" | ", violations));
+    }
+
+    private static Compilation ProbeCompilationOf(string source) =>
+        CrudFormalContractProbe.AuthoredCompilation(source, ClosureReferences());
+
+    /// <summary>
+    /// Complete declarative model for the §7.1 root matrix: entity/Create/Update/List DTOs, the
+    /// bounded page payload, the typed single-DTO and typed page envelopes, the void/404 envelope and
+    /// both composed capability input envelopes, all registered on an official context derived type.
+    /// Only the registration named by <paramref name="except"/> is left out. This exercises the
+    /// checker; it is not metadata-generation or Feature evidence.
+    /// </summary>
+    private static string ResponseRootModelSource(string? except = null)
+    {
+        const string Contracts = "global::Shop.Application.Products.Contracts.";
+        const string Generated = "global::CrestCreates.Generated.";
+        var page = "global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<" + Contracts + "ProductDto>";
+        var dtoEnvelope = "global::CrestCreates.DynamicApi.DynamicApiResponse<" + Contracts + "ProductDto>";
+        var pageEnvelope = "global::CrestCreates.DynamicApi.DynamicApiResponse<" + page + ">";
+
+        (string Key, string Type)[] roots =
+        [
+            ("dto", Contracts + "ProductDto"),
+            ("create-dto", Contracts + "CreateProductDto"),
+            ("update-dto", Contracts + "UpdateProductDto"),
+            ("list-request", Contracts + "ProductListRequestDto"),
+            ("page", page),
+            ("dto-envelope", dtoEnvelope),
+            ("page-envelope", pageEnvelope),
+            ("void", "global::CrestCreates.DynamicApi.DynamicApiResponse"),
+            ("update-input", Generated + "ProductAppService_Update_CompatibilityInput"),
+            ("delete-input", Generated + "ProductAppService_Delete_CompatibilityInput"),
+        ];
+
+        var attributes = string.Join(
+            "\n",
+            roots
+                .Where(root => root.Key != except)
+                .Select(root => "                [global::System.Text.Json.Serialization.JsonSerializable(typeof("
+                    + root.Type + "))]"));
+
+        return """
+            namespace Shop.Application.Products.Contracts
+            {
+                public class ProductDto { }
+                public class CreateProductDto { }
+                public class UpdateProductDto { }
+                public class ProductListRequestDto { }
+            }
+
+            namespace CrestCreates.Generated
+            {
+                internal sealed class ProductAppService_Update_CompatibilityInput
+                {
+                    public global::System.Guid Id { get; init; }
+                    public global::Shop.Application.Products.Contracts.UpdateProductDto Input { get; init; } = default!;
+                }
+
+                internal sealed class ProductAppService_Delete_CompatibilityInput
+                {
+                    public global::System.Guid Id { get; init; }
+                    public string? IfMatch { get; init; }
+                }
+
+            __ROOTS__
+                internal abstract partial class FullJsonContext
+                    : global::System.Text.Json.Serialization.JsonSerializerContext
+                {
+                    protected FullJsonContext(global::System.Text.Json.JsonSerializerOptions options) : base(options)
+                    {
+                    }
+                }
+            }
+            """.Replace("__ROOTS__", attributes);
+    }
+
     private static (string Source, string ExpectedReason) InputEnvelopeMutation(string mutation) => mutation switch
     {
         "empty-shells" => ("""

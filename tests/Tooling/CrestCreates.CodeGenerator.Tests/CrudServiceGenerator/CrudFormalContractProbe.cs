@@ -165,7 +165,7 @@ internal static class CrudFormalContractProbe
             var inputRoots = CollectRegisteredRoots(inputContext);
             foreach (var envelope in declaredEnvelopes)
             {
-                if (!inputRoots.Contains(envelope, SymbolEqualityComparer.Default))
+                if (!inputRoots.Any(root => SameType(root, envelope)))
                 {
                     violations.Add(
                         $"'{envelope.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}' must be "
@@ -215,45 +215,45 @@ internal static class CrudFormalContractProbe
         foreach (var required in new[] { model.CreateDto, model.UpdateDto, model.ListRequestDto })
         {
             var requiredType = ResolveProducerType(compilation, producerTrees, required);
-            if (requiredType is null)
+            if (requiredType is not null && !roots.Any(root => SameType(root, requiredType)))
             {
-                continue;
-            }
-
-            if (!roots.Contains(requiredType, SymbolEqualityComparer.Default))
-            {
-                violations.Add($"'{required}' must be registered as a [JsonSerializable] root");
+                violations.Add(
+                    $"'{requiredType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}' must be "
+                    + "registered as a [JsonSerializable] root (request payload)");
             }
         }
 
         var envelopeOpen = ResolveReferencedType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse`1");
         var pagedOpen = ResolveReferencedType(
             compilation, "CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto`1");
-        var voidEnvelope = ResolveReferencedType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse");
 
-        if (readDto is not null)
+        // §7.1 required response roots, kept as one matrix: the entity DTO, the bounded page payload,
+        // the typed single-DTO envelope, the typed page envelope and the void/404 envelope. A
+        // registered inner payload never stands in for the closed envelope built on top of it.
+        var pagePayload = Construct(pagedOpen, readDto);
+        (string Label, ITypeSymbol? Expected)[] requiredRoots =
+        [
+            ("entity CRUD DTO", readDto),
+            ("paged result payload", pagePayload),
+            ("typed DTO result envelope", Construct(envelopeOpen, readDto)),
+            ("typed paged result envelope", Construct(envelopeOpen, pagePayload)),
+            ("void/404 result envelope",
+                ResolveReferencedType(compilation, "CrestCreates.DynamicApi.DynamicApiResponse")),
+        ];
+
+        foreach (var (label, expected) in requiredRoots)
         {
-            if (!roots.Contains(readDto, SymbolEqualityComparer.Default))
+            if (expected is null)
             {
-                violations.Add($"'{model.ReadDto}' must be registered as a [JsonSerializable] root");
+                continue; // already attributed by the missing-type violation reported above
             }
 
-            if (!ContainsClosedRoot(roots, pagedOpen, readDto))
+            if (!roots.Any(root => SameType(root, expected)))
             {
-                violations.Add($"PagedResultDto<{model.ReadDto}> must be registered as a root");
+                violations.Add(
+                    $"'{expected.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}' must be "
+                    + $"registered as a [JsonSerializable] root ({label})");
             }
-
-            if (!ContainsClosedRoot(roots, envelopeOpen, readDto))
-            {
-                violations.Add($"DynamicApiResponse<{model.ReadDto}> must be registered as a root");
-            }
-        }
-
-        if (voidEnvelope is null || !roots.Contains(voidEnvelope, SymbolEqualityComparer.Default))
-        {
-            violations.Add(
-                "the void/404 envelope root 'CrestCreates.DynamicApi.DynamicApiResponse' must be "
-                + "registered on the generated context");
         }
 
         if (envelopeOpen is not null)
@@ -271,21 +271,35 @@ internal static class CrudFormalContractProbe
         return violations;
     }
 
-    private static bool ContainsClosedRoot(
-        IReadOnlyCollection<ITypeSymbol> roots,
-        INamedTypeSymbol? openDefinition,
-        ITypeSymbol typeArgument)
+    private static ITypeSymbol? Construct(INamedTypeSymbol? openDefinition, ITypeSymbol? typeArgument) =>
+        openDefinition is { Arity: 1 } && typeArgument is not null
+            ? openDefinition.Construct(typeArgument)
+            : null;
+
+    /// <summary>
+    /// Symbol identity that still holds for closed generic types: the fast path compares the
+    /// canonicalized symbols, otherwise the OriginalDefinition and every type argument are compared
+    /// recursively, so a same-name fake or a differently-closed construction never matches.
+    /// </summary>
+    private static bool SameType(ITypeSymbol? actual, ITypeSymbol? expected)
     {
-        if (openDefinition is null)
+        if (actual is null || expected is null
+            || actual is INamedTypeSymbol { IsUnboundGenericType: true }
+            || expected is INamedTypeSymbol { IsUnboundGenericType: true })
         {
             return false;
         }
 
-        return roots.OfType<INamedTypeSymbol>().Any(root =>
-            root.Arity == 1
-            && !root.IsUnboundGenericType
-            && SymbolEqualityComparer.Default.Equals(root.OriginalDefinition, openDefinition)
-            && SymbolEqualityComparer.Default.Equals(root.TypeArguments[0], typeArgument));
+        if (SymbolEqualityComparer.Default.Equals(actual, expected))
+        {
+            return true;
+        }
+
+        return actual is INamedTypeSymbol candidate
+            && expected is INamedTypeSymbol requirement
+            && candidate.Arity == requirement.Arity
+            && SymbolEqualityComparer.Default.Equals(candidate.OriginalDefinition, requirement.OriginalDefinition)
+            && candidate.TypeArguments.Zip(requirement.TypeArguments, SameType).All(equal => equal);
     }
 
     private static IReadOnlyCollection<ITypeSymbol> CollectRegisteredRoots(INamedTypeSymbol context)

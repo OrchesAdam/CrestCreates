@@ -98,3 +98,14 @@
 - **反向对照入库（9 例，全部通过）**：输入侧空壳（ReviewUnrelated.UpdateProductInput/DeleteProductInput）、错误 owner、缺成员、错误成员类型、非 producer 所有；响应侧同名假契约（自带 JsonTypeInfo`1/DynamicApiResponse/PagedResultDto/ProductDto + 三个未初始化字段）、假 JsonSerializerContext 基类、官方 context 但零 root、只注册 `DynamicApiResponse<object>`。每例断言**目标原因**出现，杜绝因闭包缺失等旁因而假通过。
 - 计数：CodeGenerator **386 通过 + 8 约定红（394，0 skipped）**；DynamicApi **73 通过 + 2 约定红（75，0 skipped）**；无既有用例回归。8 条红：DTO 命名（driver 与 MSBuild 各一）、legacy body helper、object 静态结果契约、输入信封、响应 roots、mapping 同轮不可见（MSBuild）、MSBuild 端到端契约。
 - S1 退出状态：R1–R4 全部 P2 关闭；MSBuild fixture 时序回归已消除并新增干净目录控制运行；输入/响应契约均可拒绝同名假实现，反向对照与正向红例分别记账。设计审查通过后可推进 S2。
+
+### S1 增量 9：R5 审查修复（2026-10-15）
+
+- **R5-CRUD128-01 [P2] 响应 root 矩阵补全分页外层 envelope**：`ResponseRootViolations` 此前分别检查 `PagedResultDto<ProductDto>` 与 `DynamicApiResponse<ProductDto>`，但没有检查以分页类型为参数的外层 `DynamicApiResponse<PagedResultDto<ProductDto>>`——内层 payload 与单条 envelope 均已注册不代表分页响应 root 已注册，独立对照仅移除该 root 时 checker 返回零违规（假绿）。修订（`CrudFormalContractProbe.cs`）：
+  - 必需响应 roots 改为**同一矩阵**维护（§7.1）：entity CRUD DTO、bounded page payload、typed DTO envelope、typed page envelope、void/404 envelope，另加已声明的 Create/Update/ListRequest 请求 payload roots；矩阵项缺失时报告该闭合类型的完整 FQN 与角色标签。
+  - 闭合类型由引用程序集的 `PagedResultDto<T>`/`DynamicApiResponse<T>` 与 producer 的 `ProductDto` 逐层 `Construct` 得到；比较仍走 symbol identity（先 canonical identity，再 OriginalDefinition + 类型参数递归），未回退到短名或文本匹配。`SameType` 取代 `ContainsClosedRoot`，输入侧 root 判定同步采用同一比较。
+- **正向与单项反例入库**：`Complete_declared_model_must_satisfy_both_response_and_input_contracts`（完整声明模型必须零违规，并断言该模型 compilation 无错误、闭包守卫为空——证明 checker 能接受正确模型，红例不是"永远不可能通过"）；`Response_root_contract_must_reject_each_single_missing_root`（8 例：dto/create/update/list/page/dto-envelope/page-envelope/void，每次只删一个 `[JsonSerializable]` 注册，必须点名该闭合类型）；`Input_envelope_contract_must_reject_a_missing_capability_input_root`（update-input/delete-input，声明存在但未注册为 root 必须被输入契约拒绝）。R4 的 9 例结构反例保持。
+- **审查探针入库**：`tests/.../CrudServiceGenerator/ReviewR5ResponseRootProbes.cs` 逐字收录 R5 复审评论附带的探针（完整响应模型 / 仅移除分页外层 root / 完整输入模型）。在 `94c24031` 上前者为 pass、后者 fail（checker 零违规）；在当前 head 三项全部通过。
+- 说明：本轮试图在本地临时把矩阵项置空以自证新反例的判别力，被权限分类器判定为"故意破坏测试"而阻止，未执行；判别力证据为审查者在本头的独立对照（零违规）+ 该对照用例在本头的失败事实，以及入库探针的原样复现。
+- 计数：CodeGenerator **397 通过 + 8 约定红（405，0 skipped）**；DynamicApi **73 通过 + 2 约定红（75，0 skipped）**；无既有用例回归。8 条红与增量 8 登记的名称一致，未新增或改口。
+- S1 退出状态：R1–R5 全部 P2 关闭；响应 roots 以矩阵维护且每项单独可验，真实 metadata 生成仍按约定由 S2 端到端红验收。设计审查通过后可推进 S2。
