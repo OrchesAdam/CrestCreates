@@ -120,7 +120,8 @@ public sealed class CrudPrecompileEngine
             bundleBuilder.ToString(),
             outputs,
             diagnostics,
-            build.Models.Count);
+            build.Models.Count,
+            build.Models);
     }
 
     /// <summary>
@@ -176,10 +177,11 @@ public sealed record CrudPrecompileResult(
     string BundleSource,
     IReadOnlyList<CrudOutputManifestEntry> Outputs,
     IReadOnlyList<CrudToolDiagnostic> Diagnostics,
-    int DeclarationCount)
+    int DeclarationCount,
+    IReadOnlyList<CrudGenerationModel> Models)
 {
     public bool HasErrors => Diagnostics.Any(diagnostic => diagnostic.Id != CrudDiagnosticIds.Info);
 
     public static CrudPrecompileResult Failed(IReadOnlyList<CrudToolDiagnostic> diagnostics) =>
-        new(string.Empty, Array.Empty<CrudOutputManifestEntry>(), diagnostics, 0);
+        new(string.Empty, Array.Empty<CrudOutputManifestEntry>(), diagnostics, 0, Array.Empty<CrudGenerationModel>());
 }
