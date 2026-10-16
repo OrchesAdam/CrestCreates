@@ -67,6 +67,25 @@ public sealed record CrudGenerationModel
     /// <summary>Fields the generated query adapter may filter/sort on.</summary>
     public required IReadOnlyList<string> QueryableFields { get; init; }
 
+    /// <summary>
+    /// §8: fields the generated typed query adapter emits filter cases for — the declared
+    /// FilterableProperties when present, otherwise every queryable field. A declared set restricts
+    /// what an adapter supports; it never widens it beyond the queryable fields.
+    /// </summary>
+    public required IReadOnlyList<string> FilterableFields { get; init; }
+
+    /// <summary>
+    /// §8: fields the generated typed query adapter emits sort cases for — the declared
+    /// SortableProperties when present, otherwise every queryable field.
+    /// </summary>
+    public required IReadOnlyList<string> SortableFields { get; init; }
+
+    /// <summary>
+    /// §8: true when the entity exposes an audited CreationTime. The stable default ordering is then
+    /// CreationTime descending with an Id descending tiebreak; otherwise it is Id descending.
+    /// </summary>
+    public required bool EntityHasCreationTime { get; init; }
+
     /// <summary>The five declared actions with their wire and permission shape (§7.4).</summary>
     public required IReadOnlyList<CrudActionModel> Actions { get; init; }
 
@@ -80,6 +99,9 @@ public sealed record CrudGenerationModel
     public string UpdateDtoName => "Update" + EntityClassName + "Dto";
 
     public string ListRequestDtoName => EntityClassName + "ListRequestDto";
+
+    /// <summary>Name of the per-service generated typed query adapter (§8).</summary>
+    public string TypedQueryAdapterName => EntityClassName + "TypedQueryAdapter";
 
     public string ServiceInterfaceName => "I" + ServiceClassName;
 
@@ -144,6 +166,41 @@ public sealed record CrudFieldModel
 
     /// <summary>True for a non-nullable reference-type string, which carries the required attributes.</summary>
     public required bool IsRequiredString { get; init; }
+
+    /// <summary>
+    /// §8: the field's static CLR kind, computed by the builder from the property symbol (special type,
+    /// TypeKind, enum identity). The generated query adapter picks its FilterValueReader call and its
+    /// allowed operator set from this value; nothing parses the type display.
+    /// </summary>
+    public required CrudFieldKind Kind { get; init; }
+
+    /// <summary>
+    /// True when the property's annotated type accepts null (<c>string?</c>, <c>Nullable&lt;T&gt;</c>).
+    /// IsNull/IsNotNull cases are emitted exactly for these fields; a non-nullable field rejects them.
+    /// </summary>
+    public required bool IsNullable { get; init; }
+
+    /// <summary>Fully-qualified enum display, present exactly when <see cref="Kind"/> is Enum.</summary>
+    public string? EnumTypeDisplay { get; init; }
+}
+
+/// <summary>
+/// §8: the static CLR kinds the generated query adapter can read filter values for. <see cref="Unsupported"/>
+/// marks every property whose type has no bounded reader (float, DateTimeOffset, arrays, ...): such
+/// fields get no filter case and filters on them are rejected as plan errors before execution.
+/// </summary>
+public enum CrudFieldKind
+{
+    Unsupported,
+    String,
+    Bool,
+    Int32,
+    Int64,
+    Decimal,
+    Double,
+    Guid,
+    DateTime,
+    Enum,
 }
 
 /// <summary>One CRUD action of the wire matrix (§7.4), shared by projection emitters.</summary>

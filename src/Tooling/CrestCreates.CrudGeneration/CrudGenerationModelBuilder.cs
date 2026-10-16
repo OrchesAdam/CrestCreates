@@ -241,6 +241,16 @@ public static class CrudGenerationModelBuilder
             ?? assemblyName + "." + serviceClass.Name;
         var hasConcurrencyStamp = ImplementsInterface(entityType, ConcurrencyStampInterfaceFullName);
 
+        // §8: a declared Filterable/Sortable set restricts what the typed query adapter supports;
+        // absent (or empty) means every queryable field. Duplicates are collapsed here, so the emitted
+        // switch can never carry two case labels for one field.
+        var filterableFields = filterable.Count == 0
+            ? queryable
+            : filterable.Distinct(StringComparer.Ordinal).ToArray();
+        var sortableFields = sortable.Count == 0
+            ? queryable
+            : sortable.Distinct(StringComparer.Ordinal).ToArray();
+
         return new CrudGenerationModel
         {
             OwnerAssemblyName = assemblyName,
@@ -271,6 +281,10 @@ public static class CrudGenerationModelBuilder
                 .Where(field => !excludeProperties.Contains(field.Name, StringComparer.Ordinal))
                 .ToArray(),
             QueryableFields = queryable,
+            FilterableFields = filterableFields,
+            SortableFields = sortableFields,
+            EntityHasCreationTime = allProperties.Any(field =>
+                string.Equals(field.Name, "CreationTime", StringComparison.Ordinal)),
             Actions = BuildActions(
                 entityName,
                 serviceClass.Name,
@@ -427,17 +441,70 @@ public static class CrudGenerationModelBuilder
                     continue;
                 }
 
+                var fieldKind = ResolveFieldKind(property);
                 fields.Add(new CrudFieldModel
                 {
                     Name = property.Name,
                     TypeDisplay = PropertyTypeDisplay(property),
                     IsRequiredString = property.Type.SpecialType == SpecialType.System_String
                         && property.NullableAnnotation != NullableAnnotation.Annotated,
+                    Kind = fieldKind.Kind,
+                    IsNullable = IsNullableProperty(property),
+                    EnumTypeDisplay = fieldKind.EnumTypeDisplay,
                 });
             }
         }
 
         return fields;
+    }
+
+    /// <summary>
+    /// §8: the field's static CLR kind, read from the real symbol (special type, Nullable&lt;T&gt;
+    /// unwrapping, TypeKind.Enum). The display text is never parsed; a type without a bounded
+    /// FilterValueReader call stays Unsupported and gets no filter case.
+    /// </summary>
+    private static (CrudFieldKind Kind, string? EnumTypeDisplay) ResolveFieldKind(IPropertySymbol property)
+    {
+        var type = property.Type;
+        if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            && nullable.TypeArguments.Length == 1)
+        {
+            type = nullable.TypeArguments[0];
+        }
+
+        if (type.TypeKind == TypeKind.Enum)
+        {
+            return (CrudFieldKind.Enum, type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+        }
+
+        if (type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::System.Guid")
+        {
+            return (CrudFieldKind.Guid, null);
+        }
+
+        return (type.SpecialType switch
+        {
+            SpecialType.System_String => CrudFieldKind.String,
+            SpecialType.System_Boolean => CrudFieldKind.Bool,
+            SpecialType.System_Int32 => CrudFieldKind.Int32,
+            SpecialType.System_Int64 => CrudFieldKind.Int64,
+            SpecialType.System_Decimal => CrudFieldKind.Decimal,
+            SpecialType.System_Double => CrudFieldKind.Double,
+            SpecialType.System_DateTime => CrudFieldKind.DateTime,
+            _ => CrudFieldKind.Unsupported,
+        }, null);
+    }
+
+    /// <summary>§8: true when the property's type accepts null (Nullable&lt;T&gt; or an annotated reference type).</summary>
+    private static bool IsNullableProperty(IPropertySymbol property)
+    {
+        if (property.Type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T })
+        {
+            return true;
+        }
+
+        return property.Type.IsReferenceType
+            && property.Type.NullableAnnotation == NullableAnnotation.Annotated;
     }
 
     private static string PropertyTypeDisplay(IPropertySymbol property)

@@ -80,12 +80,24 @@ public static class CrudArtifactEmitter
         "using CrestCreates.Authorization.Abstractions;",
         "using CrestCreates.Domain.Shared.Attributes;",
         "using CrestCreates.Application.Contracts.DTOs.Common;",
-        "using CrestCreates.Application.Contracts.Query;",
         "using CrestCreates.Domain.Exceptions;",
         "using CrestCreates.Domain.Repositories;",
         "using CrestCreates.Domain.Shared.DataFilter;",
         "using CrestCreates.Domain.Shared.Entities.Auditing;",
         "using CrestCreates.Domain.Shared.Exceptions;",
+    ];
+
+    /// <summary>
+    /// §8: the typed query adapter resolves FilterValueReader/QueryPlanException and the bounded
+    /// descriptor/page types, so the search path needs no reflective query executor.
+    /// </summary>
+    private static readonly IReadOnlyList<string> TypedQueryAdapterUsings =
+    [
+        "using System;",
+        "using System.Collections.Generic;",
+        "using System.Linq;",
+        "using CrestCreates.Application.Contracts.DTOs.Common;",
+        "using CrestCreates.Application.Contracts.Query;",
     ];
 
     /// <summary>Materializes every artifact of one declared CRUD surface, in model order.</summary>
@@ -106,6 +118,7 @@ public static class CrudArtifactEmitter
             EmitObjectMappingSeeds(model),
             EmitServiceContract(model),
             EmitServiceImplementation(model),
+            EmitTypedQueryAdapter(model),
         };
 
         foreach (var action in model.Actions.Where(a => a.UsesCapabilityInputEnvelope))
@@ -370,6 +383,7 @@ public static class CrudArtifactEmitter
         var updateDto = Qualified(model.UpdateDtoFullName);
         var listRequest = Qualified(model.ListRequestFullName);
         var pagedReadDto = CrudResponseContract.PagedPayload(model.ReadDtoFullName);
+        var queryAdapter = Qualified(model.ImplementationNamespace + "." + model.TypedQueryAdapterName);
 
         var builder = StartDocument(model);
         OpenNamespace(builder, model.ImplementationNamespace, ServiceImplementationUsings);
@@ -395,20 +409,10 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent + "}");
         Line(builder, string.Empty);
 
-        Line(builder, NestedIndent + "private static readonly HashSet<string> AllowedQueryFields = new(StringComparer.OrdinalIgnoreCase)");
-        Line(builder, NestedIndent + "{");
-        foreach (var field in model.QueryableFields)
-        {
-            Line(builder, NestedIndent + "    \"" + field + "\",");
-        }
-
-        Line(builder, NestedIndent + "};");
-
         EmitPermissionCheckHelper(builder);
         EmitDataPermissionHelper(builder, entity);
         EmitAuditHelpers(builder, model, entity);
         EmitOwnershipHelper(builder, model);
-        EmitFieldGuards(builder, entityName);
 
         // Create
         Line(builder, string.Empty);
@@ -463,33 +467,13 @@ public static class CrudArtifactEmitter
         Line(builder, string.Empty);
         Line(builder, NestedIndent + "    await CheckPermissionAsync(" + Permission(model, "Search") + ", cancellationToken);");
         Line(builder, string.Empty);
-        Line(builder, NestedIndent + "    EnsureAllowedFilterFields(input.Filters);");
-        Line(builder, NestedIndent + "    EnsureAllowedSortFields(input.Sorts);");
-        Line(builder, string.Empty);
         Line(builder, NestedIndent + "    var query = Repository.GetQueryable();");
         Line(builder, NestedIndent + "    query = await ApplyDataPermissionFilterAsync(query);");
         Line(builder, NestedIndent + "    query = await ConfigureListQueryAsync(query, input, cancellationToken);");
         Line(builder, string.Empty);
-        // S2 keeps the existing search execution point unchanged; the typed query adapter replaces these
-        // two QueryExecutor calls in the next stage without altering the filter/sort/page contract above.
-        Line(builder, NestedIndent + "    query = QueryExecutor<" + entity + ">.ApplyFilters("
-            + "query, input.Filters ?? new List<FilterDescriptor>());");
-        Line(builder, NestedIndent + "    var sorts = input.Sorts;");
-        Line(builder, NestedIndent + "    if (sorts == null || sorts.Count == 0)");
-        Line(builder, NestedIndent + "    {");
-        Line(builder, NestedIndent + "        sorts = new List<SortDescriptor> { new SortDescriptor(\""
-            + DefaultSortField(model) + "\", SortDirection.Descending) };");
-        Line(builder, NestedIndent + "    }");
-        Line(builder, NestedIndent + "    query = QueryExecutor<" + entity + ">.ApplySorts(query, sorts);");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + "    var totalCount = query.Count();");
-        Line(builder, NestedIndent + "    query = QueryExecutor<" + entity + ">.ApplyPaging("
-            + "query, input.GetSkipCount(), input.PageSize);");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + "    var entities = query.ToList();");
-        Line(builder, NestedIndent + "    var dtos = entities.Select(" + mappings + ".ToTarget).ToList();");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + "    return new " + pagedReadDto + "(dtos, totalCount, input.PageIndex, input.PageSize);");
+        // §8: the generated typed query adapter owns filter/sort planning, the stable default order and
+        // the paging bounds; the reflective QueryExecutor<T> is never part of the formal CRUD search.
+        Line(builder, NestedIndent + "    return " + queryAdapter + ".Execute(query, input);");
         Line(builder, NestedIndent + "}");
 
         // Update
@@ -667,38 +651,413 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent + "}");
     }
 
-    private static void EmitFieldGuards(StringBuilder builder, string entityName)
+    // ---- 6. typed query adapter (§8) -----------------------------------------------------------
+
+    /// <summary>
+    /// §8: the compile-time typed query adapter of one CRUD service. Filters and sorts resolve through
+    /// static switches over the field name to strongly-typed lambdas; filter values are read with
+    /// <c>FilterValueReader</c> per the field's frozen static kind; paging uses the existing
+    /// <c>PagedRequestDto</c> bounds. Unknown or non-supported fields, unsupported operators and
+    /// invalid sort directions are rejected with <c>QueryPlanException</c> before the query executes —
+    /// no reflection, no dynamic LINQ and no unfiltered fallback.
+    /// </summary>
+    private static CrudArtifact EmitTypedQueryAdapter(CrudGenerationModel model)
+    {
+        var entity = model.EntityQualifiedDisplay;
+        var entityName = model.EntityClassName;
+        var adapter = model.TypedQueryAdapterName;
+        var listRequest = Qualified(model.ListRequestFullName);
+        var readDto = Qualified(model.ReadDtoFullName);
+        var mappings = Qualified(model.MappingsNamespace + "." + model.MappingClassName);
+
+        var builder = StartDocument(model);
+        OpenNamespace(builder, model.ImplementationNamespace, TypedQueryAdapterUsings);
+
+        Line(builder, Indent + "/// <summary>");
+        Line(builder, Indent + "/// §8: the compile-time typed query adapter of the generated " + entityName
+            + " CRUD search.");
+        Line(builder, Indent + "/// Field names resolve through static switches to strongly-typed lambdas, filter values are");
+        Line(builder, Indent + "/// read with FilterValueReader per the field's static CLR kind, and unknown or non-supported");
+        Line(builder, Indent + "/// fields, operators or sort directions are rejected with QueryPlanException before the query");
+        Line(builder, Indent + "/// executes. No reflection and no dynamic LINQ participate in this path.");
+        Line(builder, Indent + "/// </summary>");
+        Line(builder, Indent + "internal static class " + adapter);
+        Line(builder, Indent + "{");
+
+        EmitAdapterExecute(builder, entity, listRequest, readDto, mappings);
+        EmitAdapterFilters(builder, model, entity, entityName);
+        EmitAdapterSorts(builder, model, entity, entityName);
+
+        Line(builder, Indent + "}");
+        CloseNamespace(builder);
+        return Artifact(adapter + ".g.cs", builder);
+    }
+
+    private static void EmitAdapterExecute(
+        StringBuilder builder,
+        string entity,
+        string listRequest,
+        string readDto,
+        string mappings)
     {
         Line(builder, string.Empty);
-        Line(builder, NestedIndent + "private static void EnsureAllowedFilterFields(IEnumerable<FilterDescriptor>? filters)");
+        Line(builder, NestedIndent + "/// <summary>Executes one bounded search: filters, stable ordering, paging and the generated projection.</summary>");
+        Line(builder, NestedIndent + "public static PagedResultDto<" + readDto + "> Execute(");
+        Line(builder, NestedIndent + "    IQueryable<" + entity + "> query,");
+        Line(builder, NestedIndent + "    " + listRequest + " input)");
         Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + "    if (filters == null)");
-        Line(builder, NestedIndent + "        return;");
+        Line(builder, NestedIndent + "    ArgumentNullException.ThrowIfNull(query);");
+        Line(builder, NestedIndent + "    ArgumentNullException.ThrowIfNull(input);");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "    query = ApplyFilters(query, input.Filters);");
+        Line(builder, NestedIndent + "    query = ApplySorts(query, input.Sorts);");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "    var totalCount = query.Count();");
+        Line(builder, NestedIndent + "    var entities = query.Skip(input.GetSkipCount()).Take(input.PageSize).ToList();");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "    var dtos = new List<" + readDto + ">(entities.Count);");
+        Line(builder, NestedIndent + "    foreach (var entity in entities)");
+        Line(builder, NestedIndent + "    {");
+        Line(builder, NestedIndent + "        dtos.Add(" + mappings + ".ToTarget(entity));");
+        Line(builder, NestedIndent + "    }");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "    return new PagedResultDto<" + readDto
+            + ">(dtos, totalCount, input.PageIndex, input.PageSize);");
+        Line(builder, NestedIndent + "}");
+    }
+
+    private static void EmitAdapterFilters(
+        StringBuilder builder,
+        CrudGenerationModel model,
+        string entity,
+        string entityName)
+    {
+        var cases = new List<(string Name, CrudFieldModel Field)>();
+        foreach (var name in model.FilterableFields)
+        {
+            var field = model.ReadFields.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, name, StringComparison.Ordinal));
+            if (field is null || field.Kind == CrudFieldKind.Unsupported || cases.Any(item =>
+                    string.Equals(item.Name, name, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            cases.Add((name, field));
+        }
+
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "/// <summary>Applies every request filter; a field without a supported typed reader is rejected, never ignored.</summary>");
+        Line(builder, NestedIndent + "private static IQueryable<" + entity + "> ApplyFilters("
+            + "IQueryable<" + entity + "> query, List<FilterDescriptor>? filters)");
+        Line(builder, NestedIndent + "{");
+        Line(builder, NestedIndent + "    if (filters is null || filters.Count == 0)");
+        Line(builder, NestedIndent + "    {");
+        Line(builder, NestedIndent + "        return query;");
+        Line(builder, NestedIndent + "    }");
         Line(builder, string.Empty);
         Line(builder, NestedIndent + "    foreach (var filter in filters)");
         Line(builder, NestedIndent + "    {");
-        Line(builder, NestedIndent + "        if (!AllowedQueryFields.Contains(filter.Field))");
-        Line(builder, NestedIndent + "            throw new CrestBusinessException(\"Crest.Crud.InvalidFilterField\", \""
-            + entityName + "\", filter.Field);");
+        Line(builder, NestedIndent + "        if (filter is null)");
+        Line(builder, NestedIndent + "        {");
+        Line(builder, NestedIndent + "            throw new QueryPlanException(");
+        Line(builder, NestedIndent + "                \"Crest.Crud.InvalidFilterField\",");
+        Line(builder, NestedIndent + "                \"Filter descriptors of " + entityName + " must not be null.\");");
+        Line(builder, NestedIndent + "        }");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "        query = ApplyFilter(query, filter);");
         Line(builder, NestedIndent + "    }");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "    return query;");
         Line(builder, NestedIndent + "}");
 
         Line(builder, string.Empty);
-        Line(builder, NestedIndent + "private static void EnsureAllowedSortFields(IEnumerable<SortDescriptor>? sorts)");
+        Line(builder, NestedIndent + "private static IQueryable<" + entity + "> ApplyFilter("
+            + "IQueryable<" + entity + "> query, FilterDescriptor filter)");
         Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + "    if (sorts == null)");
-        Line(builder, NestedIndent + "        return;");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + "    foreach (var sort in sorts)");
+        Line(builder, NestedIndent + "    switch (filter.Field)");
         Line(builder, NestedIndent + "    {");
-        Line(builder, NestedIndent + "        if (!AllowedQueryFields.Contains(sort.Field))");
-        Line(builder, NestedIndent + "            throw new CrestBusinessException(\"Crest.Crud.InvalidSortField\", \""
-            + entityName + "\", sort.Field);");
+        foreach (var (name, _) in cases)
+        {
+            Line(builder, TripleIndent + "case \"" + Escape(name) + "\":");
+            Line(builder, TripleIndent + "    return ApplyFilter_" + name + "(query, filter);");
+        }
+
+        Line(builder, TripleIndent + "default:");
+        Line(builder, TripleIndent + "    throw new QueryPlanException(");
+        Line(builder, TripleIndent + "        \"Crest.Crud.InvalidFilterField\",");
+        Line(builder, TripleIndent + "        \"Filter field '\" + filter.Field + \"' is not filterable on "
+            + entityName + " by the generated query adapter.\");");
+        Line(builder, NestedIndent + "    }");
+        Line(builder, NestedIndent + "}");
+
+        foreach (var (_, field) in cases)
+        {
+            EmitAdapterFilterField(builder, entity, entityName, field);
+        }
+    }
+
+    private static void EmitAdapterFilterField(
+        StringBuilder builder,
+        string entity,
+        string entityName,
+        CrudFieldModel field)
+    {
+        var reader = FilterValueReaderCall(field);
+        var member = "entity." + field.Name;
+
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "private static IQueryable<" + entity + "> ApplyFilter_" + field.Name
+            + "(IQueryable<" + entity + "> query, FilterDescriptor filter)");
+        Line(builder, NestedIndent + "{");
+        Line(builder, NestedIndent + "    switch (filter.Operator)");
+        Line(builder, NestedIndent + "    {");
+
+        switch (field.Kind)
+        {
+            case CrudFieldKind.String:
+                EmitEqualityCases(builder, member, reader);
+                EmitStringMatchCases(builder, field, member, reader);
+                EmitInCases(builder, field, member);
+                break;
+            case CrudFieldKind.Bool:
+                EmitEqualityCases(builder, member, reader);
+                break;
+            case CrudFieldKind.Guid:
+            case CrudFieldKind.Enum:
+                EmitEqualityCases(builder, member, reader);
+                EmitInCases(builder, field, member);
+                break;
+            default:
+                EmitEqualityCases(builder, member, reader);
+                EmitComparisonCases(builder, member, reader);
+                EmitInCases(builder, field, member);
+                break;
+        }
+
+        if (field.IsNullable)
+        {
+            EmitNullCases(builder, member);
+        }
+
+        Line(builder, TripleIndent + "default:");
+        Line(builder, TripleIndent + "    throw new QueryPlanException(");
+        Line(builder, TripleIndent + "        \"Crest.Crud.UnsupportedFilterOperator\",");
+        Line(builder, TripleIndent + "        \"Filter operator '\" + filter.Operator + \"' is not supported for field '\" + "
+            + "filter.Field + \"' of " + entityName + ".\");");
         Line(builder, NestedIndent + "    }");
         Line(builder, NestedIndent + "}");
     }
 
-    // ---- 6. capability input envelopes ---------------------------------------------------------
+    /// <summary>Equals/NotEquals for every supported kind; the reader call fixes the value's static type.</summary>
+    private static void EmitEqualityCases(StringBuilder builder, string member, string reader)
+    {
+        foreach (var (operatorName, comparison) in new[]
+        {
+            ("Equals", "=="),
+            ("NotEquals", "!="),
+        })
+        {
+            Line(builder, TripleIndent + "case FilterOperator." + operatorName + ":");
+            Line(builder, TripleIndent + "{");
+            Line(builder, QuadIndent + "var value = " + reader + "(filter.Value, filter.Field);");
+            Line(builder, QuadIndent + "return query.Where(entity => " + member + " " + comparison + " value);");
+            Line(builder, TripleIndent + "}");
+        }
+    }
+
+    private static void EmitComparisonCases(StringBuilder builder, string member, string reader)
+    {
+        foreach (var (operatorName, comparison) in new[]
+        {
+            ("GreaterThan", ">"),
+            ("GreaterThanOrEqual", ">="),
+            ("LessThan", "<"),
+            ("LessThanOrEqual", "<="),
+        })
+        {
+            Line(builder, TripleIndent + "case FilterOperator." + operatorName + ":");
+            Line(builder, TripleIndent + "{");
+            Line(builder, QuadIndent + "var value = " + reader + "(filter.Value, filter.Field);");
+            Line(builder, QuadIndent + "return query.Where(entity => " + member + " " + comparison + " value);");
+            Line(builder, TripleIndent + "}");
+        }
+    }
+
+    private static void EmitStringMatchCases(
+        StringBuilder builder,
+        CrudFieldModel field,
+        string member,
+        string reader)
+    {
+        foreach (var method in new[] { "Contains", "StartsWith", "EndsWith" })
+        {
+            Line(builder, TripleIndent + "case FilterOperator." + method + ":");
+            Line(builder, TripleIndent + "{");
+            Line(builder, QuadIndent + "var value = " + reader + "(filter.Value, filter.Field);");
+            Line(builder, QuadIndent + "return query.Where(entity => "
+                + (field.IsNullable ? member + " != null && " : string.Empty)
+                + member + "." + method + "(value));");
+            Line(builder, TripleIndent + "}");
+        }
+    }
+
+    /// <summary>
+    /// In/NotIn read a same-kind scalar array with the field's own reader. Nullable fields keep an
+    /// explicit null branch: a null member is never "in" a set, and "not in" keeps the null rows.
+    /// </summary>
+    private static void EmitInCases(StringBuilder builder, CrudFieldModel field, string member)
+    {
+        var elementType = FilterArrayElementType(field);
+        var reader = FilterValueReaderCall(field);
+        var arrayCall = "FilterValueReader.ReadArray<" + elementType + ">(filter.Value, filter.Field, " + reader + ")";
+
+        var inExpression = field.IsNullable
+            ? field.Kind == CrudFieldKind.String
+                ? member + " != null && values.Contains(" + member + ")"
+                : member + ".HasValue && values.Contains(" + member + ".Value)"
+            : "values.Contains(" + member + ")";
+        var notInExpression = field.IsNullable
+            ? field.Kind == CrudFieldKind.String
+                ? member + " == null || !values.Contains(" + member + ")"
+                : "!" + member + ".HasValue || !values.Contains(" + member + ".Value)"
+            : "!values.Contains(" + member + ")";
+
+        foreach (var (operatorName, expression) in new[]
+        {
+            ("In", inExpression),
+            ("NotIn", notInExpression),
+        })
+        {
+            Line(builder, TripleIndent + "case FilterOperator." + operatorName + ":");
+            Line(builder, TripleIndent + "{");
+            Line(builder, QuadIndent + "var values = " + arrayCall + ";");
+            Line(builder, QuadIndent + "return query.Where(entity => " + expression + ");");
+            Line(builder, TripleIndent + "}");
+        }
+    }
+
+    private static void EmitNullCases(StringBuilder builder, string member)
+    {
+        Line(builder, TripleIndent + "case FilterOperator.IsNull:");
+        Line(builder, TripleIndent + "    return query.Where(entity => " + member + " == null);");
+        Line(builder, TripleIndent + "case FilterOperator.IsNotNull:");
+        Line(builder, TripleIndent + "    return query.Where(entity => " + member + " != null);");
+    }
+
+    private static void EmitAdapterSorts(
+        StringBuilder builder,
+        CrudGenerationModel model,
+        string entity,
+        string entityName)
+    {
+        var cases = new List<string>();
+        foreach (var name in model.SortableFields)
+        {
+            var field = model.ReadFields.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, name, StringComparison.Ordinal));
+            if (field is null || field.Kind == CrudFieldKind.Unsupported
+                || cases.Contains(name, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            cases.Add(name);
+        }
+
+        // §8: the stable default ordering — CreationTime descending with an Id descending tiebreak when
+        // the entity has CreationTime, otherwise Id descending.
+        var defaultOrdering = model.EntityHasCreationTime
+            ? "query.OrderByDescending(entity => entity.CreationTime).ThenByDescending(entity => entity.Id)"
+            : "query.OrderByDescending(entity => entity.Id)";
+
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "/// <summary>Applies the requested sorts, or the stable default ordering when none were requested.</summary>");
+        Line(builder, NestedIndent + "private static IQueryable<" + entity + "> ApplySorts("
+            + "IQueryable<" + entity + "> query, List<SortDescriptor>? sorts)");
+        Line(builder, NestedIndent + "{");
+        Line(builder, NestedIndent + "    if (sorts is null || sorts.Count == 0)");
+        Line(builder, NestedIndent + "    {");
+        Line(builder, NestedIndent + "        return " + defaultOrdering + ";");
+        Line(builder, NestedIndent + "    }");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "    IOrderedQueryable<" + entity + ">? ordered = null;");
+        Line(builder, NestedIndent + "    foreach (var sort in sorts)");
+        Line(builder, NestedIndent + "    {");
+        Line(builder, NestedIndent + "        if (sort is null)");
+        Line(builder, NestedIndent + "        {");
+        Line(builder, NestedIndent + "            throw new QueryPlanException(");
+        Line(builder, NestedIndent + "                \"Crest.Crud.InvalidSortField\",");
+        Line(builder, NestedIndent + "                \"Sort descriptors of " + entityName + " must not be null.\");");
+        Line(builder, NestedIndent + "        }");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "        ordered = ApplySort(query, ordered, sort);");
+        Line(builder, NestedIndent + "    }");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "    return ordered ?? query;");
+        Line(builder, NestedIndent + "}");
+
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "private static IOrderedQueryable<" + entity + "> ApplySort(");
+        Line(builder, NestedIndent + "    IQueryable<" + entity + "> source,");
+        Line(builder, NestedIndent + "    IOrderedQueryable<" + entity + ">? ordered,");
+        Line(builder, NestedIndent + "    SortDescriptor sort)");
+        Line(builder, NestedIndent + "{");
+        Line(builder, NestedIndent + "    switch (sort.Field)");
+        Line(builder, NestedIndent + "    {");
+        foreach (var name in cases)
+        {
+            Line(builder, TripleIndent + "case \"" + Escape(name) + "\" when sort.Direction == SortDirection.Ascending:");
+            Line(builder, TripleIndent + "    return ordered is null");
+            Line(builder, TripleIndent + "        ? source.OrderBy(entity => entity." + name + ")");
+            Line(builder, TripleIndent + "        : ordered.ThenBy(entity => entity." + name + ");");
+            Line(builder, TripleIndent + "case \"" + Escape(name) + "\" when sort.Direction == SortDirection.Descending:");
+            Line(builder, TripleIndent + "    return ordered is null");
+            Line(builder, TripleIndent + "        ? source.OrderByDescending(entity => entity." + name + ")");
+            Line(builder, TripleIndent + "        : ordered.ThenByDescending(entity => entity." + name + ");");
+        }
+
+        Line(builder, TripleIndent + "default:");
+        Line(builder, TripleIndent + "    throw new QueryPlanException(");
+        Line(builder, TripleIndent + "        \"Crest.Crud.InvalidSortField\",");
+        Line(builder, TripleIndent + "        \"Sort field '\" + sort.Field + \"' with direction '\" + sort.Direction + \"' is not supported by the generated "
+            + entityName + " query adapter.\");");
+        Line(builder, NestedIndent + "    }");
+        Line(builder, NestedIndent + "}");
+    }
+
+    /// <summary>The bounded FilterValueReader call for a field's frozen static kind.</summary>
+    private static string FilterValueReaderCall(CrudFieldModel field) => field.Kind switch
+    {
+        CrudFieldKind.String => "FilterValueReader.ReadString",
+        CrudFieldKind.Bool => "FilterValueReader.ReadBool",
+        CrudFieldKind.Int32 => "FilterValueReader.ReadInt32",
+        CrudFieldKind.Int64 => "FilterValueReader.ReadInt64",
+        CrudFieldKind.Decimal => "FilterValueReader.ReadDecimal",
+        CrudFieldKind.Double => "FilterValueReader.ReadDouble",
+        CrudFieldKind.Guid => "FilterValueReader.ReadGuid",
+        CrudFieldKind.DateTime => "FilterValueReader.ReadDateTime",
+        CrudFieldKind.Enum => "FilterValueReader.ReadEnum<" + field.EnumTypeDisplay + ">",
+        _ => throw new InvalidOperationException(
+            "Field '" + field.Name + "' has no typed filter reader (kind " + field.Kind + ")."),
+    };
+
+    /// <summary>The element type of the same-kind array a supported In/NotIn field reads.</summary>
+    private static string FilterArrayElementType(CrudFieldModel field) => field.Kind switch
+    {
+        CrudFieldKind.String => "string",
+        CrudFieldKind.Int32 => "int",
+        CrudFieldKind.Int64 => "long",
+        CrudFieldKind.Decimal => "decimal",
+        CrudFieldKind.Double => "double",
+        CrudFieldKind.Guid => "global::System.Guid",
+        CrudFieldKind.DateTime => "global::System.DateTime",
+        CrudFieldKind.Enum => field.EnumTypeDisplay!,
+        _ => throw new InvalidOperationException(
+            "Field '" + field.Name + "' has no supported array reader (kind " + field.Kind + ")."),
+    };
+
+    // ---- 7. capability input envelopes ---------------------------------------------------------
 
     private static CrudArtifact EmitCapabilityInputEnvelope(CrudGenerationModel model, CrudActionModel action)
     {
@@ -725,7 +1084,7 @@ public static class CrudArtifactEmitter
         return Artifact(name + ".g.cs", builder);
     }
 
-    // ---- 7. ExplicitHost capability contribution (§5.2 / §7.2 / §7.4) --------------------------
+    // ---- 8. ExplicitHost capability contribution (§5.2 / §7.2 / §7.4) --------------------------
 
     /// <summary>Owner key the outputs manifest records for the one assembly-level activation artifact.</summary>
     public const string AssemblyActivationOwnerKey = "<assembly>";
@@ -1506,9 +1865,6 @@ public static class CrudArtifactEmitter
             ? typed
             : "\"" + action.PermissionName + "\"";
     }
-
-    private static string DefaultSortField(CrudGenerationModel model) =>
-        model.QueryableFields.Contains("CreationTime", StringComparer.Ordinal) ? "CreationTime" : "Id";
 
     private static IEnumerable<CrudActionModel> OrderedActions(CrudGenerationModel model) =>
         PermissionActionOrder
