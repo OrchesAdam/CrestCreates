@@ -824,28 +824,28 @@ public static class CrudArtifactEmitter
         switch (field.Kind)
         {
             case CrudFieldKind.String:
-                EmitEqualityCases(builder, member, reader);
+                EmitEqualityCases(builder, field, member, reader);
                 EmitStringMatchCases(builder, field, member, reader);
                 EmitInCases(builder, field, member);
                 break;
             case CrudFieldKind.Bool:
-                EmitEqualityCases(builder, member, reader);
+                EmitEqualityCases(builder, field, member, reader);
                 break;
             case CrudFieldKind.Guid:
             case CrudFieldKind.Enum:
-                EmitEqualityCases(builder, member, reader);
+                EmitEqualityCases(builder, field, member, reader);
                 EmitInCases(builder, field, member);
                 break;
             default:
-                EmitEqualityCases(builder, member, reader);
-                EmitComparisonCases(builder, member, reader);
+                EmitEqualityCases(builder, field, member, reader);
+                EmitComparisonCases(builder, field, member, reader);
                 EmitInCases(builder, field, member);
                 break;
         }
 
         if (field.IsNullable)
         {
-            EmitNullCases(builder, member);
+            EmitNullCases(builder, field, member);
         }
 
         Line(builder, TripleIndent + "default:");
@@ -857,24 +857,42 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent + "}");
     }
 
-    /// <summary>Equals/NotEquals for every supported kind; the reader call fixes the value's static type.</summary>
-    private static void EmitEqualityCases(StringBuilder builder, string member, string reader)
+    /// <summary>
+    /// Equals/NotEquals for every supported kind; the reader call fixes the value's static type.
+    /// <see cref="decimal"/> filters are emitted operator-free on purpose: the runtime resolves
+    /// user-defined operators for <c>==</c> inside expression trees by reflection, and that resolution
+    /// deterministically fails under NativeAOT (S4 native gate probe: only decimal-eq/gt fail while
+    /// member Equals/CompareTo construct fine). The semantics are identical.
+    /// </summary>
+    private static void EmitEqualityCases(StringBuilder builder, CrudFieldModel field, string member, string reader)
     {
-        foreach (var (operatorName, comparison) in new[]
-        {
-            ("Equals", "=="),
-            ("NotEquals", "!="),
-        })
+        foreach (var operatorName in new[] { "Equals", "NotEquals" })
         {
             Line(builder, TripleIndent + "case FilterOperator." + operatorName + ":");
             Line(builder, TripleIndent + "{");
             Line(builder, QuadIndent + "var value = " + reader + "(filter.Value, filter.Field);");
-            Line(builder, QuadIndent + "return query.Where(entity => " + member + " " + comparison + " value);");
+            Line(builder, QuadIndent + "return query.Where(entity => "
+                + EqualityExpression(field, member, operatorName) + ");");
             Line(builder, TripleIndent + "}");
         }
     }
 
-    private static void EmitComparisonCases(StringBuilder builder, string member, string reader)
+    private static string EqualityExpression(CrudFieldModel field, string member, string operatorName)
+    {
+        if (field.Kind != CrudFieldKind.Decimal)
+        {
+            return member + (operatorName == "Equals" ? " == " : " != ") + "value";
+        }
+
+        var target = field.IsNullable ? member + ".Value" : member;
+        return field.IsNullable
+            ? operatorName == "Equals"
+                ? member + ".HasValue && " + target + ".Equals(value)"
+                : "!" + member + ".HasValue || !" + target + ".Equals(value)"
+            : (operatorName == "Equals" ? string.Empty : "!") + target + ".Equals(value)";
+    }
+
+    private static void EmitComparisonCases(StringBuilder builder, CrudFieldModel field, string member, string reader)
     {
         foreach (var (operatorName, comparison) in new[]
         {
@@ -887,9 +905,22 @@ public static class CrudArtifactEmitter
             Line(builder, TripleIndent + "case FilterOperator." + operatorName + ":");
             Line(builder, TripleIndent + "{");
             Line(builder, QuadIndent + "var value = " + reader + "(filter.Value, filter.Field);");
-            Line(builder, QuadIndent + "return query.Where(entity => " + member + " " + comparison + " value);");
+            Line(builder, QuadIndent + "return query.Where(entity => "
+                + ComparisonExpression(field, member, comparison) + ");");
             Line(builder, TripleIndent + "}");
         }
+    }
+
+    private static string ComparisonExpression(CrudFieldModel field, string member, string comparison)
+    {
+        if (field.Kind != CrudFieldKind.Decimal)
+        {
+            return member + " " + comparison + " value";
+        }
+
+        var target = field.IsNullable ? member + ".Value" : member;
+        var compare = target + ".CompareTo(value) " + comparison + " 0";
+        return field.IsNullable ? member + ".HasValue && " + compare : compare;
     }
 
     private static void EmitStringMatchCases(
@@ -945,8 +976,20 @@ public static class CrudArtifactEmitter
         }
     }
 
-    private static void EmitNullCases(StringBuilder builder, string member)
+    private static void EmitNullCases(StringBuilder builder, CrudFieldModel field, string member)
     {
+        // Nullable decimal uses the HasValue form as well: the S4 native probe showed decimal's
+        // user-defined operators cannot be resolved inside AOT expression trees, and `== null` on a
+        // nullable decimal takes the same operator resolution path.
+        if (field.Kind == CrudFieldKind.Decimal)
+        {
+            Line(builder, TripleIndent + "case FilterOperator.IsNull:");
+            Line(builder, TripleIndent + "    return query.Where(entity => !" + member + ".HasValue);");
+            Line(builder, TripleIndent + "case FilterOperator.IsNotNull:");
+            Line(builder, TripleIndent + "    return query.Where(entity => " + member + ".HasValue);");
+            return;
+        }
+
         Line(builder, TripleIndent + "case FilterOperator.IsNull:");
         Line(builder, TripleIndent + "    return query.Where(entity => " + member + " == null);");
         Line(builder, TripleIndent + "case FilterOperator.IsNotNull:");

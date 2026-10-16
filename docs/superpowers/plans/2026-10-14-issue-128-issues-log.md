@@ -320,3 +320,37 @@
   1. **未知 id 的 GET 返回 500，而不是 §7.4 要求的 404 无数据信封**：生成的 `GetByIdAsync` 抛 `CrestEntityNotFoundException` → pipeline catch-all → `Failure("PIPELINE_ERROR")` → `CapabilityEndpointResultMapper.MapFailure` 默认分支 → `Results.Problem` → 500；而生成器里那条 typed 404 分支只在**成功**返回 null 时才可达，经生成服务根本走不到。修法方向：CRUD 的 Get invoker（生成物）捕获该领域异常并交回 null，让 typed `WrapGetResult` 产生 404 信封；AppService 层语义不变。
   2. **失败路径写了 CRUD context 序列化不了的 `ProblemDetails`**：上述 500 的响应体写出阶段再抛 `NotSupportedException: JsonTypeInfo metadata for type 'Microsoft.AspNetCore.Mvc.ProblemDetails' was not provided by TypeInfoResolver of type 'CrestCreatesCrudJsonSerializerContext'`。§7.1 明确要求闭包包含"使用到的错误 DTO"——生成 context 缺错误 DTO 是一个真实闭包缺口，需要在 roots 集合里补齐（或让失败路径不用 ProblemDetails）。
 - 步骤 B 前置：`AddUnitOfWork` + provider 绑定（#137 公共契约）+ Feature 侧 Rougamo.Fody 织入，才能让 `[UnitOfWorkMo]` 真正包裹生成方法；随后才谈 UoW 提交/回滚与响应写失败独立、并发戳不匹配语义。
+
+## S4 增量 2：① 两处真缺陷的 src 侧修复（D1/D2 关闭）
+
+- **D1（未知 id 的 GET）**：生成的 GET invoker 现在 try/catch `CrestEntityNotFoundException` 并把 null 交回 typed `WrapGetResult` 分支——§7.4 的 404/无数据信封经生成服务可达；AppService 层领域语义（找不到即抛）不变。修复前该异常逃逸进 pipeline failure mapper（空 500）。
+- **D2（错误 DTO 闭包）**：§7.1 的闭包补上失败路径实际写出的 error DTO（`Microsoft.AspNetCore.Mvc.ProblemDetails`）：`CrudJsonSurfaceDiscovery` 把它注册为 CRUD context 的 root（与其余 root 同一机制），生成贡献的 `RequiredJsonRootTypes` 同步新增（action 标注 `*`，action 无关），宿主启动校验因此对失败体同样 fail-closed。修复前该失败体在无反射宿主上序列化失败、退化为空 500。
+- 红基线翻转与新增证据（fixture）：`WidgetGetById_WithUnknownId_Returns404Envelope` 由 pinned red 转绿；新增 `WidgetSearch_WithUnknownFilterField_AnswersASerializableFailureBody` 断言失败体经生成 context 真实可序列化（detail 含被拒绝字段名）。fixture **7/7**。
+- 契约面同步：`Materialized_bundle_must_declare_the_json_root_contract_and_host_wiring` 由 10 roots 更新为 **11 roots**（新增 `typeof(ProblemDetails)`）；MSBuild 探针 `RequiredCrudRoots` 同样新增并断言官方 STJ 产出 `JsonTypeInfo<...ProblemDetails>` 真实元数据。
+- 计数：CodeGenerator **451/451**（含更新后的形状与 MSBuild 端到端契约）、JsonContracts 单元 **131/131**、DynamicApi **115/115**。失败路径的 500 状态沿用既有 pipeline 失败映射（非 typed failure），本项只关"闭包可序列化"，不改状态语义。提交 `413ed95a`。
+
+## S4 增量 3：Step B — 织入 + 内存 UoW（提交/回滚/响应失败独立/并发戳）
+
+- **生成服务暴露 `ServiceProvider`**（emitter）：框架 AOP 桥 `MethodContextExtensions.GetServiceProvider` 从 target 的公有 `ServiceProvider` 成员解析服务；生成的服务此前没有该成员，`[UnitOfWorkMo]` 即使在织入后也会因为找不到 `IUnitOfWorkManager` 而**静默跳过**。补齐后与 `CrestAppServiceBase` 同一约定（构造注入 + 公有属性）。这是 Step B 发现并修复的第三处真实缺陷（D3）。
+- **Feature 织入**：`FodyWeavers.xml` + `Rougamo.Fody`，与仓库其余织入工程同一形制；生成的写方法进入真实拦截帧。
+- **Host 内存 UoW（#137 公共契约）**：`AddUnitOfWork(OrmProvider.EfCore)` + `AddUnitOfWorkProvider(...)` 绑定 fixture 的 `MemoryWidgetUnitOfWork`（能力声明与实现一致：支持事务、无显式隔离级别、及时终结与丢弃；`supportsRequiresNew:false`）。绑定用 EfCore 身份仅因 `OrmProvider` 是封闭枚举无 memory 成员——与 #137 AotFixture 的 fixture 绑定同形，不对 EF 作任何主张。UoW = 写窗（store 的 `WriteGate` 串行化）+ 事务前快照：commit 丢弃快照，rollback/未完成 dispose 恢复快照——回滚丢弃请求内写过的行是真实行为。
+- **证据（fixture JIT 11/11，其中 Step B 四例）**：
+  1. 成功写动作恰好 begin+1 / commit+1 / rollback+0 且行已入库（织入与 ServiceProvider 桥互为证明：缺任一方计数器不动）；
+  2. 仓储已写入行之后失败 → rollback+1 / commit+0 且该行被丢弃（回滚探针 = fixture 仓储在 `_store.Add` 后抛，与生产的「存储已写、外围操作失败」同形）；
+  3. 响应写失败（host 缝：武装后下一个请求的响应体流首次写入即抛，连接断开的形状）→ 客户端请求失败，但 commit+1 / rollback+0 且行保持入库——§7.3 的独立事实；
+  4. 陈旧并发戳 → 500 + detail "Concurrency conflict"，rollback+1 / commit+0，store 保持第一次已提交更新的状态。
+- 修复侧记录：partial 类**不能 override 同类自己的 virtual 钩子**（扩展钩子是给派生类用的）——第一版把回滚探针写成 partial override 直接 CS0115/CS0111，改为 fixture 仓储缝。
+- 计数：fixture JIT **11/11**；CodeGenerator 451/451（ServiceProvider emitter 变更后复跑）。提交 `61b4d3c0`。
+
+## S4 增量 4：原生门禁（publish/link/run + 分场景/总 sentinel + 变异反例），当场暴露两处 AOT 真缺口
+
+门禁结构：Host 支持 `--crud-gate`（Kestrel loopback 上自驱动 15 场景 + 每场景 `<scenario>:PASS` 行 + 总 sentinel `CRESTCREATES_GENERATED_CRUD_NATIVE_OK`）；Trait `Category=NativeAotGate` 的 harness 以 `publish -c Release -r linux-x64 --self-contained -p:CrestCreatesPublishMode=aot` 产出原生产物并运行；变异模式 `CREST_CRUD_GATE_MUTATION=wrong-expectation|wrong-typed-envelope` 必须失败（`create:FAIL`、退出码 ≠ 0、无总 sentinel、进程自行终止），`metadata-rejection` 场景在**仍激活真实生成贡献**的第二个宿主上清空 resolver 链，断言 Map 期确定性拒绝（不漏 root、不放行反射回退）。证据 JSON 写 `tests/artifacts/aot-native-evidence/`。
+
+第一次原生链路（首轮 publish）当场暴露：
+
+1. **生成 ObjectMapping 投影属性带 IL2026**：`ToTargetExpression` 的表达式树经 `Expression.Bind` 绑定属性元数据（RequiresUnreferencedCode）。修复在生成器（`ObjectMappingCodeWriter`）：getter 访问器上标注 `RequiresUnreferencedCode`（属性本身不接受该特性，CS0592 实测），契约上移到调用方。
+2. **内存 IQueryable 原生不可执行**：`List.AsQueryable()` 的 BCL `EnumerableQuery` 在 NativeAOT 下报 `Enumerable.OrderByDescending[Widget,decimal]` 无原生代码（`MethodInfo.MakeGenericMethod` 不兼容）。按 §8「收敛到静态受支持执行方案」落地 fixture 的 **memory query provider**（`WidgetQueryProvider`）：解释生成 adapter 实际发出的全部形状（Where 谓词、string Contains/StartsWith/EndsWith、Enumerable.Contains、null 守卫、与/或/非；OrderBy/ThenBy 成员键选择器；Skip/Take/Count/Any/FirstOrDefault），编译期委托静态执行，其余形状一律 `QueryPlanException` 确定性拒绝。仓储 `GetQueryable()` 改为该 provider 上的快照查询。
+3. **平台事实探针（`expression-tree-construction-probe` 场景，原生矩阵）**：`int/bool/double/enum/string ==`、`string == null`、`Guid ==`、`DateTime == / >`、`decimal.Equals/CompareTo`、`Enumerable.Contains` **全部可构造**；**仅 `decimal ==` 与 `decimal >` 在 AOT 下构造失败**（`The binary operator Equal is not defined for 'System.Decimal'`——运行时对表达式树内用户自定义运算符的反射解析在 AOT 无元数据）。据此 emitter 对 **decimal kind 收敛为 operator-free 形态**：Equals/NotEquals → `member.Equals(value)` / `!member.Equals(value)`（nullable 走 `HasValue && Value.Equals(...)` / `!HasValue || !Value.Equals(...)`）、四种比较 → `member.CompareTo(value) <op> 0`（nullable 加 HasValue 守卫）、nullable 的 IsNull/IsNotNull → `!HasValue`/`HasValue`；其余 kind 的 `==`/比较形状不变（矩阵已证安全）。语义等价；EF 翻译面按独立声明处置（本项不动其他 kind）。形状契约同步进 `CrudTypedQueryAdapterTests`（decimal 六种形态 + nullable decimal 四态逐一断言）。
+4. 附带修正 harness 过滤：IL 告警归属按**诊断自身文件路径**（`tests/Framework/Api/CrestCreates.GeneratedCrud*` 前缀，取首个 ": " 之前的路径段）判定，而非 csproj 标签——依赖工程（Aop/Application.Contracts）的既有 trim 告警带本 fixture 的 csproj 标签，不能当作 fixture 自身信号；Host csproj 移除以全局 WarningsAsErrors 提升 IL 码（会把整条 publish 图的既有依赖告警变错误），fixture 自身的 IL 不洁净由 harness 断言兜底（复跑实证：fixture 归属的 IL2026/IL3050 为 0）。
+
+原生推进序列（每步都真机 publish/link/run）：首轮 publish **15 场景 13 过**（decimal 排序与 decimal 过滤两例失败）→ provider + ObjectMapping 注解后 **14/15**（仅 `decimal ==`）→ 探针定位到 decimal 运算符缺口并完成 emitter 收敛后进入最终门禁复跑。

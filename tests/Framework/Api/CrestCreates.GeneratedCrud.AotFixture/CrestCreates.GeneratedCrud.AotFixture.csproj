@@ -8,6 +8,15 @@
     <!-- #128 S4 fixture contract: the same compiler-level switch the Feature project carries, so a
          reflective fallback can never silently satisfy the CRUD JSON surface on the host either. -->
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- #128 S4 native gate: the same AOT contract the proven CapabilityEndpoint / LocalEvent hosts
+         carry. The gate publishes with -p:CrestCreatesPublishMode=aot (Directory.Build.Aot.props
+         selects NativeAOT from that mode). IL codes are NOT promoted to errors here: this fixture's
+         publish graph includes pre-existing framework projects (Aop, Application.Contracts) whose
+         trim warnings are their own subsystem's scope; the gate harness instead asserts that no
+         IL2026/IL3050 diagnostic is attributed to this fixture's own projects. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

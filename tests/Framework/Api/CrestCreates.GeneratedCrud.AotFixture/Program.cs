@@ -24,6 +24,15 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// #128 S4 native gate mode: bind an ephemeral loopback port; CrudNativeGate then drives the
+// scenario matrix inside this process and the exit code carries the verdict. WebApplicationFactory
+// never passes this argument, so the JIT test host behaves exactly as before.
+var gateMode = args.Contains("--crud-gate");
+if (gateMode)
+{
+    builder.WebHost.UseUrls("http://127.0.0.1:0");
+}
+
 // Register capability runtime (pipeline + dispatcher + resolver) — the same composition the proven
 // CapabilityEndpoint.AotFixture and CompatibilityProjection.E2E hosts run.
 builder.Services.AddCapabilityRuntime();
@@ -108,6 +117,12 @@ app.Use(async (context, next) =>
 // mapping, which is what the generated AddGeneratedCrud + MapCrestCapabilityEndpoints pair promises.
 app.MapCrestCapabilityEndpoints();
 
+if (gateMode)
+{
+    return CrudNativeGate.RunAsync(app).GetAwaiter().GetResult();
+}
+
 app.Run();
+return 0;
 
 public partial class Program;

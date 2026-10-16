@@ -277,6 +277,9 @@ public class CrudTypedQueryAdapterTests
 
         // The operator matrix in exact emitted lambdas: string matching, comparisons, In/NotIn with
         // the same-kind array reader, the null branch of nullable fields and the lifted nullable In.
+        // decimal is the one kind emitted operator-free: the S4 native probe showed the runtime cannot
+        // resolve decimal's user-defined operators inside AOT expression trees, while member
+        // Equals/CompareTo and HasValue construct fine (identical semantics).
         string[] requiredExpressions =
         [
             "return query.Where(entity => entity.Name == value);",
@@ -284,7 +287,16 @@ public class CrudTypedQueryAdapterTests
             "return query.Where(entity => entity.Description != null && entity.Description.Contains(value));",
             "return query.Where(entity => entity.Description == null);",
             "return query.Where(entity => entity.Description != null);",
-            "return query.Where(entity => entity.Price > value);",
+            "return query.Where(entity => entity.Price.Equals(value));",
+            "return query.Where(entity => !entity.Price.Equals(value));",
+            "return query.Where(entity => entity.Price.CompareTo(value) > 0);",
+            "return query.Where(entity => entity.Price.CompareTo(value) >= 0);",
+            "return query.Where(entity => entity.Price.CompareTo(value) < 0);",
+            "return query.Where(entity => entity.Price.CompareTo(value) <= 0);",
+            "return query.Where(entity => entity.Discount.HasValue && entity.Discount.Value.Equals(value));",
+            "return query.Where(entity => !entity.Discount.HasValue || !entity.Discount.Value.Equals(value));",
+            "return query.Where(entity => !entity.Discount.HasValue);",
+            "return query.Where(entity => entity.Discount.HasValue);",
             "return query.Where(entity => entity.Stock >= value);",
             "return query.Where(entity => entity.IsActive == value);",
             "var values = FilterValueReader.ReadArray<global::System.Guid>(filter.Value, filter.Field, FilterValueReader.ReadGuid);",

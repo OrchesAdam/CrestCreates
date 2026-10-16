@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Repositories;
@@ -45,11 +46,26 @@ public sealed class MemoryWidgetRepository : ICrestRepositoryBase<Widget, Guid>
         }
     }
 
+    /// <summary>
+    /// The generated CRUD chain's query entry: a statically executed Widget queryable over a store
+    /// snapshot. The BCL <c>EnumerableQuery</c> cannot execute the generated adapter's shapes under
+    /// NativeAOT (reflective enumerable instantiation and operator lookup), so the fixture converges
+    /// to the bounded provider of §8 — see <see cref="WidgetQueryProvider"/> for the exact surface.
+    /// </summary>
     public IQueryable<Widget> GetQueryable()
     {
         lock (_sync)
         {
-            return _store.Select(Clone).ToList().AsQueryable();
+            return new WidgetQuery(new WidgetQueryProvider(), _store.Select(Clone).ToList());
+        }
+    }
+
+    /// <summary>Fixture observation helper: the row count without going through the query provider.</summary>
+    public int CountRows()
+    {
+        lock (_sync)
+        {
+            return _store.Count;
         }
     }
 
@@ -205,6 +221,9 @@ public sealed class MemoryWidgetRepository : ICrestRepositoryBase<Widget, Guid>
         }
     }
 
+    [UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+        Justification = "The repository interface requires this overload; the generated CRUD chain never " +
+            "calls it, and the suppression is scoped to the fixture's in-memory provider seam.")]
     public Task DeleteRangeAsync(Expression<Func<Widget, bool>> predicate, CancellationToken cancellationToken = default)
     {
         lock (_sync)
