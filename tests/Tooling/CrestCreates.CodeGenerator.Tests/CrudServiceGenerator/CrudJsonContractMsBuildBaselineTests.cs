@@ -161,6 +161,20 @@ public class CrudJsonContractMsBuildBaselineTests
             "JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)",
             "HTTP CRUD uses the camelCase policy of §7.1");
 
+        // #128 S4: the *whole compilation* must stay free of the legacy Dynamic API surface for a
+        // formal CRUD declaration — the bundle being symbol-clean is not enough, because another
+        // generator could still materialize a ModuleInitializer provider and a legacy body reader
+        // (observed on the real fixture before the ownership skip landed).
+        var wholeCompilation = string.Join("\n", probe.AllGeneratedFiles);
+        wholeCompilation.Should().NotContain("DynamicApiGeneratedRegistryStore",
+            "no generator may register a legacy generated provider for a formal CRUD service");
+        wholeCompilation.Should().NotContain("DynamicApiGeneratedRuntime.ReadBodyAsync",
+            "no generator may materialize a legacy body-reading endpoint for a formal CRUD service");
+        wholeCompilation.Should().NotContain("GeneratedDynamicApiRegistry",
+            "the legacy Dynamic API registry must not be generated for the probe");
+        probe.Output.Should().NotContain("CS0618",
+            "the obsolete legacy runtime must not be referenced anywhere in the probe compilation");
+
         probe.StjFiles.Should().NotBeEmpty("the official STJ generator must contribute the metadata");
         probe.StjFiles.Should().Contain(
             content => content.Contains(
@@ -293,6 +307,7 @@ public class CrudJsonContractMsBuildBaselineTests
         Path.Combine("obj", "Debug", "net10.0");
 
     private sealed record ProbeBuild(
+        IReadOnlyList<string> AllGeneratedFiles,
         string Directory,
         int ExitCode,
         string Output,
@@ -339,6 +354,7 @@ public class CrudJsonContractMsBuildBaselineTests
             // The probe directory is deleted once the build is inspected, so every artifact the
             // assertions talk about is read here, from this same build.
             return new ProbeBuild(
+                ReadAllGenerated(probeDirectory),
                 probeDirectory,
                 buildResult.ExitCode,
                 buildResult.Output,
@@ -380,6 +396,17 @@ public class CrudJsonContractMsBuildBaselineTests
             repoRoot,
             "build \"src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj\" -p:NuGetAudit=false --nologo -v q",
             TimeSpan.FromMinutes(12));
+    }
+
+    private static IReadOnlyList<string> ReadAllGenerated(string probeDirectory)
+    {
+        var generatorRoot = Path.Combine(probeDirectory, "obj");
+        return Directory.Exists(generatorRoot)
+            ? Directory.EnumerateFiles(generatorRoot, "*.g.cs", SearchOption.AllDirectories)
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .Select(File.ReadAllText)
+                .ToArray()
+            : Array.Empty<string>();
     }
 
     private static string ReadOptional(string path) =>

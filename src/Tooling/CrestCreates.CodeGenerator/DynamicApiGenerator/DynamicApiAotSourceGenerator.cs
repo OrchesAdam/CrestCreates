@@ -22,10 +22,13 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
     {
         var generationContextProvider = context.CompilationProvider
             .Combine(context.AnalyzerConfigOptionsProvider)
+            .Combine(context.AdditionalTextsProvider.Collect())
             .Select(static (input, _) =>
             {
-                var (compilation, optionsProvider) = input;
-                return IsGenerationDisabled(optionsProvider) ? null : BuildGenerationContext(compilation);
+                var ((compilation, optionsProvider), additionalTexts) = input;
+                return IsGenerationDisabled(optionsProvider)
+                    ? null
+                    : BuildGenerationContext(compilation, additionalTexts);
             });
 
         context.RegisterSourceOutput(generationContextProvider, static (productionContext, generationContext) =>
@@ -66,8 +69,15 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
                value.Equals("disabled", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static GenerationContext? BuildGenerationContext(Compilation compilation)
+    private static GenerationContext? BuildGenerationContext(
+        Compilation compilation,
+        ImmutableArray<AdditionalText> additionalTexts)
     {
+        // #128 S4: a service whose contract is owned by the CRUD precompile manifest already has its
+        // formal HTTP surface; materializing the legacy Dynamic API registry/endpoints for it would
+        // consume the legacy provider and body reader that §9 forbids. Ownership is asked once here,
+        // from the same manifest reader the Entity/ServiceRegistration generators use.
+        var ownedCrudArtifacts = CrudServiceGenerator.CrudArtifactOwnership.Read(additionalTexts);
         if (compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.IEndpointRouteBuilder") is null ||
             compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.IDynamicApiGeneratedProvider") is null)
         {
@@ -94,6 +104,13 @@ public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
 
         foreach (var type in EnumerateNamedTypes(compilation.Assembly))
         {
+            if (ownedCrudArtifacts.Count > 0
+                && ownedCrudArtifacts.Contains(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    .Replace("global::", string.Empty)))
+            {
+                continue;
+            }
+
             if (crestServiceAttribute is not null &&
                 IsDynamicApiImplementation(type, crestServiceAttribute, dynamicApiIgnoreAttribute, compatibilityProjectionAttribute))
             {
