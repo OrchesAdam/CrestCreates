@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- #128 S4 fixture: the Domain layer owns the aggregate root only. The CRUD surface (DTOs,
+         service, mappings, projections, JSON roots) must be materialized by the toolchain inside the
+         Feature assembly that declares the [GenerateCrudService] partial class. -->
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

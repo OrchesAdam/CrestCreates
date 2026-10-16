@@ -258,6 +258,8 @@
     <Project Path="tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests/CrestCreates.CapabilityEndpoint.AotFixture.Tests.csproj" />
     <Project Path="tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture/CrestCreates.CapabilityEndpoint.AotFixture.csproj" />
     <Project Path="tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests/CrestCreates.CompatibilityProjection.E2E.Tests.csproj" />
+    <Project Path="tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Domain/CrestCreates.GeneratedCrud.AotFixture.Domain.csproj" />
+    <Project Path="tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Feature/CrestCreates.GeneratedCrud.AotFixture.Feature.csproj" />
   </Folder>
   <Folder Name="/tests/Framework/Web/">
     <Project Path="tests/Framework/Web/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />

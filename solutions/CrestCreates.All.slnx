@@ -222,6 +222,8 @@
   <Folder Name="/tests/Framework/Api/">
     <Project Path="../tests/Framework/Api/CrestCreates.DynamicApi.Tests/CrestCreates.DynamicApi.Tests.csproj" />
     <Project Path="../tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests/CrestCreates.CompatibilityProjection.E2E.Tests.csproj" />
+    <Project Path="../tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Domain/CrestCreates.GeneratedCrud.AotFixture.Domain.csproj" />
+    <Project Path="../tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Feature/CrestCreates.GeneratedCrud.AotFixture.Feature.csproj" />
   </Folder>
   <Folder Name="/tests/Framework/Web/">
     <Project Path="../tests/Framework/Web/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />
