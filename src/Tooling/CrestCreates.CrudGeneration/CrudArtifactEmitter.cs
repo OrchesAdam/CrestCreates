@@ -1173,6 +1173,21 @@ public static class CrudArtifactEmitter
 
         Line(builder, string.Empty);
         Line(builder, NestedIndent + Indent
+            + "// §7.2: contributed handlers must reach the composed dispatcher resolver; without this");
+        Line(builder, NestedIndent + Indent
+            + "// module registration a real host answers HANDLER_NOT_FOUND and never calls the AppService.");
+        Line(builder, NestedIndent + Indent
+            + "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddEnumerable(");
+        Line(builder, NestedIndent + Indent + Indent + "services,");
+        Line(builder, NestedIndent + Indent + Indent
+            + "global::Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Singleton<");
+        Line(builder, NestedIndent + Indent + Indent + Indent
+            + "global::CrestCreates.Capability.Abstractions.ICapabilityHandlerModule,");
+        Line(builder, NestedIndent + Indent + Indent + Indent
+            + CrudActivationConvention.HandlerModuleTypeName(owner) + ">());");
+
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + Indent
             + "// §7.2: append this assembly's source-generated CRUD JSON context to the host's own resolver");
         Line(builder, NestedIndent + Indent
             + "// chain (after it), so the host's explicit resolvers keep winning for the types they know.");
@@ -1188,6 +1203,36 @@ public static class CrudArtifactEmitter
 
         Line(builder, string.Empty);
         Line(builder, NestedIndent + Indent + "return services;");
+        Line(builder, NestedIndent + "}");
+        Line(builder, Indent + "}");
+
+        Line(builder, string.Empty);
+        Line(builder, Indent + "/// <summary>");
+        Line(builder, Indent + "/// §7.2 handler composition for assembly '" + owner + "': the contributed invokers join");
+        Line(builder, Indent + "/// the composed CapabilityHandlerResolver through the standard module contract, so a real host");
+        Line(builder, Indent + "/// dispatches to them without any hand-written bridge.");
+        Line(builder, Indent + "/// </summary>");
+        Line(builder, Indent + "internal sealed class " + CrudActivationConvention.HandlerModuleTypeName(owner));
+        Line(builder, Indent + Indent
+            + ": global::CrestCreates.Capability.Abstractions.ICapabilityHandlerModule");
+        Line(builder, Indent + "{");
+        Line(builder, NestedIndent + "internal static readonly "
+            + CrudActivationConvention.HandlerModuleTypeName(owner) + " Instance = new();");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "public string Id => \"" + Escape(owner) + "\";");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent
+            + "public void Apply(global::CrestCreates.Capability.Abstractions.CapabilityHandlerResolver resolver)");
+        Line(builder, NestedIndent + "{");
+        foreach (var model in models)
+        {
+            foreach (var action in model.Actions)
+            {
+                Line(builder, NestedIndent + Indent + "resolver.Register(\"" + Escape(action.CapabilityId)
+                    + "\", new " + Qualified(InvokerTypeName(model, action)) + "());");
+            }
+        }
+
         Line(builder, NestedIndent + "}");
         Line(builder, Indent + "}");
 

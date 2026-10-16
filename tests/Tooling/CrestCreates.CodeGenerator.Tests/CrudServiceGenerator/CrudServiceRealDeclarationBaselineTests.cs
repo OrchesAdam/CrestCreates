@@ -933,6 +933,23 @@ public class CrudServiceRealDeclarationBaselineTests
             "every action needs a typed result mapper binding");
         bundle.Should().Contain("CapabilityEndpointRequiredIdentity",
             "every action must declare its required registry identity");
+
+        // #128 S3 (G2): contributed handlers must reach the composed dispatcher without hand-written
+        // glue — a real host otherwise answers HANDLER_NOT_FOUND and never calls the AppService.
+        bundle.Should().Contain("ICapabilityHandlerModule",
+            "the activation must register the handler module contract");
+        bundle.Should().Contain("GeneratedCrudHandlerModule_",
+            "the generated assembly needs its own handler module type");
+        foreach (var capabilityId in new[]
+                 {
+                     "Shop.Application.ProductAppService.Create", "Shop.Application.ProductAppService.Get",
+                     "Shop.Application.ProductAppService.Search", "Shop.Application.ProductAppService.Update",
+                     "Shop.Application.ProductAppService.Delete",
+                 })
+        {
+            bundle.Should().Contain("resolver.Register(\"" + capabilityId + "\"",
+                $"the handler module must register the invoker of '{capabilityId}'");
+        }
         bundle.Should().Contain("CapabilityEndpointJsonRootType",
             "every required JSON root must be declared for the map-time verification");
         bundle.Should().Contain("RequiredJsonRootTypes",

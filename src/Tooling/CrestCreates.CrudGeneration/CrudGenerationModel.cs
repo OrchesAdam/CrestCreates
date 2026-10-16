@@ -371,6 +371,14 @@ public static class CrudActivationConvention
         ContributionPrefix + SanitizeIdentifier(serviceFullName);
 
     /// <summary>Turns arbitrary identity text into one deterministic C# identifier.</summary>
+    /// <summary>
+    /// #128 S3: the generated capability-handler module that carries this assembly's contributed
+    /// handlers into the composed dispatcher resolver (the same composition model the schema capability
+    /// generator uses). One module per owner assembly, registered from AddGeneratedCrud.
+    /// </summary>
+    public static string HandlerModuleTypeName(string assemblyName) =>
+        "GeneratedCrudHandlerModule_" + SanitizeIdentifier(assemblyName);
+
     public static string SanitizeIdentifier(string value)
     {
         var builder = new System.Text.StringBuilder(value.Length + 1);

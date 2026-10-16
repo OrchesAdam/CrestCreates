@@ -275,3 +275,9 @@
   1. **生成物缺 handler 注册**：实测若只按当前 `AddGeneratedCrud` 注册（贡献 + scoped 服务 + JSON），POST `/api/widget` 返回 **500（HANDLER_NOT_FOUND）且服务零调用**——贡献的 handler 要经 `ICapabilityHandlerModule` 组合（与生成的 `GeneratedCapabilityHandlerModule` 同一模式）才会进入 dispatcher。fixture 里用一处**显式标注的桥**（手写 module）绕过，生成侧必须在下一步发射等价注册。
   2. **能力注册表未汇总贡献**：真实 Host 的 `CapabilityRegistry` 构建仍只读静态 `DescriptorProviderRegistry`，贡献的 capability descriptors 需要 Host 自己桥接；按 §7.2，`MapCrestCapabilityEndpoints` 应在未 Built 时做**一次**权威汇总（静态 providers + 本 Host 贡献），已 Built 则核对必需 identities。
 - 仍未做（S3-7 步骤 2，明确不在本轮冒充）：请求中止/取消在 HTTP 层的传播、UoW 提交与响应写失败的独立事实、以及生成物（真实工具链）fixture（属 S4 的 `GeneratedCrud.AotFixture`）。
+
+## S3 增量 10：handler module 发射（G2 生成侧关闭）
+
+- 生成物现在为每程序集发射 `GeneratedCrudHandlerModule_{assembly}`（`ICapabilityHandlerModule`，`Id` = owner assembly，`Apply` 用 `resolver.Register(capabilityId, invoker)` 注册本程序集全部五动作 invoker），并在 `AddGeneratedCrud` 里经 `TryAddEnumerable(ServiceDescriptor.Singleton<ICapabilityHandlerModule, ...>())` 注册——即 fixture 里那处手写桥所模拟的正是这个契约（`CapabilityHandlerResolver` 由模块组合，见既有 schema capability 生成器的同一模式）。
+- 证据结构（双向）：(a) 形状断言扩展 `Materialized_bundle_must_activate_through_the_explicit_host_contribution`——bundle 必含 `ICapabilityHandlerModule`、`GeneratedCrudHandlerModule_`、以及五条 `resolver.Register("Shop.Application.ProductAppService.{Action}"`；(b) E2E fixture 已证明「注册该模块后，真实 Host 经真实 dispatcher 五动作全绿」（19/19）。合起来：机制可用（b）+ 生成物确实注册它（a）。
+- 仍开放（G1，下一步）：真实 Host 的 `CapabilityRegistry` 构建仍只读静态 provider bag，贡献的 capability descriptors 需要 Host 自己桥接（fixture 里对应那处 capability provider 桥仍存在）；按 §7.2 应在 `MapCrestCapabilityEndpoints` 未 Built 时做一次权威汇总（静态 + 本 Host 贡献），已 Built 则核对必需 identities。
