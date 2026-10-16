@@ -1497,6 +1497,17 @@ public static class CrudArtifactEmitter
 
     private const string JsonRootVoidEnvelopeComponent = "VoidEnvelope";
 
+    private const string JsonRootErrorComponent = "ErrorRoot";
+
+    /// <summary>
+    /// §7.1: the failure path writes ProblemDetails (CapabilityEndpointResultMapper.MapFailure), so the
+    /// error DTO in use belongs to the closed CRUD context like every success envelope. Action label
+    /// <c>*</c>: the requirement is not owned by a single action.
+    /// </summary>
+    private const string JsonRootErrorTypeDisplay = "global::Microsoft.AspNetCore.Mvc.ProblemDetails";
+
+    private const string JsonRootErrorAction = "*";
+
     /// <summary>
     /// The required JSON roots of one model, in canonical action order, deduplicated by type so a root
     /// shared by several actions is reported against the first action that requires it. The GET branch
@@ -1538,6 +1549,8 @@ public static class CrudArtifactEmitter
                 Add(CrudResponseContract.VoidEnvelope, action.Name, JsonRootVoidEnvelopeComponent);
             }
         }
+
+        Add(JsonRootErrorTypeDisplay, JsonRootErrorAction, JsonRootErrorComponent);
 
         return requirements;
     }
@@ -1806,12 +1819,34 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent + Indent + "var service = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<"
             + contract + ">(context.ServiceProvider);");
         Line(builder, NestedIndent + Indent + typedInputDeclaration);
-        Line(builder, NestedIndent + Indent
-            + (action.ResultPayloadFullName is null ? "await " : "return await ")
-            + invocation + string.Join(", ", arguments) + ").ConfigureAwait(false);");
-        if (action.ResultPayloadFullName is null)
+
+        // §7.4: the GET of an unknown id must answer the declared 404/void envelope. The service keeps
+        // its domain semantics (CrestEntityNotFoundException for a missing entity); the wire contract
+        // maps it onto the null result that the typed WrapGetResult branch already owns.
+        var mapsNotFoundOntoNull = action.ResultPayloadFullName is not null
+            && string.Equals(action.HttpMethod, "GET", StringComparison.Ordinal);
+        if (mapsNotFoundOntoNull)
         {
-            Line(builder, NestedIndent + Indent + "return null;");
+            Line(builder, NestedIndent + Indent + "try");
+            Line(builder, NestedIndent + Indent + "{");
+            Line(builder, NestedIndent + Indent + Indent + "return await " + invocation
+                + string.Join(", ", arguments) + ").ConfigureAwait(false);");
+            Line(builder, NestedIndent + Indent + "}");
+            Line(builder, NestedIndent + Indent
+                + "catch (global::CrestCreates.Domain.Shared.Exceptions.CrestEntityNotFoundException)");
+            Line(builder, NestedIndent + Indent + "{");
+            Line(builder, NestedIndent + Indent + Indent + "return null;");
+            Line(builder, NestedIndent + Indent + "}");
+        }
+        else
+        {
+            Line(builder, NestedIndent + Indent
+                + (action.ResultPayloadFullName is null ? "await " : "return await ")
+                + invocation + string.Join(", ", arguments) + ").ConfigureAwait(false);");
+            if (action.ResultPayloadFullName is null)
+            {
+                Line(builder, NestedIndent + Indent + "return null;");
+            }
         }
 
         Line(builder, NestedIndent + "}");

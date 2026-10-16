@@ -1007,8 +1007,9 @@ public class CrudServiceRealDeclarationBaselineTests
         bundle.Should().Contain(
             "RequiredJsonRootTypes = new global::CrestCreates.DynamicApi.CapabilityEndpointJsonRootType[]");
 
-        // The ten §7.1 roots, each derived from the model: request bodies, the two capability input
-        // envelopes, the read DTO, the bounded page payload, the typed and void result envelopes.
+        // The §7.1 roots, each derived from the model: request bodies, the two capability input
+        // envelopes, the read DTO, the bounded page payload, the typed and void result envelopes,
+        // plus the error DTO the failure path in use (ProblemDetails) needs in the closure.
         string[] requiredRoots =
         [
             "typeof(global::Shop.Application.Products.Contracts.ProductDto),",
@@ -1021,6 +1022,7 @@ public class CrudServiceRealDeclarationBaselineTests
             "typeof(global::CrestCreates.DynamicApi.DynamicApiResponse<global::Shop.Application.Products.Contracts.ProductDto>),",
             "typeof(global::CrestCreates.DynamicApi.DynamicApiResponse<global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>>),",
             "typeof(global::CrestCreates.DynamicApi.DynamicApiResponse),",
+            "typeof(global::Microsoft.AspNetCore.Mvc.ProblemDetails),",
         ];
         foreach (var root in requiredRoots)
         {
@@ -1030,7 +1032,7 @@ public class CrudServiceRealDeclarationBaselineTests
         var declaredRootCount = System.Text.RegularExpressions.Regex.Matches(
             bundle, @"new global::CrestCreates\.DynamicApi\.CapabilityEndpointJsonRootType\(").Count;
         declaredRootCount.Should().Be(requiredRoots.Length,
-            "the default CRUD surface declares exactly the ten §7.1 roots, deduplicated by type");
+            "the default CRUD surface declares exactly the eleven §7.1 roots, deduplicated by type");
 
         bundle.Should().Contain("internal sealed class GeneratedCrudJsonOptionsConfigurator",
             "the assembly activation must emit the host wiring type");

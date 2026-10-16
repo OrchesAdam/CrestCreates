@@ -76,7 +76,8 @@ public class CrudJsonContractMsBuildBaselineTests
 
     /// <summary>
     /// The §7.1 matrix that must be registered by the JsonContracts stage and then closed by the
-    /// official STJ generator inside the same CoreCompile.
+    /// official STJ generator inside the same CoreCompile. Includes the error DTO the failure path
+    /// writes (ProblemDetails), so a failure response never degrades into an unserializable 500.
     /// </summary>
     private static readonly string[] RequiredCrudRoots =
     [
@@ -90,6 +91,7 @@ public class CrudJsonContractMsBuildBaselineTests
         "global::CrestCreates.DynamicApi.DynamicApiResponse",
         "global::CrestCreates.Generated.ProductAppService_Update_CompatibilityInput",
         "global::CrestCreates.Generated.ProductAppService_Delete_CompatibilityInput",
+        "global::Microsoft.AspNetCore.Mvc.ProblemDetails",
     ];
 
     [Fact]
@@ -185,6 +187,10 @@ public class CrudJsonContractMsBuildBaselineTests
                 "JsonTypeInfo<global::CrestCreates.DynamicApi.DynamicApiResponse<global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>>>",
                 StringComparison.Ordinal),
             "the typed paged result envelope must have real metadata, not only a declared root");
+        probe.StjFiles.Should().Contain(
+            content => content.Contains(
+                "JsonTypeInfo<global::Microsoft.AspNetCore.Mvc.ProblemDetails>", StringComparison.Ordinal),
+            "the §7.1 error DTO must have real metadata so a failure response body stays serializable");
 
         var outputsManifest = probe.OutputsManifest;
         outputsManifest.Should().Contain("\"OwnerServiceFullName\":\"Shop.Application.Products.ProductAppService\"",

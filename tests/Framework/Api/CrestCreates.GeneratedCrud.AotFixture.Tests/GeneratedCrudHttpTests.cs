@@ -19,9 +19,12 @@ namespace CrestCreates.GeneratedCrud.AotFixture.Tests;
 /// state, not only status codes. [UnitOfWorkMo] is inert in this fixture (no weaving), which is
 /// exactly why Step A can run without a UnitOfWork; Step B introduces it.
 ///
-/// One negative case — unknown-id GET returning the declared 404 envelope — is kept as a pinned red
-/// baseline: the generated path reaches the pipeline failure mapper (500), not the typed 404 branch.
-/// See <see cref="WidgetGetById_WithUnknownId_Returns404Envelope"/> for the exact framework gap.
+/// The two defects this fixture exposed are fixed at the source: the generated GET invoker maps the
+/// domain not-found onto the declared 404/void envelope (see
+/// <see cref="WidgetGetById_WithUnknownId_Returns404Envelope"/>), and the generated CRUD JSON
+/// context now closes the error DTO the failure path writes (ProblemDetails), so a failure response
+/// keeps a serializable body instead of degrading into an empty 500 (see
+/// <see cref="WidgetSearch_WithUnknownFilterField_AnswersASerializableFailureBody"/>).
 /// </summary>
 public class GeneratedCrudHttpTests : IClassFixture<GeneratedCrudFixtureFactory>
 {
@@ -89,20 +92,11 @@ public class GeneratedCrudHttpTests : IClassFixture<GeneratedCrudFixtureFactory>
     }
 
     /// <summary>
-    /// Spec §7.4 wire matrix: GET with an unknown id answers "不存在 404 + 无数据 envelope", and the
-    /// generated contribution declares the void/404 envelope as a required JSON root.
-    ///
-    /// PINNED RED BASELINE (#128 S4 Step A defect, no assertion weakened): the generated
-    /// WidgetAppService.GetByIdAsync throws <c>CrestEntityNotFoundException</c> instead of returning
-    /// null, the Capability pipeline's catch-all turns any thrown exception into
-    /// <c>CapabilityExecutionResult.Failure("PIPELINE_ERROR", …)</c>, and the endpoint failure mapper
-    /// answers <c>Results.Problem</c> — i.e. HTTP 500, never the typed 404 envelope of the generated
-    /// result mapper. In this reflection-free fixture host the 500 body itself additionally fails to
-    /// serialize (<c>NotSupportedException: JsonTypeInfo metadata for type
-    /// 'Microsoft.AspNetCore.Mvc.ProblemDetails' was not provided by TypeInfoResolver of type
-    /// 'CrestCreates.Generated.CrestCreatesCrudJsonSerializerContext'</c>), so the response is an
-    /// empty 500. The declared 404 branch is therefore unreachable through the generated service
-    /// until the framework maps the domain not-found exception onto the declared wire contract.
+    /// Spec §7.4 wire matrix: GET with an unknown id answers "不存在 404 + 无数据 envelope". The
+    /// generated GET invoker catches the domain not-found (CrestEntityNotFoundException) and hands
+    /// null to the typed WrapGetResult branch, so the declared 404 branch is reachable through the
+    /// generated service; before #128 S4 the exception escaped into the pipeline failure mapper and
+    /// the request answered an empty 500 instead.
     /// </summary>
     [Fact]
     public async Task WidgetGetById_WithUnknownId_Returns404Envelope()
@@ -124,6 +118,32 @@ public class GeneratedCrudHttpTests : IClassFixture<GeneratedCrudFixtureFactory>
 
         _repository.Find(unknown).Should().BeNull(
             "the unknown id must be absent from the store the generated service queried");
+    }
+
+    /// <summary>
+    /// §7.1 (S4): the failure path must answer a body the generated CRUD JSON context can serialize.
+    /// A filter field the typed query adapter does not support is rejected before the query runs
+    /// (QueryPlanException); the pipeline maps the failure and the endpoint failure mapper writes
+    /// ProblemDetails — whose metadata now comes from the generated context (the "error DTO" of the
+    /// closure). Before this closure landed, the same response failed at body serialization and
+    /// degraded into an empty 500. The 500 status is the pipeline's existing failure mapping for
+    /// non-typed failures; what #128 adds here is the serializable error DTO, not new status
+    /// semantics.
+    /// </summary>
+    [Fact]
+    public async Task WidgetSearch_WithUnknownFilterField_AnswersASerializableFailureBody()
+    {
+        // Arrange/Act — a filter field the generated adapter does not know.
+        var response = await _client.PostAsync(
+            "/api/widgets/search",
+            JsonContent("""{"pageIndex":0,"pageSize":10,"filters":[{"field":"NoSuchField","operator":2,"value":"x"}]}"""));
+
+        // Assert — the failure body exists and carries the plan rejection (an empty 500 fails to parse).
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError,
+            "an unhandled plan rejection surfaces through the pipeline's failure mapping");
+        using var body = await ReadDocumentAsync(response);
+        body.RootElement.GetProperty("detail").GetString().Should().Contain("NoSuchField",
+            "the failure body must carry the rejection the generated typed adapter raised");
     }
 
     [Fact]

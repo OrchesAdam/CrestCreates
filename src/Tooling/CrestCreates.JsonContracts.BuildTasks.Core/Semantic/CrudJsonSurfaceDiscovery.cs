@@ -46,14 +46,21 @@ public sealed class CrudJsonSurfaceDiscovery
         var pagedOpen = ResolveFrameworkType(compilation,
             "CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto`1");
 
-        if (envelopeOpen is null || voidEnvelope is null || pagedOpen is null)
+        // §7.1: "the error DTOs in use" belong to the closure. The failure path of every capability
+        // endpoint writes ProblemDetails (CapabilityEndpointResultMapper.MapFailure), so the CRUD
+        // context must answer it — otherwise a failure response fails to serialize on a
+        // reflection-free host and degrades into an empty 500.
+        var errorEnvelope = ResolveFrameworkType(compilation, "Microsoft.AspNetCore.Mvc.ProblemDetails");
+
+        if (envelopeOpen is null || voidEnvelope is null || pagedOpen is null || errorEnvelope is null)
         {
             _diagnostics.Add(new JsonContractDiagnostic
             {
                 Id = CrudDiagnosticIds.RequiredReferenceMissing,
                 Severity = JsonContractDiagnosticSeverity.Error,
                 Message = $"'{build.Models[0].ServiceFullName}' declares CRUD, so the result envelopes need "
-                    + "the referenced DynamicApiResponse, DynamicApiResponse<T> and PagedResultDto<T> types.",
+                    + "the referenced DynamicApiResponse, DynamicApiResponse<T>, PagedResultDto<T> and "
+                    + "ProblemDetails (error DTO) types.",
             });
             return roots;
         }
@@ -80,6 +87,7 @@ public sealed class CrudJsonSurfaceDiscovery
             AddRoot(roots, envelopeOpen.Construct(readDto), model);
             AddRoot(roots, envelopeOpen.Construct(paged), model);
             AddRoot(roots, voidEnvelope, model);
+            AddRoot(roots, errorEnvelope, model);
         }
 
         return roots;
