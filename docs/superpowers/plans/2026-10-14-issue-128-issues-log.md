@@ -281,3 +281,10 @@
 - 生成物现在为每程序集发射 `GeneratedCrudHandlerModule_{assembly}`（`ICapabilityHandlerModule`，`Id` = owner assembly，`Apply` 用 `resolver.Register(capabilityId, invoker)` 注册本程序集全部五动作 invoker），并在 `AddGeneratedCrud` 里经 `TryAddEnumerable(ServiceDescriptor.Singleton<ICapabilityHandlerModule, ...>())` 注册——即 fixture 里那处手写桥所模拟的正是这个契约（`CapabilityHandlerResolver` 由模块组合，见既有 schema capability 生成器的同一模式）。
 - 证据结构（双向）：(a) 形状断言扩展 `Materialized_bundle_must_activate_through_the_explicit_host_contribution`——bundle 必含 `ICapabilityHandlerModule`、`GeneratedCrudHandlerModule_`、以及五条 `resolver.Register("Shop.Application.ProductAppService.{Action}"`；(b) E2E fixture 已证明「注册该模块后，真实 Host 经真实 dispatcher 五动作全绿」（19/19）。合起来：机制可用（b）+ 生成物确实注册它（a）。
 - 仍开放（G1，下一步）：真实 Host 的 `CapabilityRegistry` 构建仍只读静态 provider bag，贡献的 capability descriptors 需要 Host 自己桥接（fixture 里对应那处 capability provider 桥仍存在）；按 §7.2 应在 `MapCrestCapabilityEndpoints` 未 Built 时做一次权威汇总（静态 + 本 Host 贡献），已 Built 则核对必需 identities。
+
+## S3 增量 11：Map 期能力注册表权威汇总（G1 关闭）
+
+- `MapCrestCapabilityEndpoints` 现在在**端点注册表构建之前**执行一次能力注册表汇总：未 Built 时用「静态 `DescriptorProviderRegistry` providers + 本 Host 贡献的能力描述符（经最小的 `IDescriptorProvider<CapabilityDescriptor>` 适配器承载，无全局状态）」一次性 `Build`，随后立即核对每个贡献能力确实可解析；已 Built（Host 自建）时逐个核对，缺失抛确定性异常并点名 capability id 与 owner 命名空间——不静默跳过、不走通用 fallback。
+- 顺序是本轮的真正坑：第一版把汇总插在 `bootstrapper.EnsureBuilt()` **之后**，而端点注册表的构建内部就会校验 endpoint→capability 引用，于是 fixture 全红（`RegistryValidationException: ... references missing Capability ...` 19/19 失败）。移到 `EnsureBuilt()` 之前即修复——这正是「一次权威汇总」必须在映射前完成的证据。
+- 证据：真实 Host fixture **删除**了它手动的 `capabilityRegistry.Build(...)` 与 `WidgetContributionCapabilityProvider` 手写桥（连带删除死代码），五动作 + greeting 兼容投影 **19/19 全绿**——即"Host 只调 `AddGeneratedCrud()`-等价注册 + `MapCrestCapabilityEndpoints()`"即可，无需自己桥接能力注册表。
+- 未完成（下一步首项）：**负向用例**——Host 先自建了不含贡献的注册表时，Map 必须点名失败（需要真实 `CapabilityRegistry` + `RegistryValidationEngine` 的测试宿主，放在 DynamicApi.Tests）；然后 S3-7 第二步（取消传播、UoW 提交 vs 响应写失败独立）。

@@ -102,21 +102,3 @@ internal sealed class WidgetGeneratedCrudHandlerModule : ICapabilityHandlerModul
     }
 }
 
-/// <summary>
-/// Host bootstrap bridge #2: the capability registry of this fixture is built from the static
-/// <c>DescriptorProviderRegistry</c> bag plus the host's own contributions — the contribution's
-/// capability descriptors must be part of the authoritative registry before the endpoint registry
-/// validates its capability references. Reading the activation's descriptors keeps this host-scoped
-/// and writes nothing to process-global state.
-/// </summary>
-internal sealed class WidgetContributionCapabilityProvider : IDescriptorProvider<CapabilityDescriptor>
-{
-    private readonly IReadOnlyList<CapabilityDescriptor> _descriptors;
-
-    public WidgetContributionCapabilityProvider(IReadOnlyList<CapabilityDescriptor> descriptors)
-    {
-        _descriptors = descriptors;
-    }
-
-    public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => _descriptors;
-}

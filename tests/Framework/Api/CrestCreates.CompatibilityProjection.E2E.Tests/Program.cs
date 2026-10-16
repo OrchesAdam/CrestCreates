@@ -76,21 +76,9 @@ builder.Services.AddLogging();
 
 var app = builder.Build();
 
-// Build capability registry from generated providers BEFORE endpoint mapping.
-var capabilityRegistry = (CapabilityRegistry)app.Services.GetRequiredService<ICapabilityRegistry>();
-var capabilityProviders = DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>().ToList();
-// The host's own ExplicitHost contributions join the same single registry build: the endpoint
-// registry validation requires the referenced capabilities to be resolvable.
-var hostActivation = app.Services.GetRequiredService<CapabilityEndpointHostActivation>();
-if (hostActivation.GetCapabilityDescriptors().Count > 0)
-{
-    capabilityProviders.Add(
-        new WidgetContributionCapabilityProvider(hostActivation.GetCapabilityDescriptors()));
-}
-
-capabilityRegistry.Build(capabilityProviders);
-
-// Map capability endpoints (includes compatibility projection endpoints)
+// §7.2: no manual capability-registry build here — MapCrestCapabilityEndpoints performs the single
+// authoritative aggregation (static providers + this host's ExplicitHost contributions) before
+// mapping, which is what the generated AddGeneratedCrud + MapCrestCapabilityEndpoints pair promises.
 app.MapCrestCapabilityEndpoints();
 
 app.Run();

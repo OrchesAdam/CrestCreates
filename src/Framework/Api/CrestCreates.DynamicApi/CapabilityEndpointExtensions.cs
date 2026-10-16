@@ -86,6 +86,15 @@ public static class CapabilityEndpointExtensions
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // §7.2: the capability registry is the authoritative aggregation of the static providers and
+        // this host's contributions, and it must be complete *before* the endpoint registry builds —
+        // that build validates every endpoint reference against it. A host that already built the
+        // registry keeps its build, but a contributed capability it does not know is a deterministic
+        // failure rather than a silently unmapped endpoint.
+        EnsureCapabilityRegistryCarriesHostContributions(
+            endpoints.ServiceProvider.GetRequiredService<ICapabilityRegistry>(),
+            endpoints.ServiceProvider.GetRequiredService<CapabilityEndpointHostActivation>());
+
         var bootstrapper = endpoints.ServiceProvider
             .GetRequiredService<CapabilityEndpointRegistryBootstrapper>();
         bootstrapper.EnsureBuilt();
@@ -238,4 +247,59 @@ public static class CapabilityEndpointExtensions
         CapabilityDescriptor Capability,
         CapabilityEndpointBindingContract Binding,
         Func<EndpointExecutionContext, IServiceProvider, object>? ResultMapper);
+
+    private static void EnsureCapabilityRegistryCarriesHostContributions(
+        ICapabilityRegistry capabilityRegistry,
+        CapabilityEndpointHostActivation hostActivation)
+    {
+        var contributed = hostActivation.GetCapabilityDescriptors();
+        if (contributed.Count == 0)
+        {
+            return;
+        }
+
+        if (capabilityRegistry is CapabilityRegistry concrete
+            && concrete.State != RegistryState.Built)
+        {
+            concrete.Build(DescriptorProviderRegistry
+                .GetProviders<CapabilityDescriptor>()
+                .Concat(new IDescriptorProvider<CapabilityDescriptor>[]
+                {
+                    new HostCapabilityDescriptorProvider(contributed),
+                }));
+
+            foreach (var descriptor in contributed)
+            {
+                if (concrete.GetById(descriptor.Id) is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Contributed capability '{descriptor.Id}' is missing from the authoritative "
+                        + "registry after the aggregation build; the host activation must be registered "
+                        + "before the capability registry is built.");
+                }
+            }
+
+            return;
+        }
+
+        foreach (var descriptor in contributed)
+        {
+            if (capabilityRegistry.GetById(descriptor.Id) is null)
+            {
+                throw new InvalidOperationException(
+                    $"Contributed capability '{descriptor.Id}' is missing from the authoritative registry "
+                    + "(owner '" + descriptor.Namespace + "'). The host activation must be registered "
+                    + "before the capability registry is built; missing capabilities are never resolved "
+                    + "through a generic fallback and never silently skipped.");
+            }
+        }
+    }
+
+    /// <summary>The contributed capability descriptors of one host, exposed as a descriptor provider.</summary>
+    private sealed class HostCapabilityDescriptorProvider(IReadOnlyList<CapabilityDescriptor> descriptors)
+        : IDescriptorProvider<CapabilityDescriptor>
+    {
+        public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => descriptors;
+    }
+
 }
