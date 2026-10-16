@@ -198,9 +198,8 @@ public sealed class CrudJsonSurfaceDiscovery
                 ManifestError("Unsupported CRUD outputs manifest schema.");
                 return;
             }
-            var expected = models.SelectMany(model => CrudArtifactEmitter.Emit(model).Select(artifact =>
-                (Model: model, Artifact: artifact))).ToDictionary(
-                item => (item.Model.ServiceFullName, item.Artifact.HintName));
+            var expected = CrudArtifactEmitter.EmitBundleArtifacts(models).ToDictionary(
+                item => (item.OwnerServiceFullName, item.Artifact.HintName));
             var seen = new HashSet<(string Owner, string Hint)>();
             foreach (var entry in root.GetProperty("Entries").EnumerateArray())
             {

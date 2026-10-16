@@ -13,6 +13,13 @@ namespace CrestCreates.Tooling.CrudGeneration;
 public sealed record CrudArtifact(string HintName, string FileName, string Source);
 
 /// <summary>
+/// One artifact of an assembly bundle together with the owner identity the outputs manifest records for
+/// it. Per-service artifacts carry the declaring service full name; the assembly-level activation
+/// artifact is owned by the assembly (see <see cref="CrudArtifactEmitter.AssemblyActivationOwnerKey"/>).
+/// </summary>
+public sealed record CrudOwnedArtifact(string OwnerServiceFullName, CrudArtifact Artifact);
+
+/// <summary>
 /// #128 S2: turns the frozen <see cref="CrudGenerationModel"/> into the materialized CRUD surface —
 /// contracts DTOs, permission definitions, mapping seeds, service contract, service implementation and
 /// the capability input envelopes. Every emitted name, namespace and member list is read from the model,
@@ -33,6 +40,14 @@ public static class CrudArtifactEmitter
     private const string Indent = "    ";
 
     private const string NestedIndent = Indent + Indent;
+
+    private const string TripleIndent = NestedIndent + Indent;
+
+    private const string QuadIndent = TripleIndent + Indent;
+
+    private const string QuintIndent = QuadIndent + Indent;
+
+    private const string SextIndent = QuintIndent + Indent;
 
     private const string ObjectMappingNamespace = "CrestCreates.Domain.Shared.ObjectMapping";
 
@@ -96,6 +111,43 @@ public static class CrudArtifactEmitter
         foreach (var action in model.Actions.Where(a => a.UsesCapabilityInputEnvelope))
         {
             artifacts.Add(EmitCapabilityInputEnvelope(model, action));
+        }
+
+        // §7.2: the ExplicitHost projection of this service — descriptors, typed bindings, invokers and
+        // typed result envelopes. One concrete contribution type per service.
+        artifacts.Add(EmitCapabilityContribution(model));
+
+        return artifacts;
+    }
+
+    /// <summary>
+    /// Every artifact of one assembly bundle: the per-model artifacts followed by the single
+    /// assembly-level activation artifact. The precompile stage and the JSON reconciliation both consume
+    /// this one list, so the outputs manifest and the JSON-side ownership check cannot disagree.
+    /// </summary>
+    public static IReadOnlyList<CrudOwnedArtifact> EmitBundleArtifacts(
+        IReadOnlyList<CrudGenerationModel> models)
+    {
+        if (models is null)
+        {
+            throw new ArgumentNullException(nameof(models));
+        }
+
+        // Canonical order, so the bundle text, the outputs manifest and the JSON-side reconciliation
+        // observe the same bytes regardless of the order the caller discovered the declarations in.
+        var ordered = CanonicalOrder(models);
+        var artifacts = new List<CrudOwnedArtifact>();
+        foreach (var model in ordered)
+        {
+            foreach (var artifact in Emit(model))
+            {
+                artifacts.Add(new CrudOwnedArtifact(model.ServiceFullName, artifact));
+            }
+        }
+
+        if (ordered.Count > 0)
+        {
+            artifacts.Add(new CrudOwnedArtifact(AssemblyActivationOwnerKey, EmitHostActivation(ordered)));
         }
 
         return artifacts;
@@ -655,21 +707,651 @@ public static class CrudArtifactEmitter
         OpenNamespace(builder, model.EnvelopeNamespace);
         Line(builder, Indent + "internal sealed class " + name);
         Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public " + model.IdTypeDisplay + " Id { get; init; }");
-        if (string.Equals(action.Name, "Update", StringComparison.Ordinal))
+        Line(builder, NestedIndent + "public " + model.IdTypeDisplay + " "
+            + CrudEnvelopeConvention.RouteIdentityMember + " { get; init; }");
+        if (action.BodyPayloadFullName is not null)
         {
-            Line(builder, NestedIndent + "public "
-                + Qualified(action.BodyPayloadFullName ?? model.UpdateDtoFullName)
-                + " Input { get; init; } = default!;");
+            Line(builder, NestedIndent + "public " + Qualified(action.BodyPayloadFullName) + " "
+                + CrudEnvelopeConvention.BodyMember + " { get; init; } = default!;");
         }
-        else
+
+        foreach (var header in action.HeaderInputs)
         {
-            Line(builder, NestedIndent + "public string? IfMatch { get; init; }");
+            Line(builder, NestedIndent + "public string? " + header.MemberName + " { get; init; }");
         }
 
         Line(builder, Indent + "}");
         CloseNamespace(builder);
         return Artifact(name + ".g.cs", builder);
+    }
+
+    // ---- 7. ExplicitHost capability contribution (§5.2 / §7.2 / §7.4) --------------------------
+
+    /// <summary>Owner key the outputs manifest records for the one assembly-level activation artifact.</summary>
+    public const string AssemblyActivationOwnerKey = "<assembly>";
+
+    /// <summary>
+    /// The one assembly-level activation artifact: a public <c>AddGeneratedCrud(this IServiceCollection)</c>
+    /// extension in the assembly-qualified generated namespace (§5.2). It registers every contributed
+    /// service — the scoped AppService (interface and concrete resolving to the same instance) and the
+    /// ExplicitHost contribution — through <c>AddCrestCapabilityEndpointContribution</c>. Emitted once per
+    /// bundle, never once per model; repeated calls are idempotent by construction and nothing is written
+    /// to process-global state.
+    /// </summary>
+    public static CrudArtifact EmitHostActivation(IReadOnlyList<CrudGenerationModel> models)
+    {
+        if (models is null)
+        {
+            throw new ArgumentNullException(nameof(models));
+        }
+
+        if (models.Count == 0)
+        {
+            throw new ArgumentException(
+                "The assembly activation artifact requires at least one CRUD model.", nameof(models));
+        }
+
+        // Canonical order: the emitted text must be a pure function of the model set, not of the order
+        // the caller happened to discover the declarations in (the JSON stage reconciles by content hash).
+        models = CanonicalOrder(models);
+        var owner = models[0].OwnerAssemblyName;
+        foreach (var model in models)
+        {
+            if (!string.Equals(model.OwnerAssemblyName, owner, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "One activation artifact covers exactly one owner assembly; got '" + owner
+                    + "' and '" + model.OwnerAssemblyName + "'.");
+            }
+        }
+
+        var activationNamespace = models[0].ActivationNamespace;
+        var builder = new StringBuilder();
+        Line(builder, "// <auto-generated />");
+        Line(builder, "// CrestCreates CRUD generated activation. Owner: " + owner
+            + "|" + AssemblyActivationOwnerKey + ". Model: " + CrudGenerationModel.ModelSchemaVersion
+            + ". Do not edit.");
+        Line(builder, "#nullable enable");
+        Line(builder, string.Empty);
+        OpenNamespace(builder, activationNamespace,
+        [
+            "using System;",
+            "using Microsoft.Extensions.DependencyInjection;",
+            "using Microsoft.Extensions.DependencyInjection.Extensions;",
+        ]);
+
+        Line(builder, Indent + "/// <summary>");
+        Line(builder, Indent + "/// #128 ExplicitHost activation for the generated CRUD surface of assembly '"
+            + owner + "'.");
+        Line(builder, Indent + "/// The host calls AddGeneratedCrud for exactly the assemblies it activates; the call is");
+        Line(builder, Indent + "/// idempotent by construction (TryAddScoped + TryAddEnumerable) and never writes process-global");
+        Line(builder, Indent + "/// registries. Generated code is immutable data and never captures an IServiceProvider.");
+        Line(builder, Indent + "/// </summary>");
+        Line(builder, Indent + "public static class " + CrudActivationConvention.ActivationTypeName);
+        Line(builder, Indent + "{");
+        Line(builder, NestedIndent + "/// <summary>Registers the CRUD AppServices and capability contributions of this assembly.</summary>");
+        Line(builder, NestedIndent + "public static IServiceCollection "
+            + CrudActivationConvention.ActivationMethodName + "(this IServiceCollection services)");
+        Line(builder, NestedIndent + "{");
+        Line(builder, NestedIndent + Indent + "ArgumentNullException.ThrowIfNull(services);");
+
+        foreach (var model in models)
+        {
+            var implementation = Qualified(model.ImplementationNamespace + "." + model.ServiceClassName);
+            var contract = Qualified(model.InterfaceNamespace + "." + model.ServiceInterfaceName);
+            Line(builder, string.Empty);
+            Line(builder, NestedIndent + Indent + "// " + model.ServiceFullName
+                + ": one scoped instance serves both the interface and the concrete type.");
+            Line(builder, NestedIndent + Indent + "services.TryAddScoped<" + implementation + ">();");
+            Line(builder, NestedIndent + Indent + "services.TryAddScoped<" + contract + ">(");
+            Line(builder, NestedIndent + Indent + Indent + "serviceProvider => serviceProvider.GetRequiredService<"
+                + implementation + ">());");
+            Line(builder, NestedIndent + Indent
+                + "global::CrestCreates.DynamicApi.CapabilityEndpointExtensions.AddCrestCapabilityEndpointContribution(");
+            Line(builder, NestedIndent + Indent + Indent + "services,");
+            Line(builder, NestedIndent + Indent + Indent + "new " + Qualified(model.ContributionFullName) + "());");
+        }
+
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + Indent + "return services;");
+        Line(builder, NestedIndent + "}");
+        Line(builder, Indent + "}");
+        CloseNamespace(builder);
+        return Artifact(CrudActivationConvention.ActivationTypeName + ".g.cs", builder);
+    }
+
+    /// <summary>
+    /// The per-service ExplicitHost contribution: descriptors for the five actions, their typed input
+    /// bindings, handler invokers and typed result envelopes, the body types the host must serialize and
+    /// the required registry identities. Everything the runtime needs is baked into this immutable type;
+    /// no module initializer, no static registry write and no IServiceProvider capture.
+    /// </summary>
+    private static CrudArtifact EmitCapabilityContribution(CrudGenerationModel model)
+    {
+        var contribution = model.ContributionTypeName;
+        var builder = StartDocument(model);
+        OpenNamespace(builder, model.ActivationNamespace);
+
+        Line(builder, Indent + "/// <summary>");
+        Line(builder, Indent + "/// ExplicitHost contribution of " + model.ServiceFullName + " (owner "
+            + model.OwnerAssemblyName + "): the five CRUD actions of " + model.EntityClassName
+            + " with their capability/endpoint descriptors, typed input bindings, invokers and typed");
+        Line(builder, Indent + "/// result envelopes. Activated per host by AddGeneratedCrud.");
+        Line(builder, Indent + "/// </summary>");
+        Line(builder, Indent + "internal sealed class " + contribution
+            + " : global::CrestCreates.DynamicApi.CapabilityEndpointContribution");
+        Line(builder, Indent + "{");
+        Line(builder, NestedIndent + "public " + contribution + "()");
+        Line(builder, NestedIndent + "{");
+        Line(builder, NestedIndent + Indent + "OwnerAssemblyName = \"" + Escape(model.OwnerAssemblyName) + "\";");
+        EmitContributionCapabilities(builder, model);
+        EmitContributionEndpoints(builder, model);
+        EmitContributionBindingContracts(builder, model);
+        EmitContributionHandlerBindings(builder, model);
+        EmitContributionResultBindings(builder, model);
+        EmitContributionBodyTypes(builder, model);
+        EmitContributionRequiredIdentities(builder, model);
+        Line(builder, NestedIndent + "}");
+        Line(builder, string.Empty);
+
+        foreach (var action in model.Actions)
+        {
+            EmitContributionBindingMethod(builder, model, action);
+            EmitContributionResultMapper(builder, model, action);
+        }
+
+        Line(builder, Indent + "}");
+        Line(builder, string.Empty);
+
+        foreach (var action in model.Actions)
+        {
+            EmitContributionInvoker(builder, model, action);
+        }
+
+        CloseNamespace(builder);
+        return Artifact(contribution + ".g.cs", builder);
+    }
+
+    private static void EmitContributionCapabilities(StringBuilder builder, CrudGenerationModel model)
+    {
+        var kind = "global::CrestCreates.Metadata.Abstractions.DescriptorCapability.";
+        Line(builder, NestedIndent + Indent + "CapabilityDescriptors = new global::CrestCreates.Metadata.CapabilityDescriptor[]");
+        Line(builder, NestedIndent + Indent + "{");
+        foreach (var action in model.Actions)
+        {
+            Line(builder, QuadIndent + "new global::CrestCreates.Metadata.CapabilityDescriptor");
+            Line(builder, QuadIndent + "{");
+            Line(builder, QuintIndent + "Namespace = \"capability\",");
+            Line(builder, QuintIndent + "Id = \"" + Escape(action.CapabilityId) + "\",");
+            Line(builder, QuintIndent + "Name = \"" + Escape(action.Name) + "\",");
+            Line(builder, QuintIndent + "State = global::CrestCreates.Metadata.Abstractions.DescriptorState.Active,");
+            Line(builder, QuintIndent + "Version = 1,");
+            Line(builder, QuintIndent + "CapabilityKind = " + kind
+                + (action.OperationKind == CrudOperationKind.Query ? "CapabilityKind.Query," : "CapabilityKind.Command,"));
+            Line(builder, QuintIndent + "Permissions = new[] { \"" + Escape(action.PermissionName) + "\" },");
+            Line(builder, QuintIndent + "RiskLevel = " + kind + "CapabilityRiskLevel.Medium,");
+            Line(builder, QuintIndent + "InputSchema = null,");
+            Line(builder, QuintIndent + "OutputSchema = null,");
+            Line(builder, QuintIndent + "ProjectionKind = " + kind + "CapabilityProjectionKind.AppServiceCompatibility,");
+            Line(builder, QuadIndent + "},");
+        }
+
+        Line(builder, NestedIndent + Indent + "};");
+    }
+
+    private static void EmitContributionEndpoints(StringBuilder builder, CrudGenerationModel model)
+    {
+        Line(builder, NestedIndent + Indent + "EndpointDescriptors = new global::CrestCreates.DynamicApi.CapabilityEndpointDescriptor[]");
+        Line(builder, NestedIndent + Indent + "{");
+        foreach (var action in model.Actions)
+        {
+            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointDescriptor");
+            Line(builder, QuadIndent + "{");
+            Line(builder, QuintIndent + "Id = \"" + Escape(action.EndpointId) + "\",");
+            Line(builder, QuintIndent + "Name = \"" + Escape(action.Name) + "\",");
+            Line(builder, QuintIndent + "Version = 1,");
+            Line(builder, QuintIndent + "State = global::CrestCreates.Metadata.Abstractions.DescriptorState.Active,");
+            Line(builder, QuintIndent + "Capability = new global::CrestCreates.Metadata.Abstractions.VersionedDescriptorRef<global::CrestCreates.Metadata.CapabilityDescriptor>(\""
+                + Escape(action.CapabilityId) + "\", 1),");
+            Line(builder, QuintIndent + "HttpMethod = global::CrestCreates.DynamicApi.CapabilityEndpointHttpMethod."
+                + HttpMethodEnum(action.HttpMethod) + ",");
+            Line(builder, QuintIndent + "RoutePattern = \"" + Escape(action.RoutePattern) + "\",");
+            Line(builder, QuintIndent + "AuthorizationMode = global::CrestCreates.DynamicApi.CapabilityEndpointAuthorizationMode.InheritCapability,");
+            Line(builder, QuintIndent + "InputBindings = new global::CrestCreates.DynamicApi.CapabilityEndpointInputBinding[]");
+            Line(builder, QuintIndent + "{");
+            foreach (var input in InputBindingsOf(action, model))
+            {
+                Line(builder, SextIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointInputBinding");
+                Line(builder, SextIndent + "{");
+                Line(builder, SextIndent + Indent + "Name = \"" + Escape(input.Name) + "\",");
+                Line(builder, SextIndent + Indent + "Source = global::CrestCreates.DynamicApi.CapabilityEndpointParameterSource."
+                    + input.Source + ",");
+                Line(builder, SextIndent + Indent + "Required = " + (input.Required ? "true" : "false") + ",");
+                Line(builder, SextIndent + "},");
+            }
+
+            Line(builder, QuintIndent + "},");
+            Line(builder, QuintIndent + "OutputMapping = new global::CrestCreates.DynamicApi.CapabilityEndpointOutputMapping { SuccessStatusCode = 200 },");
+            Line(builder, QuintIndent + "Projection = new global::CrestCreates.DynamicApi.CapabilityEndpointProjectionMetadata");
+            Line(builder, QuintIndent + "{");
+            Line(builder, QuintIndent + Indent + "OperationId = \"" + Escape(action.CapabilityId.Replace('.', '_')) + "\",");
+            Line(builder, QuintIndent + Indent + "Tags = new[] { \"" + Escape(model.ServiceClassName) + "\" },");
+            Line(builder, QuintIndent + "},");
+            Line(builder, QuadIndent + "},");
+        }
+
+        Line(builder, NestedIndent + Indent + "};");
+    }
+
+    private static void EmitContributionBindingContracts(StringBuilder builder, CrudGenerationModel model)
+    {
+        Line(builder, NestedIndent + Indent + "Bindings = new global::CrestCreates.DynamicApi.CapabilityEndpointBindingContract[]");
+        Line(builder, NestedIndent + Indent + "{");
+        foreach (var action in model.Actions)
+        {
+            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointBindingContract(");
+            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
+            Line(builder, QuintIndent + "1,");
+            Line(builder, QuintIndent + BindingMethodName(action) + "),");
+        }
+
+        Line(builder, NestedIndent + Indent + "};");
+    }
+
+    private static void EmitContributionHandlerBindings(StringBuilder builder, CrudGenerationModel model)
+    {
+        Line(builder, NestedIndent + Indent + "Handlers = new global::CrestCreates.DynamicApi.CapabilityEndpointHandlerBinding[]");
+        Line(builder, NestedIndent + Indent + "{");
+        foreach (var action in model.Actions)
+        {
+            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointHandlerBinding(");
+            Line(builder, QuintIndent + "\"" + Escape(action.CapabilityId) + "\",");
+            Line(builder, QuintIndent + "new " + Qualified(InvokerTypeName(model, action)) + "()),");
+        }
+
+        Line(builder, NestedIndent + Indent + "};");
+    }
+
+    private static void EmitContributionResultBindings(StringBuilder builder, CrudGenerationModel model)
+    {
+        Line(builder, NestedIndent + Indent + "ResultMappers = new global::CrestCreates.DynamicApi.CapabilityEndpointResultBinding[]");
+        Line(builder, NestedIndent + Indent + "{");
+        foreach (var action in model.Actions)
+        {
+            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointResultBinding(");
+            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
+            Line(builder, QuintIndent + "1,");
+            Line(builder, QuintIndent + ResultMapperName(action) + "),");
+        }
+
+        Line(builder, NestedIndent + Indent + "};");
+    }
+
+    private static void EmitContributionBodyTypes(StringBuilder builder, CrudGenerationModel model)
+    {
+        var bodyTypes = new List<string>();
+        foreach (var action in model.Actions)
+        {
+            if (action.BodyPayloadFullName is not null
+                && !bodyTypes.Contains(action.BodyPayloadFullName, StringComparer.Ordinal))
+            {
+                bodyTypes.Add(action.BodyPayloadFullName);
+            }
+
+            if (action.UsesCapabilityInputEnvelope
+                && !bodyTypes.Contains(model.EnvelopeFullName(action.Name), StringComparer.Ordinal))
+            {
+                bodyTypes.Add(model.EnvelopeFullName(action.Name));
+            }
+        }
+
+        Line(builder, NestedIndent + Indent + "BodyTypes = new global::System.Type[]");
+        Line(builder, NestedIndent + Indent + "{");
+        foreach (var bodyType in bodyTypes)
+        {
+            Line(builder, QuadIndent + "typeof(" + Qualified(bodyType) + "),");
+        }
+        Line(builder, NestedIndent + Indent + "};");
+    }
+
+    private static void EmitContributionRequiredIdentities(StringBuilder builder, CrudGenerationModel model)
+    {
+        Line(builder, NestedIndent + Indent + "RequiredIdentityIds = new global::CrestCreates.DynamicApi.CapabilityEndpointRequiredIdentity[]");
+        Line(builder, NestedIndent + Indent + "{");
+        foreach (var action in model.Actions)
+        {
+            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointRequiredIdentity(");
+            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
+            Line(builder, QuintIndent + "\"" + Escape(model.OwnerAssemblyName) + "\",");
+            Line(builder, QuintIndent + "\"" + Escape(action.Name) + "\",");
+            Line(builder, QuintIndent + "\"" + Escape(model.EntityClassName) + "\",");
+            Line(builder, QuintIndent + "1),");
+        }
+
+        Line(builder, NestedIndent + Indent + "};");
+    }
+
+    /// <summary>
+    /// §7.3/§7.4 input binding per action, all through the typed, no-fallback body reader: required
+    /// Create/Search bodies throw 400 on empty/whitespace/null/bad JSON before any business call, the
+    /// route identity parses statically, and the composed envelopes carry the route id and the If-Match
+    /// header.
+    /// </summary>
+    private static void EmitContributionBindingMethod(
+        StringBuilder builder,
+        CrudGenerationModel model,
+        CrudActionModel action)
+    {
+        var readsBody = action.BodyPayloadFullName is not null;
+        Line(builder, NestedIndent + "private static "
+            + (readsBody ? "async " : string.Empty)
+            + "global::System.Threading.Tasks.ValueTask<object?> " + BindingMethodName(action) + "(");
+        Line(builder, NestedIndent + Indent + "global::Microsoft.AspNetCore.Http.HttpContext context,");
+        Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
+        Line(builder, NestedIndent + "{");
+
+        if (action.RouteIdentityParameter is not null)
+        {
+            EmitRouteIdentityParse(builder, model, action);
+        }
+
+        if (readsBody && !action.UsesCapabilityInputEnvelope)
+        {
+            // Create / Search: the required body is the capability input itself.
+            Line(builder, NestedIndent + Indent + "var jsonTypeInfo = global::CrestCreates.DynamicApi.CapabilityEndpointJsonTypeInfoResolver.Require<"
+                + Qualified(action.BodyPayloadFullName!) + ">(context.RequestServices);");
+            Line(builder, NestedIndent + Indent + "return await global::CrestCreates.DynamicApi.CapabilityEndpointBodyReader.ReadNativeBodyAsync(");
+            Line(builder, NestedIndent + Indent + Indent + "context, jsonTypeInfo, optional: false, ct);");
+        }
+        else if (readsBody)
+        {
+            // Update: route id + required body composed into the capability input envelope. The method
+            // already awaits the body read, so the envelope is returned directly.
+            Line(builder, NestedIndent + Indent + "var jsonTypeInfo = global::CrestCreates.DynamicApi.CapabilityEndpointJsonTypeInfoResolver.Require<"
+                + Qualified(action.BodyPayloadFullName!) + ">(context.RequestServices);");
+            Line(builder, NestedIndent + Indent + "var body = await global::CrestCreates.DynamicApi.CapabilityEndpointBodyReader.ReadNativeBodyAsync(");
+            Line(builder, NestedIndent + Indent + Indent + "context, jsonTypeInfo, optional: false, ct);");
+            Line(builder, string.Empty);
+            EmitEnvelopeConstruction(builder, model, action, "body!", returnDirectly: true);
+        }
+        else if (action.HeaderInputs.Count == 0)
+        {
+            // GetById: the route identity is the whole input. The method has nothing to await, so the
+            // parse result is wrapped explicitly instead of relying on an async state machine.
+            Line(builder, NestedIndent + Indent
+                + "return global::System.Threading.Tasks.ValueTask.FromResult<object?>(id);");
+        }
+        else
+        {
+            // Delete: route id + the optional If-Match concurrency header. Nothing is awaited, so the
+            // envelope is built first and then wrapped in a completed ValueTask.
+            EmitEnvelopeConstruction(builder, model, action, bodyExpression: null, returnDirectly: false);
+        }
+
+        Line(builder, NestedIndent + "}");
+        Line(builder, string.Empty);
+    }
+
+    private static void EmitRouteIdentityParse(
+        StringBuilder builder,
+        CrudGenerationModel model,
+        CrudActionModel action)
+    {
+        var routeParameter = action.RouteIdentityParameter!;
+        Line(builder, NestedIndent + Indent + "var routeId = context.Request.RouteValues[\""
+            + Escape(routeParameter) + "\"]?.ToString();");
+        switch (model.IdWireKind)
+        {
+            case CrudIdWireKind.String:
+                Line(builder, NestedIndent + Indent + "if (routeId is null)");
+                Line(builder, NestedIndent + Indent + "{");
+                Line(builder, NestedIndent + Indent + Indent + "throw new global::Microsoft.AspNetCore.Http.BadHttpRequestException(");
+                Line(builder, NestedIndent + Indent + Indent + Indent + "\"The route value '" + Escape(routeParameter) + "' is required.\");");
+                Line(builder, NestedIndent + Indent + "}");
+                Line(builder, string.Empty);
+                Line(builder, NestedIndent + Indent + "var id = routeId;");
+                break;
+            default:
+                Line(builder, NestedIndent + Indent + "if (routeId is null || !"
+                    + IdTryParseExpression(model) + ")");
+                Line(builder, NestedIndent + Indent + "{");
+                Line(builder, NestedIndent + Indent + Indent + "throw new global::Microsoft.AspNetCore.Http.BadHttpRequestException(");
+                Line(builder, NestedIndent + Indent + Indent + Indent + "\"The route value '" + Escape(routeParameter)
+                    + "' must be a valid " + Escape(MessageTypeName(model.IdTypeDisplay)) + ".\");");
+                Line(builder, NestedIndent + Indent + "}");
+                Line(builder, string.Empty);
+                break;
+        }
+    }
+
+    /// <summary>The readable type name for a diagnostic message (drops the emitted <c>global::</c> prefix).</summary>
+    private static string MessageTypeName(string typeDisplay) =>
+        typeDisplay.StartsWith("global::", StringComparison.Ordinal)
+            ? typeDisplay.Substring("global::".Length)
+            : typeDisplay;
+
+    private static void EmitEnvelopeConstruction(
+        StringBuilder builder,
+        CrudGenerationModel model,
+        CrudActionModel action,
+        string? bodyExpression,
+        bool returnDirectly)
+    {
+        // `returnDirectly` is the awaited (async) binding path; otherwise the caller wraps the built
+        // envelope into a completed ValueTask itself.
+        Line(builder, NestedIndent + Indent + (returnDirectly ? "return new " : "var envelope = new ")
+            + Qualified(model.EnvelopeFullName(action.Name)));
+        Line(builder, NestedIndent + Indent + "{");
+        Line(builder, NestedIndent + Indent + Indent + CrudEnvelopeConvention.RouteIdentityMember + " = id,");
+        if (bodyExpression is not null)
+        {
+            Line(builder, NestedIndent + Indent + Indent + CrudEnvelopeConvention.BodyMember + " = " + bodyExpression + ",");
+        }
+
+        foreach (var header in action.HeaderInputs)
+        {
+            Line(builder, NestedIndent + Indent + Indent + header.MemberName + " = "
+                + HeaderValueExpression(header) + ",");
+        }
+
+        Line(builder, NestedIndent + Indent + "};");
+        if (!returnDirectly)
+        {
+            Line(builder, NestedIndent + Indent
+                + "return global::System.Threading.Tasks.ValueTask.FromResult<object?>(envelope);");
+        }
+    }
+
+    private static string HeaderValueExpression(CrudHeaderInputModel header)
+    {
+        // The generated artifact carries no file-level usings, so the LINQ accessor is fully qualified
+        // instead of depending on the consumer's implicit usings.
+        var read = "global::System.Linq.Enumerable.FirstOrDefault(context.Request.Headers[\""
+            + Escape(header.HeaderName) + "\"])";
+        return header.TrimQuotes ? read + "?.Trim('\"')" : read;
+    }
+
+    /// <summary>
+    /// §7.3 result envelope per action: a checked conversion from the declared static payload type into
+    /// the typed, no-fallback mapper overload whose metadata comes from the host's source-generated
+    /// resolver. The void/404 envelope and the GET branch are explicit; nothing is inferred from the
+    /// static type of <c>ctx.Output</c>.
+    /// </summary>
+    private static void EmitContributionResultMapper(
+        StringBuilder builder,
+        CrudGenerationModel model,
+        CrudActionModel action)
+    {
+        var payload = action.ResultPayloadFullName is null
+            ? null
+            : action.UsesPagedResult
+                ? CrudResponseContract.PagedPayload(action.ResultPayloadFullName)
+                : Qualified(action.ResultPayloadFullName);
+        var require = "global::CrestCreates.DynamicApi.CapabilityEndpointJsonTypeInfoResolver.Require";
+        var mapper = "global::CrestCreates.DynamicApi.CompatibilityHttpResultMapper";
+
+        string expression;
+        if (payload is null)
+        {
+            expression = mapper + ".WrapVoidResult(" + require
+                + "<" + CrudResponseContract.VoidEnvelope + ">(serviceProvider))";
+        }
+        else if (string.Equals(action.HttpMethod, "GET", StringComparison.Ordinal))
+        {
+            // §7.3/§7.4: the typed GET overload takes the envelope metadata of the declared payload —
+            // for a paged payload that is DynamicApiResponse<PagedResultDto<Dto>>, never the DTO envelope.
+            expression = mapper + ".WrapGetResult<" + payload + ">("
+                + "ctx.Output as " + payload + ", "
+                + require + "<" + CrudResponseContract.EnvelopeOfPayload(payload) + ">(serviceProvider), "
+                + require + "<" + CrudResponseContract.VoidEnvelope + ">(serviceProvider))";
+        }
+        else
+        {
+            expression = mapper + ".WrapResult<" + payload + ">("
+                + "(" + payload + ")ctx.Output!, "
+                + require + "<" + CrudResponseContract.EnvelopeOfPayload(payload) + ">(serviceProvider))";
+        }
+
+        Line(builder, NestedIndent + "private static object " + ResultMapperName(action) + "(");
+        Line(builder, NestedIndent + Indent + "global::CrestCreates.DynamicApi.EndpointExecutionContext ctx,");
+        Line(builder, NestedIndent + Indent + "global::System.IServiceProvider serviceProvider)");
+        Line(builder, NestedIndent + Indent + "=> " + expression + ";");
+        Line(builder, string.Empty);
+    }
+
+    /// <summary>
+    /// §7.4 execution: the invoker resolves the scoped AppService from the capability execution context
+    /// and awaits it with the managed request token, so permission/validation/UoW all run on the unique
+    /// Capability/AppService core. The plain invoker overload is not an entry point.
+    /// </summary>
+    private static void EmitContributionInvoker(
+        StringBuilder builder,
+        CrudGenerationModel model,
+        CrudActionModel action)
+    {
+        var contract = Qualified(model.InterfaceNamespace + "." + model.ServiceInterfaceName);
+        var invocation = "service." + action.ServiceMethodName + "(";
+        var arguments = new List<string>();
+        string? typedInputDeclaration = null;
+
+        if (action.RouteIdentityParameter is null)
+        {
+            typedInputDeclaration = "var typedInput = (" + Qualified(action.BodyPayloadFullName!) + ")context.Input!;";
+            arguments.Add("typedInput");
+        }
+        else if (action.UsesCapabilityInputEnvelope)
+        {
+            typedInputDeclaration = "var envelope = (" + Qualified(model.EnvelopeFullName(action.Name)) + ")context.Input!;";
+            arguments.Add("envelope." + CrudEnvelopeConvention.RouteIdentityMember);
+            if (action.BodyPayloadFullName is not null)
+            {
+                arguments.Add("envelope." + CrudEnvelopeConvention.BodyMember);
+            }
+
+            foreach (var header in action.HeaderInputs)
+            {
+                arguments.Add("envelope." + header.MemberName);
+            }
+        }
+        else
+        {
+            typedInputDeclaration = "var id = (" + model.IdTypeDisplay + ")context.Input!;";
+            arguments.Add("id");
+        }
+
+        arguments.Add("ct");
+
+        Line(builder, Indent + "internal sealed class " + InvokerDeclarationName(model, action)
+            + " : global::CrestCreates.Capability.Abstractions.ICapabilityContextAwareHandlerInvoker");
+        Line(builder, Indent + "{");
+        Line(builder, NestedIndent + "public async global::System.Threading.Tasks.Task<object?> InvokeAsync(");
+        Line(builder, NestedIndent + Indent + "global::CrestCreates.Capability.Abstractions.CapabilityExecutionContext context,");
+        Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
+        Line(builder, NestedIndent + "{");
+        Line(builder, NestedIndent + Indent + "var service = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<"
+            + contract + ">(context.ServiceProvider);");
+        Line(builder, NestedIndent + Indent + typedInputDeclaration);
+        Line(builder, NestedIndent + Indent
+            + (action.ResultPayloadFullName is null ? "await " : "return await ")
+            + invocation + string.Join(", ", arguments) + ").ConfigureAwait(false);");
+        if (action.ResultPayloadFullName is null)
+        {
+            Line(builder, NestedIndent + Indent + "return null;");
+        }
+
+        Line(builder, NestedIndent + "}");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + "public global::System.Threading.Tasks.Task<object?> InvokeAsync(");
+        Line(builder, NestedIndent + Indent + "object? input,");
+        Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
+        Line(builder, NestedIndent + Indent + "=> throw new global::System.InvalidOperationException(");
+        Line(builder, NestedIndent + Indent + Indent
+            + "\"The generated CRUD invoker requires a CapabilityExecutionContext; the plain ICapabilityHandlerInvoker overload is not an entry point.\");");
+        Line(builder, Indent + "}");
+        Line(builder, string.Empty);
+    }
+
+    private static string BindingMethodName(CrudActionModel action) => "Bind_" + action.Name + "_Async";
+
+    private static string ResultMapperName(CrudActionModel action) => "MapResult_" + action.Name;
+
+    private static string InvokerDeclarationName(CrudGenerationModel model, CrudActionModel action) =>
+        model.ContributionTypeName + "_" + action.Name + "_Invoker";
+
+    private static string InvokerTypeName(CrudGenerationModel model, CrudActionModel action) =>
+        model.ActivationNamespace + "." + InvokerDeclarationName(model, action);
+
+    /// <summary>The static route-id parse call for the frozen id wire kind (§7.4).</summary>
+    private static string IdTryParseExpression(CrudGenerationModel model)
+    {
+        var core = model.IdTypeDisplay;
+        var invariant = "global::System.Globalization.CultureInfo.InvariantCulture";
+        var numeric = "global::System.Globalization.NumberStyles.Integer, " + invariant;
+        return model.IdWireKind switch
+        {
+            CrudIdWireKind.Guid => "global::System.Guid.TryParse(routeId, out var id)",
+            CrudIdWireKind.Int16 => "short.TryParse(routeId, " + numeric + ", out var id)",
+            CrudIdWireKind.Int32 => "int.TryParse(routeId, " + numeric + ", out var id)",
+            CrudIdWireKind.Int64 => "long.TryParse(routeId, " + numeric + ", out var id)",
+            CrudIdWireKind.UInt16 => "ushort.TryParse(routeId, " + numeric + ", out var id)",
+            CrudIdWireKind.UInt32 => "uint.TryParse(routeId, " + numeric + ", out var id)",
+            CrudIdWireKind.UInt64 => "ulong.TryParse(routeId, " + numeric + ", out var id)",
+            CrudIdWireKind.Byte => "byte.TryParse(routeId, " + numeric + ", out var id)",
+            CrudIdWireKind.SByte => "sbyte.TryParse(routeId, " + numeric + ", out var id)",
+            _ => "((global::System.Func<bool>)(() => throw new global::System.InvalidOperationException(\"Unsupported id kind " + core + "\")))()",
+        };
+    }
+
+    private static string HttpMethodEnum(string httpMethod) => httpMethod switch
+    {
+        "GET" => "Get",
+        "POST" => "Post",
+        "PUT" => "Put",
+        "PATCH" => "Patch",
+        "DELETE" => "Delete",
+        _ => "None",
+    };
+
+    private sealed record InputBindingModel(string Name, string Source, bool Required);
+
+    private static IEnumerable<InputBindingModel> InputBindingsOf(
+        CrudActionModel action,
+        CrudGenerationModel model)
+    {
+        if (action.RouteIdentityParameter is not null)
+        {
+            yield return new InputBindingModel(action.RouteIdentityParameter, "Route", true);
+        }
+
+        if (action.BodyPayloadFullName is not null)
+        {
+            yield return new InputBindingModel("input", "Body", true);
+        }
+
+        foreach (var header in action.HeaderInputs)
+        {
+            yield return new InputBindingModel(header.HeaderName, "Header", header.Required);
+        }
     }
 
     // ---- shared shape helpers ------------------------------------------------------------------
@@ -704,6 +1386,15 @@ public static class CrudArtifactEmitter
             .Where(action => action is not null)!;
 
     private static string Qualified(string fullName) => "global::" + fullName;
+
+    private static IReadOnlyList<CrudGenerationModel> CanonicalOrder(
+        IReadOnlyList<CrudGenerationModel> models) =>
+        models.Count > 1
+            ? models.OrderBy(model => model.ServiceFullName, StringComparer.Ordinal).ToArray()
+            : models;
+
+    private static string Escape(string value) =>
+        value.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
     private static StringBuilder StartDocument(CrudGenerationModel model)
     {

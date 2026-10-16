@@ -95,6 +95,9 @@ public class CrudServiceRealDeclarationBaselineTests
         "CrestCreates.Application.Contracts",
         "CrestCreates.Core.Abstractions",
         "CrestCreates.DynamicApi",
+        "CrestCreates.DynamicApi.Abstractions",
+        "CrestCreates.Capability.Abstractions",
+        "CrestCreates.Metadata.Abstractions",
         "CrestCreates.Validation",
         "Microsoft.AspNetCore.Http",
         "Microsoft.AspNetCore.Routing",
@@ -119,29 +122,12 @@ public class CrudServiceRealDeclarationBaselineTests
             }
         }
 
-        // The ASP.NET shared-framework assemblies are not copied into the test output; resolve
-        // them deterministically from the runtime directory so the closure really contains the
-        // types the dynamic-API support check requires.
-        var aspNetCoreDirectory = System.IO.Path.GetDirectoryName(
-            typeof(Microsoft.AspNetCore.Http.HttpContext).Assembly.Location);
-        if (!string.IsNullOrEmpty(aspNetCoreDirectory))
-        {
-            foreach (var fileName in new[]
-                     {
-                         "Microsoft.AspNetCore.Http.dll",
-                         "Microsoft.AspNetCore.Http.Abstractions.dll",
-                         "Microsoft.AspNetCore.Routing.dll",
-                         "Microsoft.AspNetCore.Routing.Abstractions.dll",
-                         "Microsoft.AspNetCore.Mvc.Core.dll",
-                     })
-            {
-                var candidate = System.IO.Path.Combine(aspNetCoreDirectory, fileName);
-                if (System.IO.File.Exists(candidate))
-                {
-                    referencePaths.Add(candidate);
-                }
-            }
-        }
+        // The ASP.NET shared-framework assemblies are not copied into the test output; the closure
+        // closes over the whole framework reference (a real consumer declares
+        // <FrameworkReference Include="Microsoft.AspNetCore.App" />), because the required types are
+        // split across physical assemblies (for example HttpContext lives in
+        // Microsoft.AspNetCore.Http.Abstractions in .NET 10).
+        referencePaths.AddRange(CrudConsumerFrameworkClosure.AspNetCoreSharedFrameworkAssemblies());
 
         return referencePaths
             .Distinct()
@@ -905,5 +891,53 @@ public class CrudServiceRealDeclarationBaselineTests
         diagnostics.Should().ContainSingle("one diagnostic per entity");
         diagnostics[0].GetMessage().Should().Contain("public parameterless constructor",
             "the diagnostic must specify that a public constructor is required");
+    }
+
+    private static readonly string[] ForbiddenLegacyRegistrationSymbols =
+    [
+        "[ModuleInitializer]",
+        "DescriptorProviderRegistry.Register",
+        "CapabilityEndpointBindingRegistry.Register",
+        "CapabilityEndpointJsonContractRegistry.RegisterBodyType",
+        "CapabilityHandlerResolverProvider.Register",
+        "CapabilityEndpointResultContractRegistration.Register",
+        "AppServiceCompatibilityProjectionManifestRegistry.Register",
+        "DynamicApiGeneratedRegistryStore",
+        "IDynamicApiGeneratedProvider",
+    ];
+
+    [Fact]
+    public void Materialized_bundle_must_activate_through_the_explicit_host_contribution()
+    {
+        // #128 S3 step B: the projection is delivered as an ExplicitHost contribution plus the
+        // per-assembly AddGeneratedCrud extension, and formal CRUD never registers through any of the
+        // legacy process-global initializers (§7.2/§9).
+        var producer = CrudPrecompileProducer.Run(DeclarationSource, ClosureReferences());
+
+        producer.Diagnostics.Should().BeEmpty(
+            "the declaration must build a clean model: "
+            + string.Join(" | ", producer.Diagnostics.Select(issue => issue.ToDisplayString())));
+
+        var bundle = string.Join("\n", producer.BundleTrees.Select(tree => tree.ToString()));
+        bundle.Should().Contain("AddGeneratedCrud",
+            "the assembly must expose the explicit per-assembly activation extension");
+        bundle.Should().Contain("CapabilityEndpointContribution",
+            "the projection must be delivered as one contribution per service");
+        bundle.Should().Contain("AddCrestCapabilityEndpointContribution",
+            "activation must go through the DI entry point, not a global registry");
+        bundle.Should().Contain("CapabilityEndpointBindingContract",
+            "every action needs a binding contract");
+        bundle.Should().Contain("CapabilityEndpointHandlerBinding",
+            "every action needs an invoker binding");
+        bundle.Should().Contain("CapabilityEndpointResultBinding",
+            "every action needs a typed result mapper binding");
+        bundle.Should().Contain("CapabilityEndpointRequiredIdentity",
+            "every action must declare its required registry identity");
+
+        foreach (var forbidden in ForbiddenLegacyRegistrationSymbols)
+        {
+            bundle.Should().NotContain(forbidden,
+                $"formal CRUD must never register through the legacy global path ('{forbidden}')");
+        }
     }
 }

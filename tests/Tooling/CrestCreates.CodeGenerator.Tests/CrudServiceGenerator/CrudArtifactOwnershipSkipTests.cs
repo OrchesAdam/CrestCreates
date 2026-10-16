@@ -110,7 +110,11 @@ public class CrudArtifactOwnershipSkipTests
         "CrestCreates.Application.Contracts",
         "CrestCreates.Core.Abstractions",
         "CrestCreates.DynamicApi",
+        "CrestCreates.DynamicApi.Abstractions",
+        "CrestCreates.Capability.Abstractions",
+        "CrestCreates.Metadata.Abstractions",
         "CrestCreates.Validation",
+        "Microsoft.AspNetCore.Http",
         "Rougamo",
     ];
 
@@ -132,6 +136,11 @@ public class CrudArtifactOwnershipSkipTests
                 // Unavailable optional reference: the closure carries what is actually present.
             }
         }
+
+        // The CRUD HTTP projection binds ASP.NET and DI types a real consumer receives from the
+        // ASP.NET Core shared framework; the framework files are not copied next to the test
+        // assembly, so the whole framework reference is closed over (see the helper).
+        referencePaths.AddRange(CrudConsumerFrameworkClosure.AspNetCoreSharedFrameworkAssemblies());
 
         return referencePaths
             .Distinct()

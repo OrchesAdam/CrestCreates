@@ -98,21 +98,25 @@ public sealed class CrudPrecompileEngine
             + ". Model: " + CrudGenerationModel.ModelSchemaVersion
             + ". Artifacts schema: " + CrudArtifactSchemaVersion + ". Do not edit.");
 
-        foreach (var model in build.Models.OrderBy(m => m.ServiceFullName, StringComparer.Ordinal))
+        // One artifact list: the per-service artifacts plus the single assembly-level activation, so the
+        // bundle text and the outputs manifest cover exactly the same set the JSON stage reconciles.
+        var models = build.Models.OrderBy(m => m.ServiceFullName, StringComparer.Ordinal).ToArray();
+        var modelByOwner = models.ToDictionary(m => m.ServiceFullName, m => m, StringComparer.Ordinal);
+        foreach (var item in CrudArtifactEmitter.EmitBundleArtifacts(models))
         {
-            foreach (var artifact in CrudArtifactEmitter.Emit(model))
-            {
-                bundleBuilder.AppendLine("// ---- artifact: " + artifact.HintName + " ----");
-                bundleBuilder.AppendLine(artifact.Source);
-                outputs.Add(new CrudOutputManifestEntry(
-                    OwnerAssemblyName: assemblyName,
-                    OwnerServiceFullName: model.ServiceFullName,
-                    ArtifactHintName: artifact.HintName,
-                    DeclaredTypeFullNames: CrudArtifactEmitter.DeclaredTypeFullNames(artifact.Source),
-                    SourceLocation: model.DeclarationLocation.ToString(),
-                    ModelSchemaVersion: CrudGenerationModel.ModelSchemaVersion,
-                    ContentHash: Sha256(artifact.Source)));
-            }
+            bundleBuilder.AppendLine("// ---- artifact: " + item.Artifact.HintName + " ----");
+            bundleBuilder.AppendLine(item.Artifact.Source);
+            var location = modelByOwner.TryGetValue(item.OwnerServiceFullName, out var owner)
+                ? owner.DeclarationLocation.ToString()
+                : models[0].DeclarationLocation.ToString();
+            outputs.Add(new CrudOutputManifestEntry(
+                OwnerAssemblyName: assemblyName,
+                OwnerServiceFullName: item.OwnerServiceFullName,
+                ArtifactHintName: item.Artifact.HintName,
+                DeclaredTypeFullNames: CrudArtifactEmitter.DeclaredTypeFullNames(item.Artifact.Source),
+                SourceLocation: location,
+                ModelSchemaVersion: CrudGenerationModel.ModelSchemaVersion,
+                ContentHash: Sha256(item.Artifact.Source)));
         }
 
         return new CrudPrecompileResult(

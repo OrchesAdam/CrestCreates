@@ -22,7 +22,8 @@ internal static class CrudPrecompileProducer
         IReadOnlyCollection<SyntaxTree> BundleTrees,
         IReadOnlyList<CrudGenerationModel> Models,
         IReadOnlyList<CrudGenerationDiagnostic> Diagnostics,
-        IReadOnlyList<string> BundleCompileErrors);
+        IReadOnlyList<string> BundleCompileErrors,
+        string OutputsManifestJson);
 
     public static Output Run(string authoredSource, IReadOnlyList<MetadataReference> references,
         string assemblyName = "Shop.Application")
@@ -77,7 +78,8 @@ internal static class CrudPrecompileProducer
             var producerTrees = new[] { bundle, context }.Concat(run.GeneratedTrees).ToArray();
             var errors = compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error)
                 .Select(d => d.ToString()).ToArray();
-            return new Output(compilation, producerTrees, models.Models, models.Diagnostics, errors);
+            return new Output(compilation, producerTrees, models.Models, models.Diagnostics, errors,
+                prepare.GetProperty("Outputs").GetRawText());
         }
         finally
         {

@@ -71,7 +71,10 @@ public static class CrudGenerationModelBuilder
 
     /// <summary>
     /// Referenced types the materialized service surface needs. Missing ones are CCCRUD005 — the
-    /// producer must not emit half a chain into a contracts-only or Domain-only project.
+    /// producer must not emit half a chain into a contracts-only or Domain-only project. The HTTP
+    /// projection is part of the formal surface, so the DynamicApi contribution contract, the
+    /// capability invoker contract and the ASP.NET/DI types the activation surface binds are required
+    /// exactly like the Application types.
     /// </summary>
     private static readonly IReadOnlyList<string> RequiredImplementationTypes =
     [
@@ -80,6 +83,10 @@ public static class CrudGenerationModelBuilder
         "CrestCreates.Authorization.Abstractions.IPermissionChecker",
         "CrestCreates.Application.Contracts.DTOs.Common.PagedRequestDto",
         "CrestCreates.Domain.Shared.ObjectMapping.GenerateObjectMappingAttribute",
+        "CrestCreates.DynamicApi.CapabilityEndpointContribution",
+        "CrestCreates.Capability.Abstractions.ICapabilityHandlerInvoker",
+        "Microsoft.AspNetCore.Http.HttpContext",
+        "Microsoft.Extensions.DependencyInjection.IServiceCollection",
     ];
 
     public static CrudModelBuildResult Build(Compilation compilation, string assemblyName)
@@ -184,6 +191,18 @@ public static class CrudGenerationModelBuilder
             return null;
         }
 
+        var idWireKind = ResolveIdWireKind(idType);
+        if (idWireKind is null)
+        {
+            diagnostics.Add(new CrudGenerationDiagnostic(
+                CrudDiagnosticIds.DeclarationUnsupported,
+                $"Entity '{entityType.ToDisplayString()}' has identity type "
+                + $"'{idType.ToDisplayString()}'; the CRUD wire route cannot parse it statically. "
+                + "Supported identities: Guid, string, and the integer primitives.",
+                location));
+            return null;
+        }
+
         var excludeProperties = ReadStringArray(attributeData, "ExcludeProperties");
         var allProperties = ReadProperties(entityType);
 
@@ -231,6 +250,7 @@ public static class CrudGenerationModelBuilder
             EntityNamespace = entityType.ContainingNamespace.ToDisplayString(),
             EntityQualifiedDisplay = entityType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             IdTypeDisplay = idType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            IdWireKind = idWireKind.Value,
             ContractsNamespace = contractsNamespace,
             RoutePrefix = routePrefix,
             CapabilityIdPrefix = capabilityIdPrefix,
@@ -289,7 +309,11 @@ public static class CrudGenerationModelBuilder
                 PermissionName = entityName + ".Create",
                 CapabilityId = capabilityIdPrefix + ".Create",
                 OperationKind = CrudOperationKind.Command,
+                ServiceMethodName = "CreateAsync",
                 BodyPayloadFullName = createDto,
+                // §7.4: Create answers 200 + DynamicApiResponse<Dto>, so the created read contract is
+                // the declared result payload (never the void envelope).
+                ResultPayloadFullName = readDto,
             },
             new CrudActionModel
             {
@@ -299,6 +323,7 @@ public static class CrudGenerationModelBuilder
                 PermissionName = entityName + ".Get",
                 CapabilityId = capabilityIdPrefix + ".Get",
                 OperationKind = CrudOperationKind.Query,
+                ServiceMethodName = "GetByIdAsync",
                 RouteIdentityParameter = "id",
                 ResultPayloadFullName = readDto,
             },
@@ -310,6 +335,7 @@ public static class CrudGenerationModelBuilder
                 PermissionName = entityName + ".Search",
                 CapabilityId = capabilityIdPrefix + ".Search",
                 OperationKind = CrudOperationKind.Query,
+                ServiceMethodName = "GetListAsync",
                 BodyPayloadFullName = listRequest,
                 ResultPayloadFullName = readDto,
                 UsesPagedResult = true,
@@ -322,6 +348,7 @@ public static class CrudGenerationModelBuilder
                 PermissionName = entityName + ".Update",
                 CapabilityId = capabilityIdPrefix + ".Update",
                 OperationKind = CrudOperationKind.Command,
+                ServiceMethodName = "UpdateAsync",
                 BodyPayloadFullName = updateDto,
                 RouteIdentityParameter = "id",
                 UsesCapabilityInputEnvelope = true,
@@ -335,12 +362,49 @@ public static class CrudGenerationModelBuilder
                 PermissionName = entityName + ".Delete",
                 CapabilityId = capabilityIdPrefix + ".Delete",
                 OperationKind = CrudOperationKind.Command,
+                ServiceMethodName = "DeleteAsync",
                 RouteIdentityParameter = "id",
                 // If-Match composes a second input, so Delete always carries the envelope; the header
                 // is only required when the entity keeps a concurrency stamp.
                 UsesCapabilityInputEnvelope = true,
+                HeaderInputs =
+                [
+                    new CrudHeaderInputModel(
+                        MemberName: "IfMatch",
+                        HeaderName: CrudWireConvention.ConcurrencyHeaderName,
+                        Required: hasConcurrencyStamp,
+                        TrimQuotes: true),
+                ],
             },
         ];
+    }
+
+    /// <summary>
+    /// §7.4: the route identity is parsed statically by the generated binder. Only identities with a
+    /// bounded, culture-invariant parse surface are supported; anything else is a declaration-level
+    /// rejection instead of an emitted parser that guesses.
+    /// </summary>
+    private static CrudIdWireKind? ResolveIdWireKind(INamedTypeSymbol idType)
+    {
+        // Guid is not a C# special type, so it is matched by its runtime identity.
+        if (idType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::System.Guid")
+        {
+            return CrudIdWireKind.Guid;
+        }
+
+        return idType.SpecialType switch
+        {
+            SpecialType.System_String => CrudIdWireKind.String,
+            SpecialType.System_Int16 => CrudIdWireKind.Int16,
+            SpecialType.System_Int32 => CrudIdWireKind.Int32,
+            SpecialType.System_Int64 => CrudIdWireKind.Int64,
+            SpecialType.System_UInt16 => CrudIdWireKind.UInt16,
+            SpecialType.System_UInt32 => CrudIdWireKind.UInt32,
+            SpecialType.System_UInt64 => CrudIdWireKind.UInt64,
+            SpecialType.System_Byte => CrudIdWireKind.Byte,
+            SpecialType.System_SByte => CrudIdWireKind.SByte,
+            _ => null,
+        };
     }
 
     private static IReadOnlyList<CrudFieldModel> ReadProperties(INamedTypeSymbol entityType)

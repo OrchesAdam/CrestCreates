@@ -236,3 +236,11 @@
 - 记录两处与定型文本的差异（实现细节，非口径偏离）：贡献类型命名为 `CapabilityEndpointContribution`（合并了原计划的 provider 概念，避免双注册面）；`TryAddEnumerable` 要求贡献是**每程序集的具体类型**（不能用服务类型本身实例化），这正是生成物形状，已在实现里注明。
 - 证据：DynamicApi **109/109**（新增 9 例：两 Host 隔离且无静态泄漏、贡献注册幂等、必需 identity 缺失→确定性失败且不映射、第二次 Map 不重复映射、缺 result mapper/handler 均 fail-closed、Build 失败不复用、host 覆盖 legacy、body types 合并）；CodeGenerator 仍 **445/445**；`CompatibilityProjection.E2E.Tests` 9/9；`CapabilityEndpoint.AotFixture` 构建 0 错误。
 - 环境已知项（非本轮引入）：`CrestCreates.Web.Tests` 4 例文件扫描测试在 git worktree 下失败——其 `FindRepoRoot()` 要求 `.git` 是目录，而 worktree 的 `.git` 是文件，断言前即抛；扫描目标文件已人工核对不含被禁 legacy 符号。
+
+## S3 增量 5：CRUD ExplicitHost 投影发射（S3-3 步骤 B）
+
+- 物化 bundle 现在包含完整 ExplicitHost 投影：每服务一个 `CapabilityEndpointContribution` 派生类型 + 每程序集一个 `AddGeneratedCrud(this IServiceCollection)`（经 `AddCrestCapabilityEndpointContribution` 注册），五动作的 binding/handler/result binding/required identity 齐备；模型侧新增 `IdWireKind`（按实体真实 Id 类型冻结路由解析）与激活命名约定（`EndpointId = "endpoint:" + CapabilityId`，绑定/结果/身份一律用同一约定，避免第二套命名）。
+- 五动作 wire 语义按 §7.4 发射：Create/Search 走 `ReadNativeBodyAsync` + `Require<T>` 的 required 语义；Get 路由 Id 按静态类型解析、失败 400；Update/Delete 用组合 envelope（route Id + body / If-Match）；结果一律 typed overload + `Require<DynamicApiResponse<...>>`；正式 CRUD 产物中**不再出现**任何 legacy 注册符号。
+- 证据（发射侧）：新增 `Materialized_bundle_must_activate_through_the_explicit_host_contribution` —— 断言 bundle 含 AddGeneratedCrud/贡献类型/DI 入口/四类绑定形状，且**不含**九个 legacy 注册符号（`[ModuleInitializer]`、`DescriptorProviderRegistry.Register`、`CapabilityEndpointBindingRegistry.Register`、`CapabilityEndpointJsonContractRegistry.RegisterBodyType`、`CapabilityHandlerResolverProvider.Register`、`CapabilityEndpointResultContractRegistration.Register`、`AppServiceCompatibilityProjectionManifestRegistry.Register`、`DynamicApiGeneratedRegistryStore`、`IDynamicApiGeneratedProvider`）。
+- 消费闭包事实：正式 CRUD 消费项目必须显式引用 ASP.NET Core 与 DI 抽象（`Microsoft.AspNetCore.App` FrameworkReference），模型构建期按 CCCRUD005 确定性拒绝缺引用的项目；测试探针与 harness 已补齐该闭包（含 split-assembly 事实：`HttpContext` 在 `Microsoft.AspNetCore.Http.Abstractions`）。
+- **未完成并如实记录**：运行期“五动作真实请求”集成证据本轮没有交付——手工 contribution 的 invoker/mapper 接线还差 5 例（服务未被调用、结果链路未对齐），该文件已移入 `99_RecycleBin/issue-128-s3-projection-integration-pending/`（附 README 说明去向），正式交付点是 **S3-7** 的真实 Host 集成证据（J/H/Q），不在本轮冒充完成。现有运行时段仍为 109/109，发射侧形状由上述断言承担。

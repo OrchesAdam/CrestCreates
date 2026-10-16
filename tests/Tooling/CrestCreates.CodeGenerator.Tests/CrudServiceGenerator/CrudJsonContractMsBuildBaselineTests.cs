@@ -45,6 +45,7 @@ public class CrudJsonContractMsBuildBaselineTests
             <ProjectReference Include="__ROOT__/src/Framework/Infrastructure/CrestCreates.Aop/CrestCreates.Aop.csproj" />
             <ProjectReference Include="__ROOT__/src/Framework/Infrastructure/CrestCreates.Validation/CrestCreates.Validation.csproj" />
             <ProjectReference Include="__ROOT__/src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+            <FrameworkReference Include="Microsoft.AspNetCore.App" />
           </ItemGroup>
         __IMPORTS__
         </Project>
