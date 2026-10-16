@@ -311,3 +311,12 @@
 - 修后实证：`CrestCreates.GeneratedCrud.AotFixture.Feature` 清 obj 重建——`source-generators/.../DynamicApiAotSourceGenerator/` **不再有任何输出**，`GeneratedDynamicApiRegistry.g.cs` / `GeneratedDynamicApiEndpoints.g.cs` 消失，编译输出无 CS0618（此前 legacy 端点引用 obsolete `DynamicApiGeneratedRuntime.ReadBodyAsync`）。
 - 断言提升到"整次编译"层面：MSBuild 探针新增 `AllGeneratedFiles`（obj 下全部 `*.g.cs` 内容）并在端到端契约用例中断言——整棵树不含 `DynamicApiGeneratedRegistryStore`、不含 `DynamicApiGeneratedRuntime.ReadBodyAsync`、不含 `GeneratedDynamicApiRegistry`，且编译输出无 `CS0618`。该用例已通过。
 - 说明：S3-3 的形状断言只覆盖了 bundle 自身（"bundle 符号干净"），这次证明**整棵树**才是有意义的边界；两处断言各司其职（bundle 形状 vs 整次编译）。CodeGenerator 全套在后台复跑（预期 451 + 既有新增计数不变），结果随后记录。
+
+## S4 增量 1c：真实 Host 五动作 loopback（步骤 A），并暴露两处真缺陷
+
+- 新增 `tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture`（Web Host，Sdk.Web，不引用 analyzer，只消费生成物）与 `...AotFixture.Tests`（`WebApplicationFactory<Program>` 真 HTTP）。Host 调用的正是**生成**的激活入口：`CrestCreates.Generated.CrestCreates_GeneratedCrud_AotFixture_Feature.GeneratedCrudActivation.AddGeneratedCrud()`，加上 `AddCapabilityRuntime`/`AddCrestCompatibilityProjection`/`MapCrestCapabilityEndpoints` 与既有 E2E 的 RemoveAll 三件套；JSON 侧由生成的 configurator 接线（不手写）。DI 缝按生成服务构造器真实类型实现：`MemoryWidgetRepository : ICrestRepositoryBase<Widget, Guid>`（插入发号+戳、更新校验并轮换戳、删除校验戳、读取返回游离副本）+ 最小 `IPermissionChecker`/`ICurrentUser`/`IDataPermissionFilter`。`[UnitOfWorkMo]` 在**未织入**时是惰性的——这正是步骤 A 可以在没有 UoW 的情况下跑通的原因（步骤 B 才上 Rougamo.Fody 织入 + #137 UoW）。
+- 结果：Create/GetById/Search（wire filter）/Update/Delete **五动作真 HTTP 全绿**（生成服务 + 生成 typed query adapter 全部生效）；Host 构建 0 错误；DynamicApi 115/115；CodeGenerator 全套 451/451（ownership 跳过修复无回归）。
+- **两处真缺陷（步骤 A 当场暴露，已留红基线并记账，下一轮修复）**：
+  1. **未知 id 的 GET 返回 500，而不是 §7.4 要求的 404 无数据信封**：生成的 `GetByIdAsync` 抛 `CrestEntityNotFoundException` → pipeline catch-all → `Failure("PIPELINE_ERROR")` → `CapabilityEndpointResultMapper.MapFailure` 默认分支 → `Results.Problem` → 500；而生成器里那条 typed 404 分支只在**成功**返回 null 时才可达，经生成服务根本走不到。修法方向：CRUD 的 Get invoker（生成物）捕获该领域异常并交回 null，让 typed `WrapGetResult` 产生 404 信封；AppService 层语义不变。
+  2. **失败路径写了 CRUD context 序列化不了的 `ProblemDetails`**：上述 500 的响应体写出阶段再抛 `NotSupportedException: JsonTypeInfo metadata for type 'Microsoft.AspNetCore.Mvc.ProblemDetails' was not provided by TypeInfoResolver of type 'CrestCreatesCrudJsonSerializerContext'`。§7.1 明确要求闭包包含"使用到的错误 DTO"——生成 context 缺错误 DTO 是一个真实闭包缺口，需要在 roots 集合里补齐（或让失败路径不用 ProblemDetails）。
+- 步骤 B 前置：`AddUnitOfWork` + provider 绑定（#137 公共契约）+ Feature 侧 Rougamo.Fody 织入，才能让 `[UnitOfWorkMo]` 真正包裹生成方法；随后才谈 UoW 提交/回滚与响应写失败独立、并发戳不匹配语义。
