@@ -289,3 +289,11 @@
 - 证据：真实 Host fixture **删除**了它手动的 `capabilityRegistry.Build(...)` 与 `WidgetContributionCapabilityProvider` 手写桥（连带删除死代码），五动作 + greeting 兼容投影 **19/19 全绿**——即"Host 只调 `AddGeneratedCrud()`-等价注册 + `MapCrestCapabilityEndpoints()`"即可，无需自己桥接能力注册表。
 - 负向用例已补（`CapabilityRegistryHostAggregationTests`）：真实 `CapabilityRegistry` 先以空 provider 集建好、再激活一个拥有 `WidgetFeature.WidgetAppService.Create` 的贡献 → `MapCrestCapabilityEndpoints` 抛 `InvalidOperationException` 且消息点名该 capability id。顺带记录两条 API 事实：`RegistryValidationEngine<T>` 需要显式 validators 集合；`TryAddEnumerable` 要求贡献是**具体派生类型**（不能用服务类型自身实例），测试里用空的 `ProbeContribution : CapabilityEndpointContribution` 表达。DynamicApi 套件 **115/115**。
 - S3 剩余：S3-7 第二步（请求中止/取消在 HTTP 的传播、UoW 提交与响应写失败独立），然后进入 S4（生成物 + 原生 fixture）。
+
+## S3 增量 12：取消在 HTTP 层的传播（S3-7 步骤 2a）
+
+- fixture 服务加了**显式 opt-in 门闸**（`WidgetCallRecorder.Armed` + TCS + 进入信号 + 观测取消标志 + 完成标志，全部 host-scoped、无静态），`CreateAsync` 在门闸武装时 `await gate.Task.WaitAsync(cancellationToken)`，捕获 `OperationCanceledException` 记录后重抛；未武装时行为与之前完全一致（既有用例不受影响）。
+- 新用例（`WidgetCrudE2ETests` 第 11 例）：武装门闸 → 用测试自持的 `CancellationTokenSource` 发起 `POST /api/widget`（不 await）→ 有界轮询（25ms 间隔、10s 上限）等到服务进入 → `Cancel()` → 断言 (a) 请求在界内以 `OperationCanceledException` 族结束、(b) 服务**观测到取消**且 `LastCreateToken.IsCancellationRequested`、(c) 未记录"完成"。结果：E2E **20/20**（连跑两遍）、DynamicApi **115/115**、CodeGenerator **451/451**。
+- **牙齿证明**（执行者做了变异反向验证）：把服务改成 `WaitAsync(CancellationToken.None)` 后，用例在 10s 边界确定性失败（"aborted request must settle instead of hanging or completing"），随后还原——这条断言不是空真的。
+- 记录一条链路事实：TestHost 会把客户端 token 取消接到服务端 `RequestAborted`；pipeline 会把 handler 的 OCE 映射成 504 且该响应不会到达已中止的客户端——因此本用例的证据是 **recorder 观测**，不是响应码。
+- 归入 S4（有据可依，不是拖延）：**UoW 提交 vs 响应写失败独立** 与**并发戳不匹配语义**都需要真实 memory repository/UoW 与真实 generated service——计划 S4 原文即要求"memory repository/UoW 明确能力且走真实 generated service/typed query/Capability 执行"，本 fixture 是手工形状探针，不在这里造假 UoW。S3-7 的 HTTP 证据部分（五动作 wire、400 零业务、路由 id/If-Match 传输、取消传播）已全部交付。

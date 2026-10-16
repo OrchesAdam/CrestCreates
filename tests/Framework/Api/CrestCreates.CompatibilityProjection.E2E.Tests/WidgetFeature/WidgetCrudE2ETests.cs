@@ -18,9 +18,12 @@ namespace CrestCreates.CompatibilityProjection.E2E;
 /// invoker → scoped AppService → typed result mapper, and every rejection must stop before any
 /// business call. The assertions check response content, not only status codes.
 ///
-/// Deliberately still open (not claimed here): request-abort/cancellation propagation over HTTP,
-/// UoW commit vs response-write independence, and the generated-code (real toolchain) fixture —
-/// the last one is S4's scope.
+/// S3-7 part 2a (request-abort leg): the client-abort test proves a client-side abort reaches the
+/// generated-shaped CRUD chain — the service receives the request's abort token, observes the
+/// cancellation on it and the create never completes. Deliberately still open (not claimed here):
+/// UoW commit vs response-write independence (lands with the S4 generated fixture, which runs a
+/// real UoW through the generated service) and the generated-code (real toolchain) fixture itself —
+/// the latter is S4's scope.
 /// </summary>
 public class WidgetCrudE2ETests : IClassFixture<CompatibilityProjectionE2ETestFactory>
 {
@@ -90,6 +93,53 @@ public class WidgetCrudE2ETests : IClassFixture<CompatibilityProjectionE2ETestFa
             "malformed JSON is a 400, never a pipeline or serialization error");
         _recorder.CreateCalls.Should().Be(0,
             "malformed-body rejection is zero-business");
+    }
+
+    [Fact]
+    public async Task WidgetCreate_ClientAbortsTheRequest_ServiceObservesTheAbortTokenAndTheCreateDoesNotComplete()
+    {
+        // Arrange — arm the opt-in gate (the service will park inside CreateAsync after reporting
+        // entry) and let this test own the abort token the way a disconnecting client owns the socket.
+        _recorder.ArmCreateGate();
+        using var abortSource = new CancellationTokenSource();
+
+        // Act — start the POST without awaiting it; the request is in flight while the test holds
+        // the abort token.
+        var requestTask = _client.PostAsync(
+            "/api/widget", JsonContent("""{"title":"Aborted Widget"}"""), abortSource.Token);
+
+        // Wait (bounded polling) until the service reports gate entry. The pipeline cannot finish
+        // while the gate is unreleased, so entry is a race-free precondition for the abort.
+        await WaitForConditionAsync(
+            () => _recorder.CreateEntered?.Task.IsCompleted == true,
+            TimeSpan.FromSeconds(10),
+            "the service to enter the armed create gate");
+
+        // Abort the request exactly like a disconnecting client; the service is parked on the gate,
+        // so the request abort token is the only way the parked await can complete.
+        abortSource.Cancel();
+
+        // Assert (a) — the request task settles as cancellation, never as a shaped response.
+        var settled = await Task.WhenAny(requestTask, Task.Delay(TimeSpan.FromSeconds(10)));
+        settled.Should().BeSameAs(requestTask,
+            "the aborted request must settle instead of hanging or completing");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => requestTask);
+
+        // Assert (b) — the token handed down the generated-shaped chain is the request's abort
+        // token: the service observed exactly that cancellation on its parked await.
+        await WaitForConditionAsync(
+            () => _recorder.CreateCancellationObserved,
+            TimeSpan.FromSeconds(10),
+            "the service to observe the request abort");
+        _recorder.CreateCalls.Should().Be(1, "the entry recorded exactly one create invocation");
+        _recorder.LastCreateToken.CanBeCanceled.Should().BeTrue();
+        _recorder.LastCreateToken.IsCancellationRequested.Should().BeTrue(
+            "the token the service received is the request's abort token, cancelled by the client abort");
+
+        // Assert (c) — nothing beyond entry: the gate was never released, so the create cannot
+        // have completed.
+        _recorder.CreateCompleted.Should().BeFalse(
+            "the operation must be cancelled rather than completed");
     }
 
     [Fact]
@@ -234,6 +284,25 @@ public class WidgetCrudE2ETests : IClassFixture<CompatibilityProjectionE2ETestFa
     }
 
     private static StringContent JsonContent(string json) => new(json, Encoding.UTF8, "application/json");
+
+    /// <summary>
+    /// Bounded polling for fixture signals that have no awaitable completion (a flag or a TCS); a
+    /// broken propagation becomes a definite <see cref="TimeoutException"/>, never a hang.
+    /// </summary>
+    private static async Task WaitForConditionAsync(Func<bool> condition, TimeSpan timeout, string expectation)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException(
+                    $"Timed out after {timeout.TotalSeconds:0}s waiting for {expectation}.");
+            }
+
+            await Task.Delay(25);
+        }
+    }
 
     private static async Task<JsonDocument> ReadDocumentAsync(HttpResponseMessage response)
         => JsonDocument.Parse(await response.Content.ReadAsStringAsync());

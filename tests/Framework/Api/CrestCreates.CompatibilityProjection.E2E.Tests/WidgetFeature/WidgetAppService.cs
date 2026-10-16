@@ -6,11 +6,19 @@ namespace CrestCreates.CompatibilityProjection.E2E.WidgetFeature;
 
 /// <summary>
 /// Per-host call ledger for the widget probe surface. Registered as a DI singleton on the host and
-/// written only by the scoped <see cref="WidgetAppService"/>; tests read it back through the host's
+/// written by the scoped <see cref="WidgetAppService"/> (tests only arm/read it) through the host's
 /// own provider. This is host-scoped fixture state — never a process-global static.
 /// </summary>
 public sealed class WidgetCallRecorder
 {
+    private readonly object _createGateSync = new();
+
+    private bool _createGateArmed;
+    private TaskCompletionSource? _createGate;
+    private TaskCompletionSource? _createEntered;
+    private bool _createCancellationObserved;
+    private bool _createCompleted;
+
     public int CreateCalls { get; private set; }
 
     public int GetCalls { get; private set; }
@@ -70,6 +78,81 @@ public sealed class WidgetCallRecorder
         LastDeleteStamp = expectedStamp;
     }
 
+    // ---- opt-in create gate (S3-7 part 2a request-abort probe) ----------------------------------
+    // While armed, WidgetAppService.CreateAsync parks on the gate after reporting entry, so a test
+    // can abort the owning HTTP request and observe that the token handed down the generated-shaped
+    // chain is the request's abort token. Every member is a no-op for the unarmed fixtures.
+
+    /// <summary>True while the create gate is armed; <see cref="Reset"/> disarms it.</summary>
+    public bool CreateGateArmed
+    {
+        get { lock (_createGateSync) { return _createGateArmed; } }
+    }
+
+    /// <summary>
+    /// The gate an armed <see cref="WidgetAppService.CreateAsync"/> call parks on; <c>null</c> while
+    /// the gate is not armed, which is how the unarmed call keeps its pre-probe shape.
+    /// </summary>
+    public TaskCompletionSource? CreateGate
+    {
+        get { lock (_createGateSync) { return _createGate; } }
+    }
+
+    /// <summary>Completed by <see cref="WidgetAppService.CreateAsync"/> immediately before it parks.</summary>
+    public TaskCompletionSource? CreateEntered
+    {
+        get { lock (_createGateSync) { return _createEntered; } }
+    }
+
+    /// <summary>True once an armed create's gate await failed with <see cref="OperationCanceledException"/>.</summary>
+    public bool CreateCancellationObserved
+    {
+        get { lock (_createGateSync) { return _createCancellationObserved; } }
+    }
+
+    /// <summary>True once an armed create passed the gate without cancellation.</summary>
+    public bool CreateCompleted
+    {
+        get { lock (_createGateSync) { return _createCompleted; } }
+    }
+
+    /// <summary>Arms the create gate for the next <see cref="WidgetAppService.CreateAsync"/> call.</summary>
+    public void ArmCreateGate()
+    {
+        lock (_createGateSync)
+        {
+            _createGateArmed = true;
+            _createGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _createEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _createCancellationObserved = false;
+            _createCompleted = false;
+        }
+    }
+
+    public void SignalCreateEntered()
+    {
+        lock (_createGateSync)
+        {
+            _createEntered?.TrySetResult();
+        }
+    }
+
+    public void RecordCreateCancellationObserved()
+    {
+        lock (_createGateSync)
+        {
+            _createCancellationObserved = true;
+        }
+    }
+
+    public void RecordCreateCompleted()
+    {
+        lock (_createGateSync)
+        {
+            _createCompleted = true;
+        }
+    }
+
     public void Reset()
     {
         CreateCalls = 0;
@@ -85,6 +168,15 @@ public sealed class WidgetCallRecorder
         LastUpdateInput = null;
         LastDeleteId = null;
         LastDeleteStamp = null;
+
+        lock (_createGateSync)
+        {
+            _createGateArmed = false;
+            _createGate = null;
+            _createEntered = null;
+            _createCancellationObserved = false;
+            _createCompleted = false;
+        }
     }
 }
 
@@ -108,11 +200,33 @@ public sealed class WidgetAppService : IWidgetAppService
         _recorder = recorder;
     }
 
-    public Task<WidgetDto> CreateAsync(CreateWidgetDto input, CancellationToken cancellationToken = default)
+    public async Task<WidgetDto> CreateAsync(CreateWidgetDto input, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         _recorder.RecordCreate(input, cancellationToken);
-        return Task.FromResult(new WidgetDto { Id = Guid.NewGuid(), Title = input.Title });
+
+        // Opt-in request-abort probe (S3-7 part 2a): while the gate is armed the call parks after
+        // reporting entry, so a test can abort the owning HTTP request and the request's own token
+        // is the only way the parked await can complete. Unarmed calls skip the block entirely and
+        // keep the pre-probe shape.
+        var gate = _recorder.CreateGate;
+        if (gate is not null)
+        {
+            _recorder.SignalCreateEntered();
+            try
+            {
+                await gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _recorder.RecordCreateCancellationObserved();
+                throw;
+            }
+
+            _recorder.RecordCreateCompleted();
+        }
+
+        return new WidgetDto { Id = Guid.NewGuid(), Title = input.Title };
     }
 
     public Task<WidgetDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
