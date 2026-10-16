@@ -400,3 +400,16 @@
 - DynamicApi **125/125**（115 + 审查探针 6 + 等价控制 4）；Application **177/177**（含 8 种底层类型 enum 数值/边界/名称/未定义/In 数组矩阵）；fixture JIT **18/18**（11 + 审查探针 3 + 宿主装配 2 + 双序双 Feature 2）；E2E **20/20**；CapabilityEndpoint JIT **3/3**（该 fixture 无 ExplicitHost 贡献 → capability 等价校验与 JSON 合同校验路径均为 no-op，其原生门禁在本分支早前已 13/13）；JsonContracts 单元 **131/131**；PackageTests **29/29**；CodeGenerator **451/451**（configurator 形状断言已同步为插入语义）。
 - 原生门禁 **3/3**（linux-x64，committed head）：绿跑 exit 0（16 PASS（15 场景 + 构造探针）/0 FAIL/总 sentinel）；两变异 exit 1、定向 `create:FAIL`、无 sentinel、进程自行终止；三份 evidence SHA 精确绑定 `9849defaea7655b19b098aaec8e614ae177b714e`。
 - 双序验收说明：Widget 序与 Gadget 序两个宿主都跑通"每 Feature create/search + 每 Feature 失败体（ProblemDetails 由对方 context 先答时仍可序列化）"；SecondFeature 故意不织入（该验收不覆盖 UoW 腿，UoW 证据在主 fixture）。
+
+## PR #150 复审 R2 修复（2026-10-17）
+
+R2 复审（head `23e920e7`，review 5550193846）：原四条 R1 探针全部通过；新增 3×P2 装配/等价边界，均独立复现。R2 探针原样入库（`docs/review/probes/2026-10-16-issue-128-pr150-r2.patch`，只新增测试），红基线 = DynamicApi 2 fail、fixture 1 fail，与审查逐项一致；修复后全部转绿，未弱化。提交 `6d54f384`。
+
+- **R2-01 [P2] 带 Modifiers 的显式 Default resolver 被静默绕过（`CrudArtifactEmitter` configurator）**：fallback 识别收紧为「**运行时类型恰好是** `DefaultJsonTypeInfoResolver`（`GetType() == typeof(...)`，派生类型不算）**且** `Modifiers.Count == 0`」。Host 显式 modifier / 派生 resolver 保留声明优先级 → 首答 CRUD root → Map 期确定性拒绝并点名该 resolver——不再被插到前面静默覆盖 Host 的 JSON 定制。验收：审查 modifier 探针转绿（修复前 Map 接受、modifier 调用数 0、元数据被覆盖的真实行为），新增派生 resolver 控制同向拒绝；默认 JIT 正例、Host-only 类型保留、wrapper 冲突负例保持；bundle 形状断言补 `GetType()` 与 `Modifiers.Count == 0` 两处守卫。
+- **R2-02 [P2] 精确版本被 Latest 索引替代（`CapabilityEndpointExtensions`）**：等价校验先 `GetByVersion(contributed.Id, contributed.Version)` 精确定位；v1+v2 共存且 v1 等价 → Map 通过且注册表数量不变（其他版本共存不是冲突）；只有 v2 → 拒绝并给 "the exact version is not present（registry holds v2）" 诊断；v1 存在但不等价 → 按字段差异拒绝。验收：审查 v1+v2 探针转绿；原 R1 版本差异控制断言更新为精确版本诊断；新增 v1 非等价拒绝控制。
+- **R2-03 [P2] 等价遗漏 Contract 字段（同上）**：对照官方 `CapabilityDescriptorCanonicalHashProfile` 的 Contract 分类补齐 **`Name`、`SupersededById`、`RiskLevel`**（原有 version/namespace/state/kind/projection/permissions/schema refs 保持）；DefinitionOnly 目录字段（SemanticTags/Categories/Produces/Consumes）不纳入执行等价面（目录/定义元数据，非执行权威；projection 因 R1 验收显式保留）。验收：审查 Low↔Medium 探针转绿；新增 High↔Medium 反向控制（双向覆盖）；等价正例保持、零 registry 突变。
+
+### R2 复跑矩阵（head `6d54f384`）
+
+- DynamicApi **129/129**（125 + R2 探针 2 + 新增控制 2）；Application 177/177；fixture JIT **20/20**（18 + R2 modifier 探针 + 派生控制）；E2E 20/20；CapabilityEndpoint JIT 3/3；JsonContracts 单元 131/131；PackageTests 29/29；CodeGenerator **451/451**（含更新后的 configurator 形状断言）。
+- 原生门禁 **3/3**（linux-x64，committed head；绿跑 exit 0（16 PASS + 总 sentinel），两变异 exit 1、无 sentinel；evidence SHA 绑定 `6d54f384`）。
