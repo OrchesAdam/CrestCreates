@@ -396,16 +396,24 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent + "protected readonly ICurrentUser CurrentUser;");
         Line(builder, NestedIndent + "protected readonly IDataPermissionFilter DataPermissionFilter;");
         Line(builder, string.Empty);
+        // The framework's AOP bridge (MethodContextExtensions.GetServiceProvider) resolves services
+        // through the target's public ServiceProvider member; without it the woven [UnitOfWorkMo] /
+        // [CacheMo] / [PermissionMo] frames find no kernel service and silently skip. CrestAppServiceBase
+        // exposes the same member, so this keeps the generated service on the same convention.
+        Line(builder, NestedIndent + "public global::System.IServiceProvider ServiceProvider { get; }");
+        Line(builder, string.Empty);
         Line(builder, NestedIndent + "public " + service + "(");
         Line(builder, NestedIndent + "    " + repository + " repository,");
         Line(builder, NestedIndent + "    IPermissionChecker permissionChecker,");
         Line(builder, NestedIndent + "    ICurrentUser currentUser,");
-        Line(builder, NestedIndent + "    IDataPermissionFilter dataPermissionFilter)");
+        Line(builder, NestedIndent + "    IDataPermissionFilter dataPermissionFilter,");
+        Line(builder, NestedIndent + "    global::System.IServiceProvider serviceProvider)");
         Line(builder, NestedIndent + "{");
         Line(builder, NestedIndent + "    Repository = repository ?? throw new ArgumentNullException(nameof(repository));");
         Line(builder, NestedIndent + "    PermissionChecker = permissionChecker ?? throw new ArgumentNullException(nameof(permissionChecker));");
         Line(builder, NestedIndent + "    CurrentUser = currentUser ?? throw new ArgumentNullException(nameof(currentUser));");
         Line(builder, NestedIndent + "    DataPermissionFilter = dataPermissionFilter ?? throw new ArgumentNullException(nameof(dataPermissionFilter));");
+        Line(builder, NestedIndent + "    ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));");
         Line(builder, NestedIndent + "}");
         Line(builder, string.Empty);
 

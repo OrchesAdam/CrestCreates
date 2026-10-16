@@ -35,6 +35,13 @@
                       ExcludeAssets="runtime" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- #128 S4 Step B: this consumer weaves the generated [UnitOfWorkMo] methods exactly like any
+         real application assembly would (FodyWeavers.xml + Rougamo.Fody), so the CRUD write actions
+         run under the unique UnitOfWork kernel instead of the attribute being inert. -->
+    <PackageReference Include="Rougamo.Fody" />
+  </ItemGroup>
+
   <Import Project="../../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.props" />
   <Import Project="../../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.targets" />
 

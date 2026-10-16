@@ -7,20 +7,43 @@ using CrestCreates.GeneratedCrud.AotFixture.Domain;
 namespace CrestCreates.GeneratedCrud.AotFixture;
 
 /// <summary>
-/// #128 S4 Step A memory repository: the persistence seam the generated WidgetAppService injects.
+/// #128 S4 memory repository: the persistence seam the generated WidgetAppService injects.
 /// It models the real provider contract in the two places the generated CRUD surface depends on:
 /// identity/stamp issuance on insert (an entity always leaves the persistence layer with a non-empty
 /// Id and ConcurrencyStamp) and the optimistic-concurrency rotation on update/delete
 /// (<see cref="CrestConcurrencyException"/> on a stamp mismatch, new stamp after a successful update
 /// — the same semantics as the EF/FreeSql/SqlSugar repositories). Reads return detached copies, so a
 /// caller's in-memory mutations never leak into the store before UpdateAsync is called.
-/// No UnitOfWork participates here: Step A deliberately runs without weaving, which is exactly why
-/// the generated [UnitOfWorkMo] attributes are inert in this fixture (Step B introduces the UoW).
+/// Step B adds the transactional seam the memory unit of work drives: a write gate that serializes
+/// unit-of-work windows and a row snapshot/restore pair (commit drops the snapshot, rollback
+/// restores it). Step A's five-action behavior is unchanged.
 /// </summary>
 public sealed class MemoryWidgetRepository : ICrestRepositoryBase<Widget, Guid>
 {
     private readonly object _sync = new();
     private readonly List<Widget> _store = new();
+
+    /// <summary>Serializes unit-of-work write windows over the single memory store.</summary>
+    public SemaphoreSlim WriteGate { get; } = new(1, 1);
+
+    /// <summary>Takes the pre-transaction row image the unit of work restores on rollback.</summary>
+    internal List<Widget> SnapshotRows()
+    {
+        lock (_sync)
+        {
+            return _store.Select(Clone).ToList();
+        }
+    }
+
+    /// <summary>Restores a snapshot as the complete store content (rollback / abandon discard).</summary>
+    internal void RestoreRows(List<Widget> rows)
+    {
+        lock (_sync)
+        {
+            _store.Clear();
+            _store.AddRange(rows.Select(Clone));
+        }
+    }
 
     public IQueryable<Widget> GetQueryable()
     {
@@ -74,10 +97,23 @@ public sealed class MemoryWidgetRepository : ICrestRepositoryBase<Widget, Guid>
             }
 
             _store.Add(Clone(entity));
+
+            // #128 S4 Step B rollback seam: the row is already written into the store when the
+            // persistence layer fails, exactly the production shape of a store write succeeding while
+            // the surrounding operation still fails. The unit of work must discard the row.
+            if (entity.Name.StartsWith(RollbackProbePrefix, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(RollbackProbeMessage);
+            }
         }
 
         return Task.FromResult(entity);
     }
+
+    internal const string RollbackProbePrefix = "rollback-probe-";
+
+    internal const string RollbackProbeMessage =
+        "rollback probe: the unit of work must discard the staged insert";
 
     public async Task<IEnumerable<Widget>> InsertRangeAsync(IEnumerable<Widget> entities, CancellationToken cancellationToken = default)
     {
@@ -227,6 +263,9 @@ public sealed class MemoryWidgetRepository : ICrestRepositoryBase<Widget, Guid>
 
     /// <summary>Reads one row as a detached copy, so callers observe exactly what is persisted.</summary>
     public Widget? Find(Guid id) => GetQueryable().FirstOrDefault(x => x.Id == id);
+
+    /// <summary>Reads one row by name; used by tests whose response failed before the id was read.</summary>
+    public Widget? FindByName(string name) => GetQueryable().FirstOrDefault(x => x.Name == name);
 
     private Task DeleteEntityAsync(Widget entity)
     {

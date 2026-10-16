@@ -2,6 +2,7 @@ using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Middleware;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.DynamicApi;
@@ -14,12 +15,12 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-// #128 S4 Step A host: the real Web Host for the generated CRUD fixture. Every CRUD wire contract
+// #128 S4 host: the real Web Host for the generated CRUD fixture. Every CRUD wire contract
 // member (DTOs, service, mappings, typed query adapter, capability/endpoint descriptors, invokers,
 // typed result envelopes and the source-generated JSON context) comes from the Feature assembly's
 // toolchain output; this Program only composes the framework runtime and the memory-era DI seams.
-// [UnitOfWorkMo] on the generated methods stays inert here because no weaving participates in this
-// fixture — Step A deliberately proves the actions before the UnitOfWork leg (Step B) lands.
+// The Feature assembly is woven (Rougamo.Fody), so the generated [UnitOfWorkMo] write methods run
+// under the unique UnitOfWork kernel with the fixture's memory provider (Step B).
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -62,10 +63,45 @@ builder.Services.AddSingleton<IPermissionChecker, FixturePermissionChecker>();
 builder.Services.AddSingleton<ICurrentUser, FixtureCurrentUser>();
 builder.Services.AddSingleton<IDataPermissionFilter, IdentityDataPermissionFilter>();
 
+// #128 S4 Step B: the unique UnitOfWork assembly entry with the fixture's memory provider binding.
+// Capabilities are declared exactly as implemented (transactions yes; no explicit isolation levels;
+// prompt termination and discard on abandon) — the kernel fail-closes before business code whenever
+// a declared-but-unsupported capability is requested. The provider is bound under OrmProvider.EfCore
+// only because that enum is a closed list of ORM families with no memory member.
+builder.Services.AddUnitOfWork(OrmProvider.EfCore);
+builder.Services.AddUnitOfWorkProvider(
+    OrmProvider.EfCore,
+    static serviceProvider => serviceProvider.GetRequiredService<MemoryWidgetUnitOfWork>(),
+    supportsRequiresNew: false,
+    capabilities: new UnitOfWorkProviderCapabilities
+    {
+        SupportsTransactions = true,
+        PromptTerminationOnAbandon = true,
+        DiscardUncommittedOnAbandon = true,
+    });
+builder.Services.AddScoped<MemoryWidgetUnitOfWork>();
+builder.Services.AddSingleton<MemoryUnitOfWorkObserver>();
+
+// #128 S4 Step B seam: lets a test make the next response write fail (dropped-connection shape),
+// so the "commit vs response-write failure are independent facts" claim is provable.
+builder.Services.AddSingleton<ResponseWriteFailureGate>();
+
 // Add logging (required by pipeline middleware)
 builder.Services.AddLogging();
 
 var app = builder.Build();
+
+// The response-write failure gate must sit before the endpoint stage; when armed it replaces the
+// body stream for exactly the next request with one whose first write throws.
+app.Use(async (context, next) =>
+{
+    if (context.RequestServices.GetRequiredService<ResponseWriteFailureGate>().TryConsumeArm())
+    {
+        context.Response.Body = new ThrowingResponseBodyStream();
+    }
+
+    await next(context);
+});
 
 // §7.2: no manual capability/endpoint registry build here — MapCrestCapabilityEndpoints performs the
 // single authoritative aggregation (static providers + this host's ExplicitHost contributions) before
