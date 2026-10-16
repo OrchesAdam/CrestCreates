@@ -394,3 +394,9 @@
 - **R1-04 [P2] enum 数值固定 Int32（`FilterValueReader`）**：数值先按 `Enum.GetUnderlyingType` 的**精确 CLR 类型**有界读取（byte/sbyte/short/ushort/uint/long/ulong/int 八分支），再做 `Enum.IsDefined` 精确装箱校验与 `Enum.ToObject`；越界、小数、未定义一律拒绝，不截断、不猜类型。验收：审查 byte/long 探针转绿；Application.Tests 新增 8 种底层类型的数值/边界（含 `ulong.MaxValue`、`long` 的 4294967296）、名称、未定义、越界、小数与 In 数组矩阵（FilterValueReader 12/12）。
 
 复跑（R1 head）：见下方「R1 复跑矩阵」。CI 保持暂停、未合并。
+
+### R1 复跑矩阵（head `9849defa`）
+
+- DynamicApi **125/125**（115 + 审查探针 6 + 等价控制 4）；Application **177/177**（含 8 种底层类型 enum 数值/边界/名称/未定义/In 数组矩阵）；fixture JIT **18/18**（11 + 审查探针 3 + 宿主装配 2 + 双序双 Feature 2）；E2E **20/20**；CapabilityEndpoint JIT **3/3**（该 fixture 无 ExplicitHost 贡献 → capability 等价校验与 JSON 合同校验路径均为 no-op，其原生门禁在本分支早前已 13/13）；JsonContracts 单元 **131/131**；PackageTests **29/29**；CodeGenerator **451/451**（configurator 形状断言已同步为插入语义）。
+- 原生门禁 **3/3**（linux-x64，committed head）：绿跑 exit 0（16 PASS（15 场景 + 构造探针）/0 FAIL/总 sentinel）；两变异 exit 1、定向 `create:FAIL`、无 sentinel、进程自行终止；三份 evidence SHA 精确绑定 `9849defaea7655b19b098aaec8e614ae177b714e`。
+- 双序验收说明：Widget 序与 Gadget 序两个宿主都跑通"每 Feature create/search + 每 Feature 失败体（ProblemDetails 由对方 context 先答时仍可序列化）"；SecondFeature 故意不织入（该验收不覆盖 UoW 腿，UoW 证据在主 fixture）。
