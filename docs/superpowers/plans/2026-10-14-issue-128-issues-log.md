@@ -266,3 +266,12 @@
 - 计划级拒绝用新类型 `QueryPlanException : CrestBusinessException`（`Application.Contracts.Query`，保留 `Crest.Crud.InvalidFilterField/UnsupportedFilterOperator/InvalidSortField` 错误码与业务错误面），值/类型不匹配仍是 `FilterValueFormatException`。
 - 证据：`CrudTypedQueryAdapterTests` 4/4（形状：kind/nullability/精确 reader 调用/operator lambda/默认排序/**不含 `QueryExecutor`**/不含旧守卫；`BundleCompileErrors` 为空；负例：无可查询字段仍发射 adapter 与两条拒绝路径并回落 Id desc；声明 Filterable/Sortable 集合限制 case）；Application.Tests 174/174；DynamicApi 114/114；CodeGenerator 全套后台复跑（451 预期），结果随后记录。
 - 说明（执行者记录、我接受）：为让「bundle 编译错误为空」的断言真实，测试闭包显式补齐 `System.Linq.Queryable`/`CrestCreates.Aop`/`CrestCreates.Schema.Abstractions`/`System.Text.Encodings.Web`；负例不能用 `ExcludeProperties` 排除全部可映射字段（会触发 ObjectMapping OM001），改用 Id-only 实体。
+
+## S3 增量 9：真实 Host 五动作 HTTP 证据（S3-7 步骤 1）
+
+- 在已有真实 JIT fixture（`tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests`，`WebApplicationFactory<Program>` + 真实 capability pipeline + `MapCrestCapabilityEndpoints`）上新增 CRUD 形状的 ExplicitHost 激活：`WidgetFeature/` 下含五动作 DTO、两个 capability input envelope、scoped 内存服务（记录调用与并发戳、尊重 CT）、一个**镜像生成物形状**的 `CapabilityEndpointContribution`（descriptor/binding/handler/result/required identity/body types + S3-5 的 `JsonContext` 与 10 个 required root）、以及 S3-5 形状的 `IConfigureOptions<JsonOptions>` 接线（本地 camelCase 源生成 context，宿主先清掉默认反射 resolver，再由 configurator 合并——反射不是答案来源）。
+- 用例 10 例（内容断言，非仅状态码）：Create 200+信封数据+服务恰一次；Create 缺体/空体 → 400 且服务零调用；坏 JSON → 400；GetById 命中 200 / 未知 id → 404 void 信封（无 data）/ 坏 id → 400；Search 带 camelCase filter payload → 200 分页信封（items/count）；Update 路由 id 与体进入服务；Delete 的 If-Match（去引号）进入服务；interface/concrete 同 scoped 实例。E2E 套件 **19/19**（原 9 + 新 10，0 失败）。
+- **通过本 fixture 实证暴露两处真实缺陷（不掩盖、记为 S3 未闭合项）**：
+  1. **生成物缺 handler 注册**：实测若只按当前 `AddGeneratedCrud` 注册（贡献 + scoped 服务 + JSON），POST `/api/widget` 返回 **500（HANDLER_NOT_FOUND）且服务零调用**——贡献的 handler 要经 `ICapabilityHandlerModule` 组合（与生成的 `GeneratedCapabilityHandlerModule` 同一模式）才会进入 dispatcher。fixture 里用一处**显式标注的桥**（手写 module）绕过，生成侧必须在下一步发射等价注册。
+  2. **能力注册表未汇总贡献**：真实 Host 的 `CapabilityRegistry` 构建仍只读静态 `DescriptorProviderRegistry`，贡献的 capability descriptors 需要 Host 自己桥接；按 §7.2，`MapCrestCapabilityEndpoints` 应在未 Built 时做**一次**权威汇总（静态 providers + 本 Host 贡献），已 Built 则核对必需 identities。
+- 仍未做（S3-7 步骤 2，明确不在本轮冒充）：请求中止/取消在 HTTP 层的传播、UoW 提交与响应写失败的独立事实、以及生成物（真实工具链）fixture（属 S4 的 `GeneratedCrud.AotFixture`）。

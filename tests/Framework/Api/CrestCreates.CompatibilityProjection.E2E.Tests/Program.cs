@@ -3,6 +3,9 @@ using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
 using CrestCreates.CompatibilityProjection.E2E;
+using CrestCreates.CompatibilityProjection.E2E.WidgetFeature;
+using CrestCreates.CompatibilityProjection.E2E.WidgetFeature.Generated;
+using CrestCreates.CompatibilityProjection.E2E.WidgetFeature.Services;
 using CrestCreates.DynamicApi;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
@@ -13,6 +16,7 @@ using CrestCreates.Metadata.DescriptorCapability;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +42,35 @@ builder.Services.AddCrestCompatibilityProjection();
 // Register the test AppService as scoped
 builder.Services.AddScoped<GreetingAppService>();
 
+// #128 S3-7 (J/H/Q, JIT leg): the CRUD-shaped ExplicitHost activation of the WidgetFeature probe
+// surface, following the generated AddGeneratedCrud() shape — the per-assembly contribution, one
+// scoped AppService instance serving both the interface and the concrete type, and the S3-5 JSON
+// configurator that appends the contribution's source-generated context to the host's resolver
+// chain. The generated-code fixture with real toolchain output is S4's scope (GeneratedCrud.AotFixture).
+builder.Services.AddCrestCapabilityEndpointContribution(new WidgetGeneratedCrudContribution());
+builder.Services.AddSingleton<WidgetCallRecorder>();
+builder.Services.TryAddScoped<WidgetAppService>();
+builder.Services.TryAddScoped<IWidgetAppService>(serviceProvider =>
+    serviceProvider.GetRequiredService<WidgetAppService>());
+
+// Dispatch bridge for the contribution's own invokers: the Capability pipeline resolves handlers
+// through the composed ICapabilityHandlerResolver (modules registered in DI — the same composition
+// model the generator emits for capability handlers), so the hand-written module replays the
+// contribution's Handlers into the host-owned resolver. The generated activation must eventually
+// emit this wiring itself; see WidgetHostWiring.cs.
+builder.Services.TryAddEnumerable(
+    ServiceDescriptor.Singleton<ICapabilityHandlerModule>(WidgetGeneratedCrudHandlerModule.Instance));
+
+// §7.2: this host must not let JsonSerializerIsReflectionEnabledByDefault behaviour answer the wire
+// contract. The default reflection resolver is dropped and the contribution's source-generated
+// context is combined into the final Http.Json.JsonOptions afterwards by the configurator (the
+// generated GeneratedCrudJsonOptionsConfigurator shape), so the map-time verification finds the
+// declared context as the first answering resolver for every required root.
+builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
+    options.SerializerOptions.TypeInfoResolverChain.Clear());
+builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+    IConfigureOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>, WidgetJsonOptionsConfigurator>());
+
 // Add logging (required by pipeline middleware)
 builder.Services.AddLogging();
 
@@ -45,7 +78,16 @@ var app = builder.Build();
 
 // Build capability registry from generated providers BEFORE endpoint mapping.
 var capabilityRegistry = (CapabilityRegistry)app.Services.GetRequiredService<ICapabilityRegistry>();
-var capabilityProviders = DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>();
+var capabilityProviders = DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>().ToList();
+// The host's own ExplicitHost contributions join the same single registry build: the endpoint
+// registry validation requires the referenced capabilities to be resolvable.
+var hostActivation = app.Services.GetRequiredService<CapabilityEndpointHostActivation>();
+if (hostActivation.GetCapabilityDescriptors().Count > 0)
+{
+    capabilityProviders.Add(
+        new WidgetContributionCapabilityProvider(hostActivation.GetCapabilityDescriptors()));
+}
+
 capabilityRegistry.Build(capabilityProviders);
 
 // Map capability endpoints (includes compatibility projection endpoints)
