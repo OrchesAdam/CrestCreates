@@ -813,7 +813,46 @@ public static class CrudArtifactEmitter
         }
 
         Line(builder, string.Empty);
+        Line(builder, NestedIndent + Indent
+            + "// §7.2: append this assembly's source-generated CRUD JSON context to the host's own resolver");
+        Line(builder, NestedIndent + Indent
+            + "// chain (after it), so the host's explicit resolvers keep winning for the types they know.");
+        Line(builder, NestedIndent + Indent
+            + "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddEnumerable(");
+        Line(builder, NestedIndent + Indent + Indent + "services,");
+        Line(builder, NestedIndent + Indent + Indent
+            + "global::Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Singleton<");
+        Line(builder, NestedIndent + Indent + Indent + Indent
+            + "global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>,");
+        Line(builder, NestedIndent + Indent + Indent + Indent
+            + CrudActivationConvention.JsonOptionsConfiguratorTypeName + ">());");
+
+        Line(builder, string.Empty);
         Line(builder, NestedIndent + Indent + "return services;");
+        Line(builder, NestedIndent + "}");
+        Line(builder, Indent + "}");
+
+        Line(builder, string.Empty);
+        Line(builder, Indent + "/// <summary>");
+        Line(builder, Indent + "/// §7.2 host wiring of assembly '" + owner + "': appends the generated CRUD JSON context");
+        Line(builder, Indent + "/// to this host's final Http.Json.JsonOptions after any resolver the host configured itself.");
+        Line(builder, Indent + "/// The host's own explicit resolvers therefore keep winning for the types they already know,");
+        Line(builder, Indent + "/// while the source-generated CRUD roots are answered by this assembly's context. Registered");
+        Line(builder, Indent + "/// only from AddGeneratedCrud; repeated activation stays idempotent.");
+        Line(builder, Indent + "/// </summary>");
+        Line(builder, Indent + "internal sealed class " + CrudActivationConvention.JsonOptionsConfiguratorTypeName
+            + " : global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>");
+        Line(builder, Indent + "{");
+        Line(builder, NestedIndent
+            + "public void Configure(global::Microsoft.AspNetCore.Http.Json.JsonOptions options)");
+        Line(builder, NestedIndent + "{");
+        Line(builder, NestedIndent + Indent + "var generatedContext = "
+            + Qualified(CrudJsonContractConvention.JsonContextFullName) + ".Default;");
+        Line(builder, NestedIndent + Indent + "var existing = options.SerializerOptions.TypeInfoResolver;");
+        Line(builder, NestedIndent + Indent + "options.SerializerOptions.TypeInfoResolver = existing is null");
+        Line(builder, NestedIndent + Indent + Indent + "? generatedContext");
+        Line(builder, NestedIndent + Indent + Indent
+            + ": global::System.Text.Json.Serialization.Metadata.JsonTypeInfoResolver.Combine(existing, generatedContext);");
         Line(builder, NestedIndent + "}");
         Line(builder, Indent + "}");
         CloseNamespace(builder);
@@ -850,6 +889,7 @@ public static class CrudArtifactEmitter
         EmitContributionHandlerBindings(builder, model);
         EmitContributionResultBindings(builder, model);
         EmitContributionBodyTypes(builder, model);
+        EmitContributionJsonContract(builder, model);
         EmitContributionRequiredIdentities(builder, model);
         Line(builder, NestedIndent + "}");
         Line(builder, string.Empty);
@@ -1013,6 +1053,101 @@ public static class CrudArtifactEmitter
         }
         Line(builder, NestedIndent + Indent + "};");
     }
+
+    /// <summary>
+    /// §7.1/§7.2: the generated JSON contract this contribution delivers to the host — the assembly's
+    /// one source-generated context plus the exact roots the host's final Http.Json.JsonOptions must
+    /// answer from it. The root set is derived from the same model that emits the binders and result
+    /// mappers (bodies, capability input envelopes, payloads, typed result envelopes and the void
+    /// envelope), so the verification and the emitted wire shape cannot disagree.
+    /// </summary>
+    private static void EmitContributionJsonContract(StringBuilder builder, CrudGenerationModel model)
+    {
+        Line(builder, NestedIndent + Indent + "JsonContext = "
+            + Qualified(CrudJsonContractConvention.JsonContextFullName) + ".Default;");
+        Line(builder, NestedIndent + Indent
+            + "RequiredJsonRootTypes = new global::CrestCreates.DynamicApi.CapabilityEndpointJsonRootType[]");
+        Line(builder, NestedIndent + Indent + "{");
+        foreach (var (typeDisplay, action, component) in JsonRootRequirements(model))
+        {
+            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointJsonRootType(");
+            Line(builder, QuintIndent + "typeof(" + typeDisplay + "),");
+            Line(builder, QuintIndent + "\"" + Escape(action) + "\",");
+            Line(builder, QuintIndent + "\"" + component + "\"),");
+        }
+
+        Line(builder, NestedIndent + Indent + "};");
+    }
+
+    /// <summary>
+    /// One wire component label per §7.1 vocabulary; the diagnostics message uses them to say which
+    /// part of the action contract is missing.
+    /// </summary>
+    private const string JsonRootBodyComponent = "Body";
+
+    private const string JsonRootCapabilityInputComponent = "CapabilityInput";
+
+    private const string JsonRootPayloadComponent = "Payload";
+
+    private const string JsonRootResultEnvelopeComponent = "ResultEnvelope";
+
+    private const string JsonRootVoidEnvelopeComponent = "VoidEnvelope";
+
+    /// <summary>
+    /// The required JSON roots of one model, in canonical action order, deduplicated by type so a root
+    /// shared by several actions is reported against the first action that requires it. The GET branch
+    /// also consumes the void envelope for its 404 answer, exactly like the emitted result mapper.
+    /// </summary>
+    private static IReadOnlyList<(string TypeDisplay, string Action, string Component)> JsonRootRequirements(
+        CrudGenerationModel model)
+    {
+        var requirements = new List<(string, string, string)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        void Add(string? typeDisplay, string action, string component)
+        {
+            if (typeDisplay is null || !seen.Add(typeDisplay))
+            {
+                return;
+            }
+
+            requirements.Add((typeDisplay, action, component));
+        }
+
+        foreach (var action in model.Actions)
+        {
+            var payload = ResultPayloadDisplay(action);
+            Add(action.BodyPayloadFullName is null ? null : Qualified(action.BodyPayloadFullName),
+                action.Name, JsonRootBodyComponent);
+            if (action.UsesCapabilityInputEnvelope)
+            {
+                Add(Qualified(model.EnvelopeFullName(action.Name)), action.Name, JsonRootCapabilityInputComponent);
+            }
+
+            Add(payload, action.Name, JsonRootPayloadComponent);
+            Add(
+                payload is null ? CrudResponseContract.VoidEnvelope : CrudResponseContract.EnvelopeOfPayload(payload),
+                action.Name,
+                payload is null ? JsonRootVoidEnvelopeComponent : JsonRootResultEnvelopeComponent);
+            if (payload is not null && string.Equals(action.HttpMethod, "GET", StringComparison.Ordinal))
+            {
+                Add(CrudResponseContract.VoidEnvelope, action.Name, JsonRootVoidEnvelopeComponent);
+            }
+        }
+
+        return requirements;
+    }
+
+    /// <summary>
+    /// §7.3 declared result payload display of one action (the paged wrapper applied), or null for the
+    /// void action. The result mapper and the JSON root requirements read this one rule.
+    /// </summary>
+    private static string? ResultPayloadDisplay(CrudActionModel action) =>
+        action.ResultPayloadFullName is null
+            ? null
+            : action.UsesPagedResult
+                ? CrudResponseContract.PagedPayload(action.ResultPayloadFullName)
+                : Qualified(action.ResultPayloadFullName);
 
     private static void EmitContributionRequiredIdentities(StringBuilder builder, CrudGenerationModel model)
     {
@@ -1182,11 +1317,7 @@ public static class CrudArtifactEmitter
         CrudGenerationModel model,
         CrudActionModel action)
     {
-        var payload = action.ResultPayloadFullName is null
-            ? null
-            : action.UsesPagedResult
-                ? CrudResponseContract.PagedPayload(action.ResultPayloadFullName)
-                : Qualified(action.ResultPayloadFullName);
+        var payload = ResultPayloadDisplay(action);
         var require = "global::CrestCreates.DynamicApi.CapabilityEndpointJsonTypeInfoResolver.Require";
         var mapper = "global::CrestCreates.DynamicApi.CompatibilityHttpResultMapper";
 

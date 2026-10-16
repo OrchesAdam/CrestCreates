@@ -933,11 +933,98 @@ public class CrudServiceRealDeclarationBaselineTests
             "every action needs a typed result mapper binding");
         bundle.Should().Contain("CapabilityEndpointRequiredIdentity",
             "every action must declare its required registry identity");
+        bundle.Should().Contain("CapabilityEndpointJsonRootType",
+            "every required JSON root must be declared for the map-time verification");
+        bundle.Should().Contain("RequiredJsonRootTypes",
+            "the contribution must carry the JSON roots the host's final options have to answer");
+        bundle.Should().Contain("CrestCreatesCrudJsonSerializerContext",
+            "the contribution must reference the assembly's one source-generated CRUD JSON context");
+        bundle.Should().Contain("IConfigureOptions",
+            "the activation must register the generated JsonOptions configurator");
+        bundle.Should().Contain("JsonTypeInfoResolver.Combine",
+            "the configurator must append the generated context after the host's own resolvers");
 
         foreach (var forbidden in ForbiddenLegacyRegistrationSymbols)
         {
             bundle.Should().NotContain(forbidden,
                 $"formal CRUD must never register through the legacy global path ('{forbidden}')");
         }
+    }
+
+    [Fact]
+    public void Materialized_bundle_must_declare_the_json_root_contract_and_host_wiring()
+    {
+        // #128 S3 step C (§7.1/§7.2): the contribution carries the assembly's generated JSON context
+        // plus the exact §7.1 roots the host's final Http.Json.JsonOptions has to answer; the assembly
+        // activation registers an IConfigureOptions<JsonOptions> configurator that appends the context
+        // after any resolver the host configured itself. Nothing may install a reflection resolver.
+        var producer = CrudPrecompileProducer.Run(DeclarationSource, ClosureReferences());
+
+        producer.Diagnostics.Should().BeEmpty(
+            "the declaration must build a clean model: "
+            + string.Join(" | ", producer.Diagnostics.Select(issue => issue.ToDisplayString())));
+
+        var bundle = string.Join("\n", producer.BundleTrees.Select(tree => tree.ToString()));
+
+        // The one-driver harness closure deliberately carries only the references the contract checks
+        // need (real MSBuild supplies the rest), so errors before the JSON contract block are closure
+        // gaps, not producer defects. From the JSON contract block to the end of the bundle — which is
+        // exactly the emitted JSON contract plus the assembly activation artifact — nothing may fail
+        // to compile: a malformed generated statement must be caught here, not only by the real build.
+        var jsonBlockStartLine = bundle[..bundle.IndexOf(
+            "JsonContext = global::", StringComparison.Ordinal)].Count(character => character == '\n');
+        var jsonContractErrors = producer.Compilation.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error
+                && diagnostic.Location.SourceTree is { } tree
+                && tree.FilePath.EndsWith("CrestCreates.Crud.g.cs", StringComparison.Ordinal)
+                && diagnostic.Location.GetLineSpan().StartLinePosition.Line >= jsonBlockStartLine)
+            .Select(diagnostic => diagnostic.ToString())
+            .ToArray();
+        jsonContractErrors.Should().BeEmpty(
+            "the generated JSON contract and host wiring must compile in the one-driver harness: "
+            + string.Join(" | ", jsonContractErrors));
+
+        bundle.Should().Contain(
+            "JsonContext = global::CrestCreates.Generated.CrestCreatesCrudJsonSerializerContext.Default",
+            "the contribution must deliver the assembly's source-generated CRUD context");
+        bundle.Should().Contain(
+            "RequiredJsonRootTypes = new global::CrestCreates.DynamicApi.CapabilityEndpointJsonRootType[]");
+
+        // The ten §7.1 roots, each derived from the model: request bodies, the two capability input
+        // envelopes, the read DTO, the bounded page payload, the typed and void result envelopes.
+        string[] requiredRoots =
+        [
+            "typeof(global::Shop.Application.Products.Contracts.ProductDto),",
+            "typeof(global::Shop.Application.Products.Contracts.CreateProductDto),",
+            "typeof(global::Shop.Application.Products.Contracts.UpdateProductDto),",
+            "typeof(global::Shop.Application.Products.Contracts.ProductListRequestDto),",
+            "typeof(global::CrestCreates.Generated.ProductAppService_Update_CompatibilityInput),",
+            "typeof(global::CrestCreates.Generated.ProductAppService_Delete_CompatibilityInput),",
+            "typeof(global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>),",
+            "typeof(global::CrestCreates.DynamicApi.DynamicApiResponse<global::Shop.Application.Products.Contracts.ProductDto>),",
+            "typeof(global::CrestCreates.DynamicApi.DynamicApiResponse<global::CrestCreates.Application.Contracts.DTOs.Common.PagedResultDto<global::Shop.Application.Products.Contracts.ProductDto>>),",
+            "typeof(global::CrestCreates.DynamicApi.DynamicApiResponse),",
+        ];
+        foreach (var root in requiredRoots)
+        {
+            bundle.Should().Contain(root, "the §7.1 root matrix must be declared from the model");
+        }
+
+        var declaredRootCount = System.Text.RegularExpressions.Regex.Matches(
+            bundle, @"new global::CrestCreates\.DynamicApi\.CapabilityEndpointJsonRootType\(").Count;
+        declaredRootCount.Should().Be(requiredRoots.Length,
+            "the default CRUD surface declares exactly the ten §7.1 roots, deduplicated by type");
+
+        bundle.Should().Contain("internal sealed class GeneratedCrudJsonOptionsConfigurator",
+            "the assembly activation must emit the host wiring type");
+        bundle.Should().Contain(
+            "global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>",
+            "the wiring must plug into the host's own Http.Json.JsonOptions");
+        bundle.Should().Contain("JsonTypeInfoResolver.Combine(existing, generatedContext)",
+            "an existing host resolver must stay first and keep winning for the types it knows");
+        bundle.Should().Contain("ServiceCollectionDescriptorExtensions.TryAddEnumerable",
+            "repeated AddGeneratedCrud calls must stay idempotent");
+        bundle.Should().NotContain("DefaultJsonTypeInfoResolver",
+            "the generated wiring must never install or fall back to a reflection resolver");
     }
 }

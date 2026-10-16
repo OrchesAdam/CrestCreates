@@ -299,6 +299,12 @@ public static class CrudActivationConvention
 
     public const string ActivationMethodName = "AddGeneratedCrud";
 
+    /// <summary>
+    /// §7.2: the generated <c>IConfigureOptions&lt;Http.Json.JsonOptions&gt;</c> configurator that
+    /// appends this assembly's generated CRUD JSON context to the host's resolver chain.
+    /// </summary>
+    public const string JsonOptionsConfiguratorTypeName = "GeneratedCrudJsonOptionsConfigurator";
+
     public const string ContributionPrefix = "GeneratedCrudContribution_";
 
     public static string ActivationNamespace(string assemblyName) =>
@@ -345,6 +351,23 @@ public static class CrudResponseContract
 
     public static string VoidEnvelope =>
         "global::" + DynamicApiEnvelopeNamespace + ".DynamicApiResponse";
+}
+
+/// <summary>
+/// §7.1/§7.2: identity of the one source-generated JSON context that carries the assembly's CRUD root
+/// matrix. The JSON stage emits this context (see the JSON runtime's
+/// <c>JsonContractBuildConstants.CrudJsonContextSimpleName</c>, which aliases this name) and the
+/// generated ExplicitHost contribution references it, so both sides share exactly one definition.
+/// </summary>
+public static class CrudJsonContractConvention
+{
+    /// <summary>Namespace of the generated JSON blocks the CRUD context is materialized into.</summary>
+    public const string GeneratedNamespace = "CrestCreates.Generated";
+
+    public const string JsonContextSimpleName = "CrestCreatesCrudJsonSerializerContext";
+
+    /// <summary>Namespace-qualified name the generated contribution and configurator reference.</summary>
+    public static string JsonContextFullName => GeneratedNamespace + "." + JsonContextSimpleName;
 }
 
 /// <summary>Model plus the diagnostics that came out of the same build pass.</summary>

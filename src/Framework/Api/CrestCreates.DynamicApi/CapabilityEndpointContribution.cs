@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 using CrestCreates.Metadata;
 
 namespace CrestCreates.DynamicApi;
@@ -61,6 +62,27 @@ public class CapabilityEndpointContribution
     /// </summary>
     public IReadOnlyList<Type> BodyTypes { get; init; }
         = Array.Empty<Type>();
+
+    /// <summary>
+    /// The assembly's source-generated JSON context (the generated CRUD root context) this
+    /// contribution delivers to the host's final <c>Http.Json.JsonOptions</c>.
+    /// </summary>
+    /// <remarks>
+    /// #128 §7.1/§7.2: the generated configurator appended by the assembly activation wires this
+    /// context into the host's resolver chain, and the map-time verification requires every
+    /// <see cref="RequiredJsonRootTypes"/> entry to be answered by this exact context on the host's
+    /// final options. A reflection resolver never satisfies that requirement.
+    /// </remarks>
+    public JsonSerializerContext? JsonContext { get; init; }
+
+    /// <summary>
+    /// JSON contract roots this contribution requires the host's final options to resolve from
+    /// <see cref="JsonContext"/> (bodies, capability input envelopes, payloads, typed result envelopes
+    /// and the void envelope). Each root that the final options cannot answer from the declared
+    /// source-generated context fails the map deterministically with owner/action/type diagnostics.
+    /// </summary>
+    public IReadOnlyList<CapabilityEndpointJsonRootType> RequiredJsonRootTypes { get; init; }
+        = Array.Empty<CapabilityEndpointJsonRootType>();
 
     /// <summary>
     /// Registry identities this contribution requires to be present in the authoritative registry

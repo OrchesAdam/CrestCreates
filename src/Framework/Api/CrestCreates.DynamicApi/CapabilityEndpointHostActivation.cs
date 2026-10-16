@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Text.Json.Serialization;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 
@@ -9,9 +10,10 @@ namespace CrestCreates.DynamicApi;
 /// </summary>
 /// <remarks>
 /// The activation is the host-authoritative answer source for endpoint descriptors, bindings,
-/// handlers, result mappers, body types and required identities. Lookups never fall back to
-/// another host: the legacy static registries remain a fallback source only so existing
-/// compatibility consumers keep working, and they are consulted after the host contribution.
+/// handlers, result mappers, body types, required identities and the per-contribution JSON contract
+/// requirements. Lookups never fall back to another host: the legacy static registries remain a
+/// fallback source only so existing compatibility consumers keep working, and they are consulted
+/// after the host contribution.
 /// </remarks>
 public sealed class CapabilityEndpointHostActivation
 {
@@ -25,6 +27,7 @@ public sealed class CapabilityEndpointHostActivation
     private readonly IReadOnlyList<Type> _bodyTypes;
     private readonly IReadOnlyList<CapabilityEndpointRequiredIdentity> _requiredIdentities;
     private readonly IReadOnlyList<RequiredIdentityEntry> _requiredIdentityEntries;
+    private readonly IReadOnlyList<ContributedJsonContract> _contributedJsonContracts;
 
     public CapabilityEndpointHostActivation(
         IEnumerable<CapabilityEndpointContribution> contributions,
@@ -44,6 +47,7 @@ public sealed class CapabilityEndpointHostActivation
         var bodyTypes = new List<Type>();
         var requiredIdentities = new List<CapabilityEndpointRequiredIdentity>();
         var requiredIdentityEntries = new List<RequiredIdentityEntry>();
+        var contributedJsonContracts = new List<ContributedJsonContract>();
 
         foreach (var contribution in contributions)
         {
@@ -123,6 +127,14 @@ public sealed class CapabilityEndpointHostActivation
                 requiredIdentities.Add(effective);
                 requiredIdentityEntries.Add(new RequiredIdentityEntry(effective, owner));
             }
+
+            // §7.2: the JSON contract requirements of this contribution travel with its owner identity
+            // so the map-time verification can name the responsible assembly in its diagnostics.
+            if (contribution.RequiredJsonRootTypes.Count > 0)
+            {
+                contributedJsonContracts.Add(new ContributedJsonContract(
+                    owner, contribution.JsonContext, contribution.RequiredJsonRootTypes));
+            }
         }
 
         _contributedBindings = bindings.ToFrozenDictionary(pair => pair.Key, pair => pair.Value);
@@ -134,6 +146,7 @@ public sealed class CapabilityEndpointHostActivation
         _bodyTypes = bodyTypes;
         _requiredIdentities = requiredIdentities;
         _requiredIdentityEntries = requiredIdentityEntries;
+        _contributedJsonContracts = contributedJsonContracts;
     }
 
     /// <summary>
@@ -160,6 +173,22 @@ public sealed class CapabilityEndpointHostActivation
     internal readonly record struct RequiredIdentityEntry(
         CapabilityEndpointRequiredIdentity Identity,
         string RequiredBy);
+
+    /// <summary>
+    /// Per-contribution JSON contract requirements this host must verify against its own final
+    /// <c>Http.Json.JsonOptions</c>. Contributions that declare no required root are not listed: they
+    /// have nothing to verify.
+    /// </summary>
+    internal IReadOnlyList<ContributedJsonContract> GetContributedJsonContracts() => _contributedJsonContracts;
+
+    /// <summary>
+    /// One contribution's JSON contract: the declaring owner, the source-generated context it delivers
+    /// and the roots the host's final options must answer from that context.
+    /// </summary>
+    internal readonly record struct ContributedJsonContract(
+        string Owner,
+        JsonSerializerContext? JsonContext,
+        IReadOnlyList<CapabilityEndpointJsonRootType> RequiredJsonRootTypes);
 
     /// <summary>
     /// Body types contributed by this host, with the legacy static registry as fallback.

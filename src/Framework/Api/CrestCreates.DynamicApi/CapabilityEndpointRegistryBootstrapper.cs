@@ -1,5 +1,11 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using Microsoft.AspNetCore.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.DynamicApi;
 
@@ -14,23 +20,29 @@ namespace CrestCreates.DynamicApi;
 /// permanently poisons the host and a later attempt retries from the then-current inputs. The
 /// bootstrapper also owns the per-host mapped-endpoint ledger used to de-duplicate repeated maps by
 /// (endpointId, version).
+/// The same verification pass also requires every contributed JSON contract root to be answered by the
+/// contribution's source-generated context on this host's final <c>Http.Json.JsonOptions</c>; the final
+/// options are read at verification time and never cached process-globally.
 /// </remarks>
 internal sealed class CapabilityEndpointRegistryBootstrapper
 {
     private readonly ICapabilityEndpointRegistry _registry;
     private readonly CapabilityEndpointRegistry? _retryableRegistry;
     private readonly CapabilityEndpointHostActivation _hostActivation;
+    private readonly IServiceProvider _serviceProvider;
     private readonly object _gate = new();
     private readonly HashSet<(string EndpointId, int Version)> _mappedEndpoints = new();
     private bool _ready;
 
     public CapabilityEndpointRegistryBootstrapper(
         ICapabilityEndpointRegistry registry,
-        CapabilityEndpointHostActivation hostActivation)
+        CapabilityEndpointHostActivation hostActivation,
+        IServiceProvider serviceProvider)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _retryableRegistry = registry as CapabilityEndpointRegistry;
         _hostActivation = hostActivation ?? throw new ArgumentNullException(nameof(hostActivation));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     }
 
     public void EnsureBuilt()
@@ -66,6 +78,7 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             }
 
             VerifyHostIdentities();
+            VerifyHostJsonContracts();
 
             _ready = true;
         }
@@ -153,5 +166,147 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
         }
 
         public IReadOnlyList<CapabilityEndpointDescriptor> GetDescriptors() => _descriptors;
+    }
+
+    /// <summary>
+    /// #128 §7.1/§7.2 map-time verification: for every contribution and every required JSON contract
+    /// root, the contribution's own source-generated context must resolve the type AND the host's final
+    /// <c>Http.Json.JsonOptions</c> must resolve it from that same context. The final options are read
+    /// here, on this host's own options instance, and never cached process-globally. A reflection
+    /// resolver never satisfies the requirement: the root's ordered resolver chain must answer from the
+    /// declared contributor, so a host whose only resolver is
+    /// <c>DefaultJsonTypeInfoResolver</c> fails even though reflection could serialize the type.
+    /// </summary>
+    private void VerifyHostJsonContracts()
+    {
+        var contracts = _hostActivation.GetContributedJsonContracts();
+        if (contracts.Count == 0)
+        {
+            return;
+        }
+
+        JsonSerializerOptions? options = null;
+        foreach (var contract in contracts)
+        {
+            foreach (var required in contract.RequiredJsonRootTypes)
+            {
+                // Read the final options on first need only, so hosts without JSON contract
+                // requirements never depend on Http.Json.JsonOptions being resolvable.
+                options ??= _serviceProvider.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
+
+                var reason = DescribeJsonRootFailure(options, contract, required);
+                if (reason is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Required JSON contract root '{required.TypeName}' is not resolved from the declared "
+                        + $"source-generated contract (owner '{contract.Owner}', action '{required.Action}', "
+                        + $"type '{required.TypeName}', component '{required.Component}'). {reason} "
+                        + "CRUD JSON metadata must be supplied by the contribution's source-generated JsonContext "
+                        + "on the host's final Http.Json.JsonOptions; it is never resolved through a reflection "
+                        + "resolver and never silently skipped.");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns null when the root is satisfied, otherwise the deterministic reason used by the
+    /// diagnostics message. Both halves of §7.2 are checked: the contributed context must carry the
+    /// metadata, and the host's final resolver chain must answer with that exact context.
+    /// </summary>
+    private static string? DescribeJsonRootFailure(
+        JsonSerializerOptions options,
+        CapabilityEndpointHostActivation.ContributedJsonContract contract,
+        CapabilityEndpointJsonRootType required)
+    {
+        var context = contract.JsonContext;
+        if (context is null)
+        {
+            return "The owning contribution declares no source-generated JsonContext.";
+        }
+
+        if (!TryGetContributedMetadata(context, required, out _))
+        {
+            return "The contribution's source-generated JsonContext does not carry metadata for it.";
+        }
+
+        if (!TryFindFirstAnsweringResolver(
+                options.TypeInfoResolverChain, required.ClrType, options, out var answering))
+        {
+            return "The host's final resolver chain answers no metadata for it at all.";
+        }
+
+        if (!ReferenceEquals(answering, context))
+        {
+            return $"The host's final resolver chain answers it from "
+                + $"'{answering!.GetType().FullName ?? answering.GetType().Name}' before the contribution's "
+                + "JsonContext (activate the generated context after the host's own resolvers).";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Asks the contributed context for the root's metadata through the resolver interface, using the
+    /// context's own options so the answer is a pure fact about the declared contract.
+    /// </summary>
+    private static bool TryGetContributedMetadata(
+        JsonSerializerContext context,
+        CapabilityEndpointJsonRootType required,
+        out JsonTypeInfo? metadata)
+    {
+        try
+        {
+            metadata = ((IJsonTypeInfoResolver)context).GetTypeInfo(required.ClrType, context.Options);
+            return metadata is not null;
+        }
+        catch (NotSupportedException)
+        {
+            metadata = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reproduces the ordered resolution of the final options — the first resolver in the chain that
+    /// answers wins — so the verification can tell which resolver actually served the type. A composed
+    /// resolver (the chain type <c>JsonTypeInfoResolver.Combine</c> produces) is walked in its own
+    /// order at its position, matching how the options themselves resolve the type.
+    /// </summary>
+    private static bool TryFindFirstAnsweringResolver(
+        IList<IJsonTypeInfoResolver> chain,
+        Type type,
+        JsonSerializerOptions options,
+        out IJsonTypeInfoResolver? answering)
+    {
+        foreach (var resolver in chain)
+        {
+            if (resolver is not JsonSerializerContext
+                && resolver is IList<IJsonTypeInfoResolver> composed)
+            {
+                if (TryFindFirstAnsweringResolver(composed, type, options, out answering))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            try
+            {
+                if (resolver.GetTypeInfo(type, options) is not null)
+                {
+                    answering = resolver;
+                    return true;
+                }
+            }
+            catch (NotSupportedException)
+            {
+                // A resolver without metadata for the type reports it this way; the chain continues.
+            }
+        }
+
+        answering = null;
+        return false;
     }
 }

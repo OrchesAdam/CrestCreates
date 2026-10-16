@@ -124,7 +124,10 @@ public static class JsonContractSourceWriter
         List<JsonContractRootModel> roots,
         string assemblyName)
     {
-        sb.AppendLine($"namespace {JsonContractBuildConstants.LocalEventGeneratedNamespace}");
+        // The CRUD context namespace is owned by the shared CRUD generation convention, which the
+        // generated activation also references (one definition for both sides).
+        var crudNamespace = global::CrestCreates.Tooling.CrudGeneration.CrudJsonContractConvention.GeneratedNamespace;
+        sb.AppendLine($"namespace {crudNamespace}");
         sb.AppendLine("{");
 
         foreach (var root in roots.OrderBy(r => r.FullMetadataName, StringComparer.Ordinal))
