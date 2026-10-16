@@ -354,3 +354,32 @@
 4. 附带修正 harness 过滤：IL 告警归属按**诊断自身文件路径**（`tests/Framework/Api/CrestCreates.GeneratedCrud*` 前缀，取首个 ": " 之前的路径段）判定，而非 csproj 标签——依赖工程（Aop/Application.Contracts）的既有 trim 告警带本 fixture 的 csproj 标签，不能当作 fixture 自身信号；Host csproj 移除以全局 WarningsAsErrors 提升 IL 码（会把整条 publish 图的既有依赖告警变错误），fixture 自身的 IL 不洁净由 harness 断言兜底（复跑实证：fixture 归属的 IL2026/IL3050 为 0）。
 
 原生推进序列（每步都真机 publish/link/run）：首轮 publish **15 场景 13 过**（decimal 排序与 decimal 过滤两例失败）→ provider + ObjectMapping 注解后 **14/15**（仅 `decimal ==`）→ 探针定位到 decimal 运算符缺口并完成 emitter 收敛后进入最终门禁复跑。
+
+最终原生证据：**门禁 3/3**——绿跑 gateExit=0（16 PASS（15 场景 + 构造探针）/0 FAIL/总 sentinel）、`wrong-expectation` 变异 gateExit=1（`create:FAIL`、无 sentinel、进程自行终止）、`wrong-typed-envelope` 变异 gateExit=1（同上）；三份证据 JSON 均在 `tests/artifacts/aot-native-evidence/`，publish exit 0 且 fixture 归属 IL 告警 0（按诊断文件路径判定）。
+
+## S4 增量 5：受影响门禁复跑（最终 head）与一处真实回归修复
+
+按 S4 计划复跑全部受影响门禁，最后一项当场抓到真实回归：
+
+- **CapabilityEndpoint 原生 HTTP 门禁（既有 fixture）2/13 失败 → 修复后 13/13**：失败根因是 S3-2 的 typed 结果契约把兼容投影的结果 mapper 改为 `Require<T>`（fail-closed），而该 AOT fixture 手写的 JSON context 仍只有旧的 `DynamicApiResponse<object>` root——native 进程在 readiness 端点回 500（"Source-generated JSON metadata ... is not available in this host"）。修复：fixture context 声明生成契约实际要求的三个闭合 root（`DynamicApiResponse`（void/404）、`DynamicApiResponse<GreetingResponse>`、`DynamicApiResponse<List<GreetingResponse>>`）；JIT 部分原本靠反射 resolver 掩盖了缺口，native 门禁是唯一能抓到的信号。提交 `79193444`。这正是"既有原生门禁必须在工具链/契约变化后复跑"的价值证据。
+- 其余复跑（最终 head）：CodeGenerator **451/451**；JsonContracts 单元 **131/131**；PackageTests（真实消费工程构建/pack）**29/29**；BuildTasks **8/8**；OrmProviders（#137 UoW 回归）**124/124**；LocalEvent 原生 publish/link/run **1/1**（11 场景 + sentinel）；CapabilityEndpoint 全套 **13/13**（含原生 HTTP 门禁与负例）；RabbitMQ 单元 **58/58** + broker 集成 **37/37** + trim/NativeAOT 双门禁 **2/2**（六场景 + sentinel，broker 为本地 `crestcreates-test-rabbitmq`）；fixture JIT **11/11** + GeneratedCrud 原生门禁 **3/3**；E2E（S3-7 手工形状探针）**20/20**；DynamicApi **115/115**。
+- 已知未复跑项（如实记录）：Windows/macOS RID 原生门禁（本机 linux-x64 only）；`samples/*` 的 AOT 发布（改动只涉及 formal CRUD/ObjectMapping 投影形态，四个 sample 无 formal 声明；compat 引擎 S3 已修过 CS8651 且本轮不再触碰其路径）。
+
+## S4 收口：迁移表、owner/provenance、支持声明与 #129 交接
+
+**迁移（对照 Spec §9）**：
+1. 新项目形态（D01）：真实 `[GenerateCrudService(typeof(Entity))]` 声明 + 标准工具链导入 + `AddGeneratedCrud()` —— fixture 的 Domain/Feature/Host 三件即此形态的完整运行证据。
+2. 现有手写 DTO/独立 Contracts 不自动搬迁；转换为自动生成时 owner/FQN 唯一性由 outputs manifest 与 CCCRUD003/CCRUD008 守卫（既有测试与 MSBuild 探针）。
+3. 旧 generated CRUD provider 收口：正式声明不再产生任何 legacy 注册（`DynamicApiAotSourceGenerator` ownership 跳过 + 整棵生成树断言）；旧 bundle 路径保留给尚未迁移的旧测试消费者（S2-4 已把它降为诊断入口），`CrudServiceSourceGenerator` 的 `#warning` 待旧路径归档后移除——**本项未做**（不提前删除仍有消费者的隔离 legacy，留 #129/独立归档任务）。
+4. AGENTS/memory/#123 evidence matrix 与本文档同步更新（支持声明见下）。
+5. #129 交接：wire shape（DTO 命名/Contracts 命名空间/Envelope/`RequiredJsonRootTypes`/camelCase）、typed JSON roots 与 `AddGeneratedCrud` 激活 API、typed query adapter 的 decimal operator-free 形态、ExplicitHost 贡献契约（`CapabilityEndpointContribution` + `AddCrestCapabilityEndpointContribution`）、已验证组合/限制（见下）、以及必带的两条纪律：工具链消费者需 `Microsoft.AspNetCore.App` 引用；正式声明所在工程禁用 legacy 前提。
+
+**owner/provenance 收口**：outputs manifest 的 owner（`OwnerServiceFullName`/`OwnerAssemblyName`）与 sha256 content hash 由 MSBuild 端到端契约断言；JSON 阶段按 schema/owner/FQN 集合/artifact hash 与 manifest 双向对账（缺/旧/多余即 CCCRUD008）；整次编译级 legacy 符号断言（`DynamicApiGeneratedRegistryStore`/`GeneratedDynamicApiRegistry`/`DynamicApiGeneratedRuntime.ReadBodyAsync`/CS0618 全禁）；native 证据含 fixture 归属 IL 告警为零的判定（按诊断文件路径）。
+
+**支持声明（#128 范围，逐项）**：
+- 正式 CRUD + JSON 主链（生成 DTO/service/projection/typed envelope/typed adapter + `AddGeneratedCrud` + Map 期契约汇总与 metadata 拒绝）：**NativeAOT-verified（linux-x64）**——prompt 的 fixture publish/link/run 与 16 场景 + 两变异反例 + 双 sentinel。
+- 内存 Search 执行：fixture memory query provider 的**静态受支持执行方案**（§8 收敛）；BCL `EnumerableQuery` 在 AOT 下不可执行是实测平台事实（构造/运行两级证据）。
+- decimal 过滤形态：operator-free（Equals/CompareTo/HasValue）；探针矩阵证明除 decimal 运算符外其余形状在 AOT 表达式树可构造。
+- EF/其他 ORM 的查询翻译与 UoW 组合：**未验证**（独立声明；decimal/DateTime 的 CompareTo 形态翻译证据待补，作为 #129/EF 轨道前置）。
+- UoW 语义证据仅在 fixture memory provider（#137 公共契约）上；EF/持久化 UoW 由 #137 自身证据承担。
+- JIT（linux）：fixture 11/11 + E2E 20/20；Windows/macOS RID 原生：未验证。
