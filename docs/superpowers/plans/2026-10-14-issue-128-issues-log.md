@@ -252,3 +252,9 @@
 - 证据：DynamicApi 新增 5 例（接线后才解析出的 generated-only root、宿主 resolver 仍优先、必需 root 缺失→ Map 失败点名、仅反射 resolver 的宿主必须失败、契约齐备时正常 Map）→ 套件 **114/114**；发射侧新增 `Materialized_bundle_must_declare_the_json_root_contract_and_host_wiring`（context 引用 + 恰好 10 个 root 及 action/component 标注 + 配置器/Combine/无 `DefaultJsonTypeInfoResolver`）→ 定向通过。
 - **修正一处我此前引入的真实破坏**（诚实记录）：S3-2 的兼容 result emitter 用带可空标注的返回类型名生成 `ctx.Output as AssetResult?`，`as` 表达式非法（CS8651），`samples/AssetManagement`、`ProcurementApproval` 两个 Host 在 HEAD 上编译失败。修法是从源头改：compat 生成器的 `returnTypeName` 改用不带 `NullableReferenceTypeModifier` 的 `SymbolDisplayFormat.FullyQualifiedFormat`（envelope 的可空性由运行期泛型 `T?` 承担）。修后四个 sample（AssetManagement / ProcurementApproval / LibraryManagement.Web / SaaSHelpdesk.Web）全部 0 错误，compat 定向 42/42。
 - 其余验证：JsonContracts 单元 131/131；CodeGenerator 全套在后台复跑（含真实构建探针），结果随后记录。
+
+## S3 增量 7：查询值读取层（S3-6 步骤 i）
+
+- 新增 `FilterValueReader`（`Application.Contracts/Query`）：生成式字段 adapter 的静态读取层。按**字段静态 CLR 类型**读取 S3-1 的受限 JsonElement 暂存或 CLR 值——decimal 走 `TryGetDecimal` 保精度、64 位整数保全域、分数不截断成整数、枚举只接受已定义名/值、数组逐元素读取且拒绝 null 元素；任何不匹配抛 `FilterValueFormatException`（§8：执行前拒绝，不做 `Convert.ChangeType`/token 猜测）。null 由 adapter 自己的 operator 分支处理，标量读取层拒绝 null。
+- 证据：`FilterValueReaderTests` 9/9（28 位 decimal 原文保真、1e100 拒绝、19.5→int 拒绝、int64 极值、kind 不匹配四种、枚举已定义/未定义、数组逐元素与 null 元素、CLR 直通、经 S3-1 wire 域端到端读出）。
+- **未完成（S3-6 步骤 ii，明确不在本轮冒充）**：CRUD emitter 仍在 `GetListAsync` 里调用反射式 `QueryExecutor<{entity}>.ApplyFilters`（`CrudArtifactEmitter.cs:475`）。下一步要按 `QueryableFields`（及声明的 Filterable/Sortable）生成 switch + 强类型 lambda 的 typed query adapter、稳定默认排序（CreationTime desc / Id desc + Id 次排序）、分页边界，并**只**替换该 CRUD 消费点；非法字段/运算/类型在执行前拒绝。发射侧需要形状断言（bundle 不再含 `QueryExecutor`、含 adapter 与默认排序），运行期证据并入 S3-7。
