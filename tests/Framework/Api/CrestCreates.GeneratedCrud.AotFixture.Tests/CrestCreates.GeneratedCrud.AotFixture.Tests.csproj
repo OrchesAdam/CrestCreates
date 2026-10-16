@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../CrestCreates.GeneratedCrud.AotFixture/CrestCreates.GeneratedCrud.AotFixture.csproj" />
+    <ProjectReference Include="../CrestCreates.GeneratedCrud.AotFixture.SecondFeature/CrestCreates.GeneratedCrud.AotFixture.SecondFeature.csproj" />
   </ItemGroup>
 
 </Project>

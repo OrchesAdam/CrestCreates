@@ -5,6 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
+using CrestCreates.Metadata.Abstractions.DescriptorCapability;
 using CrestCreates.Metadata.Abstractions.Registry;
 using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Registry;
@@ -350,6 +351,182 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
     /// plus, when requested, the generated-equivalent configurator registration. The host's own
     /// resolver is a source-generated context, mirroring an AOT-first host.
     /// </summary>
+    [Fact]
+    public void Review150_two_explicit_contributions_with_common_void_root_must_map()
+    {
+        var capA = CreateCapability("feature-a.cap");
+        var capB = CreateCapability("feature-b.cap");
+        var epA = CreateEndpoint("feature-a.endpoint", capA.Id, "/feature-a");
+        var epB = CreateEndpoint("feature-b.endpoint", capB.Id, "/feature-b");
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(CreateCapabilityRegistryMock(capA, capB).Object);
+        services.AddSingleton(CreateDispatcherMock().Object);
+        services.AddCrestCapabilityEndpoints();
+        services.Configure<JsonOptions>(options => options.SerializerOptions.TypeInfoResolver =
+            JsonTypeInfoResolver.Combine(CrudWireProbeJsonContext.Default, Review150SecondContext.Default));
+        services.AddCrestCapabilityEndpointContribution(new Review150FirstContribution
+        {
+            OwnerAssemblyName = "FeatureA",
+            CapabilityDescriptors = new[] { capA }, EndpointDescriptors = new[] { epA },
+            Bindings = new[] { CreateBinding(epA.Id) },
+            Handlers = new[] { CreateHandler(capA.Id) },
+            ResultMappers = new[] { CreateResultBinding(epA.Id, "a") },
+            JsonContext = CrudWireProbeJsonContext.Default,
+            RequiredJsonRootTypes = new[] { new CapabilityEndpointJsonRootType(typeof(DynamicApiResponse), "Delete", "VoidEnvelope") },
+        });
+        services.AddCrestCapabilityEndpointContribution(new Review150SecondContribution
+        {
+            OwnerAssemblyName = "FeatureB",
+            CapabilityDescriptors = new[] { capB }, EndpointDescriptors = new[] { epB },
+            Bindings = new[] { CreateBinding(epB.Id) },
+            Handlers = new[] { CreateHandler(capB.Id) },
+            ResultMappers = new[] { CreateResultBinding(epB.Id, "b") },
+            JsonContext = Review150SecondContext.Default,
+            RequiredJsonRootTypes = new[] { new CapabilityEndpointJsonRootType(typeof(DynamicApiResponse), "Delete", "VoidEnvelope") },
+        });
+        using var sp = services.BuildServiceProvider();
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        endpoints.MapCrestCapabilityEndpoints();
+        GetEndpoints(endpoints).Should().HaveCount(2);
+    }
+
+    private sealed class Review150CapabilityProvider(CapabilityDescriptor descriptor) : IDescriptorProvider<CapabilityDescriptor>
+    {
+        public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => new[] { descriptor };
+    }
+    private sealed class Review150FirstContribution : CapabilityEndpointContribution;
+    private sealed class Review150SecondContribution : CapabilityEndpointContribution;
+
+    [Fact]
+    public void Review150_prebuilt_capability_with_changed_permissions_must_reject()
+    {
+        var expected = new CapabilityDescriptor { Id = "owned.cap", Name = "Expected", Version = 1,
+            State = DescriptorState.Active, Permissions = new[] { "Product.Create" } };
+        var actual = new CapabilityDescriptor { Id = expected.Id, Name = expected.Name, Version = expected.Version, State = DescriptorState.Active, Permissions = Array.Empty<string>() };
+        var endpoint = CreateEndpoint("owned.endpoint", expected.Id);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        var registry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>(Array.Empty<IRegistryValidator<CapabilityDescriptor>>()));
+        registry.Build(new[] { new Review150CapabilityProvider(actual) });
+        registry.State.Should().Be(RegistryState.Built);
+        services.AddSingleton<ICapabilityRegistry>(registry);
+        services.AddSingleton(CreateDispatcherMock().Object);
+        services.AddCrestCapabilityEndpoints();
+        services.AddCrestCapabilityEndpointContribution(new Review150FirstContribution
+        {
+            OwnerAssemblyName = "FeatureA", CapabilityDescriptors = new[] { expected },
+            EndpointDescriptors = new[] { endpoint }, Bindings = new[] { CreateBinding(endpoint.Id) },
+            Handlers = new[] { CreateHandler(expected.Id) },
+            ResultMappers = new[] { CreateResultBinding(endpoint.Id, "a") },
+        });
+        using var sp = services.BuildServiceProvider();
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+        map.Should().Throw<InvalidOperationException>("a prebuilt descriptor with different authority is not the contributed contract");
+    }
+
+    // PR150-R1-CRUD128-03 acceptance: the equivalence rule accepts a fully equivalent prebuilt
+    // entry and rejects version / state / projection differences with deterministic diagnostics.
+
+    [Fact]
+    public void CrudR1_prebuilt_registry_with_the_equivalent_capability_must_map()
+    {
+        var authoritative = CreateOwnedCapability();
+        var contributed = CreateOwnedCapability();
+        var (_, endpoints) = BuildPrebuiltRegistryHost(authoritative, contributed);
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+
+        map.Should().NotThrow("a value-equivalent authority is the contributed execution contract");
+        GetEndpoints(endpoints).Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void CrudR1_prebuilt_registry_with_a_different_version_must_reject()
+    {
+        var authoritative = CreateOwnedCapability(version: 2);
+        var contributed = CreateOwnedCapability();
+        var (_, endpoints) = BuildPrebuiltRegistryHost(authoritative, contributed);
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+
+        map.Should().Throw<InvalidOperationException>()
+            .WithMessage("*owned.cap*")
+            .WithMessage("*version 2 vs 1*");
+    }
+
+    [Fact]
+    public void CrudR1_prebuilt_registry_with_a_different_state_must_reject()
+    {
+        var authoritative = CreateOwnedCapability(state: DescriptorState.Deprecated);
+        var contributed = CreateOwnedCapability();
+        var (_, endpoints) = BuildPrebuiltRegistryHost(authoritative, contributed);
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+
+        map.Should().Throw<InvalidOperationException>()
+            .WithMessage("*owned.cap*")
+            .WithMessage("*state*Deprecated*Active*");
+    }
+
+    [Fact]
+    public void CrudR1_prebuilt_registry_with_a_different_projection_must_reject()
+    {
+        var authoritative = CreateOwnedCapability(projection: CapabilityProjectionKind.AppServiceCompatibility);
+        var contributed = CreateOwnedCapability();
+        var (_, endpoints) = BuildPrebuiltRegistryHost(authoritative, contributed);
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+
+        map.Should().Throw<InvalidOperationException>()
+            .WithMessage("*owned.cap*")
+            .WithMessage("*projection*AppServiceCompatibility*Native*");
+    }
+
+    private static CapabilityDescriptor CreateOwnedCapability(
+        int version = 1,
+        DescriptorState state = DescriptorState.Active,
+        CapabilityProjectionKind projection = CapabilityProjectionKind.Native)
+        => new()
+        {
+            Id = "owned.cap",
+            Name = "Expected",
+            Version = version,
+            State = state,
+            ProjectionKind = projection,
+            Permissions = new[] { "Product.Create" },
+        };
+
+    /// <summary>Prebuilds a real, frozen registry from the authoritative descriptor and activates the
+    /// contributed descriptor as this host's feature contract, mirroring the reviewed defect setup.</summary>
+    private static (IServiceProvider ServiceProvider, IEndpointRouteBuilder Endpoints) BuildPrebuiltRegistryHost(
+        CapabilityDescriptor authoritative,
+        CapabilityDescriptor contributed)
+    {
+        var endpoint = CreateEndpoint("owned.endpoint", contributed.Id);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        var registry = new CapabilityRegistry(
+            new RegistryValidationEngine<CapabilityDescriptor>(Array.Empty<IRegistryValidator<CapabilityDescriptor>>()));
+        registry.Build(new IDescriptorProvider<CapabilityDescriptor>[] { new Review150CapabilityProvider(authoritative) });
+        services.AddSingleton<ICapabilityRegistry>(registry);
+        services.AddSingleton(CreateDispatcherMock().Object);
+        services.AddCrestCapabilityEndpoints();
+        services.AddCrestCapabilityEndpointContribution(new Review150FirstContribution
+        {
+            OwnerAssemblyName = "FeatureA",
+            CapabilityDescriptors = new[] { contributed },
+            EndpointDescriptors = new[] { endpoint },
+            Bindings = new[] { CreateBinding(endpoint.Id) },
+            Handlers = new[] { CreateHandler(contributed.Id) },
+            ResultMappers = new[] { CreateResultBinding(endpoint.Id, "a") },
+        });
+
+        var sp = services.BuildServiceProvider();
+        return (sp, new DefaultEndpointRouteBuilder(sp));
+    }
+
     private static JsonSerializerOptions ResolveSerializerOptions(bool registerGeneratedContext)
     {
         var services = new ServiceCollection();
@@ -523,3 +700,6 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
 }
 
 #pragma warning restore CC1001
+
+[JsonSerializable(typeof(DynamicApiResponse))]
+internal partial class Review150SecondContext : JsonSerializerContext { }

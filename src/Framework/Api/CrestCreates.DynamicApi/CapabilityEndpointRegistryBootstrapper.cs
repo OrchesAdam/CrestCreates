@@ -3,9 +3,10 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
-using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using JsonOptions = Microsoft.AspNetCore.Http.Json.JsonOptions;
 
 namespace CrestCreates.DynamicApi;
 
@@ -169,13 +170,26 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
     }
 
     /// <summary>
+    /// #128 §7.2 host-shared JSON roots: framework types every generated CRUD contribution declares
+    /// identically (the void/404 envelope and the failure-path error DTO). Their metadata is
+    /// framework-owned, so the host's first answerer may be any activated source-generated
+    /// contributor of this host; every feature-private root keeps the exact owning-context rule.
+    /// </summary>
+    private static readonly Type[] HostSharedJsonRootTypes =
+    [
+        typeof(DynamicApiResponse),
+        typeof(ProblemDetails),
+    ];
+
+    /// <summary>
     /// #128 §7.1/§7.2 map-time verification: for every contribution and every required JSON contract
     /// root, the contribution's own source-generated context must resolve the type AND the host's final
-    /// <c>Http.Json.JsonOptions</c> must resolve it from that same context. The final options are read
-    /// here, on this host's own options instance, and never cached process-globally. A reflection
-    /// resolver never satisfies the requirement: the root's ordered resolver chain must answer from the
-    /// declared contributor, so a host whose only resolver is
-    /// <c>DefaultJsonTypeInfoResolver</c> fails even though reflection could serialize the type.
+    /// <c>Http.Json.JsonOptions</c> must resolve it from an activated source-generated contributor of
+    /// this host (the owning context for feature-private roots, any of this host's contributed contexts
+    /// for the framework-shared void/error roots). The final options are read here, on this host's own
+    /// options instance, and never cached process-globally. A reflection resolver never satisfies the
+    /// requirement, so a host whose only resolver is <c>DefaultJsonTypeInfoResolver</c> fails even
+    /// though reflection could serialize the type.
     /// </summary>
     private void VerifyHostJsonContracts()
     {
@@ -183,6 +197,15 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
         if (contracts.Count == 0)
         {
             return;
+        }
+
+        var hostContexts = new List<JsonSerializerContext>();
+        foreach (var contract in contracts)
+        {
+            if (contract.JsonContext is not null && !hostContexts.Contains(contract.JsonContext))
+            {
+                hostContexts.Add(contract.JsonContext);
+            }
         }
 
         JsonSerializerOptions? options = null;
@@ -194,7 +217,7 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
                 // requirements never depend on Http.Json.JsonOptions being resolvable.
                 options ??= _serviceProvider.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
 
-                var reason = DescribeJsonRootFailure(options, contract, required);
+                var reason = DescribeJsonRootFailure(options, contract, required, hostContexts);
                 if (reason is not null)
                 {
                     throw new InvalidOperationException(
@@ -211,13 +234,16 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
 
     /// <summary>
     /// Returns null when the root is satisfied, otherwise the deterministic reason used by the
-    /// diagnostics message. Both halves of §7.2 are checked: the contributed context must carry the
-    /// metadata, and the host's final resolver chain must answer with that exact context.
+    /// diagnostics message. Both halves of §7.2 are checked: the contribution's own closure must carry
+    /// the metadata, and the host's final resolver chain must answer it from an activated
+    /// source-generated contributor — the owning context for feature-private roots, any contributed
+    /// context of this host for the framework-shared void/error roots.
     /// </summary>
     private static string? DescribeJsonRootFailure(
         JsonSerializerOptions options,
         CapabilityEndpointHostActivation.ContributedJsonContract contract,
-        CapabilityEndpointJsonRootType required)
+        CapabilityEndpointJsonRootType required,
+        IReadOnlyList<JsonSerializerContext> hostContexts)
     {
         var context = contract.JsonContext;
         if (context is null)
@@ -236,14 +262,31 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return "The host's final resolver chain answers no metadata for it at all.";
         }
 
-        if (!ReferenceEquals(answering, context))
+        if (ReferenceEquals(answering, context))
         {
-            return $"The host's final resolver chain answers it from "
-                + $"'{answering!.GetType().FullName ?? answering.GetType().Name}' before the contribution's "
-                + "JsonContext (activate the generated context after the host's own resolvers).";
+            return null;
         }
 
-        return null;
+        if (answering is JsonSerializerContext answeringContext
+            && hostContexts.Contains(answeringContext)
+            && Array.IndexOf(HostSharedJsonRootTypes, required.ClrType) >= 0)
+        {
+            // Framework-shared root: every generated contribution carries identical metadata for it,
+            // so any activated source-generated contributor of this host may answer it first.
+            return null;
+        }
+
+        if (answering is JsonSerializerContext foreignContext
+            && hostContexts.Contains(foreignContext))
+        {
+            return "The host's final resolver chain answers it from another contributed JsonContext "
+                + $"('{foreignContext.GetType().FullName}') although this root is feature-private; a private "
+                + "root must be answered by its owning contribution's context.";
+        }
+
+        return $"The host's final resolver chain answers it from "
+            + $"'{answering!.GetType().FullName ?? answering.GetType().Name}' before the contribution's "
+            + "JsonContext (activate the generated context after the host's own resolvers).";
     }
 
     /// <summary>

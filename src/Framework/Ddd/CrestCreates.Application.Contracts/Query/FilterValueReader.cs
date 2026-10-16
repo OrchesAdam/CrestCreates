@@ -178,14 +178,90 @@ public static class FilterValueReader
             }
 
             if (element.ValueKind == JsonValueKind.Number
-                && element.TryGetInt32(out var numeric)
-                && Enum.IsDefined(typeof(TEnum), numeric))
+                && TryReadUnderlyingEnumNumber(element, typeof(TEnum), out var numeric)
+                && Enum.IsDefined(typeof(TEnum), numeric!))
             {
-                return (TEnum)Enum.ToObject(typeof(TEnum), numeric);
+                return (TEnum)Enum.ToObject(typeof(TEnum), numeric!);
             }
         }
 
         throw Mismatch(value, field, typeof(TEnum).Name);
+    }
+
+    /// <summary>
+    /// Reads a wire number into the enum's exact underlying CLR type, so the definition check uses the
+    /// same boxed type the enum declares: <c>byte</c>/<c>short</c>/<c>long</c>/<c>ulong</c> enums accept
+    /// or reject numeric members by their real range (a boxed Int32 would throw for a byte enum, and
+    /// Int32 range checks would wrongly reject legal long members). Nothing is truncated or guessed.
+    /// </summary>
+    private static bool TryReadUnderlyingEnumNumber(JsonElement element, Type enumType, out object? numeric)
+    {
+        var underlying = Enum.GetUnderlyingType(enumType);
+
+        if (underlying == typeof(byte))
+        {
+            if (element.TryGetByte(out var byteValue))
+            {
+                numeric = byteValue;
+                return true;
+            }
+        }
+        else if (underlying == typeof(sbyte))
+        {
+            if (element.TryGetSByte(out var sbyteValue))
+            {
+                numeric = sbyteValue;
+                return true;
+            }
+        }
+        else if (underlying == typeof(short))
+        {
+            if (element.TryGetInt16(out var shortValue))
+            {
+                numeric = shortValue;
+                return true;
+            }
+        }
+        else if (underlying == typeof(ushort))
+        {
+            if (element.TryGetUInt16(out var ushortValue))
+            {
+                numeric = ushortValue;
+                return true;
+            }
+        }
+        else if (underlying == typeof(uint))
+        {
+            if (element.TryGetUInt32(out var uintValue))
+            {
+                numeric = uintValue;
+                return true;
+            }
+        }
+        else if (underlying == typeof(long))
+        {
+            if (element.TryGetInt64(out var longValue))
+            {
+                numeric = longValue;
+                return true;
+            }
+        }
+        else if (underlying == typeof(ulong))
+        {
+            if (element.TryGetUInt64(out var ulongValue))
+            {
+                numeric = ulongValue;
+                return true;
+            }
+        }
+        else if (element.TryGetInt32(out var intValue))
+        {
+            numeric = intValue;
+            return true;
+        }
+
+        numeric = null;
+        return false;
     }
 
     /// <summary>

@@ -1289,11 +1289,13 @@ public static class CrudArtifactEmitter
 
         Line(builder, string.Empty);
         Line(builder, Indent + "/// <summary>");
-        Line(builder, Indent + "/// §7.2 host wiring of assembly '" + owner + "': appends the generated CRUD JSON context");
-        Line(builder, Indent + "/// to this host's final Http.Json.JsonOptions after any resolver the host configured itself.");
-        Line(builder, Indent + "/// The host's own explicit resolvers therefore keep winning for the types they already know,");
-        Line(builder, Indent + "/// while the source-generated CRUD roots are answered by this assembly's context. Registered");
-        Line(builder, Indent + "/// only from AddGeneratedCrud; repeated activation stays idempotent.");
+        Line(builder, Indent + "/// §7.2 host wiring of assembly '" + owner + "': inserts the generated CRUD JSON context into");
+        Line(builder, Indent + "/// this host's final Http.Json.JsonOptions resolver chain. The host's own resolvers keep their");
+        Line(builder, Indent + "/// priority — and therefore keep winning for the types they already know (an explicitly");
+        Line(builder, Indent + "/// conflicting resolver still fails the map-time contract verification) — while the built-in");
+        Line(builder, Indent + "/// reflection resolver can never shadow the generated CRUD metadata on a default host: the");
+        Line(builder, Indent + "/// context is inserted immediately before it and appended when no reflection resolver exists.");
+        Line(builder, Indent + "/// Registered only from AddGeneratedCrud; repeated activation stays idempotent.");
         Line(builder, Indent + "/// </summary>");
         Line(builder, Indent + "internal sealed class " + CrudActivationConvention.JsonOptionsConfiguratorTypeName
             + " : global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>");
@@ -1303,11 +1305,29 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent + "{");
         Line(builder, NestedIndent + Indent + "var generatedContext = "
             + Qualified(CrudJsonContractConvention.JsonContextFullName) + ".Default;");
-        Line(builder, NestedIndent + Indent + "var existing = options.SerializerOptions.TypeInfoResolver;");
-        Line(builder, NestedIndent + Indent + "options.SerializerOptions.TypeInfoResolver = existing is null");
-        Line(builder, NestedIndent + Indent + Indent + "? generatedContext");
+        Line(builder, NestedIndent + Indent
+            + "var chain = options.SerializerOptions.TypeInfoResolverChain;");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + Indent + "for (var index = 0; index < chain.Count; index++)");
+        Line(builder, NestedIndent + Indent + "{");
+        Line(builder, NestedIndent + Indent + Indent + "if (global::System.Object.ReferenceEquals(chain[index], generatedContext))");
+        Line(builder, NestedIndent + Indent + Indent + "{");
+        Line(builder, NestedIndent + Indent + Indent + Indent + "return;");
+        Line(builder, NestedIndent + Indent + Indent + "}");
+        Line(builder, NestedIndent + Indent + "}");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + Indent + "var insertionIndex = chain.Count;");
+        Line(builder, NestedIndent + Indent + "for (var index = 0; index < chain.Count; index++)");
+        Line(builder, NestedIndent + Indent + "{");
         Line(builder, NestedIndent + Indent + Indent
-            + ": global::System.Text.Json.Serialization.Metadata.JsonTypeInfoResolver.Combine(existing, generatedContext);");
+            + "if (chain[index] is global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)");
+        Line(builder, NestedIndent + Indent + Indent + "{");
+        Line(builder, NestedIndent + Indent + Indent + Indent + "insertionIndex = index;");
+        Line(builder, NestedIndent + Indent + Indent + Indent + "break;");
+        Line(builder, NestedIndent + Indent + Indent + "}");
+        Line(builder, NestedIndent + Indent + "}");
+        Line(builder, string.Empty);
+        Line(builder, NestedIndent + Indent + "chain.Insert(insertionIndex, generatedContext);");
         Line(builder, NestedIndent + "}");
         Line(builder, Indent + "}");
         CloseNamespace(builder);

@@ -270,13 +270,10 @@ public static class CapabilityEndpointExtensions
 
             foreach (var descriptor in contributed)
             {
-                if (concrete.GetById(descriptor.Id) is null)
-                {
-                    throw new InvalidOperationException(
-                        $"Contributed capability '{descriptor.Id}' is missing from the authoritative "
-                        + "registry after the aggregation build; the host activation must be registered "
-                        + "before the capability registry is built.");
-                }
+                RequireEquivalentContributedCapability(
+                    capabilityRegistry,
+                    descriptor,
+                    "after the aggregation build");
             }
 
             return;
@@ -284,16 +281,98 @@ public static class CapabilityEndpointExtensions
 
         foreach (var descriptor in contributed)
         {
-            if (capabilityRegistry.GetById(descriptor.Id) is null)
-            {
-                throw new InvalidOperationException(
-                    $"Contributed capability '{descriptor.Id}' is missing from the authoritative registry "
-                    + "(owner '" + descriptor.Namespace + "'). The host activation must be registered "
-                    + "before the capability registry is built; missing capabilities are never resolved "
-                    + "through a generic fallback and never silently skipped.");
-            }
+            RequireEquivalentContributedCapability(
+                capabilityRegistry,
+                descriptor,
+                "of the host's already-built registry");
         }
     }
+
+    /// <summary>
+    /// #128 §7.2: a contributed capability must be the registry's authoritative entry, not merely a
+    /// name that happens to exist. The frozen registry is never mutated, so version, namespace, state
+    /// and the execution semantics (kind, permissions, projection, input/output schemas) must already
+    /// match; any difference is a deterministic pre-mapping rejection naming the capability and owner.
+    /// </summary>
+    private static void RequireEquivalentContributedCapability(
+        ICapabilityRegistry capabilityRegistry,
+        CapabilityDescriptor contributed,
+        string context)
+    {
+        var registered = capabilityRegistry.GetById(contributed.Id);
+        if (registered is null)
+        {
+            throw new InvalidOperationException(
+                $"Contributed capability '{contributed.Id}' is missing from the authoritative registry "
+                + context + " (owner '" + contributed.Namespace + "'). The host activation must be registered "
+                + "before the capability registry is built; missing capabilities are never resolved "
+                + "through a generic fallback and never silently skipped.");
+        }
+
+        var differences = DescribeCapabilityDifferences(registered, contributed);
+        if (differences.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Contributed capability '{contributed.Id}' (owner '{contributed.Namespace}') conflicts with "
+                + "the authoritative registry entry " + context + ": " + string.Join("; ", differences)
+                + ". The frozen registry is never mutated, and a feature is never activated against a "
+                + "different execution contract; activate the feature before the registry is built.");
+        }
+    }
+
+    private static List<string> DescribeCapabilityDifferences(
+        CapabilityDescriptor registered,
+        CapabilityDescriptor contributed)
+    {
+        var differences = new List<string>();
+
+        if (registered.Version != contributed.Version)
+        {
+            differences.Add($"version {registered.Version} vs {contributed.Version}");
+        }
+
+        if (!string.Equals(registered.Namespace, contributed.Namespace, StringComparison.Ordinal))
+        {
+            differences.Add($"namespace '{registered.Namespace}' vs '{contributed.Namespace}'");
+        }
+
+        if (registered.State != contributed.State)
+        {
+            differences.Add($"state {registered.State} vs {contributed.State}");
+        }
+
+        if (registered.CapabilityKind != contributed.CapabilityKind)
+        {
+            differences.Add($"kind {registered.CapabilityKind} vs {contributed.CapabilityKind}");
+        }
+
+        if (registered.ProjectionKind != contributed.ProjectionKind)
+        {
+            differences.Add($"projection {registered.ProjectionKind} vs {contributed.ProjectionKind}");
+        }
+
+        if (!PermissionsEqual(registered.Permissions, contributed.Permissions))
+        {
+            differences.Add(
+                $"permissions [{string.Join(", ", registered.Permissions)}] vs "
+                + $"[{string.Join(", ", contributed.Permissions)}]");
+        }
+
+        if (!Equals(registered.InputSchema, contributed.InputSchema))
+        {
+            differences.Add("input schema reference differs");
+        }
+
+        if (!Equals(registered.OutputSchema, contributed.OutputSchema))
+        {
+            differences.Add("output schema reference differs");
+        }
+
+        return differences;
+    }
+
+    private static bool PermissionsEqual(IReadOnlyList<string> left, IReadOnlyList<string> right)
+        => new HashSet<string>(left, StringComparer.Ordinal).SetEquals(right);
 
     /// <summary>The contributed capability descriptors of one host, exposed as a descriptor provider.</summary>
     private sealed class HostCapabilityDescriptorProvider(IReadOnlyList<CapabilityDescriptor> descriptors)

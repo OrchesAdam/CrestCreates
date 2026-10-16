@@ -958,8 +958,10 @@ public class CrudServiceRealDeclarationBaselineTests
             "the contribution must reference the assembly's one source-generated CRUD JSON context");
         bundle.Should().Contain("IConfigureOptions",
             "the activation must register the generated JsonOptions configurator");
-        bundle.Should().Contain("JsonTypeInfoResolver.Combine",
-            "the configurator must append the generated context after the host's own resolvers");
+        bundle.Should().Contain("options.SerializerOptions.TypeInfoResolverChain",
+            "the configurator must wire the generated context into the host's resolver chain");
+        bundle.Should().Contain("chain.Insert(insertionIndex, generatedContext)",
+            "the generated context is inserted into the host's chain, keeping the host's resolvers in place");
 
         foreach (var forbidden in ForbiddenLegacyRegistrationSymbols)
         {
@@ -1039,11 +1041,14 @@ public class CrudServiceRealDeclarationBaselineTests
         bundle.Should().Contain(
             "global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>",
             "the wiring must plug into the host's own Http.Json.JsonOptions");
-        bundle.Should().Contain("JsonTypeInfoResolver.Combine(existing, generatedContext)",
-            "an existing host resolver must stay first and keep winning for the types it knows");
+        bundle.Should().Contain(
+            "chain[index] is global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver",
+            "the insertion point is immediately before the built-in reflection resolver");
+        bundle.Should().NotContain("JsonTypeInfoResolver.Combine",
+            "the generated wiring must not collapse the host's resolver chain into one composed resolver");
         bundle.Should().Contain("ServiceCollectionDescriptorExtensions.TryAddEnumerable",
             "repeated AddGeneratedCrud calls must stay idempotent");
-        bundle.Should().NotContain("DefaultJsonTypeInfoResolver",
-            "the generated wiring must never install or fall back to a reflection resolver");
+        bundle.Should().NotContain("new global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver",
+            "the generated wiring must never install a reflection resolver");
     }
 }

@@ -15,6 +15,53 @@ internal enum ProbeState
     Archived = 2,
 }
 
+// PR150-R1-CRUD128-04 acceptance: one enum per CLR underlying type, with boundary members.
+internal enum ByteState : byte
+{
+    Inactive = 0,
+    Active = 1,
+    Max = 255,
+}
+
+internal enum SByteState : sbyte
+{
+    Min = -128,
+    Active = 1,
+    Max = 127,
+}
+
+internal enum ShortState : short
+{
+    Min = -32768,
+    Active = 1,
+    Max = 32767,
+}
+
+internal enum UShortState : ushort
+{
+    Active = 1,
+    Max = 65535,
+}
+
+internal enum UIntState : uint
+{
+    Active = 1,
+    Max = 4294967295,
+}
+
+internal enum LongState : long
+{
+    Active = 1,
+    Large = 4294967296,
+    Max = 9223372036854775807,
+}
+
+internal enum ULongState : ulong
+{
+    Active = 1,
+    Max = 18446744073709551615,
+}
+
 /// <summary>
 /// #128 S3 (§8): the static value reader behind generated field adapters. Values are read according to
 /// the field's static CLR type — exact wire text for decimals and 64-bit integers, no token-based
@@ -84,6 +131,67 @@ public class FilterValueReaderTests
         ((Action)(() => FilterValueReader.ReadEnum<ProbeState>(Stage("7"), "State")))
             .Should().Throw<FilterValueFormatException>(
                 "an undefined numeric value must not be coerced into the enum default");
+    }
+
+    [Fact]
+    public void Enum_fields_must_read_every_underlying_type_by_its_own_range()
+    {
+        FilterValueReader.ReadEnum<ByteState>(Stage("1"), "State").Should().Be(ByteState.Active);
+        FilterValueReader.ReadEnum<ByteState>(Stage("255"), "State").Should().Be(ByteState.Max);
+        FilterValueReader.ReadEnum<SByteState>(Stage("-128"), "State").Should().Be(SByteState.Min);
+        FilterValueReader.ReadEnum<SByteState>(Stage("127"), "State").Should().Be(SByteState.Max);
+        FilterValueReader.ReadEnum<ShortState>(Stage("-32768"), "State").Should().Be(ShortState.Min);
+        FilterValueReader.ReadEnum<ShortState>(Stage("32767"), "State").Should().Be(ShortState.Max);
+        FilterValueReader.ReadEnum<UShortState>(Stage("65535"), "State").Should().Be(UShortState.Max);
+        FilterValueReader.ReadEnum<UIntState>(Stage("4294967295"), "State").Should().Be(UIntState.Max);
+        FilterValueReader.ReadEnum<LongState>(Stage("1"), "State").Should().Be(LongState.Active);
+        FilterValueReader.ReadEnum<LongState>(Stage("4294967296"), "State").Should().Be(LongState.Large);
+        FilterValueReader.ReadEnum<LongState>(Stage("9223372036854775807"), "State").Should().Be(LongState.Max);
+        FilterValueReader.ReadEnum<ULongState>(Stage("18446744073709551615"), "State").Should().Be(ULongState.Max);
+
+        // Names stay accepted for every underlying type.
+        FilterValueReader.ReadEnum<ByteState>(Stage("\"Active\""), "State").Should().Be(ByteState.Active);
+        FilterValueReader.ReadEnum<ShortState>(Stage("\"Active\""), "State").Should().Be(ShortState.Active);
+        FilterValueReader.ReadEnum<LongState>(Stage("\"Active\""), "State").Should().Be(LongState.Active);
+        FilterValueReader.ReadEnum<ULongState>(Stage("\"Active\""), "State").Should().Be(ULongState.Active);
+    }
+
+    [Fact]
+    public void Enum_numbers_outside_the_underlying_range_or_undefined_must_be_rejected()
+    {
+        ((Action)(() => FilterValueReader.ReadEnum<ByteState>(Stage("256"), "State")))
+            .Should().Throw<FilterValueFormatException>("a byte enum member cannot exceed byte.MaxValue");
+        ((Action)(() => FilterValueReader.ReadEnum<ByteState>(Stage("-1"), "State")))
+            .Should().Throw<FilterValueFormatException>("a byte enum has no negative members");
+        ((Action)(() => FilterValueReader.ReadEnum<ByteState>(Stage("200"), "State")))
+            .Should().Throw<FilterValueFormatException>("an in-range but undefined value is a rejection");
+        ((Action)(() => FilterValueReader.ReadEnum<ByteState>(Stage("1.5"), "State")))
+            .Should().Throw<FilterValueFormatException>("fractional numbers are never truncated into an enum");
+        ((Action)(() => FilterValueReader.ReadEnum<SByteState>(Stage("128"), "State")))
+            .Should().Throw<FilterValueFormatException>();
+        ((Action)(() => FilterValueReader.ReadEnum<ULongState>(Stage("18446744073709551616"), "State")))
+            .Should().Throw<FilterValueFormatException>("beyond ulong.MaxValue the value is not representable");
+        ((Action)(() => FilterValueReader.ReadEnum<LongState>(Stage("\"Unknown\""), "State")))
+            .Should().Throw<FilterValueFormatException>();
+    }
+
+    [Fact]
+    public void Enum_arrays_must_read_element_wise_with_the_field_reader()
+    {
+        FilterValueReader.ReadArray(
+                Stage("[0,1,255]"), "State", FilterValueReader.ReadEnum<ByteState>)
+            .Should().Equal(ByteState.Inactive, ByteState.Active, ByteState.Max);
+        FilterValueReader.ReadArray(
+                Stage("[1,4294967296]"), "State", FilterValueReader.ReadEnum<LongState>)
+            .Should().Equal(LongState.Active, LongState.Large);
+
+        ((Action)(() => FilterValueReader.ReadArray(
+                Stage("[1,200]"), "State", FilterValueReader.ReadEnum<ByteState>)))
+            .Should().Throw<FilterValueFormatException>(
+                "an undefined array element rejects the whole filter instead of being skipped");
+        ((Action)(() => FilterValueReader.ReadArray(
+                Stage("[1,256]"), "State", FilterValueReader.ReadEnum<ByteState>)))
+            .Should().Throw<FilterValueFormatException>();
     }
 
     [Fact]

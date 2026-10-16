@@ -383,3 +383,14 @@
 - EF/其他 ORM 的查询翻译与 UoW 组合：**未验证**（独立声明；decimal/DateTime 的 CompareTo 形态翻译证据待补，作为 #129/EF 轨道前置）。
 - UoW 语义证据仅在 fixture memory provider（#137 公共契约）上；EF/持久化 UoW 由 #137 自身证据承担。
 - JIT（linux）：fixture 11/11 + E2E 20/20；Windows/macOS RID 原生：未验证。
+
+## PR #150 R1 审查修复（2026-10-16）
+
+审查 head `672462d3`（base `de50b337`）：3×P1 + 1×P2，均带独立复现探针（`docs/review/2026-10-16-issue-128-pr150-review-round1.md` + `probes/2026-10-16-issue-128-pr150-r1.patch`）。探针原样 `git apply` 入库（只含测试），确认红基线：DynamicApi **5 fail + 1 正控 pass**、fixture **1 fail + 2 正控 400 pass**——与审查报告逐项一致。**探针未做任何弱化**：修复后全部转绿（不是改成断言异常的永久绿例）。
+
+- **R1-01 [P1] 多 Feature 公共 JSON roots（`CapabilityEndpointRegistryBootstrapper`）**：校验改为两级——①贡献自身闭包必须完整（不变）；②最终链的**首个回答者**必须是本 Host 已激活的 source-generated 贡献上下文：feature-private root 必须由**属主 context** 回答（被他贡献 context 抢先 → 新的确定性拒绝文案点名两者），框架公共 root（`DynamicApiResponse` void、`ProblemDetails`，两者每个生成程序集必须声明且元数据框架所有）允许**任一已激活贡献上下文**回答——反射/未知 resolver 仍一律拒绝。验收：审查探针转绿；按审查要求新增**第二个真实生成 Feature**（Domain `Gadget` + `SecondFeature` 工程经同一工具链物化，工具链消费形状与主 Feature 相同、故意不织入）+ **双序激活** HTTP 用例：两序各跑每 Feature 的 create/search + 每 Feature 的失败体（ProblemDetails 公共 root 在对方 context 先答的序下仍可序列化），2/2。
+- **R1-02 [P1] 默认 JIT Host 装配（`CrudArtifactEmitter` 生成的 configurator）**：旧发射 `JsonTypeInfoResolver.Combine(existing, generated)` 会**替换宿主链**且把 generated 排在内置反射 resolver 之后，默认宿主必然被反射抢先。新发射改为对 `TypeInfoResolverChain` **就地插入**：宿主 resolver 保留原位与相对优先；generated 插在**首个 `DefaultJsonTypeInfoResolver` 之前**（不存在则追加）；显式冲突 resolver（非内置反射类型、被宿主排在前位）仍首位回答 → Map 期确定性拒绝（点名 resolver 类型）。fixture Host **移除手工 `Clear()`**——默认组合路径从此是被测路径（native 发布本就反射关闭）。验收：审查默认宿主探针转绿；新增宿主自有 resolver 先答自己的类型 + 显式冲突拒绝两例（2/2）；bundle 形状断言同步为插入语义（禁 `Combine`、禁 `new DefaultJsonTypeInfoResolver`）。
+- **R1-03 [P1] 冻结 registry 只按 Id 接受（`CapabilityEndpointExtensions`）**：两个分支（未 Built 聚合 Build 后 / 已 Built）统一走 `RequireEquivalentContributedCapability`：**版本、namespace、state、kind、projection、权限集合（set）、输入/输出 schema 引用**逐项等价；任何差异前置拒绝并点名 capability id/owner 与具体差异，frozen registry 不突变、不做「同名即已装配」的假设。验收：审查预构建权限差异探针转绿；新增等价通过 + 版本/状态/投影差异三拒绝控制（4/4）。
+- **R1-04 [P2] enum 数值固定 Int32（`FilterValueReader`）**：数值先按 `Enum.GetUnderlyingType` 的**精确 CLR 类型**有界读取（byte/sbyte/short/ushort/uint/long/ulong/int 八分支），再做 `Enum.IsDefined` 精确装箱校验与 `Enum.ToObject`；越界、小数、未定义一律拒绝，不截断、不猜类型。验收：审查 byte/long 探针转绿；Application.Tests 新增 8 种底层类型的数值/边界（含 `ulong.MaxValue`、`long` 的 4294967296）、名称、未定义、越界、小数与 In 数组矩阵（FilterValueReader 12/12）。
+
+复跑（R1 head）：见下方「R1 复跑矩阵」。CI 保持暂停、未合并。

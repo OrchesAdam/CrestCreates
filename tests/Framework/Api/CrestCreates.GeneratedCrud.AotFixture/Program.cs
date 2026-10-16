@@ -50,11 +50,11 @@ builder.Services.AddSingleton(new CapabilityPipelineBuilder());
 // Endpoint infrastructure + compatibility result contract.
 builder.Services.AddCrestCompatibilityProjection();
 
-// §7.2: the wire contract must be answered by the generated CRUD JSON context, never by reflection —
-// the resolver chain is cleared here, and the generated GeneratedCrudJsonOptionsConfigurator (part of
-// AddGeneratedCrud below) re-adds exactly that context to the host's final Http.Json.JsonOptions.
-builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(
-    options => options.SerializerOptions.TypeInfoResolverChain.Clear());
+// §7.2: the wire contract must be answered by the generated CRUD JSON context, never by reflection.
+// The host deliberately keeps its DEFAULT composition here (no manual chain clearing): the generated
+// GeneratedCrudJsonOptionsConfigurator (part of AddGeneratedCrud below) inserts the context before the
+// built-in reflection resolver, so the JIT host exercises the same default path an ordinary consumer
+// gets; the native publish is reflection-free by construction (JsonSerializerIsReflectionEnabledByDefault).
 
 // The generated per-assembly activation, called exactly as an ordinary consumer would: one scoped
 // AppService instance for the interface and the concrete type, the ExplicitHost contribution with
