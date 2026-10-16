@@ -1319,8 +1319,16 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent + Indent + "var insertionIndex = chain.Count;");
         Line(builder, NestedIndent + Indent + "for (var index = 0; index < chain.Count; index++)");
         Line(builder, NestedIndent + Indent + "{");
+        // #150 R2: only the UNCUSTOMIZED framework-default reflection resolver is a fallback that may
+        // be preceded. A host-configured DefaultJsonTypeInfoResolver (non-empty Modifiers) or a
+        // derived resolver keeps its declared priority — it answers first and the map-time contract
+        // verification then rejects deterministically instead of silently bypassing the host's
+        // explicit JSON customizations.
         Line(builder, NestedIndent + Indent + Indent
-            + "if (chain[index] is global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)");
+            + "if (chain[index] is global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver defaultResolver");
+        Line(builder, NestedIndent + Indent + Indent + Indent
+            + "&& defaultResolver.GetType() == typeof(global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)");
+        Line(builder, NestedIndent + Indent + Indent + Indent + "&& defaultResolver.Modifiers.Count == 0)");
         Line(builder, NestedIndent + Indent + Indent + "{");
         Line(builder, NestedIndent + Indent + Indent + Indent + "insertionIndex = index;");
         Line(builder, NestedIndent + Indent + Indent + Indent + "break;");

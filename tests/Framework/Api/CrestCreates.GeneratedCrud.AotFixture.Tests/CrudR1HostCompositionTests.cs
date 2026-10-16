@@ -97,6 +97,65 @@ public class CrudR1HostCompositionTests
             .WithMessage("*before the contribution's JsonContext*");
     }
 
+    [Fact]
+    public async Task Review150R2_explicit_default_resolver_with_modifiers_must_not_be_silently_bypassed()
+    {
+        var explicitlyConfigured = new DefaultJsonTypeInfoResolver();
+        var invoked = 0;
+        explicitlyConfigured.Modifiers.Add(metadata =>
+        {
+            if (metadata.Type == typeof(CreateWidgetDto))
+            {
+                invoked++;
+                metadata.Properties.Single(property => property.Name == "name").Name = "hostName";
+            }
+        });
+        var controlMetadata = explicitlyConfigured.GetTypeInfo(typeof(CreateWidgetDto), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        controlMetadata.Properties.Should().Contain(property => property.Name == "hostName",
+            "the explicitly configured modifier really changes this CRUD type's contract");
+        invoked = 0;
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.Services.AddCapabilityRuntime();
+        builder.Services.AddCrestCompatibilityProjection();
+        builder.Services.Configure<JsonOptions>(options => options.SerializerOptions.TypeInfoResolverChain.Insert(0, explicitlyConfigured));
+        builder.Services.AddGeneratedCrud();
+        await using var app = builder.Build();
+        Action map = () => app.MapCrestCapabilityEndpoints();
+        var failure = Record.Exception(map);
+        if (failure is null)
+        {
+            var options = app.Services.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
+            var finalMetadata = options.GetTypeInfo(typeof(CreateWidgetDto));
+            throw new Xunit.Sdk.XunitException("Map accepted an explicit conflicting resolver; modifier calls=" + invoked
+                + "; final property names=" + string.Join(",", finalMetadata.Properties.Select(property => property.Name)));
+        }
+        failure.Should().BeOfType<InvalidOperationException>().Which.Message
+            .Should().Contain(nameof(DefaultJsonTypeInfoResolver));
+
+    }
+
+    [Fact]
+    public async Task Derived_reflection_resolver_keeps_priority_and_fails_the_map()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.Services.AddCapabilityRuntime();
+        builder.Services.AddCrestCompatibilityProjection();
+        builder.Services.Configure<JsonOptions>(options =>
+            options.SerializerOptions.TypeInfoResolverChain.Insert(0, new CrudR2DerivedReflectionResolver()));
+        builder.Services.AddGeneratedCrud();
+
+        await using var app = builder.Build();
+        Action map = () => app.MapCrestCapabilityEndpoints();
+
+        map.Should().Throw<InvalidOperationException>()
+            .WithMessage("*CrudR2DerivedReflectionResolver*")
+            .WithMessage("*before the contribution's JsonContext*");
+    }
+
+    private sealed class CrudR2DerivedReflectionResolver : DefaultJsonTypeInfoResolver;
+
     private static IJsonTypeInfoResolver? FirstAnsweringResolver(
         IList<IJsonTypeInfoResolver> chain,
         JsonSerializerOptions options,

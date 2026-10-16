@@ -1042,8 +1042,14 @@ public class CrudServiceRealDeclarationBaselineTests
             "global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>",
             "the wiring must plug into the host's own Http.Json.JsonOptions");
         bundle.Should().Contain(
-            "chain[index] is global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver",
+            "chain[index] is global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver defaultResolver",
             "the insertion point is immediately before the built-in reflection resolver");
+        bundle.Should().Contain(
+            "defaultResolver.GetType() == typeof(global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)",
+            "only the exact built-in type counts as the fallback, never a host-derived resolver");
+        bundle.Should().Contain(
+            "defaultResolver.Modifiers.Count == 0",
+            "a host-configured modifier resolver keeps its priority and fails the map instead of being bypassed");
         bundle.Should().NotContain("JsonTypeInfoResolver.Combine",
             "the generated wiring must not collapse the host's resolver chain into one composed resolver");
         bundle.Should().Contain("ServiceCollectionDescriptorExtensions.TryAddEnumerable",

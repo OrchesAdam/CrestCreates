@@ -453,7 +453,39 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
 
         map.Should().Throw<InvalidOperationException>()
             .WithMessage("*owned.cap*")
-            .WithMessage("*version 2 vs 1*");
+            .WithMessage("*exact version is not present*")
+            .WithMessage("*v2*");
+    }
+
+    [Fact]
+    public void CrudR2_exact_v1_with_a_non_equivalent_contract_must_reject()
+    {
+        // The exact version exists, but its execution contract differs — v1/v2 coexistence must not
+        // degrade into accepting a non-equivalent v1.
+        var authoritative = CreateOwnedCapability(permissions: Array.Empty<string>());
+        var contributed = CreateOwnedCapability();
+        var (_, endpoints) = BuildPrebuiltRegistryHost(authoritative, contributed);
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+
+        map.Should().Throw<InvalidOperationException>()
+            .WithMessage("*owned.cap*")
+            .WithMessage("*permissions*");
+    }
+
+    [Fact]
+    public void CrudR2_different_risk_level_must_reject_in_both_directions()
+    {
+        // The reviewer probe covers registry-Low vs contributed-Medium; this is the reverse direction.
+        var authoritative = CreateOwnedCapability(risk: CapabilityRiskLevel.High);
+        var contributed = CreateOwnedCapability();
+        var (_, endpoints) = BuildPrebuiltRegistryHost(authoritative, contributed);
+
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+
+        map.Should().Throw<InvalidOperationException>()
+            .WithMessage("*owned.cap*")
+            .WithMessage("*risk level*High*Medium*");
     }
 
     [Fact]
@@ -487,7 +519,9 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
     private static CapabilityDescriptor CreateOwnedCapability(
         int version = 1,
         DescriptorState state = DescriptorState.Active,
-        CapabilityProjectionKind projection = CapabilityProjectionKind.Native)
+        CapabilityProjectionKind projection = CapabilityProjectionKind.Native,
+        IReadOnlyList<string>? permissions = null,
+        CapabilityRiskLevel risk = CapabilityRiskLevel.Medium)
         => new()
         {
             Id = "owned.cap",
@@ -495,7 +529,8 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
             Version = version,
             State = state,
             ProjectionKind = projection,
-            Permissions = new[] { "Product.Create" },
+            Permissions = permissions ?? new[] { "Product.Create" },
+            RiskLevel = risk,
         };
 
     /// <summary>Prebuilds a real, frozen registry from the authoritative descriptor and activates the
@@ -525,6 +560,49 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
 
         var sp = services.BuildServiceProvider();
         return (sp, new DefaultEndpointRouteBuilder(sp));
+    }
+
+    [Fact]
+    public void Review150R2_matching_exact_v1_must_map_when_v2_also_exists()
+    {
+        var expected = CreateOwnedCapability(version: 1);
+        var newer = CreateOwnedCapability(version: 2);
+        var registry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>(Array.Empty<IRegistryValidator<CapabilityDescriptor>>()));
+        registry.Build(new[] { new Review150CapabilityProvider(expected), new Review150CapabilityProvider(newer) });
+        registry.GetByVersion(expected.Id, 1).Should().BeSameAs(expected);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<ICapabilityRegistry>(registry);
+        services.AddSingleton(CreateDispatcherMock().Object);
+        services.AddCrestCapabilityEndpoints();
+        var endpoint = CreateEndpoint("owned.endpoint", expected.Id);
+        services.AddCrestCapabilityEndpointContribution(new Review150FirstContribution
+        {
+            OwnerAssemblyName = "FeatureA", CapabilityDescriptors = new[] { expected },
+            EndpointDescriptors = new[] { endpoint }, Bindings = new[] { CreateBinding(endpoint.Id) },
+            Handlers = new[] { CreateHandler(expected.Id) },
+            ResultMappers = new[] { CreateResultBinding(endpoint.Id, "a") },
+        });
+        using var sp = services.BuildServiceProvider();
+        var endpoints = new DefaultEndpointRouteBuilder(sp);
+        endpoints.MapCrestCapabilityEndpoints();
+        GetEndpoints(endpoints).Should().HaveCount(1);
+        registry.GetAll().Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Review150R2_different_risk_must_reject_the_frozen_authority()
+    {
+        var expected = CreateOwnedCapability();
+        var actual = new CapabilityDescriptor {
+            Id = expected.Id, Name = expected.Name, Version = expected.Version,
+            Permissions = expected.Permissions, ProjectionKind = expected.ProjectionKind,
+            RiskLevel = CapabilityRiskLevel.Low,
+        };
+        expected.RiskLevel.Should().Be(CapabilityRiskLevel.Medium);
+        var (_, endpoints) = BuildPrebuiltRegistryHost(actual, expected);
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+        map.Should().Throw<InvalidOperationException>("risk is an execution/governance contract field");
     }
 
     private static JsonSerializerOptions ResolveSerializerOptions(bool registerGeneratedContext)

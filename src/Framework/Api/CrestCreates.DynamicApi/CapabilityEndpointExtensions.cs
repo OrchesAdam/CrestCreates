@@ -290,31 +290,46 @@ public static class CapabilityEndpointExtensions
 
     /// <summary>
     /// #128 §7.2: a contributed capability must be the registry's authoritative entry, not merely a
-    /// name that happens to exist. The frozen registry is never mutated, so version, namespace, state
-    /// and the execution semantics (kind, permissions, projection, input/output schemas) must already
-    /// match; any difference is a deterministic pre-mapping rejection naming the capability and owner.
+    /// name that happens to exist. The exact declared version is located first (a registry holding
+    /// several versions is not a conflict), then version, name, namespace, state, supersession and the
+    /// execution semantics (kind, permissions, risk level, projection, input/output schemas — the
+    /// Contract-classified fields of the canonical hash profile plus the projection) must match; any
+    /// difference is a deterministic pre-mapping rejection naming the capability and owner, and the
+    /// frozen registry is never mutated.
     /// </summary>
     private static void RequireEquivalentContributedCapability(
         ICapabilityRegistry capabilityRegistry,
         CapabilityDescriptor contributed,
         string context)
     {
-        var registered = capabilityRegistry.GetById(contributed.Id);
+        // Exact-version lookup: GetById is a latest-version index by design and must never stand in
+        // for the exact contract the contribution declares.
+        var registered = capabilityRegistry.GetByVersion(contributed.Id, contributed.Version);
         if (registered is null)
         {
+            var latest = capabilityRegistry.GetById(contributed.Id);
+            if (latest is null)
+            {
+                throw new InvalidOperationException(
+                    $"Contributed capability '{contributed.Id}' is missing from the authoritative registry "
+                    + context + " (owner '" + contributed.Namespace + "'). The host activation must be registered "
+                    + "before the capability registry is built; missing capabilities are never resolved "
+                    + "through a generic fallback and never silently skipped.");
+            }
+
             throw new InvalidOperationException(
-                $"Contributed capability '{contributed.Id}' is missing from the authoritative registry "
-                + context + " (owner '" + contributed.Namespace + "'). The host activation must be registered "
-                + "before the capability registry is built; missing capabilities are never resolved "
-                + "through a generic fallback and never silently skipped.");
+                $"Contributed capability '{contributed.Id}' v{contributed.Version} (owner '{contributed.Namespace}') "
+                + "is missing from the authoritative registry " + context + ": the exact version is not present "
+                + $"(the registry holds v{latest.Version} under this id). The frozen registry is never mutated; "
+                + "activate the feature against the registry that carries its exact contract.");
         }
 
         var differences = DescribeCapabilityDifferences(registered, contributed);
         if (differences.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Contributed capability '{contributed.Id}' (owner '{contributed.Namespace}') conflicts with "
-                + "the authoritative registry entry " + context + ": " + string.Join("; ", differences)
+                $"Contributed capability '{contributed.Id}' v{contributed.Version} (owner '{contributed.Namespace}') "
+                + "conflicts with the authoritative registry entry " + context + ": " + string.Join("; ", differences)
                 + ". The frozen registry is never mutated, and a feature is never activated against a "
                 + "different execution contract; activate the feature before the registry is built.");
         }
@@ -331,6 +346,11 @@ public static class CapabilityEndpointExtensions
             differences.Add($"version {registered.Version} vs {contributed.Version}");
         }
 
+        if (!string.Equals(registered.Name, contributed.Name, StringComparison.Ordinal))
+        {
+            differences.Add($"name '{registered.Name}' vs '{contributed.Name}'");
+        }
+
         if (!string.Equals(registered.Namespace, contributed.Namespace, StringComparison.Ordinal))
         {
             differences.Add($"namespace '{registered.Namespace}' vs '{contributed.Namespace}'");
@@ -339,6 +359,11 @@ public static class CapabilityEndpointExtensions
         if (registered.State != contributed.State)
         {
             differences.Add($"state {registered.State} vs {contributed.State}");
+        }
+
+        if (!string.Equals(registered.SupersededById, contributed.SupersededById, StringComparison.Ordinal))
+        {
+            differences.Add($"superseded-by '{registered.SupersededById ?? "<none>"}' vs '{contributed.SupersededById ?? "<none>"}'");
         }
 
         if (registered.CapabilityKind != contributed.CapabilityKind)
@@ -356,6 +381,11 @@ public static class CapabilityEndpointExtensions
             differences.Add(
                 $"permissions [{string.Join(", ", registered.Permissions)}] vs "
                 + $"[{string.Join(", ", contributed.Permissions)}]");
+        }
+
+        if (registered.RiskLevel != contributed.RiskLevel)
+        {
+            differences.Add($"risk level {registered.RiskLevel} vs {contributed.RiskLevel}");
         }
 
         if (!Equals(registered.InputSchema, contributed.InputSchema))
