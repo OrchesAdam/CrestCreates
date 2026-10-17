@@ -232,3 +232,15 @@ PR #152 head 602d6e40 独立定向复跑6绿+8约定红/14，0 skipped。额外�
 5. R3 复核结果（实测）：三条控制共用单次真实构建 3 pass / 3（15 分 9 秒）——负例 `SYSLIB1030` 点名信封、authored 文件不含点名该信封的 CS0234/CS0246、STJ 无其 metadata；同次构建内普通 Compile 根由 STJ 关闭；`[ModuleInitializer]` 内向 ≥4 个进程全局注册表写入且无可拒绝的 Host 接缝。样例侧全量 41 pass + 71 fail / 112（约定红 9，既有红 62，新增回归 0）。
 
 6. `CrestCreates.CodeGenerator.Tests` 全量在最终 head `214426ea` 复跑：459 pass / 0 fail / 459（22 分 30 秒），无 skipped；上一 head 的唯一失败（每条控制各建一次导致的超时）已随单次构建合并消除。
+
+## 11. R4 修正（2026-10-17，回应 05fa50cb 复审的两项 P2）
+
+1. **修改后的 HTTP stamp 回读（原 R1-HTTP129-03 剩余项）**：新增 `R15_http_served_stamp_reflects_a_write_that_happened_after_the_first_read`（目标红）——先 GET 预热，再用数据库当前 stamp 发起一次合法更新使存储 stamp 轮转，然后再次 GET，要求响应 stamp 等于 fresh-scope 读到的**新** stamp。该构造专门反制「首次读到就缓存、之后永不失效」的故意错误实现：原 R07 只比较第一次 GET，会在该变异下假绿。`R07` 保留首次回读的断言；`P09` 的措辞收窄为「数据库 stamp 可驱动合法写入，且写入产生一次业务调用/一次真实 UoW/标题落库/stamp 轮转」，明确不宣称客户端响应 stamp 可复用——两类事实分开记账。
+2. **逻辑执行与真实事务分开观测（原 R1-HTTP129-03 剩余项）**：`TicketWriteSideEffectProbe` 拆成
+   - `LogicalExecutions`：`Execute`/`ExecuteAsync` 入口计数；
+   - `TransactionsStarted`：仅在**内核帧内**（Execute 委托进入时）或 `IUnitOfWorkScope.StartAsync` 完成后解析到 ambient UoW 时才 +1；
+   - `UnobservedExecutions`：声称执行但解析不到 ambient 的帧数（必须为 0）。
+
+   `BeginScope` 返回计数包装 scope（覆盖 #137 的另一条正式入口），因此「Execute 为 0」不再被表述成「没有事务启动」。新增 `P11_scope_start_is_observed_as_a_real_transaction`：在测量宿主里真实 `BeginScope + StartAsync`，断言 `DbContext.Database.CurrentTransaction != null`、`TransactionsStarted == 1`、`LogicalExecutions == 0`（两条入口可区分）。`R03/R04/R08` 三条拒绝路径同时断言零业务调用、`LogicalExecutions == 0`、`TransactionsStarted == 0`、`UnobservedExecutions == 0` 与持久化不变（R04 补了此前缺的整组断言）。`P09/P10` 断言 `TransactionsStarted == 1`。
+
+R4 实测（head 见 issues log）：样例全量 `42 pass / 72 fail / 114`；约定红 10 条（`R01`、`R03`–`R08`、`R15`、`F02`、`R14`），既有红 62 条与 R2/R3 同一集合 → 新增回归 0；`P09`、`P10`、`P11`、`U01`–`U05`、`C11`–`C13` 全绿。`R15` 的失败原因是实测 `served=""` 而存储 stamp 已轮转为 `3d08…`，即客户端拿不到可用并发条件。

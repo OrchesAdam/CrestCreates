@@ -15,12 +15,26 @@ namespace SaaSHelpdesk.Tests;
 internal sealed class TicketWriteSideEffectProbe
 {
     public List<string> ServiceCalls { get; } = new();
-    public int UnitOfWorkExecutions { get; set; }
+
+    /// <summary>Logical kernel entries (Execute / ExecuteAsync). Says nothing about transactions.</summary>
+    public int LogicalExecutions { get; set; }
+
+    /// <summary>
+    /// Real unit-of-work starts observed where the kernel makes them observable: inside the Execute
+    /// delegate frame, or after IUnitOfWorkScope.StartAsync. Counts only frames where the ambient unit
+    /// of work was actually resolvable, so a no-op wrapper cannot inflate it.
+    /// </summary>
+    public int TransactionsStarted { get; set; }
+
+    /// <summary>Frames that claimed to execute but had no ambient unit of work — must stay 0.</summary>
+    public int UnobservedExecutions { get; set; }
 
     public void Reset()
     {
         ServiceCalls.Clear();
-        UnitOfWorkExecutions = 0;
+        LogicalExecutions = 0;
+        TransactionsStarted = 0;
+        UnobservedExecutions = 0;
     }
 }
 
@@ -92,15 +106,35 @@ internal sealed class CountingUnitOfWorkManager : IUnitOfWorkManager
     public IUnitOfWork? CurrentOrNull => _inner.CurrentOrNull;
     public IUnitOfWork Current => _inner.Current;
 
-    public IUnitOfWorkScope BeginScope(UnitOfWorkOptions? options = null) => _inner.BeginScope(options);
+    public IUnitOfWorkScope BeginScope(UnitOfWorkOptions? options = null)
+        => new CountingUnitOfWorkScope(_inner.BeginScope(options), this);
+
+    internal void ObserveScopeStarted()
+    {
+        if (_inner.CurrentOrNull is null)
+        {
+            _probe.UnobservedExecutions++;
+        }
+        else
+        {
+            _probe.TransactionsStarted++;
+        }
+    }
 
     public Task<TResult> ExecuteAsync<TResult>(
         Func<CancellationToken, Task<TResult>> action,
         UnitOfWorkOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        _probe.UnitOfWorkExecutions++;
-        return _inner.ExecuteAsync(action, options, cancellationToken);
+        _probe.LogicalExecutions++;
+        return _inner.ExecuteAsync(
+            async token =>
+            {
+                ObserveAmbient();
+                return await action(token);
+            },
+            options,
+            cancellationToken);
     }
 
     public TResult Execute<TResult>(
@@ -108,9 +142,61 @@ internal sealed class CountingUnitOfWorkManager : IUnitOfWorkManager
         UnitOfWorkOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        _probe.UnitOfWorkExecutions++;
-        return _inner.Execute(action, options, cancellationToken);
+        _probe.LogicalExecutions++;
+        return _inner.Execute(
+            () =>
+            {
+                ObserveAmbient();
+                return action();
+            },
+            options,
+            cancellationToken);
     }
+
+    private void ObserveAmbient()
+    {
+        if (_inner.CurrentOrNull is null)
+        {
+            _probe.UnobservedExecutions++;
+        }
+        else
+        {
+            _probe.TransactionsStarted++;
+        }
+    }
+}
+
+internal sealed class CountingUnitOfWorkScope : IUnitOfWorkScope
+{
+    private readonly IUnitOfWorkScope _inner;
+    private readonly CountingUnitOfWorkManager _manager;
+
+    internal CountingUnitOfWorkScope(IUnitOfWorkScope inner, CountingUnitOfWorkManager manager)
+    {
+        _inner = inner;
+        _manager = manager;
+    }
+
+    public IUnitOfWork UnitOfWork => _inner.UnitOfWork;
+    public bool IsOwner => _inner.IsOwner;
+    public bool IsTransactional => _inner.IsTransactional;
+    public UnitOfWorkState State => _inner.State;
+    public UnitOfWorkTransactionOutcome TransactionOutcome => _inner.TransactionOutcome;
+    public UnitOfWorkNotificationOutcome NotificationOutcome => _inner.NotificationOutcome;
+    public bool IsReleased => _inner.IsReleased;
+    public Exception? RollbackTerminationFailure => _inner.RollbackTerminationFailure;
+    public CancellationToken ExecutionToken => _inner.ExecutionToken;
+
+    public async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        await _inner.StartAsync(cancellationToken);
+        _manager.ObserveScopeStarted();
+    }
+
+    public Task CompleteAsync(CancellationToken cancellationToken = default) => _inner.CompleteAsync(cancellationToken);
+    public Task RollbackAsync(CancellationToken cancellationToken = default) => _inner.RollbackAsync(cancellationToken);
+    public void Dispose() => _inner.Dispose();
+    public ValueTask DisposeAsync() => _inner.DisposeAsync();
 }
 
 internal static class TicketProbeHostBuilderExtensions

@@ -49,7 +49,9 @@ public class TicketProjectionGapBaselineTests : BaseTest
             "a malformed request body is a client error; the raw JsonException currently reaches the " +
             "converter's catch-all and is reported as Crest.InternalError/500");
         _probe.ServiceCalls.Should().BeEmpty("the handler must not reach the business service");
-        _probe.UnitOfWorkExecutions.Should().Be(0, "no write transaction may be started");
+        _probe.LogicalExecutions.Should().Be(0, "no managed execution may be entered");
+        _probe.TransactionsStarted.Should().Be(0, "no real unit of work may be started");
+        _probe.UnobservedExecutions.Should().Be(0);
         (await CountTicketsAsync()).Should().Be(before);
     }
 
@@ -57,6 +59,7 @@ public class TicketProjectionGapBaselineTests : BaseTest
     public async Task R04_malformed_or_missing_guid_input_is_rejected_with_400_and_calls_no_service()
     {
         var (client, _) = await SignInAsync(MeasurementHost());
+        var ticketsBefore = await CountTicketsAsync();
         _probe.Reset();
 
         var route = await client.GetAsync("/api/ticket/not-a-guid");
@@ -65,6 +68,10 @@ public class TicketProjectionGapBaselineTests : BaseTest
 
         _probe.ServiceCalls.Should().BeEmpty(
             "route and query binding failures must be produced by the typed binder, before any service call");
+        _probe.LogicalExecutions.Should().Be(0);
+        _probe.TransactionsStarted.Should().Be(0, "a rejected binding must not open a unit of work");
+        _probe.UnobservedExecutions.Should().Be(0);
+        (await CountTicketsAsync()).Should().Be(ticketsBefore);
         foreach (var response in new[] { route, badQuery, missingQuery })
         {
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
@@ -148,6 +155,9 @@ public class TicketProjectionGapBaselineTests : BaseTest
         var body = await response.Content.ReadAsStringAsync();
         _probe.ServiceCalls.Should().BeEmpty(
             "CreateTicketDtoValidator rejects a 2-character title, so the business service must not be entered");
+        _probe.LogicalExecutions.Should().Be(0);
+        _probe.TransactionsStarted.Should().Be(0, "validation must fail before a unit of work is started");
+        _probe.UnobservedExecutions.Should().Be(0);
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
         JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().Should().Be("Crest.Validation.Failed",
             "the request is accepted by the validation step today and only fails later inside Ticket.SetTitle, " +
@@ -178,7 +188,10 @@ public class TicketProjectionGapBaselineTests : BaseTest
         {
             nameof(SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.UpdateAsync),
         }, "exactly the update action may run, and nothing else may piggyback on the accepted path");
-        _probe.UnitOfWorkExecutions.Should().Be(1, "the accepted write must own exactly one managed execution");
+        _probe.LogicalExecutions.Should().Be(1, "the accepted write must own exactly one managed execution");
+        _probe.TransactionsStarted.Should().Be(1,
+            "the accepted write must start exactly one real unit of work, observed inside the kernel frame");
+        _probe.UnobservedExecutions.Should().Be(0);
 
         var after = await ReadTicketAsync(ticketId);
         after.Exists.Should().BeTrue();
@@ -187,8 +200,10 @@ public class TicketProjectionGapBaselineTests : BaseTest
             "a successful write must rotate the stored stamp so the next precondition can be checked");
         (await CountTicketsAsync()).Should().Be(ticketsBefore, "an update must not create rows");
 
-        // Read-back after the write, before any further request: the rotated stamp must be stable and
-        // re-usable, otherwise the positive control would only prove a one-off mutation happened.
+        // P09 only claims the business/unit-of-work side: a legal stamp is accepted, one transaction runs,
+        // and the stored stamp rotates. The client-facing read-back ("the served stamp is the current
+        // stamp and can drive the next precondition") is a separate contract owned by R07/R15 and is not
+        // asserted here, where it would conflate two different claims.
         var (secondClient, _) = await SignInAsync(MeasurementHost());
         _probe.Reset();
         var followUp = await secondClient.PutAsync($"/api/ticket/{ticketId}", new StringContent(
@@ -219,12 +234,72 @@ public class TicketProjectionGapBaselineTests : BaseTest
         {
             nameof(SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.DeleteAsync),
         }, "only the delete action may run for an accepted If-Match request");
-        _probe.UnitOfWorkExecutions.Should().Be(1);
+        _probe.LogicalExecutions.Should().Be(1);
+        _probe.TransactionsStarted.Should().Be(1);
+        _probe.UnobservedExecutions.Should().Be(0);
 
         var after = await ReadTicketAsync(ticketId);
         after.Exists.Should().BeFalse("the accepted delete must remove the row");
         after.ConcurrencyStamp.Should().BeEmpty();
         (await CountTicketsAsync()).Should().Be(ticketsBefore - 1);
+    }
+
+    [Fact]
+    public async Task R15_http_served_stamp_reflects_a_write_that_happened_after_the_first_read()
+    {
+        // Mutation-sensitivity guard for R07: a server that maps the stamp once and then serves a cached
+        // value forever passes the initial read. The client-facing contract only holds when the stamp
+        // served after a write is the row's new stamp.
+        var (client, _) = await SignInAsync(MeasurementHost());
+        var ticketId = await CreateTicketAsync(client);
+        var before = await ReadTicketAsync(ticketId);
+
+        var prime = await client.GetAsync($"/api/ticket/{ticketId}");
+        prime.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        _probe.Reset();
+        var update = await client.PutAsync($"/api/ticket/{ticketId}", new StringContent(
+            UpdatePayload(before.ConcurrencyStamp), Encoding.UTF8, "application/json"));
+        update.StatusCode.Should().Be(HttpStatusCode.OK, await update.Content.ReadAsStringAsync());
+
+        var persistedAfterWrite = await ReadTicketAsync(ticketId);
+        persistedAfterWrite.ConcurrencyStamp.Should().NotBe(before.ConcurrencyStamp,
+            "the write must rotate the stored stamp; otherwise this control cannot distinguish cached responses");
+
+        var read = await client.GetAsync($"/api/ticket/{ticketId}");
+        read.StatusCode.Should().Be(HttpStatusCode.OK);
+        var served = JsonDocument.Parse(await read.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("data").GetProperty("concurrencyStamp").GetString();
+
+        served.Should().Be(persistedAfterWrite.ConcurrencyStamp,
+            "after a successful write the client must receive the new stamp, not the value it saw before");
+    }
+
+    [Fact]
+    public async Task P11_scope_start_is_observed_as_a_real_transaction()
+    {
+        // Discriminating control for the zero-transaction assertions: they are only meaningful if the
+        // observer can see a transaction opened through the other official entry point,
+        // IUnitOfWorkScope.StartAsync, and the provider really reports an active transaction.
+        using var host = MeasurementHost();
+        using var serviceScope = host.Services.CreateScope();
+        var manager = serviceScope.ServiceProvider
+            .GetRequiredService<CrestCreates.Data.Abstractions.IUnitOfWorkManager>();
+        var db = serviceScope.ServiceProvider.GetRequiredService<HelpdeskDbContext>();
+        _probe.Reset();
+
+        await using var scope = manager.BeginScope();
+        await scope.StartAsync();
+
+        db.Database.CurrentTransaction.Should().NotBeNull(
+            "the scope must have opened a real provider transaction before the observer can count it");
+        _probe.TransactionsStarted.Should().Be(1,
+            "the counter must observe the BeginScope/StartAsync path, not only Execute/ExecuteAsync");
+        _probe.LogicalExecutions.Should().Be(0,
+            "opening a scope is not a logical Execute; the two counters must stay distinguishable");
+        _probe.UnobservedExecutions.Should().Be(0);
+
+        await scope.RollbackAsync();
     }
 
     private WebApplicationFactory<global::Program> MeasurementHost()

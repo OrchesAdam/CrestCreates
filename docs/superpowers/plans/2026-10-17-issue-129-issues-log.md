@@ -147,3 +147,16 @@ PR #152 head 602d6e40 独立定向复跑6绿+8约定红/14，0 skipped。额外�
 | `CrestCreates.CodeGenerator.Tests` 全量（最终 head `214426ea`） | 459 pass + 0 fail / 459，0 skipped，22 分 30 秒；上一 head 的唯一超时失败已随「单次构建 + 串行集合」消除 |
 
 S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由维护者判定，本轮不自称完成。
+
+---
+
+## S1 补件 R4（2026-10-17，回应 head `05fa50cb` 复审的两项 P2）
+
+| 发现 | 补件 | 实测 |
+| --- | --- | --- |
+| R3-HTTP129-01 修改后未从 HTTP 回读 stamp | 新增目标红 `R15`：GET 预热 → 用数据库当前 stamp 合法更新（存储 stamp 轮转）→ 再 GET，响应 stamp 必须等于新存储值；`R07` 保留首次回读；`P09` 措辞收窄为业务/UoW 正向（明确不宣称客户端响应 stamp 可复用），两类事实分开记账 | `R15` 红：`served=""` vs 存储 `3d08…`；`R07` 红同因；`P09` 绿 |
+| R3-HTTP129-02 Execute 计数不能证明零事务；R04/R08 断言缺 | 计数器拆分 `LogicalExecutions` / `TransactionsStarted` / `UnobservedExecutions`；`BeginScope` 返回计数包装 scope（覆盖 `StartAsync` 正式入口），内核帧内解析不到 ambient 记入 `UnobservedExecutions`；新增 `P11` 真实 `BeginScope + StartAsync` 正例（断 `DbContext.Database.CurrentTransaction != null`、事务计数 1、逻辑执行 0）；`R03/R04/R08` 补齐零业务/零逻辑执行/零事务/零未观测/持久化不变 | `P11` 绿；`R03/R04/R08` 仍为既有目标红，新增断言均通过；`P09/P10` 断 `TransactionsStarted == 1` 通过 |
+
+计数（本轮实测，最终 head 见提交）：`SaaSHelpdesk.Tests` 全量 **42 pass / 72 fail / 114**，0 skipped；约定红 10 条（`R01`、`R03`–`R08`、`R15`、`F02`、`R14`），既有红 62 条与 R2/R3 同一集合 → 新增回归 0。本轮只改样例测试与探针设施，未触及 CodeGenerator 套件（上一 head 459/459 仍适用）。
+
+仍未闭合（不声称完成）：客户端响应 stamp 的可复用性在 S1 只作为目标红记录，生产映射修复属 S3；双租户选库 factory、生产启动根因按 rev.2 属 S3；引用程序集声明范围的小范围设计增补仍是对应 S2 的前置设计门禁。
