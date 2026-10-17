@@ -90,8 +90,9 @@ public sealed class AppServiceHttpProjectionModelTests
         create.InputEnvelopeFullName.Should().BeNull("a single body parameter binds directly");
 
         var update = model.Actions.Single(a => a.Name == "UpdateAsync");
-        update.InputEnvelopeFullName.Should().Be("CrestCreates.Generated.WidgetAppService_Update_CompatibilityInput",
-            "a route identity composed with a body uses the shared envelope convention");
+        update.InputEnvelopeFullName.Should().Be(
+            "CrestCreates.Generated.shop-http_shop-contracts-i-widget-app-service_Update_CompatibilityInput",
+            "the envelope name carries the full owner identity (assembly + contract), not the short service name");
         update.BodyPolicy.Should().Be(AppServiceHttpBodyPolicy.Required);
         update.RouteIdentityParameterName.Should().Be("id");
 

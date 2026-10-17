@@ -227,3 +227,16 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 - 共享 emitter 提取与普通 Compile 产物（信封/binder/invoker/result/manifest/ownership）、`CrestCreatesJsonContractGenerationDependsOn` 接入、MSBuild 生命周期与外部包首消费（B01–B04）；
 - `AddGeneratedAppServiceHttp` 贡献/handler/JSON configurator、Map 期 fail-closed、Asset/Procurement 迁移与 H08。
 - 本轮不声称 S2 放行，不合并，CI 保持暂停。
+
+### S2.1 审查 R1 修复（2026-10-17，4 项 P2）
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| S21-R1-01 显式 ExplicitHost 缺 ContractType 仍生成全局静态注册 | 静态生成器现在区分四种模式：显式 `ExplicitHost` + `ContractType` → 跳过（CCHTTP002 警告，零产物）；显式 `ExplicitHost` 无 `ContractType` → 同样跳过并告警（不再静默发布静态链）；无 mode + `ContractType` → 视为 ExplicitHost（属性默认值语义）；无 mode 且无 `ContractType` → 旧静态链 + CCHTTP005 迁移警告。跳过路径不再发射空模型产物（`Actions.Length == 0` 直接跳过），避免遗留空 provider/ModuleInitializer | 审查者探针 `Explicit_host_without_contract_cannot_silently_publish_static` 由 0/5 组转为通过 |
+| S21-R1-02 同短名契约的 capability ID / 组合信封名碰撞 | 默认 capability id 改为 owner assembly + 完整契约名（去 `global::`）+ action 的确定性编码；组合信封名为 `CrestCreates.Generated.{assembly}_{contractFullName}_{Action}_CompatibilityInput`（`SanitizeToken` 归一化 `.`/`+`/泛型符号）。显式 `CapabilityIdPrefix` 仍覆盖 ID，但信封始终含完整 owner 身份；CRUD 的 `CrudEnvelopeConvention` 未改动 | 审查者两条身份探针（不同显式前缀 / 默认 ID）通过 |
+| S21-R1-03 合法闭合泛型接口被误判为开放泛型 | 由 `TypeParameters.Length > 0` 改为 `IsUnboundGenericType`；闭合泛型契约的 `ContractFullName` 含闭合参数，动作签名与结果类型按构造后类型记录 | `Closed_generic_contract_is_a_supported_closed_interface` 通过 |
+| S21-R1-04 接口私有辅助方法纳入动作集 | 只枚举 `DeclaredAccessibility == Public` 的 ordinary 实例方法（C# 8 私有 DIM 是实现细节） | `Private_interface_helper_is_not_an_action` 通过 |
+
+审查者的 5 条探针以 patch 原样入库（`ReviewS21ContractProbes.cs`）。本轮定向（5 审查探针 + 7 模型 + 3 声明）**15/15 pass**；全量 `CrestCreates.CodeGenerator.Tests` 结果见补记。默认 ID 语义变化影响正式声明（Ticket 将在 S3 声明时显式保留现有 `compat.appservice.ticket` 前缀，迁移表已记录），旧静态链不受影响。
+
+S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution/binder/invoker/typed result/required identities/JSON root/Host configurator）先归一 wire action model 再调同一 emitter；实体发现、DTO/CRUD service、repository、mapping、permission、filter/sort/query adapter 留在 CRUD 前端；#128 的 not-found/result envelope 与 #129 的 Web CrestErrorResponse 责任分开；工具链复用既有 CLI/Task/fingerprint/stamp/DependsOn/分区与 packaged transport。

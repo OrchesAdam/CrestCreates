@@ -55,7 +55,7 @@ public static class AppServiceHttpProjectionModelBuilder
 
         if (contractType is not INamedTypeSymbol contractSymbol
             || contractType.TypeKind != TypeKind.Interface
-            || contractSymbol.TypeParameters.Length > 0)
+            || contractSymbol.IsUnboundGenericType)
         {
             return Failed(diagnostics, AppServiceHttpDiagnosticCodes.UnsupportedDeclaration,
                 $"ContractType '{contractType.ToDisplayString()}' must be a closed interface", anchor);
@@ -71,18 +71,18 @@ public static class AppServiceHttpProjectionModelBuilder
         var serviceName = AppServiceHttpWireConvention.ServiceName(contract.Name);
         var routePrefix = (ReadString(projection, "RoutePrefix") ?? AppServiceHttpWireConvention.ToKebabCase(serviceName))
             .Trim('/');
-        var capabilityPrefix = (ReadString(projection, "CapabilityIdPrefix")
-                                ?? AppServiceHttpWireConvention.DefaultCapabilityPrefix + AppServiceHttpWireConvention.ToKebabCase(serviceName))
-            .TrimEnd('.');
-
+        var explicitCapabilityPrefix = ReadString(projection, "CapabilityIdPrefix")?.TrimEnd('.');
         var ownerAssembly = compilation.AssemblyName ?? string.Empty;
+        var contractFullName = contract.ToDisplayString(Display).Replace("global::", string.Empty);
         var actions = new List<AppServiceHttpActionModel>();
         var referenced = new List<AppServiceHttpReferenceIdentity>();
         AddReference(referenced, contract, ownerAssembly, isContract: true);
 
         foreach (var contractMethod in EnumerateContractMethods(contract))
         {
-            var action = BuildAction(compilation, contract, anchor, contractMethod, capabilityPrefix, diagnostics, referenced);
+            var action = BuildAction(
+                compilation, contract, anchor, contractMethod, ownerAssembly, contractFullName,
+                explicitCapabilityPrefix, diagnostics, referenced);
             if (action is not null)
             {
                 actions.Add(action);
@@ -125,11 +125,12 @@ public static class AppServiceHttpProjectionModelBuilder
             HttpOwnerAssemblyName = ownerAssembly,
             AnchorTypeFullName = anchor.ToDisplayString(Display),
             ContractAssemblyName = contract.ContainingAssembly?.Name ?? string.Empty,
-            ContractFullName = contract.ToDisplayString(Display),
+            ContractFullName = contractFullName,
             ContractNamespace = contract.ContainingNamespace?.ToDisplayString() ?? string.Empty,
             ContractName = contract.Name,
             RoutePrefix = routePrefix,
-            CapabilityIdPrefix = capabilityPrefix,
+            CapabilityIdPrefix = explicitCapabilityPrefix
+                ?? AppServiceHttpWireConvention.DefaultCapabilityPrefix + AppServiceHttpWireConvention.SanitizeToken(ownerAssembly),
             RegistrationMode = registrationMode,
             Actions = actions,
             ReferencedTypes = referenced
@@ -148,7 +149,9 @@ public static class AppServiceHttpProjectionModelBuilder
         INamedTypeSymbol contract,
         INamedTypeSymbol anchor,
         IMethodSymbol contractMethod,
-        string capabilityPrefix,
+        string ownerAssemblyName,
+        string contractFullName,
+        string? explicitCapabilityPrefix,
         List<AppServiceHttpProjectionDiagnostic> diagnostics,
         List<AppServiceHttpReferenceIdentity> referenced)
     {
@@ -280,7 +283,9 @@ public static class AppServiceHttpProjectionModelBuilder
             AddReference(referenced, resultType, compilation.AssemblyName ?? string.Empty, isContract: false);
         }
 
-        var capabilityId = capabilityPrefix + "." + AppServiceHttpWireConvention.ToKebabCase(AppServiceHttpWireConvention.TrimAsyncSuffix(actionName));
+        var capabilityId = explicitCapabilityPrefix is null
+            ? AppServiceHttpWireConvention.DefaultCapabilityId(ownerAssemblyName, contractFullName, actionName)
+            : explicitCapabilityPrefix + "." + AppServiceHttpWireConvention.ToKebabCase(AppServiceHttpWireConvention.TrimAsyncSuffix(actionName));
         return new AppServiceHttpActionModel
         {
             Name = actionName,
@@ -298,7 +303,7 @@ public static class AppServiceHttpProjectionModelBuilder
             RouteIdentityParameterName = routeParameters.FirstOrDefault()?.Name,
             ScalarInputs = scalarInputs,
             InputEnvelopeFullName = needsEnvelope
-                ? AppServiceHttpWireConvention.EnvelopeFullName(contract.Name, actionName)
+                ? AppServiceHttpWireConvention.EnvelopeFullName(ownerAssemblyName, contractFullName, actionName)
                 : null,
             RequiresConcurrencyToken = requiresConcurrencyToken,
         };
@@ -311,8 +316,12 @@ public static class AppServiceHttpProjectionModelBuilder
         {
             foreach (var method in type.GetMembers().OfType<IMethodSymbol>())
             {
-                if (method.MethodKind != MethodKind.Ordinary || method.IsStatic)
+                if (method.MethodKind != MethodKind.Ordinary
+                    || method.IsStatic
+                    || method.DeclaredAccessibility != Accessibility.Public)
                 {
+                    // Private interface helpers (C# 8 default-interface members) are implementation
+                    // details, not HTTP actions (review finding S21-R1-04).
                     continue;
                 }
 

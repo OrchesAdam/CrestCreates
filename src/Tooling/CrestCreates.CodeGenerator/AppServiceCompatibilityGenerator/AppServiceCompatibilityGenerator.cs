@@ -73,13 +73,19 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             .Where(argument => argument.Key == "ContractType")
             .Select(argument => argument.Value)
             .FirstOrDefault();
-        var isExplicitHostWithContract = classProjectionAttr is not null
-            && contractTypeArgument is { Kind: TypedConstantKind.Type, Value: not null }
-            && !(registrationMode is { Kind: TypedConstantKind.Enum }
-                 && System.Convert.ToInt32(registrationMode.Value.Value) == 1);
+        var hasRegistrationMode = registrationMode is { Kind: TypedConstantKind.Enum };
+        var isExplicitHost = classProjectionAttr is not null
+            && ((hasRegistrationMode && System.Convert.ToInt32(registrationMode!.Value.Value) == 0)
+                // A mode-less declaration that names ContractType is an explicit-host declaration:
+                // the attribute's default mode is ExplicitHost, and only ContractType makes the model valid.
+                || (!hasRegistrationMode
+                    && contractTypeArgument is { Kind: TypedConstantKind.Type, Value: not null }));
+        var hasContractType = contractTypeArgument is { Kind: TypedConstantKind.Type, Value: not null };
+        var isExplicitHostWithContract = isExplicitHost && hasContractType;
+        var isExplicitHostWithoutContract = isExplicitHost && !hasContractType;
 
         // CEP030: [CapabilityCompatibilityProjection] on non-[CrestService] class
-        if (!hasCrestService && !isExplicitHostWithContract && (classProjectionAttr != null || methodsWithProjection.Count > 0))
+        if (!hasCrestService && !isExplicitHost && (classProjectionAttr != null || methodsWithProjection.Count > 0))
         {
             var cep030Diagnostics = new List<DiagnosticDescriptorAndLocation>();
             var location = classProjectionAttr?.ApplicationSyntaxReference?.GetSyntax().GetLocation()
@@ -101,7 +107,7 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                 Diagnostics: cep030Diagnostics.ToArray());
         }
 
-        if (isExplicitHostWithContract)
+        if (isExplicitHostWithContract || isExplicitHostWithoutContract)
         {
             var skipLocation = classProjectionAttr!.ApplicationSyntaxReference?.GetSyntax().GetLocation()
                 ?? classDecl.GetLocation();
@@ -549,6 +555,13 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             // (CEP030, CEP031, CEP034, CEP037) to avoid generating code that would
             // produce additional compiler errors (e.g., CS0310 for new() constraint violation)
             if (service.Diagnostics.Any(d => d.Descriptor.DefaultSeverity == DiagnosticSeverity.Error))
+            {
+                continue;
+            }
+
+            // #129: a declaration the static registrar declined (CCHTTP002) owns no actions; emitting
+            // empty providers would leave a half endpoint set (and a global registration) behind.
+            if (service.Actions.Length == 0)
             {
                 continue;
             }
