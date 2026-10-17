@@ -48,6 +48,30 @@ public static class CapabilityEndpointJsonTypeInfoResolver
     }
 
     /// <summary>
+    /// #128 S3: the typed accessor generated binding/result code uses when a missing metadata table
+    /// must fail closed. §7.3 explicitly forbids falling back to a general resolver, so a host that did
+    /// not assemble the generated contract gets a deterministic error instead of a reflection guess.
+    /// </summary>
+    public static JsonTypeInfo<T> Require<T>(IServiceProvider serviceProvider)
+    {
+        JsonTypeInfo<T>? metadata;
+        try
+        {
+            metadata = Resolve<T>(serviceProvider);
+        }
+        catch (NotSupportedException)
+        {
+            // A host whose resolver carries no metadata for T reports this the moment the type is asked
+            // for; §7.3 wants one deterministic rejection here rather than STJ's implementation detail.
+            metadata = null;
+        }
+
+        return metadata ?? throw new InvalidOperationException(
+            $"Source-generated JSON metadata for '{typeof(T)}' is not available in this host. "
+            + "The generated CRUD/compatibility JSON contract is not assembled or not activated for this Host.");
+    }
+
+    /// <summary>
     /// Resolves JsonTypeInfo directly from an IServiceProvider.
     /// Non-generic version used by startup validation.
     /// </summary>

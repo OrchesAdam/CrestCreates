@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Same consumer-level switch as the main Feature: the toolchain surface must close without a
+         reflective fallback. Unlike the main Feature this assembly is deliberately NOT woven
+         (no FodyWeavers.xml / Rougamo.Fody): the dual-order acceptance exercises the JSON contract
+         co-activation and the per-feature wire, not the UnitOfWork leg. -->
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- #128 R1: a second, independent generated Feature. Same consumer import set as
+         CrestCreates.GeneratedCrud.AotFixture.Feature (proven by the real-MSBuild probe). -->
+    <ProjectReference Include="../../../../src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../CrestCreates.GeneratedCrud.AotFixture.Domain/CrestCreates.GeneratedCrud.AotFixture.Domain.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
+    <ProjectReference Include="../../../../src/Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Aop/CrestCreates.Aop.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Validation/CrestCreates.Validation.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"
+                      ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <Import Project="../../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.props" />
+  <Import Project="../../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.targets" />
+
+</Project>

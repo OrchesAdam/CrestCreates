@@ -15,11 +15,9 @@ internal static class CapabilityEndpointMapper
         CapabilityEndpointDescriptor descriptor,
         CapabilityDescriptor capability,
         CapabilityEndpointBindingContract binding,
-        ICapabilityEndpointResultContractRegistry? resultContractRegistry = null)
+        Func<EndpointExecutionContext, IServiceProvider, object>? resultMapper = null)
     {
         var httpMethod = descriptor.HttpMethod.ToString().ToUpperInvariant();
-
-        var resultMapper = resultContractRegistry?.TryGetResultMapper(descriptor.Id, descriptor.Version);
 
         var routeHandler = endpoints.MapMethods(
             descriptor.RoutePattern,

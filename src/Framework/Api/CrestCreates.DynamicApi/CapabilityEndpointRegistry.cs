@@ -17,6 +17,22 @@ public sealed class CapabilityEndpointRegistry
     {
     }
 
+    /// <summary>
+    /// Rebuild entry point used by the per-host <see cref="CapabilityEndpointRegistryBootstrapper"/>.
+    /// Unlike <see cref="RegistryBase{TDescriptor}.Build"/>, a previously failed attempt does not
+    /// permanently poison this host-scoped registry: the terminal Failed state is reset so a later
+    /// attempt rebuilds from the then-current inputs. A Built registry is never rebuilt or mutated here.
+    /// </summary>
+    internal void BuildRetryable(IEnumerable<IDescriptorProvider<CapabilityEndpointDescriptor>> providers)
+    {
+        if (State == RegistryState.Failed)
+        {
+            State = RegistryState.Created;
+        }
+
+        Build(providers);
+    }
+
     CapabilityEndpointDescriptor? IDescriptorRegistry<CapabilityEndpointDescriptor>.GetByName(string name)
         => GetByName(name).FirstOrDefault(d => d.State == DescriptorState.Active)
            ?? GetByName(name).FirstOrDefault();

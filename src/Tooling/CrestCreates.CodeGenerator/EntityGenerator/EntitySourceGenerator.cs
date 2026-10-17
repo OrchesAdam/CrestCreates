@@ -8,6 +8,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using CrestCreates.CodeGenerator.CrudServiceGenerator;
 using CrestCreates.CodeGenerator.ObjectMappingGenerator;
 
 namespace CrestCreates.CodeGenerator.EntityGenerator
@@ -24,7 +25,15 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
-            var compilationAndClasses = context.CompilationProvider.Combine(entityClasses);
+            // #128 S2 item ①: the CRUD precompile manifest owns the concrete artifacts it materialized.
+            var ownedCrudArtifacts = context.AdditionalTextsProvider
+                .Collect()
+                .Select(static (texts, _) => CrudArtifactOwnership.Read(texts))
+                .WithComparer(CrudArtifactOwnership.ContentComparer);
+
+            var compilationAndClasses = context.CompilationProvider
+                .Combine(entityClasses)
+                .Combine(ownedCrudArtifacts);
 
             context.RegisterSourceOutput(compilationAndClasses, ExecuteGeneration);
         }
@@ -53,9 +62,12 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 attr.AttributeClass?.Name == "EntityAttribute" || attr.AttributeClass?.Name == "Entity");
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, (Compilation Compilation, ImmutableArray<INamedTypeSymbol?> EntityClasses) input)
+        private void ExecuteGeneration(
+            SourceProductionContext context,
+            ((Compilation Compilation, ImmutableArray<INamedTypeSymbol?> EntityClasses) Inputs, ImmutableSortedSet<string> OwnedCrudArtifacts) input)
         {
-            var (compilation, entityClasses) = input;
+            var (compilation, entityClasses) = input.Inputs;
+            var ownedCrudArtifacts = input.OwnedCrudArtifacts;
             if (entityClasses.IsDefaultOrEmpty) return;
 
             var hasPermissionName = compilation.GetTypeByMetadataName("CrestCreates.Core.Abstractions.Identity.PermissionName") != null;
@@ -82,10 +94,10 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                     }
 
                     GenerateOrmMappings(context, entityClass);
-                    GenerateEntityDto(context, entityClass);
-                    GenerateCreateEntityDto(context, entityClass);
-                    GenerateUpdateEntityDto(context, entityClass);
-                    GenerateObjectMappingDeclarations(context, entityClass);
+                    GenerateEntityDto(context, entityClass, ownedCrudArtifacts);
+                    GenerateCreateEntityDto(context, entityClass, ownedCrudArtifacts);
+                    GenerateUpdateEntityDto(context, entityClass, ownedCrudArtifacts);
+                    GenerateObjectMappingDeclarations(context, entityClass, ownedCrudArtifacts);
                     GenerateEntityExtensions(context, entityClass);
                     GenerateValidationRules(context, entityClass);
 
@@ -1046,13 +1058,23 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             return indexes.ToString();
         }
 
-        private void GenerateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass)
+        private void GenerateEntityDto(
+            SourceProductionContext context,
+            INamedTypeSymbol entityClass,
+            ImmutableSortedSet<string> ownedCrudArtifacts)
         {
             var entityName = entityClass.Name;
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
             var properties = GetAllEntityProperties(entityClass);
             var dtosNamespace = GetTargetNamespace(namespaceName, GeneratedCodeType.Dto);
             var idType = GetEntityIdType(entityClass);
+
+            // §6.1: the CRUD precompile manifest already owns this exact contract type, so this generator
+            // must not emit a second file for it. Nothing else about the entity changes.
+            if (ownedCrudArtifacts.Contains($"{dtosNamespace}.{entityName}Dto"))
+            {
+                return;
+            }
 
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
@@ -1089,12 +1111,20 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             context.AddSource($"{entityName}Dto.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateCreateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass)
+        private void GenerateCreateEntityDto(
+            SourceProductionContext context,
+            INamedTypeSymbol entityClass,
+            ImmutableSortedSet<string> ownedCrudArtifacts)
         {
             var entityName = entityClass.Name;
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
             var properties = GetInputEntityProperties(entityClass, includeConcurrencyStamp: true);
             var dtosNamespace = GetTargetNamespace(namespaceName, GeneratedCodeType.CreateDto);
+
+            if (ownedCrudArtifacts.Contains($"{dtosNamespace}.Create{entityName}Dto"))
+            {
+                return;
+            }
 
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
@@ -1128,13 +1158,21 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             context.AddSource($"Create{entityName}Dto.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateUpdateEntityDto(SourceProductionContext context, INamedTypeSymbol entityClass)
+        private void GenerateUpdateEntityDto(
+            SourceProductionContext context,
+            INamedTypeSymbol entityClass,
+            ImmutableSortedSet<string> ownedCrudArtifacts)
         {
             var entityName = entityClass.Name;
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
             var properties = GetInputEntityProperties(entityClass, includeConcurrencyStamp: false);
             var dtosNamespace = GetTargetNamespace(namespaceName, GeneratedCodeType.UpdateDto);
             var idType = GetEntityIdType(entityClass);
+
+            if (ownedCrudArtifacts.Contains($"{dtosNamespace}.Update{entityName}Dto"))
+            {
+                return;
+            }
 
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");
@@ -1171,12 +1209,21 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             context.AddSource($"Update{entityName}Dto.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
-        private void GenerateObjectMappingDeclarations(SourceProductionContext context, INamedTypeSymbol entityClass)
+        private void GenerateObjectMappingDeclarations(
+            SourceProductionContext context,
+            INamedTypeSymbol entityClass,
+            ImmutableSortedSet<string> ownedCrudArtifacts)
         {
             var entityName = entityClass.Name;
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
             var entityFullName = entityClass.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             var dtosNamespace = GetTargetNamespace(namespaceName, GeneratedCodeType.Dto);
+
+            // The mapping seed class this generator declares lives in "{entity namespace}.Mappings".
+            if (ownedCrudArtifacts.Contains($"{namespaceName}.Mappings.{entityName}ObjectMappings"))
+            {
+                return;
+            }
 
             var builder = new StringBuilder();
             builder.AppendLine("#nullable enable");

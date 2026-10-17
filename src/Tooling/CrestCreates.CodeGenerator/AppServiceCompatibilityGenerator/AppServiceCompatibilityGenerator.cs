@@ -382,10 +382,13 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                     || (returnNamedType != null && returnType.Name == "ValueTask" && !returnNamedType.IsGenericType)
                     || returnType.SpecialType == SpecialType.System_Void;
 
+                // #128 S3: the return type name feeds a checked cast and the typed envelope's generic
+                // argument, so it must not carry the nullable annotation ('AssetResult?' cannot appear
+                // in an `as` expression); the envelope's nullability comes from the runtime generic.
                 var returnTypeName = isVoidReturn ? "void"
                     : returnType is INamedTypeSymbol namedReturn && namedReturn.IsGenericType
-                        ? namedReturn.TypeArguments[0].ToDisplayString(FullyQualifiedFormat)
-                        : returnType.ToDisplayString(FullyQualifiedFormat);
+                        ? namedReturn.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                        : returnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
                 // CEP037: Body parameter type must be suitable for generated emptyBodyFactory
                 var bodyParamModel = paramModels.FirstOrDefault(p => p.Source == "Body");

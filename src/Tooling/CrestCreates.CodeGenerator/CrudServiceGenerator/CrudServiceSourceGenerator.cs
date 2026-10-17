@@ -7,6 +7,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using CrestCreates.Tooling.CrudGeneration;
 
 namespace CrestCreates.CodeGenerator.CrudServiceGenerator
 {
@@ -25,7 +26,19 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 .Where(static x => x is not null)
                 .Collect();
 
-            var compilationAndClasses = context.CompilationProvider.Combine(entityClasses);
+            // The CRUD precompile + JSON transport marker decides whether a formal declaration is
+            // allowed to exist at all; the analyzer never falls back to the legacy surface.
+            var toolchainAssembled = context.AnalyzerConfigOptionsProvider.Select(static (provider, _) =>
+                provider.GlobalOptions.TryGetValue(
+                    "build_property.CrestCreatesCrudJsonToolchain", out var value) && value == "true");
+
+            var ownedArtifacts = context.AdditionalTextsProvider.Collect()
+                .Select(static (texts, _) => CrudArtifactOwnership.Read(texts))
+                .WithComparer(CrudArtifactOwnership.ContentComparer);
+
+            var compilationAndClasses = context.CompilationProvider
+                .Combine(entityClasses)
+                .Combine(toolchainAssembled.Combine(ownedArtifacts));
 
             context.RegisterSourceOutput(compilationAndClasses, ExecuteGeneration);
         }
@@ -158,10 +171,28 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             return defaultValue;
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, (Compilation Compilation, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> Classes) input)
+        private void ExecuteGeneration(
+            SourceProductionContext context,
+            ((Compilation Compilation, ImmutableArray<(INamedTypeSymbol Symbol, bool GenerateAsBaseClass, bool IsUsingNewAttribute)?> Classes) Combined, (bool ToolchainAssembled, ImmutableSortedSet<string> OwnedArtifacts) State) input)
         {
-            var (compilation, entityClasses) = input;
+            var (combined, state) = input;
+            var (toolchainAssembled, ownedArtifacts) = state;
+            var (compilation, entityClasses) = combined;
             if (entityClasses.IsDefaultOrEmpty) return;
+
+            // #128 S2: a formal [GenerateCrudService(typeof(Entity))] declaration is materialized by
+            // the CRUD precompile stage as ordinary Compile input. This generator keeps only the
+            // declaration and assembly-consistency diagnostics for it; emitting a second surface here
+            // is exactly the double track the design closes.
+            var formalDeclarations = entityClasses
+                .Where(info => info.HasValue)
+                .Select(info => info!.Value.Symbol)
+                .Where(IsFormalDeclaration)
+                .ToImmutableHashSet(SymbolEqualityComparer.Default);
+            if (!formalDeclarations.IsEmpty)
+            {
+                ReportFormalDeclarationDiagnostics(context, compilation, formalDeclarations.Count, toolchainAssembled, ownedArtifacts);
+            }
 
             var hasMultiTenant = compilation.GetTypeByMetadataName("CrestCreates.DataFilter.Entities.IMultiTenant") != null;
             var hasDynamicApi = HasDynamicApiSupport(compilation);
@@ -175,6 +206,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
 
                 var (entityClass, generateAsBaseClass, isUsingNewAttribute) = entityInfo.Value;
                 var entityFullName = entityClass.ToDisplayString();
+                if (formalDeclarations.Contains(entityClass)) continue;
                 if (processedEntities.Contains(entityFullName)) continue;
 
                 processedEntities.Add(entityFullName);
@@ -185,6 +217,12 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                     var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
                     var idType = GetEntityIdType(entityClass);
                     var properties = GetEntityProperties(entityClass);
+
+                    // Validate entity can be statically mapped (CCCRUD004)
+                    if (!ValidateEntityMapperClosure(context, entityClass, properties))
+                    {
+                        continue;
+                    }
 
                     // Generate DTOs
                     GenerateEntityDto(context, entityClass, entityName, namespaceName, properties);
@@ -220,6 +258,65 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
                 }
             }
         }
+
+        /// <summary>
+        /// Formal recognition is by the attribute's metadata full name and symbol identity; the test
+        /// stub with the same short name is not a delivered contract (§5.1).
+        /// </summary>
+        /// <summary>
+        /// Formal recognition is by the attribute's metadata full name and symbol identity, plus the
+        /// delivered <c>typeof(Entity)</c> constructor shape (§5.1). The test stub shares the full name
+        /// but has no entity-typed constructor argument, so it stays on the legacy path and is never
+        /// mistaken for the delivered contract.
+        /// </summary>
+        private static bool IsFormalDeclaration(INamedTypeSymbol type) => type.GetAttributes().Any(data =>
+            data.AttributeClass?.ToDisplayString() == CrudGenerationModelBuilder.AttributeFullName
+            && data.ConstructorArguments.Length == 1
+            && data.ConstructorArguments[0].Value is INamedTypeSymbol);
+
+        private static void ReportFormalDeclarationDiagnostics(
+            SourceProductionContext context,
+            Compilation compilation,
+            int formalDeclarationCount,
+            bool toolchainAssembled,
+            ImmutableSortedSet<string> ownedArtifacts)
+        {
+            var build = CrudGenerationModelBuilder.Build(compilation, compilation.AssemblyName ?? string.Empty);
+            foreach (var issue in build.Diagnostics)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    MapDescriptor(issue.Id),
+                    Location.None,
+                    issue.Message));
+            }
+
+            var actualSurface = build.Models.All(model =>
+                CrudArtifactEmitter.Emit(model)
+                    .SelectMany(artifact => CrudArtifactEmitter.DeclaredTypeFullNames(artifact.Source))
+                    .All(name => ownedArtifacts.Contains(name)
+                        && compilation.GetTypeByMetadataName(name) is INamedTypeSymbol type
+                        && SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, compilation.Assembly)));
+            if ((!toolchainAssembled || !actualSurface) && formalDeclarationCount > 0)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    CrudServiceDiagnostics.PrecompileTransportMissing,
+                    Location.None,
+                    $"{formalDeclarationCount} formal CRUD declaration(s) require the precompile/JSON toolchain, a valid ownership manifest and current materialized Compile artifacts."));
+            }
+        }
+
+        private static DiagnosticDescriptor MapDescriptor(string id) => id switch
+        {
+            CrudDiagnosticIds.DeclarationUnsupported => CrudServiceDiagnostics.InvalidDeclaration,
+            CrudDiagnosticIds.ToolchainNotAssembled => CrudServiceDiagnostics.PrecompileTransportMissing,
+            CrudDiagnosticIds.OwnerIdentityConflict => CrudServiceDiagnostics.IdentityConflict,
+            CrudDiagnosticIds.StaticClosureUnsupported => CrudServiceDiagnostics.StaticClosureUnsupported,
+            CrudDiagnosticIds.RequiredReferenceMissing => CrudServiceDiagnostics.MissingRequiredReference,
+            CrudDiagnosticIds.PrecompileStateInvalid => CrudServiceDiagnostics.PrecompileInputCorrupted,
+            CrudDiagnosticIds.QueryConfigurationUnsupported => CrudServiceDiagnostics.FilterSortUnsupported,
+            CrudDiagnosticIds.LegacyContractMismatch => CrudServiceDiagnostics.LegacySerializationInconsistent,
+            _ => CrudServiceDiagnostics.InvalidDeclaration,
+        };
 
         private static bool HasDynamicApiSupport(Compilation compilation)
         {
@@ -903,6 +1000,119 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator
             }
 
             return properties;
+        }
+
+        private bool ValidateEntityMapperClosure(
+            SourceProductionContext context,
+            INamedTypeSymbol serviceClass,
+            List<IPropertySymbol> properties)
+        {
+            // Extract the actual entity type from the attribute's constructor argument
+            var entityType = ExtractEntityTypeFromAttribute(serviceClass);
+            if (entityType is null)
+            {
+                // Fall back to validating the service class itself (legacy behavior)
+                entityType = serviceClass;
+            }
+
+            // Extract ExcludeProperties from the attribute
+            var excludeProperties = ExtractExcludePropertiesFromAttribute(serviceClass);
+
+            // Re-collect properties from the actual entity type
+            var entityProperties = GetEntityProperties(entityType);
+
+            // R1-CRUD128-04: Only public parameterless constructors are callable from the static mapper
+            var hasPublicParameterlessCtor = entityType.Constructors.Any(c =>
+                c.Parameters.Length == 0 &&
+                c.DeclaredAccessibility == Accessibility.Public);
+
+            if (!hasPublicParameterlessCtor)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    CrudServiceDiagnostics.StaticClosureUnsupported,
+                    entityType.Locations.FirstOrDefault(),
+                    $"Entity '{entityType.Name}' does not have a public parameterless constructor; " +
+                    "generated mapper cannot construct it."));
+                return false;
+            }
+
+            // R1-CRUD128-03: Only validate properties that participate in Create/Update input mapping.
+            // Exclude: Id (output-only), ExcludeProperties, navigation properties, platform exclusions.
+            // R2-CRUD128-02: Use the same exclusion list as Create/Update DTOs to avoid false rejections.
+            var defaultExcludedProperties = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "Id", "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId",
+                "IsDeleted", "DeletionTime", "DeleterId", "ConcurrencyStamp", "TenantId"
+            };
+
+            var inputProperties = entityProperties
+                .Where(p => !s_platformExclusions.Contains(p.Name))
+                .Where(p => !defaultExcludedProperties.Contains(p.Name))
+                .Where(p => !excludeProperties.Contains(p.Name))
+                .Where(p => !IsNavigationProperty(p))
+                .ToList();
+
+            var unmappableProperties = inputProperties
+                .Where(p => p.SetMethod == null || p.SetMethod.DeclaredAccessibility != Accessibility.Public)
+                .Select(p => p.Name)
+                .ToList();
+
+            if (unmappableProperties.Count > 0)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    CrudServiceDiagnostics.StaticClosureUnsupported,
+                    entityType.Locations.FirstOrDefault(),
+                    $"Entity '{entityType.Name}' has input properties without public setters: {string.Join(", ", unmappableProperties)}; " +
+                    "generated mapper cannot assign them."));
+                return false;
+            }
+
+            return true;
+        }
+
+        private static HashSet<string> ExtractExcludePropertiesFromAttribute(INamedTypeSymbol serviceClass)
+        {
+            foreach (var attr in serviceClass.GetAttributes())
+            {
+                if (attr.AttributeClass is null) continue;
+                var name = attr.AttributeClass.Name;
+                var fullName = attr.AttributeClass.ToDisplayString();
+                if (!(name == "GenerateCrudServiceAttribute" || name == "GenerateCrudService" ||
+                      fullName.EndsWith(".GenerateCrudServiceAttribute") || fullName.EndsWith(".GenerateCrudService")))
+                    continue;
+
+                var namedArg = attr.NamedArguments.FirstOrDefault(a => a.Key == "ExcludeProperties");
+                if (namedArg.Value.Kind == TypedConstantKind.Array)
+                {
+                    return new HashSet<string>(
+                        namedArg.Value.Values
+                            .Where(v => v.Value is string)
+                            .Select(v => (string)v.Value!),
+                        StringComparer.Ordinal);
+                }
+            }
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        private static INamedTypeSymbol? ExtractEntityTypeFromAttribute(INamedTypeSymbol serviceClass)
+        {
+            foreach (var attr in serviceClass.GetAttributes())
+            {
+                if (attr.AttributeClass is null) continue;
+                var name = attr.AttributeClass.Name;
+                var fullName = attr.AttributeClass.ToDisplayString();
+                if (!(name == "GenerateCrudServiceAttribute" || name == "GenerateCrudService" ||
+                      fullName.EndsWith(".GenerateCrudServiceAttribute") || fullName.EndsWith(".GenerateCrudService")))
+                    continue;
+
+                // The first constructor argument is typeof(Entity)
+                if (attr.ConstructorArguments.Length > 0 &&
+                    attr.ConstructorArguments[0].Value is INamedTypeSymbol entityType)
+                {
+                    return entityType;
+                }
+            }
+            return null;
         }
 
         private static List<IPropertySymbol> GetQueryableProperties(List<IPropertySymbol> properties)

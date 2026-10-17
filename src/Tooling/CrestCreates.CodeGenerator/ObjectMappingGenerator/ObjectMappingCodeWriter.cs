@@ -286,8 +286,15 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             sb.AppendLine("        /// <summary>");
             sb.AppendLine("        /// Projection expression for query pipelines.");
             sb.AppendLine("        /// </summary>");
-            sb.AppendLine($"        public static Expression<Func<{sourceType}, {targetType}>> ToTargetExpression =>");
-            sb.AppendLine("            source => new " + targetType);
+            // #128 S4: the expression tree binds to property metadata via Expression.Bind, which is
+            // RequiresUnreferencedCode — the getter carries that contract so trimmed/AOT projects see
+            // the warning at their call sites instead of inside the generated file (the attribute is
+            // not valid on properties, only on the accessor). The generated ToTarget/Apply methods
+            // remain the trimming-safe path.
+            sb.AppendLine($"        public static Expression<Func<{sourceType}, {targetType}>> ToTargetExpression");
+            sb.AppendLine("        {");
+            sb.AppendLine("            [global::System.Diagnostics.CodeAnalysis.RequiresUnreferencedCode(\"Expression-tree projection binds to property metadata; use ToTarget/Apply in trimmed or AOT contexts.\")]");
+            sb.AppendLine("            get => source => new " + targetType);
             sb.AppendLine("            {");
 
             // Skip properties with navigation paths or custom converters (not Expression-compatible)
@@ -306,6 +313,7 @@ namespace CrestCreates.CodeGenerator.ObjectMappingGenerator
             }
 
             sb.AppendLine("            };");
+            sb.AppendLine("        }");
         }
 
         private void WritePartialMethods(

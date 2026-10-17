@@ -39,6 +39,9 @@ public sealed class GenerateJsonContracts : ITask
 
     public string? ToolPath { get; set; }
 
+    /// <summary>#128: the CRUD precompile outputs manifest, reconciled against the discovered roots.</summary>
+    public string? CrudOutputsManifestPath { get; set; }
+
     [Output]
     public int GeneratedContextCount { get; set; }
 
@@ -215,6 +218,8 @@ public sealed class GenerateJsonContracts : ITask
         writer.WriteString("Nullable", Nullable);
         writer.WriteBoolean("AllowUnsafeBlocks", AllowUnsafeBlocks);
         writer.WriteString("ManifestAccessibility", ManifestAccessibility);
+        if (!string.IsNullOrEmpty(CrudOutputsManifestPath) && File.Exists(CrudOutputsManifestPath))
+            writer.WriteString("CrudOutputsManifestJson", File.ReadAllText(CrudOutputsManifestPath));
         writer.WriteEndObject();
         writer.Flush();
     }

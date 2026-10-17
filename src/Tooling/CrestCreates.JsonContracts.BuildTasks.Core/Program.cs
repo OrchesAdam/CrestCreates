@@ -1,4 +1,5 @@
 using CrestCreates.JsonContracts.BuildTasks;
+using CrestCreates.JsonContracts.BuildTasks.Crud;
 using CrestCreates.JsonContracts.BuildTasks.Semantic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -14,6 +15,7 @@ internal static class Program
             Console.Error.WriteLine("Usage: CrestCreates.JsonContracts.Tool <command> <args>");
             Console.Error.WriteLine("Commands:");
             Console.Error.WriteLine("  generate <request-path> <response-path>");
+            Console.Error.WriteLine("  prepare-crud <request-path> <response-path>");
             return 2;
         }
 
@@ -24,6 +26,7 @@ internal static class Program
             return command switch
             {
                 "generate" => ExecuteGenerate(args),
+                "prepare-crud" => ExecutePrepareCrud(args),
                 _ => Fail($"Unknown command: {command}")
             };
         }
@@ -32,6 +35,90 @@ internal static class Program
             Console.Error.WriteLine($"Fatal: {ex.Message}");
             return 3;
         }
+    }
+
+    /// <summary>
+    /// #128 S2: materializes the CRUD surface as ordinary source before CoreCompile, together with the
+    /// outputs manifest the build stage writes. The bundle is returned as bytes and the caller keeps
+    /// ownership of where it lands, so the path trust boundary stays in the task.
+    /// </summary>
+    private static int ExecutePrepareCrud(string[] args)
+    {
+        if (args.Length < 3)
+        {
+            Console.Error.WriteLine("Usage: prepare-crud <request-path> <response-path>");
+            return 2;
+        }
+
+        var requestPath = args[1];
+        var responsePath = args[2];
+
+        var requestJson = File.ReadAllText(requestPath);
+        var request = JsonSerializer.Deserialize(requestJson, ToolJsonSerializerContext.Default.CrudPrepareRequest);
+        if (request is null)
+        {
+            Console.Error.WriteLine("Failed to deserialize CRUD precompile request.");
+            return 4;
+        }
+
+        var result = !string.IsNullOrEmpty(request.ExpectedModelSchemaVersion)
+            && request.ExpectedModelSchemaVersion != CrestCreates.Tooling.CrudGeneration.CrudGenerationModel.ModelSchemaVersion
+            ? CrudPrecompileResult.Failed([new CrudToolDiagnostic("CCCRUD006",
+                "The requested CRUD model schema version is unsupported.", null, 0, 0)])
+            : new CrudPrecompileEngine().Run(
+            request.AssemblyName ?? "",
+            request.Sources?.Select(source => (source.Path, source.Text)).ToList() ?? [],
+            request.ReferencePaths ?? [],
+            request.LangVersion ?? "latest",
+            request.DefineConstants ?? [],
+            request.Nullable ?? "enable",
+            request.AllowUnsafeBlocks,
+            request.ValidateOnly);
+
+        var diagnostics = result.Diagnostics
+            .Select(diagnostic => new ToolDiagnosticDto
+            {
+                Id = diagnostic.Id,
+                Severity = diagnostic.Severity,
+                Message = diagnostic.Message,
+                FilePath = diagnostic.FilePath ?? "",
+                Line = diagnostic.Line,
+                Column = diagnostic.Column,
+            })
+            .ToList();
+
+        var response = new CrudPrepareResponse
+        {
+            Diagnostics = diagnostics,
+            BundleBytes = result.HasErrors
+                ? null
+                : System.Text.Encoding.UTF8.GetBytes(result.BundleSource),
+            ModelSchemaVersion = CrestCreates.Tooling.CrudGeneration.CrudGenerationModel.ModelSchemaVersion,
+            DeclarationCount = result.DeclarationCount,
+            Outputs = new CrudOutputManifestDocument
+            {
+                SchemaVersion = CrudPrecompileEngine.CrudArtifactSchemaVersion,
+                ModelSchemaVersion = CrestCreates.Tooling.CrudGeneration.CrudGenerationModel.ModelSchemaVersion,
+                Entries = result.Outputs
+                    .Select(entry => new CrudOutputManifestEntryDto
+                    {
+                        OwnerAssemblyName = entry.OwnerAssemblyName,
+                        OwnerServiceFullName = entry.OwnerServiceFullName,
+                        ArtifactHintName = entry.ArtifactHintName,
+                        DeclaredTypeFullNames = entry.DeclaredTypeFullNames.ToArray(),
+                        SourceLocation = entry.SourceLocation,
+                        ModelSchemaVersion = entry.ModelSchemaVersion,
+                        ContentHash = entry.ContentHash,
+                    })
+                    .ToList(),
+            },
+        };
+
+        File.WriteAllText(
+            responsePath,
+            JsonSerializer.Serialize(response, ToolJsonSerializerContext.Default.CrudPrepareResponse));
+
+        return diagnostics.Count > 0 ? 1 : 0;
     }
 
     private static int ExecuteGenerate(string[] args)
@@ -66,7 +153,8 @@ internal static class Program
             defineConstants,
             request.Nullable ?? "enable",
             request.AllowUnsafeBlocks,
-            request.ManifestAccessibility ?? "Internal");
+            request.ManifestAccessibility ?? "Internal",
+            request.CrudOutputsManifestJson);
 
         var diagnostics = result.Diagnostics.Select(d => new ToolDiagnosticDto
         {
@@ -114,6 +202,9 @@ internal sealed class GenerateRequest
     public string? Nullable { get; set; }
     public bool AllowUnsafeBlocks { get; set; }
     public string? ManifestAccessibility { get; set; }
+
+    /// <summary>CRUD precompile outputs manifest, used to reconcile the root matrix against owners.</summary>
+    public string? CrudOutputsManifestJson { get; set; }
 }
 
 internal sealed class SourceDto
@@ -144,4 +235,6 @@ internal sealed class ToolDiagnosticDto
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true, WriteIndented = false)]
 [JsonSerializable(typeof(GenerateRequest))]
 [JsonSerializable(typeof(GenerateResponse))]
+[JsonSerializable(typeof(CrestCreates.JsonContracts.BuildTasks.Crud.CrudPrepareRequest))]
+[JsonSerializable(typeof(CrestCreates.JsonContracts.BuildTasks.Crud.CrudPrepareResponse))]
 internal sealed partial class ToolJsonSerializerContext : JsonSerializerContext;

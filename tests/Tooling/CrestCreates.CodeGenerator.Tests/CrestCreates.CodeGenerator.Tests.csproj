@@ -18,8 +18,10 @@
     <!-- 同时引用CodeGenerator作为常规项目，以便测试代码可以访问生成器类型 -->
     <ProjectReference Include="../../../src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />
     
+    <ProjectReference Include="../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj" ReferenceOutputAssembly="false" />
     <!-- 项目引用 -->
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+    <ProjectReference Include="../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
     <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />

@@ -9,10 +9,14 @@ namespace CrestCreates.CodeGenerator.AppServiceCompatibilityGenerator;
 /// <see cref="DynamicApiResponse"/> / <see cref="DynamicApiResponse{T}"/>
 /// envelope matching legacy AppService behavior.
 ///
+/// #128 S3 typed contract: the declared static return type steers a checked cast plus the typed,
+/// no-fallback overload whose envelope metadata is required from the host's source-generated resolver
+/// (§7.3). The object-typed overloads stay for isolated legacy consumers and are never selected here.
+///
 /// Wrap method selection:
-///   - Void return  →  CompatibilityHttpResultMapper.WrapVoidResult()
-///   - GET non-void →  CompatibilityHttpResultMapper.WrapGetResult(ctx.Output)
-///   - Other non-void → CompatibilityHttpResultMapper.WrapResult(ctx.Output)
+///   - Void return    → WrapVoidResult(Require&lt;DynamicApiResponse&gt;(sp))
+///   - GET non-void   → WrapGetResult&lt;T&gt;(ctx.Output as T, Require&lt;DynamicApiResponse&lt;T&gt;&gt;(sp), Require&lt;DynamicApiResponse&gt;(sp))
+///   - Other non-void → WrapResult&lt;T&gt;((T)ctx.Output!, Require&lt;DynamicApiResponse&lt;T&gt;&gt;(sp))
 /// </summary>
 internal static class AppServiceCompatibilityResultContractEmitter
 {
@@ -39,15 +43,24 @@ internal static class AppServiceCompatibilityResultContractEmitter
 
             if (action.IsVoidReturn)
             {
-                wrapExpression = "CompatibilityHttpResultMapper.WrapVoidResult(serviceProvider)";
+                wrapExpression =
+                    "CompatibilityHttpResultMapper.WrapVoidResult("
+                    + "CapabilityEndpointJsonTypeInfoResolver.Require<global::CrestCreates.DynamicApi.DynamicApiResponse>(serviceProvider))";
             }
             else if (action.HttpMethod == "GET")
             {
-                wrapExpression = "CompatibilityHttpResultMapper.WrapGetResult(ctx.Output, serviceProvider)";
+                wrapExpression =
+                    $"CompatibilityHttpResultMapper.WrapGetResult<{action.ReturnTypeName}>("
+                    + $"ctx.Output as {action.ReturnTypeName}, "
+                    + $"CapabilityEndpointJsonTypeInfoResolver.Require<global::CrestCreates.DynamicApi.DynamicApiResponse<{action.ReturnTypeName}>>(serviceProvider), "
+                    + "CapabilityEndpointJsonTypeInfoResolver.Require<global::CrestCreates.DynamicApi.DynamicApiResponse>(serviceProvider))";
             }
             else
             {
-                wrapExpression = "CompatibilityHttpResultMapper.WrapResult(ctx.Output, serviceProvider)";
+                wrapExpression =
+                    $"CompatibilityHttpResultMapper.WrapResult<{action.ReturnTypeName}>("
+                    + $"({action.ReturnTypeName})ctx.Output!, "
+                    + $"CapabilityEndpointJsonTypeInfoResolver.Require<global::CrestCreates.DynamicApi.DynamicApiResponse<{action.ReturnTypeName}>>(serviceProvider))";
             }
 
             sb.AppendLine($"        CapabilityEndpointResultContractRegistration.Register(");
