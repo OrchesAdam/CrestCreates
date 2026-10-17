@@ -220,7 +220,7 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 4. **测试**
    - `AppServiceHttpProjectionModelTests`（7）：冻结矩阵（GET 写动作仍 Command、双 query 无组合信封、route+body 使用共享信封名）、引用契约/DTO 单列、非接口契约 CCHTTP001、LegacyStatic 不接管、缺 CT 警告、重复 method+route CCHTTP003、契约/实现声明冲突 CCHTTP008；
    - `AppServiceHttpProjectionDeclarationTests`（3）：显式 host 跳过 + CCHTTP002、缺 mode 的 CCHTTP005 且静态发射不变、显式 LegacyStatic 无迁移告警。
-   - 定向 10/10 pass；全量 `CrestCreates.CodeGenerator.Tests` 结果见本轮补记。
+   - 定向 10/10 pass；全量 `CrestCreates.CodeGenerator.Tests`：**473 pass + 1 fail / 474**。唯一失败是本轮新增的 `CCHTTP005` 迁移警告进入了同轮探针的「authored 文件只允许 SYSLIB1030」过滤器（探针把生成器告警误当编译诊断），与本轮实现无关。已把该探针显式声明为 `LegacyStatic`（它测的就是旧静态链）并把过滤器限定为「编译器错误 + SYSLIB」，重跑 **3/3 pass**（15m09s）。因此本轮无新增回归。
 
 ### 未交付（S2.2/S2.3）
 

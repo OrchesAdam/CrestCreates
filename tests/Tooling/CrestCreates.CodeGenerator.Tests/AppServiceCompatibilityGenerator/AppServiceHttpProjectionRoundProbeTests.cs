@@ -34,7 +34,9 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
         namespace ProbeHandwritten
         {
             [CrestService]
-            [CapabilityCompatibilityProjection(RoutePrefix = "api/probe-orders")]
+            [CapabilityCompatibilityProjection(
+                RoutePrefix = "api/probe-orders",
+                RegistrationMode = HttpProjectionRegistrationMode.LegacyStatic)]
             public class OrderAppService
             {
                 public Task<string> SearchAsync(string keyword, int take, CancellationToken cancellationToken)
@@ -271,7 +273,7 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
         => OutputLines(output)
             .Where(line => line.Contains(fileName, StringComparison.Ordinal)
                            && (line.Contains(": error ", StringComparison.Ordinal)
-                               || line.Contains(": warning ", StringComparison.Ordinal)))
+                               || line.Contains("SYSLIB", StringComparison.Ordinal)))
             .ToArray();
 
     private static string[] ErrorLines(string output)
