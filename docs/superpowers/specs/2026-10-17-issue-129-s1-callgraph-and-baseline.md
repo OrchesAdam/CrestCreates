@@ -216,3 +216,15 @@ PR #152 head 602d6e40 独立定向复跑6绿+8约定红/14，0 skipped。额外�
 
 - R1-HTTP129-02 要求的同轮闭包 / Host 激活 / contract fixtures 见 §10 状态；双租户选库 factory 与真实生产进程启动根因按 rev.2 属 S3。
 
+
+## 10. R3 修正（2026-10-17，回应 09f73642 复审的三项 P2 与跨 Host 控制）
+
+1. 同轮探针归因错误（P2）：探针原先把信封写成 `ProbeHandwritten.OrderAppService_Search_CompatibilityInput`，而 emit 端真实命名空间是 `CrestCreates.Generated`（`AppServiceCompatibilityEndpointEmitter.cs:43,135`）。错误 FQN 使失败原因是普通名称解析（CS0234），不是同轮不可见。现在：
+   - 引用正确 FQN，并新增反向守卫——authored 文件上不得出现点名该信封的 `CS0234/CS0246`；
+   - 诊断采集覆盖 warning 级（`SYSLIB1030` 是 STJ 的 warning，旧过滤器只看 `: error` 才导致「无诊断」假象）；
+   - 同一个 context 里同时声明一个普通 Compile 根 `ProbeOrdinary.OrdinaryEnvelope`，因此「官方生成器在本次构建确实运行」由同一次构建内的 `JsonTypeInfo<global::ProbeOrdinary.OrdinaryEnvelope>` 证明，而不是靠另一个测试；信封本身仍无 metadata，且必须点名 `SYSLIB1030`；
+   - producer 预检额外要求信封确实落在 `namespace CrestCreates.Generated`。
+   - 三次控制共享两次冷构建（类别内 `IAsyncLifetime`），并与 CRUD 探针同串行集合；单跑时长上限 20 分钟。
+2. `U02` 误判 owner（P2）：MemberRef 只说明「谁调用绑定声明 API」，不能说明最终图里有几份。`U02` 改为事实控制（绿），逐字列出实测两个装配点；真正的不变量交给 `R01`/`U04`（宿主最终解析出的绑定数）与新增 `U05`：同一 provider 两份绑定在构建索引时确定性拒绝、单绑定通过、空图在 `GetRequired` 处拒绝（保留 #137 语义，不改 first-wins）。修好装配后 `U02` 仍可绿（只少一个调用点），不会像原断言那样永远红。
+3. `P09` 不是合法正例（P2）：请求体现在携带从数据库 fresh-scope 回读到的当前 stamp（先断该值非空，避免空值让控制变成假绿），并断：仅 `UpdateAsync` 一次业务调用、恰好一次受管执行、行数不变、标题落库、存储 stamp 轮转；再用轮转后的 stamp 发第二次更新，断 stamp 再次轮转（证明返回给客户端的 stamp 可用于下一次前置条件）。`P10` 同步改为真实 `If-Match`、仅一次 `DeleteAsync`、一次受管执行、行数减一、行与 stamp 均消失。
+4. 跨 Host 激活控制（复审另需项）：新增 `Projection_activation_is_process_global_and_has_no_host_scoped_seam`，在同一真实构建的生成语法树上按 AST 取证——`[ModuleInitializer]` 方法体内直接写入 `DescriptorProviderRegistry.Register` / `CapabilityEndpointBindingRegistry.Register` / `CapabilityHandlerResolverProvider.Register` 等进程全局注册表（≥4 处），且整个生成输出不含 `ICapabilityEndpointContribution`/`AddCrestCapabilityEndpointContribution`，即宿主无处可拒绝。该条记录的是「注册不受 Host 作用域」的当前机制；正式的 `AddGeneratedAppServiceHttp()` 拒绝式激活由 S2 发射并配相应红例，本轮不提前断言尚不存在的 API 名称作为唯一失败原因。

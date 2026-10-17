@@ -122,3 +122,20 @@ PR #152 head 602d6e40 独立定向复跑6绿+8约定红/14，0 skipped。额外�
 
 | 套件 | 结果 |
 | --- | --- |
+
+---
+
+## S1 补件 R3（2026-10-17，回应 head `09f73642` 复审）
+
+环境态：CI 仍全部禁用；本轮生产实现不变，改动集中在测试与探针。
+
+| 项 | 内容 | 实测 |
+| --- | --- | --- |
+| R3-1 同轮探针归因 | 改用 emit 的真实 FQN `CrestCreates.Generated.OrderAppService_Search_CompatibilityInput`；诊断采集纳入 warning；authored 文件禁止出现点名信封的 CS0234/CS0246；同一 context 增普通 Compile 根作为同次构建内 STJ 运行证据 | 待单跑（探针 3 条，共享 2 次冷构建） |
+| R3-2 `U02` 误判 owner | `U02` 降为归属事实控制（绿，逐字列出两个装配调用点）；新增 `U05` 锁定真正的注册表不变量（同 provider 双绑定构建期确定性拒绝 / 单绑定通过 / 空图在 `GetRequired` 拒绝） | 样例侧：`U02`、`U05`、`U01`、`U03`、`U04` 全绿 |
+| R3-3 `P09` 非法正例 | 载荷改为数据库 fresh-scope 回读的当前 stamp，并先断其非空；补业务调用恰一次、受管执行恰一次、行数不变、标题落库、stamp 轮转，以及用轮转值再发第二次更新的回读控制；`P10` 同步为真实 `If-Match` + 行数减一 | `P09`、`P10` 绿（此前 `P09` 因把 because 文案误当期望元素而虚红，已修） |
+| R3-4 跨 Host 激活控制 | 同次构建生成语法树 AST 取证：`[ModuleInitializer]` 内向进程全局注册表写入 ≥4 处；输出中无 `ICapabilityEndpointContribution`/`AddCrestCapabilityEndpointContribution` | 待同批单跑 |
+
+计数（本轮已复跑）：`SaaSHelpdesk.Tests` Ticket 五类定向 18 pass + 9 约定红 / 27，0 skipped；约定红为 `R01`、`R03`–`R08`、`F02`、`R14`（`U02` 已按 R3-2 转为事实控制，不再计入目标红）。
+
+待补：全量 `SaaSHelpdesk.Tests` 与 `CrestCreates.CodeGenerator.Tests` 的最终计数在探针单跑结束后补记；本轮不据此声称 S1 放行。
