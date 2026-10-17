@@ -213,14 +213,21 @@
         "L": "linked token handed to business (R linked with K)"
       },
       "classification": [
-        "OCE.Token == R -> CallerAbort",
-        "OCE.Token == K -> ManagedDeadline",
-        "OCE.Token == L -> R canceled ? CallerAbort : ManagedDeadline; when both are canceled CallerAbort wins and both sources are recorded",
-        "OCE.Token is a third token or None -> NonCaller (missing identity is not evidence of caller intent)",
-        "identity unreadable -> NonCaller (sanitized 500)"
+        "0. OCE.Token is default/None -> NonCaller; identity absence is established before any equality matching, otherwise a default OCE matches R when R is None and is misread as CallerAbort",
+        "1. OCE.Token == R -> R is canceled ? CallerAbort : NonCaller",
+        "2. OCE.Token == K -> K is canceled ? ManagedDeadline : NonCaller",
+        "3. OCE.Token == L -> R canceled ? CallerAbort : K canceled ? ManagedDeadline : NonCaller; when both are canceled CallerAbort wins and both sources are recorded",
+        "4. third token -> NonCaller",
+        "5. identity unreadable -> NonCaller (sanitized 500)"
       ],
       "precedence": "when R and K are both canceled and the identity resolves to L: CallerAbort wins for classification and response suppression, while CallerAbort+Deadline is recorded as the fact set",
-      "responseSuppression": "suppress the body whenever R is canceled or the response has started, regardless of classification; otherwise write per classification (CallerAbort never writes a body; ManagedDeadline/NonCaller -> sanitized 500 Crest.InternalError)"
+      "responseSuppression": "suppress the body whenever R is canceled or the response has started, regardless of classification; otherwise write per classification (CallerAbort never writes a body; ManagedDeadline/NonCaller -> sanitized 500 Crest.InternalError)",
+      "edgeRules": [
+        "None is handled before identity matching so a tokenless OCE is never attributed to a None-valued R",
+        "an identity match only classifies when the matching source is actually IsCancellationRequested; a handmade OCE carrying R/K without that source canceled is NonCaller",
+        "L with neither R nor K canceled is NonCaller, never a default ManagedDeadline",
+        "when R and K are the same token or L equals R (K not cancelable), attribute through the R check and record R==K without double counting"
+      ]
     }
   },
   "persistenceOwnership": {
@@ -350,7 +357,8 @@
       "R-06b": "managed deadline: sanitized 500 when the response has not started; Unknown/Committed facts preserved",
       "R-06c": "non-caller OCE: treated as an internal fault (sanitized 500), never dropped as cancellation",
       "R-06d": "linked-token identity resolution: deadline-only never hits CallerAbort; both canceled -> CallerAbort with both sources recorded",
-      "R-06e": "binding/validation uses the same classifier: OCE(R) no body, OCE(K) sanitized 500, third token/None sanitized 500"
+      "R-06e": "binding/validation uses the same classifier: OCE(R) no body, OCE(K) sanitized 500, third token/None sanitized 500",
+      "R-06f": "boundary: None before identity matching (R=None must not turn a default OCE into CallerAbort); identity match without the source canceled -> NonCaller; L with N/R/K untouched -> NonCaller"
     }
   },
   "acceptanceMatrixDelta": {

@@ -89,13 +89,23 @@ targetFramework, runtimeIdentifier
 deadline 到期会同时取消 `K` 与 `L`，所以「`L` 已取消」不能作为调用方中止的依据；必须按 `OperationCanceledException.CancellationToken` 的身份回指到 `R` 或 `K`，再按下面的顺序判定：
 
 ```
-1. OCE.Token == R                      → CallerAbort
-2. OCE.Token == K                      → ManagedDeadline
-3. OCE.Token == L                      → R.IsCancellationRequested ? CallerAbort : ManagedDeadline
-                                         （两者都已取消时：CallerAbort 优先，同时记录 CallerAbort+Deadline）
-4. OCE.Token 是第三个 token，或为 None  → NonCaller（token 身份缺失不构成调用方意图的证据）
-5. 分类失败/无法读取 token               → NonCaller（随后按安全 500 处理）
+0. OCE.Token 为 default/None（身份缺失）              → NonCaller
+1. OCE.Token == R：R.IsCancellationRequested ? CallerAbort : NonCaller
+2. OCE.Token == K：K.IsCancellationRequested ? ManagedDeadline : NonCaller
+3. OCE.Token == L：R 已取消 → CallerAbort
+                    否则 K 已取消 → ManagedDeadline
+                    否则 → NonCaller
+                    （R 与 K 同时取消时 CallerAbort 优先，事实同时记录 CallerAbort+Deadline）
+4. 第三个 token                                       → NonCaller
+5. 身份不可读                                         → NonCaller（随后按安全 500 处理）
 ```
+
+规则要点：
+
+- **None 先处理**：`default(CancellationToken)` 与「没有 token 的 `new OperationCanceledException()`」都按身份缺失归 `NonCaller`，不得再参与与 `R`/`K` 的相等匹配。否则当 `R` 本身是 None（无请求 token 的传输）时，默认 OCE 会命中第 1 步而被误判为 `CallerAbort`，错误抑制仍存活请求的响应。
+- **身份匹配之后必须检查来源是否真的已取消**：`OCE.Token` 与 `R`/`K` 相等但对应源 `IsCancellationRequested == false` 时（例如有人手工构造了带该 token 的 OCE），归 `NonCaller`。
+- **L 的来源都未取消 → `NonCaller`**：只有 `L` 被取消才可能进入第 3 步；若 `R`、`K` 都未取消，不得默认成 `ManagedDeadline`。
+- `R` 与 `K` 是同一 token、或 `L == R`（`K` 不可取消）时，按 `R` 的检查归因，事实记录 `R==K`，不重复计数。
 
 **分类与响应抑制分开**：
 
@@ -130,6 +140,7 @@ deadline 到期会同时取消 `K` 与 `L`，所以「`L` 已取消」不能作�
 | R-06c | 非调用方 OCE（第三 token / None）：判定为内部故障（500 脱敏），不得当作取消静默丢弃响应 |
 | R-06d | linked token 身份回指：deadline 仅取消 `K` 时不命中 `CallerAbort`；`R`+`K` 同时取消按优先级归 `CallerAbort` 且事实同时记录 |
 | R-06e | 绑定/验证阶段沿用同一分类：`OCE(R)` 无响应体、`OCE(K)` 500 脱敏、第三 token/None → 500 脱敏 |
+| R-06f | 边界：None 先于身份匹配（`R=None` 时默认 OCE 不判 `CallerAbort`）；身份相等但来源未取消 → `NonCaller`；`L` 的 `R`/`K` 均未取消 → `NonCaller` |
 
 本轮先交付 R-01 与 schema/fixture 的冻结；R-02–R-06c 进 S2/S3 实现门禁。
 

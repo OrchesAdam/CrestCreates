@@ -173,7 +173,7 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 - 当前可表达性事实：`CrestServiceAttribute` 仅 Class（`CrestServiceAttribute.cs:4-5`）；projection 属性仅 Class|Method 且无 `ContractType`（`CapabilityCompatibilityProjectionAttribute.cs:9-25`）；生成器语法提供器只扫本编译 class（`AppServiceCompatibilityGenerator.cs:40-64`）；`EnumerateContractTypes` 允许契约来自 metadata。
 - 决定：不新增程序集级 Attribute、不扫描引用程序集、不用反射补洞；以「本地标记类 + `ContractType`」为唯一入口，标记类不注册/不实例化、方法集合只来自契约；契约缺失注册 → 启动期 `CCHTTP007`；身份与 manifest 分离 owner 与 contract assembly。
 - 验证：新增/更新测试 `ReferencedAssemblyScopeProbeTests`（2）+ `Issue129ContractFixtureTests`（6）共 8/8 通过；本轮未触及样例与探针构建，S1 放行结论不受影响。
-- 状态：**设计增补 rev.3 待审查**；审查通过后才进入 S2 实现（不合并、CI 暂停）。
+- 状态：**设计增补 rev.4 待审查**；审查通过后才进入 S2 实现（不合并、CI 暂停）。
 
 ### 增补 rev.2（回应 2 项 P2：产物所有权与取消契约）
 
@@ -189,3 +189,11 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 3. **分类与响应抑制分开**：响应抑制只看传输状态（`R` 已取消或响应已开始则一律不写体，任何分类都不二次写入）；否则按分类写（`CallerAbort` 永不写体；`ManagedDeadline`/`NonCaller` → 500 `Crest.InternalError` 脱敏）。因此「客户端断开 + 第三 token OCE」归因 `NonCaller`，但响应仍被抑制，不改成调用方中止。
 4. **绑定/验证阶段沿用同一规则**：`OCE(R)` → 无业务/无事务/无响应体；`OCE(K)` → 500 脱敏（响应未开始且 `R` 未取消）；第三 token/None → 500 脱敏；普通绑定失败仍走 converter 权威。
 5. 验收：R-06 扩为 R-06a–e（新增 R-06d 链接身份解析与同时取消优先级、R-06e 绑定阶段同规则）；fixture 增 `tokens`/`classification`/`precedence`/`responseSuppression` 并同步 `bindingStage`；H02/H07 描述同步。验证：`ReferencedAssemblyScopeProbeTests`(2) + `Issue129ContractFixtureTests`(8) = **10/10 pass**。
+
+### 增补 rev.4（回应取消分类边界 P2：None 先处理、来源必须已取消）
+
+1. **None/default 先于身份匹配**：`OCE.Token` 为 `default(CancellationToken)`（含无 token 的 `new OperationCanceledException()`）直接归 `NonCaller`。否则当 `R` 本身是 None（无请求 token 的传输）时，默认 OCE 会命中 `OCE.Token == R` 被误判为 `CallerAbort`，从而抑制仍存活请求的响应。
+2. **身份匹配后必须检查来源已取消**：`OCE.Token == R` 但 `R.IsCancellationRequested == false`（或 `== K` 但 `K` 未取消）→ `NonCaller`，不得仅凭 token 相等归因。
+3. **L 的来源都未取消 → `NonCaller`**：只有 `L` 被取消才可能进入该步；`R`、`K` 都未取消时不得默认成 `ManagedDeadline`。
+4. `R` 与 `K` 为同一 token、或 `L == R` 时按 `R` 的检查归因，事实记录 `R==K`，不重复计数。
+5. 验收：新增 `R-06f`（None 优先、身份相等但来源未取消、L 来源全未取消）；fixture `classification` 重写为 0–5 步并新增 `edgeRules`；校验测试增加对应断言。验证：`ReferencedAssemblyScopeProbeTests`(2) + `Issue129ContractFixtureTests`(8) = **10/10 pass**，0 skipped。

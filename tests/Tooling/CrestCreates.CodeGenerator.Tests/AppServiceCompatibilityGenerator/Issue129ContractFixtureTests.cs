@@ -195,7 +195,7 @@ public class Issue129ContractFixtureTests
 
         probes.TryGetProperty("R-06", out _).Should().BeFalse(
             "R-06 was split so each cancellation class has its own contract");
-        foreach (var id in new[] { "R-06d", "R-06e" })
+        foreach (var id in new[] { "R-06d", "R-06e", "R-06f" })
         {
             probes.TryGetProperty(id, out _).Should().BeTrue(
                 $"probe {id} locks original-source classification and the binding-stage rule");
@@ -247,11 +247,25 @@ public class Issue129ContractFixtureTests
 
         var classification = cancellation.GetProperty("classification").EnumerateArray()
             .Select(v => v.GetString()!).ToList();
+        classification.First().Should().Contain("default/None").And.Contain("NonCaller")
+            .And.Contain("before any equality matching",
+                "None must be handled first, otherwise a default OCE matches a None-valued R and suppresses a live response");
+        classification.Should().Contain(step => step.Contains("OCE.Token == R", StringComparison.Ordinal)
+                                               && step.Contains("R is canceled", StringComparison.Ordinal),
+            "an identity match alone is not enough; the source must actually be canceled");
         classification.Should().Contain(step => step.Contains("OCE.Token == L", StringComparison.Ordinal)
                                                && step.Contains("R canceled", StringComparison.Ordinal),
             "the linked token must be resolved back to R or K, otherwise deadline cancels it too and the rule conflates sources");
-        classification.Should().Contain(step => step.Contains("third token or None", StringComparison.Ordinal)
+        classification.Should().Contain(step => step.Contains("K canceled", StringComparison.Ordinal)
+                                               && step.Contains("NonCaller", StringComparison.Ordinal),
+            "L with neither source canceled is NonCaller");
+        classification.Should().Contain(step => step.Contains("third token", StringComparison.Ordinal)
                                                && step.Contains("NonCaller", StringComparison.Ordinal));
+
+        var edgeRules = cancellation.GetProperty("edgeRules").EnumerateArray().Select(v => v.GetString()!).ToList();
+        edgeRules.Should().Contain(rule => rule.Contains("None is handled before identity matching", StringComparison.Ordinal));
+        edgeRules.Should().Contain(rule => rule.Contains("IsCancellationRequested", StringComparison.Ordinal));
+        edgeRules.Should().Contain(rule => rule.Contains("never a default ManagedDeadline", StringComparison.Ordinal));
 
         cancellation.GetProperty("precedence").GetString().Should().Contain("CallerAbort wins");
         cancellation.GetProperty("precedence").GetString().Should().Contain("both");
@@ -292,6 +306,10 @@ public class Issue129ContractFixtureTests
             "the both-canceled precedence must be explicit");
         addendum.Should().Contain("第三 token",
             "the binding-stage rule must not blanket-map to caller abort");
+        addendum.Should().Contain("None 先处理",
+            "the addendum must establish identity absence before equality matching");
+        addendum.Should().Contain("L 的来源都未取消",
+            "the linked token must not default to a deadline when neither source is canceled");
     }
 
     private static string FixturePath()
