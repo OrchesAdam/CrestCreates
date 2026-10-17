@@ -144,4 +144,6 @@ PR #152 head 602d6e40 独立定向复跑6绿+8约定红/14，0 skipped。额外�
 | `SaaSHelpdesk.Tests` Ticket 五类定向 | 18 pass + 9 约定红 / 27；`U01`、`U02`、`U03`、`U04`、`U05`、`P09`、`P10`、`C11`、`C12`、`C13` 与 `TicketWireBaselineTests` 6 条全绿 |
 | `AppServiceHttpProjectionRoundProbeTests`（R3-1 + R3-4，单次真实构建共用） | 3 pass / 3，0 fail，耗时 15 分 9 秒：负例 `SYSLIB1030` 点名 `OrderAppService_Search_CompatibilityInput` 且 authored 文件无点名该信封的 CS0234/CS0246、STJ 无其 metadata；同次构建内普通 Compile 根 `ProbeOrdinary.OrdinaryEnvelope` 被 STJ 关闭；`[ModuleInitializer]` 内向 ≥4 个进程全局注册表写入且无 `ICapabilityEndpointContribution`/`AddCrestCapabilityEndpointContribution` 接缝 |
 
-待补：`CrestCreates.CodeGenerator.Tests` 在最终 head 的全量计数复跑进行中（上一 head 为 457 pass / 1 fail，唯一失败即当时「每条控制各建一次」造成的超时，现已合并为单次构建并单跑 3/3 通过）。本轮不据此声称 S1 放行。
+| `CrestCreates.CodeGenerator.Tests` 全量（最终 head `214426ea`） | 459 pass + 0 fail / 459，0 skipped，22 分 30 秒；上一 head 的唯一超时失败已随「单次构建 + 串行集合」消除 |
+
+S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由维护者判定，本轮不自称完成。

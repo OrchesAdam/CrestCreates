@@ -230,3 +230,5 @@ PR #152 head 602d6e40 独立定向复跑6绿+8约定红/14，0 skipped。额外�
 4. 跨 Host 激活控制（复审另需项）：新增 `Projection_activation_is_process_global_and_has_no_host_scoped_seam`，在同一真实构建的生成语法树上按 AST 取证——`[ModuleInitializer]` 方法体内直接写入 `DescriptorProviderRegistry.Register` / `CapabilityEndpointBindingRegistry.Register` / `CapabilityHandlerResolverProvider.Register` 等进程全局注册表（≥4 处），且整个生成输出不含 `ICapabilityEndpointContribution`/`AddCrestCapabilityEndpointContribution`，即宿主无处可拒绝。该条记录的是「注册不受 Host 作用域」的当前机制；正式的 `AddGeneratedAppServiceHttp()` 拒绝式激活由 S2 发射并配相应红例，本轮不提前断言尚不存在的 API 名称作为唯一失败原因。
 
 5. R3 复核结果（实测）：三条控制共用单次真实构建 3 pass / 3（15 分 9 秒）——负例 `SYSLIB1030` 点名信封、authored 文件不含点名该信封的 CS0234/CS0246、STJ 无其 metadata；同次构建内普通 Compile 根由 STJ 关闭；`[ModuleInitializer]` 内向 ≥4 个进程全局注册表写入且无可拒绝的 Host 接缝。样例侧全量 41 pass + 71 fail / 112（约定红 9，既有红 62，新增回归 0）。
+
+6. `CrestCreates.CodeGenerator.Tests` 全量在最终 head `214426ea` 复跑：459 pass / 0 fail / 459（22 分 30 秒），无 skipped；上一 head 的唯一失败（每条控制各建一次导致的超时）已随单次构建合并消除。
