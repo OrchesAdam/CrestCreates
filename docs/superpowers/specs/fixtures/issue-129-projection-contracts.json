@@ -1,0 +1,370 @@
+{
+  "$schema": "crestcreates.issue129.contract-fixture/v1",
+  "status": "frozen-for-review-rev2",
+  "design": "docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md#144-145; referenced scope: docs/superpowers/specs/2026-10-17-issue-129-referenced-declaration-scope-addendum.md",
+  "notes": [
+    "Every name below is a frozen contract proposal for S2/S3, not a claim that the API exists today.",
+    "Field lists are normative: an implementation that renames or drops one of them must revise this fixture in the same commit."
+  ],
+  "manifest": {
+    "artifactEntry": {
+      "reuse": "CrestCreates #128 crud-artifacts-v1 (src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/Crud/CrudPrecompileEngine.cs)",
+      "fields": [
+        "OwnerAssemblyName",
+        "OwnerServiceFullName",
+        "ArtifactHintName",
+        "DeclaredTypeFullNames",
+        "SourceLocation",
+        "ModelSchemaVersion",
+        "ContentHash",
+        "ContractAssemblyName",
+        "ReferencedTypeFullNames"
+      ],
+      "rules": [
+        "DeclaredTypeFullNames records only the types the artifact itself declares or generates; referenced DTO/enum/contract types must never be mixed in",
+        "CCCRUD008 reconciles DeclaredTypeFullNames with CrudArtifactEmitter.DeclaredTypeFullNames(artifact.Source); mixing a referenced type is a hard diagnostic, not a naming preference",
+        "ReferencedTypeFullNames records referenced type identities separately, as plain FQNs; each entry resolves to exactly one definition by symbol identity (assembly + full metadata name + closed generic arguments)",
+        "OwnerAssemblyName is the HTTP glue owner; ContractAssemblyName and ReferencedTypeFullNames are sibling fields, never encoded as owner:type",
+        "ContentHash is 'sha256:<hex>' and is the write-if-changed and provenance key"
+      ]
+    },
+    "actionIdentity": {
+      "inputs": [
+        "ownerServiceFullMetadataName",
+        "closedContractMethodSignature",
+        "configuration",
+        "targetFramework",
+        "runtimeIdentifier",
+        "httpOwnerAssemblyName",
+        "contractAssemblyName",
+        "ownerAssemblyName"
+      ],
+      "forbidden": [
+        "action short name alone",
+        "service simple name alone",
+        "discovery-order dependent suffix"
+      ],
+      "properties": [
+        "same inputs in any declaration order produce the same identity",
+        "two front ends claiming one artifact or action is a diagnostic, not a last-wins",
+        "an unrelated manifest hit must not suppress a whole assembly's legacy output"
+      ]
+    },
+    "stages": [
+      "CRUD prepare/include",
+      "AppService projection prepare/include",
+      "JsonContracts prepare/include",
+      "one CoreCompile with the official STJ generator and all other generators"
+    ],
+    "stageRule": "ordering is an explicit DependsOn edge list, never BeforeTargets luck",
+    "ownership": {
+      "declaredTypesField": "DeclaredTypeFullNames",
+      "referencedTypesField": "ReferencedTypeFullNames",
+      "declaredOnly": true,
+      "forbidden": [
+        "referenced DTO or contract FQN inside DeclaredTypeFullNames",
+        "owner/contract/referenced types concatenated into one string"
+      ],
+      "authority": "src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/Semantic/CrudJsonSurfaceDiscovery.cs:184-233 (CCCRUD008)",
+      "evidence": "reviewer ownership contrast 2/2: mixing a referenced type into DeclaredTypeFullNames triggers CCCRUD008"
+    }
+  },
+  "requiredJsonRoots": {
+    "derivedFrom": "the frozen action model, not a hand written table",
+    "categories": [
+      "required body DTOs",
+      "combined route/query/body/header envelopes per action",
+      "no-input actions (explicit no-input, never arbitrary object)",
+      "typed result DTOs",
+      "each distinct static list shape",
+      "success void envelope",
+      "resource-not-found and failure DTOs owned by Web",
+      "scalar inputs that are serialized at run time"
+    ],
+    "forbidden": [
+      "DynamicApiResponse<object>",
+      "one shared object envelope for all list shapes",
+      "reflection fill-in for a missing root"
+    ]
+  },
+  "failureBridge": {
+    "proposedAbstractions": [
+      "Capability.Abstractions: CapabilityFailureFacts",
+      "Capability.Abstractions: ICapabilityExceptionClassifier",
+      "Capability.Abstractions: CapabilityFailureKind"
+    ],
+    "facts": [
+      "Kind",
+      "ErrorCode",
+      "SafeMessage",
+      "SafeDetails"
+    ],
+    "factsMustNotCarry": [
+      "HttpStatusCode",
+      "Exception",
+      "Type",
+      "stack trace",
+      "open ended property bag"
+    ],
+    "adapter": "Web/Platform scoped adapter reuses the existing ICrestExceptionConverter with the real HttpContext",
+    "codeStatusTable": [
+      {
+        "kind": "InvalidRequest",
+        "status": 400,
+        "code": "Crest.Request.InvalidArgument"
+      },
+      {
+        "kind": "ValidationFailed",
+        "status": 400,
+        "code": "Crest.Validation.Failed"
+      },
+      {
+        "kind": "Unauthenticated",
+        "status": 401,
+        "code": "Crest.Auth.Unauthorized"
+      },
+      {
+        "kind": "Forbidden",
+        "status": 403,
+        "code": "Crest.Auth.Forbidden"
+      },
+      {
+        "kind": "NotFound",
+        "status": 404,
+        "code": "Crest.Entity.NotFound"
+      },
+      {
+        "kind": "ConcurrencyConflict",
+        "status": 409,
+        "code": "Crest.Concurrency.Conflict"
+      },
+      {
+        "kind": "PreconditionRequired",
+        "status": 428,
+        "code": "Crest.Concurrency.PreconditionRequired"
+      },
+      {
+        "kind": "OperationInvalid",
+        "status": 400,
+        "code": "Crest.Operation.Invalid"
+      },
+      {
+        "kind": "Internal",
+        "status": 500,
+        "code": "Crest.InternalError"
+      }
+    ],
+    "binderOwnedFailures": [
+      "malformed json body",
+      "illegal scalar format",
+      "missing required route/query/body/header value"
+    ],
+    "binderRule": "normalise to InvalidRequest inside the typed binder, before handler entry; do not globally remap JsonException/FormatException because serialization failures on the response path are internal errors",
+    "singleNotFoundShape": "CrestErrorResponse from the Web owner; the legacy DynamicApiResponse 404 wrapper stays in the legacy snapshot only",
+    "cancellationRule": "caller abort and managed deadline keep their existing semantics; a classifier must not convert them into OperationInvalid and must not re-run business work",
+    "cancellation": {
+      "principle": "classify by the original cancellation source (R = RequestAborted, K = managed kernel/deadline token, L = linked), never by whether L is canceled; response suppression is decided separately from classification",
+      "cases": [
+        {
+          "kind": "callerAbort",
+          "detect": "only R canceled (identity resolves to R or to L with R canceled)",
+          "http": "no JSON error body; connection aborted if response not started; never rewrite a started response",
+          "uow": "abandon/rollback uncommitted per #137; committed stays committed",
+          "forbidden": [
+            "4xx/5xx JSON body",
+            "retry or re-execute business"
+          ]
+        },
+        {
+          "kind": "managedDeadline",
+          "detect": "only K canceled while R is alive (identity resolves to K or to L with R not canceled)",
+          "http": "500 Crest.InternalError, sanitized, only if the response has not started; otherwise abort without a second write",
+          "uow": "preserve Unknown/Committed facts; never rewrite them as a successful rollback",
+          "forbidden": [
+            "new 408/504 public semantics",
+            "re-execute business"
+          ]
+        },
+        {
+          "kind": "nonCallerOperationCanceled",
+          "detect": "OCE token is a third token or None; never remapped by transport state",
+          "http": "500 Crest.InternalError, sanitized",
+          "uow": "internal failure path; rollback if uncommitted",
+          "forbidden": [
+            "treating it as caller cancellation and dropping the response"
+          ]
+        },
+        {
+          "kind": "cancelAfterCommitOrResponseFailure",
+          "detect": "classification as above, but the committed fact wins",
+          "http": "no rewrite of the committed outcome",
+          "uow": "Committed preserved; notification failure does not roll back",
+          "forbidden": [
+            "rolling back committed business"
+          ]
+        }
+      ],
+      "syncCall": "sync and async kernel entries share the same classifier",
+      "bindingStage": "the same classifier applies at binding/validation: OCE(R) -> CallerAbort with no business, no transaction and no body; OCE(K) -> ManagedDeadline with a sanitized 500 when the response has not started; third token or None -> NonCaller with a sanitized 500; ordinary binding failures keep the converter's authority",
+      "classificationFailure": "unknown token identity falls back to a sanitized 500",
+      "tokens": {
+        "R": "HttpContext.RequestAborted",
+        "K": "managed kernel token (deadline / transaction deadline)",
+        "L": "linked token handed to business (R linked with K)"
+      },
+      "classification": [
+        "0. OCE.Token is default/None -> NonCaller; identity absence is established before any equality matching, otherwise a default OCE matches R when R is None and is misread as CallerAbort",
+        "1. OCE.Token == R -> R is canceled ? CallerAbort : NonCaller",
+        "2. OCE.Token == K -> K is canceled ? ManagedDeadline : NonCaller",
+        "3. OCE.Token == L -> R canceled ? CallerAbort : K canceled ? ManagedDeadline : NonCaller; when both are canceled CallerAbort wins and both sources are recorded",
+        "4. third token -> NonCaller",
+        "5. identity unreadable -> NonCaller (sanitized 500)"
+      ],
+      "precedence": "when R and K are both canceled and the identity resolves to L: CallerAbort wins for classification and response suppression, while CallerAbort+Deadline is recorded as the fact set",
+      "responseSuppression": "suppress the body whenever R is canceled or the response has started, regardless of classification; otherwise write per classification (CallerAbort never writes a body; ManagedDeadline/NonCaller -> sanitized 500 Crest.InternalError)",
+      "edgeRules": [
+        "None is handled before identity matching so a tokenless OCE is never attributed to a None-valued R",
+        "an identity match only classifies when the matching source is actually IsCancellationRequested; a handmade OCE carrying R/K without that source canceled is NonCaller",
+        "L with neither R nor K canceled is NonCaller, never a default ManagedDeadline",
+        "when R and K are the same token or L equals R (K not cancelable), attribute through the R check and record R==K without double counting"
+      ]
+    }
+  },
+  "persistenceOwnership": {
+    "modes": [
+      "PlatformDefault",
+      "ApplicationOwned"
+    ],
+    "optionApi": "CrestWebOptions.UseApplicationPersistence() (proposed)",
+    "invariants": [
+      "exactly one UnitOfWorkProviderBinding per ORM provider in the final graph",
+      "duplicate or missing binding is a startup diagnostic, before the first request",
+      "the test fixture is not an ownership participant",
+      "#137 deterministic rejection for genuinely different bindings stays in place"
+    ]
+  },
+  "permissions": {
+    "formalTicketDefinitions": [
+      "Ticket.Create",
+      "Ticket.Get",
+      "Ticket.Search",
+      "Ticket.Update",
+      "Ticket.Delete"
+    ],
+    "actionToPermission": {
+      "CreateAsync": "Ticket.Create",
+      "GetByIdAsync": "Ticket.Get",
+      "GetAllAsync": "Ticket.Search",
+      "UpdateAsync": "Ticket.Update",
+      "DeleteAsync": "Ticket.Delete",
+      "AssignAsync": "Ticket.Update",
+      "ResolveAsync": "Ticket.Update",
+      "CloseAsync": "Ticket.Update",
+      "GetByCustomerAsync": "Ticket.Get",
+      "GetByAssigneeAsync": "Ticket.Get",
+      "GetOverdueAsync": "Ticket.Search"
+    },
+    "retiredNames": [
+      "Ticket.GetAll"
+    ],
+    "rules": [
+      "definitions come from an explicit IPermissionDefinitionProvider in the sample, not a generated string table or seeded grant rows",
+      "no OR/alias fallback in the checker between Helpdesk.Tickets.* and Ticket.*",
+      "a Search or read grant is never auto promoted to Update"
+    ]
+  },
+  "legacyProjects": {
+    "CrestCreates.DynamicApi.Legacy": {
+      "dependsOn": [
+        "shared typed runtime",
+        "existing runtime deps"
+      ],
+      "hosts": [
+        "legacy provider",
+        "registry helpers",
+        "body reader"
+      ]
+    },
+    "CrestCreates.CodeGenerator.Legacy": {
+      "targetFramework": "netstandard2.0",
+      "dependsOn": [
+        "shared-source model and emitters"
+      ],
+      "mustNotReference": [
+        "an analyzer package containing the default formal generators"
+      ]
+    },
+    "CrestCreates.Web.Legacy": {
+      "layer": "Platform",
+      "dependsOn": [
+        "CrestCreates.Web",
+        "CrestCreates.DynamicApi.Legacy"
+      ],
+      "provides": [
+        "Add/MapLegacyGeneratedApi"
+      ]
+    },
+    "edges": {
+      "formalToLegacy": "forbidden",
+      "runtimeToApiOrWebOrOrm": "forbidden",
+      "defaultAnalyzerOrPackageIncludesLegacy": false,
+      "sampleOptIn": "explicit per owner/action allowlist recorded in the archive table"
+    }
+  },
+  "diagnostics": {
+    "ids": {
+      "CCHTTP001": "declaration or contract shape unsupported",
+      "CCHTTP002": "projection not materialized / toolchain missing",
+      "CCHTTP003": "owner, route, action or identity conflict",
+      "CCHTTP004": "json input, output or error closure incomplete",
+      "CCHTTP005": "formal path uses legacy or publishes the same action twice",
+      "CCHTTP006": "transport, manifest, stamp or path state invalid",
+      "CCHTTP007": "required host composition, validation or error contract missing",
+      "CCHTTP008": "action permission, kind, cancellation token or concurrency declaration contradicts"
+    },
+    "collisionCheck": "repo-wide grep for CCHTTP recorded zero hits on 2026-10-17; re-checked before implementation"
+  },
+  "referencedAssembly": {
+    "decision": "declaration lives in the compiling HTTP owner; the contract (and its DTOs) may live in a referenced assembly",
+    "anchor": "local marker class (may be static) carrying CapabilityCompatibilityProjection(ContractType = typeof(IX), RegistrationMode = ExplicitHost); no CrestService required in this mode",
+    "rules": [
+      "ContractType is an accessible closed interface; only it and its inherited interfaces contribute methods",
+      "the marker class is never DI-registered or instantiated and its own public methods are not projected",
+      "existing facades that implement the contract keep today's behaviour; business DI stays with the owning module",
+      "the contract must be registered by the business owner; missing registration is a startup CCHTTP007, not a request-time 500",
+      "two HTTP owners declaring the same contract is CCHTTP003",
+      "artifact identity includes contractAssemblyName and the closed method signature; owner and contract stay separate fields"
+    ],
+    "forbidden": [
+      "assembly-level declaration attribute",
+      "scanning referenced assemblies for CrestService/projection attributes",
+      "reflection or Type.GetType discovery",
+      "relaxing CrestService to interfaces",
+      "same-short-name type stubs standing in for referenced contracts or DTOs"
+    ],
+    "jsonClosure": [
+      "referenced DTOs must appear as JsonSerializable roots and in official STJ metadata",
+      "same-short-name types across assemblies must not cross owners",
+      "generation must not write into the referenced assembly output"
+    ],
+    "probes": {
+      "R-01": "a projection declaration inside a referenced assembly is not discovered by the consuming compilation",
+      "R-02": "ContractType mode enumerates only the contract surface",
+      "R-03": "referenced DTO json closure",
+      "R-04": "missing contract DI registration fails at startup with CCHTTP007",
+      "R-05": "identity includes contractAssemblyName and no cross-assembly owner bleed",
+      "R-06a": "caller abort: no JSON error body, business observed cancellation once, no re-execution, #137 abandonment facts",
+      "R-06b": "managed deadline: sanitized 500 when the response has not started; Unknown/Committed facts preserved",
+      "R-06c": "non-caller OCE: treated as an internal fault (sanitized 500), never dropped as cancellation",
+      "R-06d": "linked-token identity resolution: deadline-only never hits CallerAbort; both canceled -> CallerAbort with both sources recorded",
+      "R-06e": "binding/validation uses the same classifier: OCE(R) no body, OCE(K) sanitized 500, third token/None sanitized 500",
+      "R-06f": "boundary: None before identity matching (R=None must not turn a default OCE into CallerAbort); identity match without the source canceled -> NonCaller; L with N/R/K untouched -> NonCaller"
+    }
+  },
+  "acceptanceMatrixDelta": {
+    "H02": "binding-stage cancellation follows the same classifier (OCE(R) no body; OCE(K)/third token -> sanitized 500), never a stage-wide attribution",
+    "H07": "R-06a-e: caller abort / managed deadline / non-caller OCE / both-cancel precedence / binding-stage same rule; fixed HTTP and #137 facts; cancellation never re-executes",
+    "N01/N02": "native gate adds one caller-abort and one non-caller OCE scenario",
+    "D01": "migration guide states the two client-visible cancellation behaviours"
+  }
+}

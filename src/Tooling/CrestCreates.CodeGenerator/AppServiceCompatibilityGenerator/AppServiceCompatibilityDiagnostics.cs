@@ -80,4 +80,29 @@ internal static class AppServiceCompatibilityDiagnostics
         category: "CrestCreates.Compatibility",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    /// <summary>
+    /// CCHTTP002 (#129): an explicit-host projection was declared but the precompile/ExplicitHost
+    /// front-end is not materializing it yet, so the static registrar skipped it instead of publishing
+    /// a second, divergent endpoint set.
+    /// </summary>
+    public static readonly DiagnosticDescriptor CCHTTP002 = new(
+        id: "CCHTTP002",
+        title: "Explicit-host projection is not materialized yet",
+        messageFormat: "'{0}' declares an explicit-host HTTP projection; the static compatibility registrar skipped it because the precompile front-end does not materialize it yet (#129 S2)",
+        category: "CrestCreates.HttpProjection",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    /// <summary>
+    /// CCHTTP005 (#129): a projection declaration has no RegistrationMode. During migration the static
+    /// registrar stays authoritative for it; the declaration must be migrated before S4 removes it.
+    /// </summary>
+    public static readonly DiagnosticDescriptor CCHTTP005 = new(
+        id: "CCHTTP005",
+        title: "Projection declaration has no RegistrationMode",
+        messageFormat: "'{0}' declares a compatibility projection without RegistrationMode; the static registrar remains authoritative for it until it is migrated to ExplicitHost (#129 S2)",
+        category: "CrestCreates.HttpProjection",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
 }

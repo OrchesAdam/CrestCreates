@@ -15,6 +15,8 @@
     <!-- #128 S2: the CRUD model/emitters are one implementation, source-linked into the analyzer and
          the build-time tool so field rules, routes and identity can never drift apart. -->
     <Compile Include="..\CrestCreates.CrudGeneration\*.cs" Link="CrudGeneration\%(Filename)%(Extension)" />
+    <!-- #129 S2: source-linked hand-written HTTP projection model, shared by the analyzer and the precompile tool. -->
+    <Compile Include="..\CrestCreates.HttpProjectionGeneration\*.cs" Link="HttpProjectionGeneration\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
