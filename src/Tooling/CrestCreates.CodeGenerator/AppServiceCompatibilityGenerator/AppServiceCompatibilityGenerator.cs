@@ -63,8 +63,23 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             }
         }
 
+        // #129: an explicit-host declaration belongs to the precompile front-end. Until that front-end
+        // materializes it, the static registrar must not publish a second, divergent endpoint set.
+        var registrationMode = classProjectionAttr?.NamedArguments
+            .Where(argument => argument.Key == "RegistrationMode")
+            .Select(argument => argument.Value)
+            .FirstOrDefault();
+        var contractTypeArgument = classProjectionAttr?.NamedArguments
+            .Where(argument => argument.Key == "ContractType")
+            .Select(argument => argument.Value)
+            .FirstOrDefault();
+        var isExplicitHostWithContract = classProjectionAttr is not null
+            && contractTypeArgument is { Kind: TypedConstantKind.Type, Value: not null }
+            && !(registrationMode is { Kind: TypedConstantKind.Enum }
+                 && System.Convert.ToInt32(registrationMode.Value.Value) == 1);
+
         // CEP030: [CapabilityCompatibilityProjection] on non-[CrestService] class
-        if (!hasCrestService && (classProjectionAttr != null || methodsWithProjection.Count > 0))
+        if (!hasCrestService && !isExplicitHostWithContract && (classProjectionAttr != null || methodsWithProjection.Count > 0))
         {
             var cep030Diagnostics = new List<DiagnosticDescriptorAndLocation>();
             var location = classProjectionAttr?.ApplicationSyntaxReference?.GetSyntax().GetLocation()
@@ -86,12 +101,44 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
                 Diagnostics: cep030Diagnostics.ToArray());
         }
 
+        if (isExplicitHostWithContract)
+        {
+            var skipLocation = classProjectionAttr!.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                ?? classDecl.GetLocation();
+            return new CompatibilityServiceModel(
+                ServiceName: symbol.Name,
+                StrippedName: string.Empty,
+                SanitizedIdentifier: string.Empty,
+                RoutePrefix: string.Empty,
+                CapabilityIdPrefix: string.Empty,
+                ServiceTypeName: symbol.ToDisplayString(),
+                InterfaceTypeName: string.Empty,
+                Actions: System.Array.Empty<CompatibilityActionModel>(),
+                Diagnostics: new[]
+                {
+                    new DiagnosticDescriptorAndLocation(
+                        AppServiceCompatibilityDiagnostics.CCHTTP002, skipLocation,
+                        new object?[] { symbol.Name }),
+                });
+        }
+
+
         if (!hasCrestService) return null;
 
         if (classProjectionAttr == null && methodsWithProjection.Count == 0)
             return null;
 
         var diagnostics = new List<DiagnosticDescriptorAndLocation>();
+
+        if (classProjectionAttr is not null
+            && registrationMode is not { Kind: TypedConstantKind.Enum })
+        {
+            var migrationLocation = classProjectionAttr.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                ?? classDecl.GetLocation();
+            diagnostics.Add(new DiagnosticDescriptorAndLocation(
+                AppServiceCompatibilityDiagnostics.CCHTTP005, migrationLocation,
+                new object?[] { symbol.Name }));
+        }
 
         // Validate CEP031 — DynamicApiIgnore conflict (check both contract and implementation methods)
         foreach (var contractMethod in methodsWithProjection)
