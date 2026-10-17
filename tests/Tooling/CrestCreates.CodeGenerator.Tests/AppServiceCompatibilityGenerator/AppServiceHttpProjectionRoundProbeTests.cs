@@ -145,18 +145,19 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
         // is closed by the official generator, so the envelope's absence is the round, not a dead driver.
         var run = await ProbeRunFor(HandWrittenServiceWithTwoValueParameters);
         {
+            // The same context reports SYSLIB1030 for the generator-only envelope, so the control must be
+            // about the ordinary root itself: no diagnostic may name it.
             DiagnosticsIn(run.Output, "Declaration.cs").Should().NotContain(
-                line => line.Contains("SYSLIB1030", StringComparison.Ordinal),
-                "the control must show that an ordinary-Compile envelope of the same shape closes without a "
-                + "missing-metadata diagnostic; diagnostics: "
-                + string.Join(" | ", DiagnosticsIn(run.Output, "Declaration.cs")));
+                line => line.Contains("OrdinaryEnvelope", StringComparison.Ordinal),
+                "the ordinary-Compile root must not be the subject of any diagnostic on the authored file; "
+                + "diagnostics: " + string.Join(" | ", DiagnosticsIn(run.Output, "Declaration.cs")));
 
             var stj = ReadGeneratedFiles(run.Directory, StjFolderFragment);
             stj.Should().Contain(
                 content => content.Contains(
-                    "JsonTypeInfo<global::ProbeOrdinary.OrderSearchEnvelope>", StringComparison.Ordinal),
-                "the official STJ generator ran in this build and closed the ordinary-Compile envelope; "
-                + "otherwise the negative case above would prove nothing. STJ files: " + stj.Length);
+                    "JsonTypeInfo<global::ProbeOrdinary.OrdinaryEnvelope>", StringComparison.Ordinal),
+                "the ordinary-Compile root of the same shape closes inside this very build, so the envelope's "
+                + "missing metadata is the round boundary and not a dead generator. STJ files: " + stj.Length);
         }
     }
 
