@@ -251,4 +251,4 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 默认 capability id = `compat.appservice.{CanonicalToken(owner)}.{CanonicalToken(contractFullName)}.{kebab(action)}`；
 - 显式 `CapabilityIdPrefix` 路径保持 `prefix + "." + kebab(action)`，以便 Ticket 在 S3 显式保留现有 `compat.appservice.ticket.*` id。
 
-审查者新增 3 条身份探针（信封 FQN 可在普通 Compile 声明、`A.B`/`A_B` 默认 ID 不碰撞、不同显式 prefix 下信封不碰撞）以 patch 原样入库；与 R1 的 5 条及本切片 10 条定向合并 **18/18 pass**。全量 `CrestCreates.CodeGenerator.Tests` 结果见补记。
+审查者新增 3 条身份探针（信封 FQN 可在普通 Compile 声明、`A.B`/`A_B` 默认 ID 不碰撞、不同显式 prefix 下信封不碰撞）以 patch 原样入库；与 R1 的 5 条及本切片 10 条定向合并 **18/18 pass**；全量 `CrestCreates.CodeGenerator.Tests` **482 pass / 0 fail / 482**，0 skipped（22m26s），无新增回归。
