@@ -32,45 +32,56 @@ public static class AppServiceHttpWireConvention
     /// S21-R1-02); a declaration that needs to keep an existing id sets CapabilityIdPrefix explicitly.
     /// </summary>
     public static string DefaultCapabilityId(string ownerAssemblyName, string contractFullMetadataName, string actionName)
-        => DefaultCapabilityPrefix + SanitizeToken(ownerAssemblyName) + "."
-           + SanitizeToken(contractFullMetadataName) + "." + ToKebabCase(TrimAsyncSuffix(actionName));
+        => DefaultCapabilityPrefix + CanonicalToken(ownerAssemblyName) + "."
+           + CanonicalToken(contractFullMetadataName) + "." + ToKebabCase(TrimAsyncSuffix(actionName));
 
     /// <summary>
     /// Envelope name for the hand-written front-end. The owner identity is part of the type name so two
     /// same-short-name contracts cannot share one envelope type (S21-R1-02).
     /// </summary>
     public static string EnvelopeFullName(string ownerAssemblyName, string contractFullMetadataName, string actionName)
-        => CrudEnvelopeConvention.EnvelopeNamespace + "." + SanitizeToken(ownerAssemblyName) + "_"
-           + SanitizeToken(contractFullMetadataName) + "_" + TrimAsyncSuffix(actionName)
+        => CrudEnvelopeConvention.EnvelopeNamespace + "." + CanonicalToken(ownerAssemblyName) + "__"
+           + CanonicalToken(contractFullMetadataName) + "__" + CanonicalToken(TrimAsyncSuffix(actionName))
            + CrudEnvelopeConvention.Suffix;
 
-    /// <summary>Deterministic identifier token: letters/digits kept, everything else becomes a separator.</summary>
-    public static string SanitizeToken(string value)
+    /// <summary>
+    /// Canonical, case-preserving, injective identifier token (S21-R2-HTTP129-01):
+    /// letters and digits are kept as-is, an underscore becomes '_005F', and every other character
+    /// becomes '_' + its UTF-16 code unit in hex. The encoding is reversible, so namespace separators
+    /// and literal underscores can never collapse two identities, and the result is a legal C#
+    /// identifier fragment (a leading underscore is added when the first character is a digit).
+    /// </summary>
+    public static string CanonicalToken(string value)
     {
         var builder = new StringBuilder(value.Length + 8);
         foreach (var character in value)
         {
             if (char.IsLetterOrDigit(character))
             {
-                if (char.IsUpper(character) && builder.Length > 0 && builder[builder.Length - 1] != '-')
-                {
-                    builder.Append('-');
-                }
-
-                builder.Append(char.ToLowerInvariant(character));
-                continue;
+                builder.Append(character);
             }
-
-            if (builder.Length > 0 && builder[builder.Length - 1] != '-')
+            else if (character == '_')
             {
-                builder.Append('-');
+                builder.Append("_005F");
+            }
+            else
+            {
+                builder.Append('_').Append(((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
             }
         }
 
-        return builder.ToString().Trim('-');
-    }
+        if (builder.Length == 0)
+        {
+            return "_EMPTY";
+        }
 
-    public static string EndpointId(string capabilityId) => CrudWireConvention.EndpointId(capabilityId);
+        if (!char.IsLetter(builder[0]) && builder[0] != '_')
+        {
+            builder.Insert(0, '_');
+        }
+
+        return builder.ToString();
+    }
 
     /// <summary>Verb derived when the action declaration does not name one.</summary>
     public static string DefaultHttpMethod(string methodName)
@@ -137,4 +148,6 @@ public static class AppServiceHttpWireConvention
 
         return builder.ToString();
     }
+
+    public static string EndpointId(string capabilityId) => CrudWireConvention.EndpointId(capabilityId);
 }

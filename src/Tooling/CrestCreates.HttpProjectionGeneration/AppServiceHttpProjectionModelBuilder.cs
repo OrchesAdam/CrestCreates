@@ -130,7 +130,7 @@ public static class AppServiceHttpProjectionModelBuilder
             ContractName = contract.Name,
             RoutePrefix = routePrefix,
             CapabilityIdPrefix = explicitCapabilityPrefix
-                ?? AppServiceHttpWireConvention.DefaultCapabilityPrefix + AppServiceHttpWireConvention.SanitizeToken(ownerAssembly),
+                ?? AppServiceHttpWireConvention.DefaultCapabilityPrefix + AppServiceHttpWireConvention.CanonicalToken(ownerAssembly),
             RegistrationMode = registrationMode,
             Actions = actions,
             ReferencedTypes = referenced

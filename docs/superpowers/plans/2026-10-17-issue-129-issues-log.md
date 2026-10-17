@@ -240,3 +240,15 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 审查者的 5 条探针以 patch 原样入库（`ReviewS21ContractProbes.cs`）。本轮定向（5 审查探针 + 7 模型 + 3 声明）**15/15 pass**；全量 `CrestCreates.CodeGenerator.Tests` **479 pass / 0 fail / 479**，0 skipped（22m28s），无新增回归。默认 ID 语义变化影响正式声明（Ticket 将在 S3 声明时显式保留现有 `compat.appservice.ticket` 前缀，迁移表已记录），旧静态链不受影响。
 
 S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution/binder/invoker/typed result/required identities/JSON root/Host configurator）先归一 wire action model 再调同一 emitter；实体发现、DTO/CRUD service、repository、mapping、permission、filter/sort/query adapter 留在 CRUD 前端；#128 的 not-found/result envelope 与 #129 的 Web CrestErrorResponse 责任分开；工具链复用既有 CLI/Task/fingerprint/stamp/DependsOn/分区与 packaged transport。
+
+### S2.1 复审 R2 修复（S21-R2-HTTP129-01：identity 编码）
+
+有损 slug（`SanitizeToken` 把 `.`/`_` 都归一成 `-`）导致两类问题：信封名含 `-` 不是合法 C# 类型名；`A.B.IOrder` 与 `A_B.IOrder` 归一后碰撞。
+
+修复：`AppServiceHttpWireConvention.CanonicalToken` 改为**可逆、区分大小写**的编码——字母/数字原样保留，`_` → `_005F`，其余字符 → `_` + UTF-16 码元的四位十六进制；首字符为数字时前置 `_`。契约/owner/action 各自编码后：
+
+- 组合信封名 = `CrestCreates.Generated.{CanonicalToken(owner)}__{CanonicalToken(contractFullName)}__{CanonicalToken(action)}_CompatibilityInput`（`__` 为字段分隔，编码内容不可能产生 `__`；类型名合法且单射）；
+- 默认 capability id = `compat.appservice.{CanonicalToken(owner)}.{CanonicalToken(contractFullName)}.{kebab(action)}`；
+- 显式 `CapabilityIdPrefix` 路径保持 `prefix + "." + kebab(action)`，以便 Ticket 在 S3 显式保留现有 `compat.appservice.ticket.*` id。
+
+审查者新增 3 条身份探针（信封 FQN 可在普通 Compile 声明、`A.B`/`A_B` 默认 ID 不碰撞、不同显式 prefix 下信封不碰撞）以 patch 原样入库；与 R1 的 5 条及本切片 10 条定向合并 **18/18 pass**。全量 `CrestCreates.CodeGenerator.Tests` 结果见补记。

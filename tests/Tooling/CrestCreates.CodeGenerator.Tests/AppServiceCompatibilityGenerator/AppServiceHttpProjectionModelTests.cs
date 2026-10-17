@@ -91,7 +91,7 @@ public sealed class AppServiceHttpProjectionModelTests
 
         var update = model.Actions.Single(a => a.Name == "UpdateAsync");
         update.InputEnvelopeFullName.Should().Be(
-            "CrestCreates.Generated.shop-http_shop-contracts-i-widget-app-service_Update_CompatibilityInput",
+            "CrestCreates.Generated.Shop_002EHttp__Shop_002EContracts_002EIWidgetAppService__Update_CompatibilityInput",
             "the envelope name carries the full owner identity (assembly + contract), not the short service name");
         update.BodyPolicy.Should().Be(AppServiceHttpBodyPolicy.Required);
         update.RouteIdentityParameterName.Should().Be("id");
