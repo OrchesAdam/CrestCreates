@@ -161,20 +161,42 @@ public class TicketProjectionGapBaselineTests : BaseTest
         var (client, _) = await SignInAsync(MeasurementHost());
         var ticketId = await CreateTicketAsync(client);
         var persisted = await ReadTicketAsync(ticketId);
+        var ticketsBefore = await CountTicketsAsync();
+
+        // The payload carries the stamp this row actually holds, read back from the database in a fresh
+        // scope, so this control is a legitimate precondition-satisfied update and not a placeholder.
+        persisted.ConcurrencyStamp.Should().NotBeNullOrWhiteSpace(
+            "the control needs a real current stamp to send; an empty stored stamp would make P09 vacuous");
+
         _probe.Reset();
-
         var response = await client.PutAsync($"/api/ticket/{ticketId}", new StringContent(
-            ValidUpdatePayload, Encoding.UTF8, "application/json"));
+            UpdatePayload(persisted.ConcurrencyStamp), Encoding.UTF8, "application/json"));
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        _probe.ServiceCalls.Should().Contain(nameof(SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.UpdateAsync),
-            "the probe must actually observe the business call, otherwise R05/R08 could pass on an empty counter");
-        _probe.UnitOfWorkExecutions.Should().Be(1);
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        _probe.ServiceCalls.Should().BeEquivalentTo(new[]
+        {
+            nameof(SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.UpdateAsync),
+        }, "exactly the update action may run, and nothing else may piggyback on the accepted path");
+        _probe.UnitOfWorkExecutions.Should().Be(1, "the accepted write must own exactly one managed execution");
 
         var after = await ReadTicketAsync(ticketId);
         after.Exists.Should().BeTrue();
+        after.Title.Should().Be("accepted update title", "the accepted update must persist");
         after.ConcurrencyStamp.Should().NotBe(persisted.ConcurrencyStamp,
-            "a successful write must produce a new persisted stamp so the next precondition can be checked");
+            "a successful write must rotate the stored stamp so the next precondition can be checked");
+        (await CountTicketsAsync()).Should().Be(ticketsBefore, "an update must not create rows");
+
+        // Read-back after the write, before any further request: the rotated stamp must be stable and
+        // re-usable, otherwise the positive control would only prove a one-off mutation happened.
+        var (secondClient, _) = await SignInAsync(MeasurementHost());
+        _probe.Reset();
+        var followUp = await secondClient.PutAsync($"/api/ticket/{ticketId}", new StringContent(
+            UpdatePayload(after.ConcurrencyStamp), Encoding.UTF8, "application/json"));
+        followUp.StatusCode.Should().Be(HttpStatusCode.OK, await followUp.Content.ReadAsStringAsync());
+        var afterSecond = await ReadTicketAsync(ticketId);
+        afterSecond.ConcurrencyStamp.Should().NotBe(after.ConcurrencyStamp,
+            "the stamp the previous response was built against has to be the one the next request can use");
     }
 
     [Fact]
@@ -183,16 +205,26 @@ public class TicketProjectionGapBaselineTests : BaseTest
         var (client, _) = await SignInAsync(MeasurementHost());
         var ticketId = await CreateTicketAsync(client);
         var persisted = await ReadTicketAsync(ticketId);
-        _probe.Reset();
+        var ticketsBefore = await CountTicketsAsync();
+        persisted.ConcurrencyStamp.Should().NotBeNullOrWhiteSpace("the precondition header must be real");
 
+        _probe.Reset();
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/ticket/{ticketId}");
         request.Headers.IfMatch.Add(new EntityTagHeaderValue($"\"{persisted.ConcurrencyStamp}\""));
         var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK,
             "the accepted If-Match path must keep working; R06 only rejects the missing precondition");
-        _probe.ServiceCalls.Should().Contain(nameof(SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.DeleteAsync));
-        (await ReadTicketAsync(ticketId)).Exists.Should().BeFalse();
+        _probe.ServiceCalls.Should().BeEquivalentTo(new[]
+        {
+            nameof(SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.DeleteAsync),
+        }, "only the delete action may run for an accepted If-Match request");
+        _probe.UnitOfWorkExecutions.Should().Be(1);
+
+        var after = await ReadTicketAsync(ticketId);
+        after.Exists.Should().BeFalse("the accepted delete must remove the row");
+        after.ConcurrencyStamp.Should().BeEmpty();
+        (await CountTicketsAsync()).Should().Be(ticketsBefore - 1);
     }
 
     private WebApplicationFactory<global::Program> MeasurementHost()
@@ -205,10 +237,11 @@ public class TicketProjectionGapBaselineTests : BaseTest
          "priority":3,"type":2,"categoryId":null,"concurrencyStamp":"00000000-0000-0000-0000-000000000000"}
         """;
 
-    private const string ValidUpdatePayload = """
-        {"title":"accepted update title","description":"accepted update description",
-         "priority":3,"type":2,"categoryId":null,"concurrencyStamp":"any-value-ignored-today"}
-        """;
+    private static string UpdatePayload(string concurrencyStamp)
+        => $$"""
+           {"title":"accepted update title","description":"accepted update description",
+            "priority":3,"type":2,"categoryId":null,"concurrencyStamp":"{{concurrencyStamp}}"}
+           """;
 
     private static string ShortTitlePayload(string customerId)
         => $$"""

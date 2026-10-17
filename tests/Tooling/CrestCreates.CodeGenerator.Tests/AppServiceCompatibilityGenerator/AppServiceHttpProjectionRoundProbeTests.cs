@@ -44,7 +44,7 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
         namespace ProbeJson
         {
             [System.Text.Json.Serialization.JsonSerializable(
-                typeof(ProbeHandwritten.OrderAppService_Search_CompatibilityInput))]
+                typeof(CrestCreates.Generated.OrderAppService_Search_CompatibilityInput))]
             public partial class ProbeEnvelopeContext : System.Text.Json.Serialization.JsonSerializerContext
             {
             }
@@ -102,19 +102,31 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
                 "pre-condition: the compatibility projection producer must really materialize the combined " +
                 "input envelope in this build, otherwise nothing about its visibility is being measured; " +
                 "generated files: " + string.Join(" | ", generated.Select(FileName)));
+            envelopeFile.Should().Contain("namespace CrestCreates.Generated",
+                "the probe must reference the producer's own namespace, so a failed lookup cannot be a "
+                + "namespace spelling mistake");
+
+            // Attribution is by location and by diagnostic id: the envelope exists in this compilation
+            // (it is a generator output), so a CS0234/CS0246 on the authored file would mean a naming
+            // mistake, not same-round invisibility. Only the STJ generator's own SYSLIB1030 proves the
+            // round boundary.
+            DiagnosticsIn(run.Output, "Declaration.cs").Should().OnlyContain(
+                line => line.Contains("SYSLIB1030", StringComparison.Ordinal),
+                "the authored context must fail only through the official generator's missing-metadata "
+                + "diagnostic; any compiler name-resolution error here would be a naming mistake. Diagnostics: "
+                + string.Join(" | ", DiagnosticsIn(run.Output, "Declaration.cs")));
 
             DiagnosticsIn(run.Output, "Declaration.cs").Should().Contain(
-                line => (line.Contains("CS0246") || line.Contains("CS0234"))
-                        && line.Contains("OrderAppService_Search_CompatibilityInput", StringComparison.Ordinal),
-                "the context declaration in ordinary Compile input cannot resolve a type another generator emits "
-                + "in the same round (observed as CS0234/CS0246 naming the envelope). This is the mechanism #128 "
-                + "closed by pre-materializing artifacts; the hand-written projection has no equivalent yet. Diagnostics: "
-                + string.Join(" | ", ErrorLines(run.Output)));
+                line => line.Contains("OrderAppService_Search_CompatibilityInput", StringComparison.Ordinal),
+                "SYSLIB1030 must name the combined envelope, not an unrelated root");
 
             var stj = ReadGeneratedFiles(run.Directory, StjFolderFragment);
+            stj.Should().NotBeEmpty("the official generator must run in this build, otherwise the absence of "
+                + "metadata would prove nothing");
             stj.Should().NotContain(
                 content => content.Contains("OrderAppService_Search_CompatibilityInput", StringComparison.Ordinal),
-                "the official generator cannot produce metadata for the generator-only envelope");
+                "the official generator cannot produce metadata for an envelope another generator emits in the "
+                + "same round");
         }
         finally
         {
@@ -129,10 +141,10 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
         try
         {
             DiagnosticsIn(run.Output, "Declaration.cs").Should().NotContain(
-                line => (line.Contains("CS0246") || line.Contains("CS0234"))
-                        && line.Contains("OrderSearchEnvelope", StringComparison.Ordinal),
-                "the control must show that ordinary Compile input is visible; diagnostics: "
-                + string.Join(" | ", ErrorLines(run.Output)));
+                line => line.Contains("SYSLIB1030", StringComparison.Ordinal),
+                "the control must show that an ordinary-Compile envelope of the same shape closes without a "
+                + "missing-metadata diagnostic; diagnostics: "
+                + string.Join(" | ", DiagnosticsIn(run.Output, "Declaration.cs")));
 
             var stj = ReadGeneratedFiles(run.Directory, StjFolderFragment);
             stj.Should().Contain(
@@ -140,6 +152,67 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
                     "JsonTypeInfo<global::ProbeOrdinary.OrderSearchEnvelope>", StringComparison.Ordinal),
                 "the official STJ generator ran in this build and closed the ordinary-Compile envelope; "
                 + "otherwise the negative case above would prove nothing. STJ files: " + stj.Length);
+        }
+        finally
+        {
+            Delete(run.Directory);
+        }
+    }
+
+    [Fact]
+    public async Task Projection_activation_is_process_global_and_has_no_host_scoped_seam()
+    {
+        // Issue #129 R3: the cross-Host activation control. Same real build as the envelope probes, but
+        // the claim is read off the producer's own syntax tree, not off file contents or comments.
+        var run = await RunProbeAsync(HandWrittenServiceWithTwoValueParameters);
+        try
+        {
+            var trees = ReadGeneratedFiles(run.Directory, GeneratorFolderFragment)
+                .Where(content => content.Contains("OrderAppService", StringComparison.Ordinal))
+                .Select(content => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                    content[..content.LastIndexOf("// FILE:", StringComparison.Ordinal)]))
+                .ToList();
+
+            trees.Should().NotBeEmpty("the probe project declares the projected service");
+
+            var initializerMethods = trees
+                .SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>())
+                .Where(method => method.AttributeLists
+                    .SelectMany(list => list.Attributes)
+                    .Any(attribute => attribute.Name.ToString().Contains("ModuleInitializer", StringComparison.Ordinal)))
+                .ToList();
+
+            initializerMethods.Should().NotBeEmpty(
+                "the compatibility projection must be reachable without any host call, and it achieves that "
+                + "by registering from a module initializer");
+
+            var registrations = initializerMethods
+                .SelectMany(method => method.DescendantNodes()
+                    .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>())
+                .Select(invocation => invocation.Expression.ToString())
+                .Where(expression => expression.Contains(".Register", StringComparison.Ordinal))
+                .Select(expression => expression.Split('.')[^2] + "." + expression.Split('.').Last().Split('(').First())
+                .Distinct()
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+
+            registrations.Should().Contain(new[]
+            {
+                "DescriptorProviderRegistry.Register",
+                "CapabilityEndpointBindingRegistry.Register",
+                "CapabilityHandlerResolverProvider.Register",
+            }, "these are the process-global registries the projection writes into at assembly load; "
+                + "observed: " + string.Join(", ", registrations));
+            registrations.Should().HaveCountGreaterThanOrEqualTo(4,
+                "descriptor, binding, invoker and manifest/result registration are all global today; observed: "
+                + string.Join(", ", registrations));
+
+            var wholeBuild = string.Join("\n", ReadGeneratedFiles(run.Directory, GeneratorFolderFragment));
+            wholeBuild.Should().NotContain("ICapabilityEndpointContribution",
+                "there is no per-Host contribution seam for the hand-written projection, so a host cannot "
+                + "decline activation; this is the gap #129 closes with AddGeneratedAppServiceHttp()");
+            wholeBuild.Should().NotContain("AddCrestCapabilityEndpointContribution",
+                "the explicit-host composition used by the #128 CRUD path must not appear here");
         }
         finally
         {

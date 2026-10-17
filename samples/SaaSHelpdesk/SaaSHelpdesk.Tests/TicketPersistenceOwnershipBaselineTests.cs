@@ -2,6 +2,7 @@ using System.IO;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using CrestCreates.Data.Abstractions;
+using Xunit;
 using SaaSHelpdesk.EntityFrameworkCore.Modules;
 
 namespace SaaSHelpdesk.Tests;
@@ -33,14 +34,47 @@ public class TicketPersistenceOwnershipBaselineTests : BaseTest
     }
 
     [Fact]
-    public void U02_production_composition_declares_the_binding_more_than_once()
+    public void U02_binding_declaring_call_sites_are_attributed_by_assembly_metadata()
     {
         var callers = AssembliesDeclaringBinding().OrderBy(name => name, StringComparer.Ordinal).ToList();
 
-        callers.Should().HaveCount(1,
-            "exactly one composition owner may declare the EfCore binding (rev.2 14.3 PlatformDefault vs "
-            + "ApplicationOwned). Assemblies whose metadata references the binding-declaring API: "
-            + string.Join(", ", callers));
+        // This is attribution evidence, not the invariant. Referring to the binding-declaring API does
+        // not make an assembly an owner of the final graph: a fix that leaves one composition site and
+        // drops the other must turn R01/U04 green while this list still names whatever still calls it.
+        callers.Should().BeEquivalentTo(
+            new[] { "CrestCreates.Web", "SaaSHelpdesk.EntityFrameworkCore" },
+            "rev.2 14.3 needs the two production declaration sites named, so the owner decision cannot be "
+            + "made by guesswork. Observed callers: " + string.Join(", ", callers));
+    }
+
+    [Fact]
+    public void U05_registry_accepts_one_binding_and_refuses_a_conflicting_second_one()
+    {
+        var single = new UnitOfWorkProviderBinding(
+            OrmProvider.EfCore, static _ => null!, supportsRequiresNew: false);
+        var others = new[]
+        {
+            new UnitOfWorkProviderBinding(OrmProvider.FreeSql, static _ => null!, supportsRequiresNew: false),
+        };
+
+        var merged = new UnitOfWorkProviderBindingRegistry(new[] { single }.Concat(others));
+        merged.GetRequired(OrmProvider.EfCore).Should().BeSameAs(single);
+        merged.GetRequired(OrmProvider.FreeSql).Should().BeSameAs(others[0]);
+
+        var conflict = new[]
+        {
+            single,
+            new UnitOfWorkProviderBinding(OrmProvider.EfCore, static _ => null!, supportsRequiresNew: false),
+        };
+
+        var refused = Assert.Throws<InvalidOperationException>(() => BuildRegistry(conflict));
+        refused.Message.Should().Contain("Duplicate unit-of-work binding for provider 'EfCore'");
+
+        // #137 semantics: an empty graph is not refused at construction time; the refusal happens when a
+        // provider is required. The duplicate, by contrast, is refused while building the index.
+        var empty = BuildRegistry(Array.Empty<UnitOfWorkProviderBinding>());
+        Assert.Throws<InvalidOperationException>(() => empty.GetRequired(OrmProvider.EfCore))
+            .Message.Should().Contain("Register the provider package's unit-of-work services");
     }
 
     [Fact]
@@ -60,6 +94,9 @@ public class TicketPersistenceOwnershipBaselineTests : BaseTest
                 "the duplicate must stay observable in the host so R01 cannot silently turn green by " +
                 "removing the measurement path instead of the composition defect");
     }
+
+    private static UnitOfWorkProviderBindingRegistry BuildRegistry(IEnumerable<UnitOfWorkProviderBinding> bindings)
+        => new(bindings);
 
     private static int EfCoreBindingDeclarations(IServiceCollection services)
         => services.Count(d => d.ServiceType == typeof(UnitOfWorkProviderBinding)
