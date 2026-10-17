@@ -427,11 +427,19 @@ public sealed class AppServiceCompatibilityGeneratorTests
                 [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple = false)]
                 public class CrestServiceAttribute : System.Attribute { }
 
+                public enum HttpProjectionRegistrationMode
+                {
+                    ExplicitHost = 0,
+                    LegacyStatic = 1,
+                }
+
                 [System.AttributeUsage(System.AttributeTargets.Class | System.AttributeTargets.Method, AllowMultiple = false)]
                 public sealed class CapabilityCompatibilityProjectionAttribute : System.Attribute
                 {
                     public string? CapabilityIdPrefix { get; init; }
                     public string? RoutePrefix { get; init; }
+                    public System.Type? ContractType { get; init; }
+                    public HttpProjectionRegistrationMode RegistrationMode { get; init; }
                 }
 
                 [System.AttributeUsage(System.AttributeTargets.Method, AllowMultiple = false)]
