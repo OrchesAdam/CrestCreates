@@ -413,3 +413,10 @@ R2 复审（head `23e920e7`，review 5550193846）：原四条 R1 探针全部�
 
 - DynamicApi **129/129**（125 + R2 探针 2 + 新增控制 2）；Application 177/177；fixture JIT **20/20**（18 + R2 modifier 探针 + 派生控制）；E2E 20/20；CapabilityEndpoint JIT 3/3；JsonContracts 单元 131/131；PackageTests 29/29；CodeGenerator **451/451**（含更新后的 configurator 形状断言）。
 - 原生门禁 **3/3**（linux-x64，committed head；绿跑 exit 0（16 PASS + 总 sentinel），两变异 exit 1、无 sentinel；evidence SHA 绑定 `6d54f384`）。
+
+## PR #150 审查闭环（2026-10-17）
+
+- 两轮复审均已闭环：R1（head `672462d3`，review 5545853237，3×P1+1×P2）→ 修复 `9849defa`；R2（head `23e920e7`，review 5550193846，3×P2）→ 修复 `6d54f384`；文档 head `2483d4cd` **复审通过**。R1 四条 + R2 三条全部关闭，无遗留 P1/P2；审查探针（`Review150_*` / `Review150R2_*`）全部原样入库并转绿。
+- 最终证据（head `2483d4cd`，实现 `6d54f384`）：DynamicApi **129/129**、Application **177/177**、GeneratedCrud fixture JIT **20/20**、原生门禁 **3/3**（linux-x64；绿跑 exit 0（16 PASS + 总 sentinel），两变异 exit 1 无 sentinel，evidence SHA 绑定 `6d54f384`）、CodeGenerator **451/451**、JsonContracts **131/131**、PackageTests **29/29**、E2E **20/20**、CapabilityEndpoint JIT **3/3**、BuildTasks **8/8**、OrmProviders（UoW）**124/124**、LocalEvent native **1/1**、RabbitMQ **58/58 + 37/37 + trim/native 2/2**。
+- **合并建议**：以 **merge commit** 合入 master（与 #145/#147/#149 一致，保留 S1–S4 分阶段提交与两轮修复轨迹）；base `de50b337`，head `2483d4cd`。CI 保持暂停；合并后不自动派发 Agent。支持声明与未验证项按 S4 收口节（正式 CRUD + JSON 主链 **NativeAOT-verified（linux-x64）**；EF/其他 ORM 查询翻译与 UoW 组合、其他 RID **未验证**）。
+- 合并后需补记：memory.md / AGENTS 的「待合并」状态改为已合并（含 merge sha）；#129 的交接内容已在 S4 收口节，不随本次合并改变范围。

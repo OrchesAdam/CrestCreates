@@ -373,7 +373,7 @@ TestBase
 - Feature Management：正式平台能力。
 - Dynamic API AoT：generated path 是正式主链。
 - Audit Logging：统一写入、脱敏、查询已闭环；清理 / governance 仍需最终确认。
-- CRUD 主链（#128 已实施、待合并审查）：formal 链 = 真实 `[GenerateCrudService]` 声明 + BuildTasks 前置物化 + JsonContracts root 闭合 + ExplicitHost typed HTTP 投影 + typed query adapter + 生成 JSON context + 唯一 UoW（`[UnitOfWorkMo]` 织入后经生成服务 `ServiceProvider` 成员接入内核）；旧 bundle 路径只服务未迁移消费者（待归档）。证据与支持声明见本文件「平台能力」与 `docs/superpowers/plans/2026-10-14-issue-128-issues-log.md`。
+- CRUD 主链（#128 已实施，PR #150 复审通过、待合并）：formal 链 = 真实 `[GenerateCrudService]` 声明 + BuildTasks 前置物化 + JsonContracts root 闭合 + ExplicitHost typed HTTP 投影 + typed query adapter + 生成 JSON context + 唯一 UoW（`[UnitOfWorkMo]` 织入后经生成服务 `ServiceProvider` 成员接入内核）；旧 bundle 路径只服务未迁移消费者（待归档）。证据与支持声明见本文件「平台能力」与 `docs/superpowers/plans/2026-10-14-issue-128-issues-log.md`。
 - 权限系统：授予、撤销、缓存、租户边界、SuperAdmin、AOP 已收口。
 - 后台作业：ISchedulerService + Quartz + 重试策略 + 租户上下文。
 - UnitOfWork：唯一装配（`AddUnitOfWork` + Provider 包 typed `AddUnitOfWorkProvider` binding + 能力声明，无反射/程序集扫描）；唯一执行内核（`UnitOfWorkOptions`、`BeginScope + StartAsync` 调用方帧激活协议、四维结果：参与状态/事务结果/通知结果/释放；join 完成=参与者成功、rollback-only 拒绝部分提交；提交确认即记录 Committed、Unknown 不被回滚改写、提交后通知失败不回滚且保留已提交事实）；受管链 ambient 路由（descendant-or-self 可见性 + 租户/声明/连接先校验后路由）与未完成退出「终结 + 丢弃未 flush 跟踪写入」；操作层 token 组合（正式仓储/Provider 组合传入 CT ⊕ 受管执行 token，AOP/生成端点 deadline 覆盖）；Provider 能力（隔离级别实测矩阵、及时终止、丢弃）执行业务前 fail closed；requiresNew 经子 DI scope 隔离，不支持的 Provider 确定性诊断；旧双轨与死契约已归档（99_RecycleBin）。状态：#137 已合并（PR #139：切片 1-5 + 三轮审查修复；CAP 参与 lease 契约见交接文档）。
@@ -407,4 +407,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-10-16
+**最后更新**: 2026-10-17
