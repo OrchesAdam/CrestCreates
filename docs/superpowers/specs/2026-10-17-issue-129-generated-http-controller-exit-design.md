@@ -1,10 +1,10 @@
-# #129 旧 Controller 退出与正式 HTTP 投影收口 — 详细设计 rev.1
+# #129 旧 Controller 退出与正式 HTTP 投影收口 — 详细设计 rev.2
 
 ## 1. 状态、基线与核心决策
 
 - Issue：[#129](https://github.com/OrchesAdam/CrestCreates/issues/129)，总控 #121，前置 #128。
 - 已核对 GitHub：PR #150 已合并；当前远端 master 为 **196b6f66048ef32d644eeb856d00d58ae9d34965**。本设计依据该提交源码，不依据本会话较旧的本地 master。
-- 状态：**设计交接，未开始功能实现**。下文新增名称均是拟定契约，不声称今天已经存在；合并权限、暂停 CI 的安排不变。
+- 状态：**S1 已提交 PR #152（head `602d6e40`），事实稿已复核；S1 退出门禁尚未通过，S2 未获放行**。rev.2 根据 S1 事实修订，§14 为新增的明确决策与补证要求。下文新增名称均是拟定契约，不声称今天已经存在；合并权限、暂停 CI 的安排不变。
 - 方案：保留 Ticket 的领域模型、手写 AppService、既有业务接口；将 HTTP 声明转为**有明确契约范围的编译期投影 → 普通 Compile 产物 → JsonContracts → 官方 STJ → 本 Host 显式贡献 → 既有 Capability 管线**。
 - 复用 #128 的前置生成设施、ownership、强类型 body/result、Host activation、精确版本校验与 JSON 来源校验；不再为 Ticket 发出 legacy provider，也不复制 Dispatcher/UoW/权限/租户系统。
 - 完成 Controller 退出，归档无消费者的反射辅助代码和旧 CRUD bundle；仍有真实消费者的 legacy Minimal API 必须物理隔离、显式装配、限定支持与退出清单，不能作为正式入口失败时的 fallback。
@@ -20,11 +20,11 @@
 | TicketAppService 的 Assign/Resolve/Close 当前没有 CT 参数；默认 HTTP convention 将其投影为 GET | 不能按 GET 自动归类为 Query；CT/UoW/权限须逐动作声明与验证 |
 | 旧 convention 对这些动作落到 Ticket.Search，业务方法自身也未显式检查 Update 权限 | 不把现有权限缺口固化成兼容要求；三动作收紧为 Ticket.Update，并在迁移表明示 |
 | CapabilityPipeline 会把普通业务异常转成 PIPELINE_ERROR，统一 mapper 默认产生 500；sample 原测试期望 InvalidOperationException 为 400 | 不能依赖外层 ExceptionHandlingMiddleware 捕获已被吞掉的异常；需复用已有错误权威并补管线桥接 |
-| DynamicApiRouteConvention 实例方法使用反射，但当前仓库消费者只发现 LegacyRuntime.ValidateAsync 调用静态 IsScalar | 归因为残留辅助 API，不能继续描述为正式路由依赖运行时 Attribute 扫描 |
+| DynamicApiRouteConvention 实例方法使用反射，但当前仓库消费者只发现 DynamicApiGeneratedRuntime.ValidateAsync 调用静态 IsScalar | 归因为残留辅助 API，不能继续描述为正式路由依赖运行时 Attribute 扫描 |
 | src 中未发现 DynamicApiScanner / DynamicApiEndpointExecutor 实现 | 不再把已退出实现列为待删除工作；新守卫应阻止重新引入 |
 | HelpdeskDbContext 按 ICurrentTenant 的 ConnectionString 选库；现有测试 factory 将其替换为同一个 shared connection | 必须新增保留生产选库逻辑的双租户测试，不能用现有单连接测试推导数据库隔离 |
 
-证据入口：samples/SaaSHelpdesk/{Application/GeneratedApi/TicketApi.cs,Application/Services/TicketAppService.cs,Application.Contracts/Interfaces/ITicketAppService.cs,EntityFrameworkCore/Modules/EntityFrameworkCoreModule.cs,Tests/TicketApiTests.cs}；Tooling 的 DynamicApiGenerator/AppServiceCompatibilityGenerator/CrudServiceGenerator；DynamicApiRouteConvention.cs、CapabilityPipeline.cs、DefaultCrestExceptionConverter.cs。
+证据入口：samples/SaaSHelpdesk/{SaaSHelpdesk.Application/GeneratedApi/TicketApi.cs,SaaSHelpdesk.Application/Services/TicketAppService.cs,SaaSHelpdesk.Application.Contracts/Interfaces/ITicketAppService.cs,SaaSHelpdesk.EntityFrameworkCore/Modules/EntityFrameworkCoreModule.cs,SaaSHelpdesk.Tests/TicketApiTests.cs}；Tooling 的 DynamicApiGenerator/AppServiceCompatibilityGenerator/CrudServiceGenerator；DynamicApiRouteConvention.cs、CapabilityPipeline.cs、DefaultCrestExceptionConverter.cs。
 
 ## 3. 范围与交付边界
 
@@ -88,7 +88,7 @@ SDK source/global usings/references
 
 ### 4.3 自动 JSON 闭包
 
-必需 roots 从 action model 推导：CreateTicketDto/UpdateTicketDto、实际返回 TicketDto、IReadOnlyList<TicketDto>、List<TicketDto>、所有 route/query/body/header 组合信封、DynamicApiResponse<TicketDto>、两种实际静态 list 的 typed envelope、void/404 envelope，以及每种失败路径真正写出的 DTO。
+必需 roots 从 action model 推导：CreateTicketDto/UpdateTicketDto、实际返回 TicketDto、IReadOnlyList<TicketDto>、List<TicketDto>、所有 route/query/body/header 组合信封、DynamicApiResponse<TicketDto>、两种实际静态 list 的 typed envelope、成功 void envelope，以及 Web 所有的资源不存在/失败 DTO。旧 404 envelope 只留在 legacy 快照，不是正式 Ticket 404 的第二条输出。
 
 不能把 IReadOnlyList 与 List 当作同一静态契约，不注册 object envelope；无输入动作使用明确 no-input 语义，不引入任意 object 输入。单 Guid 输入若运行时 SerializeToElement 会用到，同样纳入 root 需求。
 
@@ -98,7 +98,7 @@ SDK source/global usings/references
 
 ## 5. Ticket 路由、业务与兼容矩阵
 
-S1 先通过真实生成源码 + EndpointDataSource + HTTP 观测核对下表；测试注释不是路由证据。有差异必须在进入实现切片前修订矩阵并说明，不允许让测试追着新实现改口。
+下表是 rev.2 冻结的**目标契约**。S1 的旧链快照另外保存，不随新实现改写。现状 `GET /all` 的端点元数据要求 Ticket.GetAll，但真实服务另要求 Ticket.Search；目标显式统一为 Ticket.Search（§14.2）。Assign/Resolve/Close 从 Search 收紧为 Update，属于明示行为迁移。测试注释不是路由证据。
 
 | 动作 | 保留的 method/route | 输入 | Kind / 权限 | 成功结果 |
 | --- | --- | --- | --- | --- |
@@ -137,7 +137,7 @@ Platform Web 正式模式必须显式接上 capability runtime 与 endpoint mapp
 
 ### 6.2 权限与验证
 
-由现有权限服务和 Capability authorization middleware作权威校验；Ticket 全部正式端点声明 RequireAuthenticated，不靠业务方法抛异常替代 401。声明 permissions 来自冻结矩阵，禁止 Ticket handler 手动读 token/claim 或静默忽略缺 permission checker。业务域操作原有校验继续执行。
+由现有权限服务和 Capability authorization middleware作权威校验；Ticket 全部正式端点声明 RequireAuthenticated，不靠业务方法抛异常替代 401。声明 permissions 来自冻结矩阵；正式 Ticket 使用 Ticket.Create/Get/Search/Update/Delete 五个已注册定义（§14.2），不继续产生 Ticket.GetAll。禁止 Ticket handler 手动读 token/claim 或静默忽略缺 permission checker。业务域操作原有校验继续执行。
 
 Create/Update 使用现有 validators 的**编译期 closed typed 调用/注册**；必要时给现有 IValidationService 增 additive CT overload，旧 overload 委托它，不新造验证引擎。ValidationMiddleware 在 InputSchema=null 时放行，不构成已执行 FluentValidation 的证据。正式 Ticket 写动作的必需 validator 缺失应在装配阶段诊断，不能以缺服务即成功代替。
 
@@ -161,7 +161,7 @@ Create/Update/Delete + Assign/Resolve/Close 共六个写动作均使用 #137 唯
 
 ## 7. 失败响应平台桥接
 
-保留既有 DefaultCrestExceptionConverter 的错误码、认证区分、本地化、trace 和脱敏权威。目标：400 参数/验证/非法领域操作；401 未认证；403 无权限/租户边界；404 资源不存在；并发/前置条件按既有 4xx 契约；未知错误 500 且不泄露堆栈/内部消息。GET 不存在继续使用已声明的 typed 404 envelope，不能被普通 pipeline failure 改成空 500。
+保留既有 DefaultCrestExceptionConverter 的错误码、认证区分、本地化、trace 和脱敏权威。目标：400 参数/验证/非法领域操作；401 未认证；403 无权限/租户边界；404 资源不存在；并发/前置条件按既有 4xx 契约；未知错误 500 且不泄露堆栈/内部消息。目标态的资源不存在统一由 Web 权威输出 CrestErrorResponse（404、Crest.Entity.NotFound），包括 GetById 返回 null 与业务抛 KeyNotFoundException；成功/void envelope 保持 typed DynamicApiResponse。旧 GetById 的 DynamicApiResponse 404 形状属于迁移项，不能同时宣称两种正式 404 形状。不得被普通 pipeline failure 改成空 500。
 
 不能在 Ticket invoker 复制一份 catch-switch，也不能认为外层异常 middleware 能接住 PIPELINE_ERROR。采用小型平台桥接：
 
@@ -170,13 +170,13 @@ Create/Update/Delete + Assign/Resolve/Close 共六个写动作均使用 #137 唯
 3. CapabilityEndpoint 的 HTTP failure mapper 消费这些事实并由既有 Web 错误呈现逻辑输出 CrestErrorResponse；普通 native capability 的既有错误映射不被强制改为 Ticket 格式。
 4. CrestErrorResponse 的 metadata 由现有 Web source-generated context 提供，并作为 Host 必需 error contract 验证，不要求 Feature 引用 Web DTO。失败路径自身也必须在无反射 Host 可写出。
 
-S1 冻结桥接类型、语义分类、已知 code/status 对照与依赖方向；桥接必须配现有异常 converter 的同输入等价测试及 unknown-failure 脱敏负例，不成为任意 HttpStatusCode 向 Runtime 泄漏的通道。
+桥接的冻结形状与 code/status 对照见 §14.5，S1 仍须提交引用真实契约的判别探针；桥接必须配现有异常 converter 的同输入等价测试及 unknown-failure 脱敏负例，不成为任意 HttpStatusCode 向 Runtime 泄漏的通道。
 
 ## 8. Legacy 隔离与归档清单
 
 ### 8.1 确定归档
 
-- samples/SaaSHelpdesk/Application/GeneratedApi/TicketApi.cs：其 all 行为并入正式声明，旧声明不再参与编译。
+- samples/SaaSHelpdesk/SaaSHelpdesk.Application/GeneratedApi/TicketApi.cs：其 all 行为并入正式声明，旧声明不再参与编译。
 - ControllerSourceGenerator、CrudControllerSourceGenerator：核对无真实 GenerateController/CrestCrudApiController 消费者后归档实现与维护其旧输出的测试。两者 Obsolete 提示中的 GeneratedApiController 也要退出，不能保留过时推荐。
 - DynamicApiAotSourceGenerator 的 GeneratedApiController/ApiOverride/controller registration 分支及仅供它的 runtime abstractions：迁移唯一真实 consumer 后归档，不带入新的 legacy analyzer。
 - CrudServiceSourceGenerator 旧无参 stub/bundle/provider/旧 bool ExecuteAsync 发射分支及专用旧测试：#128 正式声明诊断入口保留；#warning 只随该旧分支真实退出而移除，不能整类删除后丢失前阶段缺失诊断。
@@ -186,7 +186,7 @@ S1 冻结桥接类型、语义分类、已知 code/status 对照与依赖方向�
 
 ### 8.2 有消费者的 legacy Minimal API
 
-从正式运行时/默认 analyzer 提取到明确的兼容项目/包，建议 CrestCreates.DynamicApi.Legacy 与 CrestCreates.CodeGenerator.Legacy；Web 的旧装配放在独立 LegacyDynamicApi adapter，不让正式 Web 映射无条件调用它。名称在 S1 项目依赖图中最终冻结。新 analyzer 仍遵守 netstandard2.0/PrivateAssets 的分发要求，并从根目录默认 runtime Trim/AOT 配置及自动 analyzer ProjectReference 中正确排除，避免自引用、互相引用和运行时依赖渗漏。
+从正式运行时/默认 analyzer 提取到明确的兼容项目/包，冻结为 CrestCreates.DynamicApi.Legacy 与 CrestCreates.CodeGenerator.Legacy；Platform 的旧 Add/Map 装配放在 CrestCreates.Web.Legacy，不让正式 Web 映射无条件调用它。依赖约束见 §14.4。新 analyzer 仍遵守 netstandard2.0/PrivateAssets 的分发要求，并从根目录默认 runtime Trim/AOT 配置及自动 analyzer ProjectReference 中正确排除，避免自引用、互相引用和运行时依赖渗漏。
 
 保留对象仅限调用图证明仍使用的旧 AppService generated provider、registry/runtime helpers/body reader；不重新保留已无消费者的 MVC/controller 生成器。非反射 scalar helper 的唯一基线消费者是 legacy ValidateAsync，因此先放 legacy 内部有限类型分类器，不为“共享”向 Core 添加公共基础设施 API。Type flags/有限已知类型判定不等于成员扫描；正式路由仍由 Roslyn symbols 决定。
 
@@ -215,18 +215,18 @@ SaaSHelpdesk 其他仍需 legacy 的服务允许短期共 Host，但要逐 owner
 | ID | 必须证明的事实 |
 | --- | --- |
 | I01 | 在最新 master 上建立 authored → generator/Task → provider → Host → route → runtime helper 调用图；区分声明、注册、实际执行 |
-| I02 | Ticket 11 动作的真实 route/permission/DTO/error 快照，有生产 Host/真实 HTTP 对照；纠正现有测试注释的 GET/POST、list/page 混淆 |
+| I02 | Ticket 11 动作的旧链 route/permission/DTO/error 快照，区分端点元数据与业务二次权限；分别标记原 factory、归一化 factory 和生产进程证据；纠正注释的 GET/POST、list/page 混淆 |
 | B01 | 手写服务组合信封是 ordinary Compile；官方 STJ 与其他 SG 同轮可见，不用串行 driver 或预填 obj |
 | B02 | 正式 DTO/result/list/error roots 元数据真实存在；缺单 root、同名假类型、错误 owner/hash、非生成 resolver 均拒绝 |
 | B03 | clean/no-op/改名/移除声明/坏输出修复/失败无成功 stamp/design-time/多 TFM·RID/外部包首消费，用扩展后的正式前阶段复跑 |
 | B04 | 同短名服务、继承泛型接口、重载、接口实现声明冲突、referenced DTO/service 场景不会串 owner 或多生成 |
 | H01 | Ticket 全矩阵正确，GetAll 替代旧 ApiOverride，未声明基类方法不被自动暴露 |
 | H02 | 缺 body/null/坏 JSON/非法 Guid/缺 query/header，在业务与写事务前拒绝；零 business、零 repo 写入 |
-| H03 | 未认证 401、认证无权 403、读权限不可写、Update 权限动作可用，使用真实认证/授予设施 |
+| H03 | 五个正式 Ticket 权限定义存在；非 SuperAdmin 的真实登录、授予/撤销、GetAll 单 Search 权限正例、读权限不可写及 Update 写正例；定义、grant、端点与业务二次校验一致 |
 | H04 | 未知/禁用/主体与请求租户不匹配先拒绝；两租户生产选库与读写隔离实际成立，含调用方上下文恢复 |
 | H05 | 既有业务状态/SLA/DTO/null/list/enum wire 正例不变；领域失败 400、资源不存在 404、unknown 500 脱敏可序列化 |
 | H06 | typed validators 真执行；缺必需 validator 不假绿；CT 向业务/仓储/验证传播 |
-| H07 | 唯一 UoW 真织入；成功提交、失败回滚、stale stamp、缺 stamp、响应写失败与提交事实独立 |
+| H07 | PlatformDefault/ApplicationOwned 单 owner，启动验证零/重复绑定；生产与 fixture 都仅一个 EfCore binding；唯一 UoW 真织入、提交/回滚、stale/missing stamp、返回 stamp 与存储精确相等、fresh-scope 零写入与响应失败事实 |
 | H08 | 默认 JIT、Host-only JSON、modifier/派生/wrapper、两个真实 Feature 双序、精确 v1/v2 共存与不等价拒绝均回归通过 |
 | L01 | Controller/旧 CRUD stub 分支真归档；默认 analyzer/compile/package 不加载；原样重新引入任一 formal legacy call 的变异能被守卫捕获 |
 | L02 | 必要 legacy 只经 explicit opt-in；未 opt-in 无旧路由；同一动作 formal/legacy 双发布被拒绝；无自动 fallback |
@@ -264,3 +264,117 @@ native 场景至少含：create/update body；组合 route/body/If-Match；all �
 Ticket 的所有对外动作由唯一正式编译期贡献执行；原 Controller 声明、旧注册和 JSON fallback 不再参与该调用图。普通 Feature 只声明契约、业务服务/validator 与少量动作差异；Host 显式激活。失败、权限、租户与事务复杂性回到既有平台 owner。
 
 必要 legacy 明确隔离并可删除；无人消费残留已归档。真实集成与独立原生证据、变异及架构守卫均成立，支持声明准确。以上工作和设计评审闭环完成后 #129 才可关闭；发布本设计不代表开始实现或授权自动合并。
+
+
+## 14. rev.2：S1 复核后的设计决策与退出要求（2026-10-17）
+
+本节优先于 rev.1 评论及 S1 事实稿中的未决项。审查提交为 `602d6e40ba2f0b0841e96055d95cc71b54e3ce97`，生产代码与基线 `196b6f66` 相同；新增内容仅为文档与测试。独立复跑新增套件为 **6 pass + 8 约定红 / 14，0 skipped**。红例是待实现契约，不能将该结果写成实现通过。
+
+### 14.1 事实修正及证据分层
+
+- Ticket 今天走 DynamicApiAotSourceGenerator 的 CrestService/controller 两个分支，尚无 CapabilityCompatibilityProjection 声明。compat generator 是另外一条待收口前端，不能把它描述为当前 Ticket 的执行链。
+- `GET /all`：旧端点要求 Ticket.GetAll；继承的 CrestAppServiceBase.GetAllAsync 又检查 Ticket.Search。SuperAdmin 控制不能证明普通用户只授予端点权限便能通过。
+- HelpdeskPermissions.Tickets 仅是常量，仓库没有使用它注册的 IPermissionDefinitionProvider；Ticket.* 与 Helpdesk.Tickets.* 均不能仅凭常量声称已经进入权限目录。现有 PermissionGrantManager 和 PermissionChecker 不依赖 definition manager，未定义名字也可写入 grant 并被 checker 接受。因此 R02 证明目录缺失，不能证明“除 SuperAdmin 外无人可调用”。
+- 平台预设和样例 EF 模块各注册一次 EfCore binding；原 factory 再注册一次。生产组合静态可证明有两项冲突，原 factory HTTP 实测三项；当前没有成功直跑生产进程的证据，不将其写成已经观测到的生产 HTTP 结果。
+- 归一化 factory 的合法写入、领域规则以及 R05–R08 是受控实验；原 factory 仅用于 R01/旧线路观测。两类结果分栏，不能合并声称原 Host 写入成功或租户隔离成立。
+- 全套 29/70/99 为作者报告，本轮只独立复跑 14 条。旧失败分类 32+17+10+2=61，与“62 条既有红”有一条未分类差额；S1 补按测试 FQN 的完整账本。无法从“都是 HTTP 400”认定17条具有相同根因，必须保留未归因状态或补异常证据。
+
+### 14.2 权限目录与行为迁移：冻结唯一名称
+
+正式 Ticket 权限只定义五项：Ticket.Create、Ticket.Get、Ticket.Search、Ticket.Update、Ticket.Delete。由 sample 的显式 IPermissionDefinitionProvider 注册到既有目录，permissions 常量、动作声明和基类 override 引用同一常量源。不能仅生成一个同名字符串表或往测试 seed 插权限行后声称注册完成。
+
+正式 GetAll 使用 Ticket.Search，和真实 AppService 二次检查一致；GetById/ByCustomer/ByAssignee 使用 Ticket.Get；Overdue 使用 Ticket.Search；Assign/Resolve/Close 使用 Ticket.Update。既有业务中的权限检查不通过“正式入口已授权”的标志跳过，直接 AppService 调用仍沿原有权限服务执行必要检查。
+
+旧 Ticket.GetAll 只存在于旧链快照与迁移文档，正式投影不再发布/授予该名。仅拥有 GetAll 而没有 Search 的用户在旧服务实际上也不能列举；不得自动将这种单独 grant 转成 Search 而意外扩大权限。已有 Search 授予保持有效，正常列表调用减少一项错误的额外门禁。三个 GET 写动作从 Search 改为 Update，不自动把读权限 grant 升级为写权限。
+
+Helpdesk.Tickets.* 的旧常量不注册成并行运行时定义，也不在 checker 做 OR/alias fallback。若部署中确有以这些名字保存的 grant，提供可审阅的迁移清单，保留 provider、provider key、scope 和 tenant；Assign/ChangeStatus 到 Update 会扩大能力，必须单列人工迁移决定，不能批量自动提升。其它 Helpdesk 权限家族不在本次顺手改名范围。
+
+R02 应拆为：旧端点权限快照继续锁六个旧名字；正式目标测试验证五个定义以及实际投影要求的每项 definition。不得为了保留旧 R02 的硬编码六项而新增一个正式投影根本不用的 GetAll 定义。修改目标断言须在 issues log 明确本 rev.2 的决策，不能冒充实现让原测试自然转绿。
+
+H03 必须有实际登录的非 SuperAdmin：无 grant 403；单 Search 可访问 all/overdue；单 Get 可访问明细但不能列举；只读不能执行三个写动作；Update 允许声明的写动作；撤销后再次拒绝。目录存在、实际 grant 和 HTTP 执行分别断言，不能继续用 SuperAdmin 代替权限验收。
+
+### 14.3 UoW 与持久化装配责任：冻结 owner，不放宽 #137 内核
+
+问题来自多个组合层重复注册，不能修改 AddUnitOfWorkProvider 为 first-wins/last-wins、Skip(1) 或宽泛 TryAdd 来掩盖冲突。
+
+在 CrestWebOptions 增加显式持久化所有权选择（拟 API `UseApplicationPersistence()`；默认模式 `PlatformDefault`，显式模式 `ApplicationOwned`）：
+
+| 模式 | 数据装配 owner | 责任 |
+| --- | --- | --- |
+| PlatformDefault | Platform 的既有默认数据预设 | 保持依赖默认宿主的行为；一次 core UoW + 一次 Provider binding；不得再有应用模块为同 provider 重复装配 |
+| ApplicationOwned | 应用的唯一 Persistence module | Platform 不注入默认 SqlServer options contributor、默认 DbContext/adapter、Provider binding 和默认迁移上下文清单；应用模块提供实际 DbContext/adapter、provider、仓储、迁移上下文及一次 UoW 装配 |
+
+这不是关闭认证/审计/租户/Setting/Permission 管线的开关。Platform 中业务层注册与 provider-specific 默认数据预设需分开；最终图中它们解析到应用提供的正式仓储与 DbContext。SaaSHelpdesk 显式选择 ApplicationOwned，由 EntityFrameworkCoreModule 配置 PostgreSQL/HelpdeskDbContext、IDataBaseContext 与 EfCore binding。Host identity/OpenIddict、框架存储和迁移上下文也必须使用该模块明确选择的 provider，不允许残留 SqlServer contributor 与 Npgsql 对同一 context 叠加。
+
+测试 factory 只替换连接/叶子设施，移除其 AddEfCoreUnitOfWork 重复调用，不再自己声明第三个 owner。正式验收 factory 不运行 Skip(1) 归一化。仅 S1 历史事实控制可以保留归一化，并显式标为测量设施。
+
+在正式 Host ready/Map 前通过既有 bootstrap/启动校验装配一步验证最终 UnitOfWorkProviderBindingRegistry、必需 provider/default 与实际 DbContext/adapter 一致性；借同一初始化顺序完成，不单独 BuildServiceProvider，不启动第二个 bootstrap engine。重复或缺绑定必须启动期诊断，不能等第一个请求变成业务 400。此验证不预先打开请求事务，也不声称自动验证所有 Provider 能力。
+
+正例覆盖默认平台宿主、应用持久化宿主、原样生产组合与 factory；负例覆盖 ApplicationOwned 缺 provider、同 provider 冲突、默认 SQL 与应用 PG 同 context 冲突。保留 #137 对确实不同绑定的确定性拒绝测试，验证真实六写动作 begin/commit/rollback 与资源身份。变更平台默认行为时回归 LibraryManagement 等实际消费者。
+
+### 14.4 普通编译、引用程序集、ownership 与 legacy 依赖
+
+延用 §4 的前阶段与现有 CRUD manifest 协议，不另造一套未校验的 JSON 文本所有权。输入必须包含源文本与编译选项、引用程序集、目标 assembly、配置/TFM/RID、声明与模型 schema、工具版本。输出继续记录 OwnerAssemblyName、OwnerServiceFullName、ArtifactHintName、DeclaredTypeFullNames、SourceLocation、ModelSchemaVersion、ContentHash；类型列表仍为纯 FQN，owner 是兄弟字段，不能改回 owner:type 拼接字符串。
+
+手写投影扩展增加可版本化的 projection/action identity 与 referenced contract assembly/type identity。OwnerAssemblyName 是产出胶水的 HTTP owner；service/contract assembly 是被调用业务的来源，不能混成一个 owner。同一 action identity 以 owner、service、closed contract method 签名和配置得到确定值；不使用仅 action 短名，顺序无关。两个前端声明同一 artifact/action 时诊断；不能根据一次 unrelated manifest 命中而整程序集跳过。
+
+冻结阶段语义：CRUD prepare/include → AppService projection prepare/include → JsonContracts prepare/include → 一次 CoreCompile。任务名称可按现有命名规范落地，但必须是显式 DependsOn 边，测试读取真实 MSBuild 执行与产物。此阶段使用既有隔离 CLI、source-generated transport JSON 与 state/write-if-changed 工具；需通用化时提取已有实现，不能复制另一份状态机。
+
+引用程序集上的真实 service/DTO/contract 是 B04 必测输入，不能用同名 stub。是否提供额外 assembly-level 声明 API 不在本次悄悄定成第二套声明链：当前 Ticket/Asset/Procurement 使用已有声明目标；外部服务的声明范围、DI contract 与 HTTP owner 必须在 S1 探针和 schema 中明确，若现有 Attribute 无法表达则先提交小范围设计增补，不能进入实现后用反射补洞。
+
+项目依赖冻结为：
+
+- 正式 DynamicApi / Web 不引用任何 *.Legacy；Runtime 仍不引用 Api/Web/ORM。声明数据留 Domain.Shared；共享 model/emitter 为 Tooling shared-source，不让 analyzer 运行时加载 net10 工具程序集。
+- CrestCreates.DynamicApi.Legacy 单向引用正式共享契约/typed runtime 和必要的既有依赖；承载旧 provider/registry/helper/body reader，正式 runtime 不转接回去。
+- CrestCreates.CodeGenerator.Legacy 为 netstandard2.0 analyzer，仅包含仍有消费者的旧 Minimal API 前端。小型共用 Roslyn/model/emitter 源码通过 shared-source 引入，不引用一个含默认正式 Generator 集合的 analyzer 来凑实现。
+- CrestCreates.Web.Legacy 放 Platform 层，引用 CrestCreates.Web 与 DynamicApi.Legacy，提供明确旧 Add/Map 适配；主 Web 包不引用它。样例按精确 consumer allowlist 显式 opt-in。
+- 默认 analyzer/包分发不包含 Legacy，根目录自动 analyzer 引用及 AOT/Trim props 排除该 analyzer 自身；归档代码不混入任何 Compile/package glob。Controller 生成器与 TicketApi 的专属分支无消费者后归档，不进入 legacy analyzer。
+
+S1 退出仍需将该表细化为具体项目引用图、action/consumer 允许清单和输入输出 schema fixture，并补真实引用程序集负例；仅把未来 API 名称列出来不算冻结完成。
+
+### 14.5 failure bridge、绑定失败与唯一 404
+
+冻结拟契约形状：Capability.Abstractions 中增加 `CapabilityFailureFacts` 与分类扩展点 `ICapabilityExceptionClassifier`。facts 包含封闭 `CapabilityFailureKind`、ErrorCode、SafeMessage、可选 SafeDetails；不含 HttpStatusCode、Exception、Type、stack 或任意扩展字典。作为 CapabilityExecutionResult 的 additive 字段，不替换既有 ErrorCode/Issues/Status，不作为业务 Output 序列化。分类器消费原 Exception 与真实 CapabilityExecutionContext，返回是否处理及只读 facts；无 HTTP adapter 时原 transport 的错误语义保持。
+
+Web/Platform 的 scoped adapter 只在真实 HTTP invocation 上调用既有 ICrestExceptionConverter，使用请求原 HttpContext，不伪造上下文。允许的语义到状态映射如下；未知/不支持分类回到 Internal，禁止将任意上层 status 值透传进 Runtime。
+
+| Kind | HTTP / code 权威 |
+| --- | --- |
+| InvalidRequest | 400 / Crest.Request.InvalidArgument |
+| ValidationFailed | 400 / Crest.Validation.Failed |
+| Unauthenticated / Forbidden | 401 / Crest.Auth.Unauthorized；403 / Crest.Auth.Forbidden |
+| NotFound | 404 / Crest.Entity.NotFound |
+| ConcurrencyConflict | 409 / Crest.Concurrency.Conflict |
+| PreconditionRequired | 428 / Crest.Concurrency.PreconditionRequired |
+| OperationInvalid | 400 / Crest.Operation.Invalid |
+| Internal | 500 / Crest.InternalError；无内部 message/details |
+
+绑定层对坏 JSON、非法 scalar、缺必要 route/query/body/header 的失败在 typed binder 内归一为请求错误；不能把全局所有 JsonException/FormatException 都改成 400，因为业务或服务器响应序列化抛这些异常可能是内部故障。边界外异常继续遵守 converter 的权威分类。必需 body 的 empty/whitespace/null 明确失败，失败时 handler 和写事务尚未开始。
+
+异常被 pipeline 消化时保留安全分类 facts，由 HTTP presentation adapter 使用既有转换/本地化规则和原 request TraceId 输出 Web 所有的 CrestErrorResponse。对外文本/code 不从 PIPELINE_ERROR 的原始 Message 补猜。分类/呈现自身失败回到安全 500，不泄露原异常；正常非 HTTP capability 的 ProblemDetails/既有 mapper 不被整体替换。
+
+GetById 返回 null 在 typed result 计划中明确映射 NotFound，与真实 KeyNotFoundException 共用 CrestErrorResponse 的 404 形状。成功仍为 typed DynamicApiResponse<T>/void。缺 metadata 的启动诊断与该运行期业务 404 区分；失败体 metadata 本身缺失必须前置拒绝。
+
+调用方取消和 deadline 沿既有取消策略，不能被 classifier 重新变成 OperationInvalid/内部失败并重执行业务。S1 需冻结调用方中止与 timeout 的对外处理及 #137 committed/unknown 事实独立保留的测试口径，S3 实现和原生门禁验证。
+
+### 14.6 Framework HTTP 缺失与真实宿主启动：限定范围
+
+`AddApplicationServiceAssembly<UserAppService>()` 只选择生成 provider，不使被引用的 framework assembly 重新生成代码。POST /api/user 的404是独立的缺失 HTTP 面；不能给 DDD Application 加 ASP.NET 引用、扫描所有引用程序集或随手生成所有 public 方法来解决。
+
+本 issue 的生产 HTTP 迁移范围仍为 Ticket、现有正式 compat consumers 以及明确允许的 legacy consumers。User/Setting/Feature/Audit 等框架服务的完整新 HTTP 面不在 #129 自动开通；必须在 S1 账本逐服务记录“实际有路由/未生成/测试依赖”，交给独立 HTTP 设计任务，不借 auth fixture 种子顺带新增身份管理 API。
+
+Ticket 的真实认证/授权测试可以通过现有业务服务/正式数据种子建立普通用户、角色和 grant，再走实际 OpenIddict 登录和 HTTP 请求；测试准备与 User HTTP 功能验收分开。原有专门验证 /api/user 的失败测试保留原目标与归因，不通过改期望404、skip、删除或声称“鉴权已测所以 User API 已恢复”制造全套绿。#129 全量回归需要逐 FQN 比较既有失败，新增回归为零；明确未解决的框架 HTTP 面不计入已通过能力。
+
+生产进程启动挂起另设 S3 的前置交付：真实 Program + PostgreSQL，记录模块初始化/迁移/seed/bootstrap 阶段及有界 startup deadline（测试配置，默认建议90秒）；超时保留日志、失败阶段、子进程 exit 与清理证据。不得静默禁掉 migration/bootstrap/tenant boundary 或增加一个只用于测试的空管线使其监听。修复实际根因后验证监听、真实登录、Ticket 一次读写与退出；无生产进程证据时只声明 WebApplicationFactory 观测，不能升级成生产直跑通过。
+
+原 shared-connection factory 不承担 H04；保留生产选库 contributor 的双租户 factory 按 S3 交付，不要求在 S1 做完其整个实现，但 S1 必须写出连接/tenant/context 责任与拒绝条件。
+
+### 14.7 S1 还要补什么；S2/S3 如何接续
+
+1. 将 rev.2 与计划、S1 事实稿、issues log 同步；分开旧快照与正式目标，修正“只有 SuperAdmin”和单层 GetAll 权限推断，补62条既有失败的 FQN 分类差额。
+2. 补当前实现下组合信封同轮不可见、per-Host 未激活仍受全局注册影响的纯净契约探针；使用真实引用程序集/官方 STJ 的对照，预检 producer 确实运行，不用不存在的未来 API 作为唯一失败原因。这是 S1 原退出要求；完整 B01–04 实现验收仍属 S2。
+3. 补新声明/manifest/action identity、项目依赖图与 failure bridge 的 contract fixtures，明确未决的引用程序集声明范围和取消处理，不把“拟名列表”当成冻结完成。
+4. 增强红例判别力：R03/R04/R08 同时检查业务/事务/持久化零副作用；R06 在 fresh scope 验证原行/stamp仍在；R07 与真实数据库当前 stamp精确相等，并包含真实修改后的 stamp；补合法 stamp 更新/删除正向控制。仅状态428或非空字符串不能证明没有删除或返回的是当前值。运行计数可由测试装饰器提供，不给生产增加测试专用公共扩展点。
+5. R01 的测试归一化限制在测量设施，补“原生产组合两 binding / 原 factory 三 binding”的来源证据；正式转绿必须删除调用方重复装配，而不是让 registry 选择第一个绑定。
+
+完成以上补件并复审后才放行 S2。S2 专注通用投影/JSON/ExplicitHost 和已有 consumer 迁移；S3 先完成平台持久化 owner/启动可诊断，再做 Ticket/五权限定义/validation/stamp/error/双租户实际验收。无需为观察 S1 缺口提前实现 S3，也不因文档 rev.2 发布自动解除门禁。S4/S5 顺序与证据范围保持；CI 继续暂停，不自动合并。

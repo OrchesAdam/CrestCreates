@@ -1,0 +1,158 @@
+{
+  "$schema": "crestcreates.issue129.contract-fixture/v1",
+  "status": "frozen-for-review-rev2",
+  "design": "docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md#144-145",
+  "notes": [
+    "Every name below is a frozen contract proposal for S2/S3, not a claim that the API exists today.",
+    "Field lists are normative: an implementation that renames or drops one of them must revise this fixture in the same commit."
+  ],
+  "manifest": {
+    "artifactEntry": {
+      "reuse": "CrestCreates #128 crud-artifacts-v1 (src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/Crud/CrudPrecompileEngine.cs)",
+      "fields": [
+        "OwnerAssemblyName",
+        "OwnerServiceFullName",
+        "ArtifactHintName",
+        "DeclaredTypeFullNames",
+        "SourceLocation",
+        "ModelSchemaVersion",
+        "ContentHash"
+      ],
+      "rules": [
+        "DeclaredTypeFullNames stays a plain FQN list; owner is a sibling field and must not be re-encoded as owner:type",
+        "OwnerAssemblyName is the HTTP glue owner; the service/contract assembly is a separate identity and must not be merged into it",
+        "ContentHash is 'sha256:<hex>' and is the write-if-changed and provenance key"
+      ]
+    },
+    "actionIdentity": {
+      "inputs": [
+        "ownerAssemblyName",
+        "ownerServiceFullMetadataName",
+        "closedContractMethodSignature",
+        "configuration",
+        "targetFramework",
+        "runtimeIdentifier"
+      ],
+      "forbidden": [
+        "action short name alone",
+        "service simple name alone",
+        "discovery-order dependent suffix"
+      ],
+      "properties": [
+        "same inputs in any declaration order produce the same identity",
+        "two front ends claiming one artifact or action is a diagnostic, not a last-wins",
+        "an unrelated manifest hit must not suppress a whole assembly's legacy output"
+      ]
+    },
+    "stages": [
+      "CRUD prepare/include",
+      "AppService projection prepare/include",
+      "JsonContracts prepare/include",
+      "one CoreCompile with the official STJ generator and all other generators"
+    ],
+    "stageRule": "ordering is an explicit DependsOn edge list, never BeforeTargets luck"
+  },
+  "requiredJsonRoots": {
+    "derivedFrom": "the frozen action model, not a hand written table",
+    "categories": [
+      "required body DTOs",
+      "combined route/query/body/header envelopes per action",
+      "no-input actions (explicit no-input, never arbitrary object)",
+      "typed result DTOs",
+      "each distinct static list shape",
+      "success void envelope",
+      "resource-not-found and failure DTOs owned by Web",
+      "scalar inputs that are serialized at run time"
+    ],
+    "forbidden": [
+      "DynamicApiResponse<object>",
+      "one shared object envelope for all list shapes",
+      "reflection fill-in for a missing root"
+    ]
+  },
+  "failureBridge": {
+    "proposedAbstractions": [
+        "Capability.Abstractions: CapabilityFailureFacts",
+        "Capability.Abstractions: ICapabilityExceptionClassifier",
+        "Capability.Abstractions: CapabilityFailureKind"
+    ],
+    "facts": ["Kind", "ErrorCode", "SafeMessage", "SafeDetails"],
+    "factsMustNotCarry": ["HttpStatusCode", "Exception", "Type", "stack trace", "open ended property bag"],
+    "adapter": "Web/Platform scoped adapter reuses the existing ICrestExceptionConverter with the real HttpContext",
+    "codeStatusTable": [
+      { "kind": "InvalidRequest", "status": 400, "code": "Crest.Request.InvalidArgument" },
+      { "kind": "ValidationFailed", "status": 400, "code": "Crest.Validation.Failed" },
+      { "kind": "Unauthenticated", "status": 401, "code": "Crest.Auth.Unauthorized" },
+      { "kind": "Forbidden", "status": 403, "code": "Crest.Auth.Forbidden" },
+      { "kind": "NotFound", "status": 404, "code": "Crest.Entity.NotFound" },
+      { "kind": "ConcurrencyConflict", "status": 409, "code": "Crest.Concurrency.Conflict" },
+      { "kind": "PreconditionRequired", "status": 428, "code": "Crest.Concurrency.PreconditionRequired" },
+      { "kind": "OperationInvalid", "status": 400, "code": "Crest.Operation.Invalid" },
+      { "kind": "Internal", "status": 500, "code": "Crest.InternalError" }
+    ],
+    "binderOwnedFailures": [
+      "malformed json body",
+      "illegal scalar format",
+      "missing required route/query/body/header value"
+    ],
+    "binderRule": "normalise to InvalidRequest inside the typed binder, before handler entry; do not globally remap JsonException/FormatException because serialization failures on the response path are internal errors",
+    "singleNotFoundShape": "CrestErrorResponse from the Web owner; the legacy DynamicApiResponse 404 wrapper stays in the legacy snapshot only",
+    "cancellationRule": "caller abort and managed deadline keep their existing semantics; a classifier must not convert them into OperationInvalid and must not re-run business work"
+  },
+  "persistenceOwnership": {
+    "modes": ["PlatformDefault", "ApplicationOwned"],
+    "optionApi": "CrestWebOptions.UseApplicationPersistence() (proposed)",
+    "invariants": [
+      "exactly one UnitOfWorkProviderBinding per ORM provider in the final graph",
+      "duplicate or missing binding is a startup diagnostic, before the first request",
+      "the test fixture is not an ownership participant",
+      "#137 deterministic rejection for genuinely different bindings stays in place"
+    ]
+  },
+  "permissions": {
+    "formalTicketDefinitions": ["Ticket.Create", "Ticket.Get", "Ticket.Search", "Ticket.Update", "Ticket.Delete"],
+    "actionToPermission": {
+      "CreateAsync": "Ticket.Create",
+      "GetByIdAsync": "Ticket.Get",
+      "GetAllAsync": "Ticket.Search",
+      "UpdateAsync": "Ticket.Update",
+      "DeleteAsync": "Ticket.Delete",
+      "AssignAsync": "Ticket.Update",
+      "ResolveAsync": "Ticket.Update",
+      "CloseAsync": "Ticket.Update",
+      "GetByCustomerAsync": "Ticket.Get",
+      "GetByAssigneeAsync": "Ticket.Get",
+      "GetOverdueAsync": "Ticket.Search"
+    },
+    "retiredNames": ["Ticket.GetAll"],
+    "rules": [
+      "definitions come from an explicit IPermissionDefinitionProvider in the sample, not a generated string table or seeded grant rows",
+      "no OR/alias fallback in the checker between Helpdesk.Tickets.* and Ticket.*",
+      "a Search or read grant is never auto promoted to Update"
+    ]
+  },
+  "legacyProjects": {
+    "CrestCreates.DynamicApi.Legacy": { "dependsOn": ["shared typed runtime", "existing runtime deps"], "hosts": ["legacy provider", "registry helpers", "body reader"] },
+    "CrestCreates.CodeGenerator.Legacy": { "targetFramework": "netstandard2.0", "dependsOn": ["shared-source model and emitters"], "mustNotReference": ["an analyzer package containing the default formal generators"] },
+    "CrestCreates.Web.Legacy": { "layer": "Platform", "dependsOn": ["CrestCreates.Web", "CrestCreates.DynamicApi.Legacy"], "provides": ["Add/MapLegacyGeneratedApi"] },
+    "edges": {
+      "formalToLegacy": "forbidden",
+      "runtimeToApiOrWebOrOrm": "forbidden",
+      "defaultAnalyzerOrPackageIncludesLegacy": false,
+      "sampleOptIn": "explicit per owner/action allowlist recorded in the archive table"
+    }
+  },
+  "diagnostics": {
+    "ids": {
+      "CCHTTP001": "declaration or contract shape unsupported",
+      "CCHTTP002": "projection not materialized / toolchain missing",
+      "CCHTTP003": "owner, route, action or identity conflict",
+      "CCHTTP004": "json input, output or error closure incomplete",
+      "CCHTTP005": "formal path uses legacy or publishes the same action twice",
+      "CCHTTP006": "transport, manifest, stamp or path state invalid",
+      "CCHTTP007": "required host composition, validation or error contract missing",
+      "CCHTTP008": "action permission, kind, cancellation token or concurrency declaration contradicts"
+    },
+    "collisionCheck": "repo-wide grep for CCHTTP recorded zero hits on 2026-10-17; re-checked before implementation"
+  }
+}

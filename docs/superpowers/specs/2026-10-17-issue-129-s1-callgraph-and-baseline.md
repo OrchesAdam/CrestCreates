@@ -156,3 +156,63 @@ S1 判定：R01 类「装配唯一性」修复与旧 CRUD bundle 归档互不阻
 2. `S2` 级「同轮 JSON 闭包 / ExplicitHost 激活 / 进程全局注册」的契约探针（#128 式引用程序集 symbol identity 探针 + 真实 MSBuild 前阶段复跑）未入库，留给 S2 起点；本文只记录其当前事实（compat 链仍是 `ModuleInitializer` 进程全局、组合信封由 `AddSource` 同轮产生）。
 3. NativeAOT Ticket fixture（N01/N02）与守卫三层（§9）在 S4/S5 交付。
 4. 样例真实宿主 `dotnet run`（本地 PG）在启动阶段长时间未监听 5199（无错误日志），未定位原因；本文的 HTTP 证据均来自 `WebApplicationFactory<Program>`（生产 Program.cs 管线 + fixture 的 DB/审计替换），因此「生产 Host 直跑」这一条仍需单独复现与归因。
+
+
+## 复核注记（2026-10-17，保留上文作者原始记录）
+
+PR #152 head 602d6e40 独立定向复跑6绿+8约定红/14，0 skipped。额外真实PG+manager/checker+AppService控制2/2通过：未定义Ticket.Get可授予非SuperAdmin并通过checker；只授Ticket.GetAll时真实GetAllAsync拒绝Ticket.Search。Helpdesk常量也不是已注册definition。上述原文“除SuperAdmin外无人可调用”应撤回。
+
+生产组合静态为平台+EF模块两份binding，factory加第三份；生产进程尚未直跑成功，不能写成生产HTTP已经观测。全套既有红分类32+17+10+2=61，与62总数差一项，需FQN账本。R06只断状态、R07只断非空，尚不证明未删除和当前stamp精确一致。
+
+目标契约以设计rev.2 §14为准：正式五权限、GetAll统一Search；Platform/Application持久化owner明确；Web404统一；User等缺失HTTP面单独记账；S1同轮闭包/Host激活/contract fixtures须补件后复审，再进入S2。当前S1未放行，CI暂停、不合并。详见2026-10-17-issue-129-s1-design-review-round1.md。
+
+## 9. R2 补件（2026-10-17，回应 PR #152 R1 三项 P2 与账本修正）
+
+### 9.1 撤回与更正
+
+- 撤回 §4/§7 的「除 SuperAdmin 外无人可调用」推论。事实是：`PermissionGrantManager`/`PermissionChecker`（`src/Framework/Infrastructure/CrestCreates.Authorization/PermissionChecker.cs:40-58`、`PermissionGrantManager.cs:91-125`）不做 definition 查表，未定义名字照样能写入 grant 并被 checker 接受；`Helpdesk.Tickets.*` 也只是常量，仓库内没有任何已注册的 `IPermissionDefinitionProvider` 使用它。目录缺失由 F02 锁定，能否调用由 C11/C12/C13 用真实登录+真实 grant 锁定。
+- 撤回「R02 补六个 definition 即可」的目标：`GET /api/ticket/all` 是双层门禁——端点元数据要求 `Ticket.GetAll`，继承的 `CrestAppServiceBase.GetAllAsync`（`CrestAppServiceBase.cs:207-214`）另要求 `Ticket.Search`。C11 实测：只授 `Ticket.GetAll` 时 HTTP 403 `Crest.Auth.Forbidden` 且 details 指向 `Ticket.Search`；同时授予两项才 200。按 rev.2 §14.2，正式目标为五权限且 `GetAll` 统一 `Ticket.Search`，旧 `Ticket.GetAll` 只保留在 §3 快照里，不再新增第六个定义。
+
+### 9.2 既有失败按 FQN 归因（替换 §4 的 32+17+10+2 粗分）
+
+方法：在同一 head 上跑三次全量并逐 FQN 取差集——① 原样（3 份 EfCore binding）；② 删除 fixture 自己那份重复装配后（2 份，rev.2 §14.3 明确 fixture 不得再声明第三个 owner）；③ 临时把 binding 归一为 1 份（仅作归因实验，未保留在代码里）。
+
+| 观测 | 数量 |
+| --- | --- |
+| 全量（原样） | 70 fail / 31 pass / 101 |
+| 删除 fixture 第三份声明 | 仍 70 fail（生产两份照样冲突，证明修复必须落在装配 owner，不是删测试代码） |
+| 归一为 1 份 binding 后仍失败 | 18 |
+| 因单一 binding 而转绿（= R01 归因） | 52（含本切片自己的 R01/U02 类红例 1 条） |
+
+既有 62 条红因此拆为三类，全部按 FQN 记账：
+
+- **R01 装配冲突（51 条）**，转绿证据为 ③ 与 ① 的差集：
+  - `AgentApiTests`：5 条 —— `CreateAsync_ShouldCreateAgent_ReturnsAgentDtoWithRole`, `CreateAsync_ShouldCreateAgent_WithoutRole`, `CreateAsync_WithNonExistentRole_ShouldStillCreateAgent`, `DeactivateAsync_ShouldDeactivateAgent_ReturnsIsActiveFalse`, `GetByIdAsync_ShouldReturnAgent_WhenExists`
+  - `CategoryApiTests`：15 条 —— `CreateAsync_ValidInput_ShouldCreateCategory`, `CreateAsync_WithParent_ShouldSetParentId`, `DeleteAsync_ShouldDeleteCategory`, `FullLifecycle_CreateUpdateMoveReorderDelete_ShouldWorkEndToEnd`, `GetByIdAsync_ExistingId_ShouldReturnCategory`, `GetChildrenAsync_EmptyParent_ShouldReturnEmptyList`, `GetChildrenAsync_ShouldReturnChildrenOfSpecificParent`, `GetListAsync_WithPaging_ShouldReturnCategories`, `GetRootsAsync_ShouldReturnOnlyRootCategories`, `GetTreeAsync_WithParentAndChild_ShouldReturnCorrectTreeStructure`, `MoveAsync_CircularReference_ShouldBeRejected`, `MoveAsync_NullParent_ShouldMakeCategoryRoot`, `MoveAsync_ToNewParent_ShouldUpdateParentId`, `ReorderAsync_ShouldUpdateSortOrder`, `UpdateAsync_ShouldUpdateCategory`
+  - `CustomerApiTests`：9 条 —— `ActivateAsync_ShouldActivateInactiveCustomer`, `ActivateAsync_ShouldReturn400_WhenAlreadyActive`, `CreateAsync_ShouldCreateCustomer_ReturnsCustomerDto`, `DeactivateAsync_ShouldDeactivateActiveCustomer`, `DeactivateAsync_ShouldReturn400_WhenAlreadyInactive`, `DeleteAsync_ShouldDeleteCustomer`, `GetByIdAsync_ShouldReturnCustomer_WhenExists`, `GetListAsync_ShouldReturnPagedCustomers`, `UpdateAsync_ShouldUpdateNamePhoneCompanyAndNotes`
+  - `KnowledgeBaseApiTests`：12 条 —— `CreateAsync_ReturnsCreatedArticle`, `DeleteAsync_ExistingArticle_ReturnsOk`, `GetByIdAsync_ExistingArticle_ReturnsArticle`, `GetListAsync_ReturnsPagedResult`, `GetPopularAsync_WithPositiveCount_ReturnsArticles`, `IncrementViewCountAsync_IncrementsViewCount`, `PublishAsync_SetsIsPublishedTrue`, `SearchAsync_WithEmptyKeyword_ReturnsBadRequest`, `SearchAsync_WithMatchingKeyword_ReturnsArticles`, `SearchAsync_WithNonMatchingKeyword_ReturnsEmptyList`, `UnpublishAsync_SetsIsPublishedFalse`, `UpdateAsync_ExistingArticle_UpdatesTitleAndPersists`
+  - `SLAPolicyApiTests`：7 条 —— `CreateAsync_WithAllPriorityLevels_ShouldReturnCreatedPolicy`, `DeleteAsync_NonExistingPolicy_ShouldReturnError`, `DeleteAsync_WithValidConcurrencyStamp_ShouldRemovePolicy`, `DeleteAsync_WithoutConcurrencyStamp_ShouldStillRemovePolicy`, `GetAllAsync_ShouldReturnAllPolicies`, `GetByIdAsync_ExistingPolicy_ShouldReturnPolicy`, `UpdateAsync_ExistingPolicy_ShouldApplyChanges`
+  - `TicketApiTests`：3 条 —— `CreateAsync_ShouldCreateTicketAndReturnDto`, `DeleteAsync_ShouldRemoveTicket`, `UpdateAsync_ShouldUpdateAllFields`
+- **框架服务缺 HTTP 面（10 条）**：`POST /api/user` 返回 404，`CrestCreates.Application` 没有 `DynamicApiAotSourceGenerator` 产物；按 rev.2 §14.6 单列，不在 #129 顺带开通 User/Setting/Feature/Audit 的 HTTP 面，也不通过改期望或删测试凑绿：
+  - `AssignAsync_WithActiveSlaPolicy_ShouldSetDueDateAndAssign`, `AssignAsync_WithoutSlaPolicy_ShouldAssignWithoutDueDate`, `CloseAsync_AlreadyClosed_ShouldThrowInvalidOperationException`, `CloseAsync_NotResolved_ShouldStillSucceed`, `CloseAsync_ShouldCloseResolvedTicket`, `GetByAssigneeAsync_ShouldReturnAssigneeTickets`, `GetOverdueAsync_ShouldReturnOverdueTickets`, `ResolveAsync_AlreadyClosed_ShouldThrowInvalidOperationException`, `ResolveAsync_AlreadyResolved_ShouldStillSucceed`, `ResolveAsync_ShouldResolveOpenTicket`
+- **容器构建校验（1 条）**：`UseAuthorization_ShouldProcessRequest_WhenAddCrestAuthorizationRegistersServices` —— `AggregateException: Unable to resolve service for type 'CrestCreates.MultiTenancy.Abstract.ITenantProvider'`（`TenantPermissionScopeValidator` 依赖链）。
+- 差额已闭合：`51 + 10 + 1 = 62`，不存在「凭 HTTP 400 推断同根因」的未归因项；此前的 19 条无响应体 400 全部落在 R01 归因集合内（由 ③ 转绿事实支撑，而非由状态码推断）。
+
+### 9.3 红例判别力增强（回应 R1-HTTP129-03）
+
+- `TicketWriteSideEffectProbe`（`samples/SaaSHelpdesk/SaaSHelpdesk.Tests/TicketWriteSideEffectProbe.cs`）在测量宿主里装饰 `ITicketAppService` 与 `IUnitOfWorkManager`，记录业务调用名与内核执行次数；计数只来自测试侧装饰器，生产未新增任何测试专用公共扩展点。
+- R03/R04/R08 现同时断言状态码、业务调用集合为空（或不含被拒动作）、`UnitOfWorkExecutions`、以及 fresh-scope 的持久化行数/内容不变；R08 今天正是因 `ServiceCalls == ["CreateAsync"]` 而红，直接证明校验器未执行。
+- R05 增加「原标题与原 stamp 在 fresh scope 精确不变」；R06 增加「行仍在 + stamp 不变 + 再次请求仍是 428」（消除「删完再返 428」的假绿）；R07 改为「响应 stamp 与数据库当前 stamp 精确相等」，并在真实修改后要求等于新值。
+- 正向控制 `P09/P10`（今天即绿）证明这套计数器确实能观测到业务调用、内核执行 1 次、stamp 轮转与删除生效；否则 R05/R06/R08 的空计数断言可能是假绿。
+
+### 9.4 装配来源证据（回应 R1-HTTP129-05 项）
+
+- `U01`：只调用样例持久化模块即可得到恰好 1 份 EfCore binding（应用自持能力成立）。
+- `U02`（红）：按程序集元数据引用 `AddEfCoreUnitOfWork` 的装配实测为 `CrestCreates.Web` 与 `SaaSHelpdesk.EntityFrameworkCore` —— 即生产组合确实两份；目标是恰好一个 owner（PlatformDefault/ApplicationOwned）。这不是靠注释或计数猜测，而是读 MemberRef。
+- `U03`（绿）：测试程序集不再引用绑定声明 API（fixture 的第三份声明已按 rev.2 §14.3 删除）；`U04`（绿）要求宿主仍可见 >1 份 binding，防止用「删除测量路径」冒充修复。
+- R01 的目标计数仍为 1，当前观测为 2（历史上是 3，其中一份来自 fixture，已删除）。
+
+### 9.5 仍未交付（不声称完成）
+
+- R1-HTTP129-02 要求的同轮闭包 / Host 激活 / contract fixtures 见 §10 状态；双租户选库 factory 与真实生产进程启动根因按 rev.2 属 S3。
+
