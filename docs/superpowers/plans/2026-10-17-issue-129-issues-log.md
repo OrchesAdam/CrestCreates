@@ -173,4 +173,11 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 - 当前可表达性事实：`CrestServiceAttribute` 仅 Class（`CrestServiceAttribute.cs:4-5`）；projection 属性仅 Class|Method 且无 `ContractType`（`CapabilityCompatibilityProjectionAttribute.cs:9-25`）；生成器语法提供器只扫本编译 class（`AppServiceCompatibilityGenerator.cs:40-64`）；`EnumerateContractTypes` 允许契约来自 metadata。
 - 决定：不新增程序集级 Attribute、不扫描引用程序集、不用反射补洞；以「本地标记类 + `ContractType`」为唯一入口，标记类不注册/不实例化、方法集合只来自契约；契约缺失注册 → 启动期 `CCHTTP007`；身份与 manifest 分离 owner 与 contract assembly。
 - 验证：新增/更新测试 `ReferencedAssemblyScopeProbeTests`（2）+ `Issue129ContractFixtureTests`（6）共 8/8 通过；本轮未触及样例与探针构建，S1 放行结论不受影响。
-- 状态：**设计增补待审查**；审查通过后才进入 S2 实现（不合并、CI 暂停）。
+- 状态：**设计增补 rev.2 待审查**；审查通过后才进入 S2 实现（不合并、CI 暂停）。
+
+### 增补 rev.2（回应 2 项 P2：产物所有权与取消契约）
+
+1. **产物所有权分开**：`DeclaredTypeFullNames` 只记录 artifact 自己声明/生成的类型；引用 DTO/契约另立并列字段 `ReferencedTypeFullNames`。依据是 CCCRUD008 的权威对账（`CrudJsonSurfaceDiscovery.cs:184-233` 把该字段与 `CrudArtifactEmitter.DeclaredTypeFullNames(artifact.Source)` 逐项比较），混入引用类型会直接触发「declared types or content hash do not match」；审查实测正反 2/2 与此一致。fixture 增 `manifest.ownership`（declaredOnly/字段名/禁止项/权威位置/证据）。
+2. **取消契约完整冻结**：按 token 身份判定，分四类写清传播、HTTP 状态/响应与 UoW 事实——调用方中止（无 JSON 错误体、可中止连接、不重执行）、受管 deadline（响应未开始则 500 `Crest.InternalError` 脱敏，否则中止不二次写；`Unknown`/`Committed` 保留）、非调用方 OCE（内部故障 500 脱敏，不得当取消丢弃响应）、提交后取消/响应写失败（Committed 保留、不回滚）。
+3. **验收矩阵同步**：R-06 拆为 R-06a/b/c；增补 §4.1 覆盖 rev.2 §10 的 H02/H07/N01/N02/D01 四行含义。
+4. 验证：`ReferencedAssemblyScopeProbeTests`（2）+ `Issue129ContractFixtureTests`（8）共 **10/10 pass**（秒级）；新增 fixture 断言覆盖所有权字段分离、四类取消、验收矩阵扩展与增补文本一致性。

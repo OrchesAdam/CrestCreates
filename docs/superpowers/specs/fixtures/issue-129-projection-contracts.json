@@ -17,11 +17,14 @@
         "SourceLocation",
         "ModelSchemaVersion",
         "ContentHash",
-        "ContractAssemblyName"
+        "ContractAssemblyName",
+        "ReferencedTypeFullNames"
       ],
       "rules": [
-        "DeclaredTypeFullNames stays a plain FQN list; owner is a sibling field and must not be re-encoded as owner:type",
-        "OwnerAssemblyName is the HTTP glue owner; the service/contract assembly is a separate identity and must not be merged into it",
+        "DeclaredTypeFullNames records only the types the artifact itself declares or generates; referenced DTO/enum/contract types must never be mixed in",
+        "CCCRUD008 reconciles DeclaredTypeFullNames with CrudArtifactEmitter.DeclaredTypeFullNames(artifact.Source); mixing a referenced type is a hard diagnostic, not a naming preference",
+        "ReferencedTypeFullNames records referenced type identities separately, as plain FQNs; each entry resolves to exactly one definition by symbol identity (assembly + full metadata name + closed generic arguments)",
+        "OwnerAssemblyName is the HTTP glue owner; ContractAssemblyName and ReferencedTypeFullNames are sibling fields, never encoded as owner:type",
         "ContentHash is 'sha256:<hex>' and is the write-if-changed and provenance key"
       ]
     },
@@ -53,7 +56,18 @@
       "JsonContracts prepare/include",
       "one CoreCompile with the official STJ generator and all other generators"
     ],
-    "stageRule": "ordering is an explicit DependsOn edge list, never BeforeTargets luck"
+    "stageRule": "ordering is an explicit DependsOn edge list, never BeforeTargets luck",
+    "ownership": {
+      "declaredTypesField": "DeclaredTypeFullNames",
+      "referencedTypesField": "ReferencedTypeFullNames",
+      "declaredOnly": true,
+      "forbidden": [
+        "referenced DTO or contract FQN inside DeclaredTypeFullNames",
+        "owner/contract/referenced types concatenated into one string"
+      ],
+      "authority": "src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/Semantic/CrudJsonSurfaceDiscovery.cs:184-233 (CCCRUD008)",
+      "evidence": "reviewer ownership contrast 2/2: mixing a referenced type into DeclaredTypeFullNames triggers CCCRUD008"
+    }
   },
   "requiredJsonRoots": {
     "derivedFrom": "the frozen action model, not a hand written table",
@@ -147,7 +161,53 @@
     ],
     "binderRule": "normalise to InvalidRequest inside the typed binder, before handler entry; do not globally remap JsonException/FormatException because serialization failures on the response path are internal errors",
     "singleNotFoundShape": "CrestErrorResponse from the Web owner; the legacy DynamicApiResponse 404 wrapper stays in the legacy snapshot only",
-    "cancellationRule": "caller abort and managed deadline keep their existing semantics; a classifier must not convert them into OperationInvalid and must not re-run business work"
+    "cancellationRule": "caller abort and managed deadline keep their existing semantics; a classifier must not convert them into OperationInvalid and must not re-run business work",
+    "cancellation": {
+      "principle": "classify by token identity first, exception type second; the linked token is request-aborted + kernel token",
+      "cases": [
+        {
+          "kind": "callerAbort",
+          "detect": "linked token canceled or RequestAborted requested",
+          "http": "no JSON error body; connection aborted if response not started; never rewrite a started response",
+          "uow": "abandon/rollback uncommitted per #137; committed stays committed",
+          "forbidden": [
+            "4xx/5xx JSON body",
+            "retry or re-execute business"
+          ]
+        },
+        {
+          "kind": "managedDeadline",
+          "detect": "kernel token canceled while the request is alive",
+          "http": "500 Crest.InternalError, sanitized, only if the response has not started; otherwise abort without a second write",
+          "uow": "preserve Unknown/Committed facts; never rewrite them as a successful rollback",
+          "forbidden": [
+            "new 408/504 public semantics",
+            "re-execute business"
+          ]
+        },
+        {
+          "kind": "nonCallerOperationCanceled",
+          "detect": "OCE token does not match the linked token",
+          "http": "500 Crest.InternalError, sanitized",
+          "uow": "internal failure path; rollback if uncommitted",
+          "forbidden": [
+            "treating it as caller cancellation and dropping the response"
+          ]
+        },
+        {
+          "kind": "cancelAfterCommitOrResponseFailure",
+          "detect": "commit already confirmed when cancellation or response write failure occurs",
+          "http": "no rewrite of the committed outcome",
+          "uow": "Committed preserved; notification failure does not roll back",
+          "forbidden": [
+            "rolling back committed business"
+          ]
+        }
+      ],
+      "syncCall": "sync and async kernel entries share the same classifier",
+      "bindingStage": "cancellation observed during binding/validation is caller abort: no business, no transaction, no JSON body",
+      "classificationFailure": "unknown token identity falls back to a sanitized 500"
+    }
   },
   "persistenceOwnership": {
     "modes": [
@@ -272,7 +332,15 @@
       "R-03": "referenced DTO json closure",
       "R-04": "missing contract DI registration fails at startup with CCHTTP007",
       "R-05": "identity includes contractAssemblyName and no cross-assembly owner bleed",
-      "R-06": "cancellation/deadline never reclassified as business failure and never re-executes"
+      "R-06a": "caller abort: no JSON error body, business observed cancellation once, no re-execution, #137 abandonment facts",
+      "R-06b": "managed deadline: sanitized 500 when the response has not started; Unknown/Committed facts preserved",
+      "R-06c": "non-caller OCE: treated as an internal fault (sanitized 500), never dropped as cancellation"
     }
+  },
+  "acceptanceMatrixDelta": {
+    "H02": "add binding-stage cancellation: no business call, no transaction, no JSON error body",
+    "H07": "add R-06a/b/c with fixed HTTP statuses and #137 facts; cancellation never re-executes",
+    "N01/N02": "native gate adds one caller-abort and one non-caller OCE scenario",
+    "D01": "migration guide states the two client-visible cancellation behaviours"
   }
 }

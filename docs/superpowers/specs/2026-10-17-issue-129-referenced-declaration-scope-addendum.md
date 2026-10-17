@@ -49,22 +49,26 @@ public static class ShippingQuotesHttpProjection
 - 生成物在 Host 装配期校验「必需契约可解析」（与 rev.2 §14.4 的 required identities 同批），缺注册 → **启动期** `CCHTTP007`，不是首个请求的 500；校验不打开请求事务。
 - 同一 `ContractType` 被两个 HTTP owner 声明 → `CCHTTP003`（identity/owner 冲突），不按发现顺序覆盖。
 
-### 3.3 身份与 manifest（沿用 #128 形状，增加引用程序集维度）
+### 3.3 身份与 manifest（沿用 #128 形状，增加引用程序集维度；产物所有权与引用身份分开）
 
 Action identity 输入冻结为：
 
 ```
 httpOwnerAssemblyName          // 生成胶水所属程序集（本地声明所在程序集）
-contractAssemblyName           // ContractType 的defining assembly（允许是引用程序集）
+contractAssemblyName           // ContractType 的 defining assembly（允许是引用程序集）
 ownerServiceFullMetadataName   // ContractType 的完整 metadata name（含泛型闭合参数）
 closedContractMethodSignature  // 闭合方法签名（参数/返回/CT 形态）
 configuration                  // RoutePrefix/Verb/Kind/BodyPolicy 等冻结配置
 targetFramework, runtimeIdentifier
 ```
 
-- artifact entry 字段沿用 #128：`OwnerAssemblyName`/`OwnerServiceFullName`/`ArtifactHintName`/`DeclaredTypeFullNames`/`SourceLocation`/`ModelSchemaVersion`/`ContentHash`；**新增并列字段** `ContractAssemblyName`（与被调用业务来源一致），不把 owner 与 contract 拼成一个字符串。
-- `DeclaredTypeFullNames` 收录引用程序集里的 DTO 与契约类型 FQN（纯 FQN 列表，owner 字段并列）。
-- 组合输入信封的命名与所有权规则不变（owner = HTTP owner 程序集 + action identity 的确定性编码），引用程序集只贡献类型身份，不贡献信封 owner。
+**产物所有权**（对应审查发现的 CCCRUD008 混入问题）：
+
+- `DeclaredTypeFullNames` **只能**记录该 artifact 自己**声明/生成**的类型；不得混入引用程序集里的 DTO、枚举或契约。原因：CCCRUD008 的权威对账是把该字段与 `CrudArtifactEmitter.DeclaredTypeFullNames(artifact.Source)` 逐项比较（`src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/Semantic/CrudJsonSurfaceDiscovery.cs:184-233`），混入引用类型会直接触发 `CRUD artifact declared types or content hash do not match the current producer model`。审查实测：混入引用类型的正反两例 2/2 按此规则判定。
+- 引用类型**单独**记录：新增并列字段 `ReferencedTypeFullNames`（纯 FQN 列表，来源于 action model 的符号身份），与 `DeclaredTypeFullNames` 分开序列化；契约的程序集身份由 `ContractAssemblyName` 记录。
+- 每个 `ReferencedTypeFullNames` 条目在生成期必须以 symbol identity 解析为**唯一定义**（引用程序集 + 完整 metadata name + 泛型闭合参数）；解析不唯一或落在当前编译之外无法访问 → `CCHTTP001/004`，不写入 manifest。
+- artifact entry 字段沿用 #128：`OwnerAssemblyName`/`OwnerServiceFullName`/`ArtifactHintName`/`DeclaredTypeFullNames`/`SourceLocation`/`ModelSchemaVersion`/`ContentHash`，并并列新增 `ContractAssemblyName` 与 `ReferencedTypeFullNames`；owner、contract 与引用类型三者不合并成一个字符串。
+- 组合输入信封的命名与所有权规则不变（owner = HTTP owner 程序集 + action identity 的确定性编码）；引用程序集只贡献类型身份，不贡献信封 owner。
 
 ### 3.4 JSON 闭包
 
@@ -74,12 +78,22 @@ targetFramework, runtimeIdentifier
   - 引用程序集不可写时仍能生成（不在引用程序集目录落文件）。
 - 私有/内部 DTO 的可见性与 `InternalsVisibleTo` 不改变本决定：不可访问 → `CCHTTP001/004`。
 
-### 3.5 取消处理（与 §14.5 同时冻结）
+### 3.5 取消处理（完整冻结：三类 OCE 分开判定）
 
-- 11 个契约方法统一 optional `CancellationToken`；生成 binder/invoker 组合「请求中止 + 内核联动 token」，不复制请求 token 到全局字段。
-- 取消不是业务失败：`OperationCanceledException` 不得被分类为 `OperationInvalid`/`Internal`，不得触发重试或重执行业务；已提交事实不回滚（#137 committed/unknown 语义保持）。
-- 响应写失败不回滚已提交业务；受管 deadline 有界终止。
-- S1 只冻结契约；S3 实现，S5 由原生门禁验证。
+分类原则：**先按 token 身份判定，再按异常类型**。生成 binder/invoker 组合「请求中止 + 内核联动 token」得到 linked token；`OperationCanceledException.CancellationToken` 与 linked token 相等（或 `RequestAborted.IsCancellationRequested` 为真）才算「调用方取消」。
+
+| 场景 | 判定依据 | 业务/传播 | HTTP 状态与响应 | UoW/事务事实 | 禁止 |
+| --- | --- | --- | --- | --- | --- |
+| 调用方中止请求（client abort） | linked token 取消或 `RequestAborted` 已请求取消 | 业务观察到取消一次即停止；不重试、不重执行 | **不写 JSON 错误体**；若响应尚未开始则连接中止（客户端观察为取消），若已开始则不得再写第二段响应；trace 记为 Canceled | 按 #137 放弃/回滚未提交事务；已提交事实保持 Committed | 不得包装成 4xx/5xx JSON；不得把取消当业务失败重试 |
+| 受管 deadline / 内核超时 | 内核联动 token 因 deadline 取消（请求仍存活） | 业务观察到来自内核 token 的 OCE；不重执行 | 响应未开始：**500 `Crest.InternalError`（脱敏，无内部 message/details）**；已开始：中止连接、不二次写入 | 保留 `Unknown`/`Committed` 事实，不因取消改写为回滚成功 | 不得映射为 408/504/CancellationFailed 等新对外语义；不得重执行业务 |
+| 非调用方 OCE（业务/依赖自身抛出的 OCE，token 与 linked 无关） | token 身份不匹配 | 视为内部故障传播；不重试 | **500 `Crest.InternalError`（脱敏）** | 按内部失败路径处理（未提交则回滚） | 不得当作调用方取消而静默丢弃响应 |
+| 提交后取消 / 响应写失败 | 提交已确认后再取消或写失败 | 不重执行 | 已提交事实优先；响应侧不再改写 | 保留 Committed；通知失败也不回滚 | 不得因响应阶段失败回滚已提交业务 |
+
+补充：
+
+- 同步调用（`Execute<TResult>`）与异步调用（`ExecuteAsync`）共用同一分类器；取消不得跨请求缓存或复制到全局字段。
+- 取消发生在绑定/验证阶段时，按「调用方中止」处理（尚未进入业务、未开事务）。
+- 分类失败（例如无法判定 token 身份）回到安全 500，不泄露原异常。
 
 ## 4. 验收与探针计划（S2）
 
@@ -90,9 +104,22 @@ targetFramework, runtimeIdentifier
 | R-03 | 引用程序集 DTO 的真实 JSON 闭包（作为 `[JsonSerializable]` root 且官方 STJ 产出 metadata） |
 | R-04 | 缺契约 DI 注册 → 启动期 `CCHTTP007`，零路由、零请求期 500 |
 | R-05 | 同短名类型跨程序集不串 owner（B04）；身份包含 `contractAssemblyName` + 闭合签名 |
-| R-06 | 取消/超时不改写为业务失败、不重执行；`#137` 事实独立保留 |
+| R-06a | 调用方中止：无 JSON 错误体、业务只观察到一次取消、无重执行、`#137` 未提交事实按放弃/回滚处理 |
+| R-06b | 受管 deadline：响应未开始时 500 `Crest.InternalError` 脱敏；`Unknown`/`Committed` 事实不被改写 |
+| R-06c | 非调用方 OCE：判定为内部故障（500 脱敏），不得当作取消静默丢弃响应 |
 
-本轮先交付 R-01 与 schema/fixture 的冻结；R-02–R-06 进 S2 实现门禁。
+本轮先交付 R-01 与 schema/fixture 的冻结；R-02–R-06c 进 S2/S3 实现门禁。
+
+### 4.1 验收矩阵同步（覆盖 rev.2 §10 的对应行）
+
+| 既有行 | 增补后的含义 |
+| --- | --- |
+| H02（输入拒绝） | 增加「绑定阶段取消」：无业务调用、无事务、无 JSON 错误体（按调用方中止处理） |
+| H07（UoW 事实） | 增加 R-06a/b/c 三态：调用方中止 / 受管 deadline / 非调用方 OCE，HTTP 状态与事务事实各自固定，且取消不重执行 |
+| N01/N02（原生门禁） | 原生场景增加一条调用方中止与一条非调用方 OCE，验证分类不依赖异常类型字符串 |
+| D01（文档交接） | 迁移指南写明「deadline 对外为 500 脱敏」「调用方中止无错误体」两条客户端可见行为 |
+
+本增补对 rev.2 §10 的扩展以本节为准；未列出的行不变。
 
 ## 5. 影响面
 

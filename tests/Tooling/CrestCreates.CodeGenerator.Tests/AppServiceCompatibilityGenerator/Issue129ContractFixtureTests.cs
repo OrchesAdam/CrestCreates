@@ -137,7 +137,8 @@ public class Issue129ContractFixtureTests
         {
             "OwnerAssemblyName", "OwnerServiceFullName", "ArtifactHintName", "DeclaredTypeFullNames",
             "SourceLocation", "ModelSchemaVersion", "ContentHash", "ContractAssemblyName",
-        }, "the #128 artifact entry shape is reused; the contract assembly is a separate field, not owner:type");
+            "ReferencedTypeFullNames",
+        }, "the #128 artifact entry shape is reused; contract assembly and referenced types are separate fields");
     }
 
     [Fact]
@@ -187,10 +188,13 @@ public class Issue129ContractFixtureTests
         forbidden.Should().Contain(shape => shape.Contains("reflection", StringComparison.Ordinal));
 
         var probes = referenced.GetProperty("probes");
-        foreach (var id in new[] { "R-01", "R-02", "R-03", "R-04", "R-05", "R-06" })
+        foreach (var id in new[] { "R-01", "R-02", "R-03", "R-04", "R-05", "R-06a", "R-06b", "R-06c" })
         {
             probes.TryGetProperty(id, out _).Should().BeTrue($"probe {id} must stay in the frozen plan");
         }
+
+        probes.TryGetProperty("R-06", out _).Should().BeFalse(
+            "R-06 was split into R-06a/b/c so each cancellation class has its own contract");
 
         var addendum = Path.Combine(RepoRoot(), "docs", "superpowers", "specs",
             "2026-10-17-issue-129-referenced-declaration-scope-addendum.md");
@@ -202,6 +206,57 @@ public class Issue129ContractFixtureTests
             "the addendum freezes cancellation handling together with the declaration scope");
         text.Should().Contain("程序集级 Attribute",
             "the addendum must name what it deliberately does not add");
+    }
+
+    [Fact]
+    public void Referenced_types_are_recorded_outside_declared_ownership()
+    {
+        var ownership = Fixture.RootElement.GetProperty("manifest").GetProperty("ownership");
+        ownership.GetProperty("declaredOnly").GetBoolean().Should().BeTrue();
+        ownership.GetProperty("declaredTypesField").GetString().Should().Be("DeclaredTypeFullNames");
+        ownership.GetProperty("referencedTypesField").GetString().Should().Be("ReferencedTypeFullNames");
+
+        var forbidden = ownership.GetProperty("forbidden").EnumerateArray().Select(v => v.GetString()!).ToList();
+        forbidden.Should().Contain(shape => shape.Contains("DeclaredTypeFullNames", StringComparison.Ordinal));
+
+        ownership.GetProperty("authority").GetString().Should().Contain("CrudJsonSurfaceDiscovery.cs",
+            "the rule must point at the CCCRUD008 reconciliation that enforces it");
+        ownership.GetProperty("evidence").GetString().Should().Contain("CCCRUD008");
+    }
+
+    [Fact]
+    public void Cancellation_contract_freezes_all_three_classes_and_the_acceptance_delta()
+    {
+        var cancellation = Fixture.RootElement.GetProperty("failureBridge").GetProperty("cancellation");
+        cancellation.GetProperty("principle").GetString().Should().Contain("token identity");
+
+        var cases = cancellation.GetProperty("cases").EnumerateArray().ToList();
+        cases.Select(c => c.GetProperty("kind").GetString()).Should().BeEquivalentTo(
+            "callerAbort", "managedDeadline", "nonCallerOperationCanceled", "cancelAfterCommitOrResponseFailure");
+
+        var deadline = cases.Single(c => c.GetProperty("kind").GetString() == "managedDeadline");
+        deadline.GetProperty("http").GetString().Should().Contain("Crest.InternalError");
+        deadline.GetProperty("http").GetString().Should().Contain("sanitized");
+        deadline.GetProperty("forbidden").EnumerateArray().Select(v => v.GetString()!)
+            .Should().Contain(rule => rule.Contains("re-execute", StringComparison.Ordinal));
+
+        var nonCaller = cases.Single(c => c.GetProperty("kind").GetString() == "nonCallerOperationCanceled");
+        nonCaller.GetProperty("detect").GetString().Should().Contain("does not match");
+        nonCaller.GetProperty("forbidden").EnumerateArray().Select(v => v.GetString()!)
+            .Should().Contain(rule => rule.Contains("caller cancellation", StringComparison.Ordinal));
+
+        var delta = Fixture.RootElement.GetProperty("acceptanceMatrixDelta");
+        foreach (var row in new[] { "H02", "H07", "N01/N02", "D01" })
+        {
+            delta.TryGetProperty(row, out _).Should().BeTrue($"acceptance row {row} must be extended explicitly");
+        }
+
+        var addendum = File.ReadAllText(Path.Combine(RepoRoot(), "docs", "superpowers", "specs",
+            "2026-10-17-issue-129-referenced-declaration-scope-addendum.md"));
+        addendum.Should().Contain("ReferencedTypeFullNames");
+        addendum.Should().Contain("非调用方 OCE");
+        addendum.Should().Contain("500 `Crest.InternalError`");
+        addendum.Should().Contain("不写 JSON 错误体");
     }
 
     private static string FixturePath()
