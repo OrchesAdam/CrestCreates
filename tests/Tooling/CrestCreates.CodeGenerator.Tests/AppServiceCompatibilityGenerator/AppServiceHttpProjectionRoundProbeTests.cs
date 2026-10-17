@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.CodeGenerator.Tests.CrudServiceGenerator;
 using FluentAssertions;
@@ -41,8 +42,19 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
             }
         }
 
+        namespace ProbeOrdinary
+        {
+            public sealed class OrdinaryEnvelope
+            {
+                public string Keyword { get; init; } = string.Empty;
+            }
+        }
+
         namespace ProbeJson
         {
+            // Two roots in one context: the ordinary-Compile type proves the official generator really ran
+            // in this build, so the absence of metadata for the generator-only envelope is a round effect.
+            [System.Text.Json.Serialization.JsonSerializable(typeof(ProbeOrdinary.OrdinaryEnvelope))]
             [System.Text.Json.Serialization.JsonSerializable(
                 typeof(CrestCreates.Generated.OrderAppService_Search_CompatibilityInput))]
             public partial class ProbeEnvelopeContext : System.Text.Json.Serialization.JsonSerializerContext
@@ -51,49 +63,36 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
         }
         """;
 
-    /// <summary>
-    /// Control: the same envelope shape written as ordinary Compile input, which the official
-    /// generator must be able to close. Without this the red above could be "STJ never runs".
-    /// </summary>
-    private const string OrdinaryCompileEnvelopeControl = """
-        using System;
-        using System.Threading;
-        using System.Threading.Tasks;
-        using CrestCreates.Domain.Shared.Attributes;
-
-        namespace ProbeOrdinary
-        {
-            public sealed class OrderSearchEnvelope
-            {
-                public string Keyword { get; init; } = string.Empty;
-                public int Take { get; init; }
-            }
-
-            [CrestService]
-            [CapabilityCompatibilityProjection(RoutePrefix = "api/probe-orders")]
-            public class OrderAppService
-            {
-                public Task<string> SearchAsync(string keyword, int take, CancellationToken cancellationToken)
-                    => Task.FromResult(keyword + take);
-            }
-        }
-
-        namespace ProbeJson
-        {
-            [System.Text.Json.Serialization.JsonSerializable(typeof(ProbeOrdinary.OrderSearchEnvelope))]
-            public partial class ProbeEnvelopeContext : System.Text.Json.Serialization.JsonSerializerContext
-            {
-            }
-        }
-        """;
-
     private sealed record ProbeRun(int ExitCode, string Output, string Directory);
+
+    // xUnit constructs a class instance per test, so a lifetime hook would rebuild for every test.
+    // The projection is built once per source text and shared by all three controls.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ProbeRun> Runs = new();
+    private static readonly SemaphoreSlim BuildGate = new(1, 1);
+
+    private static async Task<ProbeRun> ProbeRunFor(string source)
+    {
+        await BuildGate.WaitAsync();
+        try
+        {
+            if (!Runs.TryGetValue(source, out var cached))
+            {
+                cached = await RunProbeAsync(source);
+                Runs[source] = cached;
+            }
+
+            return cached;
+        }
+        finally
+        {
+            BuildGate.Release();
+        }
+    }
 
     [Fact]
     public async Task Generator_materialized_combination_envelope_is_not_visible_to_the_official_stj_generator()
     {
-        var run = await RunProbeAsync(HandWrittenServiceWithTwoValueParameters);
-        try
+        var run = await ProbeRunFor(HandWrittenServiceWithTwoValueParameters);
         {
             var generated = ReadGeneratedFiles(run.Directory, GeneratorFolderFragment);
             var envelopeFile = generated.FirstOrDefault(content =>
@@ -117,28 +116,34 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
                 + string.Join(" | ", DiagnosticsIn(run.Output, "Declaration.cs")));
 
             DiagnosticsIn(run.Output, "Declaration.cs").Should().Contain(
-                line => line.Contains("OrderAppService_Search_CompatibilityInput", StringComparison.Ordinal),
-                "SYSLIB1030 must name the combined envelope, not an unrelated root");
+                line => line.Contains("SYSLIB1030", StringComparison.Ordinal)
+                        && line.Contains("OrderAppService_Search_CompatibilityInput", StringComparison.Ordinal),
+                "the official generator must report the envelope root it cannot close, by name");
+
+            DiagnosticsIn(run.Output, "Declaration.cs").Should().NotContain(
+                line => (line.Contains("CS0234") || line.Contains("CS0246"))
+                        && line.Contains("OrderAppService_Search_CompatibilityInput", StringComparison.Ordinal),
+                "the envelope must resolve as a compilation symbol; only the same-round generator must not see it");
 
             var stj = ReadGeneratedFiles(run.Directory, StjFolderFragment);
-            stj.Should().NotBeEmpty("the official generator must run in this build, otherwise the absence of "
-                + "metadata would prove nothing");
+            stj.Should().Contain(
+                content => content.Contains(
+                    "JsonTypeInfo<global::ProbeOrdinary.OrdinaryEnvelope>", StringComparison.Ordinal),
+                "the official generator must close the ordinary-Compile root inside this very build, otherwise "
+                + "the absence of metadata for the envelope would only prove the generator never ran");
             stj.Should().NotContain(
                 content => content.Contains("OrderAppService_Search_CompatibilityInput", StringComparison.Ordinal),
                 "the official generator cannot produce metadata for an envelope another generator emits in the "
                 + "same round");
         }
-        finally
-        {
-            Delete(run.Directory);
-        }
     }
 
     [Fact]
-    public async Task Ordinary_compile_envelope_of_the_same_shape_is_closed_by_the_official_stj_generator()
+    public async Task Ordinary_compile_root_closes_in_the_same_build_as_the_generator_only_envelope()
     {
-        var run = await RunProbeAsync(OrdinaryCompileEnvelopeControl);
-        try
+        // Same build, opposite half of the contract: the ordinary-Compile root in this very compilation
+        // is closed by the official generator, so the envelope's absence is the round, not a dead driver.
+        var run = await ProbeRunFor(HandWrittenServiceWithTwoValueParameters);
         {
             DiagnosticsIn(run.Output, "Declaration.cs").Should().NotContain(
                 line => line.Contains("SYSLIB1030", StringComparison.Ordinal),
@@ -153,10 +158,6 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
                 "the official STJ generator ran in this build and closed the ordinary-Compile envelope; "
                 + "otherwise the negative case above would prove nothing. STJ files: " + stj.Length);
         }
-        finally
-        {
-            Delete(run.Directory);
-        }
     }
 
     [Fact]
@@ -164,11 +165,10 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
     {
         // Issue #129 R3: the cross-Host activation control. Same real build as the envelope probes, but
         // the claim is read off the producer's own syntax tree, not off file contents or comments.
-        var run = await RunProbeAsync(HandWrittenServiceWithTwoValueParameters);
-        try
+        var run = await ProbeRunFor(HandWrittenServiceWithTwoValueParameters);
         {
             var trees = ReadGeneratedFiles(run.Directory, GeneratorFolderFragment)
-                .Where(content => content.Contains("OrderAppService", StringComparison.Ordinal))
+                .Where(content => FileName(content).StartsWith("GeneratedAppServiceCompatibility", StringComparison.Ordinal))
                 .Select(content => Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
                     content[..content.LastIndexOf("// FILE:", StringComparison.Ordinal)]))
                 .ToList();
@@ -191,7 +191,12 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
                     .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>())
                 .Select(invocation => invocation.Expression.ToString())
                 .Where(expression => expression.Contains(".Register", StringComparison.Ordinal))
-                .Select(expression => expression.Split('.')[^2] + "." + expression.Split('.').Last().Split('(').First())
+                .Select(expression =>
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(
+                        expression, @"(?<owner>[A-Za-z0-9_]+)\.(?<member>Register[A-Za-z0-9_]*)");
+                    return match.Success ? match.Groups["owner"].Value + "." + match.Groups["member"].Value : expression;
+                })
                 .Distinct()
                 .OrderBy(name => name, StringComparer.Ordinal)
                 .ToList();
@@ -206,6 +211,9 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
             registrations.Should().HaveCountGreaterThanOrEqualTo(4,
                 "descriptor, binding, invoker and manifest/result registration are all global today; observed: "
                 + string.Join(", ", registrations));
+            registrations.Should().ContainSingle(name => name == "AppServiceCompatibilityProjectionManifestRegistry.Register",
+                "the projection manifest is also registered process-globally; observed: "
+                + string.Join(", ", registrations));
 
             var wholeBuild = string.Join("\n", ReadGeneratedFiles(run.Directory, GeneratorFolderFragment));
             wholeBuild.Should().NotContain("ICapabilityEndpointContribution",
@@ -213,10 +221,6 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
                 + "decline activation; this is the gap #129 closes with AddGeneratedAppServiceHttp()");
             wholeBuild.Should().NotContain("AddCrestCapabilityEndpointContribution",
                 "the explicit-host composition used by the #128 CRUD path must not appear here");
-        }
-        finally
-        {
-            Delete(run.Directory);
         }
     }
 
@@ -264,7 +268,9 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
 
     private static string[] DiagnosticsIn(string output, string fileName)
         => OutputLines(output)
-            .Where(line => line.Contains(fileName, StringComparison.Ordinal) && line.Contains(": error ", StringComparison.Ordinal))
+            .Where(line => line.Contains(fileName, StringComparison.Ordinal)
+                           && (line.Contains(": error ", StringComparison.Ordinal)
+                               || line.Contains(": warning ", StringComparison.Ordinal)))
             .ToArray();
 
     private static string[] ErrorLines(string output)
