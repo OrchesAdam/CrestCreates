@@ -19,7 +19,8 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 
 ## S2 — 通用 HTTP 投影与 JSON
 
-- [ ] 提取并 source-link shared model/emitter；CRUD 与手写 service 前端消费同一 HTTP 后端。
+- [x] S2.1 共享模型与声明面：`ContractType`/`RegistrationMode`/`AppServiceHttpActionAttribute`、`AppServiceHttpProjectionModel`+builder+wire convention（source-link）、CCHTTP001–008、静态注册器跳过显式 host 声明并给迁移告警；定向 10/10 pass。
+- [ ] S2.2 提取并 source-link shared emitter；CRUD 与手写 service 前端消费同一 HTTP 后端（普通 Compile 产物、ownership/manifest、DependsOn、生命周期）。
 - [ ] 扩展前置工具链 ordinary Compile、完整 ownership/provenance、显式 DependsOn、诊断与错误状态；复用现有 stamp/transport，不复制实现。
 - [ ] 自动 body/input/scalar/list/typed result/void/error contracts；官方 STJ 单 driver/真实 MSBuild 可见。
 - [ ] AddGeneratedAppServiceHttp 显式贡献/handler/JSON 装配，业务 DI owner 不重复；转换已有 Asset/Procurement 等正式 compatibility consumer。

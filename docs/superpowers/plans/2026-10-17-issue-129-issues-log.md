@@ -197,3 +197,33 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 3. **L 的来源都未取消 → `NonCaller`**：只有 `L` 被取消才可能进入该步；`R`、`K` 都未取消时不得默认成 `ManagedDeadline`。
 4. `R` 与 `K` 为同一 token、或 `L == R` 时按 `R` 的检查归因，事实记录 `R==K`，不重复计数。
 5. 验收：新增 `R-06f`（None 优先、身份相等但来源未取消、L 来源全未取消）；fixture `classification` 重写为 0–5 步并新增 `edgeRules`；校验测试增加对应断言。验证：`ReferencedAssemblyScopeProbeTests`(2) + `Issue129ContractFixtureTests`(8) = **10/10 pass**，0 skipped。
+
+---
+
+## S2.1 共享模型与声明面（2026-10-17，S2 首个增量）
+
+设计与增补审查均已通过（rev.4）；本轮按「shared model/emitter」顺序只交付模型与声明面，不宣称 S2 完成。
+
+### 已交付
+
+1. **声明面**（`src/Framework/Ddd/CrestCreates.Domain.Shared/Attributes/`）
+   - `CapabilityCompatibilityProjectionAttribute` 增 `ContractType`（可指向引用程序集契约）与 `RegistrationMode`（默认 `ExplicitHost`）；
+   - 新枚举 `HttpProjectionRegistrationMode`/`HttpProjectionVerb`/`HttpProjectionOperationKind`/`HttpProjectionBodyPolicy`；
+   - 新 `AppServiceHttpActionAttribute`（Verb/Route/Kind/Permissions/Body/RequiresConcurrencyToken，仅声明数据，不引用 ASP.NET/Runtime）。
+2. **共享模型**（`src/Tooling/CrestCreates.HttpProjectionGeneration/`，source-link 进 analyzer 与 JsonContracts 工具）
+   - `AppServiceHttpProjectionModel`：owner/contract（含 `ContractAssemblyName`）、`Actions`（verb/route/kind/permissions/body/CT/route identity/closed signature/capability+endpoint id/envelope）、`ReferencedTypes`（与 declared 分开）、`RequiredJsonRootTypeNames`、`ActivationMethodName`；
+   - `AppServiceHttpWireConvention`：复用 `CrudEnvelopeConvention`/`CrudWireConvention`，route/verb 派生与 legacy convention 对齐（S4 收口时删除旧副本）；
+   - `AppServiceHttpProjectionModelBuilder`：按 `ContractType` 只枚举契约及其继承接口；标记类自身方法不投影；`LegacyStatic` 声明不由正式模型接管；诊断使用冻结的 `CCHTTP001–008`（含契约非接口/开放泛型、路由占位缺参、多 body、重复 method+route、重复 capability、契约与实现声明不一致、缺 CT 警告）。
+3. **静态注册器收口（最小步）**
+   - 带 `ContractType` 且非 `LegacyStatic` 的声明：静态 compat 生成器**跳过**并给 `CCHTTP002` 警告（避免与未来 ExplicitHost 双发布，同时不产生半套端点）；
+   - 无 `RegistrationMode` 的旧声明：继续由静态注册器承接，但给 `CCHTTP005` 迁移警告；显式 `LegacyStatic` 不再告警。
+4. **测试**
+   - `AppServiceHttpProjectionModelTests`（7）：冻结矩阵（GET 写动作仍 Command、双 query 无组合信封、route+body 使用共享信封名）、引用契约/DTO 单列、非接口契约 CCHTTP001、LegacyStatic 不接管、缺 CT 警告、重复 method+route CCHTTP003、契约/实现声明冲突 CCHTTP008；
+   - `AppServiceHttpProjectionDeclarationTests`（3）：显式 host 跳过 + CCHTTP002、缺 mode 的 CCHTTP005 且静态发射不变、显式 LegacyStatic 无迁移告警。
+   - 定向 10/10 pass；全量 `CrestCreates.CodeGenerator.Tests` 结果见本轮补记。
+
+### 未交付（S2.2/S2.3）
+
+- 共享 emitter 提取与普通 Compile 产物（信封/binder/invoker/result/manifest/ownership）、`CrestCreatesJsonContractGenerationDependsOn` 接入、MSBuild 生命周期与外部包首消费（B01–B04）；
+- `AddGeneratedAppServiceHttp` 贡献/handler/JSON configurator、Map 期 fail-closed、Asset/Procurement 迁移与 H08。
+- 本轮不声称 S2 放行，不合并，CI 保持暂停。
