@@ -237,6 +237,6 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 | S21-R1-03 合法闭合泛型接口被误判为开放泛型 | 由 `TypeParameters.Length > 0` 改为 `IsUnboundGenericType`；闭合泛型契约的 `ContractFullName` 含闭合参数，动作签名与结果类型按构造后类型记录 | `Closed_generic_contract_is_a_supported_closed_interface` 通过 |
 | S21-R1-04 接口私有辅助方法纳入动作集 | 只枚举 `DeclaredAccessibility == Public` 的 ordinary 实例方法（C# 8 私有 DIM 是实现细节） | `Private_interface_helper_is_not_an_action` 通过 |
 
-审查者的 5 条探针以 patch 原样入库（`ReviewS21ContractProbes.cs`）。本轮定向（5 审查探针 + 7 模型 + 3 声明）**15/15 pass**；全量 `CrestCreates.CodeGenerator.Tests` 结果见补记。默认 ID 语义变化影响正式声明（Ticket 将在 S3 声明时显式保留现有 `compat.appservice.ticket` 前缀，迁移表已记录），旧静态链不受影响。
+审查者的 5 条探针以 patch 原样入库（`ReviewS21ContractProbes.cs`）。本轮定向（5 审查探针 + 7 模型 + 3 声明）**15/15 pass**；全量 `CrestCreates.CodeGenerator.Tests` **479 pass / 0 fail / 479**，0 skipped（22m28s），无新增回归。默认 ID 语义变化影响正式声明（Ticket 将在 S3 声明时显式保留现有 `compat.appservice.ticket` 前缀，迁移表已记录），旧静态链不受影响。
 
 S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution/binder/invoker/typed result/required identities/JSON root/Host configurator）先归一 wire action model 再调同一 emitter；实体发现、DTO/CRUD service、repository、mapping、permission、filter/sort/query adapter 留在 CRUD 前端；#128 的 not-found/result envelope 与 #129 的 Web CrestErrorResponse 责任分开；工具链复用既有 CLI/Task/fingerprint/stamp/DependsOn/分区与 packaged transport。
