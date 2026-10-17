@@ -55,6 +55,9 @@ S1 事实稿：`docs/superpowers/specs/2026-10-17-issue-129-s1-callgraph-and-bas
 
 | 套件 | 结果 |
 | --- | --- |
+| `SaaSHelpdesk.Tests` 全量（最终 head） | 39 pass + 72 fail / 111，0 skipped。约定红 10 条：`R01`、`R03`–`R08`、`F02`、`R14`、`U02`；既有红 62 条按 §9.2 归因不变 → 新增回归 0 |
+| `SaaSHelpdesk.Tests` 新增测试 | 12 条新增中 8 条为事实/正向控制（`C11/C12/C13`、`P09/P10`、`U01/U03/U04`）全绿，4 条为目标红（`F02/R14/U02` + `R01` 保持） |
+| `CrestCreates.CodeGenerator.Tests` 全量 | 457 pass + 1 fail / 458；唯一失败是同轮信封 MSBuild 探针在与其他 450 条并行时 12 分钟超时（非契约失败）。已改为与 CRUD 探针同一串行集合并把上限提到 20 分钟；单跑复核进行中（负例先完成且未报失败，正向对照仍在冷构建），结果在本文件后续补记 |
 | `SaaSHelpdesk.Tests` 定向（新增两类） | 6 pass + 8 约定红 / 14 |
 | `SaaSHelpdesk.Tests` 全量（含新增 14 条） | 29 pass + 70 fail / 99；其中 8 条是本文约定红，**62 条为 master 既有红**（非本切片引入） |
 
