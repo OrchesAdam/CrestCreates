@@ -18,6 +18,7 @@ namespace CrestCreates.CodeGenerator.Tests.AppServiceCompatibilityGenerator;
 /// identical envelope declared as ordinary Compile input is. Nothing here depends on a not-yet-existing
 /// API, so the red cause cannot be "an assertion about the future".
 /// </summary>
+[Collection("CrudBuild")]
 public sealed class AppServiceHttpProjectionRoundProbeTests
 {
     private const string GeneratorFolderFragment = "CrestCreates.CodeGenerator";
@@ -163,7 +164,7 @@ public sealed class AppServiceHttpProjectionRoundProbeTests
         var (exitCode, output) = await RunDotnetAsync(
             repoRoot,
             $"build \"{Path.Combine(probeDirectory, "Probe.csproj")}\" -p:NuGetAudit=false --nologo",
-            TimeSpan.FromMinutes(12));
+            TimeSpan.FromMinutes(20));
 
         return new ProbeRun(exitCode, output, probeDirectory);
     }
