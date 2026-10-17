@@ -163,11 +163,11 @@
     "singleNotFoundShape": "CrestErrorResponse from the Web owner; the legacy DynamicApiResponse 404 wrapper stays in the legacy snapshot only",
     "cancellationRule": "caller abort and managed deadline keep their existing semantics; a classifier must not convert them into OperationInvalid and must not re-run business work",
     "cancellation": {
-      "principle": "classify by token identity first, exception type second; the linked token is request-aborted + kernel token",
+      "principle": "classify by the original cancellation source (R = RequestAborted, K = managed kernel/deadline token, L = linked), never by whether L is canceled; response suppression is decided separately from classification",
       "cases": [
         {
           "kind": "callerAbort",
-          "detect": "linked token canceled or RequestAborted requested",
+          "detect": "only R canceled (identity resolves to R or to L with R canceled)",
           "http": "no JSON error body; connection aborted if response not started; never rewrite a started response",
           "uow": "abandon/rollback uncommitted per #137; committed stays committed",
           "forbidden": [
@@ -177,7 +177,7 @@
         },
         {
           "kind": "managedDeadline",
-          "detect": "kernel token canceled while the request is alive",
+          "detect": "only K canceled while R is alive (identity resolves to K or to L with R not canceled)",
           "http": "500 Crest.InternalError, sanitized, only if the response has not started; otherwise abort without a second write",
           "uow": "preserve Unknown/Committed facts; never rewrite them as a successful rollback",
           "forbidden": [
@@ -187,7 +187,7 @@
         },
         {
           "kind": "nonCallerOperationCanceled",
-          "detect": "OCE token does not match the linked token",
+          "detect": "OCE token is a third token or None; never remapped by transport state",
           "http": "500 Crest.InternalError, sanitized",
           "uow": "internal failure path; rollback if uncommitted",
           "forbidden": [
@@ -196,7 +196,7 @@
         },
         {
           "kind": "cancelAfterCommitOrResponseFailure",
-          "detect": "commit already confirmed when cancellation or response write failure occurs",
+          "detect": "classification as above, but the committed fact wins",
           "http": "no rewrite of the committed outcome",
           "uow": "Committed preserved; notification failure does not roll back",
           "forbidden": [
@@ -205,8 +205,22 @@
         }
       ],
       "syncCall": "sync and async kernel entries share the same classifier",
-      "bindingStage": "cancellation observed during binding/validation is caller abort: no business, no transaction, no JSON body",
-      "classificationFailure": "unknown token identity falls back to a sanitized 500"
+      "bindingStage": "the same classifier applies at binding/validation: OCE(R) -> CallerAbort with no business, no transaction and no body; OCE(K) -> ManagedDeadline with a sanitized 500 when the response has not started; third token or None -> NonCaller with a sanitized 500; ordinary binding failures keep the converter's authority",
+      "classificationFailure": "unknown token identity falls back to a sanitized 500",
+      "tokens": {
+        "R": "HttpContext.RequestAborted",
+        "K": "managed kernel token (deadline / transaction deadline)",
+        "L": "linked token handed to business (R linked with K)"
+      },
+      "classification": [
+        "OCE.Token == R -> CallerAbort",
+        "OCE.Token == K -> ManagedDeadline",
+        "OCE.Token == L -> R canceled ? CallerAbort : ManagedDeadline; when both are canceled CallerAbort wins and both sources are recorded",
+        "OCE.Token is a third token or None -> NonCaller (missing identity is not evidence of caller intent)",
+        "identity unreadable -> NonCaller (sanitized 500)"
+      ],
+      "precedence": "when R and K are both canceled and the identity resolves to L: CallerAbort wins for classification and response suppression, while CallerAbort+Deadline is recorded as the fact set",
+      "responseSuppression": "suppress the body whenever R is canceled or the response has started, regardless of classification; otherwise write per classification (CallerAbort never writes a body; ManagedDeadline/NonCaller -> sanitized 500 Crest.InternalError)"
     }
   },
   "persistenceOwnership": {
@@ -334,12 +348,14 @@
       "R-05": "identity includes contractAssemblyName and no cross-assembly owner bleed",
       "R-06a": "caller abort: no JSON error body, business observed cancellation once, no re-execution, #137 abandonment facts",
       "R-06b": "managed deadline: sanitized 500 when the response has not started; Unknown/Committed facts preserved",
-      "R-06c": "non-caller OCE: treated as an internal fault (sanitized 500), never dropped as cancellation"
+      "R-06c": "non-caller OCE: treated as an internal fault (sanitized 500), never dropped as cancellation",
+      "R-06d": "linked-token identity resolution: deadline-only never hits CallerAbort; both canceled -> CallerAbort with both sources recorded",
+      "R-06e": "binding/validation uses the same classifier: OCE(R) no body, OCE(K) sanitized 500, third token/None sanitized 500"
     }
   },
   "acceptanceMatrixDelta": {
-    "H02": "add binding-stage cancellation: no business call, no transaction, no JSON error body",
-    "H07": "add R-06a/b/c with fixed HTTP statuses and #137 facts; cancellation never re-executes",
+    "H02": "binding-stage cancellation follows the same classifier (OCE(R) no body; OCE(K)/third token -> sanitized 500), never a stage-wide attribution",
+    "H07": "R-06a-e: caller abort / managed deadline / non-caller OCE / both-cancel precedence / binding-stage same rule; fixed HTTP and #137 facts; cancellation never re-executes",
     "N01/N02": "native gate adds one caller-abort and one non-caller OCE scenario",
     "D01": "migration guide states the two client-visible cancellation behaviours"
   }

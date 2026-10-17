@@ -78,22 +78,43 @@ targetFramework, runtimeIdentifier
   - 引用程序集不可写时仍能生成（不在引用程序集目录落文件）。
 - 私有/内部 DTO 的可见性与 `InternalsVisibleTo` 不改变本决定：不可访问 → `CCHTTP001/004`。
 
-### 3.5 取消处理（完整冻结：三类 OCE 分开判定）
+### 3.5 取消处理（按原始取消源分类；分类与响应抑制分开）
 
-分类原则：**先按 token 身份判定，再按异常类型**。生成 binder/invoker 组合「请求中止 + 内核联动 token」得到 linked token；`OperationCanceledException.CancellationToken` 与 linked token 相等（或 `RequestAborted.IsCancellationRequested` 为真）才算「调用方取消」。
+**分类只看原始取消源，不看 linked token 是否取消。** 定义：
 
-| 场景 | 判定依据 | 业务/传播 | HTTP 状态与响应 | UoW/事务事实 | 禁止 |
-| --- | --- | --- | --- | --- | --- |
-| 调用方中止请求（client abort） | linked token 取消或 `RequestAborted` 已请求取消 | 业务观察到取消一次即停止；不重试、不重执行 | **不写 JSON 错误体**；若响应尚未开始则连接中止（客户端观察为取消），若已开始则不得再写第二段响应；trace 记为 Canceled | 按 #137 放弃/回滚未提交事务；已提交事实保持 Committed | 不得包装成 4xx/5xx JSON；不得把取消当业务失败重试 |
-| 受管 deadline / 内核超时 | 内核联动 token 因 deadline 取消（请求仍存活） | 业务观察到来自内核 token 的 OCE；不重执行 | 响应未开始：**500 `Crest.InternalError`（脱敏，无内部 message/details）**；已开始：中止连接、不二次写入 | 保留 `Unknown`/`Committed` 事实，不因取消改写为回滚成功 | 不得映射为 408/504/CancellationFailed 等新对外语义；不得重执行业务 |
-| 非调用方 OCE（业务/依赖自身抛出的 OCE，token 与 linked 无关） | token 身份不匹配 | 视为内部故障传播；不重试 | **500 `Crest.InternalError`（脱敏）** | 按内部失败路径处理（未提交则回滚） | 不得当作调用方取消而静默丢弃响应 |
-| 提交后取消 / 响应写失败 | 提交已确认后再取消或写失败 | 不重执行 | 已提交事实优先；响应侧不再改写 | 保留 Committed；通知失败也不回滚 | 不得因响应阶段失败回滚已提交业务 |
+- `R` = `HttpContext.RequestAborted`（调用方中止源）
+- `K` = 受管内核 token（deadline / 事务执行期限源）
+- `L` = `CreateLinkedTokenSource(R, K).Token`（binder/invoker 实际传给业务的 token）
+
+deadline 到期会同时取消 `K` 与 `L`，所以「`L` 已取消」不能作为调用方中止的依据；必须按 `OperationCanceledException.CancellationToken` 的身份回指到 `R` 或 `K`，再按下面的顺序判定：
+
+```
+1. OCE.Token == R                      → CallerAbort
+2. OCE.Token == K                      → ManagedDeadline
+3. OCE.Token == L                      → R.IsCancellationRequested ? CallerAbort : ManagedDeadline
+                                         （两者都已取消时：CallerAbort 优先，同时记录 CallerAbort+Deadline）
+4. OCE.Token 是第三个 token，或为 None  → NonCaller（token 身份缺失不构成调用方意图的证据）
+5. 分类失败/无法读取 token               → NonCaller（随后按安全 500 处理）
+```
+
+**分类与响应抑制分开**：
+
+- 响应抑制只看传输状态：`R.IsCancellationRequested` 或响应已开始 → 任何分类都**不写 JSON 错误体**、不二次写入；否则按分类写（`CallerAbort` 永不写体；`ManagedDeadline`/`NonCaller` → 500 `Crest.InternalError` 脱敏）。
+- 因此「客户端同时断开 + 业务抛第三 token 的 OCE」会被分类为 `NonCaller`（内部故障事实），但响应仍因 `R` 已取消而被抑制；不得把这种情形改写成 `CallerAbort` 归因。
+
+| 场景 | 分类 | HTTP 状态与响应 | UoW/事务事实 | 禁止 |
+| --- | --- | --- | --- | --- |
+| 调用方中止（仅 `R` 取消） | `CallerAbort` | 不写 JSON 错误体；响应未开始则连接中止，已开始不二次写入 | 按 #137 放弃/回滚未提交事务；Committed 保留 | 包装成 4xx/5xx JSON；重试或重执行 |
+| 受管 deadline（仅 `K` 取消，`R` 仍存活） | `ManagedDeadline` | 响应未开始：**500 `Crest.InternalError` 脱敏**；已开始：中止连接 | `Unknown`/`Committed` 保留，不改为回滚成功 | 新 408/504 语义；重执行 |
+| `R` 与 `K` 同时取消 | `CallerAbort`（优先级规则），事实同时记录 `CallerAbort+Deadline` | 按调用方中止抑制响应 | 同上，事实独立保留 | 只记录单一来源、丢失 deadline 事实 |
+| 非调用方 OCE（第三 token / None） | `NonCaller` | 未抑制时 500 `Crest.InternalError` 脱敏；`R` 已取消则抑制响应 | 未提交则回滚 | 当作调用方取消静默丢弃响应 |
+| 提交后取消 / 响应写失败 | 依上述分类，但结果以已提交事实为准 | 不改写已提交结果 | Committed 保留；通知失败不回滚 | 因响应阶段失败回滚业务 |
 
 补充：
 
-- 同步调用（`Execute<TResult>`）与异步调用（`ExecuteAsync`）共用同一分类器；取消不得跨请求缓存或复制到全局字段。
-- 取消发生在绑定/验证阶段时，按「调用方中止」处理（尚未进入业务、未开事务）。
-- 分类失败（例如无法判定 token 身份）回到安全 500，不泄露原异常。
+- **绑定/验证阶段使用同一规则**，不按阶段无条件归为调用方中止：绑定阶段出现 `OCE(R)` → `CallerAbort`（无业务、无事务、无响应体）；`OCE(K)` → `ManagedDeadline`（500 脱敏，前提是响应未开始且 `R` 未取消）；第三 token/None → `NonCaller`（500 脱敏）。绑定失败的普通异常仍按 converter 的既有权威分类。
+- 同步 `Execute<TResult>` 与异步 `ExecuteAsync` 共用同一分类器；不得把取消状态复制到全局字段或跨请求缓存。
+- 分类器只消费原 Exception、`CapabilityExecutionContext` 中的 `R`/`K` 身份与传输状态，不携带任意 HttpStatusCode。
 
 ## 4. 验收与探针计划（S2）
 
@@ -106,7 +127,9 @@ targetFramework, runtimeIdentifier
 | R-05 | 同短名类型跨程序集不串 owner（B04）；身份包含 `contractAssemblyName` + 闭合签名 |
 | R-06a | 调用方中止：无 JSON 错误体、业务只观察到一次取消、无重执行、`#137` 未提交事实按放弃/回滚处理 |
 | R-06b | 受管 deadline：响应未开始时 500 `Crest.InternalError` 脱敏；`Unknown`/`Committed` 事实不被改写 |
-| R-06c | 非调用方 OCE：判定为内部故障（500 脱敏），不得当作取消静默丢弃响应 |
+| R-06c | 非调用方 OCE（第三 token / None）：判定为内部故障（500 脱敏），不得当作取消静默丢弃响应 |
+| R-06d | linked token 身份回指：deadline 仅取消 `K` 时不命中 `CallerAbort`；`R`+`K` 同时取消按优先级归 `CallerAbort` 且事实同时记录 |
+| R-06e | 绑定/验证阶段沿用同一分类：`OCE(R)` 无响应体、`OCE(K)` 500 脱敏、第三 token/None → 500 脱敏 |
 
 本轮先交付 R-01 与 schema/fixture 的冻结；R-02–R-06c 进 S2/S3 实现门禁。
 
@@ -114,8 +137,8 @@ targetFramework, runtimeIdentifier
 
 | 既有行 | 增补后的含义 |
 | --- | --- |
-| H02（输入拒绝） | 增加「绑定阶段取消」：无业务调用、无事务、无 JSON 错误体（按调用方中止处理） |
-| H07（UoW 事实） | 增加 R-06a/b/c 三态：调用方中止 / 受管 deadline / 非调用方 OCE，HTTP 状态与事务事实各自固定，且取消不重执行 |
+| H02（输入拒绝） | 增加「绑定阶段取消」：无业务调用、无事务；响应体与状态按 §3.5 的同一分类规则（`OCE(R)` 无体、`OCE(K)`/第三 token → 500 脱敏），不按阶段统一归因 |
+| H07（UoW 事实） | 增加 R-06a–e：调用方中止 / 受管 deadline / 非调用方 OCE / 同时取消优先级 / 绑定阶段同规则；HTTP 状态与事务事实各自固定，取消不重执行 |
 | N01/N02（原生门禁） | 原生场景增加一条调用方中止与一条非调用方 OCE，验证分类不依赖异常类型字符串 |
 | D01（文档交接） | 迁移指南写明「deadline 对外为 500 脱敏」「调用方中止无错误体」两条客户端可见行为 |
 

@@ -173,7 +173,7 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 - 当前可表达性事实：`CrestServiceAttribute` 仅 Class（`CrestServiceAttribute.cs:4-5`）；projection 属性仅 Class|Method 且无 `ContractType`（`CapabilityCompatibilityProjectionAttribute.cs:9-25`）；生成器语法提供器只扫本编译 class（`AppServiceCompatibilityGenerator.cs:40-64`）；`EnumerateContractTypes` 允许契约来自 metadata。
 - 决定：不新增程序集级 Attribute、不扫描引用程序集、不用反射补洞；以「本地标记类 + `ContractType`」为唯一入口，标记类不注册/不实例化、方法集合只来自契约；契约缺失注册 → 启动期 `CCHTTP007`；身份与 manifest 分离 owner 与 contract assembly。
 - 验证：新增/更新测试 `ReferencedAssemblyScopeProbeTests`（2）+ `Issue129ContractFixtureTests`（6）共 8/8 通过；本轮未触及样例与探针构建，S1 放行结论不受影响。
-- 状态：**设计增补 rev.2 待审查**；审查通过后才进入 S2 实现（不合并、CI 暂停）。
+- 状态：**设计增补 rev.3 待审查**；审查通过后才进入 S2 实现（不合并、CI 暂停）。
 
 ### 增补 rev.2（回应 2 项 P2：产物所有权与取消契约）
 
@@ -181,3 +181,11 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 2. **取消契约完整冻结**：按 token 身份判定，分四类写清传播、HTTP 状态/响应与 UoW 事实——调用方中止（无 JSON 错误体、可中止连接、不重执行）、受管 deadline（响应未开始则 500 `Crest.InternalError` 脱敏，否则中止不二次写；`Unknown`/`Committed` 保留）、非调用方 OCE（内部故障 500 脱敏，不得当取消丢弃响应）、提交后取消/响应写失败（Committed 保留、不回滚）。
 3. **验收矩阵同步**：R-06 拆为 R-06a/b/c；增补 §4.1 覆盖 rev.2 §10 的 H02/H07/N01/N02/D01 四行含义。
 4. 验证：`ReferencedAssemblyScopeProbeTests`（2）+ `Issue129ContractFixtureTests`（8）共 **10/10 pass**（秒级）；新增 fixture 断言覆盖所有权字段分离、四类取消、验收矩阵扩展与增补文本一致性。
+
+### 增补 rev.3（回应取消契约剩余 P2：原取消源与绑定阶段）
+
+1. **按原始取消源分类**：定义 `R`=RequestAborted、`K`=受管内核/deadline token、`L`=linked token；deadline 会同时取消 `K` 与 `L`，因此不再用「`L` 已取消」判定调用方中止。分类顺序：`OCE.Token == R → CallerAbort`；`== K → ManagedDeadline`；`== L → R 是否取消 ? CallerAbort : ManagedDeadline`；第三 token/None → `NonCaller`；身份不可读 → `NonCaller`。
+2. **同时取消的优先级**：`R`+`K` 同时取消且身份解析到 `L` 时，分类与响应抑制按 `CallerAbort`，事实同时记录 `CallerAbort+Deadline`（不丢 deadline 事实）。
+3. **分类与响应抑制分开**：响应抑制只看传输状态（`R` 已取消或响应已开始则一律不写体，任何分类都不二次写入）；否则按分类写（`CallerAbort` 永不写体；`ManagedDeadline`/`NonCaller` → 500 `Crest.InternalError` 脱敏）。因此「客户端断开 + 第三 token OCE」归因 `NonCaller`，但响应仍被抑制，不改成调用方中止。
+4. **绑定/验证阶段沿用同一规则**：`OCE(R)` → 无业务/无事务/无响应体；`OCE(K)` → 500 脱敏（响应未开始且 `R` 未取消）；第三 token/None → 500 脱敏；普通绑定失败仍走 converter 权威。
+5. 验收：R-06 扩为 R-06a–e（新增 R-06d 链接身份解析与同时取消优先级、R-06e 绑定阶段同规则）；fixture 增 `tokens`/`classification`/`precedence`/`responseSuppression` 并同步 `bindingStage`；H02/H07 描述同步。验证：`ReferencedAssemblyScopeProbeTests`(2) + `Issue129ContractFixtureTests`(8) = **10/10 pass**。

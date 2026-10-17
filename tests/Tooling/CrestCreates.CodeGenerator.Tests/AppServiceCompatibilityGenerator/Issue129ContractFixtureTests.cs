@@ -194,7 +194,12 @@ public class Issue129ContractFixtureTests
         }
 
         probes.TryGetProperty("R-06", out _).Should().BeFalse(
-            "R-06 was split into R-06a/b/c so each cancellation class has its own contract");
+            "R-06 was split so each cancellation class has its own contract");
+        foreach (var id in new[] { "R-06d", "R-06e" })
+        {
+            probes.TryGetProperty(id, out _).Should().BeTrue(
+                $"probe {id} locks original-source classification and the binding-stage rule");
+        }
 
         var addendum = Path.Combine(RepoRoot(), "docs", "superpowers", "specs",
             "2026-10-17-issue-129-referenced-declaration-scope-addendum.md");
@@ -228,11 +233,30 @@ public class Issue129ContractFixtureTests
     public void Cancellation_contract_freezes_all_three_classes_and_the_acceptance_delta()
     {
         var cancellation = Fixture.RootElement.GetProperty("failureBridge").GetProperty("cancellation");
-        cancellation.GetProperty("principle").GetString().Should().Contain("token identity");
+        cancellation.GetProperty("principle").GetString().Should().Contain("original cancellation source");
+        cancellation.GetProperty("principle").GetString().Should().Contain("never by whether L is canceled");
 
         var cases = cancellation.GetProperty("cases").EnumerateArray().ToList();
         cases.Select(c => c.GetProperty("kind").GetString()).Should().BeEquivalentTo(
             "callerAbort", "managedDeadline", "nonCallerOperationCanceled", "cancelAfterCommitOrResponseFailure");
+
+        var tokens = cancellation.GetProperty("tokens");
+        tokens.GetProperty("R").GetString().Should().Contain("RequestAborted");
+        tokens.GetProperty("K").GetString().Should().Contain("deadline");
+        tokens.GetProperty("L").GetString().Should().Contain("linked");
+
+        var classification = cancellation.GetProperty("classification").EnumerateArray()
+            .Select(v => v.GetString()!).ToList();
+        classification.Should().Contain(step => step.Contains("OCE.Token == L", StringComparison.Ordinal)
+                                               && step.Contains("R canceled", StringComparison.Ordinal),
+            "the linked token must be resolved back to R or K, otherwise deadline cancels it too and the rule conflates sources");
+        classification.Should().Contain(step => step.Contains("third token or None", StringComparison.Ordinal)
+                                               && step.Contains("NonCaller", StringComparison.Ordinal));
+
+        cancellation.GetProperty("precedence").GetString().Should().Contain("CallerAbort wins");
+        cancellation.GetProperty("precedence").GetString().Should().Contain("both");
+        cancellation.GetProperty("responseSuppression").GetString().Should().Contain("suppress the body")
+            .And.Contain("regardless of classification");
 
         var deadline = cases.Single(c => c.GetProperty("kind").GetString() == "managedDeadline");
         deadline.GetProperty("http").GetString().Should().Contain("Crest.InternalError");
@@ -241,9 +265,14 @@ public class Issue129ContractFixtureTests
             .Should().Contain(rule => rule.Contains("re-execute", StringComparison.Ordinal));
 
         var nonCaller = cases.Single(c => c.GetProperty("kind").GetString() == "nonCallerOperationCanceled");
-        nonCaller.GetProperty("detect").GetString().Should().Contain("does not match");
+        nonCaller.GetProperty("detect").GetString().Should().Contain("third token");
+        nonCaller.GetProperty("detect").GetString().Should().Contain("None");
         nonCaller.GetProperty("forbidden").EnumerateArray().Select(v => v.GetString()!)
             .Should().Contain(rule => rule.Contains("caller cancellation", StringComparison.Ordinal));
+
+        cancellation.GetProperty("bindingStage").GetString().Should().Contain("same classifier");
+        cancellation.GetProperty("bindingStage").GetString().Should().Contain("OCE(R)");
+        cancellation.GetProperty("bindingStage").GetString().Should().Contain("OCE(K)");
 
         var delta = Fixture.RootElement.GetProperty("acceptanceMatrixDelta");
         foreach (var row in new[] { "H02", "H07", "N01/N02", "D01" })
@@ -257,6 +286,12 @@ public class Issue129ContractFixtureTests
         addendum.Should().Contain("非调用方 OCE");
         addendum.Should().Contain("500 `Crest.InternalError`");
         addendum.Should().Contain("不写 JSON 错误体");
+        addendum.Should().Contain("OCE.Token == L",
+            "the addendum must resolve the linked token back to its original source");
+        addendum.Should().Contain("CallerAbort 优先",
+            "the both-canceled precedence must be explicit");
+        addendum.Should().Contain("第三 token",
+            "the binding-stage rule must not blanket-map to caller abort");
     }
 
     private static string FixturePath()
