@@ -160,3 +160,17 @@ S1 补件 R3 到此三 P2 与跨 Host 控制均有实测支撑；是否放行由
 计数（本轮实测，最终 head 见提交）：`SaaSHelpdesk.Tests` 全量 **42 pass / 72 fail / 114**，0 skipped；约定红 10 条（`R01`、`R03`–`R08`、`R15`、`F02`、`R14`），既有红 62 条与 R2/R3 同一集合 → 新增回归 0。本轮只改样例测试与探针设施，未触及 CodeGenerator 套件（上一 head 459/459 仍适用）。
 
 仍未闭合（不声称完成）：客户端响应 stamp 的可复用性在 S1 只作为目标红记录，生产映射修复属 S3；双租户选库 factory、生产启动根因按 rev.2 属 S3；引用程序集声明范围的小范围设计增补仍是对应 S2 的前置设计门禁。
+
+---
+
+## 设计增补：引用程序集声明范围（2026-10-17，S2 前置门禁）
+
+- 交付：`docs/superpowers/specs/2026-10-17-issue-129-referenced-declaration-scope-addendum.md`（决策、身份字段、DI 契约、取消语义、S2 验收 R-01–R-06）。
+- 契约 fixture 同步：`docs/superpowers/specs/fixtures/issue-129-projection-contracts.json` 增 `referencedAssembly` 段；action identity 增 `httpOwnerAssemblyName`/`contractAssemblyName`/`closedContractMethodSignature`；artifact entry 增并列字段 `ContractAssemblyName`。
+- 事实探针（本次入库，2/2 绿）：`ReferencedAssemblyScopeProbeTests`
+  - `R01a`：引用程序集内部声明的 `[CrestService]` + projection 不被消费编译发现（生成物为空、诊断为空）——这是「引用服务必须由本地锚点声明」的事实依据；
+  - `R01b`：本地 facade 实现引用程序集里的契约时，投影照常生成——保留现有唯一声明链。
+- 当前可表达性事实：`CrestServiceAttribute` 仅 Class（`CrestServiceAttribute.cs:4-5`）；projection 属性仅 Class|Method 且无 `ContractType`（`CapabilityCompatibilityProjectionAttribute.cs:9-25`）；生成器语法提供器只扫本编译 class（`AppServiceCompatibilityGenerator.cs:40-64`）；`EnumerateContractTypes` 允许契约来自 metadata。
+- 决定：不新增程序集级 Attribute、不扫描引用程序集、不用反射补洞；以「本地标记类 + `ContractType`」为唯一入口，标记类不注册/不实例化、方法集合只来自契约；契约缺失注册 → 启动期 `CCHTTP007`；身份与 manifest 分离 owner 与 contract assembly。
+- 验证：新增/更新测试 `ReferencedAssemblyScopeProbeTests`（2）+ `Issue129ContractFixtureTests`（6）共 8/8 通过；本轮未触及样例与探针构建，S1 放行结论不受影响。
+- 状态：**设计增补待审查**；审查通过后才进入 S2 实现（不合并、CI 暂停）。

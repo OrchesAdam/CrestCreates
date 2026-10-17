@@ -416,7 +416,7 @@ public sealed class AppServiceCompatibilityGeneratorTests
             d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error);
     }
 
-    private static string[] BuildCompatibilityStubs()
+    internal static string[] BuildCompatibilityStubs()
     {
         return new[]
         {

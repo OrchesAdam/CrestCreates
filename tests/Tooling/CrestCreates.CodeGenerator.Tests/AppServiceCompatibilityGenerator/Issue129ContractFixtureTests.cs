@@ -127,6 +127,8 @@ public class Issue129ContractFixtureTests
         inputs.Should().Contain("ownerAssemblyName");
         inputs.Should().Contain("ownerServiceFullMetadataName");
         inputs.Should().Contain("closedContractMethodSignature");
+        inputs.Should().Contain("httpOwnerAssemblyName");
+        inputs.Should().Contain("contractAssemblyName");
         forbidden.Should().Contain("action short name alone");
 
         var fields = Fixture.RootElement.GetProperty("manifest").GetProperty("artifactEntry").GetProperty("fields")
@@ -134,8 +136,8 @@ public class Issue129ContractFixtureTests
         fields.Should().BeEquivalentTo(new[]
         {
             "OwnerAssemblyName", "OwnerServiceFullName", "ArtifactHintName", "DeclaredTypeFullNames",
-            "SourceLocation", "ModelSchemaVersion", "ContentHash",
-        }, "the #128 artifact entry shape is reused, not reinvented");
+            "SourceLocation", "ModelSchemaVersion", "ContentHash", "ContractAssemblyName",
+        }, "the #128 artifact entry shape is reused; the contract assembly is a separate field, not owner:type");
     }
 
     [Fact]
@@ -165,6 +167,41 @@ public class Issue129ContractFixtureTests
                     $"formal project {Path.GetRelativePath(RepoRoot(), projectFile)} must not depend on the isolated legacy package");
             }
         }
+    }
+
+    [Fact]
+    public void Referenced_declaration_scope_is_frozen_with_probes_and_forbidden_shapes()
+    {
+        var referenced = Fixture.RootElement.GetProperty("referencedAssembly");
+        referenced.GetProperty("decision").GetString().Should().Contain("referenced assembly");
+
+        referenced.GetProperty("anchor").GetString().Should().Contain("local marker class");
+
+        var rules = referenced.GetProperty("rules").EnumerateArray().Select(v => v.GetString()!).ToList();
+        rules.Should().Contain(rule => rule.Contains("startup CCHTTP007", StringComparison.Ordinal));
+        rules.Should().Contain(rule => rule.Contains("contractAssemblyName", StringComparison.Ordinal));
+
+        var forbidden = referenced.GetProperty("forbidden").EnumerateArray().Select(v => v.GetString()!).ToList();
+        forbidden.Should().Contain(shape => shape.Contains("assembly-level", StringComparison.Ordinal));
+        forbidden.Should().Contain(shape => shape.Contains("scanning referenced assemblies", StringComparison.Ordinal));
+        forbidden.Should().Contain(shape => shape.Contains("reflection", StringComparison.Ordinal));
+
+        var probes = referenced.GetProperty("probes");
+        foreach (var id in new[] { "R-01", "R-02", "R-03", "R-04", "R-05", "R-06" })
+        {
+            probes.TryGetProperty(id, out _).Should().BeTrue($"probe {id} must stay in the frozen plan");
+        }
+
+        var addendum = Path.Combine(RepoRoot(), "docs", "superpowers", "specs",
+            "2026-10-17-issue-129-referenced-declaration-scope-addendum.md");
+        File.Exists(addendum).Should().BeTrue("the addendum is the design gate for S2");
+        var text = File.ReadAllText(addendum);
+        text.Should().Contain("ContractType = typeof(",
+            "the addendum must show the concrete declaration form, not only prose");
+        text.Should().Contain("CancellationToken",
+            "the addendum freezes cancellation handling together with the declaration scope");
+        text.Should().Contain("程序集级 Attribute",
+            "the addendum must name what it deliberately does not add");
     }
 
     private static string FixturePath()

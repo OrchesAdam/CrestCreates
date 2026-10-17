@@ -57,3 +57,8 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 - 双租户生产选库factory归S3；S1写清责任与拒绝条件，不要求提前完成S3实现。
 - review入口：docs/review/2026-10-17-issue-129-s1-design-review-round1.md；两条事实控制补丁：docs/review/probes/2026-10-17-issue-129-s1-permission-facts.patch。
 - 需把本地rev.2带回PR开发分支后逐项补件。本次只修订设计与评审材料，不替开发分支实现S2，不自动合并，不恢复CI。
+
+## S2 前置：引用程序集声明范围设计增补（2026-10-17）
+
+- 已交付 `docs/superpowers/specs/2026-10-17-issue-129-referenced-declaration-scope-addendum.md` 与契约 fixture 同步；事实探针 `ReferencedAssemblyScopeProbeTests` 2/2 绿（引用程序集内声明不可见、本地锚点 + 引用契约可投影）。
+- 该增补通过审查后才启动 S2 实现；实现按增补 §4 的 R-01–R-06 作为 S2 验收。

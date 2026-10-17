@@ -1,7 +1,7 @@
 {
   "$schema": "crestcreates.issue129.contract-fixture/v1",
   "status": "frozen-for-review-rev2",
-  "design": "docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md#144-145",
+  "design": "docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md#144-145; referenced scope: docs/superpowers/specs/2026-10-17-issue-129-referenced-declaration-scope-addendum.md",
   "notes": [
     "Every name below is a frozen contract proposal for S2/S3, not a claim that the API exists today.",
     "Field lists are normative: an implementation that renames or drops one of them must revise this fixture in the same commit."
@@ -16,7 +16,8 @@
         "DeclaredTypeFullNames",
         "SourceLocation",
         "ModelSchemaVersion",
-        "ContentHash"
+        "ContentHash",
+        "ContractAssemblyName"
       ],
       "rules": [
         "DeclaredTypeFullNames stays a plain FQN list; owner is a sibling field and must not be re-encoded as owner:type",
@@ -26,12 +27,14 @@
     },
     "actionIdentity": {
       "inputs": [
-        "ownerAssemblyName",
         "ownerServiceFullMetadataName",
         "closedContractMethodSignature",
         "configuration",
         "targetFramework",
-        "runtimeIdentifier"
+        "runtimeIdentifier",
+        "httpOwnerAssemblyName",
+        "contractAssemblyName",
+        "ownerAssemblyName"
       ],
       "forbidden": [
         "action short name alone",
@@ -72,23 +75,70 @@
   },
   "failureBridge": {
     "proposedAbstractions": [
-        "Capability.Abstractions: CapabilityFailureFacts",
-        "Capability.Abstractions: ICapabilityExceptionClassifier",
-        "Capability.Abstractions: CapabilityFailureKind"
+      "Capability.Abstractions: CapabilityFailureFacts",
+      "Capability.Abstractions: ICapabilityExceptionClassifier",
+      "Capability.Abstractions: CapabilityFailureKind"
     ],
-    "facts": ["Kind", "ErrorCode", "SafeMessage", "SafeDetails"],
-    "factsMustNotCarry": ["HttpStatusCode", "Exception", "Type", "stack trace", "open ended property bag"],
+    "facts": [
+      "Kind",
+      "ErrorCode",
+      "SafeMessage",
+      "SafeDetails"
+    ],
+    "factsMustNotCarry": [
+      "HttpStatusCode",
+      "Exception",
+      "Type",
+      "stack trace",
+      "open ended property bag"
+    ],
     "adapter": "Web/Platform scoped adapter reuses the existing ICrestExceptionConverter with the real HttpContext",
     "codeStatusTable": [
-      { "kind": "InvalidRequest", "status": 400, "code": "Crest.Request.InvalidArgument" },
-      { "kind": "ValidationFailed", "status": 400, "code": "Crest.Validation.Failed" },
-      { "kind": "Unauthenticated", "status": 401, "code": "Crest.Auth.Unauthorized" },
-      { "kind": "Forbidden", "status": 403, "code": "Crest.Auth.Forbidden" },
-      { "kind": "NotFound", "status": 404, "code": "Crest.Entity.NotFound" },
-      { "kind": "ConcurrencyConflict", "status": 409, "code": "Crest.Concurrency.Conflict" },
-      { "kind": "PreconditionRequired", "status": 428, "code": "Crest.Concurrency.PreconditionRequired" },
-      { "kind": "OperationInvalid", "status": 400, "code": "Crest.Operation.Invalid" },
-      { "kind": "Internal", "status": 500, "code": "Crest.InternalError" }
+      {
+        "kind": "InvalidRequest",
+        "status": 400,
+        "code": "Crest.Request.InvalidArgument"
+      },
+      {
+        "kind": "ValidationFailed",
+        "status": 400,
+        "code": "Crest.Validation.Failed"
+      },
+      {
+        "kind": "Unauthenticated",
+        "status": 401,
+        "code": "Crest.Auth.Unauthorized"
+      },
+      {
+        "kind": "Forbidden",
+        "status": 403,
+        "code": "Crest.Auth.Forbidden"
+      },
+      {
+        "kind": "NotFound",
+        "status": 404,
+        "code": "Crest.Entity.NotFound"
+      },
+      {
+        "kind": "ConcurrencyConflict",
+        "status": 409,
+        "code": "Crest.Concurrency.Conflict"
+      },
+      {
+        "kind": "PreconditionRequired",
+        "status": 428,
+        "code": "Crest.Concurrency.PreconditionRequired"
+      },
+      {
+        "kind": "OperationInvalid",
+        "status": 400,
+        "code": "Crest.Operation.Invalid"
+      },
+      {
+        "kind": "Internal",
+        "status": 500,
+        "code": "Crest.InternalError"
+      }
     ],
     "binderOwnedFailures": [
       "malformed json body",
@@ -100,7 +150,10 @@
     "cancellationRule": "caller abort and managed deadline keep their existing semantics; a classifier must not convert them into OperationInvalid and must not re-run business work"
   },
   "persistenceOwnership": {
-    "modes": ["PlatformDefault", "ApplicationOwned"],
+    "modes": [
+      "PlatformDefault",
+      "ApplicationOwned"
+    ],
     "optionApi": "CrestWebOptions.UseApplicationPersistence() (proposed)",
     "invariants": [
       "exactly one UnitOfWorkProviderBinding per ORM provider in the final graph",
@@ -110,7 +163,13 @@
     ]
   },
   "permissions": {
-    "formalTicketDefinitions": ["Ticket.Create", "Ticket.Get", "Ticket.Search", "Ticket.Update", "Ticket.Delete"],
+    "formalTicketDefinitions": [
+      "Ticket.Create",
+      "Ticket.Get",
+      "Ticket.Search",
+      "Ticket.Update",
+      "Ticket.Delete"
+    ],
     "actionToPermission": {
       "CreateAsync": "Ticket.Create",
       "GetByIdAsync": "Ticket.Get",
@@ -124,7 +183,9 @@
       "GetByAssigneeAsync": "Ticket.Get",
       "GetOverdueAsync": "Ticket.Search"
     },
-    "retiredNames": ["Ticket.GetAll"],
+    "retiredNames": [
+      "Ticket.GetAll"
+    ],
     "rules": [
       "definitions come from an explicit IPermissionDefinitionProvider in the sample, not a generated string table or seeded grant rows",
       "no OR/alias fallback in the checker between Helpdesk.Tickets.* and Ticket.*",
@@ -132,9 +193,36 @@
     ]
   },
   "legacyProjects": {
-    "CrestCreates.DynamicApi.Legacy": { "dependsOn": ["shared typed runtime", "existing runtime deps"], "hosts": ["legacy provider", "registry helpers", "body reader"] },
-    "CrestCreates.CodeGenerator.Legacy": { "targetFramework": "netstandard2.0", "dependsOn": ["shared-source model and emitters"], "mustNotReference": ["an analyzer package containing the default formal generators"] },
-    "CrestCreates.Web.Legacy": { "layer": "Platform", "dependsOn": ["CrestCreates.Web", "CrestCreates.DynamicApi.Legacy"], "provides": ["Add/MapLegacyGeneratedApi"] },
+    "CrestCreates.DynamicApi.Legacy": {
+      "dependsOn": [
+        "shared typed runtime",
+        "existing runtime deps"
+      ],
+      "hosts": [
+        "legacy provider",
+        "registry helpers",
+        "body reader"
+      ]
+    },
+    "CrestCreates.CodeGenerator.Legacy": {
+      "targetFramework": "netstandard2.0",
+      "dependsOn": [
+        "shared-source model and emitters"
+      ],
+      "mustNotReference": [
+        "an analyzer package containing the default formal generators"
+      ]
+    },
+    "CrestCreates.Web.Legacy": {
+      "layer": "Platform",
+      "dependsOn": [
+        "CrestCreates.Web",
+        "CrestCreates.DynamicApi.Legacy"
+      ],
+      "provides": [
+        "Add/MapLegacyGeneratedApi"
+      ]
+    },
     "edges": {
       "formalToLegacy": "forbidden",
       "runtimeToApiOrWebOrOrm": "forbidden",
@@ -154,5 +242,37 @@
       "CCHTTP008": "action permission, kind, cancellation token or concurrency declaration contradicts"
     },
     "collisionCheck": "repo-wide grep for CCHTTP recorded zero hits on 2026-10-17; re-checked before implementation"
+  },
+  "referencedAssembly": {
+    "decision": "declaration lives in the compiling HTTP owner; the contract (and its DTOs) may live in a referenced assembly",
+    "anchor": "local marker class (may be static) carrying CapabilityCompatibilityProjection(ContractType = typeof(IX), RegistrationMode = ExplicitHost); no CrestService required in this mode",
+    "rules": [
+      "ContractType is an accessible closed interface; only it and its inherited interfaces contribute methods",
+      "the marker class is never DI-registered or instantiated and its own public methods are not projected",
+      "existing facades that implement the contract keep today's behaviour; business DI stays with the owning module",
+      "the contract must be registered by the business owner; missing registration is a startup CCHTTP007, not a request-time 500",
+      "two HTTP owners declaring the same contract is CCHTTP003",
+      "artifact identity includes contractAssemblyName and the closed method signature; owner and contract stay separate fields"
+    ],
+    "forbidden": [
+      "assembly-level declaration attribute",
+      "scanning referenced assemblies for CrestService/projection attributes",
+      "reflection or Type.GetType discovery",
+      "relaxing CrestService to interfaces",
+      "same-short-name type stubs standing in for referenced contracts or DTOs"
+    ],
+    "jsonClosure": [
+      "referenced DTOs must appear as JsonSerializable roots and in official STJ metadata",
+      "same-short-name types across assemblies must not cross owners",
+      "generation must not write into the referenced assembly output"
+    ],
+    "probes": {
+      "R-01": "a projection declaration inside a referenced assembly is not discovered by the consuming compilation",
+      "R-02": "ContractType mode enumerates only the contract surface",
+      "R-03": "referenced DTO json closure",
+      "R-04": "missing contract DI registration fails at startup with CCHTTP007",
+      "R-05": "identity includes contractAssemblyName and no cross-assembly owner bleed",
+      "R-06": "cancellation/deadline never reclassified as business failure and never re-executes"
+    }
   }
 }
