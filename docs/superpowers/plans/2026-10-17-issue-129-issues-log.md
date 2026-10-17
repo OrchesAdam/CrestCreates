@@ -105,6 +105,11 @@ PR #152 head 602d6e40 独立定向复跑6绿+8约定红/14，0 skipped。额外�
 | 账本 32+17+10+2=61 与 62 差额 | 三次全量差集逐 FQN 归因：51 条为 R01 装配冲突（在单绑定实验中转绿）、10 条为 `POST /api/user` 404（框架 HTTP 面缺失，按 rev.2 §14.6 单列）、1 条 `ITenantProvider` 容器校验失败；无「凭 400 推断同根因」的未归因项 | 已入库（S1 事实稿 §9.2） |
 | rev.2 §14.7.5 装配来源证据 | `TicketPersistenceOwnershipBaselineTests`：U01 样例模块单独恰好 1 份绑定（绿）；U02 按程序集 MemberRef 实测引用绑定声明 API 的装配为 `CrestCreates.Web` 与 `SaaSHelpdesk.EntityFrameworkCore`，目标 1 个 owner（红）；U03 测试程序集不再声明 owner（绿）；U04 宿主仍可观测 >1 份，防止用删除测量路径冒充修复（绿） | 已入库并实测 |
 
+### 同轮可见性探针口径
+
+- 负例先断 producer 确实运行（本次构建产物里存在 `OrderAppService_Search_CompatibilityInput`），再断普通 Compile 的 `JsonSerializerContext` 无法解析它（实测 `CS0234`），并断官方 STJ 生成目录不含其 metadata。
+- 正向对照用形状相同的普通 Compile 信封，实测由官方 STJ 关闭。两条都是**事实控制（绿）**，不是目标红：它们锁定「同轮不可见」这一机制，S2 的正式前阶段必须让手写投影落到普通 Compile 一侧，届时负例的构造方式会随之改写（不能靠放宽断言转绿）。
+
 ### fixture 修复（rev.2 §14.3 明确指令）
 
 `samples/SaaSHelpdesk/SaaSHelpdesk.Tests/Fixtures/HelpdeskWebApplicationFactory.cs` 删除自身对 `AddUnitOfWork(OrmProvider.EfCore)` / `AddEfCoreUnitOfWork()` 的调用：fixture 只替换连接与叶子设施，不再声明第三个 owner。删除后宿主仍有 2 份冲突绑定（全量计数不变，70 fail），证明必须修的是装配 owner 而非测试代码；R01 目标计数继续固定为 1。
