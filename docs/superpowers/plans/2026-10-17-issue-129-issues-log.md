@@ -258,3 +258,32 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 `CanonicalToken` 的「首字符为数字时补 `_`」不是单射：`"005FHost"` → `_005FHost`，而 `"_Host"` 的 `_` 转义同样是 `_005FHost`。修复为**编码首位数字本身**（`'0'` → `_0030`），删掉条件补 `_`；其余字符规则不变。于是 `"005FHost"` → `_003005FHost`，`"_Host"` → `_005FHost`，不再碰撞；空串仍 `_EMPTY`（与 `"EMPTY"`→`EMPTY`、`"_EMPTY"`→`_005FEMPTY` 均不同）。
 
 审查者 2 条探针（token 单射、同源不同合法程序集的 ID/信封不同）以 patch 原样入库；与 R1/R2 探针及本切片定向合并 **20/20 pass**；全量 `CrestCreates.CodeGenerator.Tests` **484 pass / 0 fail / 484**，0 skipped（22m30s），无新增回归。
+
+## S2.2-A 共享 HTTP emitter（2026-10-17）
+
+按审查边界先物化 emitter，再动物化工具链；本轮不接入 BuildTasks、不激活真实 Host。
+
+### 已交付
+
+1. `AppServiceHttpProjectionEmitter`（`src/Tooling/CrestCreates.HttpProjectionGeneration/`，与模型一起 source-link 进 analyzer 与 JsonContracts 工具）从 `AppServiceHttpProjectionModel` 发射三份普通 Compile 产物：
+   - **Envelopes**：组合输入信封（`CrestCreates.Generated.{canonical identity}`），成员为 `Id`/`Input`/query 参数；
+   - **Contribution**：`CapabilityEndpointContribution` 派生类（capability/endpoint descriptors、typed binding contracts、handler bindings、result bindings、BodyTypes、`JsonContext`、`RequiredJsonRootTypes`、`RequiredIdentityIds`），外加每动作的 typed binder（`CapabilityEndpointJsonTypeInfoResolver.Require` + `CapabilityEndpointBodyReader.ReadNativeBodyAsync`，route/query 严格解析、缺失/非法 → 400）、typed result mapper（`WrapResult`/`WrapGetResult`/`WrapVoidResult` 的 typed overload）与 `ICapabilityContextAwareHandlerInvoker`；
+   - **Activation**：`AddGeneratedAppServiceHttp()` + handler module + `IConfigureOptions<Http.Json.JsonOptions>` configurator（与 #128 相同的插入/追加规则），全部 `TryAdd*`，无 `ModuleInitializer`、无进程全局注册表、无 IServiceProvider 捕获。
+2. `BuildManifestEntry`：`OwnerAssemblyName`/`OwnerServiceFullName`/`ContractAssemblyName`/`ArtifactHintName`/`DeclaredTypeFullNames`（仅本产物声明类型：contribution/handler/activation/invokers/envelopes）/`ReferencedTypeFullNames`（模型引用契约与 DTO）/`SourceLocation`/`ModelSchemaVersion`；与 addendum §3.3 的 CCCRUD008 约束一致。
+3. 命名：`AppServiceHttpEmissionOptions.ForContract` 由 canonical token 派生 contribution/handler/activation/configurator/JSON context 名称；JSON context 名称以 `GeneratedHttpJsonContext` 冻结，供 JsonContracts 阶段生成。
+
+### 证据
+
+`AppServiceHttpProjectionEmitterTests`（3）：
+
+- 产物断言：无 `ModuleInitializer`/`DescriptorProviderRegistry`/`CompatibilityBodyReader`/`DynamicApiGeneratedRuntime`；激活只经 `AddGeneratedAppServiceHttp`；贡献含权限、JSON roots、required identities 与 typed binder/mapper；GET 写动作保持 GET + Command；组合信封名与成员正确；
+- manifest 断言：declared 不含契约/DTO，contract assembly 单列；
+- **编译探针**：契约源 + 三份产物 + JSON context stub，引用真实运行时程序集（Metadata/Capability/DynamicApi/Schema/Options/Json）编译零错误。
+
+定向 3/3 pass；全量 `CrestCreates.CodeGenerator.Tests` 结果见补记。
+
+### 未交付（S2.2-B/S2.3）
+
+- BuildTasks task/targets 物化、CLI/transport/stamp 复用、`CrestCreatesJsonContractGenerationDependsOn` 显式接入、design-time/TFM/RID 分区、外部包首消费（B01–B04 的 MSBuild 证据）；
+- JsonContracts 生成 `HttpProjectionJsonContext_*` roots（当前 emitter 通过 options 引用该名称；stub 只用于编译探针）；
+- 真实 Host 的 `AddGeneratedAppServiceHttp` 激活验收、Map 期 fail-closed、Asset/Procurement 迁移（S2.3）。

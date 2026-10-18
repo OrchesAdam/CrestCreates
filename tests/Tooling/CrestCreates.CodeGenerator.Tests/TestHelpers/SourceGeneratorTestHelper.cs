@@ -288,9 +288,10 @@ namespace CrestCreates.Domain.Shared.Attributes
         public static Microsoft.CodeAnalysis.CSharp.CSharpCompilation CreateAnalysisCompilation(
             string assemblyName,
             string[] sources,
-            IEnumerable<MetadataReference>? additionalMetadataReferences = null)
+            IEnumerable<MetadataReference>? additionalMetadataReferences = null,
+            string[]? additionalReferences = null)
             => (Microsoft.CodeAnalysis.CSharp.CSharpCompilation)CreateCompilation(
-                assemblyName, sources, additionalSources: null, additionalReferences: null, additionalMetadataReferences);
+                assemblyName, sources, additionalSources: null, additionalReferences, additionalMetadataReferences);
 
         /// <summary>
         /// 将一个程序集编译为 PE 镜像字节（不运行任何生成器），供跨程序集测试作为 MetadataReference 引用。
