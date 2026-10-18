@@ -53,11 +53,26 @@ public static class AppServiceHttpWireConvention
     /// </summary>
     public static string CanonicalToken(string value)
     {
-        var builder = new StringBuilder(value.Length + 8);
-        foreach (var character in value)
+        if (value.Length == 0)
         {
+            return "_EMPTY";
+        }
+
+        var builder = new StringBuilder(value.Length + 8);
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
             if (char.IsLetterOrDigit(character))
             {
+                if (index == 0 && char.IsDigit(character))
+                {
+                    // Encode the leading digit itself. A conditional '_' prefix is not injective:
+                    // "_Host" already encodes to "_005FHost", which is exactly what the prefix produced
+                    // for "005FHost" (S21-R3 review).
+                    builder.Append('_').Append(((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
+                    continue;
+                }
+
                 builder.Append(character);
             }
             else if (character == '_')
@@ -68,16 +83,6 @@ public static class AppServiceHttpWireConvention
             {
                 builder.Append('_').Append(((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture));
             }
-        }
-
-        if (builder.Length == 0)
-        {
-            return "_EMPTY";
-        }
-
-        if (!char.IsLetter(builder[0]) && builder[0] != '_')
-        {
-            builder.Insert(0, '_');
         }
 
         return builder.ToString();
@@ -97,7 +102,7 @@ public static class AppServiceHttpWireConvention
     }
 
     /// <summary>Route relative to the projection prefix, derived when the declaration does not name one.</summary>
-    public static string DefaultRoute(string methodName, IReadOnlyList<string> scalarParameterNames)
+    public static string DefaultRoute(string methodName, IReadOnlyList<string> parameterNames)
     {
         var name = TrimAsyncSuffix(methodName);
         return name switch
@@ -109,14 +114,14 @@ public static class AppServiceHttpWireConvention
             "GetAll" => "all",
             "Count" => "count",
             "Query" => "query",
-            _ when name.StartsWith("GetBy", StringComparison.Ordinal) && scalarParameterNames.Count == 1
-                => "by-" + ToKebabCase(name.Substring("GetBy".Length)) + "/{" + scalarParameterNames[0] + "}",
-            _ when name.StartsWith("Get", StringComparison.Ordinal) && scalarParameterNames.Count == 0
+            _ when name.StartsWith("GetBy", StringComparison.Ordinal) && parameterNames.Count == 1
+                => "by-" + ToKebabCase(name.Substring("GetBy".Length)) + "/{" + parameterNames[0] + "}",
+            _ when name.StartsWith("Get", StringComparison.Ordinal) && parameterNames.Count == 0
                 => ToKebabCase(name.Substring("Get".Length)),
-            _ when name.StartsWith("Get", StringComparison.Ordinal) && scalarParameterNames.Count == 1
+            _ when name.StartsWith("Get", StringComparison.Ordinal) && parameterNames.Count == 1
                 => ToKebabCase(name.Substring("Get".Length)),
-            _ when name.StartsWith("Get", StringComparison.Ordinal) && scalarParameterNames.Count > 1
-                => ToKebabCase(name.Substring("Get".Length)) + "/{" + scalarParameterNames[0] + "}",
+            _ when name.StartsWith("Get", StringComparison.Ordinal) && parameterNames.Count > 1
+                => ToKebabCase(name.Substring("Get".Length)) + "/{" + parameterNames[0] + "}",
             _ => ToKebabCase(name),
         };
     }

@@ -252,3 +252,9 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 显式 `CapabilityIdPrefix` 路径保持 `prefix + "." + kebab(action)`，以便 Ticket 在 S3 显式保留现有 `compat.appservice.ticket.*` id。
 
 审查者新增 3 条身份探针（信封 FQN 可在普通 Compile 声明、`A.B`/`A_B` 默认 ID 不碰撞、不同显式 prefix 下信封不碰撞）以 patch 原样入库；与 R1 的 5 条及本切片 10 条定向合并 **18/18 pass**；全量 `CrestCreates.CodeGenerator.Tests` **482 pass / 0 fail / 482**，0 skipped（22m26s），无新增回归。
+
+### S2.1 复审 R3 修复（首位数字前缀碰撞）
+
+`CanonicalToken` 的「首字符为数字时补 `_`」不是单射：`"005FHost"` → `_005FHost`，而 `"_Host"` 的 `_` 转义同样是 `_005FHost`。修复为**编码首位数字本身**（`'0'` → `_0030`），删掉条件补 `_`；其余字符规则不变。于是 `"005FHost"` → `_003005FHost`，`"_Host"` → `_005FHost`，不再碰撞；空串仍 `_EMPTY`（与 `"EMPTY"`→`EMPTY`、`"_EMPTY"`→`_005FEMPTY` 均不同）。
+
+审查者 2 条探针（token 单射、同源不同合法程序集的 ID/信封不同）以 patch 原样入库；与 R1/R2 探针及本切片定向合并 **20/20 pass**。全量结果见补记。
