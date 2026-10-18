@@ -156,6 +156,26 @@ public static class AppServiceHttpProjectionModelBuilder
         List<AppServiceHttpReferenceIdentity> referenced)
     {
         var actionName = contractMethod.Name;
+        if (contractMethod.TypeParameters.Length > 0)
+        {
+            diagnostics.Add(new AppServiceHttpProjectionDiagnostic(
+                AppServiceHttpDiagnosticCodes.UnsupportedDeclaration,
+                $"action '{actionName}' is an open generic method; the HTTP projection only supports closed signatures",
+                AppServiceHttpDiagnosticSeverity.Error,
+                contractMethod.ToDisplayString()));
+            return null;
+        }
+
+        if (contractMethod.Parameters.Any(parameter => parameter.RefKind != RefKind.None))
+        {
+            diagnostics.Add(new AppServiceHttpProjectionDiagnostic(
+                AppServiceHttpDiagnosticCodes.UnsupportedDeclaration,
+                $"action '{actionName}' declares a ref/out/in parameter; the HTTP projection has no by-reference binding",
+                AppServiceHttpDiagnosticSeverity.Error,
+                contractMethod.ToDisplayString()));
+            return null;
+        }
+
         var contractAttribute = FindAttribute(contractMethod, ActionAttributeName);
         var implementation = anchor.FindImplementationForInterfaceMember(contractMethod) as IMethodSymbol;
         var implementationAttribute = implementation is null ? null : FindAttribute(implementation, ActionAttributeName);
@@ -327,7 +347,7 @@ public static class AppServiceHttpProjectionModelBuilder
                 Name = parameter.Name,
                 TypeFullName = parameter.Type.ToDisplayString(Display),
                 Source = isStamp ? "Header" : isBody ? "Body" : isRoute ? "Route" : "Query",
-                Required = isStamp ? false : true,
+                Required = isStamp ? false : !IsNullableScalar(parameter.Type),
                 ScalarKind = isStamp ? AppServiceHttpScalarKind.String : scalarKind,
                 MemberName = isStamp ? "IfMatch" : memberName,
             });
@@ -512,6 +532,16 @@ public static class AppServiceHttpProjectionModelBuilder
 
         return type.ToDisplayString() is "System.Guid" or "System.DateTime" or "System.DateTimeOffset"
             or "System.TimeSpan" or "System.DateOnly" or "System.TimeOnly";
+    }
+
+    private static bool IsNullableScalar(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol nullable && nullable.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+        {
+            return true;
+        }
+
+        return type.IsReferenceType && type.NullableAnnotation == NullableAnnotation.Annotated;
     }
 
     private static bool IsCancellationToken(ITypeSymbol type)

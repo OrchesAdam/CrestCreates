@@ -1091,25 +1091,18 @@ public static class CrudArtifactEmitter
 
     private static CrudArtifact EmitCapabilityInputEnvelope(CrudGenerationModel model, CrudActionModel action)
     {
+        // #129 S2.2: the composed input envelope is declared by the shared wire backend, so the CRUD and
+        // hand-written fronts cannot drift in envelope shape (S22A-R2 review).
         var name = model.EnvelopeName(action.Name);
         var builder = StartDocument(model);
         OpenNamespace(builder, model.EnvelopeNamespace);
-        Line(builder, Indent + "internal sealed class " + name);
-        Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public " + model.IdTypeDisplay + " "
-            + CrudEnvelopeConvention.RouteIdentityMember + " { get; init; }");
-        if (action.BodyPayloadFullName is not null)
+        var wireAction = ToWireAction(model, action);
+        foreach (var line in CrestCreates.Tooling.HttpProjection.HttpWireEmitter.EmitEnvelopeDeclaration(
+                     name, wireAction.Parameters))
         {
-            Line(builder, NestedIndent + "public " + Qualified(action.BodyPayloadFullName) + " "
-                + CrudEnvelopeConvention.BodyMember + " { get; init; } = default!;");
+            Line(builder, line);
         }
 
-        foreach (var header in action.HeaderInputs)
-        {
-            Line(builder, NestedIndent + "public string? " + header.MemberName + " { get; init; }");
-        }
-
-        Line(builder, Indent + "}");
         CloseNamespace(builder);
         return Artifact(name + ".g.cs", builder);
     }
@@ -1366,6 +1359,7 @@ public static class CrudArtifactEmitter
                 ScalarKind = CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.NotScalar,
                 MemberName = CrudEnvelopeConvention.BodyMember,
                 LocalName = "body",
+                NeedsDefaultInitializer = true,
             });
             arguments.Add(action.UsesCapabilityInputEnvelope
                 ? new CrestCreates.Tooling.HttpProjection.HttpWireArgument(

@@ -103,6 +103,9 @@ public sealed record HttpWireParameter
     /// <summary>Local variable name the binder declares for this input (CRUD keeps id/body).</summary>
     public string? LocalName { get; init; }
 
+    /// <summary>True when the emitted envelope member needs a <c>= default!</c> initializer.</summary>
+    public bool NeedsDefaultInitializer { get; init; }
+
     /// <summary>False for a synthetic header input with no matching contract parameter.</summary>
     public bool IsContractParameter { get; init; } = true;
 }

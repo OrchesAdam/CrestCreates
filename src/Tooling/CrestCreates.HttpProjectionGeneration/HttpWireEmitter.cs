@@ -34,20 +34,37 @@ public static class HttpWireEmitter
         foreach (var action in model.Actions.Where(action => action.EnvelopeFullName is not null))
         {
             var typeName = action.EnvelopeFullName!.Substring(action.EnvelopeFullName!.LastIndexOf('.') + 1);
-            Line(builder, Indent + "internal sealed class " + typeName);
-            Line(builder, Indent + "{");
-            foreach (var parameter in action.Parameters.Where(parameter => parameter.Source != "CancellationToken"))
+            foreach (var line in EmitEnvelopeDeclaration(typeName, action.Parameters))
             {
-                Line(builder, NestedIndent + "public " + parameter.TypeFullName + " " + parameter.MemberName
-                    + " { get; init; } = default!;");
+                Line(builder, line);
             }
 
-            Line(builder, Indent + "}");
             Line(builder, string.Empty);
         }
 
         Line(builder, "}");
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// One composed input envelope declaration shared by every front-end (CRUD bundles and hand-written
+    /// projections alike); the caller places it inside its generated namespace.
+    /// </summary>
+    public static IReadOnlyList<string> EmitEnvelopeDeclaration(string typeName, IReadOnlyList<HttpWireParameter> parameters)
+    {
+        var lines = new List<string>
+        {
+            Indent + "internal sealed class " + typeName,
+            Indent + "{",
+        };
+        foreach (var parameter in parameters.Where(parameter => parameter.Source != "CancellationToken"))
+        {
+            lines.Add(NestedIndent + "public " + parameter.TypeFullName + " " + parameter.MemberName
+                + " { get; init; }" + (parameter.NeedsDefaultInitializer ? " = default!;" : string.Empty));
+        }
+
+        lines.Add(Indent + "}");
+        return lines;
     }
 
     /// <summary>The contribution class with every wire component of the model.</summary>
@@ -335,23 +352,50 @@ public static class HttpWireEmitter
             + Escape(MessageType(parameter.TypeFullName)) + ".\");";
         if (parameter.ScalarKind == AppServiceHttpScalarKind.String)
         {
-            Line(builder, NestedIndent + Indent + "var " + local + " = " + expression + ";");
-            Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "))");
-            Line(builder, NestedIndent + Indent + "{");
-            Line(builder, NestedIndent + Indent + Indent + failure);
-            Line(builder, NestedIndent + Indent + "}");
+            Line(builder, NestedIndent + Indent + "var " + local + "Text = " + expression + ";");
+            if (parameter.Required)
+            {
+                Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "Text))");
+                Line(builder, NestedIndent + Indent + "{");
+                Line(builder, NestedIndent + Indent + Indent + failure);
+                Line(builder, NestedIndent + Indent + "}");
+                Line(builder, NestedIndent + Indent + "var " + local + " = " + local + "Text;");
+            }
+            else
+            {
+                Line(builder, NestedIndent + Indent + "var " + local + " = global::System.String.IsNullOrEmpty(" + local + "Text) ? null : " + local + "Text;");
+            }
+
             return;
         }
 
         if (parameter.ScalarKind == AppServiceHttpScalarKind.Enum)
         {
+            var enumType = EnumTypeForParse(parameter.TypeFullName);
             Line(builder, NestedIndent + Indent + "var " + local + "Text = " + expression + ";");
-            Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "Text) || !global::System.Enum.TryParse(typeof("
-                + parameter.TypeFullName + "), " + local + "Text, ignoreCase: true, out var " + local + "Value))");
-            Line(builder, NestedIndent + Indent + "{");
-            Line(builder, NestedIndent + Indent + Indent + failure);
-            Line(builder, NestedIndent + Indent + "}");
-            Line(builder, NestedIndent + Indent + "var " + local + " = (" + parameter.TypeFullName + ")" + local + "Value!;");
+            if (parameter.Required)
+            {
+                Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "Text) || !global::System.Enum.TryParse(typeof("
+                    + enumType + "), " + local + "Text, ignoreCase: true, out var " + local + "Value))");
+                Line(builder, NestedIndent + Indent + "{");
+                Line(builder, NestedIndent + Indent + Indent + failure);
+                Line(builder, NestedIndent + Indent + "}");
+                Line(builder, NestedIndent + Indent + "var " + local + " = (" + parameter.TypeFullName + ")" + local + "Value!;");
+            }
+            else
+            {
+                Line(builder, NestedIndent + Indent + parameter.TypeFullName + " " + local + " = default!;");
+                Line(builder, NestedIndent + Indent + "if (!global::System.String.IsNullOrEmpty(" + local + "Text))");
+                Line(builder, NestedIndent + Indent + "{");
+                Line(builder, NestedIndent + Indent + Indent + "if (!global::System.Enum.TryParse(typeof(" + enumType + "), "
+                    + local + "Text, ignoreCase: true, out var " + local + "Value))");
+                Line(builder, NestedIndent + Indent + Indent + "{");
+                Line(builder, NestedIndent + Indent + Indent + Indent + failure);
+                Line(builder, NestedIndent + Indent + Indent + "}");
+                Line(builder, NestedIndent + Indent + Indent + local + " = (" + parameter.TypeFullName + ")" + local + "Value!;");
+                Line(builder, NestedIndent + Indent + "}");
+            }
+
             return;
         }
 
@@ -377,11 +421,27 @@ public static class HttpWireEmitter
                 + ": scalar kind '" + parameter.ScalarKind + "' has no bounded binder."),
         };
         Line(builder, NestedIndent + Indent + "var " + local + "Text = " + expression + ";");
-        Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "Text) || !" + parse
-            + ".TryParse(" + local + "Text, out var " + local + "))");
-        Line(builder, NestedIndent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + failure);
-        Line(builder, NestedIndent + Indent + "}");
+        if (parameter.Required)
+        {
+            Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "Text) || !" + parse
+                + ".TryParse(" + local + "Text, out var " + local + "))");
+            Line(builder, NestedIndent + Indent + "{");
+            Line(builder, NestedIndent + Indent + Indent + failure);
+            Line(builder, NestedIndent + Indent + "}");
+        }
+        else
+        {
+            Line(builder, NestedIndent + Indent + parameter.TypeFullName + " " + local + " = default!;");
+            Line(builder, NestedIndent + Indent + "if (!global::System.String.IsNullOrEmpty(" + local + "Text) && " + parse
+                + ".TryParse(" + local + "Text, out var " + local + "Value))");
+            Line(builder, NestedIndent + Indent + "{");
+            Line(builder, NestedIndent + Indent + Indent + local + " = " + local + "Value;");
+            Line(builder, NestedIndent + Indent + "}");
+            Line(builder, NestedIndent + Indent + "else if (!global::System.String.IsNullOrEmpty(" + local + "Text))");
+            Line(builder, NestedIndent + Indent + "{");
+            Line(builder, NestedIndent + Indent + Indent + failure);
+            Line(builder, NestedIndent + Indent + "}");
+        }
     }
 
     private static void EmitResultMapper(StringBuilder builder, HttpWireAction action)
@@ -553,6 +613,17 @@ public static class HttpWireEmitter
                 yield return root;
             }
         }
+    }
+
+    private static string EnumTypeForParse(string typeFullName)
+    {
+        var trimmed = typeFullName.TrimEnd('?');
+        if (trimmed.StartsWith("global::System.Nullable<", StringComparison.Ordinal) && trimmed.EndsWith(">", StringComparison.Ordinal))
+        {
+            return trimmed.Substring("global::System.Nullable<".Length, trimmed.Length - "global::System.Nullable<".Length - 1);
+        }
+
+        return trimmed;
     }
 
     private static string BinderName(HttpWireAction action) => "Bind_" + action.Name + "_Async";

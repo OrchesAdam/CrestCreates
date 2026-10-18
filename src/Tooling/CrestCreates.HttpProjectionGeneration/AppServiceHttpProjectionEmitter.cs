@@ -205,6 +205,7 @@ public static class AppServiceHttpProjectionEmitter
                 HeaderName = parameter.Source == "Header" ? "If-Match" : null,
                 TrimQuotes = parameter.Source == "Header",
                 IsContractParameter = parameter.IsContractParameter,
+                NeedsDefaultInitializer = parameter.Source != "CancellationToken",
             })
             .ToArray();
 
@@ -304,12 +305,22 @@ public sealed record AppServiceHttpAssemblyOptions
     public string HandlerModuleTypeName { get; init; } = "GeneratedAppServiceHttpHandlerModule";
     public string JsonOptionsConfiguratorTypeName { get; init; } = "GeneratedAppServiceHttpJsonConfigurator";
 
+    /// <summary>
+    /// Per-owner names: two owner assemblies may be referenced by one host, so the public activation type
+    /// must be unique per assembly (S22A-R2 review); internal module/configurator types are private to
+    /// their assembly but stay qualified for diagnosability.
+    /// </summary>
     public static AppServiceHttpAssemblyOptions ForAssembly(string ownerAssemblyName)
-        => new()
+    {
+        var token = AppServiceHttpWireConvention.CanonicalToken(ownerAssemblyName);
+        return new AppServiceHttpAssemblyOptions
         {
-            JsonContextFullName = "global::" + GeneratedHttpJsonContext.Namespace + "." + GeneratedHttpJsonContext.TypePrefix
-                + AppServiceHttpWireConvention.CanonicalToken(ownerAssemblyName),
+            ActivationTypeName = "GeneratedAppServiceHttpActivation_" + token,
+            HandlerModuleTypeName = "GeneratedAppServiceHttpHandlerModule_" + token,
+            JsonOptionsConfiguratorTypeName = "GeneratedAppServiceHttpJsonConfigurator_" + token,
+            JsonContextFullName = "global::" + GeneratedHttpJsonContext.Namespace + "." + GeneratedHttpJsonContext.TypePrefix + token,
         };
+    }
 }
 
 /// <summary>Frozen naming for the JSON context the JsonContracts stage must materialize per assembly.</summary>

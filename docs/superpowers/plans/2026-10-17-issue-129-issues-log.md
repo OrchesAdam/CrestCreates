@@ -308,3 +308,13 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - **手写前端**：`AppServiceHttpProjectionEmitter` 现在只做「模型 → wire」映射与 bundle/激活/manifest 组装，不再持有发射规则；14 条审查探针 + 3 条 emitter 测试 + 7 条模型测试保持 **24/24**。
 - **CRUD 前端**：`CrudArtifactEmitter.EmitCapabilityContribution` 改为构造 wire model 并调用 `HttpWireEmitter.EmitContribution`；删除 21 个重复的发射方法（descriptors/endpoints/bindings/handlers/results/body types/roots/identities/binder/mapper/invoker 等）；激活中的 invoker 名称改用共享命名，JSON configurator 继续调用共享策略。CRUD 独占的实体/DTO/service/repository/mapping/permission/query-adapter 生成不变。
 - 验证：CRUD 形状测试 54/54；两前端定向 24/24；全量 `CrestCreates.CodeGenerator.Tests` **501 pass / 0 fail / 501**（22m11s）；CRUD NativeAOT 门禁**保持绿**：`CrestCreates.GeneratedCrud.AotFixture.Tests` **23/23 pass**（含 `GeneratedCrudNativeHttpGateTests` 的 publish/link/run、15 场景 sentinel、总 sentinel 与变异控制）。
+
+### S2.2-A 复审 R2 修复（3 项 P2）
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| S22A-R2-01 模型接受集大于可物化/执行集：可空 enum、ref、开放泛型方法 | 模型构建期：`ref/out/in` 参数与开放泛型方法直接 CCHTTP001 拒绝；可空标量（`Nullable<T>`/可空引用）记为 `Required=false`；共享 binder 对 enum 用**非空底层类型** `Enum.TryParse`（`State?` 不再对 `typeof(State?)` 调用），可选标量缺失时保留 default、有值时解析 | 审查 5 条边界探针（nullable enum 正例、非空 enum 正例、ref 拒绝、开放泛型拒绝、两 owner 激活）全部通过 |
+| S22A-R2-02 公开激活身份不含 owner | `ForAssembly` 的 activation/handler/configurator 名称与 file 名/context 一样包含 canonical owner；扩展方法名仍为 `AddGeneratedAppServiceHttp`，Host 可通过生成符号 FQN 精确选择 owner | 两 owner 各自 PE emit 后被同一 Host 同时引用并分别调用 → 零错误 |
+| S22A-R2-03 CRUD 输入信封仍是第二份规则 | `CrudArtifactEmitter.EmitCapabilityInputEnvelope` 改为调用共享 `HttpWireEmitter.EmitEnvelopeDeclaration`（保留 #128 每 action 文件名/hint、类型名与逐文件 manifest，冻结 roots/可空 header/wire 形状） | CRUD 形状/typed adapter/real-declaration **58/58**；全量与 NativeAOT 结果见补记 |
+
+定向（手写模型/emitter + R1/R2 审查探针）**29/29 pass**。全量 `CrestCreates.CodeGenerator.Tests` 与 CRUD NativeAOT 门禁结果见补记。
