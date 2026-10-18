@@ -299,4 +299,4 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 | S22A-R1-05 [P2] 实际 scalar 输入缺 JSON root | 输入侧 roots 覆盖：组合信封（CapabilityInput）、裸 scalar（CapabilityInput）、裸 body（Body），并逐参数收录标量类型 | `RequiredJsonRootTypes` 含 `typeof(Guid)` + `CapabilityInput` 的探针通过 |
 | S22A-R1-06 [P2] 共用后端未提取 | 新增 `HttpProjectionShared`：`DeclaredTypeFullNames`（#128 provenance 规则）与 `EmitJsonConfigurator`（resolver 插入/追加策略）；**CRUD emitter 已改为调用这两条共享规则**（`CrudArtifactEmitter.DeclaredTypeFullNames` 委托、configurator 发射委托）。binder/invoker/descriptor 的 CRUD↔手写完全归一仍**未完成**，属下一增量 | CRUD 生成器单元 21/21；全量结果见补记；不声称该项已关闭 |
 
-定向（14 条审查探针 + 3 条本切片 emitter 测试）**17/17 pass**。全量 `CrestCreates.CodeGenerator.Tests` 结果见补记。
+定向（14 条审查探针 + 7 条模型 + 3 条本切片 emitter 测试）**24/24 pass**；CRUD 生成器单元 21/21；全量 `CrestCreates.CodeGenerator.Tests` **501 pass / 0 fail / 501**，0 skipped（22m29s），无新增回归。CRUD↔手写 binder/invoker/descriptor 完全归一仍未完成（下一增量）。
