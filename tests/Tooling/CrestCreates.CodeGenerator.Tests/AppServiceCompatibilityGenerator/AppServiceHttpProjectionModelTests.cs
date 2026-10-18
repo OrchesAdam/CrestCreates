@@ -105,7 +105,9 @@ public sealed class AppServiceHttpProjectionModelTests
             new { Name = "id", Binding = "query" },
             new { Name = "agentId", Binding = "query" },
         });
-        assign.InputEnvelopeFullName.Should().BeNull("two scalar query parameters bind directly");
+        assign.InputEnvelopeFullName.Should().Be(
+            "CrestCreates.Generated.Shop_002EHttp__Shop_002EContracts_002EIWidgetAppService__Assign_CompatibilityInput",
+            "two query parameters must be preserved through the composed envelope; dropping them was the S22A-R1-01 P1");
 
         var byCustomer = model.Actions.Single(a => a.Name == "GetByCustomerAsync");
         byCustomer.RoutePattern.Should().Be("by-customer/{customerId}");
