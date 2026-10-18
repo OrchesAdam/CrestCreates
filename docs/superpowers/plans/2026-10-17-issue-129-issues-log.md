@@ -300,3 +300,11 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 | S22A-R1-06 [P2] 共用后端未提取 | 新增 `HttpProjectionShared`：`DeclaredTypeFullNames`（#128 provenance 规则）与 `EmitJsonConfigurator`（resolver 插入/追加策略）；**CRUD emitter 已改为调用这两条共享规则**（`CrudArtifactEmitter.DeclaredTypeFullNames` 委托、configurator 发射委托）。binder/invoker/descriptor 的 CRUD↔手写完全归一仍**未完成**，属下一增量 | CRUD 生成器单元 21/21；全量结果见补记；不声称该项已关闭 |
 
 定向（14 条审查探针 + 7 条模型 + 3 条本切片 emitter 测试）**24/24 pass**；CRUD 生成器单元 21/21；全量 `CrestCreates.CodeGenerator.Tests` **501 pass / 0 fail / 501**，0 skipped（22m29s），无新增回归。CRUD↔手写 binder/invoker/descriptor 完全归一仍未完成（下一增量）。
+
+### S2.2-A 后端收口（S22A-R1-06 的后续实现）
+
+- 新增中性 **wire model**：`HttpWireModel` / `HttpWireAction` / `HttpWireParameter` / `HttpWireArgument` / `HttpWireJsonRoot`（Route/Query/Body/Header/CT、信封、invoker 参数序列、结果形状、not-found 语义、额外 JSON roots）。
+- 新增共享后端 `HttpWireEmitter`：信封、capability/endpoint descriptors、typed bindings、handler bindings、typed result mappers、invokers、JSON roots、required identities 全部只此一份。
+- **手写前端**：`AppServiceHttpProjectionEmitter` 现在只做「模型 → wire」映射与 bundle/激活/manifest 组装，不再持有发射规则；14 条审查探针 + 3 条 emitter 测试 + 7 条模型测试保持 **24/24**。
+- **CRUD 前端**：`CrudArtifactEmitter.EmitCapabilityContribution` 改为构造 wire model 并调用 `HttpWireEmitter.EmitContribution`；删除 21 个重复的发射方法（descriptors/endpoints/bindings/handlers/results/body types/roots/identities/binder/mapper/invoker 等）；激活中的 invoker 名称改用共享命名，JSON configurator 继续调用共享策略。CRUD 独占的实体/DTO/service/repository/mapping/permission/query-adapter 生成不变。
+- 验证：CRUD 形状测试 54/54；两个前端定向 24/24；全量与 CRUD NativeAOT 门禁结果见补记。

@@ -132,6 +132,7 @@ public enum AppServiceHttpScalarKind
     Guid,
     String,
     Int16,
+    UInt16,
     Int32,
     Int64,
     UInt32,

@@ -8,20 +8,12 @@ using System.Text;
 namespace CrestCreates.Tooling.HttpProjection;
 
 /// <summary>
-/// Issue #129 S2.2: turns the frozen <see cref="AppServiceHttpProjectionModel"/> into ordinary Compile
-/// artifacts. One bundle per contract carries envelopes, the ExplicitHost contribution and its typed
-/// binders/invokers/result mappers; one assembly activation carries AddGeneratedAppServiceHttp plus the
-/// handler module and the JSON resolver configurator. Nothing registers through a module initializer or
-/// a process-global registry.
+/// Issue #129 S2.2: maps the hand-written AppService model onto the neutral HTTP wire model and hands it
+/// to <see cref="HttpWireEmitter"/>, the same backend the CRUD front-end uses. One bundle per contract;
+/// one assembly activation for every contract of an owner.
 /// </summary>
 public static class AppServiceHttpProjectionEmitter
 {
-    public const string GeneratedNamespace = "CrestCreates.Generated";
-    public const string HttpNamespace = "CrestCreates.Generated.HttpProjection";
-
-    private const string CapabilityAbstractions = "global::CrestCreates.Capability.Abstractions.";
-    private const string DynamicApi = "global::CrestCreates.DynamicApi.";
-
     /// <summary>The bundle artifact of one contract: envelopes + contribution + invokers.</summary>
     public static IReadOnlyList<AppServiceHttpArtifact> Emit(
         AppServiceHttpProjectionModel model,
@@ -37,21 +29,12 @@ public static class AppServiceHttpProjectionEmitter
             throw new ArgumentNullException(nameof(options));
         }
 
+        var wire = ToWireModel(model, options);
         var token = AppServiceHttpWireConvention.CanonicalToken(model.ContractFullName);
-        var builder = StartDocument("bundle", model);
-        OpenNamespace(builder, GeneratedNamespace);
-        EmitEnvelopes(builder, model);
-        CloseNamespace(builder);
-        Line(builder, string.Empty);
-        OpenNamespace(builder, HttpNamespace);
-        EmitContribution(builder, model, options);
-        Line(builder, string.Empty);
-        foreach (var action in model.Actions)
-        {
-            EmitInvoker(builder, model, action);
-        }
-
-        CloseNamespace(builder);
+        var builder = new StringBuilder();
+        builder.Append(HttpWireEmitter.EmitEnvelopes(wire));
+        builder.AppendLine();
+        builder.Append(HttpWireEmitter.EmitContribution(wire));
         return new[] { new AppServiceHttpArtifact("GeneratedAppServiceHttpBundle_" + token + ".g.cs", builder.ToString()) };
     }
 
@@ -75,11 +58,18 @@ public static class AppServiceHttpProjectionEmitter
             + " | model: " + AppServiceHttpProjectionModel.ModelSchemaVersion + ". Do not edit.");
         Line(builder, "#nullable enable");
         Line(builder, string.Empty);
-        OpenNamespace(builder, HttpNamespace, new[]
+        Line(builder, "namespace " + HttpWireEmitter.HttpNamespace);
+        Line(builder, "{");
+        foreach (var usingLine in new[]
+                 {
+                     "using Microsoft.Extensions.DependencyInjection;",
+                     "using Microsoft.Extensions.DependencyInjection.Extensions;",
+                 })
         {
-            "using Microsoft.Extensions.DependencyInjection;",
-            "using Microsoft.Extensions.DependencyInjection.Extensions;",
-        });
+            Line(builder, Indent + usingLine);
+        }
+
+        Line(builder, string.Empty);
         Line(builder, Indent + "/// <summary>");
         Line(builder, Indent + "/// #129 ExplicitHost activation of assembly '" + ownerAssemblyName + "'.");
         Line(builder, Indent + "/// The host calls " + AppServiceHttpProjectionModel.ActivationMethodName
@@ -106,7 +96,7 @@ public static class AppServiceHttpProjectionEmitter
         Line(builder, NestedIndent + Indent + Indent + "services,");
         Line(builder, NestedIndent + Indent + Indent
             + "global::Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Singleton<"
-            + CapabilityAbstractions + "ICapabilityHandlerModule,");
+            + "global::CrestCreates.Capability.Abstractions.ICapabilityHandlerModule,");
         Line(builder, NestedIndent + Indent + Indent + Indent + options.HandlerModuleTypeName + ">());");
         Line(builder, string.Empty);
         Line(builder, NestedIndent + Indent
@@ -122,18 +112,19 @@ public static class AppServiceHttpProjectionEmitter
         Line(builder, Indent + "}");
         Line(builder, string.Empty);
         Line(builder, Indent + "internal sealed class " + options.HandlerModuleTypeName
-            + " : " + CapabilityAbstractions + "ICapabilityHandlerModule");
+            + " : global::CrestCreates.Capability.Abstractions.ICapabilityHandlerModule");
         Line(builder, Indent + "{");
         Line(builder, NestedIndent + "public string Id => \"" + Escape(ownerAssemblyName) + "\";");
         Line(builder, string.Empty);
-        Line(builder, NestedIndent + "public void Apply(" + CapabilityAbstractions + "CapabilityHandlerResolver resolver)");
+        Line(builder, NestedIndent + "public void Apply(global::CrestCreates.Capability.Abstractions.CapabilityHandlerResolver resolver)");
         Line(builder, NestedIndent + "{");
-        foreach (var (model, _) in contracts)
+        foreach (var (model, optionsOfContract) in contracts)
         {
             foreach (var action in model.Actions)
             {
                 Line(builder, NestedIndent + Indent + "resolver.Register(\"" + Escape(action.CapabilityId) + "\", new "
-                    + InvokerName(model, action) + "());");
+                    + HttpWireEmitter.InvokerName(optionsOfContract.ContributionTypeName, ToWireAction(model, action))
+                    + "());");
             }
         }
 
@@ -148,14 +139,13 @@ public static class AppServiceHttpProjectionEmitter
         HttpProjectionShared.EmitJsonConfigurator(builder, options.JsonContextFullName, NestedIndent + Indent);
         Line(builder, NestedIndent + "}");
         Line(builder, Indent + "}");
-        CloseNamespace(builder);
-        return new AppServiceHttpArtifact("GeneratedAppServiceHttpActivation_" + AppServiceHttpWireConvention.CanonicalToken(ownerAssemblyName) + ".g.cs", builder.ToString());
+        Line(builder, "}");
+        return new AppServiceHttpArtifact(
+            "GeneratedAppServiceHttpActivation_" + AppServiceHttpWireConvention.CanonicalToken(ownerAssemblyName) + ".g.cs",
+            builder.ToString());
     }
 
-    /// <summary>
-    /// One manifest entry per emitted artifact. Declared types come from the artifact's own source
-    /// (#128 provenance rule); referenced contract/DTO identities stay in their own field.
-    /// </summary>
+    /// <summary>One manifest entry for the contract bundle.</summary>
     public static AppServiceHttpManifestEntry BuildManifestEntry(
         AppServiceHttpProjectionModel model,
         AppServiceHttpEmissionOptions options)
@@ -189,488 +179,76 @@ public static class AppServiceHttpProjectionEmitter
             ModelSchemaVersion: AppServiceHttpProjectionModel.ModelSchemaVersion,
             ContentHash: ContentHashOf(artifact.Source));
 
-    private static void EmitEnvelopes(StringBuilder builder, AppServiceHttpProjectionModel model)
-    {
-        foreach (var action in model.Actions.Where(action => action.InputEnvelopeFullName is not null))
+    private static HttpWireModel ToWireModel(AppServiceHttpProjectionModel model, AppServiceHttpEmissionOptions options)
+        => new()
         {
-            var typeName = action.InputEnvelopeFullName!.Substring(action.InputEnvelopeFullName!.LastIndexOf('.') + 1);
-            Line(builder, Indent + "internal sealed class " + typeName);
-            Line(builder, Indent + "{");
-            foreach (var parameter in action.Parameters.Where(parameter => parameter.Source != "CancellationToken"))
-            {
-                Line(builder, NestedIndent + "public " + MemberType(parameter) + " " + parameter.MemberName
-                    + " { get; init; } = default!;");
-            }
-
-            Line(builder, Indent + "}");
-            Line(builder, string.Empty);
-        }
-    }
-
-    private static void EmitContribution(
-        StringBuilder builder,
-        AppServiceHttpProjectionModel model,
-        AppServiceHttpEmissionOptions options)
-    {
-        Line(builder, Indent + "internal sealed class " + options.ContributionTypeName
-            + " : " + DynamicApi + "CapabilityEndpointContribution");
-        Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public " + options.ContributionTypeName + "()");
-        Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + Indent + "OwnerAssemblyName = \"" + Escape(model.HttpOwnerAssemblyName) + "\";");
-        EmitDescriptors(builder, model);
-        EmitEndpointDescriptors(builder, model);
-        EmitBindings(builder, model);
-        EmitHandlers(builder, model);
-        EmitResultBindings(builder, model);
-        EmitBodyTypes(builder, model);
-        EmitJsonContract(builder, model, options);
-        EmitRequiredIdentities(builder, model);
-        Line(builder, NestedIndent + "}");
-        Line(builder, string.Empty);
-        foreach (var action in model.Actions)
-        {
-            EmitBinder(builder, model, action);
-            EmitResultMapper(builder, action);
-        }
-
-        Line(builder, Indent + "}");
-    }
-
-    private static void EmitDescriptors(StringBuilder builder, AppServiceHttpProjectionModel model)
-    {
-        Line(builder, NestedIndent + Indent + "CapabilityDescriptors = new global::CrestCreates.Metadata.CapabilityDescriptor[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new global::CrestCreates.Metadata.CapabilityDescriptor");
-            Line(builder, QuadIndent + "{");
-            Line(builder, QuintIndent + "Namespace = \"capability\",");
-            Line(builder, QuintIndent + "Id = \"" + Escape(action.CapabilityId) + "\",");
-            Line(builder, QuintIndent + "Name = \"" + Escape(action.Name) + "\",");
-            Line(builder, QuintIndent + "State = global::CrestCreates.Metadata.Abstractions.DescriptorState.Active,");
-            Line(builder, QuintIndent + "Version = 1,");
-            Line(builder, QuintIndent + "CapabilityKind = global::CrestCreates.Metadata.Abstractions.DescriptorCapability.CapabilityKind."
-                + (action.OperationKind == AppServiceHttpOperationKind.Query ? "Query," : "Command,"));
-            Line(builder, QuintIndent + "Permissions = " + StringArray(action.Permissions) + ",");
-            Line(builder, QuintIndent + "RiskLevel = global::CrestCreates.Metadata.Abstractions.DescriptorCapability.CapabilityRiskLevel.Medium,");
-            Line(builder, QuintIndent + "InputSchema = null,");
-            Line(builder, QuintIndent + "OutputSchema = null,");
-            Line(builder, QuintIndent + "ProjectionKind = global::CrestCreates.Metadata.Abstractions.DescriptorCapability.CapabilityProjectionKind.AppServiceCompatibility,");
-            Line(builder, QuadIndent + "},");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitEndpointDescriptors(StringBuilder builder, AppServiceHttpProjectionModel model)
-    {
-        Line(builder, NestedIndent + Indent + "EndpointDescriptors = new " + DynamicApi + "CapabilityEndpointDescriptor[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointDescriptor");
-            Line(builder, QuadIndent + "{");
-            Line(builder, QuintIndent + "Id = \"" + Escape(action.EndpointId) + "\",");
-            Line(builder, QuintIndent + "Name = \"" + Escape(action.Name) + "\",");
-            Line(builder, QuintIndent + "Version = 1,");
-            Line(builder, QuintIndent + "State = global::CrestCreates.Metadata.Abstractions.DescriptorState.Active,");
-            Line(builder, QuintIndent + "Capability = new global::CrestCreates.Metadata.Abstractions.VersionedDescriptorRef<global::CrestCreates.Metadata.CapabilityDescriptor>(\""
-                + Escape(action.CapabilityId) + "\", 1),");
-            Line(builder, QuintIndent + "HttpMethod = " + DynamicApi + "CapabilityEndpointHttpMethod."
-                + EnumMethod(action.HttpMethod) + ",");
-            Line(builder, QuintIndent + "RoutePattern = \"" + Escape(FullRoute(model, action)) + "\",");
-            Line(builder, QuintIndent + "AuthorizationMode = " + DynamicApi + "CapabilityEndpointAuthorizationMode.InheritCapability,");
-            Line(builder, QuintIndent + "InputBindings = new " + DynamicApi + "CapabilityEndpointInputBinding[]");
-            Line(builder, QuintIndent + "{");
-            foreach (var parameter in action.Parameters.Where(parameter => parameter.Source != "CancellationToken"))
-            {
-                Line(builder, SextIndent + "new " + DynamicApi + "CapabilityEndpointInputBinding");
-                Line(builder, SextIndent + "{");
-                Line(builder, SextIndent + Indent + "Name = \"" + Escape(parameter.Source == "Header" ? "If-Match" : parameter.Name) + "\",");
-                Line(builder, SextIndent + Indent + "Source = " + DynamicApi + "CapabilityEndpointParameterSource." + parameter.Source + ",");
-                Line(builder, SextIndent + Indent + "Required = " + (parameter.Required ? "true" : "false") + ",");
-                Line(builder, SextIndent + "},");
-            }
-
-            Line(builder, QuintIndent + "},");
-            Line(builder, QuintIndent + "OutputMapping = new " + DynamicApi + "CapabilityEndpointOutputMapping { SuccessStatusCode = 200 },");
-            Line(builder, QuintIndent + "Projection = new " + DynamicApi + "CapabilityEndpointProjectionMetadata");
-            Line(builder, QuintIndent + "{");
-            Line(builder, QuintIndent + Indent + "OperationId = \"" + Escape(action.CapabilityId.Replace('.', '_')) + "\",");
-            Line(builder, QuintIndent + "},");
-            Line(builder, QuadIndent + "},");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitBindings(StringBuilder builder, AppServiceHttpProjectionModel model)
-    {
-        Line(builder, NestedIndent + Indent + "Bindings = new " + DynamicApi + "CapabilityEndpointBindingContract[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointBindingContract(");
-            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
-            Line(builder, QuintIndent + "1,");
-            Line(builder, QuintIndent + BinderName(action) + "),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitHandlers(StringBuilder builder, AppServiceHttpProjectionModel model)
-    {
-        Line(builder, NestedIndent + Indent + "Handlers = new " + DynamicApi + "CapabilityEndpointHandlerBinding[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointHandlerBinding(");
-            Line(builder, QuintIndent + "\"" + Escape(action.CapabilityId) + "\",");
-            Line(builder, QuintIndent + "new " + InvokerName(model, action) + "()),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitResultBindings(StringBuilder builder, AppServiceHttpProjectionModel model)
-    {
-        Line(builder, NestedIndent + Indent + "ResultMappers = new " + DynamicApi + "CapabilityEndpointResultBinding[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointResultBinding(");
-            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
-            Line(builder, QuintIndent + "1,");
-            Line(builder, QuintIndent + MapperName(action) + "),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitBodyTypes(StringBuilder builder, AppServiceHttpProjectionModel model)
-    {
-        var bodyTypes = model.Actions
-            .Where(action => action.BodyTypeFullName is not null)
-            .Select(action => action.BodyTypeFullName!)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-        Line(builder, NestedIndent + Indent + "BodyTypes = new global::System.Type[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var bodyType in bodyTypes)
-        {
-            Line(builder, QuadIndent + "typeof(" + bodyType + "),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitJsonContract(
-        StringBuilder builder,
-        AppServiceHttpProjectionModel model,
-        AppServiceHttpEmissionOptions options)
-    {
-        Line(builder, NestedIndent + Indent + "JsonContext = " + options.JsonContextFullName + ".Default;");
-        Line(builder, NestedIndent + Indent + "RequiredJsonRootTypes = new " + DynamicApi + "CapabilityEndpointJsonRootType[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var root in JsonRoots(model))
-        {
-            Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointJsonRootType(typeof(" + root.Type + "), \""
-                + Escape(root.Action) + "\", \"" + root.Component + "\"),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitRequiredIdentities(StringBuilder builder, AppServiceHttpProjectionModel model)
-    {
-        Line(builder, NestedIndent + Indent + "RequiredIdentityIds = new " + DynamicApi + "CapabilityEndpointRequiredIdentity[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointRequiredIdentity(");
-            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
-            Line(builder, QuintIndent + "\"" + Escape(model.HttpOwnerAssemblyName) + "\",");
-            Line(builder, QuintIndent + "\"" + Escape(action.Name) + "\",");
-            Line(builder, QuintIndent + "\"" + Escape(model.ContractName) + "\",");
-            Line(builder, QuintIndent + "1),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitBinder(StringBuilder builder, AppServiceHttpProjectionModel model, AppServiceHttpActionModel action)
-    {
-        var hasBody = action.Parameters.Any(parameter => parameter.Source == "Body");
-        Line(builder, NestedIndent + "private static "
-            + (hasBody ? "async " : string.Empty)
-            + "global::System.Threading.Tasks.ValueTask<object?> " + BinderName(action) + "(");
-        Line(builder, NestedIndent + Indent + "global::Microsoft.AspNetCore.Http.HttpContext context,");
-        Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
-        Line(builder, NestedIndent + "{");
-        foreach (var parameter in action.Parameters)
-        {
-            switch (parameter.Source)
-            {
-                case "Route":
-                    EmitParse(builder, parameter,
-                        "context.Request.RouteValues[\"" + Escape(parameter.Name) + "\"]?.ToString()", "route");
-                    break;
-                case "Query":
-                    EmitParse(builder, parameter,
-                        "context.Request.Query[\"" + Escape(parameter.Name) + "\"].ToString()", "query");
-                    break;
-                case "Header":
-                    Line(builder, NestedIndent + Indent + "var " + parameter.MemberName
-                        + " = global::System.Linq.Enumerable.FirstOrDefault(context.Request.Headers[\"If-Match\"])?.Trim('\"');");
-                    break;
-                case "Body":
-                    Line(builder, NestedIndent + Indent + "var bodyTypeInfo = " + DynamicApi + "CapabilityEndpointJsonTypeInfoResolver.Require<"
-                        + parameter.TypeFullName + ">(context.RequestServices);");
-                    var optional = action.BodyPolicy == AppServiceHttpBodyPolicy.Optional ? "true" : "false";
-                    Line(builder, NestedIndent + Indent + "var body = await " + DynamicApi + "CapabilityEndpointBodyReader.ReadNativeBodyAsync(");
-                    Line(builder, NestedIndent + Indent + Indent + "context, bodyTypeInfo, optional: " + optional + ", ct);");
-                    break;
-            }
-        }
-
-        if (action.InputEnvelopeFullName is not null)
-        {
-            Line(builder, NestedIndent + Indent + "var envelope = new global::" + action.InputEnvelopeFullName);
-            Line(builder, NestedIndent + Indent + "{");
-            foreach (var parameter in action.Parameters.Where(parameter => parameter.Source != "CancellationToken"))
-            {
-                Line(builder, NestedIndent + Indent + Indent + parameter.MemberName + " = " + LocalValue(parameter) + ",");
-            }
-
-            Line(builder, NestedIndent + Indent + "};");
-            Line(builder, NestedIndent + Indent + (hasBody ? "return envelope;" : "return global::System.Threading.Tasks.ValueTask.FromResult<object?>(envelope);"));
-        }
-        else
-        {
-            var single = action.Parameters.FirstOrDefault(parameter => parameter.Source != "CancellationToken");
-            Line(builder, NestedIndent + Indent + (hasBody ? "return body;" : single is null
-                ? "return global::System.Threading.Tasks.ValueTask.FromResult<object?>(null);"
-                : "return global::System.Threading.Tasks.ValueTask.FromResult<object?>(" + LocalValue(single) + ");"));
-        }
-
-        Line(builder, NestedIndent + "}");
-        Line(builder, string.Empty);
-    }
-
-    private static string LocalValue(AppServiceHttpBoundParameter parameter)
-        => parameter.Source == "Body" ? "body!" : parameter.MemberName;
-
-    private static void EmitParse(StringBuilder builder, AppServiceHttpBoundParameter parameter, string expression, string source)
-    {
-        var local = parameter.MemberName;
-        var failure = "throw new global::Microsoft.AspNetCore.Http.BadHttpRequestException("
-            + "\"The " + source + " value '" + Escape(parameter.Name) + "' is missing or not a valid "
-            + Escape(MessageType(parameter.TypeFullName)) + ".\");";
-        if (parameter.ScalarKind == AppServiceHttpScalarKind.String)
-        {
-            Line(builder, NestedIndent + Indent + "var " + local + " = " + expression + ";");
-            Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "))");
-            Line(builder, NestedIndent + Indent + "{");
-            Line(builder, NestedIndent + Indent + Indent + failure);
-            Line(builder, NestedIndent + Indent + "}");
-            return;
-        }
-
-        if (parameter.ScalarKind == AppServiceHttpScalarKind.Enum)
-        {
-            Line(builder, NestedIndent + Indent + "var " + local + "Text = " + expression + ";");
-            Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "Text) || !global::System.Enum.TryParse(typeof("
-                + parameter.TypeFullName + "), " + local + "Text, ignoreCase: true, out var " + local + "Value))");
-            Line(builder, NestedIndent + Indent + "{");
-            Line(builder, NestedIndent + Indent + Indent + failure);
-            Line(builder, NestedIndent + Indent + "}");
-            Line(builder, NestedIndent + Indent + "var " + local + " = (" + parameter.TypeFullName + ")" + local + "Value!;");
-            return;
-        }
-
-        var parse = parameter.ScalarKind switch
-        {
-            AppServiceHttpScalarKind.Guid => "global::System.Guid",
-            AppServiceHttpScalarKind.Int16 => "global::System.Int16",
-            AppServiceHttpScalarKind.Int32 => "global::System.Int32",
-            AppServiceHttpScalarKind.Int64 => "global::System.Int64",
-            AppServiceHttpScalarKind.UInt32 => "global::System.UInt32",
-            AppServiceHttpScalarKind.UInt64 => "global::System.UInt64",
-            AppServiceHttpScalarKind.Byte => "global::System.Byte",
-            AppServiceHttpScalarKind.SByte => "global::System.SByte",
-            AppServiceHttpScalarKind.Boolean => "global::System.Boolean",
-            AppServiceHttpScalarKind.Decimal => "global::System.Decimal",
-            AppServiceHttpScalarKind.Double => "global::System.Double",
-            AppServiceHttpScalarKind.Single => "global::System.Single",
-            AppServiceHttpScalarKind.Char => "global::System.Char",
-            AppServiceHttpScalarKind.DateTime => "global::System.DateTime",
-            AppServiceHttpScalarKind.DateTimeOffset => "global::System.DateTimeOffset",
-            _ => throw new InvalidOperationException(AppServiceHttpDiagnosticCodes.UnsupportedDeclaration
-                + ": scalar kind '" + parameter.ScalarKind + "' has no bounded binder."),
+            OwnerAssemblyName = model.HttpOwnerAssemblyName,
+            ContractFullName = "global::" + model.ContractFullName,
+            ContributionTypeName = options.ContributionTypeName,
+            JsonContextFullName = options.JsonContextFullName,
+            DiagnosticsTypeName = model.ContractName,
+            EmitInputScalarRoots = true,
+            Actions = model.Actions.Select(action => ToWireAction(model, action)).ToArray(),
         };
-        Line(builder, NestedIndent + Indent + "var " + local + "Text = " + expression + ";");
-        Line(builder, NestedIndent + Indent + "if (global::System.String.IsNullOrEmpty(" + local + "Text) || !" + parse
-            + ".TryParse(" + local + "Text, out var " + local + "))");
-        Line(builder, NestedIndent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + failure);
-        Line(builder, NestedIndent + Indent + "}");
-    }
 
-    private static void EmitResultMapper(StringBuilder builder, AppServiceHttpActionModel action)
+    private static HttpWireAction ToWireAction(AppServiceHttpProjectionModel model, AppServiceHttpActionModel action)
     {
-        var payload = action.ResultTypeFullName;
-        var voidEnvelope = DynamicApi + "DynamicApiResponse";
-        var require = DynamicApi + "CapabilityEndpointJsonTypeInfoResolver.Require";
-        var mapper = DynamicApi + "CompatibilityHttpResultMapper";
-        string expression;
-        if (payload is null || action.ResultKind is AppServiceHttpResultKind.Void
-            or AppServiceHttpResultKind.TaskVoid or AppServiceHttpResultKind.ValueTaskVoid)
-        {
-            expression = mapper + ".WrapVoidResult(" + require + "<" + voidEnvelope + ">(serviceProvider))";
-        }
-        else if (!action.ResultIsValueType && action.HttpMethod == "GET")
-        {
-            expression = mapper + ".WrapGetResult<" + payload + ">(ctx.Output as " + payload + ", "
-                + require + "<" + DynamicApi + "DynamicApiResponse<" + payload + ">>(serviceProvider), "
-                + require + "<" + voidEnvelope + ">(serviceProvider))";
-        }
-        else
-        {
-            expression = mapper + ".WrapResult<" + payload + ">((" + payload + ")ctx.Output!, "
-                + require + "<" + DynamicApi + "DynamicApiResponse<" + payload + ">>(serviceProvider))";
-        }
-
-        Line(builder, NestedIndent + "private static object " + MapperName(action) + "(");
-        Line(builder, NestedIndent + Indent + DynamicApi + "EndpointExecutionContext ctx,");
-        Line(builder, NestedIndent + Indent + "global::System.IServiceProvider serviceProvider)");
-        Line(builder, NestedIndent + Indent + "=> " + expression + ";");
-        Line(builder, string.Empty);
-    }
-
-    private static void EmitInvoker(StringBuilder builder, AppServiceHttpProjectionModel model, AppServiceHttpActionModel action)
-    {
-        Line(builder, Indent + "internal sealed class " + InvokerName(model, action)
-            + " : " + CapabilityAbstractions + "ICapabilityContextAwareHandlerInvoker");
-        Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public async global::System.Threading.Tasks.Task<object?> InvokeAsync(");
-        Line(builder, NestedIndent + Indent + CapabilityAbstractions + "CapabilityExecutionContext context,");
-        Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
-        Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + Indent + "var service = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<"
-            + model.ContractFullName + ">(context.ServiceProvider);");
-        if (action.InputEnvelopeFullName is not null)
-        {
-            Line(builder, NestedIndent + Indent + "var envelope = (global::" + action.InputEnvelopeFullName + ")context.Input!;");
-        }
-        else
-        {
-            var single = action.Parameters.FirstOrDefault(parameter => parameter.Source != "CancellationToken");
-            if (single is not null)
+        var parameters = action.Parameters
+            .Select(parameter => new HttpWireParameter
             {
-                Line(builder, NestedIndent + Indent + "var singleInput = (" + single.TypeFullName + ")context.Input!;");
-            }
-        }
+                Name = parameter.Source == "Header" ? parameter.Name : parameter.Name,
+                Source = parameter.Source,
+                TypeFullName = parameter.TypeFullName,
+                Required = parameter.Required,
+                ScalarKind = parameter.ScalarKind,
+                MemberName = parameter.MemberName,
+                HeaderName = parameter.Source == "Header" ? "If-Match" : null,
+                TrimQuotes = parameter.Source == "Header",
+                IsContractParameter = parameter.IsContractParameter,
+            })
+            .ToArray();
 
-        var arguments = new List<string>();
-        foreach (var parameter in action.Parameters.Where(parameter => parameter.IsContractParameter))
+        var arguments = new List<HttpWireArgument>();
+        foreach (var parameter in parameters.Where(parameter => parameter.IsContractParameter))
         {
             if (parameter.Source == "CancellationToken")
             {
-                arguments.Add("ct");
+                arguments.Add(new HttpWireArgument(HttpWireArgumentKind.CancellationToken, "ct"));
             }
             else if (action.InputEnvelopeFullName is not null)
             {
-                arguments.Add("envelope." + parameter.MemberName);
+                arguments.Add(new HttpWireArgument(HttpWireArgumentKind.EnvelopeMember, parameter.MemberName));
             }
             else
             {
-                arguments.Add("singleInput");
+                arguments.Add(new HttpWireArgument(HttpWireArgumentKind.Local, "singleInput"));
             }
         }
 
-        var invocation = "service." + action.Name + "(" + string.Join(", ", arguments) + ")";
-        switch (action.ResultKind)
+        return new HttpWireAction
         {
-            case AppServiceHttpResultKind.TaskValue:
-            case AppServiceHttpResultKind.ValueTaskValue:
-                Line(builder, NestedIndent + Indent + "return await " + invocation + ".ConfigureAwait(false);");
-                break;
-            case AppServiceHttpResultKind.SyncValue:
-                Line(builder, NestedIndent + Indent + "return " + invocation + ";");
-                break;
-            case AppServiceHttpResultKind.TaskVoid:
-            case AppServiceHttpResultKind.ValueTaskVoid:
-                Line(builder, NestedIndent + Indent + "await " + invocation + ".ConfigureAwait(false);");
-                Line(builder, NestedIndent + Indent + "return null;");
-                break;
-            default:
-                Line(builder, NestedIndent + Indent + invocation + ";");
-                Line(builder, NestedIndent + Indent + "return null;");
-                break;
-        }
-
-        Line(builder, NestedIndent + "}");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + "public global::System.Threading.Tasks.Task<object?> InvokeAsync(object? input, global::System.Threading.CancellationToken ct)");
-        Line(builder, NestedIndent + Indent + "=> throw new global::System.InvalidOperationException(");
-        Line(builder, NestedIndent + Indent + Indent + "\"The generated hand-written projection invoker requires a CapabilityExecutionContext.\");");
-        Line(builder, Indent + "}");
-        Line(builder, string.Empty);
-    }
-
-    private static IEnumerable<(string Type, string Action, string Component)> JsonRoots(AppServiceHttpProjectionModel model)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var action in model.Actions)
-        {
-            if (action.InputEnvelopeFullName is not null)
-            {
-                if (seen.Add("Input|" + action.InputEnvelopeFullName))
-                {
-                    yield return ("global::" + action.InputEnvelopeFullName, action.Name, "CapabilityInput");
-                }
-
-                foreach (var parameter in action.Parameters.Where(parameter => parameter.Source != "CancellationToken"))
-                {
-                    if (seen.Add("Scalar|" + parameter.TypeFullName))
-                    {
-                        yield return (parameter.TypeFullName, action.Name, parameter.Source == "Body" ? "Body" : "CapabilityInput");
-                    }
-                }
-            }
-            else
-            {
-                var single = action.Parameters.FirstOrDefault(parameter => parameter.Source != "CancellationToken");
-                if (single is not null && seen.Add("Input|" + single.TypeFullName))
-                {
-                    yield return (single.TypeFullName, action.Name, single.Source == "Body" ? "Body" : "CapabilityInput");
-                }
-            }
-
-            if (action.ResultTypeFullName is not null)
-            {
-                if (seen.Add("Payload|" + action.ResultTypeFullName))
-                {
-                    yield return (action.ResultTypeFullName, action.Name, "Payload");
-                }
-
-                var envelope = DynamicApi + "DynamicApiResponse<" + action.ResultTypeFullName + ">";
-                if (seen.Add("Result|" + envelope))
-                {
-                    yield return (envelope, action.Name, "ResultEnvelope");
-                }
-            }
-
-            if (action.ResultTypeFullName is null || (!action.ResultIsValueType && action.HttpMethod == "GET"))
-            {
-                if (seen.Add("Void|" + action.Name))
-                {
-                    yield return (DynamicApi + "DynamicApiResponse", action.Name, "VoidEnvelope");
-                }
-            }
-        }
+            Name = action.Name,
+            ContractMethodName = action.Name,
+            HttpMethod = action.HttpMethod,
+            RoutePattern = "/" + model.RoutePrefix.Trim('/')
+                            + (action.RoutePattern.Length == 0 ? string.Empty : "/" + action.RoutePattern.Trim('/')),
+            OperationKind = action.OperationKind,
+            Permissions = action.Permissions,
+            CapabilityId = action.CapabilityId,
+            EndpointId = action.EndpointId,
+            Parameters = parameters,
+            UsesEnvelope = action.InputEnvelopeFullName is not null,
+            EnvelopeFullName = action.InputEnvelopeFullName,
+            InvokerArguments = arguments,
+            BodyTypeFullName = action.BodyTypeFullName,
+            BodyOptional = action.BodyPolicy == AppServiceHttpBodyPolicy.Optional,
+            ResultPayloadFullName = action.ResultTypeFullName,
+            ResultKind = action.ResultKind,
+            ResultIsValueType = action.ResultIsValueType,
+            MapNotFoundOntoNull = action.ResultTypeFullName is not null && !action.ResultIsValueType
+                                  && action.HttpMethod == "GET",
+            RequiredIdentityTypeName = model.ContractName,
+        };
     }
 
     private static string ContentHashOf(string source)
@@ -680,76 +258,10 @@ public static class AppServiceHttpProjectionEmitter
         return "sha256:" + string.Concat(hash.Select(value => value.ToString("x2")));
     }
 
-    private static string MemberType(AppServiceHttpBoundParameter parameter)
-        => parameter.TypeFullName;
-
-    private static string FullRoute(AppServiceHttpProjectionModel model, AppServiceHttpActionModel action)
-        => "/" + model.RoutePrefix.Trim('/')
-           + (action.RoutePattern.Length == 0 ? string.Empty : "/" + action.RoutePattern.Trim('/'));
-
-    private static string EnumMethod(string httpMethod) => httpMethod switch
-    {
-        "GET" => "Get",
-        "POST" => "Post",
-        "PUT" => "Put",
-        "PATCH" => "Patch",
-        "DELETE" => "Delete",
-        _ => throw new InvalidOperationException(AppServiceHttpDiagnosticCodes.UnsupportedDeclaration
-            + ": unsupported HTTP method '" + httpMethod + "'."),
-    };
-
-    private static string BinderName(AppServiceHttpActionModel action) => "Bind_" + action.Name + "_Async";
-
-    private static string MapperName(AppServiceHttpActionModel action) => "MapResult_" + action.Name;
-
-    private static string InvokerName(AppServiceHttpProjectionModel model, AppServiceHttpActionModel action)
-        => "_HttpProjection_" + AppServiceHttpWireConvention.CanonicalToken(model.ContractFullName) + "_" + action.Name + "_Invoker";
-
-    private static string MessageType(string typeFullName)
-        => typeFullName.StartsWith("global::", StringComparison.Ordinal) ? typeFullName.Substring("global::".Length) : typeFullName;
-
-    private static string StringArray(IReadOnlyList<string> values)
-        => values.Count == 0
-            ? "global::System.Array.Empty<string>()"
-            : "new[] { " + string.Join(", ", values.Select(value => "\"" + Escape(value) + "\"")) + " }";
-
     private static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
-
-    private static StringBuilder StartDocument(string kind, AppServiceHttpProjectionModel model)
-    {
-        var builder = new StringBuilder();
-        Line(builder, "// <auto-generated />");
-        Line(builder, "// CrestCreates #129 hand-written HTTP projection " + kind + ". Owner: "
-            + model.HttpOwnerAssemblyName + " | contract: " + model.ContractFullName
-            + " | model: " + AppServiceHttpProjectionModel.ModelSchemaVersion + ". Do not edit.");
-        Line(builder, "#nullable enable");
-        Line(builder, string.Empty);
-        return builder;
-    }
-
-    private static void OpenNamespace(StringBuilder builder, string ns, string[]? usings = null)
-    {
-        if (usings is not null)
-        {
-            foreach (var usingLine in usings)
-            {
-                Line(builder, usingLine);
-            }
-
-            Line(builder, string.Empty);
-        }
-
-        Line(builder, "namespace " + ns);
-        Line(builder, "{");
-    }
-
-    private static void CloseNamespace(StringBuilder builder) => Line(builder, "}");
 
     private const string Indent = "    ";
     private const string NestedIndent = "        ";
-    private const string QuadIndent = "            ";
-    private const string QuintIndent = "                ";
-    private const string SextIndent = "                    ";
 
     private static void Line(StringBuilder builder, string text) => builder.AppendLine(text);
 }
