@@ -317,4 +317,4 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 | S22A-R2-02 公开激活身份不含 owner | `ForAssembly` 的 activation/handler/configurator 名称与 file 名/context 一样包含 canonical owner；扩展方法名仍为 `AddGeneratedAppServiceHttp`，Host 可通过生成符号 FQN 精确选择 owner | 两 owner 各自 PE emit 后被同一 Host 同时引用并分别调用 → 零错误 |
 | S22A-R2-03 CRUD 输入信封仍是第二份规则 | `CrudArtifactEmitter.EmitCapabilityInputEnvelope` 改为调用共享 `HttpWireEmitter.EmitEnvelopeDeclaration`（保留 #128 每 action 文件名/hint、类型名与逐文件 manifest，冻结 roots/可空 header/wire 形状） | CRUD 形状/typed adapter/real-declaration **58/58**；全量与 NativeAOT 结果见补记 |
 
-定向（手写模型/emitter + R1/R2 审查探针）**29/29 pass**。全量 `CrestCreates.CodeGenerator.Tests` 与 CRUD NativeAOT 门禁结果见补记。
+定向（手写模型/emitter + R1/R2 审查探针）**29/29 pass**；CRUD 形状/typed adapter/real-declaration 58/58；全量 `CrestCreates.CodeGenerator.Tests` **506 pass / 0 fail / 506**（22m17s）；CRUD NativeAOT fixture（含 linux-x64 publish/link/run 的 `GeneratedCrudNativeHttpGateTests`）**23/23 pass** → 三项修复无原生回归。
