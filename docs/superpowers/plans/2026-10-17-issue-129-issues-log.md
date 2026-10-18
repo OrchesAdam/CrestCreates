@@ -280,7 +280,7 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - manifest 断言：declared 不含契约/DTO，contract assembly 单列；
 - **编译探针**：契约源 + 三份产物 + JSON context stub，引用真实运行时程序集（Metadata/Capability/DynamicApi/Schema/Options/Json）编译零错误。
 
-定向 3/3 pass；全量 `CrestCreates.CodeGenerator.Tests` 结果见补记。
+定向 3/3 pass；全量 `CrestCreates.CodeGenerator.Tests` **487 pass / 0 fail / 487**，0 skipped（22m32s），无新增回归。
 
 ### 未交付（S2.2-B/S2.3）
 
