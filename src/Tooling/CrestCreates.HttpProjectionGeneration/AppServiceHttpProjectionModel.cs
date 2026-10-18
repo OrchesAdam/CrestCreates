@@ -79,9 +79,17 @@ public sealed record AppServiceHttpActionModel
 
     public string? CancellationTokenParameterName { get; init; }
 
+    /// <summary>All contract parameters in declaration order, including the CancellationToken.</summary>
+    public required IReadOnlyList<AppServiceHttpBoundParameter> Parameters { get; init; }
+
     public string? BodyTypeFullName { get; init; }
 
     public string? ResultTypeFullName { get; init; }
+
+    /// <summary>How the contract method returns: sync, Task, ValueTask, or void.</summary>
+    public required AppServiceHttpResultKind ResultKind { get; init; }
+
+    public bool ResultIsValueType { get; init; }
 
     /// <summary>Route identity member (for example "id" or "customerId").</summary>
     public string? RouteIdentityParameterName { get; init; }
@@ -95,6 +103,60 @@ public sealed record AppServiceHttpActionModel
     public bool UsesCapabilityInputEnvelope => InputEnvelopeFullName is not null;
 
     public required bool RequiresConcurrencyToken { get; init; }
+}
+
+/// <summary>One contract parameter and how the HTTP wire binds it, in contract order.</summary>
+public sealed record AppServiceHttpBoundParameter
+{
+    public required string Name { get; init; }
+
+    public required string TypeFullName { get; init; }
+
+    /// <summary>"Route", "Query", "Body", "Header" or "CancellationToken".</summary>
+    public required string Source { get; init; }
+
+    public required bool Required { get; init; }
+
+    public required AppServiceHttpScalarKind ScalarKind { get; init; }
+
+    /// <summary>Envelope member name for this parameter (PascalCase, or Id/Input conventions).</summary>
+    public required string MemberName { get; init; }
+
+    /// <summary>False for a synthetic header input that has no matching contract parameter.</summary>
+    public bool IsContractParameter { get; init; } = true;
+}
+
+public enum AppServiceHttpScalarKind
+{
+    NotScalar = 0,
+    Guid,
+    String,
+    Int16,
+    Int32,
+    Int64,
+    UInt32,
+    UInt64,
+    Byte,
+    SByte,
+    Boolean,
+    Decimal,
+    Double,
+    Single,
+    Char,
+    DateTime,
+    DateTimeOffset,
+    Enum,
+    Unsupported,
+}
+
+public enum AppServiceHttpResultKind
+{
+    Void,
+    SyncValue,
+    TaskValue,
+    ValueTaskValue,
+    TaskVoid,
+    ValueTaskVoid,
 }
 
 public sealed record AppServiceHttpInputParameter

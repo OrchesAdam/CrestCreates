@@ -287,3 +287,16 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - BuildTasks task/targets 物化、CLI/transport/stamp 复用、`CrestCreatesJsonContractGenerationDependsOn` 显式接入、design-time/TFM/RID 分区、外部包首消费（B01–B04 的 MSBuild 证据）；
 - JsonContracts 生成 `HttpProjectionJsonContext_*` roots（当前 emitter 通过 options 引用该名称；stub 只用于编译探针）；
 - 真实 Host 的 `AddGeneratedAppServiceHttp` 激活验收、Map 期 fail-closed、Asset/Procurement 迁移（S2.3）。
+
+### S2.2-A 审查 R1 修复（1 P1 + 5 P2）
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| S22A-R1-01 [P1] 输入/调用映射：纯 query 命令不可编译、route/query 同型参数被交换、If-Match 丢失 | 模型新增**契约顺序**的 `Parameters`（Route/Query/Body/Header/CancellationToken、Required、MemberName）；输入数 >1 或声明并发 token 时一律组合信封；binder 按契约顺序读取 route/query/body/header；invoker 按契约顺序从信封/单值取参并只在 CT 位置传 `ct`；`RequiresConcurrencyToken` 优先映射到契约的 `string?` stamp 参数，否则作为 input-only Header 成员（不传给业务） | 审查 2 条 query-only 探针、2 条参数顺序探针（query-first/route-first，实际执行 invoker 并断言 `Q:…;R:…`）、If-Match 绑定探针全部通过 |
+| S22A-R1-02 [P2] CLR 支持集不一致：int/string 抛异常、`Task<int>` 与同步方法不可编译 | 模型记录 `ScalarKind`（Guid/String/整数/布尔/decimal/double/single/char/DateTime/DateTimeOffset/Enum）与 `ResultKind`（Void/SyncValue/TaskValue/ValueTaskValue/TaskVoid/ValueTaskVoid）；不可绑定标量在模型构建期 CCHTTP001，不再到 emitter 才抛；invoker 按 ResultKind 发射 `return await` / `return` / `await`；GET 值类型结果不再用 `as` | int/string 物化探针、`Task<int>`/同步 `string`/同步 `void` 编译探针通过 |
+| S22A-R1-03 [P2] 同 owner 两契约激活歧义 | `Emit` 改为每契约**一个 bundle**（信封 + 贡献 + invoker）；新增 `EmitAssemblyActivation`：每 owner 程序集**一个** `AddGeneratedAppServiceHttp()` + 一个 handler module（注册全部 invoker）+ 一个 JSON configurator | 两契约 + 单次 `services.AddGeneratedAppServiceHttp()` 的编译探针通过（探针仅按允许范围改调用方式） |
+| S22A-R1-04 [P2] manifest 不精确 | manifest 改为**逐 artifact 条目**；`DeclaredTypeFullNames` 用共享 provenance 规则从该 artifact 源码提取；新增 `ContentHash`（sha256）；activation 条目覆盖 configurator | 两条 manifest 探针（与 `CrudArtifactEmitter.DeclaredTypeFullNames` 全等、hint 对应单文件）通过 |
+| S22A-R1-05 [P2] 实际 scalar 输入缺 JSON root | 输入侧 roots 覆盖：组合信封（CapabilityInput）、裸 scalar（CapabilityInput）、裸 body（Body），并逐参数收录标量类型 | `RequiredJsonRootTypes` 含 `typeof(Guid)` + `CapabilityInput` 的探针通过 |
+| S22A-R1-06 [P2] 共用后端未提取 | 新增 `HttpProjectionShared`：`DeclaredTypeFullNames`（#128 provenance 规则）与 `EmitJsonConfigurator`（resolver 插入/追加策略）；**CRUD emitter 已改为调用这两条共享规则**（`CrudArtifactEmitter.DeclaredTypeFullNames` 委托、configurator 发射委托）。binder/invoker/descriptor 的 CRUD↔手写完全归一仍**未完成**，属下一增量 | CRUD 生成器单元 21/21；全量结果见补记；不声称该项已关闭 |
+
+定向（14 条审查探针 + 3 条本切片 emitter 测试）**17/17 pass**。全量 `CrestCreates.CodeGenerator.Tests` 结果见补记。

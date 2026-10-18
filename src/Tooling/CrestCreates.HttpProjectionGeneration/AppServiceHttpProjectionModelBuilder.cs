@@ -261,8 +261,8 @@ public static class AppServiceHttpProjectionModelBuilder
         }
 
         var permissions = ReadStringArray(declaration, "Permissions");
-        var resultType = UnwrapResult(contractMethod.ReturnType);
-        var needsEnvelope = bodyParameter is not null && scalarParameters.Count > 0;
+        var (resultType, resultKind) = UnwrapResult(contractMethod.ReturnType);
+        var needsEnvelope = parameters.Count > 1 || requiresConcurrencyToken;
 
         var scalarInputs = scalarParameters
             .Select(parameter => new AppServiceHttpInputParameter
@@ -272,6 +272,80 @@ public static class AppServiceHttpProjectionModelBuilder
                 Binding = routePlaceholders.Contains(parameter.Name) ? "route" : "query",
             })
             .ToList();
+
+        var boundParameters = new List<AppServiceHttpBoundParameter>();
+        var routeIdentitySeen = false;
+        // The concurrency token maps onto the contract's optional string parameter when one exists
+        // (Ticket's DeleteAsync(id, expectedStamp, ct)); otherwise it is an input-only Header member.
+        var stampParameter = requiresConcurrencyToken
+            ? contractMethod.Parameters.FirstOrDefault(parameter =>
+                !IsCancellationToken(parameter.Type)
+                && parameter.Type.ToDisplayString() == "string?"
+                && parameter.Name != routeParameters.FirstOrDefault()?.Name)
+            : null;
+        foreach (var parameter in contractMethod.Parameters)
+        {
+            if (IsCancellationToken(parameter.Type))
+            {
+                boundParameters.Add(new AppServiceHttpBoundParameter
+                {
+                    Name = parameter.Name,
+                    TypeFullName = parameter.Type.ToDisplayString(Display),
+                    Source = "CancellationToken",
+                    Required = false,
+                    ScalarKind = AppServiceHttpScalarKind.NotScalar,
+                    MemberName = parameter.Name,
+                });
+                continue;
+            }
+
+            var isRoute = routePlaceholders.Contains(parameter.Name);
+            var isBody = !IsScalar(parameter.Type) && !SymbolEqualityComparer.Default.Equals(parameter, stampParameter);
+            var scalarKind = isBody ? AppServiceHttpScalarKind.NotScalar : MapScalarKind(parameter.Type);
+            if (!isBody && scalarKind == AppServiceHttpScalarKind.Unsupported)
+            {
+                diagnostics.Add(new AppServiceHttpProjectionDiagnostic(
+                    AppServiceHttpDiagnosticCodes.UnsupportedDeclaration,
+                    $"action '{actionName}' parameter '{parameter.Name}' has a scalar type with no bounded HTTP binder",
+                    AppServiceHttpDiagnosticSeverity.Error,
+                    contractMethod.ToDisplayString()));
+            }
+
+            var memberName = isBody
+                ? CrestCreates.Tooling.CrudGeneration.CrudEnvelopeConvention.BodyMember
+                : isRoute && !routeIdentitySeen
+                    ? CrestCreates.Tooling.CrudGeneration.CrudEnvelopeConvention.RouteIdentityMember
+                    : Inc(parameter.Name);
+            if (isRoute && !routeIdentitySeen)
+            {
+                routeIdentitySeen = true;
+            }
+
+            var isStamp = SymbolEqualityComparer.Default.Equals(parameter, stampParameter);
+            boundParameters.Add(new AppServiceHttpBoundParameter
+            {
+                Name = parameter.Name,
+                TypeFullName = parameter.Type.ToDisplayString(Display),
+                Source = isStamp ? "Header" : isBody ? "Body" : isRoute ? "Route" : "Query",
+                Required = isStamp ? false : true,
+                ScalarKind = isStamp ? AppServiceHttpScalarKind.String : scalarKind,
+                MemberName = isStamp ? "IfMatch" : memberName,
+            });
+        }
+
+        if (requiresConcurrencyToken && stampParameter is null)
+        {
+            boundParameters.Add(new AppServiceHttpBoundParameter
+            {
+                Name = "IfMatch",
+                TypeFullName = "global::System.String",
+                Source = "Header",
+                Required = false,
+                ScalarKind = AppServiceHttpScalarKind.String,
+                MemberName = "IfMatch",
+                IsContractParameter = false,
+            });
+        }
 
         foreach (var parameter in parameters)
         {
@@ -298,8 +372,11 @@ public static class AppServiceHttpProjectionModelBuilder
             EndpointId = AppServiceHttpWireConvention.EndpointId(capabilityId),
             ClosedContractMethodSignature = ClosedSignature(contractMethod),
             CancellationTokenParameterName = cancellationToken?.Name,
+            Parameters = boundParameters,
             BodyTypeFullName = bodyParameter?.Type.ToDisplayString(Display),
             ResultTypeFullName = resultType?.ToDisplayString(Display),
+            ResultKind = resultKind,
+            ResultIsValueType = resultType?.IsValueType == true,
             RouteIdentityParameterName = routeParameters.FirstOrDefault()?.Name,
             ScalarInputs = scalarInputs,
             InputEnvelopeFullName = needsEnvelope
@@ -341,11 +418,11 @@ public static class AppServiceHttpProjectionModelBuilder
         return method.ReturnType.ToDisplayString(Display) + " " + method.Name + "(" + parameters + ")";
     }
 
-    private static ITypeSymbol? UnwrapResult(ITypeSymbol returnType)
+    private static (ITypeSymbol? Type, AppServiceHttpResultKind Kind) UnwrapResult(ITypeSymbol returnType)
     {
         if (returnType.SpecialType == SpecialType.System_Void)
         {
-            return null;
+            return (null, AppServiceHttpResultKind.Void);
         }
 
         if (returnType is INamedTypeSymbol named)
@@ -353,18 +430,62 @@ public static class AppServiceHttpProjectionModelBuilder
             if (named.IsGenericType
                 && named.ConstructedFrom.ToDisplayString() is "System.Threading.Tasks.Task<TResult>" or "System.Threading.Tasks.ValueTask<TResult>")
             {
-                return named.TypeArguments[0];
+                var kind = named.Name == "Task"
+                    ? AppServiceHttpResultKind.TaskValue
+                    : AppServiceHttpResultKind.ValueTaskValue;
+                return (named.TypeArguments[0], kind);
             }
 
             if (named.Name is "Task" or "ValueTask"
                 && named.ContainingNamespace?.ToDisplayString() == "System.Threading.Tasks")
             {
-                return null;
+                return (null, named.Name == "Task"
+                    ? AppServiceHttpResultKind.TaskVoid
+                    : AppServiceHttpResultKind.ValueTaskVoid);
             }
         }
 
-        return returnType;
+        return (returnType, AppServiceHttpResultKind.SyncValue);
     }
+
+    private static AppServiceHttpScalarKind MapScalarKind(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol nullable && nullable.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+        {
+            return MapScalarKind(nullable.TypeArguments[0]);
+        }
+
+        if (type.TypeKind == TypeKind.Enum)
+        {
+            return AppServiceHttpScalarKind.Enum;
+        }
+
+        return type.SpecialType switch
+        {
+            SpecialType.System_Boolean => AppServiceHttpScalarKind.Boolean,
+            SpecialType.System_Char => AppServiceHttpScalarKind.Char,
+            SpecialType.System_SByte => AppServiceHttpScalarKind.SByte,
+            SpecialType.System_Byte => AppServiceHttpScalarKind.Byte,
+            SpecialType.System_Int16 => AppServiceHttpScalarKind.Int16,
+            SpecialType.System_Int32 => AppServiceHttpScalarKind.Int32,
+            SpecialType.System_UInt32 => AppServiceHttpScalarKind.UInt32,
+            SpecialType.System_Int64 => AppServiceHttpScalarKind.Int64,
+            SpecialType.System_UInt64 => AppServiceHttpScalarKind.UInt64,
+            SpecialType.System_Single => AppServiceHttpScalarKind.Single,
+            SpecialType.System_Double => AppServiceHttpScalarKind.Double,
+            SpecialType.System_Decimal => AppServiceHttpScalarKind.Decimal,
+            SpecialType.System_String => AppServiceHttpScalarKind.String,
+            _ => type.ToDisplayString() switch
+            {
+                "System.Guid" => AppServiceHttpScalarKind.Guid,
+                "System.DateTime" => AppServiceHttpScalarKind.DateTime,
+                "System.DateTimeOffset" => AppServiceHttpScalarKind.DateTimeOffset,
+                _ => AppServiceHttpScalarKind.Unsupported,
+            },
+        };
+    }
+
+    private static string Inc(string name) => char.ToUpperInvariant(name[0]) + name.Substring(1);
 
     internal static bool IsScalar(ITypeSymbol type)
     {

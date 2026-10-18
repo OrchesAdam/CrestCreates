@@ -20,7 +20,7 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 ## S2 — 通用 HTTP 投影与 JSON
 
 - [x] S2.1 共享模型与声明面：`ContractType`/`RegistrationMode`/`AppServiceHttpActionAttribute`、`AppServiceHttpProjectionModel`+builder+wire convention（source-link）、CCHTTP001–008、静态注册器跳过显式 host 声明并给迁移告警；R1 复核后修正四项（显式 host 缺契约不落静态链、owner-qualified 默认 ID/信封、闭合泛型、私有 DIM），审查探针原样入库，定向 15/15 pass。
-- [x] S2.2-A 共享 emitter：`AppServiceHttpProjectionEmitter` 从冻结模型发射普通 Compile 产物（组合信封、ExplicitHost 贡献、typed binder/invoker/result、required identities、JSON roots、`AddGeneratedAppServiceHttp` 激活 + handler module + JSON configurator）与 manifest 数据（declared/referenced 分列）；编译级探针通过。
+- [x] S2.2-A 共享 emitter：每契约一个 bundle（信封 + ExplicitHost 贡献 + 契约顺序的 typed binder/invoker/result + JSON roots/identities）+ 每程序集一个 `AddGeneratedAppServiceHttp()` 激活；逐 artifact manifest（共享 provenance + ContentHash）；R1 修复后 14 条审查探针 + 3 条自测 **17/17**。CRUD 已共享 provenance/JSON configurator 两条规则，binder/invoker/descriptor 完全归一仍待接续。
 - [ ] S2.2-B 工具链物化：BuildTasks task/targets、CLI/transport/stamp 复用、显式 DependsOn、JsonContracts context 生成与 Map 期激活验收。
 - [ ] 扩展前置工具链 ordinary Compile、完整 ownership/provenance、显式 DependsOn、诊断与错误状态；复用现有 stamp/transport，不复制实现。
 - [ ] 自动 body/input/scalar/list/typed result/void/error contracts；官方 STJ 单 driver/真实 MSBuild 可见。

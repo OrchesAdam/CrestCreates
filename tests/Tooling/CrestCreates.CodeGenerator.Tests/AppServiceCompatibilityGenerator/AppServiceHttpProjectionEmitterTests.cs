@@ -71,13 +71,19 @@ public sealed class AppServiceHttpProjectionEmitterTests
             || source.Contains("CompatibilityBodyReader") || source.Contains("DynamicApiGeneratedRuntime"),
             "the hand-written projection must not fall back to the legacy static chain");
 
-        var activation = artifacts.Single(a => a.FileName.Contains("Activation")).Source;
+        var activation = AppServiceHttpProjectionEmitter.EmitAssemblyActivation(
+            model.HttpOwnerAssemblyName,
+            new[] { (model, options) },
+            AppServiceHttpAssemblyOptions.ForAssembly(model.HttpOwnerAssemblyName) with
+            {
+                JsonContextFullName = "global::Generated.Tests.HttpJsonContextStub",
+            }).Source;
         activation.Should().Contain(AppServiceHttpProjectionModel.ActivationMethodName);
         activation.Should().Contain("AddCrestCapabilityEndpointContribution");
         activation.Should().Contain("ICapabilityHandlerModule");
         activation.Should().Contain("IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>");
 
-        var contribution = artifacts.Single(a => a.FileName.Contains("Contribution")).Source;
+        var contribution = artifacts.Single().Source;
         contribution.Should().Contain("CapabilityEndpointContribution");
         contribution.Should().Contain("\"Widget.Get\"");
         contribution.Should().Contain("\"Widget.Update\"");
@@ -88,7 +94,7 @@ public sealed class AppServiceHttpProjectionEmitterTests
         contribution.Should().Contain("RequiredIdentityIds");
         contribution.Should().Contain(options.JsonContextFullName + ".Default");
 
-        var envelopes = artifacts.Single(a => a.FileName.Contains("Envelopes")).Source;
+        var envelopes = artifacts.Single().Source;
         envelopes.Should().Contain("CrestCreates.Generated");
         envelopes.Should().Contain("public global::System.Guid Id { get; init; }");
         envelopes.Should().Contain("public global::Shop.Contracts.CreateWidgetDto Input { get; init; }");
@@ -102,7 +108,7 @@ public sealed class AppServiceHttpProjectionEmitterTests
 
         entry.OwnerAssemblyName.Should().Be(model.HttpOwnerAssemblyName);
         entry.ContractAssemblyName.Should().Be(model.ContractAssemblyName);
-        entry.ArtifactHintName.Should().Contain("GeneratedAppServiceHttpContribution_");
+        entry.ArtifactHintName.Should().Contain("GeneratedAppServiceHttpBundle_");
         entry.DeclaredTypeFullNames.Should().Contain(name => name.Contains("GeneratedAppServiceHttpContribution_"));
         entry.DeclaredTypeFullNames.Should().Contain(name => name.EndsWith("_CompatibilityInput"));
         entry.DeclaredTypeFullNames.Should().NotContain(model.ContractFullName,
@@ -157,7 +163,7 @@ public sealed class AppServiceHttpProjectionEmitterTests
             JsonContextFullName = "global::Generated.Tests.HttpJsonContextStub",
         };
         var artifacts = AppServiceHttpProjectionEmitter.Emit(result.Model, options);
-        artifacts.Should().HaveCount(3);
+        artifacts.Should().ContainSingle("one bundle per contract");
         return (result.Model, options, artifacts);
     }
 }

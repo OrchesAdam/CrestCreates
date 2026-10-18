@@ -195,28 +195,7 @@ public static class CrudArtifactEmitter
     /// This is the only place the rule exists; the precompile stage and the ownership tests read it here.
     /// </summary>
     public static IReadOnlyList<string> DeclaredTypeFullNames(string source)
-    {
-        if (string.IsNullOrEmpty(source))
-        {
-            return Array.Empty<string>();
-        }
-
-        var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
-        return tree.GetRoot()
-            .DescendantNodes()
-            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax>()
-            .Select(declaration =>
-            {
-                var namespaceName = declaration.Ancestors()
-                    .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.NamespaceDeclarationSyntax>()
-                    .LastOrDefault()?.Name?.ToString();
-                return string.IsNullOrEmpty(namespaceName)
-                    ? declaration.Identifier.ValueText
-                    : namespaceName + "." + declaration.Identifier.ValueText;
-            })
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-    }
+        => CrestCreates.Tooling.HttpProjection.HttpProjectionShared.DeclaredTypeFullNames(source);
 
     // ---- 1. contracts DTOs ---------------------------------------------------------------------
 
@@ -1303,39 +1282,10 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent
             + "public void Configure(global::Microsoft.AspNetCore.Http.Json.JsonOptions options)");
         Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + Indent + "var generatedContext = "
-            + Qualified(CrudJsonContractConvention.JsonContextFullName) + ".Default;");
-        Line(builder, NestedIndent + Indent
-            + "var chain = options.SerializerOptions.TypeInfoResolverChain;");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + Indent + "for (var index = 0; index < chain.Count; index++)");
-        Line(builder, NestedIndent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + "if (global::System.Object.ReferenceEquals(chain[index], generatedContext))");
-        Line(builder, NestedIndent + Indent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + Indent + "return;");
-        Line(builder, NestedIndent + Indent + Indent + "}");
-        Line(builder, NestedIndent + Indent + "}");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + Indent + "var insertionIndex = chain.Count;");
-        Line(builder, NestedIndent + Indent + "for (var index = 0; index < chain.Count; index++)");
-        Line(builder, NestedIndent + Indent + "{");
-        // #150 R2: only the UNCUSTOMIZED framework-default reflection resolver is a fallback that may
-        // be preceded. A host-configured DefaultJsonTypeInfoResolver (non-empty Modifiers) or a
-        // derived resolver keeps its declared priority — it answers first and the map-time contract
-        // verification then rejects deterministically instead of silently bypassing the host's
-        // explicit JSON customizations.
-        Line(builder, NestedIndent + Indent + Indent
-            + "if (chain[index] is global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver defaultResolver");
-        Line(builder, NestedIndent + Indent + Indent + Indent
-            + "&& defaultResolver.GetType() == typeof(global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)");
-        Line(builder, NestedIndent + Indent + Indent + Indent + "&& defaultResolver.Modifiers.Count == 0)");
-        Line(builder, NestedIndent + Indent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + Indent + "insertionIndex = index;");
-        Line(builder, NestedIndent + Indent + Indent + Indent + "break;");
-        Line(builder, NestedIndent + Indent + Indent + "}");
-        Line(builder, NestedIndent + Indent + "}");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + Indent + "chain.Insert(insertionIndex, generatedContext);");
+        CrestCreates.Tooling.HttpProjection.HttpProjectionShared.EmitJsonConfigurator(
+            builder,
+            Qualified(CrudJsonContractConvention.JsonContextFullName),
+            NestedIndent + Indent);
         Line(builder, NestedIndent + "}");
         Line(builder, Indent + "}");
         CloseNamespace(builder);
