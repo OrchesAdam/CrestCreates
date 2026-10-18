@@ -307,4 +307,4 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 新增共享后端 `HttpWireEmitter`：信封、capability/endpoint descriptors、typed bindings、handler bindings、typed result mappers、invokers、JSON roots、required identities 全部只此一份。
 - **手写前端**：`AppServiceHttpProjectionEmitter` 现在只做「模型 → wire」映射与 bundle/激活/manifest 组装，不再持有发射规则；14 条审查探针 + 3 条 emitter 测试 + 7 条模型测试保持 **24/24**。
 - **CRUD 前端**：`CrudArtifactEmitter.EmitCapabilityContribution` 改为构造 wire model 并调用 `HttpWireEmitter.EmitContribution`；删除 21 个重复的发射方法（descriptors/endpoints/bindings/handlers/results/body types/roots/identities/binder/mapper/invoker 等）；激活中的 invoker 名称改用共享命名，JSON configurator 继续调用共享策略。CRUD 独占的实体/DTO/service/repository/mapping/permission/query-adapter 生成不变。
-- 验证：CRUD 形状测试 54/54；两前端定向 24/24；全量 `CrestCreates.CodeGenerator.Tests` **501 pass / 0 fail / 501**（22m11s）；CRUD NativeAOT 门禁结果见补记。
+- 验证：CRUD 形状测试 54/54；两前端定向 24/24；全量 `CrestCreates.CodeGenerator.Tests` **501 pass / 0 fail / 501**（22m11s）；CRUD NativeAOT 门禁**保持绿**：`CrestCreates.GeneratedCrud.AotFixture.Tests` **23/23 pass**（含 `GeneratedCrudNativeHttpGateTests` 的 publish/link/run、15 场景 sentinel、总 sentinel 与变异控制）。
