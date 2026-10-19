@@ -346,6 +346,7 @@ public static class AppServiceHttpProjectionModelBuilder
             {
                 Name = parameter.Name,
                 TypeFullName = DisplayType(parameter.Type),
+                ClrTypeFullName = ClrTypeOf(parameter.Type),
                 Source = isStamp ? "Header" : isBody ? "Body" : isRoute ? "Route" : "Query",
                 Required = isStamp ? false : !IsNullableScalar(parameter.Type),
                 ScalarKind = isStamp ? AppServiceHttpScalarKind.String : scalarKind,
@@ -358,7 +359,8 @@ public static class AppServiceHttpProjectionModelBuilder
             boundParameters.Add(new AppServiceHttpBoundParameter
             {
                 Name = "IfMatch",
-                TypeFullName = "global::System.String",
+                TypeFullName = "global::System.String?",
+                ClrTypeFullName = "global::System.String",
                 Source = "Header",
                 Required = false,
                 ScalarKind = AppServiceHttpScalarKind.String,
@@ -532,6 +534,15 @@ public static class AppServiceHttpProjectionModelBuilder
 
         return type.ToDisplayString() is "System.Guid" or "System.DateTime" or "System.DateTimeOffset"
             or "System.TimeSpan" or "System.DateOnly" or "System.TimeOnly";
+    }
+
+    /// <summary>CLR display for <c>typeof</c>: reference nullable annotations are illegal there, Nullable&lt;T&gt; is not.</summary>
+    private static string ClrTypeOf(ITypeSymbol type)
+    {
+        var display = type.ToDisplayString(Display);
+        return type.IsReferenceType && display.EndsWith("?", StringComparison.Ordinal)
+            ? display.Substring(0, display.Length - 1)
+            : display;
     }
 
     /// <summary>Type display that keeps nullable reference annotations (the wire shape serializes them).</summary>

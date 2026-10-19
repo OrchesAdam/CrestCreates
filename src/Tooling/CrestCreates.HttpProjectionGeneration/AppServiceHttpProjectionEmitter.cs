@@ -199,6 +199,7 @@ public static class AppServiceHttpProjectionEmitter
                 Name = parameter.Source == "Header" ? parameter.Name : parameter.Name,
                 Source = parameter.Source,
                 TypeFullName = parameter.TypeFullName,
+                ClrTypeFullName = parameter.ClrTypeFullName,
                 Required = parameter.Required,
                 ScalarKind = parameter.ScalarKind,
                 MemberName = parameter.MemberName,

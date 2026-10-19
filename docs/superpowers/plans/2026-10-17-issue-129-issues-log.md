@@ -324,3 +324,12 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 共享 envelope 收口后 CRUD 的 `IfMatch` 变成非可空 `string`；在 `RespectNullableAnnotations=true` 的 Host 上序列化缺失 header 会抛 `JsonException`。修复：CRUD 的 header wire 参数恢复 `global::System.String?`；手写服务的引用类型参数保留 `?` 注解（`DisplayType`）；`typeof(...)` 位置对可空引用类型去掉 `?`（CS8639），`Nullable<T>` 值类型保持原样。
 - 附带的 R3 边界探针（可选 `int?/Guid?/State?/string?` 的缺失与有值经真实 invoker、非法/必需缺失 → 400、CRUD 可空 header 序列化两种对照）全部通过；定向（R1 14 + R2 5 + R3 16 + 模型 7 + emitter 3）**45/45 pass**。
 - 全量 `CrestCreates.CodeGenerator.Tests` **522 pass / 0 fail / 522**（22m28s）；CRUD NativeAOT fixture（含原生 publish/link/run）**23/23 pass**。
+
+### S2.2-A 复审 R4 修复（2 项 P2）
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| `TypeOfDisplay` 以名称子串判断 `Nullable<T>`，误判合法引用 DTO（`Box<T>?`/`Nullable<T>?`）→ `typeof` CS8639 | 删除字符串启发式；wire 参数与 JSON root 携带**结构性** `ClrTypeFullName`（引用类型去 `?`、`Nullable<T>` 保留），`typeof`/BodyTypes/roots 全部使用该 CLR display | 审查 2 条引用泛型 body 探针通过（模型 body 类型以 `?` 结尾、产物零错误） |
+| 手写服务自动补出的可选 `IfMatch` 仍为非空 → 严格 nullable JSON 序列化失败 | 合成 Header 参数声明 `global::System.String?`（CLR 类型仍为 `System.String`），`Required=false`、`IsContractParameter=false` 保持不变 | 审查 3 条官方 STJ + `RespectNullableAnnotations` 探针（原始产物/缺失或提供 header）通过，序列化为 `"IfMatch":null`/`"stamp"` |
+
+定向（R1 14 + R2 5 + R3 16 + R4 5 + 模型 7 + emitter 3）**50/50 pass**；CRUD 形状 58/58；全量与 CRUD NativeAOT 门禁结果见补记。

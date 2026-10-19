@@ -106,6 +106,9 @@ public sealed record HttpWireParameter
     /// <summary>True when the emitted envelope member needs a <c>= default!</c> initializer.</summary>
     public bool NeedsDefaultInitializer { get; init; }
 
+    /// <summary>CLR display used in <c>typeof</c>; falls back to <see cref="TypeFullName"/>.</summary>
+    public string? ClrTypeFullName { get; init; }
+
     /// <summary>False for a synthetic header input with no matching contract parameter.</summary>
     public bool IsContractParameter { get; init; } = true;
 }
@@ -119,4 +122,4 @@ public enum HttpWireArgumentKind
 
 public sealed record HttpWireArgument(HttpWireArgumentKind Kind, string Value);
 
-public sealed record HttpWireJsonRoot(string TypeDisplay, string Action, string Component);
+public sealed record HttpWireJsonRoot(string TypeDisplay, string Action, string Component, string? ClrTypeDisplay = null);

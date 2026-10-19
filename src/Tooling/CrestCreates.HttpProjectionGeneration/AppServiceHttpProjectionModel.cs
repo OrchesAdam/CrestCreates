@@ -112,6 +112,9 @@ public sealed record AppServiceHttpBoundParameter
 
     public required string TypeFullName { get; init; }
 
+    /// <summary>CLR display used in <c>typeof</c>: nullable reference annotations stripped, Nullable&lt;T&gt; kept.</summary>
+    public string? ClrTypeFullName { get; init; }
+
     /// <summary>"Route", "Query", "Body", "Header" or "CancellationToken".</summary>
     public required string Source { get; init; }
 

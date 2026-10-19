@@ -229,15 +229,16 @@ public static class HttpWireEmitter
     private static void EmitBodyTypes(StringBuilder builder, HttpWireModel model)
     {
         var bodyTypes = model.Actions
-            .Where(action => action.BodyTypeFullName is not null)
-            .Select(action => action.BodyTypeFullName!)
+            .SelectMany(action => action.Parameters)
+            .Where(parameter => parameter.Source == "Body")
+            .Select(parameter => parameter.ClrTypeFullName ?? parameter.TypeFullName)
             .Distinct(StringComparer.Ordinal)
             .ToList();
         Line(builder, NestedIndent + Indent + "BodyTypes = new global::System.Type[]");
         Line(builder, NestedIndent + Indent + "{");
         foreach (var bodyType in bodyTypes)
         {
-            Line(builder, QuadIndent + "typeof(" + TypeOfDisplay(bodyType) + "),");
+            Line(builder, QuadIndent + "typeof(" + bodyType + "),");
         }
 
         Line(builder, NestedIndent + Indent + "};");
@@ -250,7 +251,7 @@ public static class HttpWireEmitter
         foreach (var root in JsonRoots(model))
         {
             Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointJsonRootType(typeof("
-                + TypeOfDisplay(root.TypeDisplay) + "), \"" + Escape(root.Action) + "\", \"" + root.Component + "\"),");
+                + (root.ClrTypeDisplay ?? root.TypeDisplay) + "), \"" + Escape(root.Action) + "\", \"" + root.Component + "\"),");
         }
 
         Line(builder, NestedIndent + Indent + "};");
@@ -566,7 +567,9 @@ public static class HttpWireEmitter
                         if (seen.Add("Scalar|" + parameter.TypeFullName))
                         {
                             yield return new HttpWireJsonRoot(
-                                parameter.TypeFullName, action.Name, parameter.Source == "Body" ? "Body" : "CapabilityInput");
+                                parameter.TypeFullName, action.Name,
+                                parameter.Source == "Body" ? "Body" : "CapabilityInput",
+                                parameter.ClrTypeFullName);
                         }
                     }
                 }
@@ -579,7 +582,9 @@ public static class HttpWireEmitter
                     && seen.Add("Input|" + single.TypeFullName))
                 {
                     yield return new HttpWireJsonRoot(
-                        single.TypeFullName, action.Name, single.Source == "Body" ? "Body" : "CapabilityInput");
+                        single.TypeFullName, action.Name,
+                        single.Source == "Body" ? "Body" : "CapabilityInput",
+                        single.ClrTypeFullName);
                 }
             }
 
@@ -614,12 +619,6 @@ public static class HttpWireEmitter
             }
         }
     }
-
-    /// <summary>The CLR type display used in <c>typeof</c>; nullable reference annotations are illegal there.</summary>
-    private static string TypeOfDisplay(string typeFullName)
-        => typeFullName.EndsWith("?", StringComparison.Ordinal) && !typeFullName.Contains("Nullable<")
-            ? typeFullName.Substring(0, typeFullName.Length - 1)
-            : typeFullName;
 
     private static string EnumTypeForParse(string typeFullName)
     {
