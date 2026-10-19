@@ -332,4 +332,4 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 | `TypeOfDisplay` 以名称子串判断 `Nullable<T>`，误判合法引用 DTO（`Box<T>?`/`Nullable<T>?`）→ `typeof` CS8639 | 删除字符串启发式；wire 参数与 JSON root 携带**结构性** `ClrTypeFullName`（引用类型去 `?`、`Nullable<T>` 保留），`typeof`/BodyTypes/roots 全部使用该 CLR display | 审查 2 条引用泛型 body 探针通过（模型 body 类型以 `?` 结尾、产物零错误） |
 | 手写服务自动补出的可选 `IfMatch` 仍为非空 → 严格 nullable JSON 序列化失败 | 合成 Header 参数声明 `global::System.String?`（CLR 类型仍为 `System.String`），`Required=false`、`IsContractParameter=false` 保持不变 | 审查 3 条官方 STJ + `RespectNullableAnnotations` 探针（原始产物/缺失或提供 header）通过，序列化为 `"IfMatch":null`/`"stamp"` |
 
-定向（R1 14 + R2 5 + R3 16 + R4 5 + 模型 7 + emitter 3）**50/50 pass**；CRUD 形状 58/58；全量与 CRUD NativeAOT 门禁结果见补记。
+定向（R1 14 + R2 5 + R3 16 + R4 5 + 模型 7 + emitter 3）**50/50 pass**；CRUD 形状 58/58；全量 `CrestCreates.CodeGenerator.Tests` **527 pass / 0 fail / 527**（22m27s）；CRUD NativeAOT fixture（含原生 publish/link/run）**23/23 pass**。
