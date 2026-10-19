@@ -350,3 +350,9 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - BuildTasks task + targets（Prepare/State/Generate/Include、显式 `CrestCreatesJsonContractGenerationDependsOn`、design-time/TFM/RID 分区）；
 - JsonContracts 生成 `HttpProjectionJsonContext_*` roots 与 Host JSON configurator 验证；
 - 真实 MSBuild 探针（B01–B04）与外部包首消费。
+
+### S2.2-B2 隔离 CLI 与传输（2026-10-17）
+
+- 新增 `prepare-appservice-http` 工具命令 + `AppServiceHttpPrepareRequest/Response` 传输 DTO（source-generated STJ，反射关闭），复用 `BundleBytes` + 逐 artifact manifest 的既有协议；manifest 条目增加 `RequiredJsonRootTypeNames`（供 JSON 阶段生成 context）。
+- 回归：`CrestCreates.JsonContracts.BuildTasks.Tests` **135/135 pass**。
+- **仍未交付**（B 未完成）：BuildTasks 输入清单/state/Generate/Include 四个 target、`CrestCreatesJsonContractGenerationDependsOn` 接线、design-time/TFM/RID 分区、JsonContracts `HttpProjectionJsonContext_*` roots 生成与 Host configurator 校验、真实 MSBuild 探针（B01–B04）与外部包首消费。本轮不声称 B 完成。

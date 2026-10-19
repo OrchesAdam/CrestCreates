@@ -132,7 +132,9 @@ public sealed class AppServiceHttpPrecompileEngine
         {
             var bundle = AppServiceHttpProjectionEmitter.Emit(model, optionsByModel[model.ContractFullName]).Single();
             artifacts.Add((bundle.FileName, bundle.Source));
-            entries.Add(ToEntry(AppServiceHttpProjectionEmitter.BuildManifestEntry(model, optionsByModel[model.ContractFullName])));
+            entries.Add(ToEntry(
+                AppServiceHttpProjectionEmitter.BuildManifestEntry(model, optionsByModel[model.ContractFullName]),
+                model.RequiredJsonRootTypeNames));
         }
 
         var activation = AppServiceHttpProjectionEmitter.EmitAssemblyActivation(
@@ -140,8 +142,10 @@ public sealed class AppServiceHttpPrecompileEngine
             models.Select(model => (model, optionsByModel[model.ContractFullName])).ToArray(),
             assemblyOptions);
         artifacts.Add((activation.FileName, activation.Source));
-        entries.Add(ToEntry(AppServiceHttpProjectionEmitter.BuildManifestEntries(
-            models[0], optionsByModel[models[0].ContractFullName], activation)[1]));
+        entries.Add(ToEntry(
+            AppServiceHttpProjectionEmitter.BuildManifestEntries(
+                models[0], optionsByModel[models[0].ContractFullName], activation)[1],
+            Array.Empty<string>()));
 
         var manifest = new AppServiceHttpOutputManifestDocument
         {
@@ -156,9 +160,12 @@ public sealed class AppServiceHttpPrecompileEngine
         => projection.NamedArguments.Any(argument =>
             argument.Key == "ContractType" && argument.Value.Kind == TypedConstantKind.Type && argument.Value.Value is not null);
 
-    private static AppServiceHttpOutputManifestEntry ToEntry(AppServiceHttpManifestEntry entry)
+    private static AppServiceHttpOutputManifestEntry ToEntry(
+        AppServiceHttpManifestEntry entry,
+        IReadOnlyList<string> requiredJsonRootTypeNames)
         => new()
         {
+            RequiredJsonRootTypeNames = requiredJsonRootTypeNames.ToArray(),
             OwnerAssemblyName = entry.OwnerAssemblyName,
             OwnerServiceFullName = entry.OwnerServiceFullName,
             ContractAssemblyName = entry.ContractAssemblyName,
@@ -214,4 +221,7 @@ public sealed class AppServiceHttpOutputManifestEntry
     public string? ModelSchemaVersion { get; set; }
 
     public string? ContentHash { get; set; }
+
+    /// <summary>JSON roots the projection requires on the host's generated context.</summary>
+    public string[]? RequiredJsonRootTypeNames { get; set; }
 }
