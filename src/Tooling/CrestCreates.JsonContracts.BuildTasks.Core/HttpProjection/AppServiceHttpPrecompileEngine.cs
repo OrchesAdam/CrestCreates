@@ -218,7 +218,9 @@ public sealed class AppServiceHttpPrecompileEngine
         }
 
         foreach (var group in actions
-                     .GroupBy(item => item.Action.HttpMethod + " " + item.Action.RoutePattern, StringComparer.Ordinal)
+                     .GroupBy(item => item.Action.HttpMethod + " "
+                         + AppServiceHttpWireConvention.FullRoute(item.Model.RoutePrefix, item.Action.RoutePattern),
+                         StringComparer.Ordinal)
                      .Where(group => group.Count() > 1))
         {
             diagnostics.Add(Conflict(

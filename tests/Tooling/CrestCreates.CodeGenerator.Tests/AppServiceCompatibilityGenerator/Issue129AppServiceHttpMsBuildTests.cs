@@ -514,6 +514,100 @@ public sealed class Issue129AppServiceHttpMsBuildTests
             "the official STJ generator must close the nested generic root");
     }
 
+    [Theory]
+    [InlineData("comment")]
+    [InlineData("disabled")]
+    [InlineData("literal")]
+    public async Task Inactive_original_text_must_not_satisfy_the_actual_artifact_check(string placement)
+    {
+        var baseline = await Probe.RunAsync();
+        baseline.ExitCode.Should().Be(0, baseline.Output);
+        var original = File.ReadAllText(baseline.BundlePath);
+        original.Should().Contain("api/widgets");
+        var forged = original.Replace("api/widgets", "api/forged");
+        forged.Should().NotBe(original);
+
+        var payload = placement switch
+        {
+            "comment" => "/*\n" + original + "\n*/\n" + forged,
+            "disabled" => "#if false\n" + original + "\n#endif\n" + forged,
+            _ => "internal static class RetainedArtifactText { internal const string Value =\n"
+                 + new string('"', 6) + "\n" + original + "\n" + new string('"', 6) + "; }\n" + forged,
+        };
+        var payloadPath = Path.Combine(baseline.Directory, "forged-bundle.txt");
+        await File.WriteAllTextAsync(payloadPath, payload);
+        await Probe.ResetProjectAsync(baseline.Directory, extraProjectXml: """
+            <Target Name="CopyInactiveArtifactPayload"
+                    AfterTargets="IncludeCrestAppServiceHttpArtifacts"
+                    BeforeTargets="PrepareCrestCreatesJsonContractInputs">
+              <Copy SourceFiles="$(MSBuildProjectDirectory)/forged-bundle.txt"
+                    DestinationFiles="$(_CrestAppServiceHttpBundleFullPath)" />
+            </Target>
+            """);
+
+        var tampered = await Probe.BuildAsync(baseline.Directory);
+        tampered.ExitCode.Should().NotBe(0,
+            $"the expected artifact kept only as {placement} text cannot vouch for the active forged bundle");
+        tampered.Output.Should().Contain("CCHTTP006");
+        File.ReadAllText(baseline.BundlePath).Should().Contain("api/forged");
+
+        await Probe.ResetProjectAsync(baseline.Directory);
+        var recovered = await Probe.BuildAsync(baseline.Directory);
+        recovered.ExitCode.Should().Be(0, recovered.Output);
+        File.ReadAllText(baseline.BundlePath).Should().Contain("api/widgets");
+    }
+
+    [Theory]
+    [InlineData("api/orders", "all", "api/customers", "all", false)]
+    [InlineData("api/orders", "all", "api", "orders/all", true)]
+    [InlineData("api/orders", "all", "api/orders", "all", true)]
+    [InlineData("api/orders", "all", "api/customers", "list", false)]
+    public async Task Cross_contract_conflicts_must_compare_the_final_emitted_route(
+        string prefixA, string routeA, string prefixB, string routeB, bool conflict)
+    {
+        var source = $$"""
+            using System.Threading;
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Probe
+            {
+                public interface IOrders
+                {
+                    [AppServiceHttpAction(Verb = HttpProjectionVerb.Get, Route = "{{routeA}}")]
+                    Task<string> GetAsync(CancellationToken cancellationToken = default);
+                }
+
+                public interface ICustomers
+                {
+                    [AppServiceHttpAction(Verb = HttpProjectionVerb.Get, Route = "{{routeB}}")]
+                    Task<string> GetAsync(CancellationToken cancellationToken = default);
+                }
+
+                [CapabilityCompatibilityProjection(ContractType = typeof(IOrders), RoutePrefix = "{{prefixA}}")]
+                public static class OrdersAnchor
+                {
+                }
+
+                [CapabilityCompatibilityProjection(ContractType = typeof(ICustomers), RoutePrefix = "{{prefixB}}")]
+                public static class CustomersAnchor
+                {
+                }
+            }
+            """;
+        var probe = await Probe.RunAsync(source: source);
+        if (conflict)
+        {
+            probe.ExitCode.Should().NotBe(0);
+            probe.Output.Should().Contain("CCHTTP003");
+            probe.Bundle.Should().BeEmpty("a route conflict emits no partial surface");
+        }
+        else
+        {
+            probe.ExitCode.Should().Be(0, probe.Output);
+        }
+    }
+
     private sealed record ProbeResult(
         string Directory,
         int ExitCode,
@@ -744,7 +838,10 @@ public sealed class Issue129AppServiceHttpMsBuildTests
         public static async Task<(int ExitCode, string Output)> CleanAsync(string directory)
             => await RunDotnetAsync(directory, ["clean", Path.Combine(directory, "Probe.csproj")], TimeSpan.FromMinutes(10));
 
-        public static async Task ResetProjectAsync(string directory, string tfms = "net10.0")
+        public static async Task ResetProjectAsync(
+            string directory,
+            string tfms = "net10.0",
+            string? extraProjectXml = null)
         {
             var repoRoot = FindRepoRoot();
             var project = ProjectTemplate
@@ -754,7 +851,7 @@ public sealed class Issue129AppServiceHttpMsBuildTests
                     : "<TargetFramework>" + tfms + "</TargetFramework>")
                 .Replace("__IMPORTS__", CrudJsonContractMsBuildBaselineTests.ToolchainImports
                     .Replace("__ROOT__", repoRoot.Replace('\\', '/')))
-                .Replace("__EXTRA__", string.Empty);
+                .Replace("__EXTRA__", extraProjectXml ?? string.Empty);
             await File.WriteAllTextAsync(Path.Combine(directory, "Probe.csproj"), project);
             await Task.CompletedTask;
         }

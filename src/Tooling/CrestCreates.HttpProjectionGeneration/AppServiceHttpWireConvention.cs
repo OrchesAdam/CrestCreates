@@ -126,6 +126,23 @@ public static class AppServiceHttpWireConvention
         };
     }
 
+    /// <summary>
+    /// Final emitted HTTP route. Owner conflicts must compare this value, not the action-relative
+    /// route: two different prefixes can share a relative route, and two different prefix/route
+    /// splits can produce the same final route (S22B-R2-02).
+    /// </summary>
+    public static string FullRoute(string routePrefix, string routePattern)
+    {
+        var prefix = routePrefix.Trim('/');
+        var route = routePattern.Trim('/');
+        if (prefix.Length == 0)
+        {
+            return "/" + route;
+        }
+
+        return route.Length == 0 ? "/" + prefix : "/" + prefix + "/" + route;
+    }
+
     public static string ToKebabCase(string value)
     {
         if (string.IsNullOrWhiteSpace(value))

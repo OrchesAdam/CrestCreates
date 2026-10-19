@@ -358,16 +358,31 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
         var expectedByHint = expected.ToDictionary(artifact => artifact.HintName, StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        // S22B-R1-02: verify the actual Compile inputs, not only the producer's expectation. A target
-        // that replaces the bundle after Include must fail here even though the stamp was written.
-        var compileTexts = compilation.SyntaxTrees.Select(tree => tree.GetText().ToString()).ToList();
+        // S22B-R1-02/R2-01: verify the actual compiled code, not dead text. The expected artifact must
+        // appear as a contiguous active token sequence in a syntax tree; tokens inside comments,
+        // disabled preprocessor branches or string literals can never satisfy this.
+        var activeTokens = compilation.SyntaxTrees
+            .Select(tree => tree.GetRoot().DescendantTokens()
+                .Where(token => !token.IsKind(SyntaxKind.EndOfFileToken))
+                .Select(token => token.Text)
+                .ToList())
+            .ToList();
         foreach (var artifact in expected)
         {
-            if (!compileTexts.Any(text => text.Contains(artifact.Source, StringComparison.Ordinal)))
+            var artifactTokens = CSharpSyntaxTree.ParseText(
+                    artifact.Source,
+                    CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest))
+                .GetRoot()
+                .DescendantTokens()
+                .Where(token => !token.IsKind(SyntaxKind.EndOfFileToken))
+                .Select(token => token.Text)
+                .ToList();
+            if (!activeTokens.Any(tokens => ContainsContiguous(tokens, artifactTokens)))
             {
                 ManifestError(
-                    $"The compiled inputs do not contain AppService HTTP artifact '{artifact.HintName}' "
-                    + "with the producer's content; the materialized surface was modified or removed.");
+                    $"The active compiled inputs do not contain AppService HTTP artifact '{artifact.HintName}' "
+                    + "with the producer's content; the materialized surface was modified, disabled or "
+                    + "retained only as inactive text.");
             }
         }
 
@@ -493,6 +508,34 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
                 .ToArray(),
             null));
         return artifacts;
+    }
+
+    private static bool ContainsContiguous(IReadOnlyList<string> haystack, IReadOnlyList<string> needle)
+    {
+        if (needle.Count == 0)
+        {
+            return true;
+        }
+
+        for (var start = 0; start + needle.Count <= haystack.Count; start++)
+        {
+            var matches = true;
+            for (var offset = 0; offset < needle.Count; offset++)
+            {
+                if (!string.Equals(haystack[start + offset], needle[offset], StringComparison.Ordinal))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string ContentHash(string source)

@@ -415,3 +415,21 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 评审 real-build 脚本最终跑：baseline exit 0；bundle 替换 exit 1 + CCHTTP006；缺 ContractType exit 1 + CCHTTP001；双锚点 exit 1 + CCHTTP003（含两个 anchor 位置），无 “same key”。
 - 全量 `CrestCreates.CodeGenerator.Tests` **541 pass / 0 fail / 541**，0 skipped（27m55s）。
 - CRUD NativeAOT fixture **23/23**（linux-x64 publish/link/run）；`SaaSHelpdesk.Web` 构建成功。
+
+## S2.2-B 复审 R2 修复（2 项 P2，2026-10-19）
+
+审查 head `240e9754`；R2 探针原样入库：`ReviewS22BR2ArtifactProbes`、`ReviewS22BR2RouteProbes`。
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| S22B-R2-HTTP129-01 非活动源码可满足实际产物核验（R1-02 延续） | 删除 `Contains(text)` 检查；改为将每个预期 artifact 解析为 token 序列，并要求该序列在某个实际 syntax tree 的**活动 token 流**中连续出现。注释、`#if false` 禁用文本、raw string 均不产生匹配 token；manifest hash/owner/roots 对账保留 | 审查 4 条 artifact 探针 **4/4**（active + comment/disabled/literal 三反例）；真实 MSBuild `Inactive_original_text_must_not_satisfy_the_actual_artifact_check` 三 placement 均 exit≠0 + CCHTTP006 并恢复；评审 `r2-real-build.py`：baseline 0，bundle 篡改/comment/disabled/literal 均 1 + CCHTTP006 |
+| S22B-R2-HTTP129-02 跨契约冲突未比较最终路由 | 新增共享 `AppServiceHttpWireConvention.FullRoute(prefix, relative)`；投影 emitter 与 producer 冲突检查**共用**该构造。不同 prefix + 同 relative 不再误报；不同拆分得到相同最终路由会被拒绝 | 审查 4 条 route 探针 **4/4**；真实 MSBuild `Cross_contract_conflicts_must_compare_the_final_emitted_route` 四种组合符合预期；评审 `r2-route-real-build.py`：不同前缀同 relative 0、同最终路由不同拆分 1、真冲突 1、不同路由 0 |
+
+### 最终验证（R2 head）
+
+- `CrestCreates.JsonContracts.BuildTasks.Tests` **159/159**（含 R1 7 条 + R2 8 条审查探针）。
+- 真实 MSBuild 套件 **20/20**（原 13 + 新增 3 inactive placement + 4 route 组合）。
+- 评审 `r2-real-build.py`：baseline 0；bundle 篡改/comment/disabled/literal 均 exit 1 + CCHTTP006；缺 ContractType 1 + CCHTTP001；双锚点 1 + CCHTTP003。
+- 评审 `r2-route-real-build.py`：不同前缀同 relative 0；同最终路由不同拆分 1；真冲突 1；不同路由 0。
+- 全量 `CrestCreates.CodeGenerator.Tests` **548 pass / 0 fail / 548**，0 skipped（30m14s）。
+- CRUD NativeAOT fixture **23/23**（linux-x64 publish/link/run）；`SaaSHelpdesk.Web` 构建成功。

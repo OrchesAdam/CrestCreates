@@ -232,8 +232,7 @@ public static class AppServiceHttpProjectionEmitter
             Name = action.Name,
             ContractMethodName = action.Name,
             HttpMethod = action.HttpMethod,
-            RoutePattern = "/" + model.RoutePrefix.Trim('/')
-                            + (action.RoutePattern.Length == 0 ? string.Empty : "/" + action.RoutePattern.Trim('/')),
+            RoutePattern = AppServiceHttpWireConvention.FullRoute(model.RoutePrefix, action.RoutePattern),
             OperationKind = action.OperationKind,
             Permissions = action.Permissions,
             CapabilityId = action.CapabilityId,
