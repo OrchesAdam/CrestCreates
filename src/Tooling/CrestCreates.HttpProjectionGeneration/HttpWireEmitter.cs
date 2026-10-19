@@ -237,7 +237,7 @@ public static class HttpWireEmitter
         Line(builder, NestedIndent + Indent + "{");
         foreach (var bodyType in bodyTypes)
         {
-            Line(builder, QuadIndent + "typeof(" + bodyType + "),");
+            Line(builder, QuadIndent + "typeof(" + TypeOfDisplay(bodyType) + "),");
         }
 
         Line(builder, NestedIndent + Indent + "};");
@@ -249,8 +249,8 @@ public static class HttpWireEmitter
         Line(builder, NestedIndent + Indent + "{");
         foreach (var root in JsonRoots(model))
         {
-            Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointJsonRootType(typeof(" + root.TypeDisplay + "), \""
-                + Escape(root.Action) + "\", \"" + root.Component + "\"),");
+            Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointJsonRootType(typeof("
+                + TypeOfDisplay(root.TypeDisplay) + "), \"" + Escape(root.Action) + "\", \"" + root.Component + "\"),");
         }
 
         Line(builder, NestedIndent + Indent + "};");
@@ -614,6 +614,12 @@ public static class HttpWireEmitter
             }
         }
     }
+
+    /// <summary>The CLR type display used in <c>typeof</c>; nullable reference annotations are illegal there.</summary>
+    private static string TypeOfDisplay(string typeFullName)
+        => typeFullName.EndsWith("?", StringComparison.Ordinal) && !typeFullName.Contains("Nullable<")
+            ? typeFullName.Substring(0, typeFullName.Length - 1)
+            : typeFullName;
 
     private static string EnumTypeForParse(string typeFullName)
     {

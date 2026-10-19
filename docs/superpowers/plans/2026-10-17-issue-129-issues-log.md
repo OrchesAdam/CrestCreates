@@ -318,3 +318,9 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 | S22A-R2-03 CRUD 输入信封仍是第二份规则 | `CrudArtifactEmitter.EmitCapabilityInputEnvelope` 改为调用共享 `HttpWireEmitter.EmitEnvelopeDeclaration`（保留 #128 每 action 文件名/hint、类型名与逐文件 manifest，冻结 roots/可空 header/wire 形状） | CRUD 形状/typed adapter/real-declaration **58/58**；全量与 NativeAOT 结果见补记 |
 
 定向（手写模型/emitter + R1/R2 审查探针）**29/29 pass**；CRUD 形状/typed adapter/real-declaration 58/58；全量 `CrestCreates.CodeGenerator.Tests` **506 pass / 0 fail / 506**（22m17s）；CRUD NativeAOT fixture（含 linux-x64 publish/link/run 的 `GeneratedCrudNativeHttpGateTests`）**23/23 pass** → 三项修复无原生回归。
+
+### S2.2-A 复审 R3 修复（1 项 P2：CRUD 信封 IfMatch 可空性）
+
+- 共享 envelope 收口后 CRUD 的 `IfMatch` 变成非可空 `string`；在 `RespectNullableAnnotations=true` 的 Host 上序列化缺失 header 会抛 `JsonException`。修复：CRUD 的 header wire 参数恢复 `global::System.String?`；手写服务的引用类型参数保留 `?` 注解（`DisplayType`）；`typeof(...)` 位置对可空引用类型去掉 `?`（CS8639），`Nullable<T>` 值类型保持原样。
+- 附带的 R3 边界探针（可选 `int?/Guid?/State?/string?` 的缺失与有值经真实 invoker、非法/必需缺失 → 400、CRUD 可空 header 序列化两种对照）全部通过；定向（R1 14 + R2 5 + R3 16 + 模型 7 + emitter 3）**45/45 pass**。
+- 全量与 CRUD NativeAOT 门禁结果见补记。

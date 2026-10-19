@@ -288,7 +288,7 @@ public static class AppServiceHttpProjectionModelBuilder
             .Select(parameter => new AppServiceHttpInputParameter
             {
                 Name = parameter.Name,
-                TypeFullName = parameter.Type.ToDisplayString(Display),
+                TypeFullName = DisplayType(parameter.Type),
                 Binding = routePlaceholders.Contains(parameter.Name) ? "route" : "query",
             })
             .ToList();
@@ -345,7 +345,7 @@ public static class AppServiceHttpProjectionModelBuilder
             boundParameters.Add(new AppServiceHttpBoundParameter
             {
                 Name = parameter.Name,
-                TypeFullName = parameter.Type.ToDisplayString(Display),
+                TypeFullName = DisplayType(parameter.Type),
                 Source = isStamp ? "Header" : isBody ? "Body" : isRoute ? "Route" : "Query",
                 Required = isStamp ? false : !IsNullableScalar(parameter.Type),
                 ScalarKind = isStamp ? AppServiceHttpScalarKind.String : scalarKind,
@@ -393,7 +393,7 @@ public static class AppServiceHttpProjectionModelBuilder
             ClosedContractMethodSignature = ClosedSignature(contractMethod),
             CancellationTokenParameterName = cancellationToken?.Name,
             Parameters = boundParameters,
-            BodyTypeFullName = bodyParameter?.Type.ToDisplayString(Display),
+            BodyTypeFullName = bodyParameter is null ? null : DisplayType(bodyParameter.Type),
             ResultTypeFullName = resultType?.ToDisplayString(Display),
             ResultKind = resultKind,
             ResultIsValueType = resultType?.IsValueType == true,
@@ -532,6 +532,17 @@ public static class AppServiceHttpProjectionModelBuilder
 
         return type.ToDisplayString() is "System.Guid" or "System.DateTime" or "System.DateTimeOffset"
             or "System.TimeSpan" or "System.DateOnly" or "System.TimeOnly";
+    }
+
+    /// <summary>Type display that keeps nullable reference annotations (the wire shape serializes them).</summary>
+    private static string DisplayType(ITypeSymbol type)
+    {
+        var display = type.ToDisplayString(Display);
+        return type.IsReferenceType
+               && type.NullableAnnotation == NullableAnnotation.Annotated
+               && !display.EndsWith("?", StringComparison.Ordinal)
+            ? display + "?"
+            : display;
     }
 
     private static bool IsNullableScalar(ITypeSymbol type)

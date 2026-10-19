@@ -1376,7 +1376,7 @@ public static class CrudArtifactEmitter
             {
                 Name = header.HeaderName,
                 Source = "Header",
-                TypeFullName = "global::System.String",
+                TypeFullName = "global::System.String?",
                 Required = header.Required,
                 ScalarKind = CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.String,
                 MemberName = header.MemberName,
