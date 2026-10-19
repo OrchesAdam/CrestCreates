@@ -333,3 +333,20 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 | 手写服务自动补出的可选 `IfMatch` 仍为非空 → 严格 nullable JSON 序列化失败 | 合成 Header 参数声明 `global::System.String?`（CLR 类型仍为 `System.String`），`Required=false`、`IsContractParameter=false` 保持不变 | 审查 3 条官方 STJ + `RespectNullableAnnotations` 探针（原始产物/缺失或提供 header）通过，序列化为 `"IfMatch":null`/`"stamp"` |
 
 定向（R1 14 + R2 5 + R3 16 + R4 5 + 模型 7 + emitter 3）**50/50 pass**；CRUD 形状 58/58；全量 `CrestCreates.CodeGenerator.Tests` **527 pass / 0 fail / 527**（22m27s）；CRUD NativeAOT fixture（含原生 publish/link/run）**23/23 pass**。
+
+## S2.2-B1 隔离预编译引擎（2026-10-17）
+
+- 新增 `AppServiceHttpPrecompileEngine`（`src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/HttpProjection/`）：
+  - 用 `JsonContractCompilationFactory` + 真实 `ReferencePathWithRefAssemblies` 建 Roslyn compilation（无反射/无 assembly load）；
+  - 只接管带 `ContractType` 的正式声明；无 ContractType 的旧静态声明原样留给 legacy 前端（不诊断、不物化）；
+  - 每个契约产出 1 个 bundle（信封 + 贡献 + invoker），每个 owner 程序集产出 1 个激活（per-owner 公开类型名）；manifest 逐 artifact 记录 `OwnerAssemblyName`/`OwnerServiceFullName`/`ContractAssemblyName`/`DeclaredTypeFullNames`/`ReferencedTypeFullNames`/`SourceLocation`/`ModelSchemaVersion`/`ContentHash`；
+  - 生产者编译使用合成程序集名，物化前把 owner/本程序集契约身份**归一为真实程序集名**；
+  - 模型错误（ref/开放泛型/非接口契约等）fail closed，零产物；输出对同一输入确定（顺序 + 内容哈希）。
+- 测试：`AppServiceHttpPrecompileEngineTests`（4）——双契约 → 2 bundle + 1 activation + 逐 artifact manifest；legacy 声明不被接管；不支持形状零产物；同输入确定。JsonContracts BuildTasks 套件 **135/135 pass**。
+
+### S2.2-B 剩余
+
+- 隔离 CLI 命令（`prepare-appservice-http`）与 transport DTO/JSON context；
+- BuildTasks task + targets（Prepare/State/Generate/Include、显式 `CrestCreatesJsonContractGenerationDependsOn`、design-time/TFM/RID 分区）；
+- JsonContracts 生成 `HttpProjectionJsonContext_*` roots 与 Host JSON configurator 验证；
+- 真实 MSBuild 探针（B01–B04）与外部包首消费。
