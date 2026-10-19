@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using CrestCreates.JsonContracts.BuildTasks.Generation;
 using Microsoft.Build.Framework;
 
@@ -13,8 +10,10 @@ namespace CrestCreates.JsonContracts.BuildTasks.Tasks;
 /// input, a content change re-runs the producer even when timestamps survive, and a removed or renamed
 /// source changes the item list itself.
 /// </summary>
-public sealed class WriteCrestCrudInputManifest : ITask
+public class WriteCrestCrudInputManifest : ITask
 {
+    public const string Schema = "crud-inputs-v1";
+
     [Required]
     public ITaskItem[] SourceFiles { get; set; } = [];
 
@@ -57,6 +56,11 @@ public sealed class WriteCrestCrudInputManifest : ITask
 
     public string ToolAssemblyPath { get; set; } = string.Empty;
 
+    /// <summary>Diagnostic prefix for path-boundary failures (CCCRUD / CCHTTP).</summary>
+    protected virtual string ErrorPrefix => "CCCRUD";
+
+    protected virtual string SchemaName => Schema;
+
     [Output]
     public bool OutputChanged { get; set; }
 
@@ -68,74 +72,41 @@ public sealed class WriteCrestCrudInputManifest : ITask
         var normalizedOutput = Path.GetFullPath(OutputPath);
         if (!AllowedOutputPath.Contains(AllowedOutputRoot, normalizedOutput))
         {
-            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CCCRUD006", null, null, 0, 0, 0, 0,
-                $"CRUD inputs manifest '{OutputPath}' is outside AllowedOutputRoot '{AllowedOutputRoot}'.",
-                null, "CrestCreates.JsonContracts.BuildTasks"));
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(ErrorPrefix + "006", null, null, 0, 0, 0, 0,
+                $"Precompile inputs manifest '{OutputPath}' is outside AllowedOutputRoot '{AllowedOutputRoot}'.",
+                null, GetType().Name));
             return false;
         }
 
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("assemblyName", AssemblyName);
-            writer.WriteString("targetFramework", TargetFramework);
-            writer.WriteString("configuration", Configuration);
-            writer.WriteString("runtimeIdentifier", RuntimeIdentifier);
-            writer.WriteBoolean("validateOnly", ValidateOnly);
-            writer.WriteString("taskAssemblyHash", HashFile(TaskAssemblyPath));
-            writer.WriteString("langVersion", LangVersion);
-            writer.WriteString("nullable", Nullable);
-            writer.WriteBoolean("allowUnsafeBlocks", AllowUnsafeBlocks);
-            writer.WriteString("modelSchemaVersion", ModelSchemaVersion);
-            writer.WriteString("toolSemanticVersion", ToolSemanticVersion);
-            writer.WriteString("toolAssemblyHash", HashFile(ToolAssemblyPath));
-            WriteArray(writer, "defineConstants", DefineConstants.Split(';',
-                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            WriteFiles(writer, "sources", SourceFiles.Select(item => item.ItemSpec));
-            WriteFiles(writer, "references", ReferencePaths.Select(item => item.ItemSpec));
-            writer.WriteEndObject();
-            writer.Flush();
-        }
-
-        OutputChanged = WriteIfChangedFile.WriteIfChanged(
-            normalizedOutput, stream.ToArray(), TemporaryDirectory);
+        CrestInputManifestWriter.Write(
+            normalizedOutput,
+            TemporaryDirectory,
+            SchemaName,
+            AssemblyName,
+            TargetFramework,
+            Configuration,
+            RuntimeIdentifier,
+            ValidateOnly,
+            TaskAssemblyPath,
+            LangVersion,
+            Nullable,
+            AllowUnsafeBlocks,
+            ModelSchemaVersion,
+            ToolSemanticVersion,
+            ToolAssemblyPath,
+            DefineConstants,
+            SourceFiles.Select(item => item.ItemSpec),
+            ReferencePaths.Select(item => item.ItemSpec),
+            out var changed);
+        OutputChanged = changed;
         return true;
     }
+}
 
-    private static void WriteArray(Utf8JsonWriter writer, string name, IEnumerable<string> values)
-    {
-        writer.WriteStartArray(name);
-        foreach (var value in values.OrderBy(item => item, StringComparer.Ordinal))
-        {
-            writer.WriteStringValue(value);
-        }
+/// <summary>#129 S2.2-B: input fingerprint of the hand-written AppService HTTP projection stage.</summary>
+public sealed class WriteCrestAppServiceHttpInputManifest : WriteCrestCrudInputManifest
+{
+    protected override string ErrorPrefix => "CCHTTP";
 
-        writer.WriteEndArray();
-    }
-
-    private static void WriteFiles(Utf8JsonWriter writer, string name, IEnumerable<string> paths)
-    {
-        writer.WriteStartArray(name);
-        foreach (var path in paths.OrderBy(item => item, StringComparer.Ordinal))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("path", path);
-            writer.WriteString("contentHash", HashFile(path));
-            writer.WriteEndObject();
-        }
-
-        writer.WriteEndArray();
-    }
-
-    private static string HashFile(string path)
-    {
-        if (string.IsNullOrEmpty(path) || !File.Exists(path))
-        {
-            return "missing";
-        }
-
-        using var file = File.OpenRead(path);
-        return "sha256:" + Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
-    }
+    protected override string SchemaName => "appservice-http-inputs-v1";
 }

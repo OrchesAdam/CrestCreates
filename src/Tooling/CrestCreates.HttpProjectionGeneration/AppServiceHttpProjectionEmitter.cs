@@ -154,15 +154,6 @@ public static class AppServiceHttpProjectionEmitter
         return Entry(model, artifact);
     }
 
-    public static IReadOnlyList<AppServiceHttpManifestEntry> BuildManifestEntries(
-        AppServiceHttpProjectionModel model,
-        AppServiceHttpEmissionOptions options,
-        AppServiceHttpArtifact activationArtifact)
-    {
-        var bundle = Emit(model, options).Single();
-        return new[] { Entry(model, bundle), Entry(model, activationArtifact) };
-    }
-
     private static AppServiceHttpManifestEntry Entry(AppServiceHttpProjectionModel model, AppServiceHttpArtifact artifact)
         => new(
             OwnerAssemblyName: model.HttpOwnerAssemblyName,
@@ -178,6 +169,15 @@ public static class AppServiceHttpProjectionEmitter
             SourceLocation: model.DeclarationLocation,
             ModelSchemaVersion: AppServiceHttpProjectionModel.ModelSchemaVersion,
             ContentHash: ContentHashOf(artifact.Source));
+
+    /// <summary>
+    /// The closed JSON root plan of one contract, derived from the same wire model the emitter uses.
+    /// The precompile manifest records it and the JsonContracts stage recomputes it from symbols.
+    /// </summary>
+    public static IReadOnlyList<HttpWireJsonRoot> PlanJsonRoots(
+        AppServiceHttpProjectionModel model,
+        AppServiceHttpEmissionOptions options)
+        => HttpWireEmitter.PlanJsonRoots(ToWireModel(model, options));
 
     private static HttpWireModel ToWireModel(AppServiceHttpProjectionModel model, AppServiceHttpEmissionOptions options)
         => new()

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
 using FluentAssertions;
@@ -33,12 +34,44 @@ public sealed class AppServiceHttpProjectionDeclarationTests
                     RoutePrefix = "api/shipping")]
                 public static class ShippingHttpProjection { }
             }
-            """);
+            """,
+            globalAnalyzerOptions: new Dictionary<string, string>
+            {
+                ["build_property.CrestCreatesAppServiceHttpJsonToolchain"] = "true",
+            });
 
         result.Diagnostics.Should().Contain(d => d.Id == "CCHTTP002" && d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Warning,
             "an explicit-host declaration belongs to the precompile front-end; the static registrar must skip it and say so");
         result.GeneratedSources.Should().NotContain(source => source.SourceText.ToString().Contains("compat.appservice"),
             "skipping must not leave half an endpoint set behind");
+    }
+
+    [Fact]
+    public void Explicit_host_declaration_without_the_toolchain_must_be_a_build_error()
+    {
+        var result = SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>("""
+            using System.Threading;
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Http
+            {
+                public interface IShippingService
+                {
+                    Task<string> PingAsync(CancellationToken cancellationToken = default);
+                }
+
+                [CapabilityCompatibilityProjection(
+                    ContractType = typeof(IShippingService),
+                    RoutePrefix = "api/shipping")]
+                public static class ShippingHttpProjection { }
+            }
+            """);
+
+        result.Diagnostics.Should().Contain(d => d.Id == "CCHTTP002"
+            && d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error,
+            "a formal declaration without the precompile/JSON toolchain must fail instead of disappearing");
+        result.GeneratedSources.Should().NotContain(source => source.SourceText.ToString().Contains("compat.appservice"));
     }
 
     [Fact]

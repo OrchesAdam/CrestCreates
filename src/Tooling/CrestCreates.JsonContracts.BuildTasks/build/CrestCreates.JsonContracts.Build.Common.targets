@@ -116,7 +116,7 @@
   <Target Name="GenerateCrestCreatesJsonContracts"
           DependsOnTargets="ValidateCrestCreatesJsonContractPaths;ValidateCrestCreatesJsonContractTransport;PrepareCrestCreatesJsonContractInputs;WriteCrestCreatesJsonContractInputManifest;InvalidateMissingCrestCreatesJsonContractOutput"
           BeforeTargets="CoreCompile"
-          Inputs="@(CrestCreatesJsonContractCompileSources);@(CrestCreatesJsonContractReferenceAssemblies);$(_CrestCreatesJsonContractManifestFullPath);$(CrestCreatesJsonContractsSelectedTaskAssembly);$(CrestCreatesJsonContractsToolPath);$(_CrestCrudOutputsManifestFullPath)"
+          Inputs="@(CrestCreatesJsonContractCompileSources);@(CrestCreatesJsonContractReferenceAssemblies);$(_CrestCreatesJsonContractManifestFullPath);$(CrestCreatesJsonContractsSelectedTaskAssembly);$(CrestCreatesJsonContractsToolPath);$(_CrestCrudOutputsManifestFullPath);$(_CrestAppServiceHttpOutputsManifestFullPath)"
           Outputs="$(_CrestCreatesJsonContractStampFullPath)"
           Condition="'$(CrestCreatesJsonContractGenerationEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
     <CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateJsonContracts
@@ -134,7 +134,8 @@
         ManifestAccessibility="$(CrestCreatesJsonContractManifestAccessibility)"
         TaskSemanticVersion="$(CrestCreatesJsonContractsTaskSemanticVersion)"
         ToolPath="$(CrestCreatesJsonContractsToolPath)"
-        CrudOutputsManifestPath="$(_CrestCrudOutputsManifestFullPath)">
+        CrudOutputsManifestPath="$(_CrestCrudOutputsManifestFullPath)"
+        AppServiceHttpOutputsManifestPath="$(_CrestAppServiceHttpOutputsManifestFullPath)">
       <Output TaskParameter="GeneratedContextCount" PropertyName="CrestCreatesJsonContractGeneratedContextCount" />
       <Output TaskParameter="GeneratedSurfaceRootCount" PropertyName="CrestCreatesJsonContractGeneratedSurfaceRootCount" />
       <Output TaskParameter="GeneratedExplicitRootCount" PropertyName="CrestCreatesJsonContractGeneratedExplicitRootCount" />
@@ -170,5 +171,11 @@
           Condition="'$(_CrestCreatesCrudTargetsImported)' != 'true'" />
   <PropertyGroup>
     <_CrestCreatesCrudTargetsImported>true</_CrestCreatesCrudTargetsImported>
+  </PropertyGroup>
+  <!-- #129 S2.2-B: the hand-written AppService HTTP projection precompile chain. -->
+  <Import Project="$(MSBuildThisFileDirectory)CrestCreates.AppServiceHttp.Build.Common.targets"
+          Condition="'$(_CrestCreatesAppServiceHttpTargetsImported)' != 'true'" />
+  <PropertyGroup>
+    <_CrestCreatesAppServiceHttpTargetsImported>true</_CrestCreatesAppServiceHttpTargetsImported>
   </PropertyGroup>
 </Project>

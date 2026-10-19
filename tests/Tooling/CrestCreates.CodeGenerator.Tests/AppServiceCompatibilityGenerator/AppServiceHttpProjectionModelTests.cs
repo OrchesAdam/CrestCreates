@@ -177,7 +177,14 @@ public sealed class AppServiceHttpProjectionModelTests
             && reference.FullMetadataName == "Shop.Referenced.IQuoteService");
         model.ReferencedTypes.Should().Contain(reference =>
             !reference.IsContract && reference.FullMetadataName == "Shop.Referenced.QuoteDto");
-        model.RequiredJsonRootTypeNames.Should().Contain(name => name.Contains("QuoteDto"));
+        AppServiceHttpProjectionEmitter.PlanJsonRoots(
+                model,
+                AppServiceHttpEmissionOptions.ForContract(model.ContractFullName) with
+                {
+                    JsonContextFullName = "global::Review.JsonStub",
+                })
+            .Select(root => root.ClrTypeDisplay ?? root.TypeDisplay)
+            .Should().Contain(name => name.Contains("QuoteDto"));
     }
 
     [Fact]

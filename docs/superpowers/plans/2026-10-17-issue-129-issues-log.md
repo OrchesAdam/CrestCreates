@@ -340,7 +340,7 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
   - 用 `JsonContractCompilationFactory` + 真实 `ReferencePathWithRefAssemblies` 建 Roslyn compilation（无反射/无 assembly load）；
   - 只接管带 `ContractType` 的正式声明；无 ContractType 的旧静态声明原样留给 legacy 前端（不诊断、不物化）；
   - 每个契约产出 1 个 bundle（信封 + 贡献 + invoker），每个 owner 程序集产出 1 个激活（per-owner 公开类型名）；manifest 逐 artifact 记录 `OwnerAssemblyName`/`OwnerServiceFullName`/`ContractAssemblyName`/`DeclaredTypeFullNames`/`ReferencedTypeFullNames`/`SourceLocation`/`ModelSchemaVersion`/`ContentHash`；
-  - 生产者编译使用合成程序集名，物化前把 owner/本程序集契约身份**归一为真实程序集名**；
+  - 生产者编译使用合成程序集名，物化前把 owner/本程序集契约身份**归一为真实程序集名**（B3 真实构建发现该归一不完整：capability id/envelope 名仍含合成名，已改为直接以真实 owner 名编译——见 S2.2-B3/B4 节）；
   - 模型错误（ref/开放泛型/非接口契约等）fail closed，零产物；输出对同一输入确定（顺序 + 内容哈希）。
 - 测试：`AppServiceHttpPrecompileEngineTests`（4）——双契约 → 2 bundle + 1 activation + 逐 artifact manifest；legacy 声明不被接管；不支持形状零产物；同输入确定。JsonContracts BuildTasks 套件 **135/135 pass**。
 
@@ -356,3 +356,37 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 新增 `prepare-appservice-http` 工具命令 + `AppServiceHttpPrepareRequest/Response` 传输 DTO（source-generated STJ，反射关闭），复用 `BundleBytes` + 逐 artifact manifest 的既有协议；manifest 条目增加 `RequiredJsonRootTypeNames`（供 JSON 阶段生成 context）。
 - 回归：`CrestCreates.JsonContracts.BuildTasks.Tests` **135/135 pass**。
 - **仍未交付**（B 未完成）：BuildTasks 输入清单/state/Generate/Include 四个 target、`CrestCreatesJsonContractGenerationDependsOn` 接线、design-time/TFM/RID 分区、JsonContracts `HttpProjectionJsonContext_*` roots 生成与 Host configurator 校验、真实 MSBuild 探针（B01–B04）与外部包首消费。本轮不声称 B 完成。
+
+## S2.2-B3/B4 完成：BuildTasks 物化、JSON 闭包与真实 MSBuild 探针（2026-10-19）
+
+### 交付
+
+- **BuildTasks 前置阶段**（`CrestCreates.AppServiceHttp.Build.Common.targets`）：
+  - `PrepareCrestAppServiceHttpInputs`（`@(Compile)` + 真实 `ReferencePathWithRefAssemblies`，排除自身输出、CRUD bundle 与 JSON 生成物）→ `WriteCrestAppServiceHttpInputManifest`（schema `appservice-http-inputs-v1`，内容哈希/编译器选项/模型与工具版本/TFM/Configuration/RID）→ `InvalidateMissingCrestAppServiceHttpOutput`（`appservice-http-state-v1`）→ `GenerateCrestAppServiceHttpSurface`（隔离 CLI `prepare-appservice-http`，write-if-changed + stamp）→ `IncludeCrestAppServiceHttpArtifacts`（bundle 进 `@(Compile)`，outputs manifest 进 `@(AdditionalFiles)`）；`Clean` 清理。
+  - 三个 target 显式追加到 `CrestCreatesJsonContractGenerationDependsOn`，包与仓库 transport 共用；输入清单/state 任务由 CRUD 与手写前端共用同一写入器（schema 参数化），未建立第二套 stamp 引擎。
+- **JsonContracts 闭包**：
+  - `AppServiceHttpJsonSurfaceDiscovery` 从真实符号重建投影模型（只认 `ContractType` 锚点），与 outputs manifest 逐 artifact 对账：owner、schema、ContentHash、DeclaredTypeFullNames、RequiredJsonRootTypeNames；任何缺失/多余/伪造 root 直接 CCHTTP006，同一契约多锚点 CCHTTP003。
+  - roots 由共享 `HttpWireEmitter.PlanJsonRoots` 派生（信封、body/裸 scalar、payload、`DynamicApiResponse<T>`、void envelope），JSON 阶段按符号解析（含 typeref 转发、`Nullable<T>`、数组、嵌套泛型；同 FQN 多 owner 拒绝）。
+  - 生成 `CrestCreates.Generated.HttpProjection.HttpProjectionJsonContext_<owner>`（camelCase），与激活中的 configurator 名称一致；官方 STJ 在同一 CoreCompile 产出全部 metadata。
+- **工具链 fail-closed**：`CrestCreatesAppServiceHttpJsonToolchain` 标记 + 生成器读取；有 `ContractType` 但未装配工具链时 CCHTTP002 升级为 Error（装配时仍为静态注册器跳过 Warning，不双发布）。CCHTTP005 的 legacy 行为不变。
+- **真实构建暴露并修复的身份缺陷**：预编译最初用合成程序集名编译，capability id / envelope 类型名会泄漏 `HttpProjectionPrecompile`；现直接以真实 owner 程序集名编译，身份与静态契约一致（正例断言 `compat.appservice.Probe.…` 且不含合成名）。
+- **CLI 输出修正**：`generate` 只要写出有效 response 就不再把“仅含警告的 exit=1”当成传输错误（CJC013 只在无 response 时报告），避免 warning 使构建假红。
+
+### 证据
+
+- `AppServiceHttpJsonSurfaceDiscoveryTests` **9/9**：roots 重建与 manifest 对账、camelCase context、缺 `DynamicApiResponse` 引用 → CCHTTP004、篡改 hash/删除条目/伪造 root/删除 root → CCHTTP006、无 manifest 拒绝、同契约双锚点 CCHTTP003。
+- 真实 MSBuild 探针 `Issue129AppServiceHttpMsBuildTests` **7/7**（linux，`dotnet build` 原始产物）：
+  1. 单次构建物化 bundle（含组合信封 + 激活）并由官方 STJ 关闭 WidgetDto/CreateWidgetDto/List/IReadOnlyList/typed+void envelope；`CCHTTP002` 仅为警告；manifest 逐 artifact hash/roots 正确；输入清单 schema 正确；
+  2. 篡改 outputs manifest → CCHTTP006（无 CJC013 噪声），移除篡改后恢复成功；
+  3. 未知 model schema → CCHTTP006 且不记录新成功 stamp，随后恢复；
+  4. no-op 保持 stamp/bundle、缺 outputs manifest 时失效 stamp 并修复、clean 删除并可确定重建、源文件改名进入输入清单；
+  5. design-time 写 `design-time/` 分区、不触碰 runtime stamp；修改契约后 design-time 反映新路由而 runtime 保持，随后 runtime build 收敛；
+  6. 多 TFM（net10.0 / net10.0-windows）与 RID（linux-x64 / linux-arm64）各自分区，RID 构建不覆盖无 RID 输入清单；
+  7. 打包 `CrestCreates.JsonContracts.Build` 包后，全新外部消费者零仓库 import 完成物化 + JSON 闭包 + STJ metadata。
+- `CrestCreates.JsonContracts.BuildTasks.Tests` **144/144**。
+- 全量 `CrestCreates.CodeGenerator.Tests` **535 pass / 0 fail / 535**，0 skipped（26m25s）；CRUD NativeAOT fixture（linux-x64 publish/link/run）**23/23 pass**（共享后端重构无原生回归）；`SaaSHelpdesk.Web` 真实样例构建成功（新前置阶段在无锚点项目上为空操作）。
+
+### 边界（未在本节声称）
+
+- ExplicitHost 的真实 Host 激活、Map 期 fail-closed、Asset/Procurement 迁移仍属 S2.3；本章只证明编译期物化与 JSON 闭包。
+- 原生 AOT 仍由 S5 的 Ticket fixture 验证；本节探针为 JIT 构建证据。

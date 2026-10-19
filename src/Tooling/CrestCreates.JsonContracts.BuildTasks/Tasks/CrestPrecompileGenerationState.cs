@@ -6,7 +6,7 @@ using Microsoft.Build.Framework;
 namespace CrestCreates.JsonContracts.BuildTasks.Tasks;
 
 /// <summary>A successful generation binds every output to the complete input fingerprint.</summary>
-public sealed class CrestCrudGenerationState : ITask
+public sealed class CrestPrecompileGenerationState : ITask
 {
     [Required] public string StampPath { get; set; } = string.Empty;
     [Required] public string InputManifestPath { get; set; } = string.Empty;
@@ -14,6 +14,8 @@ public sealed class CrestCrudGenerationState : ITask
     [Required] public string OutputsManifestPath { get; set; } = string.Empty;
     [Required] public string AllowedOutputRoot { get; set; } = string.Empty;
     [Required] public string TemporaryDirectory { get; set; } = string.Empty;
+    public string StateSchema { get; set; } = "crud-state-v1";
+    public string ErrorCode { get; set; } = "CCCRUD006";
     public bool Write { get; set; }
     [Output] public bool IsValid { get; set; }
     public IBuildEngine? BuildEngine { get; set; }
@@ -25,8 +27,8 @@ public sealed class CrestCrudGenerationState : ITask
         if (paths.Append(StampPath).Append(TemporaryDirectory)
             .Any(path => !AllowedOutputPath.Contains(AllowedOutputRoot, path)))
         {
-            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CCCRUD006", null, null, 0, 0, 0, 0,
-                "CRUD generation state must remain inside IntermediateOutputPath.", null, GetType().Name));
+            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(ErrorCode, null, null, 0, 0, 0, 0,
+                "Precompile generation state must remain inside IntermediateOutputPath.", null, GetType().Name));
             return false;
         }
 
@@ -36,7 +38,7 @@ public sealed class CrestCrudGenerationState : ITask
         using (var writer = new Utf8JsonWriter(bytes))
         {
             writer.WriteStartObject();
-            writer.WriteString("schema", "crud-state-v1");
+            writer.WriteString("schema", StateSchema);
             foreach (var path in paths)
             {
                 using var file = File.OpenRead(path);

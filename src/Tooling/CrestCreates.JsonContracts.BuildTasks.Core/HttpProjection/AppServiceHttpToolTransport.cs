@@ -20,6 +20,10 @@ internal sealed class AppServiceHttpPrepareRequest
 
     public bool AllowUnsafeBlocks { get; set; }
 
+    /// <summary>Model schema version the caller expects; a mismatch fails before any artifact.</summary>
+    public string? ExpectedModelSchemaVersion { get; set; }
+
+    /// <summary>True when generation is disabled: formal declarations then become a build error.</summary>
     public bool ValidateOnly { get; set; }
 }
 

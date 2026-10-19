@@ -7,13 +7,22 @@ using Microsoft.Build.Framework;
 namespace CrestCreates.JsonContracts.BuildTasks.Tasks;
 
 /// <summary>
-/// #128 S2: runs the isolated CRUD precompile producer for the current inner build and writes the
-/// materialized bundle plus its outputs manifest inside the SDK intermediate path. The bundle becomes
-/// ordinary Compile input, so the official STJ generator and the remaining generators see the CRUD
-/// surface inside one real CoreCompile instead of depending on each other's same-round output.
+/// Runs an isolated precompile producer for the current inner build and writes the materialized bundle
+/// plus its outputs manifest inside the SDK intermediate path. The bundle becomes ordinary Compile
+/// input, so the official STJ generator and the remaining generators see the materialized surface
+/// inside one real CoreCompile instead of depending on each other's same-round output.
 /// </summary>
-public sealed class GenerateCrestCrudArtifacts : ITask
+public abstract class GeneratePrecompiledArtifacts : ITask
 {
+    /// <summary>Tool command name, for example <c>prepare-crud</c>.</summary>
+    protected abstract string CommandName { get; }
+
+    /// <summary>Outputs manifest schema the producer must return.</summary>
+    protected abstract string ExpectedArtifactSchemaVersion { get; }
+
+    /// <summary>Fallback diagnostic prefix for transport/state failures (CCCRUD / CCHTTP).</summary>
+    protected abstract string ErrorPrefix { get; }
+
     [Required]
     public ITaskItem[] SourceFiles { get; set; } = [];
 
@@ -79,8 +88,8 @@ public sealed class GenerateCrestCrudArtifacts : ITask
         {
             if (!AllowedOutputPath.Contains(normalizedRoot, candidate))
             {
-                Error("CCCRUD006",
-                    $"CRUD precompile output '{candidate}' is outside the intermediate root "
+                Error(ErrorPrefix + "006",
+                    $"Precompile output '{candidate}' is outside the intermediate root "
                     + $"'{AllowedOutputRoot}'.");
                 return false;
             }
@@ -88,14 +97,14 @@ public sealed class GenerateCrestCrudArtifacts : ITask
 
         if (!File.Exists(ToolPath))
         {
-            Error("CCCRUD002",
-                $"The CrestCreates CRUD precompile tool is not assembled: '{ToolPath}' does not exist. "
+            Error(ErrorPrefix + "002",
+                $"The CrestCreates precompile tool is not assembled: '{ToolPath}' does not exist. "
                 + "Import exactly one transport (Build.props or Build.Repository.props).");
             return false;
         }
 
-        var requestPath = Path.Combine(normalizedTemp, $"crud-prepare-request-{Guid.NewGuid():N}.json");
-        var responsePath = Path.Combine(normalizedTemp, $"crud-prepare-response-{Guid.NewGuid():N}.json");
+        var requestPath = Path.Combine(normalizedTemp, $"prepare-request-{Guid.NewGuid():N}.json");
+        var responsePath = Path.Combine(normalizedTemp, $"prepare-response-{Guid.NewGuid():N}.json");
 
         try
         {
@@ -105,7 +114,7 @@ public sealed class GenerateCrestCrudArtifacts : ITask
             var exitCode = RunTool(requestPath, responsePath);
             if (exitCode != 0 && !File.Exists(responsePath))
             {
-                Error("CCCRUD002", $"The CRUD precompile tool failed with exit code {exitCode}.");
+                Error(ErrorPrefix + "002", $"The precompile tool failed with exit code {exitCode}.");
                 return false;
             }
 
@@ -124,7 +133,7 @@ public sealed class GenerateCrestCrudArtifacts : ITask
         }
         catch (Exception ex)
         {
-            Error("CCCRUD006", $"GenerateCrestCrudArtifacts failed: {ex.GetType().Name}: {ex.Message}");
+            Error(ErrorPrefix + "006", $"{GetType().Name} failed: {ex.GetType().Name}: {ex.Message}");
             return false;
         }
         finally
@@ -194,7 +203,7 @@ public sealed class GenerateCrestCrudArtifacts : ITask
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"exec \"{ToolPath}\" prepare-crud \"{requestPath}\" \"{responsePath}\"",
+            Arguments = $"exec \"{ToolPath}\" {CommandName} \"{requestPath}\" \"{responsePath}\"",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -202,7 +211,7 @@ public sealed class GenerateCrestCrudArtifacts : ITask
         };
 
         using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("The CRUD precompile tool could not be started.");
+            ?? throw new InvalidOperationException("The precompile tool could not be started.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
 
@@ -215,18 +224,18 @@ public sealed class GenerateCrestCrudArtifacts : ITask
         {
             process.Kill(entireProcessTree: true);
             throw new TimeoutException(
-                $"The CRUD precompile tool exceeded the bounded {TimeoutMilliseconds} ms wait.");
+                $"The precompile tool exceeded the bounded {TimeoutMilliseconds} ms wait.");
         }
 
         var stdout = stdoutTask.GetAwaiter().GetResult();
         var stderr = stderrTask.GetAwaiter().GetResult();
         if (process.ExitCode != 0 && stderr.Length > 0)
         {
-            Error("CCCRUD002", $"CRUD precompile tool output: {stderr.Trim()}");
+            Error(ErrorPrefix + "002", $"Precompile tool output: {stderr.Trim()}");
         }
         else if (process.ExitCode != 0 && stdout.Length > 0)
         {
-            Error("CCCRUD002", $"CRUD precompile tool output: {stdout.Trim()}");
+            Error(ErrorPrefix + "002", $"Precompile tool output: {stdout.Trim()}");
         }
 
         return process.ExitCode;
@@ -243,24 +252,38 @@ public sealed class GenerateCrestCrudArtifacts : ITask
 
         if (!File.Exists(responsePath))
         {
-            failures.Add(("CCCRUD006", "The CRUD precompile tool produced no response document.", null, 0, 0));
+            failures.Add((ErrorPrefix + "006", "The precompile tool produced no response document.", null, 0, 0));
             return false;
         }
 
         using var document = JsonDocument.Parse(File.ReadAllText(responsePath));
         var root = document.RootElement;
 
-        if (root.TryGetProperty("Diagnostics", out var diagnostics)
-            && diagnostics.ValueKind == JsonValueKind.Array)
+        var diagnostics = new List<(string Id, string Severity, string Message, string? File, int Line, int Column)>();
+        if (root.TryGetProperty("Diagnostics", out var diagnosticsElement)
+            && diagnosticsElement.ValueKind == JsonValueKind.Array)
         {
-            foreach (var diagnostic in diagnostics.EnumerateArray())
+            foreach (var diagnostic in diagnosticsElement.EnumerateArray())
             {
-                failures.Add((
+                diagnostics.Add((
                     GetString(diagnostic, "Id"),
+                    GetString(diagnostic, "Severity"),
                     GetString(diagnostic, "Message"),
                     NullIfEmpty(GetString(diagnostic, "FilePath")),
                     GetInt(diagnostic, "Line"),
                     GetInt(diagnostic, "Column")));
+            }
+        }
+
+        foreach (var diagnostic in diagnostics)
+        {
+            if (string.Equals(diagnostic.Severity, "Warning", StringComparison.OrdinalIgnoreCase))
+            {
+                Warn(diagnostic.Id, diagnostic.Message, diagnostic.File, diagnostic.Line, diagnostic.Column);
+            }
+            else if (!string.IsNullOrEmpty(diagnostic.Id))
+            {
+                failures.Add((diagnostic.Id, diagnostic.Message, diagnostic.File, diagnostic.Line, diagnostic.Column));
             }
         }
 
@@ -274,19 +297,36 @@ public sealed class GenerateCrestCrudArtifacts : ITask
                 ? Convert.FromBase64String(bundle.GetString()!)
                 : Encoding.UTF8.GetBytes(string.Empty);
 
-        var manifestBytes = root.TryGetProperty("Outputs", out var outputs)
-            && outputs.ValueKind == JsonValueKind.Object
-                ? Encoding.UTF8.GetBytes(outputs.GetRawText())
-                : Encoding.UTF8.GetBytes("{}");
+        if (!root.TryGetProperty("Outputs", out var outputs) || outputs.ValueKind != JsonValueKind.Object)
+        {
+            failures.Add((ErrorPrefix + "006", "The precompile response carries no outputs manifest.", null, 0, 0));
+            return false;
+        }
 
+        if (GetString(outputs, "SchemaVersion") != ExpectedArtifactSchemaVersion)
+        {
+            failures.Add((ErrorPrefix + "006",
+                $"Unsupported precompile outputs schema '{GetString(outputs, "SchemaVersion")}'; "
+                + $"expected '{ExpectedArtifactSchemaVersion}'.", null, 0, 0));
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(ExpectedModelSchemaVersion)
+            && GetString(outputs, "ModelSchemaVersion") != ExpectedModelSchemaVersion)
+        {
+            failures.Add((ErrorPrefix + "006",
+                $"Unsupported precompile model schema '{GetString(outputs, "ModelSchemaVersion")}'; "
+                + $"expected '{ExpectedModelSchemaVersion}'.", null, 0, 0));
+            return false;
+        }
+
+        var manifestBytes = Encoding.UTF8.GetBytes(outputs.GetRawText());
         var bundleChanged = WriteIfChangedFile.WriteIfChanged(normalizedBundle, bundleBytes, TemporaryDirectory);
         var manifestChanged = WriteIfChangedFile.WriteIfChanged(normalizedManifest, manifestBytes, TemporaryDirectory);
         OutputChanged = bundleChanged || manifestChanged;
         DeclarationCount = GetInt(root, "DeclarationCount");
 
-        if (root.TryGetProperty("Outputs", out var outputsElement)
-            && outputsElement.TryGetProperty("Entries", out var entries)
-            && entries.ValueKind == JsonValueKind.Array)
+        if (outputs.TryGetProperty("Entries", out var entries) && entries.ValueKind == JsonValueKind.Array)
         {
             ArtifactCount = entries.GetArrayLength();
         }
@@ -294,8 +334,8 @@ public sealed class GenerateCrestCrudArtifacts : ITask
         // A declared surface must actually land: a boolean marker alone is never completion evidence.
         if (DeclarationCount > 0 && bundleBytes.Length == 0)
         {
-            failures.Add(("CCCRUD002",
-                $"The CRUD precompile reported {DeclarationCount} declaration(s) but produced an empty bundle.",
+            failures.Add((ErrorPrefix + "002",
+                $"The precompile reported {DeclarationCount} declaration(s) but produced an empty bundle.",
                 null, 0, 0));
             return false;
         }
@@ -333,4 +373,28 @@ public sealed class GenerateCrestCrudArtifacts : ITask
     private void Error(string code, string message, string? file = null, int line = 0, int column = 0) =>
         BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(
             code, null, file, line, column, 0, 0, message, null, "CrestCreates.JsonContracts.BuildTasks"));
+
+    private void Warn(string code, string message, string? file, int line, int column) =>
+        BuildEngine?.LogWarningEvent(new BuildWarningEventArgs(
+            code, null, file, line, column, 0, 0, message, null, "CrestCreates.JsonContracts.BuildTasks"));
+}
+
+/// <summary>#128 CRUD precompile front-end.</summary>
+public sealed class GenerateCrestCrudArtifacts : GeneratePrecompiledArtifacts
+{
+    protected override string CommandName => "prepare-crud";
+
+    protected override string ExpectedArtifactSchemaVersion => "crud-artifacts-v1";
+
+    protected override string ErrorPrefix => "CCCRUD";
+}
+
+/// <summary>#129 hand-written AppService HTTP projection precompile front-end.</summary>
+public sealed class GenerateCrestAppServiceHttpArtifacts : GeneratePrecompiledArtifacts
+{
+    protected override string CommandName => "prepare-appservice-http";
+
+    protected override string ExpectedArtifactSchemaVersion => "appservice-http-artifacts-v1";
+
+    protected override string ErrorPrefix => "CCHTTP";
 }

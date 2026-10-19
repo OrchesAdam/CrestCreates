@@ -144,15 +144,21 @@ internal static class Program
             return 4;
         }
 
-        var result = new CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrecompileEngine().Run(
-            request.AssemblyName ?? "",
-            request.Sources?.Select(source => (source.Path, source.Text)).ToList() ?? [],
-            request.ReferencePaths ?? [],
-            request.LangVersion ?? "latest",
-            request.DefineConstants ?? [],
-            request.Nullable ?? "enable",
-            request.AllowUnsafeBlocks,
-            request.ValidateOnly);
+        var result = !string.IsNullOrEmpty(request.ExpectedModelSchemaVersion)
+            && request.ExpectedModelSchemaVersion != CrestCreates.Tooling.HttpProjection.AppServiceHttpProjectionModel.ModelSchemaVersion
+            ? CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrecompileResult.Failed(
+                [new CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpToolDiagnostic(
+                    CrestCreates.Tooling.HttpProjection.AppServiceHttpDiagnosticCodes.TransportManifestState,
+                    "The requested AppService HTTP model schema version is unsupported.", null, 0, 0)])
+            : new CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrecompileEngine().Run(
+                request.AssemblyName ?? "",
+                request.Sources?.Select(source => (source.Path, source.Text)).ToList() ?? [],
+                request.ReferencePaths ?? [],
+                request.LangVersion ?? "latest",
+                request.DefineConstants ?? [],
+                request.Nullable ?? "enable",
+                request.AllowUnsafeBlocks,
+                request.ValidateOnly);
 
         var diagnostics = result.Diagnostics
             .Select(diagnostic => new ToolDiagnosticDto
@@ -177,7 +183,15 @@ internal static class Program
         {
             Diagnostics = diagnostics,
             BundleBytes = result.Succeeded ? System.Text.Encoding.UTF8.GetBytes(bundle.ToString()) : null,
-            Outputs = result.Manifest,
+            // A project without hand-written projections still gets a complete, empty manifest so the
+            // build state stays deterministic and the JSON stage can tell "nothing declared" apart
+            // from "the producer never ran".
+            Outputs = result.Manifest ?? new CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpOutputManifestDocument
+            {
+                SchemaVersion = CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrecompileEngine.ArtifactSchemaVersion,
+                ModelSchemaVersion = CrestCreates.Tooling.HttpProjection.AppServiceHttpProjectionModel.ModelSchemaVersion,
+                Entries = [],
+            },
             DeclarationCount = result.DeclarationCount,
             ModelSchemaVersion = CrestCreates.Tooling.HttpProjection.AppServiceHttpProjectionModel.ModelSchemaVersion,
         };
@@ -222,7 +236,8 @@ internal static class Program
             request.Nullable ?? "enable",
             request.AllowUnsafeBlocks,
             request.ManifestAccessibility ?? "Internal",
-            request.CrudOutputsManifestJson);
+            request.CrudOutputsManifestJson,
+            request.AppServiceHttpOutputsManifestJson);
 
         var diagnostics = result.Diagnostics.Select(d => new ToolDiagnosticDto
         {
@@ -273,6 +288,9 @@ internal sealed class GenerateRequest
 
     /// <summary>CRUD precompile outputs manifest, used to reconcile the root matrix against owners.</summary>
     public string? CrudOutputsManifestJson { get; set; }
+
+    /// <summary>AppService HTTP projection outputs manifest, used to reconcile the root plan against artifacts.</summary>
+    public string? AppServiceHttpOutputsManifestJson { get; set; }
 }
 
 internal sealed class SourceDto

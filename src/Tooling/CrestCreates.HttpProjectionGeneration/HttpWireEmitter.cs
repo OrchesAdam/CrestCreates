@@ -248,7 +248,7 @@ public static class HttpWireEmitter
     {
         Line(builder, NestedIndent + Indent + "RequiredJsonRootTypes = new " + DynamicApi + "CapabilityEndpointJsonRootType[]");
         Line(builder, NestedIndent + Indent + "{");
-        foreach (var root in JsonRoots(model))
+        foreach (var root in PlanJsonRoots(model))
         {
             Line(builder, QuadIndent + "new " + DynamicApi + "CapabilityEndpointJsonRootType(typeof("
                 + (root.ClrTypeDisplay ?? root.TypeDisplay) + "), \"" + Escape(root.Action) + "\", \"" + root.Component + "\"),");
@@ -548,8 +548,14 @@ public static class HttpWireEmitter
 
     private static string Spaces(int levels) => new string(' ', levels * 4);
 
-    private static IEnumerable<HttpWireJsonRoot> JsonRoots(HttpWireModel model)
+    /// <summary>
+    /// The authoritative root set of a wire model: composed inputs, body/scalar inputs, payloads, typed
+    /// result envelopes and the void envelope. The precompile manifest and the JsonContracts stage both
+    /// consume this plan, so a root cannot silently exist on one side only (S2.2-B).
+    /// </summary>
+    public static IReadOnlyList<HttpWireJsonRoot> PlanJsonRoots(HttpWireModel model)
     {
+        var roots = new List<HttpWireJsonRoot>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var action in model.Actions)
         {
@@ -557,7 +563,7 @@ public static class HttpWireEmitter
             {
                 if (seen.Add("Input|" + action.EnvelopeFullName))
                 {
-                    yield return new HttpWireJsonRoot("global::" + action.EnvelopeFullName, action.Name, "CapabilityInput");
+                    roots.Add(new HttpWireJsonRoot("global::" + action.EnvelopeFullName, action.Name, "CapabilityInput"));
                 }
 
                 if (model.EmitInputScalarRoots)
@@ -566,10 +572,10 @@ public static class HttpWireEmitter
                     {
                         if (seen.Add("Scalar|" + parameter.TypeFullName))
                         {
-                            yield return new HttpWireJsonRoot(
+                            roots.Add(new HttpWireJsonRoot(
                                 parameter.TypeFullName, action.Name,
                                 parameter.Source == "Body" ? "Body" : "CapabilityInput",
-                                parameter.ClrTypeFullName);
+                                parameter.ClrTypeFullName));
                         }
                     }
                 }
@@ -581,10 +587,10 @@ public static class HttpWireEmitter
                     && (model.EmitInputScalarRoots || single.Source == "Body")
                     && seen.Add("Input|" + single.TypeFullName))
                 {
-                    yield return new HttpWireJsonRoot(
+                    roots.Add(new HttpWireJsonRoot(
                         single.TypeFullName, action.Name,
                         single.Source == "Body" ? "Body" : "CapabilityInput",
-                        single.ClrTypeFullName);
+                        single.ClrTypeFullName));
                 }
             }
 
@@ -592,13 +598,13 @@ public static class HttpWireEmitter
             {
                 if (seen.Add("Payload|" + action.ResultPayloadFullName))
                 {
-                    yield return new HttpWireJsonRoot(action.ResultPayloadFullName, action.Name, "Payload");
+                    roots.Add(new HttpWireJsonRoot(action.ResultPayloadFullName, action.Name, "Payload"));
                 }
 
                 var envelope = DynamicApi + "DynamicApiResponse<" + action.ResultPayloadFullName + ">";
                 if (seen.Add("Result|" + envelope))
                 {
-                    yield return new HttpWireJsonRoot(envelope, action.Name, "ResultEnvelope");
+                    roots.Add(new HttpWireJsonRoot(envelope, action.Name, "ResultEnvelope"));
                 }
             }
 
@@ -606,7 +612,7 @@ public static class HttpWireEmitter
             {
                 if (seen.Add("Void|" + action.Name))
                 {
-                    yield return new HttpWireJsonRoot(VoidEnvelope, action.Name, "VoidEnvelope");
+                    roots.Add(new HttpWireJsonRoot(VoidEnvelope, action.Name, "VoidEnvelope"));
                 }
             }
         }
@@ -615,9 +621,11 @@ public static class HttpWireEmitter
         {
             if (seen.Add("Extra|" + root.TypeDisplay + "|" + root.Component))
             {
-                yield return root;
+                roots.Add(root);
             }
         }
+
+        return roots;
     }
 
     private static string EnumTypeForParse(string typeFullName)

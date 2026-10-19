@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using CrestCreates.JsonContracts.BuildTasks.Semantic;
 using CrestCreates.Tooling.HttpProjection;
 using Microsoft.CodeAnalysis;
@@ -41,7 +43,7 @@ public sealed class AppServiceHttpPrecompileEngine
         }
 
         var compilation = JsonContractCompilationFactory.CreateCompilation(
-            assemblyName + ".HttpProjectionPrecompile",
+            assemblyName,
             sourceFiles.ToList(),
             referencePaths,
             languageVersion,
@@ -104,17 +106,10 @@ public sealed class AppServiceHttpPrecompileEngine
             return new AppServiceHttpPrecompileResult(diagnostics, Array.Empty<(string, string)>(), null, 0);
         }
 
-        // The producer compiles under a synthetic assembly name; the wire identity must name the real
-        // owner assembly (and the contract's real assembly when it lives in this compilation).
-        var producerAssemblyName = compilation.AssemblyName;
+        // The producer must compile under the real owner assembly name: capability ids, endpoint ids and
+        // composed envelope type names are derived from it, so a synthetic name would leak into the wire
+        // identities the host later maps (S2.2-B probe).
         models = models
-            .Select(model => model with
-            {
-                HttpOwnerAssemblyName = assemblyName,
-                ContractAssemblyName = string.Equals(model.ContractAssemblyName, producerAssemblyName, StringComparison.Ordinal)
-                    ? assemblyName
-                    : model.ContractAssemblyName,
-            })
             .OrderBy(model => model.ContractFullName, StringComparer.Ordinal)
             .ToList();
         var assemblyOptions = AppServiceHttpAssemblyOptions.ForAssembly(assemblyName);
@@ -134,7 +129,7 @@ public sealed class AppServiceHttpPrecompileEngine
             artifacts.Add((bundle.FileName, bundle.Source));
             entries.Add(ToEntry(
                 AppServiceHttpProjectionEmitter.BuildManifestEntry(model, optionsByModel[model.ContractFullName]),
-                model.RequiredJsonRootTypeNames));
+                RequiredRootNames(model, optionsByModel[model.ContractFullName])));
         }
 
         var activation = AppServiceHttpProjectionEmitter.EmitAssemblyActivation(
@@ -142,10 +137,19 @@ public sealed class AppServiceHttpPrecompileEngine
             models.Select(model => (model, optionsByModel[model.ContractFullName])).ToArray(),
             assemblyOptions);
         artifacts.Add((activation.FileName, activation.Source));
-        entries.Add(ToEntry(
-            AppServiceHttpProjectionEmitter.BuildManifestEntries(
-                models[0], optionsByModel[models[0].ContractFullName], activation)[1],
-            Array.Empty<string>()));
+        entries.Add(new AppServiceHttpOutputManifestEntry
+        {
+            OwnerAssemblyName = assemblyName,
+            OwnerServiceFullName = assemblyName,
+            ContractAssemblyName = assemblyName,
+            ArtifactHintName = activation.FileName,
+            DeclaredTypeFullNames = HttpProjectionShared.DeclaredTypeFullNames(activation.Source).ToArray(),
+            ReferencedTypeFullNames = Array.Empty<string>(),
+            SourceLocation = models[0].DeclarationLocation,
+            ModelSchemaVersion = AppServiceHttpProjectionModel.ModelSchemaVersion,
+            ContentHash = ContentHashOf(activation.Source),
+            RequiredJsonRootTypeNames = Array.Empty<string>(),
+        });
 
         var manifest = new AppServiceHttpOutputManifestDocument
         {
@@ -155,6 +159,18 @@ public sealed class AppServiceHttpPrecompileEngine
         };
         return new AppServiceHttpPrecompileResult(diagnostics, artifacts, manifest, models.Count);
     }
+
+    private static string[] RequiredRootNames(
+        AppServiceHttpProjectionModel model,
+        AppServiceHttpEmissionOptions options)
+        => AppServiceHttpProjectionEmitter.PlanJsonRoots(model, options)
+            .Select(root => root.ClrTypeDisplay ?? root.TypeDisplay)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+    private static string ContentHashOf(string source)
+        => "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
 
     private static bool HasContractType(AttributeData projection)
         => projection.NamedArguments.Any(argument =>

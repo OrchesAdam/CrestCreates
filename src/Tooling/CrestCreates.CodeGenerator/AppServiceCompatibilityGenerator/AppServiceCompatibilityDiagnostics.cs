@@ -82,16 +82,28 @@ internal static class AppServiceCompatibilityDiagnostics
         isEnabledByDefault: true);
 
     /// <summary>
-    /// CCHTTP002 (#129): an explicit-host projection was declared but the precompile/ExplicitHost
-    /// front-end is not materializing it yet, so the static registrar skipped it instead of publishing
-    /// a second, divergent endpoint set.
+    /// CCHTTP002 (#129): an explicit-host projection was declared. The static registrar never publishes
+    /// it; the precompile/ExplicitHost front-end owns the wire surface. Without the precompile + JSON
+    /// toolchain marker the declaration is a build error, not a silently missing endpoint set.
     /// </summary>
     public static readonly DiagnosticDescriptor CCHTTP002 = new(
         id: "CCHTTP002",
-        title: "Explicit-host projection is not materialized yet",
-        messageFormat: "'{0}' declares an explicit-host HTTP projection; the static compatibility registrar skipped it because the precompile front-end does not materialize it yet (#129 S2)",
+        title: "Explicit-host projection is owned by the precompile front-end",
+        messageFormat: "'{0}' declares an explicit-host HTTP projection; the static compatibility registrar does not publish it and the AppService HTTP precompile/JSON toolchain must materialize the wire surface (#129 S2)",
         category: "CrestCreates.HttpProjection",
         defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    /// <summary>
+    /// CCHTTP002 in its fail-closed form: the declaration exists but the AppService HTTP precompile +
+    /// JSON toolchain marker is absent, so nothing will materialize the wire surface.
+    /// </summary>
+    public static readonly DiagnosticDescriptor CCHTTP002NotMaterialized = new(
+        id: "CCHTTP002",
+        title: "Explicit-host projection has no materializing toolchain",
+        messageFormat: "'{0}' declares an explicit-host HTTP projection, but the AppService HTTP precompile/JSON toolchain is not assembled; the declaration would disappear from the wire surface (#129 S2)",
+        category: "CrestCreates.HttpProjection",
+        defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
     /// <summary>

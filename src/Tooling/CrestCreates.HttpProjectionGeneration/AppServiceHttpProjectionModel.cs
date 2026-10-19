@@ -46,13 +46,6 @@ public sealed record AppServiceHttpProjectionModel
     public required IReadOnlyList<AppServiceHttpReferenceIdentity> ReferencedTypes { get; init; }
 
     public required string DeclarationLocation { get; init; }
-
-    public IReadOnlyList<string> RequiredJsonRootTypeNames => Actions
-        .SelectMany(action => new[] { action.BodyTypeFullName, action.ResultTypeFullName, action.InputEnvelopeFullName })
-        .Where(name => !string.IsNullOrWhiteSpace(name))
-        .Distinct(StringComparer.Ordinal)
-        .OrderBy(name => name, StringComparer.Ordinal)
-        .ToList()!;
 }
 
 /// <summary>Wire shape of one contract action. Frozen from symbols; never re-derived by an emitter.</summary>

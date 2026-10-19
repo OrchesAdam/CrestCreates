@@ -11,7 +11,7 @@
              Runtime="NET"
              Architecture="*" />
 
-  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.CrestCrudGenerationState"
+  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.CrestPrecompileGenerationState"
              AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)" Runtime="NET" Architecture="*" />
 
   <PropertyGroup>
@@ -107,12 +107,12 @@
   <Target Name="InvalidateMissingCrestCrudOutput"
           DependsOnTargets="WriteCrestCrudInputManifest"
           Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
-    <CrestCreates.JsonContracts.BuildTasks.Tasks.CrestCrudGenerationState
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.CrestPrecompileGenerationState
         StampPath="$(_CrestCrudStampFullPath)" InputManifestPath="$(_CrestCrudInputManifestFullPath)"
         BundlePath="$(_CrestCrudBundleFullPath)" OutputsManifestPath="$(_CrestCrudOutputsManifestFullPath)"
         AllowedOutputRoot="$(_CrestCrudAllowedOutputRoot)" TemporaryDirectory="$(_CrestCrudTemporaryFullPath)">
       <Output TaskParameter="IsValid" PropertyName="_CrestCrudStateValid" />
-    </CrestCreates.JsonContracts.BuildTasks.Tasks.CrestCrudGenerationState>
+    </CrestCreates.JsonContracts.BuildTasks.Tasks.CrestPrecompileGenerationState>
     <Delete Files="$(_CrestCrudStampFullPath)" Condition="'$(_CrestCrudStateValid)' != 'true'" />
   </Target>
 
@@ -142,7 +142,7 @@
       <Output TaskParameter="OutputChanged" PropertyName="CrestCrudOutputChanged" />
     </CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateCrestCrudArtifacts>
     <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(_CrestCrudStampFullPath)'))" />
-    <CrestCreates.JsonContracts.BuildTasks.Tasks.CrestCrudGenerationState Write="true"
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.CrestPrecompileGenerationState Write="true"
         StampPath="$(_CrestCrudStampFullPath)" InputManifestPath="$(_CrestCrudInputManifestFullPath)"
         BundlePath="$(_CrestCrudBundleFullPath)" OutputsManifestPath="$(_CrestCrudOutputsManifestFullPath)"
         AllowedOutputRoot="$(_CrestCrudAllowedOutputRoot)" TemporaryDirectory="$(_CrestCrudTemporaryFullPath)" />

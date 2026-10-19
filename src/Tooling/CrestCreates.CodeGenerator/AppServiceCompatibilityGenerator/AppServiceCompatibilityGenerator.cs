@@ -27,11 +27,18 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
 
         var compilationProvider = context.CompilationProvider;
 
+        // #129 S2.2-B: a formal ContractType declaration without the precompile + JSON toolchain
+        // assembled must fail the build instead of being skipped with a warning and silently
+        // disappearing from the wire surface.
+        var toolchainAssembled = context.AnalyzerConfigOptionsProvider.Select(static (provider, _) =>
+            provider.GlobalOptions.TryGetValue(
+                "build_property.CrestCreatesAppServiceHttpJsonToolchain", out var value) && value == "true");
+
         context.RegisterSourceOutput(
-            projectedServices.Combine(compilationProvider),
+            projectedServices.Combine(compilationProvider).Combine(toolchainAssembled),
             static (spc, source) =>
             {
-                GenerateAll(spc, source.Left, source.Right);
+                GenerateAll(spc, source.Left.Left, source.Left.Right, source.Right);
             });
     }
 
@@ -535,7 +542,8 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
     private static void GenerateAll(
         SourceProductionContext spc,
         ImmutableArray<CompatibilityServiceModel?> services,
-        Compilation compilation)
+        Compilation compilation,
+        bool toolchainAssembled)
     {
         var validServices = services.Where(s => s is not null).ToList();
         if (validServices.Count == 0) return;
@@ -547,14 +555,19 @@ public sealed class AppServiceCompatibilityGenerator : IIncrementalGenerator
             // Report deferred diagnostics
             foreach (var diag in service.Diagnostics)
             {
-                spc.ReportDiagnostic(Diagnostic.Create(
-                    diag.Descriptor, diag.Location, diag.MessageArgs));
+                var descriptor = !toolchainAssembled
+                                 && string.Equals(diag.Descriptor.Id, "CCHTTP002", System.StringComparison.Ordinal)
+                    ? AppServiceCompatibilityDiagnostics.CCHTTP002NotMaterialized
+                    : diag.Descriptor;
+                spc.ReportDiagnostic(Diagnostic.Create(descriptor, diag.Location, diag.MessageArgs));
             }
 
             // Fail-closed: skip code generation for services with error-level diagnostics
             // (CEP030, CEP031, CEP034, CEP037) to avoid generating code that would
             // produce additional compiler errors (e.g., CS0310 for new() constraint violation)
-            if (service.Diagnostics.Any(d => d.Descriptor.DefaultSeverity == DiagnosticSeverity.Error))
+            if (service.Diagnostics.Any(d => d.Descriptor.DefaultSeverity == DiagnosticSeverity.Error)
+                || (!toolchainAssembled && service.Diagnostics.Any(d =>
+                    string.Equals(d.Descriptor.Id, "CCHTTP002", System.StringComparison.Ordinal))))
             {
                 continue;
             }

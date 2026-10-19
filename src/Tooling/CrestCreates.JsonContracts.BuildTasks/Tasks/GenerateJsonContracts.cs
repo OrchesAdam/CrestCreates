@@ -42,6 +42,9 @@ public sealed class GenerateJsonContracts : ITask
     /// <summary>#128: the CRUD precompile outputs manifest, reconciled against the discovered roots.</summary>
     public string? CrudOutputsManifestPath { get; set; }
 
+    /// <summary>#129 S2.2-B: the AppService HTTP projection outputs manifest, reconciled with its root plan.</summary>
+    public string? AppServiceHttpOutputsManifestPath { get; set; }
+
     [Output]
     public int GeneratedContextCount { get; set; }
 
@@ -102,18 +105,22 @@ public sealed class GenerateJsonContracts : ITask
             WriteRequest(requestPath);
 
             var exitCode = RunTool(toolExe, $"generate \"{requestPath}\" \"{responsePath}\"");
-            
+
+            var responseHandled = false;
             if (File.Exists(responsePath))
             {
                 var result = ReadResponse(responsePath, normalizedOutput, normalizedTemp);
                 if (!result) return false;
+                responseHandled = true;
             }
 
-            if (exitCode != 0)
+            // The tool returns a non-zero code for warnings too; a written response with no error
+            // diagnostics is the authoritative result. Only a missing response is a transport failure.
+            if (exitCode != 0 && !responseHandled)
             {
                 BuildEngine?.LogErrorEvent(new BuildErrorEventArgs(
-                    "CJC012", null, null, 0, 0, 0, 0,
-                    $"Tool exited with code {exitCode}.",
+                    "CJC013", null, null, 0, 0, 0, 0,
+                    $"Tool exited with code {exitCode} and produced no response document.",
                     null, "CrestCreates.JsonContracts.BuildTasks"));
                 return false;
             }
@@ -220,6 +227,8 @@ public sealed class GenerateJsonContracts : ITask
         writer.WriteString("ManifestAccessibility", ManifestAccessibility);
         if (!string.IsNullOrEmpty(CrudOutputsManifestPath) && File.Exists(CrudOutputsManifestPath))
             writer.WriteString("CrudOutputsManifestJson", File.ReadAllText(CrudOutputsManifestPath));
+        if (!string.IsNullOrEmpty(AppServiceHttpOutputsManifestPath) && File.Exists(AppServiceHttpOutputsManifestPath))
+            writer.WriteString("AppServiceHttpOutputsManifestJson", File.ReadAllText(AppServiceHttpOutputsManifestPath));
         writer.WriteEndObject();
         writer.Flush();
     }
@@ -343,17 +352,10 @@ public sealed class GenerateJsonContracts : ITask
         if (process == null)
             return -1;
 
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
+        _ = process.StandardOutput.ReadToEnd();
+        _ = process.StandardError.ReadToEnd();
         process.WaitForExit();
 
-        if (process.ExitCode != 0)
-        {
-            var msg = string.Join(" | ", new[] { stdout, stderr }.Where(s => !string.IsNullOrEmpty(s)));
-            if (string.IsNullOrEmpty(msg)) msg = "(no output)";
-            BuildEngine?.LogErrorEvent(new BuildErrorEventArgs("CJC013", null, null, 0, 0, 0, 0,
-                $"Tool error (exit={process.ExitCode}): {msg}", null, "GenerateJsonContracts"));
-        }
         return process.ExitCode;
     }
 
