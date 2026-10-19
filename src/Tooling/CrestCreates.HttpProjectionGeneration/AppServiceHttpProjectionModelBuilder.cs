@@ -75,6 +75,7 @@ public static class AppServiceHttpProjectionModelBuilder
         var ownerAssembly = compilation.AssemblyName ?? string.Empty;
         var contractFullName = contract.ToDisplayString(Display).Replace("global::", string.Empty);
         var actions = new List<AppServiceHttpActionModel>();
+        var rootSymbols = new List<AppServiceHttpRootSymbol>();
         var referenced = new List<AppServiceHttpReferenceIdentity>();
         AddReference(referenced, contract, ownerAssembly, isContract: true);
 
@@ -82,7 +83,7 @@ public static class AppServiceHttpProjectionModelBuilder
         {
             var action = BuildAction(
                 compilation, contract, anchor, contractMethod, ownerAssembly, contractFullName,
-                explicitCapabilityPrefix, diagnostics, referenced);
+                explicitCapabilityPrefix, diagnostics, referenced, rootSymbols);
             if (action is not null)
             {
                 actions.Add(action);
@@ -141,7 +142,35 @@ public static class AppServiceHttpProjectionModelBuilder
             DeclarationLocation = DescribeLocation(anchor),
         };
 
-        return new AppServiceHttpProjectionBuildResult(model, diagnostics);
+        return new AppServiceHttpProjectionBuildResult(model, diagnostics)
+        {
+            RootSymbols = rootSymbols
+                .OrderBy(symbol => symbol.Action, StringComparer.Ordinal)
+                .ThenBy(symbol => symbol.Component, StringComparer.Ordinal)
+                .ThenBy(symbol => symbol.Display, StringComparer.Ordinal)
+                .ToArray(),
+        };
+    }
+
+    /// <summary>
+    /// True when this declaration belongs to the formal explicit-host front-end: it names a
+    /// ContractType, or it explicitly selects ExplicitHost. A mode-less declaration without a
+    /// ContractType, and any explicit LegacyStatic declaration, remain with the legacy registrar.
+    /// </summary>
+    public static bool OwnsFormalHttpSurface(AttributeData projection)
+    {
+        var hasContract = projection.NamedArguments.Any(argument =>
+            argument.Key == "ContractType"
+            && argument.Value.Kind == TypedConstantKind.Type
+            && argument.Value.Value is not null);
+        var mode = projection.NamedArguments.FirstOrDefault(argument => argument.Key == "RegistrationMode");
+        var hasMode = mode.Key is not null && mode.Value.Kind == TypedConstantKind.Enum;
+        if (hasMode && Convert.ToInt32(mode.Value.Value) == 1)
+        {
+            return false;
+        }
+
+        return hasContract || (hasMode && Convert.ToInt32(mode.Value.Value) == 0);
     }
 
     private static AppServiceHttpActionModel? BuildAction(
@@ -153,7 +182,8 @@ public static class AppServiceHttpProjectionModelBuilder
         string contractFullName,
         string? explicitCapabilityPrefix,
         List<AppServiceHttpProjectionDiagnostic> diagnostics,
-        List<AppServiceHttpReferenceIdentity> referenced)
+        List<AppServiceHttpReferenceIdentity> referenced,
+        List<AppServiceHttpRootSymbol> rootSymbols)
     {
         var actionName = contractMethod.Name;
         if (contractMethod.TypeParameters.Length > 0)
@@ -377,6 +407,34 @@ public static class AppServiceHttpProjectionModelBuilder
         if (resultType is not null)
         {
             AddReference(referenced, resultType, compilation.AssemblyName ?? string.Empty, isContract: false);
+        }
+
+        foreach (var bound in boundParameters.Where(parameter => parameter.Source != "CancellationToken"))
+        {
+            var symbol = bound.IsContractParameter
+                ? contractMethod.Parameters.FirstOrDefault(parameter => parameter.Name == bound.Name)?.Type
+                : bound.Source == "Header"
+                    ? compilation.GetSpecialType(SpecialType.System_String)
+                    : null;
+            if (symbol is null)
+            {
+                continue;
+            }
+
+            rootSymbols.Add(new AppServiceHttpRootSymbol(
+                actionName,
+                bound.Source == "Body" ? "Body" : "CapabilityInput",
+                bound.ClrTypeFullName ?? bound.TypeFullName,
+                symbol));
+        }
+
+        if (resultType is not null)
+        {
+            rootSymbols.Add(new AppServiceHttpRootSymbol(
+                actionName,
+                "Payload",
+                resultType.ToDisplayString(Display),
+                resultType));
         }
 
         var capabilityId = explicitCapabilityPrefix is null

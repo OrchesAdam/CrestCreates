@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.CodeAnalysis;
 
 namespace CrestCreates.Tooling.HttpProjection;
 
@@ -216,7 +217,21 @@ public sealed record AppServiceHttpProjectionBuildResult(
     IReadOnlyList<AppServiceHttpProjectionDiagnostic> Diagnostics)
 {
     public bool HasErrors => Diagnostics.Any(d => d.Severity == AppServiceHttpDiagnosticSeverity.Error);
+
+    /// <summary>
+    /// Exact symbols of the body, input and payload roots of every action. The JSON stage resolves
+    /// its roots from these symbols instead of re-parsing display text (S22B-R1-01).
+    /// </summary>
+    public IReadOnlyList<AppServiceHttpRootSymbol> RootSymbols { get; init; } =
+        Array.Empty<AppServiceHttpRootSymbol>();
 }
+
+/// <summary>One root-bearing symbol of an action, with the display the wire planner records.</summary>
+public sealed record AppServiceHttpRootSymbol(
+    string Action,
+    string Component,
+    string Display,
+    ITypeSymbol Type);
 
 /// <summary>
 /// Issue #129 rev.2 §9: CCHTTP001-008. Declared here so the analyzer and the precompile front-end

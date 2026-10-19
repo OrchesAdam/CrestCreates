@@ -390,3 +390,28 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 
 - ExplicitHost 的真实 Host 激活、Map 期 fail-closed、Asset/Procurement 迁移仍属 S2.3；本章只证明编译期物化与 JSON 闭包。
 - 原生 AOT 仍由 S5 的 Ticket fixture 验证；本节探针为 JIT 构建证据。
+
+## S2.2-B 复审 R1 修复（4 项 P2，2026-10-19）
+
+审查 head `3a1ebb26`；评审探针 `docs/review/probes/2026-10-19-issue-129-s22b-r1-probes.patch` 原样入库（`ReviewS22BProbes`）。
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| S22B-R1-HTTP129-01 JSON 类型解析丢失可空泛型/误拒嵌套泛型 | 删除整段 display 文本解析；`AppServiceHttpProjectionModelBuilder` 在构建模型时同时产出每个动作的**真实根符号**（`AppServiceHttpRootSymbol`：action/component/display/ITypeSymbol）。发现阶段按共享 `PlanJsonRoots` 的 `(action, component, display)` 取符号；仅 envelope（按编译期声明名解析）与 `DynamicApiResponse<T>`（引用程序集开放泛型 + 结果符号 `Construct`）需要构造，均是同一 compilation 的符号。`Box<int>?` 保持 `Nullable<Box<int>>`，`Outer<int>.Inner<string>` 正确绑定 | 审查 7 条探针 **7/7**（string/Box<int> 正控 + Nullable 泛型/嵌套泛型精确 symbol identity）；JsonContracts 151/151 |
+| S22B-R1-HTTP129-02 未核对实际 Compile 产物 | 发现阶段对每个预期 artifact，在 `compilation.SyntaxTrees` 的实际编译输入中验证**逐 artifact 源内容**仍存在（与重新发射的权威源码相等）；manifest hash/owner/roots 对账保持。路由篡改或删除实际声明 → CCHTTP006 | 审查 unit 探针（marker-less bundle 路由替换）通过；真实 MSBuild `Forged_bundle_after_include_must_fail_closed_and_recover` 通过（Include 后 sed 替换 bundle，exit≠0 + CCHTTP006；移除篡改后恢复）；评审 real-build 脚本 `actual-bundle-tamper` exit 1 + CCHTTP006 |
+| S22B-R1-HTTP129-03 显式 Host 缺 ContractType 被当作 legacy | 新增 `AppServiceHttpProjectionModelBuilder.OwnsFormalHttpSurface`：有 ContractType 或显式 `RegistrationMode=ExplicitHost` 即进入 builder；仅“无 mode 无 ContractType”与显式 `LegacyStatic` 留给 legacy。显式 Host 缺 ContractType → CCHTTP001 Error、零产物 | 审查 unit 探针通过；真实 MSBuild `Explicit_host_without_contract_type_must_fail_with_cchttp001` 通过（exit≠0、CCHTTP001、无 bundle/stamp）；评审 real-build 脚本 `actual-missing-contract` exit 1（日志 CCHTTP001）；旧无 mode/LegacyStatic 控制保持（既有 generator/engine 测试） |
+| S22B-R1-HTTP129-04 双锚点在 producer 抛重复键异常 | 在排序后、建立字典/发射前执行全局 owner 冲突检查：重复契约（消息含契约与**两个 anchor 的完整位置**）、跨契约重复 capability id / endpoint id / method+route；命中即 CCHTTP003、零产物、无成功 stamp | 审查 unit 探针通过（CCHTTP003，artifacts 空）；真实 MSBuild `Duplicate_contract_anchors_must_report_cchttp003_in_the_producer` 通过（CCHTTP003、无 “same key”、无 bundle/stamp）；评审 real-build 脚本 `actual-duplicate-anchor` exit 1 + CCHTTP003、无 fatal |
+
+### 追加真实构建控制（评审要求）
+
+- `Referenced_contract_and_dtos_must_close_in_the_consumer_build`：Contract/DTO 位于独立 `Shop.Contracts` 程序集，投影锚点在 Consumer；真实构建成功、manifest `ContractAssemblyName=Shop.Contracts`、JSON context 注册引用 DTO、官方 STJ 在 Consumer 同轮生成 `JsonTypeInfo<Shop.Contracts.WidgetDto/CreateWidgetDto>`，零 SYSLIB1030。
+- `Removing_the_last_projection_must_clear_bundle_manifest_and_json_roots`：移除最后一个正式声明后重建成功；bundle 无 contribution、outputs manifest entries=0、JSON 源不再含 `HttpProjectionJsonContext_`、无 CCHTTP002。
+- 既有 7 条 MSBuild 控制保持通过；本轮 MSBuild 套件 **12/12**。
+
+### 最终验证（R1 head）
+
+- 审查探针 `ReviewS22BProbes` **7/7**；`CrestCreates.JsonContracts.BuildTasks.Tests` **151/151**。
+- 真实 MSBuild 套件 **13/13**（新增：伪造实际 bundle、显式 Host 缺 ContractType、双锚点、引用程序集契约/DTO via 官方 STJ、移除最后声明、可空/嵌套泛型 body 的官方 STJ；原 7 条保持）。
+- 评审 real-build 脚本最终跑：baseline exit 0；bundle 替换 exit 1 + CCHTTP006；缺 ContractType exit 1 + CCHTTP001；双锚点 exit 1 + CCHTTP003（含两个 anchor 位置），无 “same key”。
+- 全量 `CrestCreates.CodeGenerator.Tests` **541 pass / 0 fail / 541**，0 skipped（27m55s）。
+- CRUD NativeAOT fixture **23/23**（linux-x64 publish/link/run）；`SaaSHelpdesk.Web` 构建成功。

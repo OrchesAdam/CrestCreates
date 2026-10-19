@@ -15,10 +15,10 @@ namespace CrestCreates.JsonContracts.BuildTasks.Semantic;
 
 /// <summary>
 /// #129 S2.2-B: discovers the materialized hand-written HTTP projection surface and turns it into the
-/// closed JSON roots its generated contribution requires. The bundle is ordinary Compile input, so the
-/// roots are rebuilt from real symbols and cross-checked against the precompile outputs manifest; a
-/// manifest that no longer agrees with the current declaration fails the build instead of producing a
-/// half-closed context. The same shared planner the emitter uses is the only root authority.
+/// closed JSON roots its generated contribution requires. Roots are bound from the real symbols the
+/// projection model was built from (never reconstructed from display text), and the actual Compile
+/// inputs are checked against the producer's artifacts and the precompile outputs manifest. A surface
+/// that does not match what is compiled fails the build instead of producing a half-closed context.
 /// </summary>
 public sealed class AppServiceHttpJsonSurfaceDiscovery
 {
@@ -33,14 +33,14 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
     {
         var roots = new List<JsonContractRootModel>();
         var builds = BuildModels(compilation);
-        if (builds.Models.Count == 0 || builds.Diagnostics.Any(diagnostic =>
-                diagnostic.Severity == AppServiceHttpDiagnosticSeverity.Error))
+        if (builds.Count == 0 || builds.Any(build => build.Model is null)
+            || _diagnostics.Any(diagnostic => diagnostic.Severity == JsonContractDiagnosticSeverity.Error))
         {
             return roots;
         }
 
-        var duplicateContracts = builds.Models
-            .GroupBy(model => model.ContractFullName, StringComparer.Ordinal)
+        var duplicateContracts = builds
+            .GroupBy(build => build.Model!.ContractFullName, StringComparer.Ordinal)
             .Where(group => group.Count() > 1)
             .Select(group => group.Key)
             .ToList();
@@ -60,26 +60,76 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
             return roots;
         }
 
-        if (!ReconcileWithPrecompileManifest(builds.Models, outputsManifestJson, assemblyName))
+        if (!ReconcileWithPrecompileManifest(compilation, builds, outputsManifestJson, assemblyName))
         {
             return roots;
         }
 
-        var assemblyOptions = AppServiceHttpAssemblyOptions.ForAssembly(assemblyName);
-        var optionsByModel = builds.Models.ToDictionary(
-            model => model.ContractFullName,
-            model => AppServiceHttpEmissionOptions.ForContract(model.ContractFullName) with
-            {
-                JsonContextFullName = assemblyOptions.JsonContextFullName,
-            },
-            StringComparer.Ordinal);
-
-        foreach (var model in builds.Models)
+        var responseOpen = ResolveReferenceType(
+            compilation, "CrestCreates.DynamicApi.DynamicApiResponse`1", out var responseFailure);
+        var responseVoid = ResolveReferenceType(
+            compilation, "CrestCreates.DynamicApi.DynamicApiResponse", out var voidFailure);
+        if (responseOpen is null || responseVoid is null)
         {
-            foreach (var planned in AppServiceHttpProjectionEmitter.PlanJsonRoots(model, optionsByModel[model.ContractFullName]))
+            _diagnostics.Add(new JsonContractDiagnostic
+            {
+                Id = AppServiceHttpDiagnosticCodes.JsonClosureIncomplete,
+                Severity = JsonContractDiagnosticSeverity.Error,
+                Message = "The HTTP projection result envelopes cannot be resolved from the referenced "
+                    + $"assemblies: {responseFailure} {voidFailure}".Trim(),
+            });
+            return roots;
+        }
+
+        foreach (var build in builds)
+        {
+            var model = build.Model!;
+            var options = AppServiceHttpEmissionOptions.ForContract(model.ContractFullName) with
+            {
+                JsonContextFullName = AppServiceHttpAssemblyOptions.ForAssembly(assemblyName).JsonContextFullName,
+            };
+            var actionsByName = model.Actions.ToDictionary(action => action.Name, StringComparer.Ordinal);
+            var symbols = build.Symbols
+                .GroupBy(symbol => Key(symbol.Action, symbol.Component, symbol.Display), StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().Type, StringComparer.Ordinal);
+
+            foreach (var planned in AppServiceHttpProjectionEmitter.PlanJsonRoots(model, options))
             {
                 var display = planned.ClrTypeDisplay ?? planned.TypeDisplay;
-                var type = ResolveTypeDisplay(compilation, display, out var failure);
+                ITypeSymbol? type;
+                string failure;
+                switch (planned.Component)
+                {
+                    case "VoidEnvelope":
+                        type = responseVoid;
+                        failure = string.Empty;
+                        break;
+                    case "ResultEnvelope":
+                        var payload = ResolveSymbol(symbols, planned.Action, "Payload", display: null, out failure);
+                        if (payload is null)
+                        {
+                            type = null;
+                            break;
+                        }
+
+                        type = responseOpen.Construct(payload);
+                        break;
+                    case "Payload":
+                        type = ResolveSymbol(symbols, planned.Action, "Payload", display, out failure);
+                        break;
+                    case "Body":
+                        type = ResolveSymbol(symbols, planned.Action, "Body", display, out failure);
+                        break;
+                    case "CapabilityInput":
+                        type = ResolveCapabilityInput(
+                            compilation, model, actionsByName, symbols, planned, display, out failure);
+                        break;
+                    default:
+                        type = null;
+                        failure = $"unknown root component '{planned.Component}'";
+                        break;
+                }
+
                 if (type is null)
                 {
                     _diagnostics.Add(new JsonContractDiagnostic
@@ -121,15 +171,13 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
         return roots;
     }
 
-    private sealed class BuildResult
-    {
-        public List<AppServiceHttpProjectionModel> Models { get; } = [];
-        public List<AppServiceHttpProjectionDiagnostic> Diagnostics { get; } = [];
-    }
+    private sealed record ModelBuild(
+        AppServiceHttpProjectionModel? Model,
+        IReadOnlyList<AppServiceHttpRootSymbol> Symbols);
 
-    private BuildResult BuildModels(CSharpCompilation compilation)
+    private List<ModelBuild> BuildModels(CSharpCompilation compilation)
     {
-        var result = new BuildResult();
+        var builds = new List<ModelBuild>();
         const string projectionAttributeName =
             "CrestCreates.Domain.Shared.Attributes.CapabilityCompatibilityProjectionAttribute";
 
@@ -137,60 +185,191 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
         {
             var projection = type.GetAttributes().FirstOrDefault(attribute =>
                 attribute.AttributeClass?.ToDisplayString() == projectionAttributeName);
-            if (projection is null || !HasContractType(projection))
+            if (projection is null || !AppServiceHttpProjectionModelBuilder.OwnsFormalHttpSurface(projection))
             {
                 continue;
             }
 
             var build = AppServiceHttpProjectionModelBuilder.Build(compilation, type);
-            result.Diagnostics.AddRange(build.Diagnostics);
-            if (build.Model is not null)
+            builds.Add(new ModelBuild(build.Model, build.RootSymbols));
+            foreach (var diagnostic in build.Diagnostics)
             {
-                result.Models.Add(build.Model);
+                _diagnostics.Add(new JsonContractDiagnostic
+                {
+                    Id = diagnostic.Id,
+                    Severity = diagnostic.Severity == AppServiceHttpDiagnosticSeverity.Error
+                        ? JsonContractDiagnosticSeverity.Error
+                        : JsonContractDiagnosticSeverity.Warning,
+                    Message = diagnostic.Message,
+                });
             }
         }
 
-        result.Models.Sort((left, right) => string.CompareOrdinal(left.ContractFullName, right.ContractFullName));
-        foreach (var diagnostic in result.Diagnostics)
+        builds.Sort((left, right) => string.CompareOrdinal(
+            left.Model?.ContractFullName ?? string.Empty,
+            right.Model?.ContractFullName ?? string.Empty));
+        return builds;
+    }
+
+    private static string Key(string action, string component, string display)
+        => action + "\u001f" + component + "\u001f" + display;
+
+    private static ITypeSymbol? ResolveSymbol(
+        IReadOnlyDictionary<string, ITypeSymbol> symbols,
+        string action,
+        string component,
+        string? display,
+        out string failure)
+    {
+        failure = string.Empty;
+        if (display is not null)
         {
-            _diagnostics.Add(new JsonContractDiagnostic
+            if (symbols.TryGetValue(Key(action, component, display), out var exact))
             {
-                Id = diagnostic.Id,
-                Severity = diagnostic.Severity == AppServiceHttpDiagnosticSeverity.Error
-                    ? JsonContractDiagnosticSeverity.Error
-                    : JsonContractDiagnosticSeverity.Warning,
-                Message = diagnostic.Message,
-            });
+                return exact;
+            }
+
+            var byComponent = DistinctTypes(symbols
+                .Where(pair => pair.Key.StartsWith(action + "\u001f" + component + "\u001f", StringComparison.Ordinal))
+                .Select(pair => pair.Value));
+            if (byComponent.Count == 1)
+            {
+                return byComponent[0];
+            }
+
+            failure = $"no {component} symbol with display '{display}' belongs to the compiled contract";
+            return null;
+        }
+
+        var candidates = DistinctTypes(symbols
+            .Where(pair => pair.Key.StartsWith(action + "\u001f" + component + "\u001f", StringComparison.Ordinal))
+            .Select(pair => pair.Value));
+        if (candidates.Count == 1)
+        {
+            return candidates[0];
+        }
+
+        failure = candidates.Count == 0
+            ? $"no {component} symbol belongs to action '{action}'"
+            : $"action '{action}' has {candidates.Count} distinct {component} symbols; the root is ambiguous";
+        return null;
+    }
+
+    private static IReadOnlyList<ITypeSymbol> DistinctTypes(IEnumerable<ITypeSymbol> types)
+    {
+        var result = new List<ITypeSymbol>();
+        foreach (var type in types)
+        {
+            if (!result.Any(existing => SymbolEqualityComparer.Default.Equals(existing, type)))
+            {
+                result.Add(type);
+            }
         }
 
         return result;
     }
 
-    private static bool HasContractType(AttributeData projection)
-        => projection.NamedArguments.Any(argument =>
-            argument.Key == "ContractType" && argument.Value.Kind == TypedConstantKind.Type && argument.Value.Value is not null);
+    private ITypeSymbol? ResolveCapabilityInput(
+        CSharpCompilation compilation,
+        AppServiceHttpProjectionModel model,
+        IReadOnlyDictionary<string, AppServiceHttpActionModel> actionsByName,
+        IReadOnlyDictionary<string, ITypeSymbol> symbols,
+        HttpWireJsonRoot planned,
+        string display,
+        out string failure)
+    {
+        failure = string.Empty;
+        if (actionsByName.TryGetValue(planned.Action, out var action)
+            && action.InputEnvelopeFullName is not null
+            && display == "global::" + action.InputEnvelopeFullName)
+        {
+            var envelope = compilation.GetTypeByMetadataName(action.InputEnvelopeFullName);
+            if (envelope is null)
+            {
+                failure = $"the composed input envelope '{action.InputEnvelopeFullName}' is not declared "
+                    + "by the compiled materialized surface";
+                return null;
+            }
+
+            if (!SymbolEqualityComparer.Default.Equals(envelope.ContainingAssembly, compilation.Assembly))
+            {
+                failure = $"the composed input envelope '{action.InputEnvelopeFullName}' is not owned by "
+                    + $"assembly '{compilation.AssemblyName}'";
+                return null;
+            }
+
+            return envelope;
+        }
+
+        return ResolveSymbol(symbols, planned.Action, "CapabilityInput", display, out failure);
+    }
+
+    private static INamedTypeSymbol? ResolveReferenceType(
+        CSharpCompilation compilation,
+        string metadataName,
+        out string failure)
+    {
+        failure = string.Empty;
+        var type = compilation.GetTypeByMetadataName(metadataName);
+        if (type is null)
+        {
+            failure = $"framework type '{metadataName}' does not resolve uniquely from the references";
+            return null;
+        }
+
+        if (SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, compilation.Assembly))
+        {
+            failure = $"framework type '{metadataName}' must come from a referenced assembly, not the owner";
+            return null;
+        }
+
+        return type;
+    }
+
+    private sealed record ExpectedArtifact(
+        string HintName,
+        string? OwnerServiceFullName,
+        string Source,
+        string ContentHash,
+        IReadOnlyList<string> DeclaredTypeFullNames,
+        IReadOnlyList<string>? RequiredRoots);
 
     /// <summary>
-    /// The JSON roots must agree with the precompile's own artifacts: an owner, hash, declared type or
-    /// required-root list that the producer did not emit means the context would close a declaration
-    /// that is not the one actually compiled.
+    /// The JSON roots must agree with the producer's artifacts and the compiled inputs: an owner,
+    /// hash, declared type, required root or actual artifact source the producer did not emit means
+    /// the context would close a declaration that is not the one actually compiled.
     /// </summary>
     private bool ReconcileWithPrecompileManifest(
-        IReadOnlyList<AppServiceHttpProjectionModel> models,
+        CSharpCompilation compilation,
+        IReadOnlyList<ModelBuild> builds,
         string? outputsManifestJson,
         string assemblyName)
     {
         if (string.IsNullOrWhiteSpace(outputsManifestJson))
         {
             ManifestError(
-                $"'{models[0].ContractFullName}' declares an explicit-host HTTP projection, but no precompile "
-                + "outputs manifest was provided; the projection toolchain is not assembled.");
+                $"'{builds[0].Model!.ContractFullName}' declares an explicit-host HTTP projection, but no "
+                + "precompile outputs manifest was provided; the projection toolchain is not assembled.");
             return false;
         }
 
+        var models = builds.Select(build => build.Model!).ToList();
         var expected = BuildExpectedArtifacts(assemblyName, models);
         var expectedByHint = expected.ToDictionary(artifact => artifact.HintName, StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // S22B-R1-02: verify the actual Compile inputs, not only the producer's expectation. A target
+        // that replaces the bundle after Include must fail here even though the stamp was written.
+        var compileTexts = compilation.SyntaxTrees.Select(tree => tree.GetText().ToString()).ToList();
+        foreach (var artifact in expected)
+        {
+            if (!compileTexts.Any(text => text.Contains(artifact.Source, StringComparison.Ordinal)))
+            {
+                ManifestError(
+                    $"The compiled inputs do not contain AppService HTTP artifact '{artifact.HintName}' "
+                    + "with the producer's content; the materialized surface was modified or removed.");
+            }
+        }
 
         try
         {
@@ -267,13 +446,6 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
         return _diagnostics.All(diagnostic => diagnostic.Severity != JsonContractDiagnosticSeverity.Error);
     }
 
-    private sealed record ExpectedArtifact(
-        string HintName,
-        string? OwnerServiceFullName,
-        string ContentHash,
-        IReadOnlyList<string> DeclaredTypeFullNames,
-        IReadOnlyList<string>? RequiredRoots);
-
     private static List<ExpectedArtifact> BuildExpectedArtifacts(
         string assemblyName,
         IReadOnlyList<AppServiceHttpProjectionModel> models)
@@ -295,6 +467,7 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
             artifacts.Add(new ExpectedArtifact(
                 bundle.FileName,
                 model.ContractFullName,
+                bundle.Source,
                 ContentHash(bundle.Source),
                 HttpProjectionShared.DeclaredTypeFullNames(bundle.Source)
                     .OrderBy(name => name, StringComparer.Ordinal)
@@ -313,6 +486,7 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
         artifacts.Add(new ExpectedArtifact(
             activation.FileName,
             null,
+            activation.Source,
             ContentHash(activation.Source),
             HttpProjectionShared.DeclaredTypeFullNames(activation.Source)
                 .OrderBy(name => name, StringComparer.Ordinal)
@@ -344,330 +518,4 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
                 .OrderBy(item => item, StringComparer.Ordinal)
                 .ToArray()
             : Array.Empty<string>();
-
-    private static readonly (string Keyword, SpecialType Type)[] KeywordTypes =
-    [
-        ("bool", SpecialType.System_Boolean),
-        ("byte", SpecialType.System_Byte),
-        ("sbyte", SpecialType.System_SByte),
-        ("char", SpecialType.System_Char),
-        ("decimal", SpecialType.System_Decimal),
-        ("double", SpecialType.System_Double),
-        ("float", SpecialType.System_Single),
-        ("int", SpecialType.System_Int32),
-        ("uint", SpecialType.System_UInt32),
-        ("long", SpecialType.System_Int64),
-        ("ulong", SpecialType.System_UInt64),
-        ("short", SpecialType.System_Int16),
-        ("ushort", SpecialType.System_UInt16),
-        ("object", SpecialType.System_Object),
-        ("string", SpecialType.System_String),
-    ];
-
-    /// <summary>
-    /// Resolves a model type display (the shared <c>FullyQualifiedFormat</c> plus nullable annotations)
-    /// to the one symbol in source or references. Zero or multiple owners are reported explicitly; a
-    /// name the JSON side cannot resolve is never silently skipped.
-    /// </summary>
-    private static ITypeSymbol? ResolveTypeDisplay(
-        CSharpCompilation compilation,
-        string display,
-        out string failure)
-    {
-        failure = string.Empty;
-        var text = display.Trim();
-
-        var nullableReference = false;
-        if (text.EndsWith("?", StringComparison.Ordinal))
-        {
-            nullableReference = true;
-            text = text.Substring(0, text.Length - 1);
-        }
-
-        if (text.EndsWith("[]", StringComparison.Ordinal))
-        {
-            var element = ResolveTypeDisplay(compilation, text.Substring(0, text.Length - 2), out failure);
-            return element is null ? null : compilation.CreateArrayTypeSymbol(element);
-        }
-
-        var open = FindTopLevelOpenAngle(text);
-        if (open < 0)
-        {
-            var resolved = ResolveNamed(compilation, text, out failure);
-            if (resolved is not null && nullableReference && resolved.IsValueType)
-            {
-                var nullable = compilation.GetSpecialType(SpecialType.System_Nullable_T);
-                return nullable.Construct(resolved);
-            }
-
-            return resolved;
-        }
-
-        if (!text.EndsWith(">", StringComparison.Ordinal))
-        {
-            failure = "the type display is not a closed generic type";
-            return null;
-        }
-
-        var definitionDisplay = text.Substring(0, open);
-        var argumentText = text.Substring(open + 1, text.Length - open - 2);
-        var argumentDisplays = SplitTopLevelArguments(argumentText);
-        var arguments = new List<ITypeSymbol>();
-        foreach (var argumentDisplay in argumentDisplays)
-        {
-            var argument = ResolveTypeDisplay(compilation, argumentDisplay, out failure);
-            if (argument is null)
-            {
-                return null;
-            }
-
-            arguments.Add(argument);
-        }
-
-        var definition = ResolveNamed(compilation, definitionDisplay, arguments.Count, out failure);
-        if (definition is null)
-        {
-            return null;
-        }
-
-        if (definition.Arity != arguments.Count)
-        {
-            failure = $"generic arity {arguments.Count} does not match '{definitionDisplay}'";
-            return null;
-        }
-
-        return definition.Construct(arguments.ToArray());
-    }
-
-    private static int FindTopLevelOpenAngle(string text)
-    {
-        for (var index = 0; index < text.Length; index++)
-        {
-            if (text[index] == '<')
-            {
-                return index;
-            }
-        }
-
-        return -1;
-    }
-
-    private static IReadOnlyList<string> SplitTopLevelArguments(string text)
-    {
-        var arguments = new List<string>();
-        var depth = 0;
-        var start = 0;
-        for (var index = 0; index < text.Length; index++)
-        {
-            switch (text[index])
-            {
-                case '<':
-                case '[':
-                    depth++;
-                    break;
-                case '>':
-                case ']':
-                    depth--;
-                    break;
-                case ',' when depth == 0:
-                    arguments.Add(text.Substring(start, index - start).Trim());
-                    start = index + 1;
-                    break;
-            }
-        }
-
-        arguments.Add(text.Substring(start).Trim());
-        return arguments;
-    }
-
-    private static INamedTypeSymbol? ResolveNamed(
-        CSharpCompilation compilation,
-        string display,
-        out string failure)
-    {
-        var arity = 0;
-        var name = display;
-        var backtick = name.LastIndexOf('`');
-        if (backtick >= 0)
-        {
-            name = name.Substring(0, backtick);
-            int.TryParse(display.Substring(backtick + 1), out arity);
-        }
-
-        return ResolveNamed(compilation, name, arity, out failure);
-    }
-
-    private static INamedTypeSymbol? ResolveNamed(
-        CSharpCompilation compilation,
-        string display,
-        int arity,
-        out string failure)
-    {
-        failure = string.Empty;
-        var name = display.StartsWith("global::", StringComparison.Ordinal)
-            ? display.Substring("global::".Length)
-            : display;
-
-        foreach (var (keyword, specialType) in KeywordTypes)
-        {
-            if (name == keyword)
-            {
-                return compilation.GetSpecialType(specialType);
-            }
-        }
-
-        var candidates = ResolveCandidates(compilation, name, arity);
-        if (candidates.Count == 0)
-        {
-            // Framework reference assemblies route many types through type forwarders, which a plain
-            // namespace walk cannot see. GetTypeByMetadataName follows forwarders; it is only used once
-            // the explicit owner walk found nothing, so duplicate owners are still diagnosed below.
-            var forwarded = ResolveThroughMetadataName(compilation, name, arity);
-            if (forwarded is not null)
-            {
-                return forwarded;
-            }
-
-            failure = "no type with that metadata name exists in the compilation or its references";
-            return null;
-        }
-
-        if (candidates.Count > 1)
-        {
-            failure = $"'{name}' is declared by {candidates.Count} inputs: "
-                + string.Join(", ", candidates.Select(candidate => candidate.ContainingAssembly?.Name))
-                + "; one JSON root type must have exactly one owner";
-            return null;
-        }
-
-        return candidates[0];
-    }
-
-    private static INamedTypeSymbol? ResolveThroughMetadataName(
-        CSharpCompilation compilation,
-        string name,
-        int arity)
-    {
-        var suffix = arity > 0 ? "`" + arity : string.Empty;
-        var segments = name.Split('.');
-        for (var nested = 0; nested < segments.Length; nested++)
-        {
-            var cut = segments.Length - nested;
-            var metadataName = string.Join(".", segments.Take(cut))
-                + (nested > 0 ? "+" + string.Join("+", segments.Skip(cut)) : string.Empty)
-                + suffix;
-            var resolved = compilation.GetTypeByMetadataName(metadataName);
-            if (resolved is not null)
-            {
-                return resolved;
-            }
-        }
-
-        return null;
-    }
-
-    private static IReadOnlyList<INamedTypeSymbol> ResolveCandidates(
-        CSharpCompilation compilation,
-        string fullName,
-        int arity)
-    {
-        var candidates = new List<INamedTypeSymbol>();
-        var segments = fullName.Split('.');
-
-        // Walk every split between namespace and nested type names: a display of a nested type uses
-        // '.' while the metadata name uses '+'.
-        for (var namespaceSegmentCount = segments.Length - 1; namespaceSegmentCount >= 0; namespaceSegmentCount--)
-        {
-            var namespaceName = string.Join(".", segments.Take(namespaceSegmentCount));
-            var typeSegments = segments.Skip(namespaceSegmentCount).ToArray();
-            if (typeSegments.Length == 0)
-            {
-                continue;
-            }
-
-            var metadataName = typeSegments[0] + (arity > 0 ? "`" + arity : string.Empty);
-            foreach (var type in FindTypes(compilation, namespaceName, metadataName, arity))
-            {
-                var resolved = type;
-                var valid = true;
-                for (var index = 1; index < typeSegments.Length; index++)
-                {
-                    var nested = resolved.GetTypeMembers(typeSegments[index]).FirstOrDefault();
-                    if (nested is null)
-                    {
-                        valid = false;
-                        break;
-                    }
-
-                    resolved = nested;
-                }
-
-                if (valid && !candidates.Any(existing => SymbolEqualityComparer.Default.Equals(existing, resolved)))
-                {
-                    candidates.Add(resolved);
-                }
-            }
-        }
-
-        return candidates;
-    }
-
-    private static IEnumerable<INamedTypeSymbol> FindTypes(
-        CSharpCompilation compilation,
-        string namespaceName,
-        string metadataName,
-        int arity)
-    {
-        foreach (var namespaceSymbol in EnumerateNamespaces(compilation.Assembly.GlobalNamespace))
-        {
-            if (namespaceSymbol.ToDisplayString() != namespaceName)
-            {
-                continue;
-            }
-
-            foreach (var type in namespaceSymbol.GetTypeMembers(metadataName))
-            {
-                if (type.Arity == arity)
-                {
-                    yield return type;
-                }
-            }
-        }
-
-        foreach (var reference in compilation.References)
-        {
-            if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
-            {
-                continue;
-            }
-
-            foreach (var namespaceSymbol in EnumerateNamespaces(assembly.GlobalNamespace))
-            {
-                if (namespaceSymbol.ToDisplayString() != namespaceName)
-                {
-                    continue;
-                }
-
-                foreach (var type in namespaceSymbol.GetTypeMembers(metadataName))
-                {
-                    if (type.Arity == arity)
-                    {
-                        yield return type;
-                    }
-                }
-            }
-        }
-    }
-
-    private static IEnumerable<INamespaceSymbol> EnumerateNamespaces(INamespaceSymbol root)
-    {
-        yield return root;
-        foreach (var child in root.GetNamespaceMembers())
-        {
-            foreach (var nested in EnumerateNamespaces(child))
-            {
-                yield return nested;
-            }
-        }
-    }
 }

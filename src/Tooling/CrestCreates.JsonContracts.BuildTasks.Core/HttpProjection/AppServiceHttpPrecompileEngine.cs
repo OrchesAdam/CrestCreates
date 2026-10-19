@@ -56,10 +56,12 @@ public sealed class AppServiceHttpPrecompileEngine
         {
             var projection = type.GetAttributes().FirstOrDefault(attribute =>
                 attribute.AttributeClass?.ToDisplayString() == ProjectionAttributeName);
-            if (projection is null || !HasContractType(projection))
+            if (projection is null || !AppServiceHttpProjectionModelBuilder.OwnsFormalHttpSurface(projection))
             {
-                // No ContractType: this is a legacy static declaration owned by the compatibility
-                // front-end (or a plain [CrestService]); the formal HTTP stage does not engage.
+                // A mode-less declaration without ContractType, and any explicit LegacyStatic
+                // declaration, stays with the legacy static front-end. An explicit ExplicitHost
+                // declaration without ContractType is formal and must reach the builder's CCHTTP001
+                // (S22B-R1-03), never disappear as if it were legacy.
                 continue;
             }
 
@@ -106,12 +108,19 @@ public sealed class AppServiceHttpPrecompileEngine
             return new AppServiceHttpPrecompileResult(diagnostics, Array.Empty<(string, string)>(), null, 0);
         }
 
-        // The producer must compile under the real owner assembly name: capability ids, endpoint ids and
-        // composed envelope type names are derived from it, so a synthetic name would leak into the wire
-        // identities the host later maps (S2.2-B probe).
         models = models
             .OrderBy(model => model.ContractFullName, StringComparer.Ordinal)
             .ToList();
+
+        // S22B-R1-04: diagnose owner/contract identity conflicts before any dictionary is built or
+        // artifact is emitted. The duplicate contract path previously escaped as a raw ToDictionary
+        // ArgumentException (CLI exit 3) and hid the CCHTTP003 contract.
+        AddOwnerConflictDiagnostics(diagnostics, models);
+        if (diagnostics.Any(diagnostic => diagnostic.IsError))
+        {
+            return AppServiceHttpPrecompileResult.Failed(diagnostics);
+        }
+
         var assemblyOptions = AppServiceHttpAssemblyOptions.ForAssembly(assemblyName);
         var optionsByModel = models.ToDictionary(
             model => model.ContractFullName,
@@ -169,12 +178,84 @@ public sealed class AppServiceHttpPrecompileEngine
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
 
+    private static void AddOwnerConflictDiagnostics(
+        List<AppServiceHttpToolDiagnostic> diagnostics,
+        IReadOnlyList<AppServiceHttpProjectionModel> models)
+    {
+        foreach (var group in models
+                     .GroupBy(model => model.ContractFullName, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1))
+        {
+            diagnostics.Add(Conflict(
+                $"contract '{group.Key}' is declared by {group.Count()} explicit-host projection anchors "
+                + $"({string.Join(", ", group.Select(model => model.AnchorTypeFullName + " at " + model.DeclarationLocation))}); "
+                + "one contract must have exactly one HTTP owner.",
+                group.First().DeclarationLocation));
+        }
+
+        var actions = models
+            .SelectMany(model => model.Actions.Select(action => (Model: model, Action: action)))
+            .ToList();
+
+        foreach (var group in actions
+                     .GroupBy(item => item.Action.CapabilityId, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1))
+        {
+            diagnostics.Add(Conflict(
+                $"capability id '{group.Key}' is declared by {DescribeOwnerActions(group)}; one capability "
+                + "id must have exactly one owner/action.",
+                group.First().Model.DeclarationLocation));
+        }
+
+        foreach (var group in actions
+                     .GroupBy(item => item.Action.EndpointId, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1))
+        {
+            diagnostics.Add(Conflict(
+                $"endpoint id '{group.Key}' is declared by {DescribeOwnerActions(group)}; one endpoint id "
+                + "must have exactly one owner/action.",
+                group.First().Model.DeclarationLocation));
+        }
+
+        foreach (var group in actions
+                     .GroupBy(item => item.Action.HttpMethod + " " + item.Action.RoutePattern, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1))
+        {
+            diagnostics.Add(Conflict(
+                $"method/route '{group.Key}' is declared by {DescribeOwnerActions(group)}; one route must "
+                + "have exactly one owner/action.",
+                group.First().Model.DeclarationLocation));
+        }
+    }
+
+    private static string DescribeOwnerActions(
+        IEnumerable<(AppServiceHttpProjectionModel Model, AppServiceHttpActionModel Action)> items)
+        => string.Join(", ", items.Select(item =>
+            $"{item.Model.ContractFullName}::{item.Action.Name} at {item.Model.DeclarationLocation}"));
+
+    private static AppServiceHttpToolDiagnostic Conflict(string message, string location)
+    {
+        var parts = location.Split(':');
+        var line = 0;
+        var column = 0;
+        var path = location;
+        if (parts.Length >= 3
+            && int.TryParse(parts[^1], out column)
+            && int.TryParse(parts[^2], out line))
+        {
+            path = string.Join(":", parts.Take(parts.Length - 2));
+        }
+
+        return new AppServiceHttpToolDiagnostic(
+            AppServiceHttpDiagnosticCodes.OwnerRouteActionConflict,
+            message,
+            string.IsNullOrEmpty(path) || path == "<metadata>" ? null : path,
+            line,
+            column);
+    }
+
     private static string ContentHashOf(string source)
         => "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
-
-    private static bool HasContractType(AttributeData projection)
-        => projection.NamedArguments.Any(argument =>
-            argument.Key == "ContractType" && argument.Value.Kind == TypedConstantKind.Type && argument.Value.Value is not null);
 
     private static AppServiceHttpOutputManifestEntry ToEntry(
         AppServiceHttpManifestEntry entry,

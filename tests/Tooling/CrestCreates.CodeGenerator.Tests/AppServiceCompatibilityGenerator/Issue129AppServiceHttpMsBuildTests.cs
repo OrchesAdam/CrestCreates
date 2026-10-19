@@ -339,6 +339,181 @@ public sealed class Issue129AppServiceHttpMsBuildTests
             .NotContain(Probe.RepoRoot, "the external consumer must not depend on repository imports");
     }
 
+    [Fact]
+    public async Task Forged_bundle_after_include_must_fail_closed_and_recover()
+    {
+        const string tamper = """
+            <Target Name="ForgeAppServiceBundle"
+                    AfterTargets="IncludeCrestAppServiceHttpArtifacts"
+                    BeforeTargets="PrepareCrestCreatesJsonContractInputs">
+              <Exec Command="sed -i 's#api/widgets#api/forged#g' &quot;$(_CrestAppServiceHttpBundleFullPath)&quot;" />
+            </Target>
+            """;
+        var probe = await Probe.RunAsync(extraProjectXml: tamper);
+
+        probe.ExitCode.Should().NotBe(0,
+            "the JSON stage must reconcile the actual compiled bundle, not only the producer's expectation");
+        probe.Output.Should().Contain("CCHTTP006");
+        probe.Bundle.Should().Contain("api/forged", "the probe really replaced the compiled bundle route");
+        probe.Output.Should().NotContain("ArgumentException");
+
+        await Probe.ResetProjectAsync(probe.Directory);
+        var recovered = await Probe.BuildAsync(probe.Directory);
+        recovered.ExitCode.Should().Be(0, recovered.Output);
+        File.ReadAllText(probe.BundlePath).Should().Contain("api/widgets");
+    }
+
+    [Fact]
+    public async Task Explicit_host_without_contract_type_must_fail_with_cchttp001()
+    {
+        const string source = """
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Http
+            {
+                [CapabilityCompatibilityProjection(
+                    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost)]
+                public static class MissingContractAnchor
+                {
+                }
+            }
+            """;
+        var probe = await Probe.RunAsync(source: source);
+
+        probe.ExitCode.Should().NotBe(0,
+            "an explicitly formal declaration must not be mistaken for a legacy declaration");
+        probe.Output.Should().Contain("CCHTTP001");
+        probe.Bundle.Should().BeEmpty("no partial surface may be materialized");
+        File.Exists(probe.StampPath).Should().BeFalse("a failed producer records no success stamp");
+    }
+
+    [Fact]
+    public async Task Duplicate_contract_anchors_must_report_cchttp003_in_the_producer()
+    {
+        const string source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Http
+            {
+                public interface IService
+                {
+                    [AppServiceHttpAction(Verb = HttpProjectionVerb.Get)]
+                    Task<string> GetAsync(CancellationToken cancellationToken = default);
+                }
+
+                [CapabilityCompatibilityProjection(ContractType = typeof(IService), RoutePrefix = "api/one")]
+                public static class AnchorOne
+                {
+                }
+
+                [CapabilityCompatibilityProjection(ContractType = typeof(IService), RoutePrefix = "api/two")]
+                public static class AnchorTwo
+                {
+                }
+            }
+            """;
+        var probe = await Probe.RunAsync(source: source);
+
+        probe.ExitCode.Should().NotBe(0);
+        probe.Output.Should().Contain("CCHTTP003");
+        probe.Output.Should().Contain("AnchorOne");
+        probe.Output.Should().Contain("AnchorTwo");
+        probe.Output.Should().NotContain("same key",
+            "the producer must diagnose the duplicate anchors before building its dictionary");
+        probe.Bundle.Should().BeEmpty("a conflicted producer emits no partial surface");
+        File.Exists(probe.StampPath).Should().BeFalse("a conflicted producer records no success stamp");
+    }
+
+    [Fact]
+    public async Task Referenced_contract_and_dtos_must_close_in_the_consumer_build()
+    {
+        var probe = await Probe.RunReferencedAsync();
+
+        probe.ExitCode.Should().Be(0, probe.Output);
+        probe.Output.Should().NotContain("SYSLIB1030");
+        probe.Bundle.Should().Contain("GeneratedAppServiceHttpContribution_");
+        probe.OutputsManifest.Should().Contain("\"ContractAssemblyName\":\"Shop.Contracts\"");
+        probe.JsonContractsSource.Should().Contain(
+            "typeof(global::Shop.Contracts.WidgetDto)");
+        probe.JsonContractsSource.Should().Contain(
+            "typeof(global::CrestCreates.DynamicApi.DynamicApiResponse<global::Shop.Contracts.WidgetDto>)");
+        probe.StjSources.Should().Contain(stj =>
+            stj.Contains("JsonTypeInfo<global::Shop.Contracts.WidgetDto>", StringComparison.Ordinal),
+            "the official STJ generator must close referenced DTO roots in the consumer build");
+        probe.StjSources.Should().Contain(stj =>
+            stj.Contains("JsonTypeInfo<global::Shop.Contracts.CreateWidgetDto>", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Removing_the_last_projection_must_clear_bundle_manifest_and_json_roots()
+    {
+        var probe = await Probe.RunAsync();
+        probe.ExitCode.Should().Be(0, probe.Output);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(probe.Directory, "Declaration.cs"),
+            "namespace Shop.Empty { public sealed class Placeholder { } }");
+        var removed = await Probe.BuildAsync(probe.Directory);
+
+        removed.ExitCode.Should().Be(0, removed.Output);
+        File.ReadAllText(probe.BundlePath).Should().NotContain("GeneratedAppServiceHttpContribution_");
+        using var manifest = JsonDocument.Parse(File.ReadAllText(probe.OutputsManifestPath));
+        manifest.RootElement.GetProperty("Entries").GetArrayLength().Should().Be(0);
+        File.ReadAllText(Path.Combine(probe.Intermediate, "CrestCreates.JsonContracts.g.cs"))
+            .Should().NotContain("HttpProjectionJsonContext_");
+        removed.Output.Should().NotContain("CCHTTP002",
+            "no projection declaration remains to be skipped");
+    }
+
+    [Fact]
+    public async Task Nullable_and_nested_generic_body_roots_must_close_with_official_stj()
+    {
+        const string source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Probe
+            {
+                public struct Box<T> { public T Value { get; set; } }
+                public class Outer<T> { public class Inner<U> { public U Value { get; set; } = default!; } }
+
+                public interface IService
+                {
+                    [AppServiceHttpAction(Verb = HttpProjectionVerb.Post, Route = "nullable",
+                        Body = HttpProjectionBodyPolicy.Required)]
+                    Task<string> EchoNullableAsync(Box<int>? input, CancellationToken cancellationToken = default);
+
+                    [AppServiceHttpAction(Verb = HttpProjectionVerb.Post, Route = "nested",
+                        Body = HttpProjectionBodyPolicy.Required)]
+                    Task<string> EchoNestedAsync(Outer<int>.Inner<string> input, CancellationToken cancellationToken = default);
+                }
+
+                [CapabilityCompatibilityProjection(ContractType = typeof(IService), RoutePrefix = "api/probe")]
+                public static class Anchor
+                {
+                }
+            }
+            """;
+        var probe = await Probe.RunAsync(source: source);
+
+        probe.ExitCode.Should().Be(0, probe.Output);
+        probe.Output.Should().NotContain("SYSLIB1030",
+            "the official STJ generator must close the exact nullable/nested root symbols");
+        probe.JsonContractsSource.Should().Contain(
+            "typeof(global::System.Nullable<global::Probe.Box<global::System.Int32>>)");
+        probe.JsonContractsSource.Should().Contain(
+            "typeof(global::Probe.Outer<global::System.Int32>.Inner<global::System.String>)");
+        probe.StjSources.Should().Contain(stj =>
+            stj.Contains("JsonTypeInfo<global::Probe.Box<int>>", StringComparison.Ordinal),
+            "the official STJ generator must close the nullable generic root");
+        probe.StjSources.Should().Contain(stj =>
+            stj.Contains("JsonTypeInfo<global::Probe.Outer<int>.Inner<string>>", StringComparison.Ordinal),
+            "the official STJ generator must close the nested generic root");
+    }
+
     private sealed record ProbeResult(
         string Directory,
         int ExitCode,
@@ -440,7 +615,8 @@ public sealed class Issue129AppServiceHttpMsBuildTests
             string? directory = null,
             string? extraProjectXml = null,
             string tfms = "net10.0",
-            bool external = false)
+            bool external = false,
+            string? source = null)
         {
             var repoRoot = FindRepoRoot();
             await EnsureToolchainAsync(repoRoot);
@@ -462,7 +638,7 @@ public sealed class Issue129AppServiceHttpMsBuildTests
                         .Replace("__ROOT__", repoRoot.Replace('\\', '/')))
                     .Replace("__EXTRA__", extraProjectXml ?? string.Empty);
                 await File.WriteAllTextAsync(projectPath, project);
-                await File.WriteAllTextAsync(Path.Combine(directory, "Declaration.cs"), DeclarationSource);
+                await File.WriteAllTextAsync(Path.Combine(directory, "Declaration.cs"), source ?? DeclarationSource);
             }
 
             var result = await BuildAsync(directory);
@@ -471,6 +647,98 @@ public sealed class Issue129AppServiceHttpMsBuildTests
                 result.ExitCode,
                 result.Output,
                 Path.Combine(directory, "obj", "Debug", tfms.Split(';')[0]));
+        }
+
+        public static async Task<ProbeResult> RunReferencedAsync()
+        {
+            var repoRoot = FindRepoRoot();
+            await EnsureToolchainAsync(repoRoot);
+            var root = Path.Combine(
+                repoRoot, "tests", "artifacts", "issue129-ref-" + Guid.NewGuid().ToString("N")[..8]);
+            var contractsDirectory = Path.Combine(root, "Contracts");
+            var consumerDirectory = Path.Combine(root, "Consumer");
+            System.IO.Directory.CreateDirectory(contractsDirectory);
+            System.IO.Directory.CreateDirectory(consumerDirectory);
+
+            var contractsProject = """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <Nullable>enable</Nullable>
+                    <ImplicitUsings>enable</ImplicitUsings>
+                    <AssemblyName>Shop.Contracts</AssemblyName>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <ProjectReference Include="__ROOT__/src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
+                  </ItemGroup>
+                </Project>
+                """.Replace("__ROOT__", repoRoot.Replace('\\', '/'));
+            await File.WriteAllTextAsync(Path.Combine(contractsDirectory, "Contracts.csproj"), contractsProject);
+            await File.WriteAllTextAsync(Path.Combine(contractsDirectory, "Contracts.cs"), """
+                using System;
+                using System.Threading;
+                using System.Threading.Tasks;
+                using CrestCreates.Domain.Shared.Attributes;
+
+                namespace Shop.Contracts
+                {
+                    public sealed class WidgetDto
+                    {
+                        public Guid Id { get; set; }
+                        public string Name { get; set; } = string.Empty;
+                    }
+
+                    public sealed class CreateWidgetDto
+                    {
+                        public string Name { get; set; } = string.Empty;
+                    }
+
+                    public interface IWidgetAppService
+                    {
+                        [AppServiceHttpAction(Verb = HttpProjectionVerb.Post, Route = "",
+                            Kind = HttpProjectionOperationKind.Command,
+                            Body = HttpProjectionBodyPolicy.Required)]
+                        Task<WidgetDto> CreateAsync(CreateWidgetDto input, CancellationToken cancellationToken = default);
+
+                        [AppServiceHttpAction(Verb = HttpProjectionVerb.Get, Route = "{id}",
+                            Kind = HttpProjectionOperationKind.Query)]
+                        Task<WidgetDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+                    }
+                }
+                """);
+
+            var probeReference = """
+                <ItemGroup>
+                  <ProjectReference Include="../Contracts/Contracts.csproj" />
+                </ItemGroup>
+                """;
+            var project = ProjectTemplate
+                .Replace("__ROOT__", repoRoot.Replace('\\', '/'))
+                .Replace("__TFMS__", "<TargetFramework>net10.0</TargetFramework>")
+                .Replace("__IMPORTS__", CrudServiceGenerator.CrudJsonContractMsBuildBaselineTests.ToolchainImports
+                    .Replace("__ROOT__", repoRoot.Replace('\\', '/')))
+                .Replace("__EXTRA__", probeReference);
+            await File.WriteAllTextAsync(Path.Combine(consumerDirectory, "Probe.csproj"), project);
+            await File.WriteAllTextAsync(Path.Combine(consumerDirectory, "Declaration.cs"), """
+                using CrestCreates.Domain.Shared.Attributes;
+
+                namespace Shop.Http
+                {
+                    [CapabilityCompatibilityProjection(
+                        ContractType = typeof(Shop.Contracts.IWidgetAppService),
+                        RoutePrefix = "api/widgets")]
+                    public static class WidgetHttpProjection
+                    {
+                    }
+                }
+                """);
+
+            var result = await BuildAsync(consumerDirectory);
+            return new ProbeResult(
+                consumerDirectory,
+                result.ExitCode,
+                result.Output,
+                Path.Combine(consumerDirectory, "obj", "Debug", "net10.0"));
         }
 
         public static async Task<(int ExitCode, string Output)> CleanAsync(string directory)
