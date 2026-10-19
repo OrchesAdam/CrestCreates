@@ -25,7 +25,7 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 - [x] S2.2-B 工具链物化：BuildTasks 前置链（`PrepareCrestAppServiceHttpInputs` → 输入指纹 → state → `prepare-appservice-http` → `IncludeCrestAppServiceHttpArtifacts`）显式接入 `CrestCreatesJsonContractGenerationDependsOn`；JsonContracts 从符号重建 roots 并与 outputs manifest 逐 artifact 对账，生成 `HttpProjectionJsonContext_<owner>`（camelCase）由官方 STJ 在同一 CoreCompile 关闭；无工具链的正式声明 CCHTTP002 Error。证据：JsonContracts 144/144；真实 MSBuild 7/7（物化/STJ 同轮、manifest 篡改、未知 schema、no-op/clean/rename、design-time、TFM+RID、打包外部消费）；见 issues-log「S2.2-B3/B4」。Map 期 Host 激活与 manifest ownership 仍属 S2.3。
 - [ ] 扩展前置工具链 ordinary Compile、完整 ownership/provenance、显式 DependsOn、诊断与错误状态；复用现有 stamp/transport，不复制实现。
 - [ ] 自动 body/input/scalar/list/typed result/void/error contracts；官方 STJ 单 driver/真实 MSBuild 可见。
-- [ ] AddGeneratedAppServiceHttp 显式贡献/handler/JSON 装配，业务 DI owner 不重复；转换已有 Asset/Procurement 等正式 compatibility consumer。
+- [x] S2.3 AddGeneratedAppServiceHttp 显式贡献/handler/JSON 装配，业务 DI owner 不重复；自契约类模式支持，Asset/Procurement 迁移为 ExplicitHost 并在真实 Host 组合（capability registry 含 contributions、JSON context 优先、Map 期 fail-closed）。证据：DynamicApi 130/130、Procurement 26/26（正式兼容路由 golden）、Asset 29/29、CodeGenerator 551/551；Asset 兼容 HTTP 端点未在本环境起 PG Host 独立验证。
 - [ ] B01–04/H08、生命周期与外部 packaged consumer 验收通过。
 
 ## S3 — Ticket 与真实 Host（先装配与启动，再验收业务）

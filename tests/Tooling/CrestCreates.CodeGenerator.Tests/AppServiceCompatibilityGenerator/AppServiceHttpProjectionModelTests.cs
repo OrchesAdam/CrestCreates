@@ -322,6 +322,71 @@ public sealed class AppServiceHttpProjectionModelTests
             && d.Message.Contains("different values"));
     }
 
+    [Fact]
+    public void Self_contract_class_exposes_only_attributed_public_methods()
+    {
+        var result = Build("""
+            using System;
+            using System.Threading;
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Http
+            {
+                [CapabilityCompatibilityProjection(
+                    ContractType = typeof(SelfProjection),
+                    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+                    RoutePrefix = "api/self",
+                    CapabilityIdPrefix = "compat.appservice.self")]
+                public sealed class SelfProjection
+                {
+                    [AppServiceHttpAction(Verb = HttpProjectionVerb.Get, Route = "{id}",
+                        Kind = HttpProjectionOperationKind.Query)]
+                    public Task<string> GetAsync(Guid id, CancellationToken cancellationToken = default)
+                        => Task.FromResult(id.ToString());
+
+                    public string Helper() => "not projected";
+
+                    private string Hidden() => "not projected";
+                }
+            }
+            """);
+
+        result.HasErrors.Should().BeFalse(string.Join(" | ", result.Diagnostics.Select(d => d.ToDisplayString())));
+        var model = result.Model!;
+        model.ContractFullName.Should().Be("Shop.Http.SelfProjection");
+        model.Actions.Should().ContainSingle(action => action.Name == "GetAsync");
+        model.Actions.Select(action => action.Name).Should().NotContain("Helper");
+        model.Actions.Select(action => action.Name).Should().NotContain("Hidden");
+        result.RootSymbols.Should().Contain(symbol =>
+            symbol.Component == "Payload" && symbol.Display == "string");
+    }
+
+    [Fact]
+    public void Self_contract_without_attributed_methods_is_rejected()
+    {
+        var result = Build("""
+            using CrestCreates.Domain.Shared.Attributes;
+
+            namespace Shop.Http
+            {
+                [CapabilityCompatibilityProjection(
+                    ContractType = typeof(SelfProjection),
+                    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+                    RoutePrefix = "api/self")]
+                public sealed class SelfProjection
+                {
+                    public string Helper() => "not projected";
+                }
+            }
+            """);
+
+        result.HasErrors.Should().BeTrue();
+        result.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == AppServiceHttpDiagnosticCodes.UnsupportedDeclaration
+            && diagnostic.Severity == AppServiceHttpDiagnosticSeverity.Error);
+    }
+
     private static AppServiceHttpProjectionBuildResult Build(string source)
     {
         var compilation = SourceGeneratorTestHelper.CreateAnalysisCompilation("Shop.Http", new[] { source });
@@ -330,7 +395,8 @@ public sealed class AppServiceHttpProjectionModelTests
                      ?? compilation.GetTypeByMetadataName("Shop.Http.LegacyHttpProjection")
                      ?? compilation.GetTypeByMetadataName("Shop.Http.NoTokenHttpProjection")
                      ?? compilation.GetTypeByMetadataName("Shop.Http.DuplicateHttpProjection")
-                     ?? compilation.GetTypeByMetadataName("Shop.Http.ConflictFacade");
+                     ?? compilation.GetTypeByMetadataName("Shop.Http.ConflictFacade")
+                     ?? compilation.GetTypeByMetadataName("Shop.Http.SelfProjection");
         anchor.Should().NotBeNull("the test source must declare its anchor");
         return AppServiceHttpProjectionModelBuilder.Build(compilation, anchor!);
     }

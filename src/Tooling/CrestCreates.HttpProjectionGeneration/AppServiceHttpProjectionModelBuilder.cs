@@ -54,11 +54,29 @@ public static class AppServiceHttpProjectionModelBuilder
         }
 
         if (contractType is not INamedTypeSymbol contractSymbol
-            || contractType.TypeKind != TypeKind.Interface
             || contractSymbol.IsUnboundGenericType)
         {
             return Failed(diagnostics, AppServiceHttpDiagnosticCodes.UnsupportedDeclaration,
-                $"ContractType '{contractType.ToDisplayString()}' must be a closed interface", anchor);
+                $"ContractType '{contractType.ToDisplayString()}' must be a closed interface or the anchor class itself",
+                anchor);
+        }
+
+        // Self-contract mode: the declaration class is its own contract, and only its public
+        // instance methods carrying [AppServiceHttpAction] are exposed (explicit scope). This is
+        // the migration path for existing class-only compatibility projections (Asset/Procurement).
+        var isSelfContract = contractSymbol.TypeKind == TypeKind.Class
+            && SymbolEqualityComparer.Default.Equals(contractSymbol, anchor);
+        if (contractSymbol.TypeKind != TypeKind.Interface && !isSelfContract)
+        {
+            return Failed(diagnostics, AppServiceHttpDiagnosticCodes.UnsupportedDeclaration,
+                $"ContractType '{contractType.ToDisplayString()}' must be a closed interface or the anchor class itself",
+                anchor);
+        }
+
+        if (isSelfContract && anchor.IsStatic)
+        {
+            return Failed(diagnostics, AppServiceHttpDiagnosticCodes.UnsupportedDeclaration,
+                "a self-contract projection must be an instantiable service class, not a static anchor", anchor);
         }
 
         if (!compilation.IsSymbolAccessibleWithin(contractType, compilation.Assembly))
@@ -79,7 +97,10 @@ public static class AppServiceHttpProjectionModelBuilder
         var referenced = new List<AppServiceHttpReferenceIdentity>();
         AddReference(referenced, contract, ownerAssembly, isContract: true);
 
-        foreach (var contractMethod in EnumerateContractMethods(contract))
+        var contractMethods = isSelfContract
+            ? EnumerateSelfContractMethods(contract)
+            : EnumerateContractMethods(contract);
+        foreach (var contractMethod in contractMethods)
         {
             var action = BuildAction(
                 compilation, contract, anchor, contractMethod, ownerAssembly, contractFullName,
@@ -464,6 +485,36 @@ public static class AppServiceHttpProjectionModelBuilder
                 : null,
             RequiresConcurrencyToken = requiresConcurrencyToken,
         };
+    }
+
+    /// <summary>
+    /// Self-contract scope: only public instance methods explicitly marked with
+    /// [AppServiceHttpAction]. Unannotated public methods (helpers, context accessors) are never
+    /// exposed, so the action set stays an explicit declaration.
+    /// </summary>
+    private static IEnumerable<IMethodSymbol> EnumerateSelfContractMethods(INamedTypeSymbol contract)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var method in contract.GetMembers().OfType<IMethodSymbol>())
+        {
+            if (method.MethodKind != MethodKind.Ordinary
+                || method.IsStatic
+                || method.DeclaredAccessibility != Accessibility.Public)
+            {
+                continue;
+            }
+
+            if (FindAttribute(method, ActionAttributeName) is null)
+            {
+                continue;
+            }
+
+            var signature = ClosedSignature(method);
+            if (seen.Add(signature))
+            {
+                yield return method;
+            }
+        }
     }
 
     private static IEnumerable<IMethodSymbol> EnumerateContractMethods(INamedTypeSymbol contract)

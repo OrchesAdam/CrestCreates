@@ -449,3 +449,24 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 评审 `r3-real-build.py`：baseline 0；直接篡改 1 + CCHTTP006；wrong-namespace 1 + CCHTTP006；缺 ContractType 1 + CCHTTP001；双锚点 1 + CCHTTP003。
 - 全量 `CrestCreates.CodeGenerator.Tests` **549 pass / 0 fail / 549**，0 skipped（30m57s）。
 - CRUD NativeAOT fixture **23/23**（linux-x64 publish/link/run）；`SaaSHelpdesk.Web` 构建成功。
+
+## S2.3 真实 Host 激活、Map fail-closed 与 Asset/Procurement 迁移（2026-10-19）
+
+### 声明与生成
+
+- **自契约（self-contract）模式**：`AppServiceHttpProjectionModelBuilder` 允许 `ContractType` 指向**投影类自身**（非 static）；只枚举该类上显式标注 `[AppServiceHttpAction]` 的 public 实例方法（未标注的 helper/上下文访问器不暴露）。这是无独立接口的兼容投影迁移路径，不新增空转 facade。
+- **Asset**：`AssetCompatibilityProjection` 迁移为 `RegistrationMode=ExplicitHost`、`ContractType=typeof(self)`，保留 legacy capability id 前缀 `compat.appservice.asset-compatibility-projection`、路由 `/api/assets/compat/{assetId}` 与 `/api/assets/compat/list`；权限收敛到真实已登记权限 `AssetManagement.Assets.Read/Search`；两个动作补齐 optional CT 并传递到应用服务。
+- **Procurement**：`ProcurementAppService` 同样迁移；保留 `compat.appservice.procurement.get`、`/api/procurement/query/{requestId}` 与 `Procurement.Get`（golden 测试的既有消费者）；补齐 CT。
+- **Host 激活**：两个 Host 引入 JsonContracts repository transport，并调用生成的 `AddGeneratedAppServiceHttp()`（贡献 + handler module + JSON context configurator）；业务 DI 仍由既有 `[CrestService]`/显式注册拥有，生成激活不重复业务实例。
+
+### Host 组合与 Map fail-closed
+
+- **Capability registry**：Host 在 `builder.Build()` 之后、`MapCrestCapabilityEndpoints()` 之前，用静态 provider + 原生 catalog + **本 Host 实际激活的 contributions** 构造 capability registry；`Map*` 的既有校验要求每个 contributed capability 与冻结 registry 精确等价。遗漏贡献 → 映射前确定性失败，不静默丢端点。
+- **HTTP JSON**：生成的 projection context 保持在最终 `Http.Json.JsonOptions` 链的最前；Host 自己的 source-generated combined resolver 插在 reflection 默认 resolver 之前（不再整体替换 resolver 链）。Projection roots 由生成的 context 回答，Host 自有类型仍由 Host resolver 回答。
+- **证据**：`CapabilityEndpointHostActivationTests.ContributedCapability_MissingFromAuthoritativeRegistry_FailsClosed` 通过（零端点、确定性错误）。
+
+### 运行时与样例
+
+- Procurement 样例全套 **26/26 pass**，其中既有 golden 用例实际请求正式路由 `/api/procurement/query/{id}` 并断言响应；`DescriptorAndJsonContracts_AreExactAndComplete` 证明冻结 capability registry 精确包含 `compat.appservice.procurement.get`，contributions 已进入权威 registry。
+- Asset 样例 **29/29 pass**；构建成功并生成正式 bundle/manifest/JSON context，路由与 legacy capability id 逐字保留（`compat.appservice.asset-compatibility-projection.get/list`）。Asset 兼容 HTTP 端点未在本环境独立起 Host 验证（其 E2E 需要 PostgreSQL runtime 连接）；共享的正式激活/JSON/权限路径由 Procurement 运行时覆盖。
+- DynamicApi 套件 **130/130**；JsonContracts **162/162**；CodeGenerator 全量 **551/551**（30m44s）；CRUD NativeAOT **23/23**；Procurement 样例 **26/26**、Asset 样例 **29/29**（最终 head 复跑）。
