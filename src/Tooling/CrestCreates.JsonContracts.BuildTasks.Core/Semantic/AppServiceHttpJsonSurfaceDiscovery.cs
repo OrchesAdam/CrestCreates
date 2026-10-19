@@ -10,6 +10,7 @@ using CrestCreates.JsonContracts.BuildTasks.Model;
 using CrestCreates.Tooling.HttpProjection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace CrestCreates.JsonContracts.BuildTasks.Semantic;
 
@@ -358,31 +359,17 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
         var expectedByHint = expected.ToDictionary(artifact => artifact.HintName, StringComparer.Ordinal);
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        // S22B-R1-02/R2-01: verify the actual compiled code, not dead text. The expected artifact must
-        // appear as a contiguous active token sequence in a syntax tree; tokens inside comments,
-        // disabled preprocessor branches or string literals can never satisfy this.
-        var activeTokens = compilation.SyntaxTrees
-            .Select(tree => tree.GetRoot().DescendantTokens()
-                .Where(token => !token.IsKind(SyntaxKind.EndOfFileToken))
-                .Select(token => token.Text)
-                .ToList())
-            .ToList();
+        // S22B-R1-02/R2-01/R3-01: bind each manifest-declared type to its real symbol and compare the
+        // active declaration tokens of that exact FQN. A copy of the original artifact in another
+        // namespace (or in comments/disabled text) is a different symbol and cannot vouch for it.
+        SyntaxTree? bundleTree = null;
         foreach (var artifact in expected)
         {
-            var artifactTokens = CSharpSyntaxTree.ParseText(
-                    artifact.Source,
-                    CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest))
-                .GetRoot()
-                .DescendantTokens()
-                .Where(token => !token.IsKind(SyntaxKind.EndOfFileToken))
-                .Select(token => token.Text)
-                .ToList();
-            if (!activeTokens.Any(tokens => ContainsContiguous(tokens, artifactTokens)))
+            if (!ValidateActiveArtifact(compilation, artifact, ref bundleTree, out var failure))
             {
                 ManifestError(
-                    $"The active compiled inputs do not contain AppService HTTP artifact '{artifact.HintName}' "
-                    + "with the producer's content; the materialized surface was modified, disabled or "
-                    + "retained only as inactive text.");
+                    $"AppService HTTP artifact '{artifact.HintName}' does not match the active compiled "
+                    + $"inputs: {failure}");
             }
         }
 
@@ -510,32 +497,99 @@ public sealed class AppServiceHttpJsonSurfaceDiscovery
         return artifacts;
     }
 
-    private static bool ContainsContiguous(IReadOnlyList<string> haystack, IReadOnlyList<string> needle)
+    private static bool ValidateActiveArtifact(
+        CSharpCompilation compilation,
+        ExpectedArtifact artifact,
+        ref SyntaxTree? bundleTree,
+        out string failure)
     {
-        if (needle.Count == 0)
-        {
-            return true;
-        }
+        failure = string.Empty;
+        var expectedTree = CSharpSyntaxTree.ParseText(
+            artifact.Source,
+            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest));
+        var expectedDeclarations = expectedTree.GetRoot()
+            .DescendantNodes()
+            .OfType<TypeDeclarationSyntax>()
+            .Select(declaration => (
+                FullName: DeclaredFullName(declaration),
+                MetadataName: MetadataNameOf(declaration),
+                Declaration: declaration))
+            .Where(item => item.FullName is not null)
+            .GroupBy(item => item.FullName!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
 
-        for (var start = 0; start + needle.Count <= haystack.Count; start++)
+        foreach (var expectedName in artifact.DeclaredTypeFullNames)
         {
-            var matches = true;
-            for (var offset = 0; offset < needle.Count; offset++)
+            if (!expectedDeclarations.TryGetValue(expectedName, out var expected))
             {
-                if (!string.Equals(haystack[start + offset], needle[offset], StringComparison.Ordinal))
-                {
-                    matches = false;
-                    break;
-                }
+                failure = $"the producer source does not declare '{expectedName}'";
+                return false;
             }
 
-            if (matches)
+            var actual = compilation.GetTypeByMetadataName(expected.MetadataName);
+            if (actual is null)
             {
-                return true;
+                failure = $"type '{expectedName}' does not resolve uniquely in the compiled inputs";
+                return false;
+            }
+
+            if (!SymbolEqualityComparer.Default.Equals(actual.ContainingAssembly, compilation.Assembly))
+            {
+                failure = $"type '{expectedName}' is not declared by the owner assembly";
+                return false;
+            }
+
+            var references = actual.DeclaringSyntaxReferences;
+            if (references.Length != 1
+                || references[0].GetSyntax() is not TypeDeclarationSyntax actualDeclaration)
+            {
+                failure = $"type '{expectedName}' must have exactly one active declaration in the compiled inputs";
+                return false;
+            }
+
+            if (bundleTree is null)
+            {
+                bundleTree = actualDeclaration.SyntaxTree;
+            }
+            else if (!ReferenceEquals(bundleTree, actualDeclaration.SyntaxTree))
+            {
+                failure = $"type '{expectedName}' is declared outside the materialized bundle tree";
+                return false;
+            }
+
+            var expectedTokens = expected.Declaration.DescendantTokens().Select(token => token.Text);
+            var actualTokens = actualDeclaration.DescendantTokens().Select(token => token.Text);
+            if (!expectedTokens.SequenceEqual(actualTokens, StringComparer.Ordinal))
+            {
+                failure = $"the active declaration of '{expectedName}' does not match the producer artifact";
+                return false;
             }
         }
 
-        return false;
+        return true;
+    }
+
+    private static string? DeclaredFullName(TypeDeclarationSyntax declaration)
+    {
+        var namespaceName = declaration.Ancestors()
+            .OfType<NamespaceDeclarationSyntax>()
+            .LastOrDefault()?.Name.ToString();
+        var name = declaration.Identifier.ValueText;
+        return string.IsNullOrEmpty(namespaceName) ? name : namespaceName + "." + name;
+    }
+
+    private static string MetadataNameOf(TypeDeclarationSyntax declaration)
+    {
+        var namespaceName = declaration.Ancestors()
+            .OfType<NamespaceDeclarationSyntax>()
+            .LastOrDefault()?.Name.ToString();
+        var containingTypes = declaration.Ancestors()
+            .OfType<TypeDeclarationSyntax>()
+            .Reverse()
+            .Select(type => type.Identifier.ValueText)
+            .Append(declaration.Identifier.ValueText);
+        var name = string.Join("+", containingTypes);
+        return string.IsNullOrEmpty(namespaceName) ? name : namespaceName + "." + name;
     }
 
     private static string ContentHash(string source)

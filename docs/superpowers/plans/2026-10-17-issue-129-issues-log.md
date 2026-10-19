@@ -433,3 +433,19 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 评审 `r2-route-real-build.py`：不同前缀同 relative 0；同最终路由不同拆分 1；真冲突 1；不同路由 0。
 - 全量 `CrestCreates.CodeGenerator.Tests` **548 pass / 0 fail / 548**，0 skipped（30m14s）。
 - CRUD NativeAOT fixture **23/23**（linux-x64 publish/link/run）；`SaaSHelpdesk.Web` 构建成功。
+
+## S2.2-B 复审 R3 修复（1 项 P2，2026-10-19）
+
+审查 head `9399b056`；R3 ownership 探针原样入库：`ReviewS22BR3OwnershipProbes`。
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| S22B-R3-HTTP129-01 活动 token 未绑定 manifest 声明身份（R1-02/R2-01 延续） | 删除“任意 syntax tree 匹配 token”的检查。现在对每个预期 artifact 的 `DeclaredTypeFullNames`：解析生产者源码得到声明节点与 metadata name → 用 `compilation.GetTypeByMetadataName` 解析**真实 symbol** → 要求恰有一个 source `DeclaringSyntaxReferences`、属于当前 owner 程序集、与其余 artifact 声明同处一个 bundle syntax tree → 对该 FQN 自己的声明做**活动 token 全序列比较**。`Decoy.CrestCreates...` 是不同 symbol，无法满足正确 FQN 的声明校验；注释/禁用/raw string 同样不参与 | 审查 ownership 探针 **3/3**（original 放行、直接伪造拒绝、wrong-namespace 拒绝）；R1/R2 探针保持 18/18；新增真实 MSBuild `Wrong_namespace_active_copy_must_not_vouch_for_the_real_types`：Decoy 原始副本 + 真实 FQN 伪造路由 → exit≠0 + CCHTTP006，移除变异后恢复；评审 `r3-real-build.py`：baseline 0、直接篡改 1+CCHTTP006、wrong-namespace 1+CCHTTP006、缺 ContractType 1+CCHTTP001、双锚点 1+CCHTTP003 |
+
+### 最终验证（R3 head）
+
+- JsonContracts **162/162**（含 R1 7 + R2 8 + R3 3 审查探针）。
+- 真实 MSBuild 套件 **21/21**（R2 的 20 + wrong-namespace 拒绝/恢复）。
+- 评审 `r3-real-build.py`：baseline 0；直接篡改 1 + CCHTTP006；wrong-namespace 1 + CCHTTP006；缺 ContractType 1 + CCHTTP001；双锚点 1 + CCHTTP003。
+- 全量 `CrestCreates.CodeGenerator.Tests` **549 pass / 0 fail / 549**，0 skipped（30m57s）。
+- CRUD NativeAOT fixture **23/23**（linux-x64 publish/link/run）；`SaaSHelpdesk.Web` 构建成功。

@@ -608,6 +608,39 @@ public sealed class Issue129AppServiceHttpMsBuildTests
         }
     }
 
+    [Fact]
+    public async Task Wrong_namespace_active_copy_must_not_vouch_for_the_real_types()
+    {
+        var baseline = await Probe.RunAsync();
+        baseline.ExitCode.Should().Be(0, baseline.Output);
+        var original = File.ReadAllText(baseline.BundlePath);
+        original.Should().Contain("api/widgets");
+        var forged = original.Replace("api/widgets", "api/forged");
+
+        var payloadPath = Path.Combine(baseline.Directory, "forged-bundle.txt");
+        await File.WriteAllTextAsync(payloadPath, "namespace Decoy {\n" + original + "\n}\n" + forged);
+        await Probe.ResetProjectAsync(baseline.Directory, extraProjectXml: """
+            <Target Name="CopyWrongNamespaceArtifact"
+                    AfterTargets="IncludeCrestAppServiceHttpArtifacts"
+                    BeforeTargets="PrepareCrestCreatesJsonContractInputs">
+              <Copy SourceFiles="$(MSBuildProjectDirectory)/forged-bundle.txt"
+                    DestinationFiles="$(_CrestAppServiceHttpBundleFullPath)" />
+            </Target>
+            """);
+
+        var tampered = await Probe.BuildAsync(baseline.Directory);
+        tampered.ExitCode.Should().NotBe(0,
+            "the original artifact under a Decoy namespace is a different symbol and cannot vouch "
+            + "for the forged declarations at the manifest FQNs");
+        tampered.Output.Should().Contain("CCHTTP006");
+        File.ReadAllText(baseline.BundlePath).Should().Contain("api/forged");
+
+        await Probe.ResetProjectAsync(baseline.Directory);
+        var recovered = await Probe.BuildAsync(baseline.Directory);
+        recovered.ExitCode.Should().Be(0, recovered.Output);
+        File.ReadAllText(baseline.BundlePath).Should().Contain("api/widgets");
+    }
+
     private sealed record ProbeResult(
         string Directory,
         int ExitCode,
