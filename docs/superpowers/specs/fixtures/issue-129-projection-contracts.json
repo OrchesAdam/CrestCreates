@@ -1,6 +1,6 @@
 {
   "$schema": "crestcreates.issue129.contract-fixture/v1",
-  "status": "frozen-for-review-rev2",
+  "status": "frozen-for-review-s2.3",
   "design": "docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md#144-145; referenced scope: docs/superpowers/specs/2026-10-17-issue-129-referenced-declaration-scope-addendum.md",
   "notes": [
     "Every name below is a frozen contract proposal for S2/S3, not a claim that the API exists today.",
@@ -67,6 +67,26 @@
       ],
       "authority": "src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/Semantic/CrudJsonSurfaceDiscovery.cs:184-233 (CCCRUD008)",
       "evidence": "reviewer ownership contrast 2/2: mixing a referenced type into DeclaredTypeFullNames triggers CCCRUD008"
+    }
+  },
+  "declarationScopes": {
+    "interfaceContract": {
+      "contractType": "accessible closed interface (current or referenced assembly)",
+      "methods": "the contract and its inherited interfaces only",
+      "anchorMethods": "never enumerated",
+      "businessRegistration": "the business owner registers the implementation once; the HTTP activation never registers or replaces it"
+    },
+    "selfContract": {
+      "contractType": "the projection class itself (non-static)",
+      "methods": "public instance methods explicitly marked [AppServiceHttpAction] only",
+      "helperMethods": "never exposed",
+      "businessRegistration": "the business owner registers the class once; the HTTP activation never registers or replaces it"
+    },
+    "hostComposition": {
+      "missingRegistrationDiagnostic": "CCHTTP007 before any endpoint is mapped",
+      "zeroRoutesOnFailure": true,
+      "requestTime500Forbidden": true,
+      "contributedCapability": "the host's authoritative capability registry must carry exactly the activated contributions"
     }
   },
   "requiredJsonRoots": {

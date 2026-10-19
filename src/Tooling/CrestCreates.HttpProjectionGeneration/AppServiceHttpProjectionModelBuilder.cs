@@ -10,9 +10,11 @@ namespace CrestCreates.Tooling.HttpProjection;
 
 /// <summary>
 /// Issue #129 S2: builds <see cref="AppServiceHttpProjectionModel"/> from a real declaration. The
-/// anchor carries <c>[CapabilityCompatibilityProjection(ContractType = ...)]</c>; only the contract
-/// and its inherited interfaces contribute actions. Diagnostics are the frozen CCHTTP001/003/008
-/// family; nothing here falls back to reflection or to the anchor's own public methods.
+/// anchor carries <c>[CapabilityCompatibilityProjection(ContractType = ...)]</c>. With an interface
+/// contract only that contract and its inherited interfaces contribute actions. With a self-contract
+/// (ContractType is the anchor class) only public instance methods explicitly marked with
+/// [AppServiceHttpAction] contribute; helpers are never exposed. Diagnostics are the frozen
+/// CCHTTP001/003/008 family; nothing here falls back to reflection or unscoped public-method scanning.
 /// </summary>
 public static class AppServiceHttpProjectionModelBuilder
 {

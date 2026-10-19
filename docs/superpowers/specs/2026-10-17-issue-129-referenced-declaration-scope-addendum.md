@@ -36,11 +36,13 @@ public static class ShippingQuotesHttpProjection
 }
 ```
 
-- `ContractType` 必须是**可访问的闭合接口**（允许位于引用程序集，允许继承接口；rev.2 §4.1 已冻结该要求）。
-- 标记类规则：
+- `ContractType` 有两种正式范围（rev.2 §4.1，S2.3 补充自契约）：
+  1. **接口契约**：必须是被引用程序集或当前程序集中的**可访问闭合接口**（允许继承接口）。只枚举该接口及其继承接口的方法；标记类自己的公开方法不枚举。
+  2. **自契约**：`ContractType` 指向**投影类自身**（非 static）。只枚举该类显式标注 `[AppServiceHttpAction]` 的 public 实例方法；未标注的 helper、上下文访问器等永不暴露。用于无独立接口的既有 Asset/Procurement 形态。
+- 标记/自契约类规则：
   - 带 `ContractType` 时**不要求** `[CrestService]`；此时 CEP030（「投影属性必须配合 `[CrestService]`」）收窄为「无 `ContractType` 的旧静态模式才报」。
-  - 生成器只把它当声明锚点：不注册 DI、不实例化、不枚举它自己的公开方法（方法集合只来自 `ContractType` 及其继承接口）。
-  - 与现有 facade 并存：若类实现了 `ContractType`（Asset/Procurement 形态），保持今天的行为（业务 DI 仍由模块/`[CrestService]` owner 负责），HTTP 激活不接管实例。
+  - 接口契约的标记类不注册 DI、不实例化、不枚举自己的公开方法；自契约类**就是业务服务**，由业务 owner 注册一次（`[CrestService]`/显式注册），HTTP 激活不注册、不替换、不生成第二个实例。
+  - 业务注册缺失在 Host 映射前以 CCHTTP007 拒绝（见 §3.2）；不是请求期 500。
 - 明确不做：程序集级 Attribute、扫描引用程序集、`Type.GetType`/反射发现、把 `[CrestService]` 放宽到 Interface。
 
 ### 3.2 DI 契约与缺失诊断
@@ -134,6 +136,7 @@ deadline 到期会同时取消 `K` 与 `L`，所以「`L` 已取消」不能作�
 | R-02 | `ContractType` 指向引用程序集契约时，投影只枚举该契约（及其继承）方法；标记类自身方法不暴露 |
 | R-03 | 引用程序集 DTO 的真实 JSON 闭包（作为 `[JsonSerializable]` root 且官方 STJ 产出 metadata） |
 | R-04 | 缺契约 DI 注册 → 启动期 `CCHTTP007`，零路由、零请求期 500 |
+| R-05 | 自契约类只投影显式 `[AppServiceHttpAction]` 的 public 实例方法；helper 不暴露，业务 owner 注册该类一次，缺注册由 R-04 的启动期检查拒绝 |
 | R-05 | 同短名类型跨程序集不串 owner（B04）；身份包含 `contractAssemblyName` + 闭合签名 |
 | R-06a | 调用方中止：无 JSON 错误体、业务只观察到一次取消、无重执行、`#137` 未提交事实按放弃/回滚处理 |
 | R-06b | 受管 deadline：响应未开始时 500 `Crest.InternalError` 脱敏；`Unknown`/`Committed` 事实不被改写 |

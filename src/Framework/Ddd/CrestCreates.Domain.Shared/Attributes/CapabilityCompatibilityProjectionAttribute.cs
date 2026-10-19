@@ -27,9 +27,14 @@ namespace CrestCreates.Domain.Shared.Attributes
         public string? RoutePrefix { get; init; }
 
         /// <summary>
-        /// The accessibly closed interface to project. When set, only this contract and its inherited
-        /// interfaces contribute actions; the annotated class is a declaration anchor (it is neither
-        /// instantiated nor DI-registered by the projection).
+        /// The closed interface to project, or the projection class itself for a self-contract
+        /// declaration. Interface mode: only the contract and its inherited interfaces contribute
+        /// actions and the annotated class is a declaration anchor. Self-contract mode (ContractType
+        /// equals the annotated class): only public instance methods explicitly marked with
+        /// <see cref="AppServiceHttpActionAttribute"/> contribute actions; unmarked helper methods are
+        /// never exposed. In both modes the business service is registered once by its owning
+        /// feature/module, and the host activation verifies that registration before mapping
+        /// (CCHTTP007); it never creates a second instance.
         /// </summary>
         public Type? ContractType { get; init; }
 

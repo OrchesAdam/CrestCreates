@@ -38,6 +38,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Domain.Shared.Permissions;
 using CrestCreates.Sample.AssetManagement.Application;
+using CrestCreates.Sample.AssetManagement.Host.Projections;
 using CrestCreates.Sample.AssetManagement.Application.Handlers;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Contracts.Json;
@@ -115,6 +116,7 @@ builder.Services.AddSingleton<ICapabilityHandlerModule>(new AssetCapabilityModul
 builder.Services.AddSingleton<IAssetStore>(assetStore);
 builder.Services.AddSingleton<CrestCreates.Domain.Repositories.Permission.IPermissionGrantRepository, AssetPermissionGrantRepository>();
 builder.Services.AddScoped<AssetApplicationService>();
+builder.Services.AddScoped<AssetCompatibilityProjection>();
 builder.Services.AddCrestCapabilityEndpoints();
 builder.Services.AddCrestCompatibilityProjection();
 builder.Services.AddGeneratedAppServiceHttp();

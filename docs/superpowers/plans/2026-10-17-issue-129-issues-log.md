@@ -470,3 +470,25 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - Procurement 样例全套 **26/26 pass**，其中既有 golden 用例实际请求正式路由 `/api/procurement/query/{id}` 并断言响应；`DescriptorAndJsonContracts_AreExactAndComplete` 证明冻结 capability registry 精确包含 `compat.appservice.procurement.get`，contributions 已进入权威 registry。
 - Asset 样例 **29/29 pass**；构建成功并生成正式 bundle/manifest/JSON context，路由与 legacy capability id 逐字保留（`compat.appservice.asset-compatibility-projection.get/list`）。Asset 兼容 HTTP 端点未在本环境独立起 Host 验证（其 E2E 需要 PostgreSQL runtime 连接）；共享的正式激活/JSON/权限路径由 Procurement 运行时覆盖。
 - DynamicApi 套件 **130/130**；JsonContracts **162/162**；CodeGenerator 全量 **551/551**（30m44s）；CRUD NativeAOT **23/23**；Procurement 样例 **26/26**、Asset 样例 **29/29**（最终 head 复跑）。
+
+## S2.3 复审 R1 修复（2 项 P2，2026-10-19）
+
+审查 head `84cf10f1`；审查探针原样入库：Procurement `ReviewS23HostProbes`、Asset `ReviewS23AssetCompositionProbes`。
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| S23-R1-HTTP129-01 缺业务契约注册未在启动/Map 前拒绝 | 平台贡献新增强类型 `RequiredServiceTypes`；AppService HTTP emitter 为每个契约贡献声明 `typeof(ContractType)`（CRUD 保持空，不改变其输出）。`CapabilityEndpointHostActivation` 收集 owner+contract，`CapabilityEndpointRegistryBootstrapper` 在整批端点映射前用 `IServiceProviderIsService` 校验注册；缺失 → `CCHTTP007`（含 owner 与 contract 全名）、零路由，绝不推迟到首个请求的 500。 | 审查 Procurement 探针 **3/3**：重复激活正例、Active/Opted-out 双 Host 隔离、缺业务注册 → 启动异常含 CCHTTP007 + `ProcurementAppService`；`ReviewS23HostProbes` 原样入库通过。新增 DynamicApi `ContributedCapability_MissingFromAuthoritativeRegistry_FailsClosed` 保持通过。 |
+| S23-R1-HTTP129-02 Asset 缺少自契约服务注册 | Asset Host 由业务 owner 显式注册 `AssetCompatibilityProjection`（scoped），与 Procurement 的既有显式注册一致；`[CrestService]` 元数据保留。 | 审查 Asset DI 图探针 **2/2**（false/true 两分支）：真实 Program 的注册序列含 `AssetApplicationService`、`CapabilityEndpointContribution` 与 `AssetCompatibilityProjection`；Asset 原套件 29/29。 |
+
+### 自契约声明面同步
+
+- Spec §4.1：ContractType 明确两种正式范围（接口契约 / 自契约），自契约只枚举显式标注 `[AppServiceHttpAction]` 的 public 实例方法，helper 不暴露；两种模式业务服务均由 owner 注册一次，Host 映射前 CCHTTP007 校验。
+- Addendum §3.1/§3.2：补充自契约规则与 R-05 验收行；保留 R-04 的启动期 CCHTTP007、零路由、零请求期 500。
+- 冻结 fixture：新增 `declarationScopes`（interfaceContract/selfContract/hostComposition）并把 status 更新为 `frozen-for-review-s2.3`；新增 fixture 漂移测试 `Self_contract_scope_and_host_composition_are_frozen`。
+- XML：`CapabilityCompatibilityProjectionAttribute.ContractType`、`AppServiceHttpActionAttribute` 与 builder 摘要说明两种范围与业务 DI owner。
+
+### 最终验证（S2.3 R1 head）
+
+- Procurement 样例 **29/29**（26 原有 + 3 审查探针）；Asset 样例 **29/29**、Asset E2E composition 探针 **2/2**；契约 fixture 测试 **9/9**。
+- JsonContracts **162/162**；DynamicApi **130/130**；CodeGenerator 全量 **552/552**（31m35s）；CRUD NativeAOT **23/23**。
+- 审查探针：Procurement `ReviewS23HostProbes` **3/3**（含缺业务注册 → CCHTTP007）、Asset `ReviewS23AssetCompositionProbes` **2/2**；契约 fixture 漂移测试 **9/9**。

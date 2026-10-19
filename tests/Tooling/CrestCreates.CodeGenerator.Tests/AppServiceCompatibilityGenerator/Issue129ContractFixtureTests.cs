@@ -18,6 +18,26 @@ public class Issue129ContractFixtureTests
     private static readonly JsonDocument Fixture = JsonDocument.Parse(File.ReadAllText(FixturePath()));
 
     [Fact]
+    public void Self_contract_scope_and_host_composition_are_frozen()
+    {
+        var scopes = Fixture.RootElement.GetProperty("declarationScopes");
+        var interfaceContract = scopes.GetProperty("interfaceContract");
+        interfaceContract.GetProperty("methods").GetString().Should().Contain("contract and its inherited interfaces");
+        interfaceContract.GetProperty("anchorMethods").GetString().Should().Be("never enumerated");
+
+        var selfContract = scopes.GetProperty("selfContract");
+        selfContract.GetProperty("contractType").GetString().Should().Contain("projection class itself");
+        selfContract.GetProperty("methods").GetString().Should().Contain("[AppServiceHttpAction]");
+        selfContract.GetProperty("helperMethods").GetString().Should().Be("never exposed");
+        selfContract.GetProperty("businessRegistration").GetString().Should().Contain("owner registers the class once");
+
+        var composition = scopes.GetProperty("hostComposition");
+        composition.GetProperty("missingRegistrationDiagnostic").GetString().Should().Contain("CCHTTP007");
+        composition.GetProperty("zeroRoutesOnFailure").GetBoolean().Should().BeTrue();
+        composition.GetProperty("requestTime500Forbidden").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
     public void Failure_bridge_codes_exist_in_the_exception_converter_authority()
     {
         var errorCodes = Read("src/Framework/Ddd/CrestCreates.Domain.Shared/Exceptions/CrestErrorCodes.cs");

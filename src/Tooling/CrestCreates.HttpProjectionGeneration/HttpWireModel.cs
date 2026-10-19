@@ -33,6 +33,12 @@ public sealed record HttpWireModel
     /// services); the CRUD matrix stays the frozen eleven roots and does not add route/header scalars.
     /// </summary>
     public bool EmitInputScalarRoots { get; init; }
+
+    /// <summary>
+    /// Business contract types the generated invokers resolve from DI. The host activation verifies
+    /// their registration before mapping (CCHTTP007). CRUD leaves this empty.
+    /// </summary>
+    public IReadOnlyList<string> RequiredServiceTypeFullNames { get; init; } = Array.Empty<string>();
 }
 
 public sealed record HttpWireAction

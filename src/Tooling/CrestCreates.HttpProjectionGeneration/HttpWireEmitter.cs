@@ -82,6 +82,18 @@ public static class HttpWireEmitter
         Line(builder, NestedIndent + "public " + model.ContributionTypeName + "()");
         Line(builder, NestedIndent + "{");
         Line(builder, NestedIndent + Indent + "OwnerAssemblyName = \"" + Escape(model.OwnerAssemblyName) + "\";");
+        if (model.RequiredServiceTypeFullNames.Count > 0)
+        {
+            Line(builder, NestedIndent + Indent + "RequiredServiceTypes = new global::System.Type[]");
+            Line(builder, NestedIndent + Indent + "{");
+            foreach (var serviceType in model.RequiredServiceTypeFullNames.Distinct(StringComparer.Ordinal))
+            {
+                Line(builder, QuadIndent + "typeof(" + serviceType + "),");
+            }
+
+            Line(builder, NestedIndent + Indent + "};");
+        }
+
         EmitDescriptors(builder, model);
         EmitEndpointDescriptors(builder, model);
         EmitBindings(builder, model);

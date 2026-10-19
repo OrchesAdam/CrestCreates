@@ -80,8 +80,44 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
 
             VerifyHostIdentities();
             VerifyHostJsonContracts();
+            VerifyHostRequiredServices();
 
             _ready = true;
+        }
+    }
+
+    /// <summary>
+    /// CCHTTP007: a contribution's generated invokers resolve the business contract from DI. A host
+    /// that activated the contribution but omitted the business service registration must fail
+    /// before any endpoint is mapped; the first request must never surface a request-time 500.
+    /// </summary>
+    private void VerifyHostRequiredServices()
+    {
+        var entries = _hostActivation.GetRequiredServiceEntries();
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var serviceProbe = _serviceProvider.GetService<IServiceProviderIsService>();
+        if (serviceProbe is null)
+        {
+            throw new InvalidOperationException(
+                "CCHTTP007: the host's service provider cannot verify business contract registrations "
+                + "(IServiceProviderIsService is unavailable); required contracts cannot be validated before mapping.");
+        }
+
+        foreach (var entry in entries)
+        {
+            if (!serviceProbe.IsService(entry.ServiceType))
+            {
+                throw new InvalidOperationException(
+                    $"CCHTTP007: the generated contribution of '{entry.Owner}' requires business contract "
+                    + $"service '{entry.ServiceType.FullName}', but the host has no registration for it. "
+                    + "Register the business service with its owning feature/module before "
+                    + "MapCrestCapabilityEndpoints(); a missing contract registration is never deferred "
+                    + "to the first request.");
+            }
         }
     }
 

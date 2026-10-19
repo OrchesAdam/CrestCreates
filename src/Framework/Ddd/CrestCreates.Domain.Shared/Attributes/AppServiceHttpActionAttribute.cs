@@ -5,7 +5,9 @@ namespace CrestCreates.Domain.Shared.Attributes;
 /// <summary>
 /// Declares the wire shape of one action of a hand-written projection. The attribute carries data
 /// only; verbs, kinds and body policies are framework-neutral enums and the contract method is the
-/// only method source (#129 rev.2 §4.1).
+/// only method source (#129 rev.2 §4.1). In interface-contract mode it customizes a contract method;
+/// in self-contract mode (ContractType is the service class) only public instance methods carrying
+/// this attribute are projected, and unmarked helper methods are never exposed.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
 public sealed class AppServiceHttpActionAttribute : Attribute

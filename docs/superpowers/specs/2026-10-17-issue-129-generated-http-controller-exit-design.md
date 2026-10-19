@@ -59,7 +59,12 @@ public class TicketAppService : CrestAppServiceBase<...>, ITicketAppService
 
 新增仅含声明数据的动作定制 Attribute，拟名 AppServiceHttpActionAttribute，位于 Domain.Shared：Verb、相对 Route、OperationKind(Query/Command)、Permissions、BodyPolicy、必要的并发/验证声明。Verb 枚举和 Kind 不引用 ASP.NET/Runtime 实现；Attribute 通过 metadata full name + symbol identity 识别，不匹配短名。动作定制可放契约方法；实现方法同项不同值则诊断，不按发现顺序覆盖。
 
-ContractType 是可访问闭合接口，目标类型必须实际实现它。只枚举该接口及其继承接口的正式方法；不默认扫所有 public 方法或所有其他接口。Ticket 的 11 个契约方法是首组冻结集合，GetList/Search/Count 等未在该契约声明的基类方法不得意外暴露。现有无独立接口的 Asset/Procurement 投影允许“声明类自身公开业务方法”模式，但仍需显式契约范围和排除规则，不要求新增一层空转 facade。
+ContractType 有两种正式范围：
+
+1. **接口契约**：可访问闭合接口（允许位于引用程序集），目标投影类必须实际实现它。只枚举该接口及其继承接口的正式方法；不默认扫实现类的其他 public 方法或所有其他接口。Ticket 的 11 个契约方法是首组冻结集合，GetList/Search/Count 等未在该契约声明的基类方法不得意外暴露。
+2. **自契约**：ContractType 指向投影类自身（非 static）。只枚举该类显式标注 [AppServiceHttpAction] 的 public 实例方法；未标注的 helper/上下文访问器永不暴露，不要求新增空转 facade。Asset/Procurement 的迁移使用此模式。
+
+两种模式下业务服务都只由其 owner（模块/CrestService/显式注册）注册一次；Host 装配期在映射任何端点前校验该注册（CCHTTP007），缺失注册是启动期失败，不是首个请求的 500。HTTP 激活不注册、不替换、不生成第二个业务实例。
 
 Capability/endpoint identity 默认包含 owner assembly + service full metadata name + action；现有 ID 有消费者时显式保留 prefix。组合输入类型名必须包含完整 owner identity 的确定性编码，不能只用 TicketAppService_Update 短名；同短名跨 namespace/程序集、方法重载、路由冲突均需可定位诊断。
 

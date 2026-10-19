@@ -188,6 +188,7 @@ public static class AppServiceHttpProjectionEmitter
             JsonContextFullName = options.JsonContextFullName,
             DiagnosticsTypeName = model.ContractName,
             EmitInputScalarRoots = true,
+            RequiredServiceTypeFullNames = new[] { "global::" + model.ContractFullName },
             Actions = model.Actions.Select(action => ToWireAction(model, action)).ToArray(),
         };
 
