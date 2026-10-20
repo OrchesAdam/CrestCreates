@@ -215,6 +215,29 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
     [
         typeof(DynamicApiResponse),
         typeof(ProblemDetails),
+        // Framework scalar inputs are host-shared: any source-generated host context carries the
+        // same STJ metadata, so the OpenAPI/host context may answer them before the owning
+        // contribution without changing the wire contract (#129 S3).
+        typeof(string),
+        typeof(Guid),
+        typeof(bool),
+        typeof(byte),
+        typeof(sbyte),
+        typeof(short),
+        typeof(ushort),
+        typeof(int),
+        typeof(uint),
+        typeof(long),
+        typeof(ulong),
+        typeof(char),
+        typeof(decimal),
+        typeof(double),
+        typeof(float),
+        typeof(DateTime),
+        typeof(DateTimeOffset),
+        typeof(TimeSpan),
+        typeof(DateOnly),
+        typeof(TimeOnly),
     ];
 
     /// <summary>
@@ -303,12 +326,12 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return null;
         }
 
-        if (answering is JsonSerializerContext answeringContext
-            && hostContexts.Contains(answeringContext)
-            && Array.IndexOf(HostSharedJsonRootTypes, required.ClrType) >= 0)
+        if (Array.IndexOf(HostSharedJsonRootTypes, required.ClrType) >= 0
+            && answering is JsonSerializerContext)
         {
-            // Framework-shared root: every generated contribution carries identical metadata for it,
-            // so any activated source-generated contributor of this host may answer it first.
+            // Framework-shared root: every source-generated host context carries identical metadata
+            // for it, so any host context may answer it first (the owning contribution still must
+            // declare it, which TryGetContributedMetadata above already verified).
             return null;
         }
 

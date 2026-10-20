@@ -6,25 +6,25 @@ using Microsoft.AspNetCore.TestHost;
 namespace SaaSHelpdesk.Tests;
 
 /// <summary>
-/// Issue #129 S1 baseline: locks the Ticket wire contract the current host actually publishes.
-/// Every value here was read from the running host (EndpointDataSource + real HTTP), not from
-/// test comments or generator documentation.
+/// Issue #129 S3: locks the formal Ticket wire contract published by the generated ExplicitHost
+/// contribution. The S1 legacy snapshot is preserved in the design/evidence docs; this test now
+/// asserts the target matrix (including GetAll owned by the formal contribution with Ticket.Search).
 /// </summary>
 public class TicketWireBaselineTests : BaseTest
 {
-    private static readonly (string Method, string Route, string Display, string Permission)[] FrozenMatrix =
+    private static readonly (string Method, string Route, string CapabilityId, string Permission)[] FrozenMatrix =
     [
-        ("POST", "api/ticket", "ITicketAppService.Create", "Ticket.Create"),
-        ("GET", "api/ticket/{id}", "ITicketAppService.GetById", "Ticket.Get"),
-        ("PUT", "api/ticket/{id}", "ITicketAppService.Update", "Ticket.Update"),
-        ("DELETE", "api/ticket/{id}", "ITicketAppService.Delete", "Ticket.Delete"),
-        ("GET", "api/ticket/all", "TicketApi.GetAll", "Ticket.GetAll"),
-        ("GET", "api/ticket/assign", "ITicketAppService.Assign", "Ticket.Search"),
-        ("GET", "api/ticket/resolve", "ITicketAppService.Resolve", "Ticket.Search"),
-        ("GET", "api/ticket/close", "ITicketAppService.Close", "Ticket.Search"),
-        ("GET", "api/ticket/by-customer/{customerId}", "ITicketAppService.GetByCustomer", "Ticket.Get"),
-        ("GET", "api/ticket/by-assignee/{assigneeId}", "ITicketAppService.GetByAssignee", "Ticket.Get"),
-        ("GET", "api/ticket/overdue", "ITicketAppService.GetOverdue", "Ticket.Search"),
+        ("POST", "/api/ticket", "compat.appservice.ticket.create", "Ticket.Create"),
+        ("GET", "/api/ticket/{id}", "compat.appservice.ticket.get-by-id", "Ticket.Get"),
+        ("PUT", "/api/ticket/{id}", "compat.appservice.ticket.update", "Ticket.Update"),
+        ("DELETE", "/api/ticket/{id}", "compat.appservice.ticket.delete", "Ticket.Delete"),
+        ("GET", "/api/ticket/all", "compat.appservice.ticket.get-all", "Ticket.Search"),
+        ("GET", "/api/ticket/assign", "compat.appservice.ticket.assign", "Ticket.Update"),
+        ("GET", "/api/ticket/resolve", "compat.appservice.ticket.resolve", "Ticket.Update"),
+        ("GET", "/api/ticket/close", "compat.appservice.ticket.close", "Ticket.Update"),
+        ("GET", "/api/ticket/by-customer/{customerId}", "compat.appservice.ticket.get-by-customer", "Ticket.Get"),
+        ("GET", "/api/ticket/by-assignee/{assigneeId}", "compat.appservice.ticket.get-by-assignee", "Ticket.Get"),
+        ("GET", "/api/ticket/overdue", "compat.appservice.ticket.get-overdue", "Ticket.Search"),
     ];
 
     public TicketWireBaselineTests(Fixtures.HelpdeskWebApplicationFactory factory)
@@ -33,23 +33,38 @@ public class TicketWireBaselineTests : BaseTest
     }
 
     [Fact]
-    public void Published_ticket_endpoint_matrix_is_exactly_the_frozen_projection()
+    public void Published_ticket_endpoint_matrix_is_exactly_the_formal_projection()
     {
         var dataSource = Factory.Services.GetRequiredService<EndpointDataSource>();
         var published = dataSource.Endpoints.OfType<RouteEndpoint>()
-            .Where(endpoint => endpoint.RoutePattern.RawText!.StartsWith("api/ticket", StringComparison.OrdinalIgnoreCase))
+            .Where(endpoint => endpoint.RoutePattern.RawText!.StartsWith("/api/ticket", StringComparison.OrdinalIgnoreCase))
             .Select(endpoint => (
                 Method: string.Join("|", endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? new List<string>()),
-                Route: endpoint.RoutePattern.RawText!,
-                Display: endpoint.DisplayName ?? string.Empty,
-                Permission: string.Join(",", endpoint.Metadata.GetMetadata<CrestCreates.DynamicApi.DynamicApiPermissionMetadata>()?.Permissions ?? Array.Empty<string>())))
+                Route: endpoint.RoutePattern.RawText!))
             .OrderBy(row => row.Route)
             .ThenBy(row => row.Method)
             .ToList();
 
         published.Should().BeEquivalentTo(
-            FrozenMatrix.Select(row => row).OrderBy(row => row.Route).ThenBy(row => row.Method),
-            "the S1 baseline froze the eleven Ticket endpoints published by the legacy generated projection");
+            FrozenMatrix.Select(row => (row.Method, row.Route)).OrderBy(row => row.Route).ThenBy(row => row.Method),
+            "the formal Ticket contribution owns exactly the eleven target endpoints");
+        published.Should().HaveCount(11);
+
+        var endpointRegistry = Factory.Services.GetRequiredService<CrestCreates.DynamicApi.ICapabilityEndpointRegistry>();
+        var capabilityRegistry = Factory.Services.GetRequiredService<CrestCreates.Metadata.DescriptorCapability.ICapabilityRegistry>();
+        var descriptors = endpointRegistry.GetAll()
+            .Where(descriptor => descriptor.RoutePattern.StartsWith("/api/ticket", StringComparison.OrdinalIgnoreCase))
+            .Select(descriptor => (
+                Method: descriptor.HttpMethod.ToString().ToUpperInvariant(),
+                Route: descriptor.RoutePattern,
+                CapabilityId: descriptor.Capability.Id,
+                Permission: capabilityRegistry.GetByVersion(descriptor.Capability.Id, descriptor.Capability.Version)!.Permissions.Single()))
+            .OrderBy(row => row.Route)
+            .ThenBy(row => row.Method)
+            .ToList();
+        descriptors.Should().BeEquivalentTo(
+            FrozenMatrix.OrderBy(row => row.Route).ThenBy(row => row.Method),
+            "the capability descriptors carry the frozen five-permission matrix");
     }
 
     [Fact]
@@ -64,7 +79,8 @@ public class TicketWireBaselineTests : BaseTest
         ticketEndpoints
             .SelectMany(endpoint => endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>())
             .Should().BeEmpty(
-                "permission enforcement today happens inside each generated handler through DynamicApiGeneratedRuntime.EnsurePermissionAsync, not through endpoint authorization metadata");
+                "permission enforcement is performed by the capability pipeline's authorization middleware; " +
+                "the generated contribution declares InheritCapability and must not bypass it with endpoint metadata");
     }
 
     [Fact]
@@ -82,7 +98,7 @@ public class TicketWireBaselineTests : BaseTest
     }
 
     [Fact]
-    public async Task GetAll_is_published_by_the_hand_written_controller_override_with_its_own_permission_name()
+    public async Task GetAll_is_owned_by_the_formal_contribution_with_ticket_search()
     {
         var (client, _) = await CreateAuthenticatedAdminClientAsync();
 
@@ -94,12 +110,14 @@ public class TicketWireBaselineTests : BaseTest
         document.RootElement.TryGetProperty("data", out var data).Should().BeTrue();
         data.ValueKind.Should().Be(JsonValueKind.Array);
 
-        var dataSource = Factory.Services.GetRequiredService<EndpointDataSource>();
-        var getAll = dataSource.Endpoints.OfType<RouteEndpoint>()
-            .Single(endpoint => endpoint.RoutePattern.RawText == "api/ticket/all");
-        getAll.DisplayName.Should().Be("TicketApi.GetAll");
-        getAll.Metadata.GetMetadata<CrestCreates.DynamicApi.DynamicApiPermissionMetadata>()!.Permissions
-            .Should().BeEquivalentTo(["Ticket.GetAll"]);
+        var getAllDescriptor = Factory.Services
+            .GetRequiredService<CrestCreates.DynamicApi.ICapabilityEndpointRegistry>()
+            .GetAll()
+            .Single(descriptor => descriptor.RoutePattern == "/api/ticket/all");
+        getAllDescriptor.Capability.Id.Should().Be("compat.appservice.ticket.get-all");
+        Factory.Services.GetRequiredService<CrestCreates.Metadata.DescriptorCapability.ICapabilityRegistry>()
+            .GetByVersion(getAllDescriptor.Capability.Id, getAllDescriptor.Capability.Version)!
+            .Permissions.Should().BeEquivalentTo(["Ticket.Search"]);
     }
 
     [Fact]

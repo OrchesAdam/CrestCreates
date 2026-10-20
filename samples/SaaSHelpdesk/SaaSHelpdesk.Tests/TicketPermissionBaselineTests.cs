@@ -42,23 +42,22 @@ public class TicketPermissionBaselineTests : BaseTest
     }
 
     [Fact]
-    public async Task C11_endpoint_permission_and_inherited_service_permission_are_two_independent_gates()
+    public async Task C11_formal_getall_requires_ticket_search_not_the_legacy_getall_name()
     {
         var userId = await CreatePlainUserAsync();
         var client = await SignInAsPlainUserAsync(userId);
 
         var withoutGrant = await client.GetAsync("/api/ticket/all");
-        await AssertForbiddenAsync(withoutGrant, "Ticket.GetAll");
+        await AssertForbiddenAsync(withoutGrant, "Ticket.Search");
 
         await GrantAsync(userId, "Ticket.GetAll");
-        var endpointSatisfied = await client.GetAsync("/api/ticket/all");
-        await AssertForbiddenAsync(endpointSatisfied, "Ticket.Search",
-            "the endpoint metadata requires Ticket.GetAll while the inherited GetAllAsync checks Ticket.Search, " +
-            "so a SuperAdmin-only test cannot prove the permission contract");
+        var legacyGrantOnly = await client.GetAsync("/api/ticket/all");
+        await AssertForbiddenAsync(legacyGrantOnly, "Ticket.Search",
+            "Ticket.GetAll is not a formal definition and must not satisfy the formal endpoint or service gate");
 
         await GrantAsync(userId, "Ticket.Search");
-        var bothGranted = await client.GetAsync("/api/ticket/all");
-        bothGranted.StatusCode.Should().Be(HttpStatusCode.OK, await bothGranted.Content.ReadAsStringAsync());
+        var searchGranted = await client.GetAsync("/api/ticket/all");
+        searchGranted.StatusCode.Should().Be(HttpStatusCode.OK, await searchGranted.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -70,7 +69,7 @@ public class TicketPermissionBaselineTests : BaseTest
 
         var response = await client.GetAsync("/api/ticket/all");
 
-        await AssertForbiddenAsync(response, "Ticket.GetAll");
+        await AssertForbiddenAsync(response, "Ticket.Search");
     }
 
     [Fact]
@@ -78,7 +77,6 @@ public class TicketPermissionBaselineTests : BaseTest
     {
         var userId = await CreatePlainUserAsync();
         var client = await SignInAsPlainUserAsync(userId);
-        await GrantAsync(userId, "Ticket.GetAll");
         await GrantAsync(userId, "Ticket.Search");
 
         (await client.GetAsync("/api/ticket/all")).StatusCode.Should().Be(HttpStatusCode.OK);
@@ -87,7 +85,7 @@ public class TicketPermissionBaselineTests : BaseTest
 
         var afterRevoke = await client.GetAsync("/api/ticket/all");
         await AssertForbiddenAsync(afterRevoke, "Ticket.Search",
-            "this holds today and must keep holding once the formal projection owns the gate");
+            "the formal projection owns the gate and revocation must be visible on the next request");
     }
 
     [Fact]
@@ -101,8 +99,8 @@ public class TicketPermissionBaselineTests : BaseTest
         var response = await client.GetAsync($"/api/ticket/close?id={ticketId}");
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
-            "Assign/Resolve/Close are projected as GET with the convention-derived Ticket.Search gate, so a " +
-            "read-only grant can currently change ticket state; rev.2 freezes them as Command / Ticket.Update");
+            "Assign/Resolve/Close are formal Command actions gated by Ticket.Update; a read-only grant must " +
+            "not change ticket state");
 
         var persisted = await ReadTicketStatusAsync(ticketId);
         persisted.Should().Be(TicketStatus.Open, "a rejected write must not change the row");
@@ -114,7 +112,7 @@ public class TicketPermissionBaselineTests : BaseTest
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, because ?? body);
         using var document = JsonDocument.Parse(body);
         document.RootElement.GetProperty("code").GetString().Should().Be("Crest.Auth.Forbidden", body);
-        document.RootElement.GetProperty("details").GetString().Should().Contain(expectedPermission, body);
+        document.RootElement.GetProperty("details").ToString().Should().Contain(expectedPermission, body);
     }
 
     private async Task GrantAsync(string userId, string permissionName)

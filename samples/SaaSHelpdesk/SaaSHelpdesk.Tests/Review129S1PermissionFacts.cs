@@ -14,14 +14,14 @@ public class Review129S1PermissionFacts : BaseTest
         using var scope = Factory.Services.CreateScope();
         var services = scope.ServiceProvider;
         var definitions = services.GetRequiredService<IPermissionDefinitionManager>();
-        definitions.GetOrNull("Ticket.Get").Should().BeNull();
-        definitions.GetOrNull("Helpdesk.Tickets").Should().BeNull();
-        definitions.GetOrNull("Helpdesk.Tickets.Create").Should().BeNull();
+        definitions.GetOrNull("Ticket.Get").Should().NotBeNull("S3 registers the five formal Ticket definitions");
+        definitions.GetOrNull("Ticket.Unknown").Should().BeNull();
         var userId = Guid.NewGuid().ToString();
         var grants = services.GetRequiredService<IPermissionGrantManager>();
+        var undefined = "Ticket.Unknown";
         await grants.GrantAsync(new PermissionGrantInfo
         {
-            PermissionName = "Ticket.Get",
+            PermissionName = undefined,
             ProviderType = PermissionGrantProviderType.User,
             ProviderKey = userId,
             Scope = PermissionGrantScope.Global
@@ -32,7 +32,8 @@ public class Review129S1PermissionFacts : BaseTest
             new Claim("is_super_admin", "false")
         }, "review-fact-control"));
         var checker = services.GetRequiredService<IPermissionChecker>();
-        (await checker.IsGrantedAsync(principal, "Ticket.Get")).Should().BeTrue();
+        (await checker.IsGrantedAsync(principal, undefined)).Should().BeTrue(
+            "the existing grant manager accepts undefined names; definitions are a separate authority");
         (await checker.IsGrantedAsync(principal, "Ticket.Update")).Should().BeFalse();
     }
     [Fact]

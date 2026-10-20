@@ -1,4 +1,9 @@
 using CrestCreates.Web;
+using CrestCreates.DynamicApi;
+using CrestCreates.Capability;
+using CrestCreates.Schema;
+using CrestCreates.Schema.Abstractions;
+using CrestCreates.Generated.HttpProjection;
 using CrestCreates.Modularity;
 using CrestCreates.Security.Modules;
 using CrestCreates.Application.AuditLog;
@@ -30,6 +35,11 @@ builder.AddCrestWeb(options =>
     });
 });
 
+builder.Services.AddCapabilityRuntime();
+builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
+builder.Services.AddCrestCapabilityEndpoints();
+builder.Services.AddGeneratedAppServiceHttp();
+
 builder.Services.AddAuthentication()
     .AddScheme<SaaSHelpdesk.Web.Auth.CustomerApiKeyOptions, SaaSHelpdesk.Web.Auth.CustomerApiKeyAuthenticationHandler>(
         "CustomerApiKey", options => { });
@@ -43,6 +53,7 @@ builder.Host.RegisterModules();
 var app = builder.Build();
 
 app.UseCrestWeb();
+app.MapCrestCapabilityEndpoints();
 app.MapCrestWeb();
 
 await app.InitializeCrestApplicationAsync();

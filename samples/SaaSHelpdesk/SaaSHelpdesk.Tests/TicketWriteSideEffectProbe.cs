@@ -73,23 +73,23 @@ internal sealed class CountingTicketAppService : ITicketAppService
         await _inner.DeleteAsync(id, expectedStamp, cancellationToken);
     }
 
-    public Task<TicketDto> AssignAsync(Guid id, Guid agentId)
-        => Tracked(nameof(AssignAsync), () => _inner.AssignAsync(id, agentId));
+    public Task<TicketDto> AssignAsync(Guid id, Guid agentId, CancellationToken cancellationToken = default)
+        => Tracked(nameof(AssignAsync), () => _inner.AssignAsync(id, agentId, cancellationToken));
 
-    public Task<TicketDto> ResolveAsync(Guid id)
-        => Tracked(nameof(ResolveAsync), () => _inner.ResolveAsync(id));
+    public Task<TicketDto> ResolveAsync(Guid id, CancellationToken cancellationToken = default)
+        => Tracked(nameof(ResolveAsync), () => _inner.ResolveAsync(id, cancellationToken));
 
-    public Task<TicketDto> CloseAsync(Guid id)
-        => Tracked(nameof(CloseAsync), () => _inner.CloseAsync(id));
+    public Task<TicketDto> CloseAsync(Guid id, CancellationToken cancellationToken = default)
+        => Tracked(nameof(CloseAsync), () => _inner.CloseAsync(id, cancellationToken));
 
-    public Task<List<TicketDto>> GetByCustomerAsync(Guid customerId)
-        => Tracked(nameof(GetByCustomerAsync), () => _inner.GetByCustomerAsync(customerId));
+    public Task<List<TicketDto>> GetByCustomerAsync(Guid customerId, CancellationToken cancellationToken = default)
+        => Tracked(nameof(GetByCustomerAsync), () => _inner.GetByCustomerAsync(customerId, cancellationToken));
 
-    public Task<List<TicketDto>> GetByAssigneeAsync(Guid assigneeId)
-        => Tracked(nameof(GetByAssigneeAsync), () => _inner.GetByAssigneeAsync(assigneeId));
+    public Task<List<TicketDto>> GetByAssigneeAsync(Guid assigneeId, CancellationToken cancellationToken = default)
+        => Tracked(nameof(GetByAssigneeAsync), () => _inner.GetByAssigneeAsync(assigneeId, cancellationToken));
 
-    public Task<List<TicketDto>> GetOverdueAsync()
-        => Tracked(nameof(GetOverdueAsync), () => _inner.GetOverdueAsync());
+    public Task<List<TicketDto>> GetOverdueAsync(CancellationToken cancellationToken = default)
+        => Tracked(nameof(GetOverdueAsync), () => _inner.GetOverdueAsync(cancellationToken));
 }
 
 internal sealed class CountingUnitOfWorkManager : IUnitOfWorkManager

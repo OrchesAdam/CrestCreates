@@ -492,3 +492,23 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - Procurement 样例 **29/29**（26 原有 + 3 审查探针）；Asset 样例 **29/29**、Asset E2E composition 探针 **2/2**；契约 fixture 测试 **9/9**。
 - JsonContracts **162/162**；DynamicApi **130/130**；CodeGenerator 全量 **552/552**（31m35s）；CRUD NativeAOT **23/23**。
 - 审查探针：Procurement `ReviewS23HostProbes` **3/3**（含缺业务注册 → CCHTTP007）、Asset `ReviewS23AssetCompositionProbes` **2/2**；契约 fixture 漂移测试 **9/9**。
+
+## S3 第一增量：Ticket 正式投影与真实 Host 装配（2026-10-20）
+
+### 交付
+
+- `ITicketAppService` 11 个方法全部加 `[AppServiceHttpAction]`：Create/GetById/GetAll/Update/Delete/Assign/Resolve/Close/GetByCustomer/GetByAssignee/GetOverdue；路由、verb、Kind、body 与设计矩阵一致；Assign/Resolve/Close 冻结为 GET + Command + `Ticket.Update`；GetAll 统一 `Ticket.Search`。
+- `TicketAppService` 标记 `ContractType=typeof(ITicketAppService)`、`ExplicitHost`、`api/ticket`、`compat.appservice.ticket`；六个领域查询/写动作补齐 optional CT 并向仓储传播。
+- 新增 `TicketPermissionDefinitionProvider`，注册设计冻结的五个定义 `Ticket.Create/Get/Search/Update/Delete`（不再产生 `Ticket.GetAll`）。
+- `SaaSHelpdesk.Application` 接入 JsonContracts repository transport；真实 Host 调用 `AddCapabilityRuntime`/`AddCrestCapabilityEndpoints`/`AddGeneratedAppServiceHttp` 并 `MapCrestCapabilityEndpoints`；注册 `ISchemaValidator`（正式能力管线需要）。
+- 旧 `TicketApi` 归档到 `99_RecycleBin/issue-129-controller-exit/...`；`/api/ticket/all` 由正式贡献唯一拥有。
+- 平台共享 root 规则补充：框架标量（string/Guid/数值/bool/日期等）允许任意宿主 source-generated context 回答（OpenAPI context 与贡献 context 元数据一致），feature-private DTO/envelope 仍必须由属主 context 回答。
+- 测试迁移：`TicketWireBaselineTests` 改为断言正式 11 端点矩阵（capability id/route/permission），该测试通过；权限基线改为 Search/Update 目标；`TicketWriteSideEffectProbe` 适配 CT 签名。
+
+### 当前已知未闭合（S3 后续增量）
+
+- 权限拒绝响应体仍为空 403（正式 capability pipeline 的失败桥接尚未实现）→ 权限测试的目标 body 断言仍红，属 S3-c/R-04。
+- 重复 EfCore UoW binding（三分支）尚未收口，写动作测量仍需 normalization → S3-b。
+- Update/Delete 的 client stamp 语义（缺失 428、stale 拒绝、DTO stamp 回读）尚未实现 → S3-c。
+- 租户上下文/双租户生产选库、typed validators、H01–H08 尚未完成 → S3-b/c/d。
+- 本增量不声称 S3 完成；正式 wire 矩阵测试已绿，其余目标测试按上述增量继续。
