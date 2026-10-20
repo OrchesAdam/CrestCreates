@@ -180,24 +180,26 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
             return NonCaller();
         }
 
-        // The unit-of-work kernel attaches the caller/execution identities to the original exception
-        // before unwinding; without this bridge a kernel deadline or a caller cancellation forwarded
-        // through the linked execution token is indistinguishable from an unrelated token.
+        // The unit-of-work kernel attaches the frame chain to the original exception before
+        // unwinding. An operation-derived token is matched against the frame that recorded it; the
+        // root caller (not the inner scope's caller, which may be an outer execution token) decides
+        // caller abort, and any frame deadline decides managed deadline. Unmatched third tokens never
+        // inherit kernel facts.
         if (snapshot is not null)
         {
-            if (token == snapshot.ExecutionToken)
+            if (snapshot.ContainsToken(token))
             {
-                if (snapshot.CallerTokenWasCancelled)
+                if (snapshot.RootCallerWasCancelled)
                 {
                     return CallerAbort();
                 }
 
-                return snapshot.DeadlineExpired ? ManagedDeadline() : NonCaller();
+                return snapshot.AnyDeadlineExpired ? ManagedDeadline() : NonCaller();
             }
 
-            if (snapshot.CallerToken.CanBeCanceled && token == snapshot.CallerToken)
+            if (snapshot.RootCallerToken.CanBeCanceled && token == snapshot.RootCallerToken)
             {
-                return snapshot.CallerTokenWasCancelled ? CallerAbort() : NonCaller();
+                return snapshot.RootCallerWasCancelled ? CallerAbort() : NonCaller();
             }
         }
 

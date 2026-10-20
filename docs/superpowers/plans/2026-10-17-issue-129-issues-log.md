@@ -638,3 +638,26 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - SaaSHelpdesk **137 pass / 11 fail / 148**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider）。
 - Web **113/117**（4 条仅 worktree `.git` 环境项）、Application **177/177**、DynamicApi **140/140**、OrmProviders **124/124**、CRUD NativeAOT **23/23**、Procurement **29/29**、JsonContracts **162/162**。
 - 环境项同上：Asset E2E durable PG 前置、Boundary evidence-ledger 既存 WIP、IntegrationTests 的 OpenIddict 种子时序（上一 head 可复现）。
+
+## S3 统一审查 R3 修复（取消组合路径，2026-10-20）
+
+审查报告：`docs/review/2026-10-20-issue-129-s3-unified-review-round3.md`（head `32a175ba`）。平层内核来源、响应抑制与旧断言已通过；剩余两种组合路径已闭环。
+
+### 1. 嵌套 Required 的帧间关联
+
+- `UnitOfWorkCancellationSnapshot` 改为**帧链**（`UnitOfWorkCancellationFrame`：caller/execution token、caller 是否取消、deadline 是否到期、operation 派生 token）。`CaptureCancellationSnapshot` 沿 join→owner、isolated→parent frame 的归属链构建 inner→outer 帧序；`Attach` 与已有快照按 execution token **合并**（不再无条件覆盖），保持原始 OCE 身份。
+- 分类以**最外层 root caller**（真实传输 caller）判断 CallerAbort，以**任一帧 deadline** 判断 ManagedDeadline；内层 scope 的 caller 可能是父帧 execution token，不再被误当 HTTP caller，也不会被外层快照覆盖掉与实际异常匹配的内层记录。
+- 证据：R3 嵌套矩阵（inner/outer deadline、caller、third）全部通过。
+
+### 2. 正式操作的派生 token
+
+- `UnitOfWorkExecutionContext.CombineWithCurrent` 在创建 linked token 时，把该 **operation-derived token** 记录到产生它的受管帧（`UnitOfWorkExecutionTokenSource.RecordDerivedToken`，去重、线程安全）；快照帧携带 `DerivedTokens`。
+- 分类先按 `ContainsToken` 匹配帧 execution token 或派生 token；匹配后才使用 root caller/any-deadline 事实。**未匹配的第三 token（含 scope deadline 已到期）仍为 NonCaller**，不继承内核事实。
+- 证据：R3 operation 矩阵使用真实 EF 事务 + PostgreSQL `SELECT pg_sleep(10)` + 既有 `CombineWithCurrent`，deadline → ManagedDeadline、caller → CallerAbort/Cancelled，派生 token 明确不同于 scope token。
+
+### 复跑（修复 head 见 PR）
+
+- R3 组合探针 **8/8**；R2 真实内核探针 **4/4**、Web 抑制探针 **3/3**、真实 Program 双租户 HTTP **1/1**。
+- SaaSHelpdesk **145 pass / 11 fail / 156**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider）。
+- Capability **178/178**、OrmProviders **124/124**、DynamicApi **140/140**、Application **177/177**、CRUD NativeAOT **23/23**、Procurement **29/29**、JsonContracts **162/162**、Web **113/117**（4 条仅 worktree `.git` 环境项）、Data.Abstractions NativeAOT **1/1**。
+- 环境项不变：Asset E2E durable PG 前置、Boundary evidence-ledger 既存 WIP、IntegrationTests 的 OpenIddict 种子时序（上一 head 可复现）。

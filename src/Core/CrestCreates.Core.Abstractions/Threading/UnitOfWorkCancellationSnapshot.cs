@@ -1,20 +1,95 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 
 namespace CrestCreates.Core.Abstractions.Threading;
 
 /// <summary>
-/// Identities and source facts captured by the unit-of-work kernel when a frame observes
-/// cancellation. The kernel attaches this snapshot to the original
-/// <see cref="System.OperationCanceledException"/> (via <see cref="ExceptionDataKey"/>) before the
-/// ambient frame unwinds, so transports can classify the source without wrapping or replacing the
-/// business exception and without reading ambient state that no longer exists.
+/// One frame of the managed unit-of-work chain. A Required scope joins the owner and records the
+/// owner execution token as its caller; classification therefore follows the chain back to the root
+/// caller instead of treating an inner frame's caller as the HTTP caller.
 /// </summary>
-public sealed record UnitOfWorkCancellationSnapshot(
+public sealed record UnitOfWorkCancellationFrame(
     CancellationToken CallerToken,
     CancellationToken ExecutionToken,
     bool CallerTokenWasCancelled,
-    bool DeadlineExpired)
+    bool DeadlineExpired,
+    IReadOnlyList<CancellationToken> DerivedTokens);
+
+/// <summary>
+/// Identities and source facts captured by the unit-of-work kernel when a frame observes
+/// cancellation. It is attached to the original <see cref="OperationCanceledException"/> (via
+/// <see cref="ExceptionDataKey"/>) before the ambient frame unwinds; transports classify the source
+/// from the typed chain without wrapping the business exception.
+/// </summary>
+public sealed record UnitOfWorkCancellationSnapshot(IReadOnlyList<UnitOfWorkCancellationFrame> Frames)
 {
-    /// <summary>The <see cref="System.Exception.Data"/> key carrying this snapshot.</summary>
+    /// <summary>The <see cref="Exception.Data"/> key carrying this snapshot.</summary>
     public const string ExceptionDataKey = "CrestCreates.UnitOfWork.CancellationSnapshot";
+
+    /// <summary>Innermost frame view (the frame that most operations throw with).</summary>
+    public CancellationToken CallerToken => Frames[0].CallerToken;
+
+    /// <summary>Innermost execution token view.</summary>
+    public CancellationToken ExecutionToken => Frames[0].ExecutionToken;
+
+    /// <summary>Innermost caller cancellation view.</summary>
+    public bool CallerTokenWasCancelled => Frames[0].CallerTokenWasCancelled;
+
+    /// <summary>True when any frame's managed deadline expired.</summary>
+    public bool DeadlineExpired => Frames.Any(frame => frame.DeadlineExpired);
+
+    /// <summary>The outermost (root) caller identity — the transport caller for a request chain.</summary>
+    public CancellationToken RootCallerToken => Frames[^1].CallerToken;
+
+    /// <summary>True when the root caller identity is canceled.</summary>
+    public bool RootCallerWasCancelled => Frames[^1].CallerTokenWasCancelled;
+
+    /// <summary>True when any frame's managed deadline expired.</summary>
+    public bool AnyDeadlineExpired => Frames.Any(frame => frame.DeadlineExpired);
+
+    /// <summary>
+    /// True when the token is a frame execution token or an operation-derived token recorded by the
+    /// official composition helper for one of those frames.
+    /// </summary>
+    public bool ContainsToken(CancellationToken token)
+        => Frames.Any(frame =>
+            (frame.ExecutionToken.CanBeCanceled && frame.ExecutionToken == token)
+            || frame.DerivedTokens.Contains(token));
+
+    /// <summary>
+    /// Merges an outer frame chain onto an already attached inner chain. Frames are unique by
+    /// execution token and keep inner-to-outer order, so <see cref="RootCallerToken"/> remains the
+    /// outermost frame's caller.
+    /// </summary>
+    public UnitOfWorkCancellationSnapshot Merge(UnitOfWorkCancellationSnapshot outer)
+    {
+        var frames = new List<UnitOfWorkCancellationFrame>(Frames);
+        foreach (var frame in outer.Frames)
+        {
+            if (!frames.Any(existing => existing.ExecutionToken == frame.ExecutionToken))
+            {
+                frames.Add(frame);
+            }
+        }
+
+        return new UnitOfWorkCancellationSnapshot(frames);
+    }
+
+    /// <summary>
+    /// Attaches (or merges) the snapshot on a cancellation exception without replacing the original
+    /// exception. Non-cancellation exceptions are ignored.
+    /// </summary>
+    public static void Attach(Exception exception, UnitOfWorkCancellationSnapshot? snapshot)
+    {
+        if (exception is not OperationCanceledException || snapshot is null)
+        {
+            return;
+        }
+
+        exception.Data[ExceptionDataKey] = exception.Data[ExceptionDataKey] is UnitOfWorkCancellationSnapshot existing
+            ? existing.Merge(snapshot)
+            : snapshot;
+    }
 }

@@ -81,12 +81,14 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
         }
 
         // The kernel's execution token is the only place the caller/deadline identities survive
-        // after the ambient frame is restored; attach them to the original exception before rollback.
+        // after the ambient frame is restored; attach (or merge) them on the original exception
+        // before rollback.
         if (context.Exception is OperationCanceledException
-            && scope is IUnitOfWorkCancellationSource source
-            && source.CaptureCancellationSnapshot() is { } snapshot)
+            && scope is IUnitOfWorkCancellationSource source)
         {
-            context.Exception.Data[UnitOfWorkCancellationSnapshot.ExceptionDataKey] = snapshot;
+            UnitOfWorkCancellationSnapshot.Attach(
+                context.Exception,
+                source.CaptureCancellationSnapshot());
         }
 
         return new ValueTask(RollbackScopeAsync(scope, context));

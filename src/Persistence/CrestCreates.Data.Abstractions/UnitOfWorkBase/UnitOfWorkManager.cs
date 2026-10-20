@@ -195,13 +195,7 @@ namespace CrestCreates.Data.Abstractions
         /// the ambient frame unwinds; transports classify the source from this typed snapshot.
         /// </summary>
         private static void AttachCancellationSnapshot(Exception exception, UnitOfWorkScope scope)
-        {
-            if (exception is OperationCanceledException
-                && scope.CaptureCancellationSnapshot() is { } snapshot)
-            {
-                exception.Data[UnitOfWorkCancellationSnapshot.ExceptionDataKey] = snapshot;
-            }
-        }
+            => UnitOfWorkCancellationSnapshot.Attach(exception, scope.CaptureCancellationSnapshot());
 
         private UnitOfWorkScope BeginRootScope(AmbientFrame? frame, UnitOfWorkOptions options)
         {
@@ -613,19 +607,36 @@ namespace CrestCreates.Data.Abstractions
 
             public UnitOfWorkCancellationSnapshot? CaptureCancellationSnapshot()
             {
-                if (!_started || !_tokenSource.Token.CanBeCanceled || !_tokenSource.Token.IsCancellationRequested)
+                if (!_started)
                 {
                     return null;
                 }
 
-                var callerCancelled = _callerToken.CanBeCanceled && _callerToken.IsCancellationRequested;
-                var deadlineExpired = _deadlineUtc is { } deadline
-                    && (DateTimeOffset.UtcNow >= deadline || !callerCancelled);
-                return new UnitOfWorkCancellationSnapshot(
-                    _callerToken,
-                    _tokenSource.Token,
-                    callerCancelled,
-                    deadlineExpired);
+                // Walk the ownership chain (join -> owner, isolated -> parent frame) so classification
+                // can return to the root transport caller and the real deadline source instead of
+                // mistaking an outer execution token for the caller.
+                var frames = new System.Collections.Generic.List<UnitOfWorkCancellationFrame>();
+                for (var scope = this; scope is not null; scope = scope._ownerScope ?? scope._parentFrame?.Scope)
+                {
+                    if (!scope._started)
+                    {
+                        continue;
+                    }
+
+                    var callerCancelled = scope._callerToken.CanBeCanceled
+                        && scope._callerToken.IsCancellationRequested;
+                    var deadlineExpired = scope._deadlineUtc is { } deadline
+                        && (DateTimeOffset.UtcNow >= deadline
+                            || (!callerCancelled && scope._tokenSource.Token.IsCancellationRequested));
+                    frames.Add(new UnitOfWorkCancellationFrame(
+                        scope._callerToken,
+                        scope._tokenSource.Token,
+                        callerCancelled,
+                        deadlineExpired,
+                        scope._tokenSource.SnapshotDerivedTokens()));
+                }
+
+                return frames.Count == 0 ? null : new UnitOfWorkCancellationSnapshot(frames);
             }
 
             private async Task BeginProviderTransactionAsync()
