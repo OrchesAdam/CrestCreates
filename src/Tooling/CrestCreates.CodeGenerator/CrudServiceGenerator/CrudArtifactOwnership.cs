@@ -21,7 +21,7 @@ namespace CrestCreates.CodeGenerator.CrudServiceGenerator;
 /// manifest yields that empty set, which keeps a generator on its pre-#128 behavior, and no exception
 /// can escape into the driver.
 /// </summary>
-public static class CrudArtifactOwnership
+internal static class CrudArtifactOwnership
 {
     /// <summary>Name of the outputs manifest the CRUD targets contribute as an AdditionalFile.</summary>
     public const string ManifestFileName = "CrestCreates.Crud.outputs.json";
@@ -104,7 +104,7 @@ public static class CrudArtifactOwnership
             if (!document.RootElement.TryGetProperty("SchemaVersion", out var schema)
                 || schema.GetString() != "crud-artifacts-v1"
                 || !document.RootElement.TryGetProperty("ModelSchemaVersion", out var model)
-                || model.GetString() != CrestCreates.Tooling.CrudGeneration.CrudGenerationModel.ModelSchemaVersion
+                || model.GetString() != CrestCreates.Tooling.CrudGeneration.CrudGenerationSchema.ModelSchemaVersion
                 || !document.RootElement.TryGetProperty(EntriesProperty, out var entries)
                 || entries.ValueKind != JsonValueKind.Array)
             {

@@ -9,10 +9,7 @@ namespace CrestCreates.CodeGenerator.Tests.Services
     /// 这个服务没有显式定义接口，ServiceGenerator 会自动生成 IOrderService 接口
     /// </summary>
     [CrestService(
-        Lifetime = CrestServiceAttribute.ServiceLifetime.Scoped,
-        GenerateController = true,
-        Route = "api/orders"
-    )]
+        Lifetime = CrestServiceAttribute.ServiceLifetime.Scoped)]
     public class OrderService
     {
         public async Task<OrderDto> GetByIdAsync(Guid id)

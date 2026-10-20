@@ -64,7 +64,7 @@ public static class DynamicApiGeneratedRuntime
 
     public static async Task ValidateAsync<T>(IValidationService? validationService, T? instance)
     {
-        if (validationService is null || instance is null || DynamicApiRouteConvention.IsScalar(typeof(T)))
+        if (validationService is null || instance is null || IsScalar(typeof(T)))
         {
             return;
         }
@@ -133,5 +133,28 @@ public static class DynamicApiGeneratedRuntime
         }
 
         return await unitOfWorkManager.ExecuteAsync(action, options, context.RequestAborted).ConfigureAwait(false);
+    }
+
+    private static bool IsScalar(Type type)
+    {
+        if (type == typeof(string) || type == typeof(Guid) || type == typeof(DateTime)
+            || type == typeof(DateTimeOffset) || type == typeof(TimeSpan)
+            || type == typeof(DateOnly) || type == typeof(TimeOnly))
+        {
+            return true;
+        }
+
+        if (type.IsEnum)
+        {
+            return true;
+        }
+
+        var underlying = Nullable.GetUnderlyingType(type);
+        if (underlying is not null)
+        {
+            return IsScalar(underlying);
+        }
+
+        return type.IsPrimitive || type == typeof(decimal);
     }
 }

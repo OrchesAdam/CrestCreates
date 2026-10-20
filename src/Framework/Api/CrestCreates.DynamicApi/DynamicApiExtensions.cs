@@ -24,7 +24,6 @@ public static class DynamicApiExtensions
         configure?.Invoke(options);
 
         services.AddSingleton(options);
-        services.AddSingleton<DynamicApiRouteConvention>();
 
         services.AddSingleton(sp =>
         {
@@ -37,8 +36,6 @@ public static class DynamicApiExtensions
 
             throw DynamicApiGeneratedRegistryStore.CreateMissingGeneratedProviderException(dynamicApiOptions);
         });
-
-        DynamicApiGeneratedRegistryStore.ApplyControllerRegistrations(services);
 
         return services;
     }

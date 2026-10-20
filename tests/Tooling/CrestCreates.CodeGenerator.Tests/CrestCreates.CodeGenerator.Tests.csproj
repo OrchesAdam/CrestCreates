@@ -59,4 +59,8 @@
 <!--    <Compile Remove="Services\**\*.cs" />-->
 <!--  </ItemGroup>-->
 
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Tooling/CrestCreates.CodeGenerator.Legacy/CrestCreates.CodeGenerator.Legacy.csproj" />
+  </ItemGroup>
+
 </Project>

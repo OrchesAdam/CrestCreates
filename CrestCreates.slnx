@@ -215,6 +215,7 @@
   </Folder>
   <Folder Name="/src/Tooling/">
     <Project Path="src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />
+    <Project Path="src/Tooling/CrestCreates.CodeGenerator.Legacy/CrestCreates.CodeGenerator.Legacy.csproj" />
     <Project Path="src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/CrestCreates.JsonContracts.BuildTasks.Core.csproj" />
     <Project Path="src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj" />
     <Project Path="src/Tooling/CrestCreates.Metadata.Analyzers/CrestCreates.Metadata.Analyzers.csproj" />

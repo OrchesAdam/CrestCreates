@@ -27,10 +27,7 @@ namespace CrestCreates.CodeGenerator.Tests.Services
     /// 4. 测试基类
     /// </summary>
     [CrestService(
-        Lifetime = CrestServiceAttribute.ServiceLifetime.Scoped,
-        GenerateController = true,
-        Route = "api/products"
-    )]
+        Lifetime = CrestServiceAttribute.ServiceLifetime.Scoped)]
     public class ProductService : IProductService
     {
         public async Task<ProductDto> GetByIdAsync(Guid id)

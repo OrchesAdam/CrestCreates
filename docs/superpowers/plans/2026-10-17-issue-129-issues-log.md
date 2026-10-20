@@ -678,3 +678,22 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - R3 组合 **8/8**、R2 内核 **4/4**、Web 抑制 **3/3**、真实 Program 双租户 HTTP **1/1**。
 - SaaSHelpdesk **149 pass / 11 fail / 160**（11 条既有红不变）；Capability **178/178**、OrmProviders **124/124**、DynamicApi **140/140**、Application **177/177**、CRUD NativeAOT **23/23**、Procurement **29/29**、JsonContracts **162/162**、Web **113/117**（4 条 worktree `.git`）、Data.Abstractions NativeAOT **1/1**。
 - 环境项不变。
+
+## S4.1 Legacy analyzer 拆分与死代码归档（2026-10-20）
+
+### 交付
+
+- 新增显式 `src/Tooling/CrestCreates.CodeGenerator.Legacy`（netstandard2.0 analyzer，`DevelopmentDependency`）：`[CrestService]` 旧 Minimal API 生成器与静态 compatibility 生成器从默认 analyzer 移入；默认 `CrestCreates.CodeGenerator` 不再包含它们。`Directory.Build.Aot.props` 的全局 analyzer/trim 排除同时排除 Legacy；只有 SaaSHelpdesk.Application、LibraryManagement.Application 与仍需要静态兼容/legacy 的 fixture 显式引用 Legacy analyzer。
+- `DynamicApiAotSourceGenerator` 的 controller 分支（`[GeneratedApiController]`/`[ApiOverride]`/controller registration/descriptor）移除；移除前快照归档到 `99_RecycleBin/issue-129-controller-exit/...pre-controller-removal.cs`。`GenerationContext` 只剩 services。
+- `ControllerSourceGenerator`、`CrudControllerSourceGenerator`、`CrestCrudApiControllerAttribute`、`CrestApiController`/`GeneratedApiControllerAttribute`/`ApiOverrideAttribute`/`CrudAction`、以及维护它们的专用测试归档到 `99_RecycleBin/issue-129-controller-exit/`（调用图/替代/测试迁移见该目录 README；`99_RecycleBin` 不入库）。
+- `CrudServiceSourceGenerator` 旧无参 stub/bundle/provider/旧 bool ExecuteAsync 发射器全部移除；参数化 `[GenerateCrudService(typeof(TEntity))]` 的正式诊断/ownership 入口保留。旧无参声明现在确定性报告 `InvalidDeclaration`（“parameterless stub retired”），不再生成 DTO/service/endpoint。旧专用测试 `CrudServiceSourceGeneratorTests`、`CrudServiceMainlineSourceGeneratorTests` 归档。
+- `DynamicApiRouteConvention` 删除（实例反射方法零消费者）；唯一活成员 `IsScalar` 变为 `DynamicApiGeneratedRuntime` 内的私有、有限已知类型分类器；DI 注册与 controller configurator hook 删除。
+- `CrestServiceAttribute` 移除 controller-only 的 `GenerateController`/`Route`；测试服务标记同步移除。
+- `CrudGenerationSchema.ModelSchemaVersion` 抽成独立共享源文件，legacy analyzer 只链接该 schema 常量 + `CrudArtifactOwnership`，不重复编译公开 CRUD/HTTP 模型（避免同 FQN 双程序集）。
+
+### 验证
+
+- `CodeGenerator.Tests` 正式 CRUD 定向（RealDeclaration/Ownership/BuildLifecycle/TypedQuery/MsBuild）**73/73**；CodeGenerator/legacy analyzer 均构建成功。
+- SaaSHelpdesk 全量 **149 pass / 11 fail / 160**（11 条既有红不变；Customer/Category/KB/SLA/Agent 等 legacy 端点仍由显式 Legacy analyzer 生成）。
+- DynamicApi **140/140**、CompatibilityProjection.E2E **20/20**、CapabilityEndpoint AOT fixture **13/13**、Web **109/113**（4 条 worktree `.git` 环境项）。
+- 下一步：S4.2 迁移旧运行时与 Web Add/Map 到 `DynamicApi.Legacy`/`Web.Legacy`，显式激活 + per-owner/action allowlist；S4.3 依赖/符号/运行/变异守卫与归档文档。

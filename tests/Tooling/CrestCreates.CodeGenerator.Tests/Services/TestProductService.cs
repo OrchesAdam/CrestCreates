@@ -6,7 +6,6 @@ using CrestCreates.Domain.Shared.Attributes;
 namespace CrestCreates.CodeGenerator.Tests.Services
 {
     [CrestService(
-        GenerateController = true,
         GenerateAuthorization = true,
         ResourceName = "Product",
         GenerateCrudPermissions = true,
