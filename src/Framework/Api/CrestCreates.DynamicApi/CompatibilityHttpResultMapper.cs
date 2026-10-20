@@ -113,6 +113,21 @@ public static class CompatibilityHttpResultMapper
     }
 
     /// <summary>
+    /// GET result for the hand-written AppService front-end: a null output defers to the host's
+    /// authoritative not-found response (CrestErrorResponse on CrestCreates hosts) instead of
+    /// inventing a second 404 envelope shape. Non-null values use the typed 200 envelope.
+    /// </summary>
+    public static object WrapGetResultOrNotFound<T>(
+        T? value,
+        JsonTypeInfo<DynamicApiResponse<T>> envelopeTypeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(envelopeTypeInfo);
+        return value is null
+            ? CapabilityEndpointNotFoundResult.Instance
+            : WrapResult(value, envelopeTypeInfo);
+    }
+
+    /// <summary>
     /// #128 S3 typed contract: the void/404 envelope with explicit metadata and no fallback.
     /// </summary>
     public static IResult WrapVoidResult(JsonTypeInfo<DynamicApiResponse> envelopeTypeInfo)

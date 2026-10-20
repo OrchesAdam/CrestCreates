@@ -24,7 +24,21 @@ internal static class CapabilityEndpointMapper
             new[] { httpMethod },
             async (HttpContext context) =>
             {
-                var input = await binding.BindInputAsync(context, context.RequestAborted);
+                object? input;
+                try
+                {
+                    input = await binding.BindInputAsync(context, context.RequestAborted);
+                }
+                catch (Exception ex) when (ex is BadHttpRequestException
+                    or JsonException or FormatException or ArgumentException)
+                {
+                    // Binding/parse failures are local 400s: no business code and no write ran.
+                    var presenter = context.RequestServices
+                        .GetService<ICapabilityEndpointFailurePresenter>();
+                    return presenter is not null
+                        ? presenter.PresentBindingFailure(ex, context)
+                        : Results.BadRequest();
+                }
 
                 var dispatcher = context.RequestServices
                     .GetRequiredService<ICapabilityDispatcher>();
@@ -91,7 +105,13 @@ internal static class CapabilityEndpointMapper
         // must always be mapped by the unified CapabilityEndpointResultMapper so that
         // compatibility projections never swallow a failure as a 200 OK.
         if (!result.IsSuccess)
-            return CapabilityEndpointResultMapper.Map(result, outputMapping, httpContext);
+        {
+            var presenter = httpContext.RequestServices
+                .GetService<ICapabilityEndpointFailurePresenter>();
+            return presenter is not null
+                ? presenter.Present(result, httpContext)
+                : CapabilityEndpointResultMapper.Map(result, outputMapping, httpContext);
+        }
 
         if (resultMapper is not null)
         {
@@ -104,6 +124,15 @@ internal static class CapabilityEndpointMapper
             };
 
             var mapped = resultMapper(ctx, httpContext.RequestServices);
+            if (mapped is CapabilityEndpointNotFoundResult)
+            {
+                var presenter = httpContext.RequestServices
+                    .GetService<ICapabilityEndpointFailurePresenter>();
+                return presenter is not null
+                    ? presenter.PresentNotFound(httpContext)
+                    : Results.NotFound();
+            }
+
             // The mapper returns object to avoid AspNetCore dependency in
             // Abstractions, but the concrete implementation always returns IResult.
             return (IResult)mapped;

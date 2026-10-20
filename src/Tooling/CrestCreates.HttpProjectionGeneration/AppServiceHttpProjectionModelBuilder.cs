@@ -333,6 +333,59 @@ public static class AppServiceHttpProjectionModelBuilder
                 contractMethod.ToDisplayString()));
         }
 
+        var requiresValidator = ReadBool(declaration, "RequiresValidator");
+        string? validatorImplementation = null;
+        string? validatorContract = null;
+        if (requiresValidator)
+        {
+            if (bodyParameter is null || bodyPolicy == AppServiceHttpBodyPolicy.None)
+            {
+                diagnostics.Add(new AppServiceHttpProjectionDiagnostic(
+                    AppServiceHttpDiagnosticCodes.ActionDeclarationContradiction,
+                    $"action '{actionName}' declares RequiresValidator but binds no request body",
+                    AppServiceHttpDiagnosticSeverity.Error,
+                    contractMethod.ToDisplayString()));
+            }
+            else if (bodyPolicy != AppServiceHttpBodyPolicy.Required)
+            {
+                diagnostics.Add(new AppServiceHttpProjectionDiagnostic(
+                    AppServiceHttpDiagnosticCodes.ActionDeclarationContradiction,
+                    $"action '{actionName}' declares RequiresValidator but its body is optional; a required validator needs a required body",
+                    AppServiceHttpDiagnosticSeverity.Error,
+                    contractMethod.ToDisplayString()));
+            }
+            else
+            {
+                var validators = FindBodyValidators(compilation, bodyParameter.Type);
+                var bodyDisplay = bodyParameter.Type.ToDisplayString(Display);
+                validatorContract = "global::FluentValidation.IValidator<" + bodyDisplay + ">";
+                if (validators.Count == 0)
+                {
+                    diagnostics.Add(new AppServiceHttpProjectionDiagnostic(
+                        AppServiceHttpDiagnosticCodes.ActionDeclarationContradiction,
+                        $"action '{actionName}' declares RequiresValidator but no accessible closed IValidator<"
+                        + bodyDisplay + "> implementation was found in the HTTP owner assembly or the body's assembly",
+                        AppServiceHttpDiagnosticSeverity.Error,
+                        contractMethod.ToDisplayString()));
+                }
+                else if (validators.Count > 1)
+                {
+                    diagnostics.Add(new AppServiceHttpProjectionDiagnostic(
+                        AppServiceHttpDiagnosticCodes.ActionDeclarationContradiction,
+                        $"action '{actionName}' declares RequiresValidator but multiple IValidator<" + bodyDisplay
+                        + "> implementations were found ("
+                        + string.Join(", ", validators.Select(validator => validator.ToDisplayString(Display)))
+                        + "); exactly one typed validator is required",
+                        AppServiceHttpDiagnosticSeverity.Error,
+                        contractMethod.ToDisplayString()));
+                }
+                else
+                {
+                    validatorImplementation = validators[0].ToDisplayString(Display);
+                }
+            }
+        }
+
         var permissions = ReadStringArray(declaration, "Permissions");
         var (resultType, resultKind) = UnwrapResult(contractMethod.ReturnType);
         var needsEnvelope = parameters.Count > 1 || requiresConcurrencyToken;
@@ -486,7 +539,125 @@ public static class AppServiceHttpProjectionModelBuilder
                 ? AppServiceHttpWireConvention.EnvelopeFullName(ownerAssemblyName, contractFullName, actionName)
                 : null,
             RequiresConcurrencyToken = requiresConcurrencyToken,
+            RequiresValidator = requiresValidator,
+            ValidatorImplementationFullName = validatorImplementation,
+            ValidatorContractFullName = validatorContract,
         };
+    }
+
+    /// <summary>
+    /// Build-time discovery of the closed validator for a body type. Only the HTTP owner assembly and
+    /// the assembly that declares the body are scanned (never framework references); the result is part
+    /// of the frozen model, so the generated activation registers an explicit typed service.
+    /// </summary>
+    private static IReadOnlyList<INamedTypeSymbol> FindBodyValidators(CSharpCompilation compilation, ITypeSymbol bodyType)
+    {
+        var validatorInterface = compilation.GetTypeByMetadataName("FluentValidation.IValidator`1");
+        var matches = new List<INamedTypeSymbol>();
+        if (validatorInterface is null)
+        {
+            return matches;
+        }
+
+        var assemblies = new List<IAssemblySymbol>();
+        var seen = new HashSet<IAssemblySymbol>(SymbolEqualityComparer.Default);
+        void AddAssembly(IAssemblySymbol? assembly)
+        {
+            if (assembly is not null && seen.Add(assembly))
+            {
+                assemblies.Add(assembly);
+            }
+        }
+
+        AddAssembly(compilation.Assembly);
+        AddAssembly(bodyType.ContainingAssembly);
+        foreach (var assembly in assemblies)
+        {
+            CollectValidators(compilation, assembly.GlobalNamespace, bodyType, validatorInterface, matches);
+        }
+
+        return matches
+            .OrderBy(match => match.ToDisplayString(Display), StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static void CollectValidators(
+        CSharpCompilation compilation,
+        INamespaceSymbol container,
+        ITypeSymbol bodyType,
+        INamedTypeSymbol validatorInterface,
+        List<INamedTypeSymbol> matches)
+    {
+        foreach (var member in container.GetMembers())
+        {
+            if (member is INamespaceSymbol childNamespace)
+            {
+                CollectValidators(compilation, childNamespace, bodyType, validatorInterface, matches);
+                continue;
+            }
+
+            if (member is not INamedTypeSymbol type)
+            {
+                continue;
+            }
+
+            if (type.TypeKind == TypeKind.Class
+                && !type.IsAbstract
+                && !type.IsStatic
+                && type.DeclaredAccessibility == Accessibility.Public
+                && compilation.IsSymbolAccessibleWithin(type, compilation.Assembly)
+                && ImplementsClosedValidator(type, bodyType, validatorInterface))
+            {
+                matches.Add(type);
+            }
+
+            foreach (var nested in type.GetTypeMembers())
+            {
+                CollectValidatorType(compilation, nested, bodyType, validatorInterface, matches);
+            }
+        }
+    }
+
+    private static void CollectValidatorType(
+        CSharpCompilation compilation,
+        INamedTypeSymbol type,
+        ITypeSymbol bodyType,
+        INamedTypeSymbol validatorInterface,
+        List<INamedTypeSymbol> matches)
+    {
+        if (type.TypeKind == TypeKind.Class
+            && !type.IsAbstract
+            && !type.IsStatic
+            && type.DeclaredAccessibility == Accessibility.Public
+            && compilation.IsSymbolAccessibleWithin(type, compilation.Assembly)
+            && ImplementsClosedValidator(type, bodyType, validatorInterface))
+        {
+            matches.Add(type);
+        }
+
+        foreach (var nested in type.GetTypeMembers())
+        {
+            CollectValidatorType(compilation, nested, bodyType, validatorInterface, matches);
+        }
+    }
+
+    private static bool ImplementsClosedValidator(
+        INamedTypeSymbol type,
+        ITypeSymbol bodyType,
+        INamedTypeSymbol validatorInterface)
+    {
+        foreach (var implemented in type.AllInterfaces)
+        {
+            if (implemented.IsGenericType
+                && SymbolEqualityComparer.Default.Equals(implemented.OriginalDefinition, validatorInterface)
+                && implemented.TypeArguments.Length == 1
+                && SymbolEqualityComparer.Default.Equals(implemented.TypeArguments[0], bodyType))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

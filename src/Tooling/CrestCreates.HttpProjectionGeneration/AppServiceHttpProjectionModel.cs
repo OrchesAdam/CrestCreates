@@ -13,7 +13,7 @@ namespace CrestCreates.Tooling.HttpProjection;
 /// </summary>
 public sealed record AppServiceHttpProjectionModel
 {
-    public const string ModelSchemaVersion = "appservice-http-model-v1";
+    public const string ModelSchemaVersion = "appservice-http-model-v2";
 
     public const string ActivationMethodName = "AddGeneratedAppServiceHttp";
 
@@ -97,6 +97,19 @@ public sealed record AppServiceHttpActionModel
     public bool UsesCapabilityInputEnvelope => InputEnvelopeFullName is not null;
 
     public required bool RequiresConcurrencyToken { get; init; }
+
+    public bool RequiresValidator { get; init; }
+
+    /// <summary>
+    /// Closed validator implementation discovered for the body type (FluentValidation
+    /// <c>AbstractValidator&lt;TBody&gt;</c> / <c>IValidator&lt;TBody&gt;</c>). The assembly activation
+    /// registers it as a typed service and <see cref="RequiresValidator"/> actions execute it before
+    /// the business service.
+    /// </summary>
+    public string? ValidatorImplementationFullName { get; init; }
+
+    /// <summary>Closed <c>IValidator&lt;TBody&gt;</c> display the host composition must be able to resolve.</summary>
+    public string? ValidatorContractFullName { get; init; }
 }
 
 /// <summary>One contract parameter and how the HTTP wire binds it, in contract order.</summary>

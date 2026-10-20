@@ -14,7 +14,8 @@ public interface ITicketAppService
         Route = "",
         Kind = HttpProjectionOperationKind.Command,
         Body = HttpProjectionBodyPolicy.Required,
-        Permissions = new[] { "Ticket.Create" })]
+        Permissions = new[] { "Ticket.Create" },
+        RequiresValidator = true)]
     Task<TicketDto> CreateAsync(CreateTicketDto input, CancellationToken cancellationToken = default);
 
     [AppServiceHttpAction(
@@ -36,14 +37,16 @@ public interface ITicketAppService
         Route = "{id}",
         Kind = HttpProjectionOperationKind.Command,
         Body = HttpProjectionBodyPolicy.Required,
-        Permissions = new[] { "Ticket.Update" })]
+        Permissions = new[] { "Ticket.Update" },
+        RequiresValidator = true)]
     Task<TicketDto> UpdateAsync(Guid id, UpdateTicketDto input, CancellationToken cancellationToken = default);
 
     [AppServiceHttpAction(
         Verb = HttpProjectionVerb.Delete,
         Route = "{id}",
         Kind = HttpProjectionOperationKind.Command,
-        Permissions = new[] { "Ticket.Delete" })]
+        Permissions = new[] { "Ticket.Delete" },
+        RequiresConcurrencyToken = true)]
     Task DeleteAsync(Guid id, string? expectedStamp = null, CancellationToken cancellationToken = default);
 
     [AppServiceHttpAction(

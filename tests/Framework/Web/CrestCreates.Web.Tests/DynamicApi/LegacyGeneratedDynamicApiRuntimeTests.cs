@@ -8,6 +8,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.UnitOfWork;
@@ -162,6 +163,11 @@ public sealed class TestValidationService : IValidationService
     }
 
     public Task<ValidationResult> ValidateAsync<T>(T instance)
+    {
+        return Task.FromResult(_result);
+    }
+
+    public Task<ValidationResult> ValidateAsync<T>(T instance, CancellationToken cancellationToken)
     {
         return Task.FromResult(_result);
     }

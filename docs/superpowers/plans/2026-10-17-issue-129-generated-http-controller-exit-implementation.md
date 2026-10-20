@@ -30,13 +30,13 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 
 ## S3 — Ticket 与真实 Host（先装配与启动，再验收业务）
 
-- [ ] 先落 PlatformDefault/ApplicationOwned 持久化 owner：SaaSHelpdesk由EF模块装配一次，Platform不残留SQL预设，factory不声明Provider；启动前验证零/重复binding和实际context身份。保留#137冲突拒绝。
-- [ ] 诊断真实Program启动挂起，阶段日志+有界等待+进程回收；生产PG监听/登录/Ticket读写证据独立于WebApplicationFactory。
-- [ ] ContractType 限定 ITicketAppService；完整路由/Kind/五权限定义，端点和业务校验同源，真实非SuperAdmin grant/revoke，继承基类未声明方法不暴露。
-- [ ] 六个写动作接唯一 UoW，11 动作 CT 传递；真实 typed validation 和 stamp 语义。
-- [ ] Runtime 中立失败facts + Web adapter；按rev.2的kind/code/status映射，绑定失败局部400，业务/服务器JsonException不被全局改为400；null与异常资源不存在统一Web404；未知错误脱敏、取消事实独立。
-- [ ] Host 正式 capability 装配，既有认证/租户/审计保持；补双租户生产选库 factory，不能用 shared connection 证明隔离。
-- [ ] H01–08 真实 PostgreSQL/认证/授权/租户/失败/取消/UoW 验收通过。
+- [x] 先落 PlatformDefault/ApplicationOwned 持久化 owner：SaaSHelpdesk由EF模块装配一次，Platform不残留SQL预设，factory不声明Provider；启动前验证零/重复binding和实际context身份。保留#137冲突拒绝。证据：U01/U02/U04 更新为单一 ApplicationOwned；`UnitOfWorkCompositionValidator` 零/重复 binding 启动失败；R01 1 个 binding。
+- [x] 诊断真实Program启动挂起，阶段日志+有界等待+进程回收；生产PG监听/登录/Ticket读写证据独立于WebApplicationFactory。证据：真实 PG + Production + HTTPS 进程 4s 监听，health/login/create/read/validation 400/428/409/delete 200/404，SIGTERM 2s 退出（见 issues log「S3 第二增量」）。
+- [x] ContractType 限定 ITicketAppService；完整路由/Kind/五权限定义，端点和业务校验同源，真实非SuperAdmin grant/revoke，继承基类未声明方法不暴露。证据：wire matrix 11 端点、F02/C11/C12/C13 绿，基类未声明方法不在动作集。
+- [x] 六个写动作接唯一 UoW，11 动作 CT 传递；真实 typed validation 和 stamp 语义。证据：基类与手写写动作均真实织入，H07 六写各 1 次事务；R05/R06/R07/R15；R08 + 缺 validator fail-closed；H06 request token 到达业务服务。
+- [x] Runtime 中立失败facts + Web adapter；按rev.2的kind/code/status映射，绑定失败局部400，业务/服务器JsonException不被全局改为400；null与异常资源不存在统一Web404；未知错误脱敏、取消事实独立。证据：`CapabilityFailureFacts`/classifier/presenter；H05 404/400/500 脱敏；CRUD typed 404 envelope 与 MCP capability code 保持。
+- [x] Host 正式 capability 装配，既有认证/租户/审计保持；补双租户生产选库 factory，不能用 shared connection 证明隔离。证据：`DualTenantDatabaseIsolationTests` 3/3（真实 options contributor + UoW + 两 schema）；`TenantBoundaryAcceptanceTests` 3/3。
+- [x] H01–08 真实 PostgreSQL/认证/授权/租户/失败/取消/UoW 验收通过。证据：见 issues log「S3 第二增量」逐项矩阵；H08 由 DynamicApi 138/138、JsonContracts 162/162 覆盖；Ticket NativeAOT 仍属 S5。
 
 ## S4 — Legacy 隔离与归档
 

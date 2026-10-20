@@ -2,6 +2,8 @@ using System.IO;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using CrestCreates.Data.Abstractions;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 using SaaSHelpdesk.EntityFrameworkCore.Modules;
 
@@ -39,12 +41,13 @@ public class TicketPersistenceOwnershipBaselineTests : BaseTest
         var callers = AssembliesDeclaringBinding().OrderBy(name => name, StringComparer.Ordinal).ToList();
 
         // This is attribution evidence, not the invariant. Referring to the binding-declaring API does
-        // not make an assembly an owner of the final graph: a fix that leaves one composition site and
-        // drops the other must turn R01/U04 green while this list still names whatever still calls it.
+        // not make an assembly an owner of the final graph. Rev.2 14.3 resolved the ownership decision
+        // in favor of ApplicationOwned: the platform composes nothing, and exactly the sample's
+        // persistence module declares the binding.
         callers.Should().BeEquivalentTo(
-            new[] { "CrestCreates.Web", "SaaSHelpdesk.EntityFrameworkCore" },
-            "rev.2 14.3 needs the two production declaration sites named, so the owner decision cannot be "
-            + "made by guesswork. Observed callers: " + string.Join(", ", callers));
+            new[] { "SaaSHelpdesk.EntityFrameworkCore" },
+            "the application-owned persistence module must be the only production declaration site; the "
+            + "platform preset was removed. Observed callers: " + string.Join(", ", callers));
     }
 
     [Fact]
@@ -82,17 +85,39 @@ public class TicketPersistenceOwnershipBaselineTests : BaseTest
     {
         AssembliesDeclaringBinding().Should().NotContain(
             typeof(TicketPersistenceOwnershipBaselineTests).Assembly.GetName().Name!,
-            "the fixture must not act as a third unit-of-work owner; only the measurement decorator in " +
-            "TicketProjectionGapBaselineTests may normalise the observed duplicate, and it says so explicitly");
+            "the fixture must not act as a unit-of-work owner; the sample's persistence module is the " +
+            "single application-owned declaration and no test-side normalization exists");
     }
 
     [Fact]
-    public void U04_test_host_observes_two_conflicting_bindings()
+    public void U04_test_host_observes_exactly_one_efcore_binding()
     {
         Factory.Services.GetServices<UnitOfWorkProviderBinding>()
-            .Count(binding => binding.Provider == OrmProvider.EfCore).Should().BeGreaterThan(1,
-                "the duplicate must stay observable in the host so R01 cannot silently turn green by " +
-                "removing the measurement path instead of the composition defect");
+            .Count(binding => binding.Provider == OrmProvider.EfCore).Should().Be(1,
+                "the application-owned module is the single owner; no measurement normalization may " +
+                "collapse a duplicate that the production composition still declares");
+    }
+
+    [Fact]
+    public void H07_host_without_a_provider_binding_fails_before_serving()
+    {
+        using var host = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.RemoveAll<UnitOfWorkProviderBinding>()));
+
+        var failure = Assert.ThrowsAny<Exception>(() => host.CreateClient());
+        failure.ToString().Should().Contain("CCHTTP007");
+        failure.ToString().Should().Contain("no ORM provider binding");
+    }
+
+    [Fact]
+    public void H07_duplicate_provider_binding_fails_before_serving()
+    {
+        using var host = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddSingleton(new UnitOfWorkProviderBinding(
+                OrmProvider.EfCore, static _ => null!, supportsRequiresNew: false))));
+
+        var failure = Assert.ThrowsAny<Exception>(() => host.CreateClient());
+        failure.ToString().Should().Contain("Duplicate unit-of-work binding for provider 'EfCore'");
     }
 
     private static UnitOfWorkProviderBindingRegistry BuildRegistry(IEnumerable<UnitOfWorkProviderBinding> bindings)

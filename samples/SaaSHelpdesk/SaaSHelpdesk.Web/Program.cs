@@ -45,6 +45,9 @@ builder.Services.AddAuthentication()
         "CustomerApiKey", options => { });
 
 builder.Services.AddSettingDefinitionProvider<SaaSHelpdesk.Domain.Settings.HelpdeskSettingDefinitionProvider>();
+builder.Services.AddScoped<
+    CrestCreates.Validation.Modules.IValidationService,
+    CrestCreates.Validation.Modules.ValidationService>();
 builder.Services.AddValidatorsFromAssemblyContaining<SaaSHelpdesk.Application.Validators.CreateTicketDtoValidator>();
 new SecurityModule(builder.Configuration).OnConfigureServices(builder.Services);
 

@@ -188,7 +188,8 @@ public class TicketProjectionGapBaselineTests : BaseTest
         {
             nameof(SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.UpdateAsync),
         }, "exactly the update action may run, and nothing else may piggyback on the accepted path");
-        _probe.LogicalExecutions.Should().Be(1, "the accepted write must own exactly one managed execution");
+        _probe.LogicalExecutions.Should().Be(0,
+            "the AOP scope is the managed kernel; BeginScope/StartAsync is not a logical Execute");
         _probe.TransactionsStarted.Should().Be(1,
             "the accepted write must start exactly one real unit of work, observed inside the kernel frame");
         _probe.UnobservedExecutions.Should().Be(0);
@@ -234,7 +235,8 @@ public class TicketProjectionGapBaselineTests : BaseTest
         {
             nameof(SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.DeleteAsync),
         }, "only the delete action may run for an accepted If-Match request");
-        _probe.LogicalExecutions.Should().Be(1);
+        _probe.LogicalExecutions.Should().Be(0,
+            "the AOP scope is the managed kernel; BeginScope/StartAsync is not a logical Execute");
         _probe.TransactionsStarted.Should().Be(1);
         _probe.UnobservedExecutions.Should().Be(0);
 
@@ -242,6 +244,57 @@ public class TicketProjectionGapBaselineTests : BaseTest
         after.Exists.Should().BeFalse("the accepted delete must remove the row");
         after.ConcurrencyStamp.Should().BeEmpty();
         (await CountTicketsAsync()).Should().Be(ticketsBefore - 1);
+    }
+
+    [Fact]
+    public async Task H07_all_six_write_actions_start_exactly_one_unit_of_work()
+    {
+        var (client, _) = await SignInAsync(MeasurementHost());
+        var customerId = await NewCustomerIdAsync();
+
+        async Task AssertOneTransactionAsync(string action, Func<Task<HttpResponseMessage>> invoke)
+        {
+            _probe.Reset();
+            var response = await invoke();
+            response.StatusCode.Should().Be(HttpStatusCode.OK, $"{action}: {await response.Content.ReadAsStringAsync()}");
+            _probe.TransactionsStarted.Should().Be(1, $"{action} must run in exactly one managed unit of work");
+            _probe.UnobservedExecutions.Should().Be(0);
+        }
+
+        _probe.Reset();
+        var create = await client.PostAsync("/api/ticket", new StringContent(
+            $$"""
+              {"title":"six writes ticket title","description":"six writes ticket description",
+               "priority":2,"type":2,"customerId":"{{customerId}}"}
+              """,
+            Encoding.UTF8,
+            "application/json"));
+        create.StatusCode.Should().Be(HttpStatusCode.OK, await create.Content.ReadAsStringAsync());
+        _probe.TransactionsStarted.Should().Be(1, "CreateAsync must run in exactly one managed unit of work");
+        var ticketId = Guid.Parse(JsonDocument.Parse(await create.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("data").GetProperty("id").GetString()!);
+
+        await AssertOneTransactionAsync("Update", async () =>
+        {
+            var stamp = (await ReadTicketAsync(ticketId)).ConcurrencyStamp;
+            return await client.PutAsync($"/api/ticket/{ticketId}", new StringContent(
+                UpdatePayload(stamp), Encoding.UTF8, "application/json"));
+        });
+        await AssertOneTransactionAsync("Assign", () =>
+            client.GetAsync($"/api/ticket/assign?id={ticketId}&agentId={Guid.NewGuid()}"));
+        await AssertOneTransactionAsync("Resolve", () =>
+            client.GetAsync($"/api/ticket/resolve?id={ticketId}"));
+        await AssertOneTransactionAsync("Close", () =>
+            client.GetAsync($"/api/ticket/close?id={ticketId}"));
+        await AssertOneTransactionAsync("Delete", async () =>
+        {
+            var stamp = (await ReadTicketAsync(ticketId)).ConcurrencyStamp;
+            var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/ticket/{ticketId}");
+            request.Headers.IfMatch.Add(new EntityTagHeaderValue($"\"{stamp}\""));
+            return await client.SendAsync(request);
+        });
+
+        (await ReadTicketAsync(ticketId)).Exists.Should().BeFalse();
     }
 
     [Fact]
@@ -303,9 +356,8 @@ public class TicketProjectionGapBaselineTests : BaseTest
     }
 
     private WebApplicationFactory<global::Program> MeasurementHost()
-        => Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services => services
-            .NormalizeDuplicateUnitOfWorkBindingsForMeasurement()
-            .AddTicketSideEffectProbe(_probe)));
+        => Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddTicketSideEffectProbe(_probe)));
 
     private const string StaleUpdatePayload = """
         {"title":"stale stamp overwrite attempt","description":"stale stamp overwrite description",

@@ -29,12 +29,20 @@ internal sealed class TicketWriteSideEffectProbe
     /// <summary>Frames that claimed to execute but had no ambient unit of work — must stay 0.</summary>
     public int UnobservedExecutions { get; set; }
 
+    /// <summary>Token the business service actually received from the generated invoker.</summary>
+    public CancellationToken LastServiceToken { get; set; }
+
+    /// <summary>Injects a failure at the business-service boundary (failure-bridge probes).</summary>
+    public Exception? ServiceFailure { get; set; }
+
     public void Reset()
     {
         ServiceCalls.Clear();
         LogicalExecutions = 0;
         TransactionsStarted = 0;
         UnobservedExecutions = 0;
+        LastServiceToken = default;
+        ServiceFailure = null;
     }
 }
 
@@ -49,47 +57,59 @@ internal sealed class CountingTicketAppService : ITicketAppService
         _probe = probe;
     }
 
-    private Task<T> Tracked<T>(string name, Func<Task<T>> invoke)
+    private Task<T> Tracked<T>(string name, CancellationToken cancellationToken, Func<Task<T>> invoke)
     {
         _probe.ServiceCalls.Add(name);
+        _probe.LastServiceToken = cancellationToken;
+        if (_probe.ServiceFailure is { } failure)
+        {
+            throw failure;
+        }
+
         return invoke();
     }
 
     public Task<TicketDto> CreateAsync(CreateTicketDto input, CancellationToken cancellationToken = default)
-        => Tracked(nameof(CreateAsync), () => _inner.CreateAsync(input, cancellationToken));
+        => Tracked(nameof(CreateAsync), cancellationToken, () => _inner.CreateAsync(input, cancellationToken));
 
     public Task<TicketDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
-        => Tracked(nameof(GetByIdAsync), () => _inner.GetByIdAsync(id, cancellationToken));
+        => Tracked(nameof(GetByIdAsync), cancellationToken, () => _inner.GetByIdAsync(id, cancellationToken));
 
     public Task<IReadOnlyList<TicketDto>> GetAllAsync(CancellationToken cancellationToken = default)
-        => Tracked(nameof(GetAllAsync), () => _inner.GetAllAsync(cancellationToken));
+        => Tracked(nameof(GetAllAsync), cancellationToken, () => _inner.GetAllAsync(cancellationToken));
 
     public Task<TicketDto> UpdateAsync(Guid id, UpdateTicketDto input, CancellationToken cancellationToken = default)
-        => Tracked(nameof(UpdateAsync), () => _inner.UpdateAsync(id, input, cancellationToken));
+        => Tracked(nameof(UpdateAsync), cancellationToken, () => _inner.UpdateAsync(id, input, cancellationToken));
 
     public async Task DeleteAsync(Guid id, string? expectedStamp = null, CancellationToken cancellationToken = default)
     {
         _probe.ServiceCalls.Add(nameof(DeleteAsync));
+        _probe.LastServiceToken = cancellationToken;
+        if (_probe.ServiceFailure is { } failure)
+        {
+            throw failure;
+        }
+
         await _inner.DeleteAsync(id, expectedStamp, cancellationToken);
     }
 
     public Task<TicketDto> AssignAsync(Guid id, Guid agentId, CancellationToken cancellationToken = default)
-        => Tracked(nameof(AssignAsync), () => _inner.AssignAsync(id, agentId, cancellationToken));
+        => Tracked(nameof(AssignAsync), cancellationToken, () => _inner.AssignAsync(id, agentId, cancellationToken));
 
     public Task<TicketDto> ResolveAsync(Guid id, CancellationToken cancellationToken = default)
-        => Tracked(nameof(ResolveAsync), () => _inner.ResolveAsync(id, cancellationToken));
+        => Tracked(nameof(ResolveAsync), cancellationToken, () => _inner.ResolveAsync(id, cancellationToken));
 
     public Task<TicketDto> CloseAsync(Guid id, CancellationToken cancellationToken = default)
-        => Tracked(nameof(CloseAsync), () => _inner.CloseAsync(id, cancellationToken));
+        => Tracked(nameof(CloseAsync), cancellationToken, () => _inner.CloseAsync(id, cancellationToken));
 
     public Task<List<TicketDto>> GetByCustomerAsync(Guid customerId, CancellationToken cancellationToken = default)
-        => Tracked(nameof(GetByCustomerAsync), () => _inner.GetByCustomerAsync(customerId, cancellationToken));
+        => Tracked(nameof(GetByCustomerAsync), cancellationToken, () => _inner.GetByCustomerAsync(customerId, cancellationToken));
 
     public Task<List<TicketDto>> GetByAssigneeAsync(Guid assigneeId, CancellationToken cancellationToken = default)
-        => Tracked(nameof(GetByAssigneeAsync), () => _inner.GetByAssigneeAsync(assigneeId, cancellationToken));
+        => Tracked(nameof(GetByAssigneeAsync), cancellationToken, () => _inner.GetByAssigneeAsync(assigneeId, cancellationToken));
 
     public Task<List<TicketDto>> GetOverdueAsync(CancellationToken cancellationToken = default)
-        => Tracked(nameof(GetOverdueAsync), () => _inner.GetOverdueAsync(cancellationToken));
+        => Tracked(nameof(GetOverdueAsync), cancellationToken, () => _inner.GetOverdueAsync(cancellationToken));
 }
 
 internal sealed class CountingUnitOfWorkManager : IUnitOfWorkManager
@@ -201,25 +221,6 @@ internal sealed class CountingUnitOfWorkScope : IUnitOfWorkScope
 
 internal static class TicketProbeHostBuilderExtensions
 {
-    /// <summary>
-    /// Measurement facility only: the platform preset and the sample persistence module both declare
-    /// an EfCore unit-of-work binding today (finding R01), which aborts every write before the
-    /// behaviour under test. Collapsing the duplicate here is what lets a red control measure exactly
-    /// one cause. Formal acceptance hosts must not call this.
-    /// </summary>
-    internal static IServiceCollection NormalizeDuplicateUnitOfWorkBindingsForMeasurement(this IServiceCollection services)
-    {
-        foreach (var duplicate in services
-                     .Where(d => d.ServiceType == typeof(UnitOfWorkProviderBinding))
-                     .Skip(1)
-                     .ToList())
-        {
-            services.Remove(duplicate);
-        }
-
-        return services;
-    }
-
     internal static IServiceCollection AddTicketSideEffectProbe(
         this IServiceCollection services,
         TicketWriteSideEffectProbe probe)

@@ -83,8 +83,23 @@ public sealed record HttpWireAction
 
     public bool MapNotFoundOntoNull { get; init; }
 
+    /// <summary>
+    /// When true a null GET result is handed to the host's failure presenter as a not-found marker;
+    /// otherwise the frozen typed 404 envelope of the owning front-end is emitted (CRUD contract).
+    /// </summary>
+    public bool UseNotFoundMarker { get; init; }
+
     /// <summary>Optional extra provenance for required identity diagnostics (entity name); falls back to the owner.</summary>
     public string? RequiredIdentityTypeName { get; init; }
+
+    /// <summary>True when the body must be validated by its closed typed validator before the service.</summary>
+    public bool RequiresValidator { get; init; }
+
+    /// <summary>Closed <c>IValidator&lt;TBody&gt;</c> display the host must resolve (declared as a required service).</summary>
+    public string? ValidatorContractFullName { get; init; }
+
+    /// <summary>Closed validator implementation registered by the assembly activation.</summary>
+    public string? ValidatorImplementationFullName { get; init; }
 }
 
 public sealed record HttpWireParameter

@@ -11,6 +11,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The hand-written domain write actions declare [UnitOfWorkMo] in this assembly and must be
+         woven here; base-class actions are woven in CrestCreates.Application. -->
+    <PackageReference Include="Rougamo.Fody" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
     <ProjectReference Include="../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
     <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />

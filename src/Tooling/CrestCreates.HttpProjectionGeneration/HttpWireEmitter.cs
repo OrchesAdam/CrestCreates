@@ -470,9 +470,12 @@ public static class HttpWireEmitter
         }
         else if (action.MapNotFoundOntoNull)
         {
-            expression = mapper + ".WrapGetResult<" + payload + ">(ctx.Output as " + payload + ", "
-                + require + "<" + DynamicApi + "DynamicApiResponse<" + payload + ">>(serviceProvider), "
-                + require + "<" + VoidEnvelope + ">(serviceProvider))";
+            expression = action.UseNotFoundMarker
+                ? mapper + ".WrapGetResultOrNotFound<" + payload + ">(ctx.Output as " + payload + ", "
+                    + require + "<" + DynamicApi + "DynamicApiResponse<" + payload + ">>(serviceProvider))"
+                : mapper + ".WrapGetResult<" + payload + ">(ctx.Output as " + payload + ", "
+                    + require + "<" + DynamicApi + "DynamicApiResponse<" + payload + ">>(serviceProvider), "
+                    + require + "<" + VoidEnvelope + ">(serviceProvider))";
         }
         else
         {
@@ -496,8 +499,6 @@ public static class HttpWireEmitter
         Line(builder, NestedIndent + Indent + CapabilityAbstractions + "CapabilityExecutionContext context,");
         Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
         Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + Indent + "var service = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<"
-            + model.ContractFullName + ">(context.ServiceProvider);");
         if (action.UsesEnvelope && action.EnvelopeFullName is not null)
         {
             Line(builder, NestedIndent + Indent + "var envelope = (global::" + action.EnvelopeFullName + ")context.Input!;");
@@ -511,6 +512,20 @@ public static class HttpWireEmitter
             }
         }
 
+        if (action.RequiresValidator)
+        {
+            if (action.ValidatorContractFullName is null)
+            {
+                throw new InvalidOperationException(
+                    AppServiceHttpDiagnosticCodes.ActionDeclarationContradiction
+                    + ": action '" + action.Name + "' requires a typed validator but the model carries no closed validator contract.");
+            }
+
+            EmitBodyValidation(builder, action);
+        }
+
+        Line(builder, NestedIndent + Indent + "var service = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<"
+            + model.ContractFullName + ">(context.ServiceProvider);");
         var arguments = new List<string>();
         foreach (var argument in action.InvokerArguments)
         {
@@ -545,6 +560,37 @@ public static class HttpWireEmitter
         Line(builder, NestedIndent + Indent + "=> throw new global::System.InvalidOperationException(");
         Line(builder, NestedIndent + Indent + Indent + "\"The generated projection invoker requires a CapabilityExecutionContext.\");");
         Line(builder, Indent + "}");
+        Line(builder, string.Empty);
+    }
+
+    /// <summary>
+    /// Executes the declared closed typed validator before the service and its unit of work. The
+    /// validation service and the validator are required host services (CCHTTP007), so a missing
+    /// registration never degrades into "no validation" at request time.
+    /// </summary>
+    private static void EmitBodyValidation(StringBuilder builder, HttpWireAction action)
+    {
+        var body = action.Parameters.FirstOrDefault(parameter => parameter.Source == "Body");
+        if (body is null)
+        {
+            throw new InvalidOperationException(
+                AppServiceHttpDiagnosticCodes.ActionDeclarationContradiction
+                + ": action '" + action.Name + "' requires a validator but declares no body parameter.");
+        }
+
+        var value = action.UsesEnvelope ? "envelope." + body.MemberName : "singleInput";
+        Line(builder, NestedIndent + Indent
+            + "var validationService = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<"
+            + "global::CrestCreates.Validation.Modules.IValidationService>(context.ServiceProvider);");
+        Line(builder, NestedIndent + Indent
+            + "var validationResult = await validationService.ValidateAsync(" + value + ", ct).ConfigureAwait(false);");
+        Line(builder, NestedIndent + Indent + "if (!validationResult.IsValid)");
+        Line(builder, NestedIndent + Indent + "{");
+        Line(builder, NestedIndent + Indent + Indent
+            + "throw new global::CrestCreates.Domain.Shared.Exceptions.CrestValidationException(");
+        Line(builder, NestedIndent + Indent + Indent
+            + Indent + "\"The request body failed validation.\", validationResult.Errors);");
+        Line(builder, NestedIndent + Indent + "}");
         Line(builder, string.Empty);
     }
 

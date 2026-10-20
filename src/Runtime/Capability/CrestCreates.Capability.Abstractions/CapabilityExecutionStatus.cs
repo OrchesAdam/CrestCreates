@@ -7,5 +7,6 @@ public enum CapabilityExecutionStatus
     Succeeded,
     Failed,
     TimedOut,
+    Cancelled,
     Compensated
 }

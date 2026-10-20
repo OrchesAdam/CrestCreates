@@ -524,3 +524,72 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 
 - 失败桥接（权限拒绝空 403 → CrestErrorResponse）、EfCore UoW 重复 binding、stamp/428/stale/DTO 回读、双租户生产选库、typed validators、H01–H08。S3 整体不放行。
 - 本轮证据：DynamicApi 138/138、JsonContracts 162/162、CRUD NativeAOT 23/23。
+
+## S3 第二增量：写链、验证、失败桥接、租户与真实 Host 验收（2026-10-20）
+
+### 交付
+
+**UoW 单 owner 与真实织入**
+- 平台不再预置 `AddUnitOfWork(OrmProvider.EfCore)`/`AddEfCoreUnitOfWork()`；样例 `EntityFrameworkCoreModule` 是唯一 binding 声明点（U02 已按 rev.2 决策改为只允许该 owner）。测试侧 `NormalizeDuplicateUnitOfWorkBindingsForMeasurement` 删除，U04 改为断言恰好 1 个 binding。
+- 新增 `UnitOfWorkCompositionValidator`（`CrestCreates.Web`，hosted service）：注册了 `IUnitOfWorkManager` 的 Host 必须在启动时构建 `UnitOfWorkProviderBindingRegistry`；零 binding → `CCHTTP007`，重复 binding → #137 duplicate 诊断，均在监听前失败。
+- `[UnitOfWorkMo]` 之前实际未织入：`CrestCreates.Application`（基类 Create/Update/Delete）与 `SaaSHelpdesk.Application`（手写 Assign/Resolve/Close）都缺 Rougamo.Fody 直接引用/FodyWeavers.xml。两份程序集已补，三个手写写动作加 `[UnitOfWorkMo]`；新增 H07 六写动作逐一断言 `TransactionsStarted == 1`，删除只看 Attribute 文本的假证据。
+- **实现事实**：Rougamo 织入是编译期静态 IL 改写，不是运行时反射；`IUnitOfWorkManager` 仍由服务自身的 `ServiceProvider` 桥接，不做 service-locator 扫描。
+
+**stamp 语义**
+- `IHasConcurrencyStampInput`（Domain.Shared）；`CrestAppServiceBase` Update 比较客户端 body stamp：缺失 → 428 `CrestPreconditionRequiredException`，stale → 409 `CrestConcurrencyException`；Delete 在 `RequiresConcurrencyStampOnDelete` 时要求 stamp。Ticket 两个开关打开，`MapToDto` 回读真实 stamp。R05/R06/R07/R15 绿；生产进程实测 delete 缺 If-Match=428、stale=409、current=200、随后 404。
+
+**失败桥接**
+- `Capability.Abstractions`：transport-neutral `CapabilityFailureKind/CapabilityFailureFacts/ICapabilityExceptionClassifier`；`CapabilityExecutionStatus.Cancelled`；`CapabilityExecutionResult` 携带 `FailureFacts`。
+- `CapabilityPipeline`：OCE → Cancelled + facts；`CapabilityFailureException` **保留原 capability/domain ErrorCode**（MCP/native 契约不被改写），facts 仅供 HTTP presenter；未分类异常保留历史 `PIPELINE_ERROR` + 原消息（CRUD #128 的 ProblemDetails 契约），facts 供 Web 脱敏呈现。
+- `CrestCreates.Web`：`CrestCapabilityExceptionClassifier`（400/401/403/404/409/428/499/500 与 `Crest.*` code）与 `CrestCapabilityEndpointFailurePresenter`（`CrestErrorResponse`，`CrestErrorResponseJsonContext`）；`CapabilityEndpointMapper` 绑定失败局部 400，null GET → Web 404，业务异常 → 对应 4xx/500；未知异常 500 且 `details=null`、消息固定“服务器内部错误。”。
+- **契约边界**：手写投影的 null GET 走 Web `CrestErrorResponse`；CRUD 保留 #128 冻结的 typed `DynamicApiResponse` 404 envelope（`HttpWireAction.UseNotFoundMarker` 由前端选择；恢复 CRUD 的 `WrapGetResult(..., envelopeTypeInfo, notFoundTypeInfo)` 三参 typed 调用）。MCP 继续看到 `CAPABILITY_*` code。
+
+**typed validators**
+- `AppServiceHttpActionAttribute.RequiresValidator`；模型 v2（`appservice-http-model-v2`）；builder 在 HTTP owner 与 body 所属程序集内发现**唯一** closed `IValidator<TBody>`，零/多实现均 `CCHTTP008` 失败。
+- 生成 activation 用 `ServiceDescriptor.Scoped<IValidator<TBody>, Impl>()` + `TryAddEnumerable` 做编译期 typed 注册；贡献 `RequiredServiceTypes` 增加 `IValidationService` 与 closed `IValidator<TBody>`，Map 前由 `IServiceProviderIsService` 统一校验（缺注册 → `CCHTTP007`，不推迟到首个请求）。
+- 生成 invoker 在解析业务服务与进入 UoW 之前调用 `IValidationService.ValidateAsync(body, ct)`（新增 additive CT overload，旧 overload 委托它）；失败 → `CrestValidationException` → 400 `Crest.Validation.Failed`。Create/Update 声明 `RequiresValidator=true`。
+- `ServiceSourceGenerator` 两处修正：用户已声明同 DTO validator（`AbstractValidator<T>`/`IValidator<T>`）时不再生成重复 validator（否则 DI 解析顺序会静默用生成的弱规则覆盖用户规则）；自动规则不再对可空 string 施加 `NotEmpty`（Agent 等可选字段不再被误拒）。
+
+**租户边界与双租户选库**
+- `CompositeTenantResolver` 保留 resolver 实际观察到标识符后的终态错误（不再丢弃为 `TENANT_NOT_RESOLVED`）；`MultiTenancyMiddleware` 对 `TENANT_NOT_FOUND` 与 `TENANT_INACTIVE` 都在业务前 403，禁止未知租户落回 host 库。
+- 新增 `DualTenantDatabaseIsolationTests`：使用真实 `EntityFrameworkCoreModule` 的 `AddDbContext` options contributor（`ICurrentTenant.Tenant.ConnectionString`）、真实 `RepositoryTenantProvider`、UoW 与仓储，两个 schema/连接；证明 per-tenant 选库、写读隔离、提交/回滚、调用方上下文恢复。fixture 的 shared-connection 仅保留单租户证据。
+- `TenantBoundaryAcceptanceTests`：未知、禁用、token 租户与请求租户不一致均在业务前 403 且零写入；`ReviewS3` 真实登录/授权链路不变。
+
+### 真实生产进程证据（独立于 WebApplicationFactory）
+
+环境：podman `postgres:16-alpine`（127.0.0.1:55432，db `saashelpdesk_prod`）+ 真实 `SaaSHelpdesk.Web.dll`，`ASPNETCORE_ENVIRONMENT=Production`，HTTPS（dev cert 导出 PFX），`ASPNETCORE_URLS=https://127.0.0.1:5199`，`ConnectionStrings__Default` 指向该 PG。步骤与结果（有界等待/回收）：
+
+1. 启动到监听 **4s**（`ModuleDiagnostics` 各模块阶段日志完整；此前 S1 记录的“长时间不监听”未复现）。
+2. `GET /health` → **200**。
+3. OpenIddict password grant（`crestcreates-client`，`X-Tenant-Id: host`，admin/Admin123!）→ access token。
+4. `GET /api/ticket/all` → **200**（真实 Host 种子数据）。
+5. `POST /api/ticket`（合法 body，真实 customer）→ **200**，返回 data.id；`GET /api/ticket/{id}` → **200** 且 `concurrencyStamp` 非空。
+6. 非法 title（"ab"，用户 validator 规则）→ **400 `Crest.Validation.Failed`**，details 为“工单标题长度需在5-200字符之间”（typed validator 在真实进程执行）。
+7. `DELETE` 缺 If-Match → **428**；stale If-Match → **409**；current stamp → **200**；随后 `GET` → **404**。
+8. `SIGTERM` → 进程 **2s** 内退出，无遗留监听。
+
+### 验收证据（最终 head 复跑）
+
+| 套件/门禁 | 结果 |
+| --- | --- |
+| `SaaSHelpdesk.Tests` 全量 | **119 pass / 11 fail / 130**；11 条全部为既有红：10 条 `POST /api/user` 404（rev.2 §14.6 明确不在 #129 开通）+ 1 条 `ITenantProvider` 容器校验；R01 归因的 51 条全部转绿 |
+| `TicketProjectionGapBaselineTests`（R01/R03–R08/P09–P11/R15/H07 六写） | **12/12** |
+| `TicketFailureBridgeAcceptanceTests`（404/400/500 脱敏/CT/缺 validator） | **6/6** |
+| `DualTenantDatabaseIsolationTests` | **3/3** |
+| `TenantBoundaryAcceptanceTests` | **3/3** |
+| `CrestCreates.DynamicApi.Tests` | **138/138** |
+| `CrestCreates.JsonContracts.BuildTasks.Tests` | **162/162** |
+| `CrestCreates.CodeGenerator.Tests` 全量 | **552/552**（31m17s） |
+| CRUD NativeAOT fixture（linux-x64 publish/link/run） | **23/23** |
+| Procurement 样例 | **29/29** |
+| Asset 样例（单测） | **29/29** |
+| Asset E2E | 需要 `ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING`，本环境未设置；**19 fail 均为该前置缺失**，不作为 #129 证据 |
+| DependencyBoundaries（带 DOCKER_HOST） | **176/178**；2 条为 ControlPlaneReferenceData evidence-ledger 的既存 WIP，与 #129 无关 |
+| `CrestCreates.Web.Tests` | **109/113**；4 条为 worktree 环境（`.git` 是文件，测试 helper 只认目录）导致，非代码回归 |
+| 依赖边界/HTTP/MCP/生成器回归 | 无新增回归 |
+
+### 本增量未声称
+
+- Ticket 的 NativeAOT/trim publish-and-run（N01/N02）仍属 S5；本增量只到 JIT 真实 Host + PostgreSQL。
+- EF/SqlServer 其他 Provider、Windows/macOS 其他 RID、Asset 兼容 HTTP 独立 PG 验收不在本增量结论内。
+- `POST /api/user` 等框架 HTTP 缺失、Asset E2E 的 durable PG 前置仍按既有账本单列。

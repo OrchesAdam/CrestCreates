@@ -29,4 +29,12 @@ public sealed class AppServiceHttpActionAttribute : Attribute
 
     /// <summary>True when the action binds the concurrency token from the If-Match header.</summary>
     public bool RequiresConcurrencyToken { get; init; }
+
+    /// <summary>
+    /// True when the request body must be validated by its declared closed
+    /// <c>IValidator&lt;TBody&gt;</c> before the business service or its unit of work is entered.
+    /// The projection discovers the validator implementation at build time, registers it as a typed
+    /// service, and fails the host composition when the registration or the body validator is missing.
+    /// </summary>
+    public bool RequiresValidator { get; init; }
 }

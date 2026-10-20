@@ -14,19 +14,22 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
     private readonly ICapabilityHandlerResolver _handlerResolver;
     private readonly CapabilityPipelineBuilder _builder;
     private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly ICapabilityExceptionClassifier? _exceptionClassifier;
 
     public CapabilityPipeline(
         IServiceProvider serviceProvider,
         ICapabilityRegistry registry,
         ICapabilityHandlerResolver handlerResolver,
         CapabilityPipelineBuilder builder,
-        IDescriptorStableHashBuilder hashBuilder)
+        IDescriptorStableHashBuilder hashBuilder,
+        ICapabilityExceptionClassifier? exceptionClassifier = null)
     {
         _serviceProvider = serviceProvider;
         _registry = registry;
         _handlerResolver = handlerResolver;
         _builder = builder;
         _hashBuilder = hashBuilder;
+        _exceptionClassifier = exceptionClassifier;
     }
 
     public async Task<CapabilityExecutionResult> ExecuteAsync(
@@ -119,26 +122,77 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         }
         catch (OperationCanceledException)
         {
-            return CapabilityExecutionResult.Timeout(DateTimeOffset.UtcNow - startedAt, context.AuditRecordId);
+            var facts = new CapabilityFailureFacts(
+                CapabilityFailureKind.Cancelled,
+                "Crest.Request.Cancelled",
+                "请求已取消。");
+            return CapabilityExecutionResult.Cancelled(
+                DateTimeOffset.UtcNow - startedAt, facts, context.AuditRecordId);
         }
         catch (CapabilityFailureException ex)
         {
+            // The result keeps the capability/domain code every transport already understands.
+            // The host classifier only adds HTTP-facing facts; rewriting the shared result code here
+            // would change MCP/native error contracts that never see the Web bridge.
+            var facts = _exceptionClassifier?.Classify(ex) ?? ClassifyCapabilityFailure(ex);
             return CapabilityExecutionResult.Failure(
                 ex.ErrorCode,
                 ex.Message,
                 DateTimeOffset.UtcNow - startedAt,
                 ex.Issues,
-                context.AuditRecordId);
+                context.AuditRecordId,
+                facts);
         }
         catch (Exception ex)
         {
+            // The transport-neutral result keeps its historical PIPELINE_ERROR contract (including
+            // the adapter's rejection message for hosts that render it). HTTP hosts that registered
+            // the Web bridge consume the bounded facts instead and never surface this message.
+            var facts = _exceptionClassifier?.Classify(ex)
+                ?? new CapabilityFailureFacts(
+                    CapabilityFailureKind.Unknown,
+                    "Crest.InternalError",
+                    "服务器内部错误。");
             return CapabilityExecutionResult.Failure(
                 "PIPELINE_ERROR",
                 ex.Message,
                 DateTimeOffset.UtcNow - startedAt,
+                failureFacts: facts,
                 auditRecordId: context.AuditRecordId);
         }
     }
+
+    private static CapabilityFailureFacts ClassifyCapabilityFailure(CapabilityFailureException exception)
+    {
+        var facts = exception.ErrorCode switch
+        {
+            "UNAUTHORIZED" => new CapabilityFailureFacts(
+                CapabilityFailureKind.Unauthorized, "Crest.Auth.Unauthorized", "当前请求未认证。",
+                JoinIssueDetails(exception.Issues)),
+            "CAPABILITY_FORBIDDEN" or "CAPABILITY_INVOCATION_SOURCE_FORBIDDEN" => new CapabilityFailureFacts(
+                CapabilityFailureKind.Forbidden, "Crest.Auth.Forbidden", "没有权限执行当前操作。",
+                JoinIssueDetails(exception.Issues)),
+            "CAPABILITY_CONTEXT_REQUIRED" => new CapabilityFailureFacts(
+                CapabilityFailureKind.Forbidden, "Crest.Auth.Forbidden", "没有可用的受信租户与用户上下文。"),
+            "CAPABILITY_RESOURCE_NOT_FOUND" or "CAPABILITY_NOT_FOUND" => new CapabilityFailureFacts(
+                CapabilityFailureKind.NotFound, "Crest.Entity.NotFound", "资源不存在。",
+                JoinIssueDetails(exception.Issues)),
+            "CAPABILITY_VALIDATION_FAILED" => new CapabilityFailureFacts(
+                CapabilityFailureKind.ValidationFailed, "Crest.Validation.Failed", "数据验证失败。",
+                JoinIssueDetails(exception.Issues)),
+            "CAPABILITY_DECISION_CONFLICT" or "CAPABILITY_DECISION_STATE_INVALID" => new CapabilityFailureFacts(
+                CapabilityFailureKind.Conflict, "Crest.Concurrency.Conflict", "并发冲突。"),
+            _ => new CapabilityFailureFacts(
+                CapabilityFailureKind.InvalidRequest, exception.ErrorCode, exception.Message,
+                JoinIssueDetails(exception.Issues)),
+        };
+        return facts;
+    }
+
+    private static string? JoinIssueDetails(IReadOnlyList<CapabilityExecutionIssue> issues)
+        => issues.Count == 0
+            ? null
+            : string.Join("; ", issues.Select(issue => issue.Message));
 
     private static InvocationSource ParseInvocationSource(string? value)
         => value switch

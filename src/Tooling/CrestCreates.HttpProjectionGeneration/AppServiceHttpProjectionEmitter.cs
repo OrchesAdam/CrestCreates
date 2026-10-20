@@ -90,6 +90,28 @@ public static class AppServiceHttpProjectionEmitter
             Line(builder, NestedIndent + Indent + Indent + "new " + contractOptions.ContributionTypeName + "());");
         }
 
+        foreach (var (model, _) in contracts)
+        {
+            foreach (var action in model.Actions.Where(action => action.RequiresValidator))
+            {
+                if (action.ValidatorContractFullName is null || action.ValidatorImplementationFullName is null)
+                {
+                    throw new InvalidOperationException(
+                        AppServiceHttpDiagnosticCodes.ActionDeclarationContradiction
+                        + ": action '" + action.Name + "' requires a typed validator but the model carries no closed validator identity.");
+                }
+
+                Line(builder, string.Empty);
+                Line(builder, NestedIndent + Indent
+                    + "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddEnumerable(");
+                Line(builder, NestedIndent + Indent + Indent + "services,");
+                Line(builder, NestedIndent + Indent + Indent
+                    + "global::Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Scoped<"
+                    + action.ValidatorContractFullName + ",");
+                Line(builder, NestedIndent + Indent + Indent + Indent + action.ValidatorImplementationFullName + ">());");
+            }
+        }
+
         Line(builder, string.Empty);
         Line(builder, NestedIndent + Indent
             + "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddEnumerable(");
@@ -188,9 +210,30 @@ public static class AppServiceHttpProjectionEmitter
             JsonContextFullName = options.JsonContextFullName,
             DiagnosticsTypeName = model.ContractName,
             EmitInputScalarRoots = true,
-            RequiredServiceTypeFullNames = new[] { "global::" + model.ContractFullName },
+            RequiredServiceTypeFullNames = RequiredServiceTypes(model),
             Actions = model.Actions.Select(action => ToWireAction(model, action)).ToArray(),
         };
+
+    /// <summary>
+    /// The service types the generated invokers resolve: the business contract, the validation service
+    /// for declared typed validation and every closed body validator. All of them are verified by the
+    /// host activation before mapping (CCHTTP007).
+    /// </summary>
+    private static IReadOnlyList<string> RequiredServiceTypes(AppServiceHttpProjectionModel model)
+    {
+        var required = new List<string> { "global::" + model.ContractFullName };
+        var validating = model.Actions.Where(action => action.RequiresValidator).ToList();
+        if (validating.Count > 0)
+        {
+            required.Add("global::CrestCreates.Validation.Modules.IValidationService");
+            required.AddRange(validating
+                .Select(action => action.ValidatorContractFullName)
+                .Where(type => type is not null)
+                .Select(type => type!));
+        }
+
+        return required.Distinct(StringComparer.Ordinal).ToArray();
+    }
 
     private static HttpWireAction ToWireAction(AppServiceHttpProjectionModel model, AppServiceHttpActionModel action)
     {
@@ -249,7 +292,13 @@ public static class AppServiceHttpProjectionEmitter
             ResultIsValueType = action.ResultIsValueType,
             MapNotFoundOntoNull = action.ResultTypeFullName is not null && !action.ResultIsValueType
                                   && action.HttpMethod == "GET",
+            // #129: hand-written projections answer the Web 404 contract (CrestErrorResponse);
+            // CRUD keeps its frozen typed DynamicApiResponse 404 envelope.
+            UseNotFoundMarker = true,
             RequiredIdentityTypeName = model.ContractName,
+            RequiresValidator = action.RequiresValidator,
+            ValidatorContractFullName = action.ValidatorContractFullName,
+            ValidatorImplementationFullName = action.ValidatorImplementationFullName,
         };
     }
 

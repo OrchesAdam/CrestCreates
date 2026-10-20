@@ -15,7 +15,7 @@
              AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)" Runtime="NET" Architecture="*" />
 
   <PropertyGroup>
-    <CrestCreatesAppServiceHttpModelSchemaVersion Condition="'$(CrestCreatesAppServiceHttpModelSchemaVersion)' == ''">appservice-http-model-v1</CrestCreatesAppServiceHttpModelSchemaVersion>
+    <CrestCreatesAppServiceHttpModelSchemaVersion Condition="'$(CrestCreatesAppServiceHttpModelSchemaVersion)' == ''">appservice-http-model-v2</CrestCreatesAppServiceHttpModelSchemaVersion>
   </PropertyGroup>
 
   <Target Name="SetCrestAppServiceHttpPaths"

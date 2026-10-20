@@ -1,4 +1,3 @@
-using CrestCreates.Data.Abstractions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
@@ -123,8 +122,7 @@ public class TicketWireBaselineTests : BaseTest
     [Fact]
     public async Task Domain_rules_keep_the_recorded_status_semantics_on_the_write_path()
     {
-        using var normalized = NormalizeDuplicateUnitOfWorkBinding(Factory);
-        var (client, _) = await CreateAuthenticatedAdminClient(normalized);
+        var (client, _) = await CreateAuthenticatedAdminClient(Factory);
         var ticketId = await CreateTicketThroughHttpAsync(client);
 
         var close = await client.GetAsync($"/api/ticket/close?id={ticketId}");
@@ -141,8 +139,7 @@ public class TicketWireBaselineTests : BaseTest
     [Fact]
     public async Task Assign_without_an_active_sla_policy_leaves_due_date_null()
     {
-        using var normalized = NormalizeDuplicateUnitOfWorkBinding(Factory);
-        var (client, _) = await CreateAuthenticatedAdminClient(normalized);
+        var (client, _) = await CreateAuthenticatedAdminClient(Factory);
         var ticketId = await CreateTicketThroughHttpAsync(client);
 
         var response = await client.GetAsync($"/api/ticket/assign?id={ticketId}&agentId={Guid.NewGuid()}");
@@ -165,20 +162,6 @@ public class TicketWireBaselineTests : BaseTest
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return Guid.Parse(document.RootElement.GetProperty("data").GetProperty("id").GetString()!);
     }
-
-    private static WebApplicationFactory<global::Program> NormalizeDuplicateUnitOfWorkBinding(
-        Fixtures.HelpdeskWebApplicationFactory factory)
-        => factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
-        {
-            // Measurement normalisation for finding R-01 (three EfCore unit-of-work bindings):
-            // without it every write action fails while building the provider registry, so the
-            // wire behaviour of the write path could not be observed at all. R-01 itself is locked
-            // by TicketProjectionGapBaselineTests.
-            foreach (var duplicate in services.Where(d => d.ServiceType == typeof(UnitOfWorkProviderBinding)).Skip(1).ToList())
-            {
-                services.Remove(duplicate);
-            }
-        }));
 
     private static async Task<(HttpClient Client, TokenResponse Token)> CreateAuthenticatedAdminClient(
         WebApplicationFactory<global::Program> factory)

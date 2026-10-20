@@ -26,6 +26,10 @@ namespace SaaSHelpdesk.Application.Services;
     CapabilityIdPrefix = "compat.appservice.ticket")]
 public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, CreateTicketDto, UpdateTicketDto>, ITicketAppService
 {
+    protected override bool RequiresConcurrencyStampOnUpdate => true;
+
+    protected override bool RequiresConcurrencyStampOnDelete => true;
+
     private readonly ITicketRepository _ticketRepository;
     private readonly ICrestRepositoryBase<SLAPolicy, Guid> _slaPolicyRepository;
 
@@ -66,6 +70,7 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
             IsEscalated = entity.IsEscalated,
             CreationTime = entity.CreationTime,
             CreatorId = entity.CreatorId,
+            ConcurrencyStamp = entity.ConcurrencyStamp,
         };
     }
 
@@ -77,6 +82,7 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
         entity.SetCategory(dto.CategoryId);
     }
 
+    [UnitOfWorkMo]
     public async Task<TicketDto> AssignAsync(Guid id, Guid agentId, CancellationToken cancellationToken = default)
     {
         var ticket = await Repository.GetAsync(id, cancellationToken);
@@ -96,6 +102,7 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
         return MapToDto(ticket);
     }
 
+    [UnitOfWorkMo]
     public async Task<TicketDto> ResolveAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var ticket = await Repository.GetAsync(id, cancellationToken);
@@ -108,6 +115,7 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
         return MapToDto(ticket);
     }
 
+    [UnitOfWorkMo]
     public async Task<TicketDto> CloseAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var ticket = await Repository.GetAsync(id, cancellationToken);
