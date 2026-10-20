@@ -661,3 +661,20 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - SaaSHelpdesk **145 pass / 11 fail / 156**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider）。
 - Capability **178/178**、OrmProviders **124/124**、DynamicApi **140/140**、Application **177/177**、CRUD NativeAOT **23/23**、Procurement **29/29**、JsonContracts **162/162**、Web **113/117**（4 条仅 worktree `.git` 环境项）、Data.Abstractions NativeAOT **1/1**。
 - 环境项不变：Asset E2E durable PG 前置、Boundary evidence-ledger 既存 WIP、IntegrationTests 的 OpenIddict 种子时序（上一 head 可复现）。
+
+## S3 统一审查 R4 修复（三层 Required 帧序，2026-10-20）
+
+审查报告：`docs/review/2026-10-20-issue-129-s3-unified-review-round4.md`（head `ae5eef87`）。残留 1 项 P2：三层 Required 合并后帧序为 `[内层, 根层, 中间层]`，根 caller 取末项中间层，真实请求未取消时外层 deadline 被误报 Cancelled。
+
+### 修复
+
+- 内核记录**真实执行父链**：`UnitOfWorkManager` 增加 per-scope AsyncLocal `_currentExecutionScope`，`BeginScope` 同步把当前最内层 scope（含 Required join）设为新 scope 的 `executionParent`，Dispose 时恢复。join 不再只指向事务 owner 而跳过中间帧；`CaptureCancellationSnapshot` 沿 `_executionParent` 构建 inner→root 链。
+- 快照帧增加 `DepthFromRoot`；`Merge` 按执行深度排序（inner 在前、root 深度 0 在后），不再依赖 attach/去重追加顺序；`RootCallerToken/RootCallerWasCancelled` 取深度 0 帧，任意深度下都回到真实请求 caller。
+- 分类逻辑不变：匹配帧/派生 token 后，root caller canceled → CallerAbort，否则任一 frame deadline → ManagedDeadline，否则 NonCaller；未匹配第三 token 仍 NonCaller。
+
+### 证据（修复 head 见 PR）
+
+- 审查 R4 三层探针 **4/4**：outer deadline → ManagedDeadline、inner deadline → ManagedDeadline、caller → Cancelled、third → NonCaller；`frames=3`、`rootCallerMatchesRequest=True`、真实事务/同一 owner/一次业务/原始 OCE 身份/ambient 清理断言通过。
+- R3 组合 **8/8**、R2 内核 **4/4**、Web 抑制 **3/3**、真实 Program 双租户 HTTP **1/1**。
+- SaaSHelpdesk **149 pass / 11 fail / 160**（11 条既有红不变）；Capability **178/178**、OrmProviders **124/124**、DynamicApi **140/140**、Application **177/177**、CRUD NativeAOT **23/23**、Procurement **29/29**、JsonContracts **162/162**、Web **113/117**（4 条 worktree `.git`）、Data.Abstractions NativeAOT **1/1**。
+- 环境项不变。

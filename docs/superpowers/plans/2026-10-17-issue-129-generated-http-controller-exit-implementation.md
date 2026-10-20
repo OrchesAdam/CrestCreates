@@ -40,6 +40,7 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 - [x] 统一审查 R1（1 P1 + 5 P2）修复：租户目录 scope 隔离与 HTTP 双租户验收、OCE R/K/L 身份分类、业务 JSON/Format 500、presenter 复用本地化权威、六个手写动作业务权限、共享 string converter 比较。证据见 issues log「S3 统一审查 R1 修复」。
 - [x] 统一审查 R2（取消项）：真实 EF UoW deadline/caller 经 typed snapshot 接入分类、响应抑制与分类解耦、Capability 旧 TimedOut 断言同步。证据见 issues log「S3 统一审查 R2 修复」。
 - [x] 统一审查 R3（取消组合路径）：快照改为帧链并按 execution token 合并（嵌套 Required）、`CombineWithCurrent` 记录 operation 派生 token、未匹配第三 token 保持 NonCaller。证据见 issues log「S3 统一审查 R3 修复」。
+- [x] 统一审查 R4（三层 Required 帧序）：内核记录真实 execution parent（含 join），帧带 `DepthFromRoot` 并按深度合并，root caller 恒为真实请求。证据见 issues log「S3 统一审查 R4 修复」。
 
 ## S4 — Legacy 隔离与归档
 

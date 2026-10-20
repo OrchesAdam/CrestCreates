@@ -15,7 +15,8 @@ public sealed record UnitOfWorkCancellationFrame(
     CancellationToken ExecutionToken,
     bool CallerTokenWasCancelled,
     bool DeadlineExpired,
-    IReadOnlyList<CancellationToken> DerivedTokens);
+    IReadOnlyList<CancellationToken> DerivedTokens,
+    int DepthFromRoot);
 
 /// <summary>
 /// Identities and source facts captured by the unit-of-work kernel when a frame observes
@@ -41,10 +42,12 @@ public sealed record UnitOfWorkCancellationSnapshot(IReadOnlyList<UnitOfWorkCanc
     public bool DeadlineExpired => Frames.Any(frame => frame.DeadlineExpired);
 
     /// <summary>The outermost (root) caller identity — the transport caller for a request chain.</summary>
-    public CancellationToken RootCallerToken => Frames[^1].CallerToken;
+    public CancellationToken RootCallerToken => RootFrame.CallerToken;
 
     /// <summary>True when the root caller identity is canceled.</summary>
-    public bool RootCallerWasCancelled => Frames[^1].CallerTokenWasCancelled;
+    public bool RootCallerWasCancelled => RootFrame.CallerTokenWasCancelled;
+
+    private UnitOfWorkCancellationFrame RootFrame => Frames.OrderBy(frame => frame.DepthFromRoot).First();
 
     /// <summary>True when any frame's managed deadline expired.</summary>
     public bool AnyDeadlineExpired => Frames.Any(frame => frame.DeadlineExpired);
@@ -74,7 +77,10 @@ public sealed record UnitOfWorkCancellationSnapshot(IReadOnlyList<UnitOfWorkCanc
             }
         }
 
-        return new UnitOfWorkCancellationSnapshot(frames);
+        // Order by the real execution depth, never by attach order: an outer frame must not become
+        // the "root" merely because it was merged last (three-level Required).
+        return new UnitOfWorkCancellationSnapshot(
+            frames.OrderByDescending(frame => frame.DepthFromRoot).ToArray());
     }
 
     /// <summary>
