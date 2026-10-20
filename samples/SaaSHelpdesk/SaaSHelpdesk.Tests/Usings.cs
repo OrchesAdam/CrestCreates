@@ -14,3 +14,8 @@ global using FluentAssertions;
 global using Microsoft.AspNetCore.Mvc.Testing;
 global using Microsoft.Extensions.DependencyInjection;
 global using Xunit;
+
+// Each database-backed class starts its own PostgreSQL container. Running those classes in
+// parallel makes Testcontainers' random host ports collide (observed "rootlessport ... address
+// already in use"); the acceptance suite is deterministic when they run sequentially.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]

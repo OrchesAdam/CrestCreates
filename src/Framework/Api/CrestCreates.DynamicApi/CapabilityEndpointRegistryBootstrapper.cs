@@ -399,10 +399,11 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return false;
         }
 
-        // Source-generated object converters may be context-local, so object roots are compared by
-        // their property contract below. Value roots (Guid and other framework scalars) must keep the
-        // built-in converter identity; a custom converter changes the wire contract.
-        if (expected.Type.IsValueType
+        // Source-generated object/collection converters may be context-local, so those roots are
+        // compared by their property contract below. Scalar roots (value types and reference scalars
+        // such as string) must keep the same converter type: a custom scalar converter changes the
+        // wire even though the type and kind are unchanged.
+        if ((expected.Type.IsValueType || expected.Kind == JsonTypeInfoKind.None)
             && expected.Converter.GetType() != candidate.Converter.GetType())
         {
             return false;

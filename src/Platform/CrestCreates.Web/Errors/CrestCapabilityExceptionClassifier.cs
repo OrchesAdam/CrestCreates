@@ -6,7 +6,6 @@ using CrestPermissionException = CrestCreates.Authorization.Abstractions.CrestPe
 using CrestConcurrencyException = CrestCreates.Domain.Exceptions.CrestConcurrencyException;
 using CrestPreconditionRequiredException = CrestCreates.Domain.Exceptions.CrestPreconditionRequiredException;
 using System.ComponentModel.DataAnnotations;
-using System.Text.Json;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Domain.Shared.Exceptions;
 using Microsoft.AspNetCore.Http;
@@ -43,10 +42,9 @@ public sealed class CrestCapabilityExceptionClassifier : ICapabilityExceptionCla
         BadHttpRequestException badRequest => Facts(
             CapabilityFailureKind.InvalidRequest, CrestErrorCodes.InvalidArgument, "请求参数错误。",
             badRequest.Message),
-        JsonException => Facts(
-            CapabilityFailureKind.InvalidRequest, CrestErrorCodes.InvalidArgument, "请求内容格式错误。"),
-        FormatException => Facts(
-            CapabilityFailureKind.InvalidRequest, CrestErrorCodes.InvalidArgument, "请求参数错误。"),
+        // JsonException/FormatException are only request errors at the binding boundary. The mapper
+        // classifies that stage locally; a business-internal JSON/format failure stays a sanitized
+        // server error instead of being rewritten into a 400.
         ArgumentException argument => Facts(
             CapabilityFailureKind.InvalidRequest, CrestErrorCodes.InvalidArgument, "请求参数错误。",
             argument.Message),

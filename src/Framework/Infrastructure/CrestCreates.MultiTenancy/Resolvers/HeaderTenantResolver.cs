@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -12,18 +13,18 @@ namespace CrestCreates.MultiTenancy.Resolvers
     public class HeaderTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
-        private readonly ITenantRepository _tenantRepository;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<HeaderTenantResolver> _logger;
 
         public HeaderTenantResolver(
             IOptions<MultiTenancyOptions> options,
-            ITenantRepository tenantRepository,
+            IServiceScopeFactory scopeFactory,
             TenantIdentifierNormalizer normalizer,
             ILogger<HeaderTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-            _tenantRepository = tenantRepository;
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _normalizer = normalizer;
             _logger = logger;
         }
@@ -77,15 +78,21 @@ namespace CrestCreates.MultiTenancy.Resolvers
 
         private async Task<Domain.Permission.Tenant?> ResolveTenantAsync(string rawValue, CancellationToken cancellationToken)
         {
+            // The tenant directory is host-owned lookup data. Resolving its repository from the
+            // request scope would construct the business DbContext before the tenant frame exists,
+            // pinning the host connection for the rest of the request. A dedicated scope keeps the
+            // directory read and the tenant-selected business context independent.
+            using var scope = _scopeFactory.CreateScope();
+            var tenantRepository = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
             var normalizedValue = rawValue.Trim();
 
             if (Guid.TryParse(normalizedValue, out var tenantId))
             {
-                return await _tenantRepository.FindByIdAsync(tenantId, cancellationToken);
+                return await tenantRepository.FindByIdAsync(tenantId, cancellationToken);
             }
 
             var normalizedName = _normalizer.NormalizeName(normalizedValue);
-            return await _tenantRepository.FindByNameAsync(normalizedName, cancellationToken);
+            return await tenantRepository.FindByNameAsync(normalizedName, cancellationToken);
         }
     }
 }

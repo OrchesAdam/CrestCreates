@@ -37,6 +37,7 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 - [x] Runtime 中立失败facts + Web adapter；按rev.2的kind/code/status映射，绑定失败局部400，业务/服务器JsonException不被全局改为400；null与异常资源不存在统一Web404；未知错误脱敏、取消事实独立。证据：`CapabilityFailureFacts`/classifier/presenter；H05 404/400/500 脱敏；CRUD typed 404 envelope 与 MCP capability code 保持。
 - [x] Host 正式 capability 装配，既有认证/租户/审计保持；补双租户生产选库 factory，不能用 shared connection 证明隔离。证据：`DualTenantDatabaseIsolationTests` 3/3（真实 options contributor + UoW + 两 schema）；`TenantBoundaryAcceptanceTests` 3/3。
 - [x] H01–08 真实 PostgreSQL/认证/授权/租户/失败/取消/UoW 验收通过。证据：见 issues log「S3 第二增量」逐项矩阵；H08 由 DynamicApi 138/138、JsonContracts 162/162 覆盖；Ticket NativeAOT 仍属 S5。
+- [x] 统一审查 R1（1 P1 + 5 P2）修复：租户目录 scope 隔离与 HTTP 双租户验收、OCE R/K/L 身份分类、业务 JSON/Format 500、presenter 复用本地化权威、六个手写动作业务权限、共享 string converter 比较。证据见 issues log「S3 统一审查 R1 修复」。
 
 ## S4 — Legacy 隔离与归档
 

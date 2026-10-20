@@ -16,14 +16,33 @@ namespace CrestCreates.Web.Errors;
 /// runtime failure facts to HTTP status codes.
 /// </summary>
 public sealed class CrestCapabilityEndpointFailurePresenter(
-    ICapabilityExceptionClassifier classifier) : ICapabilityEndpointFailurePresenter
+    ICapabilityExceptionClassifier classifier,
+    ICrestExceptionConverter converter) : ICapabilityEndpointFailurePresenter
 {
     public IResult Present(CapabilityExecutionResult result, HttpContext context)
     {
-        if (result.Status == CapabilityExecutionStatus.Cancelled
-            || (result.Status == CapabilityExecutionStatus.TimedOut && context.RequestAborted.IsCancellationRequested))
+        // Response suppression is a transport fact: once the response started (or the caller went
+        // away) nothing may be written a second time, regardless of the failure classification.
+        if (context.Response.HasStarted)
         {
-            return Results.StatusCode(context.RequestAborted.IsCancellationRequested ? 499 : 504);
+            return Results.Empty;
+        }
+
+        if (result.Status == CapabilityExecutionStatus.Cancelled)
+        {
+            return context.RequestAborted.IsCancellationRequested
+                ? Results.StatusCode(499)
+                : Write(new CapabilityFailureFacts(
+                    CapabilityFailureKind.NonCaller,
+                    CrestErrorCodes.InternalError,
+                    "服务器内部错误。"), context);
+        }
+
+        if (result.Status == CapabilityExecutionStatus.TimedOut)
+        {
+            return context.RequestAborted.IsCancellationRequested
+                ? Results.StatusCode(499)
+                : Results.StatusCode(504);
         }
 
         var facts = result.FailureFacts ?? ClassifyErrorCode(result.ErrorCode, result.ErrorMessage, result.Issues);
@@ -48,7 +67,7 @@ public sealed class CrestCapabilityEndpointFailurePresenter(
         => Write(new CapabilityFailureFacts(
             CapabilityFailureKind.NotFound, CrestErrorCodes.EntityNotFound, "资源不存在。"), context);
 
-    private static IResult Write(CapabilityFailureFacts facts, HttpContext context)
+    private IResult Write(CapabilityFailureFacts facts, HttpContext context)
     {
         var authenticated = context.User.Identity?.IsAuthenticated == true;
         var kind = facts.Kind == CapabilityFailureKind.Unauthorized && authenticated
@@ -72,14 +91,12 @@ public sealed class CrestCapabilityEndpointFailurePresenter(
             _ => StatusCodes.Status500InternalServerError,
         };
 
-        var response = new CrestErrorResponse
-        {
-            Code = errorCode,
-            Message = MessageFor(errorCode, facts.SafeMessage),
-            Details = kind == CapabilityFailureKind.Unknown ? null : facts.SafeDetails,
-            TraceId = context.TraceIdentifier,
-            StatusCode = statusCode,
-        };
+        // The existing converter owns code/message resources, localization fallback, 5xx detail
+        // stripping and trace identity. The presenter only supplies bounded facts and the status
+        // chosen above, so there is no second message table to drift from the platform authority.
+        var response = converter.Convert(
+            context,
+            new CapabilityFailureWireException(errorCode, statusCode, facts.SafeMessage, facts.SafeDetails)).Response;
 
         return Results.Json(
             response,
@@ -114,17 +131,17 @@ public sealed class CrestCapabilityEndpointFailurePresenter(
         };
     }
 
-    private static string MessageFor(string errorCode, string fallback) => errorCode switch
+    /// <summary>Carries bounded facts through the existing exception converter without exposing the
+    /// original exception, stack or transport type.</summary>
+    private sealed class CapabilityFailureWireException : CrestException
     {
-        "Crest.Auth.Unauthorized" => "当前请求未认证。",
-        "Crest.Auth.Forbidden" => "没有权限执行当前操作。",
-        "Crest.Validation.Failed" => "数据验证失败。",
-        "Crest.Entity.NotFound" => "资源不存在。",
-        "Crest.Concurrency.Conflict" => "并发冲突。",
-        "Crest.Concurrency.PreconditionRequired" => "缺少并发前置条件。",
-        "Crest.Request.InvalidArgument" => "请求参数错误。",
-        "Crest.Operation.Invalid" => "当前操作无效。",
-        "Crest.InternalError" => "服务器内部错误。",
-        _ => fallback,
-    };
+        public CapabilityFailureWireException(
+            string errorCode,
+            int httpStatusCode,
+            string safeMessage,
+            string? safeDetails)
+            : base(errorCode, httpStatusCode, safeMessage, safeDetails)
+        {
+        }
+    }
 }

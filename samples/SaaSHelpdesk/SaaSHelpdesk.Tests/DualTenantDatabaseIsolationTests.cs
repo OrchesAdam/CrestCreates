@@ -5,12 +5,15 @@ using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.MultiTenancy.Middleware;
 using CrestCreates.MultiTenancy.Providers;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using SaaSHelpdesk.Domain.Entities;
 using SaaSHelpdesk.Domain.Shared.Enums;
@@ -65,6 +68,8 @@ public class DualTenantDatabaseIsolationTests : IAsyncLifetime
         services.AddScoped<DataFilterState>();
         services.AddScoped<IDomainEventPublisher, NoOpDomainEventPublisher>();
         new EntityFrameworkCoreModule().OnConfigureServices(services);
+        services.AddMultiTenancy();
+        services.AddTenantResolvers(TenantResolutionStrategy.Header);
         services.AddSingleton<ICurrentTenant, CurrentTenant>();
         services.AddSingleton<ITenantProvider, RepositoryTenantProvider>();
         _provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
@@ -129,6 +134,43 @@ public class DualTenantDatabaseIsolationTests : IAsyncLifetime
         (await ReadTitlesAsync(_hostTenantId)).Should().Equal("host ticket");
         (await CountTicketsAsync(_tenantConnection)).Should().Be(1);
         (await CountTicketsAsync(_hostConnection)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task H04_header_resolution_must_not_pin_the_host_database_in_the_request_scope()
+    {
+        await InsertTicketAsync(_hostTenantId, _hostCustomerId, "host-only-secret-ticket");
+        await InsertTicketAsync(_tenantId, _tenantCustomerId, "tenant-b-ticket");
+        using var requestScope = _provider.CreateScope();
+        var services = requestScope.ServiceProvider;
+        var currentTenant = services.GetRequiredService<ICurrentTenant>();
+        currentTenant.Id.Should().BeNull();
+        var context = new DefaultHttpContext { RequestServices = services };
+        context.Request.Path = "/api/ticket/all";
+        context.Request.Headers["X-Tenant-Id"] = _tenantId.ToString();
+
+        // The production resolver graph is resolved from DI; its directory read must not construct
+        // the request-scoped business DbContext before the tenant frame exists.
+        var resolver = services.GetRequiredService<ITenantResolver>();
+        string? selectedConnection = null;
+        List<string>? selectedTitles = null;
+        var middleware = new MultiTenancyMiddleware(async _ =>
+        {
+            currentTenant.Id.Should().Be(_tenantId.ToString());
+            currentTenant.Tenant!.ConnectionString.Should().Be(_tenantConnection);
+            var db = services.GetRequiredService<HelpdeskDbContext>();
+            selectedConnection = db.Database.GetDbConnection().ConnectionString;
+            selectedTitles = (await services.GetRequiredService<ICrestRepositoryBase<Ticket, Guid>>()
+                .GetListAsync()).Select(ticket => ticket.Title).ToList();
+        }, NullLogger<MultiTenancyMiddleware>.Instance);
+
+        await middleware.InvokeAsync(context, currentTenant, resolver);
+
+        currentTenant.Id.Should().BeNull();
+        selectedTitles.Should().Equal(new[] { "tenant-b-ticket" },
+            "the real header resolver and middleware must not expose the host schema to tenant B; "
+            + "selected connection was " + selectedConnection);
+        selectedConnection.Should().Be(_tenantConnection);
     }
 
     [Fact]

@@ -7,6 +7,7 @@ using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Resolvers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -14,12 +15,13 @@ using Xunit;
 
 namespace CrestCreates.Application.Tests.Tenants;
 
-public class QueryStringTenantResolverTests
+public class QueryStringTenantResolverTests : IDisposable
 {
     private readonly Mock<ITenantRepository> _tenantRepositoryMock;
     private readonly TenantIdentifierNormalizer _normalizer;
     private readonly Mock<ILogger<QueryStringTenantResolver>> _loggerMock;
     private readonly IOptions<MultiTenancyOptions> _options;
+    private readonly ServiceProvider _provider;
 
     public QueryStringTenantResolverTests()
     {
@@ -27,11 +29,20 @@ public class QueryStringTenantResolverTests
         _normalizer = new TenantIdentifierNormalizer();
         _loggerMock = new Mock<ILogger<QueryStringTenantResolver>>();
         _options = Options.Create(new MultiTenancyOptions());
+        _provider = new ServiceCollection()
+            .AddSingleton(_tenantRepositoryMock.Object)
+            .BuildServiceProvider();
     }
+
+    public void Dispose() => _provider.Dispose();
 
     private QueryStringTenantResolver CreateResolver()
     {
-        return new QueryStringTenantResolver(_options, _tenantRepositoryMock.Object, _normalizer, _loggerMock.Object);
+        return new QueryStringTenantResolver(
+            _options,
+            _provider.GetRequiredService<IServiceScopeFactory>(),
+            _normalizer,
+            _loggerMock.Object);
     }
 
     private static DefaultHttpContext CreateHttpContextWithQueryString(string key, string value)

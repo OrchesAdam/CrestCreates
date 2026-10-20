@@ -14,6 +14,8 @@ public enum CapabilityFailureKind
     Conflict,
     PreconditionRequired,
     Cancelled,
+    ManagedDeadline,
+    NonCaller,
     Unknown,
 }
 

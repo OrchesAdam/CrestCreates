@@ -120,14 +120,9 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
 
             return await handler(context).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            var facts = new CapabilityFailureFacts(
-                CapabilityFailureKind.Cancelled,
-                "Crest.Request.Cancelled",
-                "请求已取消。");
-            return CapabilityExecutionResult.Cancelled(
-                DateTimeOffset.UtcNow - startedAt, facts, context.AuditRecordId);
+            return ClassifyCancellation(ex, context, DateTimeOffset.UtcNow - startedAt);
         }
         catch (CapabilityFailureException ex)
         {
@@ -159,6 +154,82 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
                 DateTimeOffset.UtcNow - startedAt,
                 failureFacts: facts,
                 auditRecordId: context.AuditRecordId);
+        }
+    }
+
+    /// <summary>
+    /// Frozen cancellation precedence (addendum rev.4 §3.5): identity is matched before source
+    /// cancellation is trusted. A default token is always NonCaller, an unrelated (third) token is
+    /// never treated as a managed deadline, and only a canceled caller token is a caller abort.
+    /// </summary>
+    private static CapabilityExecutionResult ClassifyCancellation(
+        OperationCanceledException exception,
+        CapabilityExecutionContext context,
+        TimeSpan duration)
+    {
+        var requested = context.CancellationToken;
+        var deadline = context.ManagedDeadlineToken;
+        var execution = context.ExecutionToken;
+        var token = exception.CancellationToken;
+
+        if (!token.CanBeCanceled)
+        {
+            return NonCaller();
+        }
+
+        if (requested.CanBeCanceled && token == requested)
+        {
+            return requested.IsCancellationRequested
+                ? CallerAbort()
+                : NonCaller();
+        }
+
+        if (deadline.CanBeCanceled && token == deadline)
+        {
+            return deadline.IsCancellationRequested ? ManagedDeadline() : NonCaller();
+        }
+
+        if (execution.CanBeCanceled && token == execution)
+        {
+            if (requested.IsCancellationRequested)
+            {
+                return CallerAbort();
+            }
+
+            return deadline.IsCancellationRequested ? ManagedDeadline() : NonCaller();
+        }
+
+        return NonCaller();
+
+        CapabilityExecutionResult CallerAbort()
+        {
+            var facts = new CapabilityFailureFacts(
+                CapabilityFailureKind.Cancelled,
+                "Crest.Request.Cancelled",
+                "请求已取消。");
+            return CapabilityExecutionResult.Cancelled(duration, facts, context.AuditRecordId);
+        }
+
+        CapabilityExecutionResult ManagedDeadline()
+        {
+            var facts = new CapabilityFailureFacts(
+                CapabilityFailureKind.ManagedDeadline,
+                "Crest.InternalError",
+                "服务器内部错误。");
+            return CapabilityExecutionResult.Failure(
+                "PIPELINE_ERROR", exception.Message, duration,
+                failureFacts: facts, auditRecordId: context.AuditRecordId);
+        }
+
+        CapabilityExecutionResult NonCaller()
+        {
+            var facts = new CapabilityFailureFacts(
+                CapabilityFailureKind.NonCaller,
+                "Crest.InternalError",
+                "服务器内部错误。");
+            return CapabilityExecutionResult.Failure(
+                "PIPELINE_ERROR", exception.Message, duration,
+                failureFacts: facts, auditRecordId: context.AuditRecordId);
         }
     }
 

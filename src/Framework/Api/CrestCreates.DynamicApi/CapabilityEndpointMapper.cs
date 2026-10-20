@@ -1,3 +1,4 @@
+using System;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using System.Text.Json;
@@ -38,6 +39,29 @@ internal static class CapabilityEndpointMapper
                     return presenter is not null
                         ? presenter.PresentBindingFailure(ex, context)
                         : Results.BadRequest();
+                }
+                catch (OperationCanceledException ex)
+                {
+                    // Binding-stage cancellation follows the same frozen identity rules as the
+                    // pipeline: only a canceled caller token suppresses the response; every other
+                    // source is an internal failure rendered as a sanitized 500.
+                    if (ex.CancellationToken == context.RequestAborted
+                        && context.RequestAborted.IsCancellationRequested)
+                    {
+                        return Results.StatusCode(499);
+                    }
+
+                    var facts = new CapabilityFailureFacts(
+                        CapabilityFailureKind.NonCaller,
+                        "Crest.InternalError",
+                        "服务器内部错误。");
+                    var cancelled = CapabilityExecutionResult.Failure(
+                        "PIPELINE_ERROR", ex.Message, TimeSpan.Zero, failureFacts: facts);
+                    var presenter = context.RequestServices
+                        .GetService<ICapabilityEndpointFailurePresenter>();
+                    return presenter is not null
+                        ? presenter.Present(cancelled, context)
+                        : Results.StatusCode(StatusCodes.Status500InternalServerError);
                 }
 
                 var dispatcher = context.RequestServices

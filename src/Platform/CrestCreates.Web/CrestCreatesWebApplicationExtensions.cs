@@ -52,7 +52,6 @@ using Microsoft.Extensions.Hosting;
 using CrestCreates.OpenApi;
 
 using CrestCreates.Capability.Abstractions;
-using CrestCreates.DynamicApi;
 using CrestCreates.Web.Errors;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 

@@ -6,11 +6,13 @@ namespace CrestCreates.DynamicApi.Tests;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(Guid))]
+[JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(DynamicApiResponse))]
 internal partial class ReviewS3OwnedContext : JsonSerializerContext;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(Guid))]
+[JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(DynamicApiResponse))]
 internal partial class ReviewS3CanonicalHostContext : JsonSerializerContext;
 
@@ -40,4 +42,17 @@ internal sealed class ReviewS3GuidConverter : JsonConverter<Guid>
         => Guid.Parse(reader.GetString()!.Replace("host:", ""));
     public override void Write(Utf8JsonWriter writer, Guid value, JsonSerializerOptions options)
         => writer.WriteStringValue("host:" + value.ToString("N"));
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    Converters = new[] { typeof(ReviewS3StringConverter) })]
+[JsonSerializable(typeof(string))]
+internal partial class ReviewS3ChangedStringContext : JsonSerializerContext;
+
+internal sealed class ReviewS3StringConverter : JsonConverter<string>
+{
+    public override string Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        => reader.GetString()!;
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options)
+        => writer.WriteStringValue("host:" + value);
 }

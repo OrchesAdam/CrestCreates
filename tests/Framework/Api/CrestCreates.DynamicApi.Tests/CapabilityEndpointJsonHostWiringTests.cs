@@ -446,6 +446,50 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReviewS3StringRoot_shared_string_converter_must_preserve_the_wire(bool changed)
+    {
+        var root = typeof(string);
+        var contribution = new WiredContractContribution
+        {
+            OwnerAssemblyName = "ReviewS3.StringFeature",
+            EndpointDescriptors = [CreateEndpoint("review-s3-string.endpoint")],
+            Bindings = [CreateBinding("review-s3-string.endpoint")],
+            Handlers = [CreateHandler("test-cap")],
+            ResultMappers = [CreateResultBinding("review-s3-string.endpoint", "string-root")],
+            JsonContext = ReviewS3OwnedContext.Default,
+            RequiredJsonRootTypes = [new(root, "Read", "Input")]
+        };
+        IJsonTypeInfoResolver first = changed
+            ? ReviewS3ChangedStringContext.Default : ReviewS3CanonicalHostContext.Default;
+        var (provider, endpoints) = BuildEndpointHost(CreateCapability(), contribution,
+            configureJson: options =>
+            {
+                if (changed) options.SerializerOptions.Converters.Add(new ReviewS3StringConverter());
+                options.SerializerOptions.TypeInfoResolver =
+                    JsonTypeInfoResolver.Combine(first, ReviewS3OwnedContext.Default);
+            });
+        using var lifetime = (IDisposable)provider;
+        var options = provider.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
+        var actual = first.GetTypeInfo(root, options)!;
+        actual.Should().NotBeNull();
+        actual.OriginatingResolver.Should().BeAssignableTo<JsonSerializerContext>();
+        JsonSerializer.Serialize("abc", actual).Should().Be(changed ? "\"host:abc\"" : "\"abc\"");
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+        if (changed)
+        {
+            map.Should().Throw<InvalidOperationException>("a source-generated custom string converter changes the shared root wire");
+            endpoints.DataSources.Should().BeEmpty();
+        }
+        else
+        {
+            map.Should().NotThrow();
+            GetEndpoints(endpoints).Should().ContainSingle();
+        }
+    }
+
     private sealed class Review150CapabilityProvider(CapabilityDescriptor descriptor) : IDescriptorProvider<CapabilityDescriptor>
     {
         public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => new[] { descriptor };

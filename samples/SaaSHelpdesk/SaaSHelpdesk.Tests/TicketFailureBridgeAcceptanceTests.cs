@@ -131,6 +131,43 @@ public class TicketFailureBridgeAcceptanceTests : BaseTest
         text.Should().Contain("CreateTicketDto");
     }
 
+    [Theory]
+    [InlineData("json")]
+    [InlineData("format")]
+    [InlineData("default-oce")]
+    [InlineData("third-oce")]
+    [InlineData("live-request-oce")]
+    [InlineData("unknown-control")]
+    public async Task ReviewS3_live_request_internal_failures_remain_sanitized_500(string mode)
+    {
+        var (client, _) = await SignInAsync(MeasurementHost());
+        var ticketId = await CreateTicketAsync(client);
+        _probe.Reset();
+        using var third = new CancellationTokenSource();
+        third.Cancel();
+        _probe.ServiceFailure = mode switch
+        {
+            "json" => new JsonException("internal secret marker"),
+            "format" => new FormatException("internal secret marker"),
+            "default-oce" => new OperationCanceledException("internal secret marker"),
+            "third-oce" => new OperationCanceledException("internal secret marker", third.Token),
+            "live-request-oce" => null,
+            _ => new NotSupportedException("internal secret marker"),
+        };
+        // The decorator can throw with the real, still-live request token after receiving it.
+        _probe.ReviewThrowLiveTokenOce = mode == "live-request-oce";
+        var response = await client.GetAsync($"/api/ticket/{ticketId}");
+        var body = await response.Content.ReadAsStringAsync();
+        _probe.ServiceCalls.Should().Equal(nameof(
+            SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService.GetByIdAsync));
+        _probe.LastServiceToken.IsCancellationRequested.Should().BeFalse();
+        body.Should().NotContain("internal secret marker");
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, body);
+        using var document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("code").GetString().Should().Be("Crest.InternalError");
+        document.RootElement.GetProperty("details").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
     private WebApplicationFactory<global::Program> MeasurementHost()
         => Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
             services.AddTicketSideEffectProbe(_probe)));

@@ -593,3 +593,22 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - Ticket 的 NativeAOT/trim publish-and-run（N01/N02）仍属 S5；本增量只到 JIT 真实 Host + PostgreSQL。
 - EF/SqlServer 其他 Provider、Windows/macOS 其他 RID、Asset 兼容 HTTP 独立 PG 验收不在本增量结论内。
 - `POST /api/user` 等框架 HTTP 缺失、Asset E2E 的 durable PG 前置仍按既有账本单列。
+
+## S3 统一审查 R1 修复（1 P1 + 5 P2，2026-10-20）
+
+审查报告：`docs/review/2026-10-20-issue-129-s3-unified-review-round1.md`（head `993297db`）；探针 patch：`docs/review/probes/2026-10-20-issue-129-s3-unified-r1-probes.patch`。以下逐项映射。
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| **S3-R1-HTTP129-01 [P1]** Header resolver 依赖 `ITenantRepository -> IDataBaseContext -> HelpdeskDbContext`，在租户帧之前固定 Host 连接；租户 B 业务仓储复用该 scoped context | 平台把租户目录读取与请求业务上下文按 scope 所有权隔离：`Header/QueryString/Cookie/Route/SubdomainTenantResolver` 改为注入 `IServiceScopeFactory`，每次解析在独立 scope 中解析 `ITenantRepository`/domain mapping；请求 scope 的 `HelpdeskDbContext` 在租户帧内才首次构造。fixture 仍保留真实 resolver 图，不引入测试专用 provider。 | 审查探针按生产 resolver 图（从 DI 解析 `ITenantResolver`）+ middleware + 生产 options + 仓储/PG 复跑：**4/4**（B 只读到 `tenant-b-ticket`，连接为 B）；新增 `DualTenantHttpAcceptanceTests`：真实 `Program`（routing/auth/OpenIddict/capability/AppService/UoW）+ 两 schema，tenant B 登录、create/read 隔离、host 不可见、428/409、FK 失败回滚（stamp 不变），**1/1**。不冒称独立 TCP Host。 |
+| **S3-R1-HTTP129-02 [P2]** 所有 OCE 无条件转 Cancelled，存活请求返回空 504 | 按 addendum rev.4 §3.5 身份优先分类：`CapabilityExecutionContext` 增加 `ManagedDeadlineToken`（K）与 `ExecutionToken`（L）；pipeline 先排除 None，再按 R/K/L 身份与源是否已取消分类；R 取消 → CallerAbort（仅抑制、499 无 JSON 体并留意 `HasStarted`），K 取消 → ManagedDeadline，其他（None/第三/未取消 R）→ NonCaller，后两者均 500 `Crest.InternalError` 脱敏。绑定阶段 OCE 使用同一身份规则。 | 审查探针 **6/6**（json/format/default-oce/third-oce/live-request-oce/unknown-control）；业务恰执行一次、传入 token 未取消、body 无内部标记、500/`details=null`。 |
+| **S3-R1-HTTP129-03 [P2]** 业务内部 JsonException/FormatException 被全局归为 400 | classifier 删除这两个全局分支；绑定边界仍由 mapper 的局部 catch + `PresentBindingFailure` 固定 400。业务内部 JSON/格式故障走 sanitized 500。 | 同上探针 json/format 两例 + 坏 body 既有 R03 控制。 |
+| **S3-R1-HTTP129-04 [P2]** presenter 固定中文文案绕过既有本地化权威 | 删除 `MessageFor` 静态表；presenter 把有界 facts 封装为 `CapabilityFailureWireException : CrestException`，交给既有 `ICrestExceptionConverter.Convert` 决定本地化消息/5xx details/trace；presenter 只负责 kind→status 与 code 升级。 | 审查探针 **1/1**：同一并发异常在 `DefaultCrestExceptionConverter` 与 capability 桥接均输出 `localized-authoritative-conflict`，status/code/trace 一致。 |
+| **S3-R1-HTTP129-05 [P2]** 手写 Assign/Resolve/Close 与三个查询直接调用无业务侧权限检查 | `TicketAppService` 六个手写动作补 `CheckPermissionAsync`：Assign/Resolve/Close → `Ticket.Update`；GetByCustomer/GetByAssignee → `Ticket.Get`；GetOverdue → `Ticket.Search`。复用既有 checker/SuperAdmin 语义，不复制逻辑。 | 审查直接调用探针 **6/6**（三个动作 × allowed/denied）：denied 抛 `CrestPermissionException` 且状态不变；allowed 成功。HTTP 权限基线 F02/C11/C12/C13 保持通过。 |
+| **S3-R1-HTTP129-06 [P2]** 共享 string root 漏比 converter（reference scalar） | `SharedContractEquivalent` 对 **scalar**（`Kind=None` 或 value type）统一比较 converter 类型；object/collection 仍按属性契约/context-local 规则，canonical host 不受影响，不通过 sample 重排 resolver 隐藏显式冲突。 | 审查 string 探针 **2/2**（changed 拒绝且零端点；canonical 放行单端点）；Guid/void 八条既有共享根探针与 DynamicApi 全套 **140/140**。 |
+
+### 复跑（修复 head 见 PR）
+
+- SaaSHelpdesk 全量 **133 pass / 11 fail / 144**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider），逐 FQN 不变；套件改为串行以消除 Testcontainers 随机端口冲突（2m44s）。
+- Application **177/177**、DynamicApi **140/140**、JsonContracts **162/162**、CRUD NativeAOT **23/23**、Procurement **29/29**、Web **110/114**（4 条仅 worktree `.git` 文件环境项）。
+- 环境项与上轮一致：Asset E2E 缺 durable PG 连接；Boundary 2 条 ControlPlaneReferenceData evidence-ledger 既存 WIP；`CrestCreates.IntegrationTests` 的 `OpenIddictScopes` 缺失在上一 head `993297db` 同条件复现，属既存环境/种子时序，不计入本轮回归。

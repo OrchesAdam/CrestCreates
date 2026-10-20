@@ -106,6 +106,59 @@ public class TicketPermissionBaselineTests : BaseTest
         persisted.Should().Be(TicketStatus.Open, "a rejected write must not change the row");
     }
 
+    [Theory]
+    [InlineData("Resolve", false)]
+    [InlineData("Resolve", true)]
+    [InlineData("Close", false)]
+    [InlineData("Close", true)]
+    [InlineData("GetByCustomer", false)]
+    [InlineData("GetByCustomer", true)]
+    public async Task ReviewS3_direct_service_preserves_business_permission_gate(string action, bool allowed)
+    {
+        var ticketId = await SeedTicketAsync();
+        var userId = await CreatePlainUserAsync();
+        var client = await SignInAsPlainUserAsync(userId);
+        var permission = action == "GetByCustomer" ? "Ticket.Get" : "Ticket.Update";
+        if (allowed) await GrantAsync(userId, permission);
+        else await GrantAsync(userId, "Ticket.Search");
+        using var scope = Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<HelpdeskDbContext>();
+        var tenantId = (await db.Tenants.AsNoTracking().SingleAsync(t => t.Name == "host")).Id.ToString();
+        var customerId = (await db.Tickets.AsNoTracking().SingleAsync(t => t.Id == ticketId)).CustomerId;
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, userId),
+            new Claim("tenantid", tenantId),
+            new Claim("is_super_admin", "false"),
+        }, "review-direct"));
+        using var frame = scope.ServiceProvider.GetRequiredService<ICurrentPrincipalAccessor>().Change(principal);
+        using var tenantFrame = await scope.ServiceProvider
+            .GetRequiredService<CrestCreates.MultiTenancy.Abstract.ICurrentTenant>().ChangeAsync(tenantId);
+        var checker = scope.ServiceProvider.GetRequiredService<IPermissionChecker>();
+        (await checker.IsGrantedAsync(permission)).Should().Be(allowed,
+            "the real permission service must establish the target condition before direct invocation");
+        var service = scope.ServiceProvider.GetRequiredService<SaaSHelpdesk.Application.Contracts.Interfaces.ITicketAppService>();
+        var failure = await Record.ExceptionAsync(async () =>
+        {
+            if (action == "Resolve") await service.ResolveAsync(ticketId);
+            else if (action == "Close") await service.CloseAsync(ticketId);
+            else await service.GetByCustomerAsync(customerId);
+        });
+        var persisted = await ReadTicketStatusAsync(ticketId);
+        if (allowed)
+        {
+            failure.Should().BeNull();
+            persisted.Should().Be(action == "Resolve" ? TicketStatus.Resolved
+                : action == "Close" ? TicketStatus.Closed : TicketStatus.Open);
+        }
+        else
+        {
+            failure.Should().BeOfType<CrestPermissionException>(
+                $"direct service execution must require {permission}; persisted status was {persisted}");
+            persisted.Should().Be(TicketStatus.Open);
+        }
+    }
+
     private async Task AssertForbiddenAsync(HttpResponseMessage response, string expectedPermission, string? because = null)
     {
         var body = await response.Content.ReadAsStringAsync();

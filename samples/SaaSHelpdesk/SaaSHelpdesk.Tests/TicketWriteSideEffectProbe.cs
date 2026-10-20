@@ -35,6 +35,8 @@ internal sealed class TicketWriteSideEffectProbe
     /// <summary>Injects a failure at the business-service boundary (failure-bridge probes).</summary>
     public Exception? ServiceFailure { get; set; }
 
+    public bool ReviewThrowLiveTokenOce { get; set; }
+
     public void Reset()
     {
         ServiceCalls.Clear();
@@ -43,6 +45,7 @@ internal sealed class TicketWriteSideEffectProbe
         UnobservedExecutions = 0;
         LastServiceToken = default;
         ServiceFailure = null;
+        ReviewThrowLiveTokenOce = false;
     }
 }
 
@@ -61,6 +64,7 @@ internal sealed class CountingTicketAppService : ITicketAppService
     {
         _probe.ServiceCalls.Add(name);
         _probe.LastServiceToken = cancellationToken;
+        if (_probe.ReviewThrowLiveTokenOce) throw new OperationCanceledException(cancellationToken);
         if (_probe.ServiceFailure is { } failure)
         {
             throw failure;
@@ -85,6 +89,7 @@ internal sealed class CountingTicketAppService : ITicketAppService
     {
         _probe.ServiceCalls.Add(nameof(DeleteAsync));
         _probe.LastServiceToken = cancellationToken;
+        if (_probe.ReviewThrowLiveTokenOce) throw new OperationCanceledException(cancellationToken);
         if (_probe.ServiceFailure is { } failure)
         {
             throw failure;

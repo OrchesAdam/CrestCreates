@@ -8,6 +8,7 @@ using CrestCreates.MultiTenancy.Resolvers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -15,12 +16,13 @@ using Xunit;
 
 namespace CrestCreates.Application.Tests.Tenants;
 
-public class RouteTenantResolverTests
+public class RouteTenantResolverTests : IDisposable
 {
     private readonly Mock<ITenantRepository> _tenantRepositoryMock;
     private readonly TenantIdentifierNormalizer _normalizer;
     private readonly Mock<ILogger<RouteTenantResolver>> _loggerMock;
     private readonly IOptions<MultiTenancyOptions> _options;
+    private readonly ServiceProvider _provider;
 
     public RouteTenantResolverTests()
     {
@@ -28,11 +30,20 @@ public class RouteTenantResolverTests
         _normalizer = new TenantIdentifierNormalizer();
         _loggerMock = new Mock<ILogger<RouteTenantResolver>>();
         _options = Options.Create(new MultiTenancyOptions());
+        _provider = new ServiceCollection()
+            .AddSingleton(_tenantRepositoryMock.Object)
+            .BuildServiceProvider();
     }
+
+    public void Dispose() => _provider.Dispose();
 
     private RouteTenantResolver CreateResolver()
     {
-        return new RouteTenantResolver(_options, _tenantRepositoryMock.Object, _normalizer, _loggerMock.Object);
+        return new RouteTenantResolver(
+            _options,
+            _provider.GetRequiredService<IServiceScopeFactory>(),
+            _normalizer,
+            _loggerMock.Object);
     }
 
     private static DefaultHttpContext CreateHttpContextWithRouteData(string key, string value)

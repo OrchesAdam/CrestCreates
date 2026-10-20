@@ -30,6 +30,10 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
 
     protected override bool RequiresConcurrencyStampOnDelete => true;
 
+    private const string UpdatePermission = "Ticket.Update";
+    private const string GetPermission = "Ticket.Get";
+    private const string SearchPermission = "Ticket.Search";
+
     private readonly ITicketRepository _ticketRepository;
     private readonly ICrestRepositoryBase<SLAPolicy, Guid> _slaPolicyRepository;
 
@@ -85,6 +89,7 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
     [UnitOfWorkMo]
     public async Task<TicketDto> AssignAsync(Guid id, Guid agentId, CancellationToken cancellationToken = default)
     {
+        await CheckPermissionAsync(UpdatePermission, cancellationToken);
         var ticket = await Repository.GetAsync(id, cancellationToken);
         if (ticket == null)
             throw new KeyNotFoundException($"Ticket with id {id} not found.");
@@ -105,6 +110,7 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
     [UnitOfWorkMo]
     public async Task<TicketDto> ResolveAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        await CheckPermissionAsync(UpdatePermission, cancellationToken);
         var ticket = await Repository.GetAsync(id, cancellationToken);
         if (ticket == null)
             throw new KeyNotFoundException($"Ticket with id {id} not found.");
@@ -118,6 +124,7 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
     [UnitOfWorkMo]
     public async Task<TicketDto> CloseAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        await CheckPermissionAsync(UpdatePermission, cancellationToken);
         var ticket = await Repository.GetAsync(id, cancellationToken);
         if (ticket == null)
             throw new KeyNotFoundException($"Ticket with id {id} not found.");
@@ -130,18 +137,21 @@ public class TicketAppService : CrestAppServiceBase<Ticket, Guid, TicketDto, Cre
 
     public async Task<List<TicketDto>> GetByCustomerAsync(Guid customerId, CancellationToken cancellationToken = default)
     {
+        await CheckPermissionAsync(GetPermission, cancellationToken);
         var tickets = await _ticketRepository.GetByCustomerAsync(customerId, cancellationToken);
         return tickets.Select(MapToDto).ToList();
     }
 
     public async Task<List<TicketDto>> GetByAssigneeAsync(Guid assigneeId, CancellationToken cancellationToken = default)
     {
+        await CheckPermissionAsync(GetPermission, cancellationToken);
         var tickets = await _ticketRepository.GetByAssigneeAsync(assigneeId, cancellationToken);
         return tickets.Select(MapToDto).ToList();
     }
 
     public async Task<List<TicketDto>> GetOverdueAsync(CancellationToken cancellationToken = default)
     {
+        await CheckPermissionAsync(SearchPermission, cancellationToken);
         var tickets = await _ticketRepository.GetOverdueTicketsAsync(DateTime.UtcNow, cancellationToken);
         return tickets.Select(MapToDto).ToList();
     }
