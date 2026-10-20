@@ -191,7 +191,7 @@ internal sealed class CountingUnitOfWorkManager : IUnitOfWorkManager
     }
 }
 
-internal sealed class CountingUnitOfWorkScope : IUnitOfWorkScope
+internal sealed class CountingUnitOfWorkScope : IUnitOfWorkScope, IUnitOfWorkCancellationSource
 {
     private readonly IUnitOfWorkScope _inner;
     private readonly CountingUnitOfWorkManager _manager;
@@ -217,6 +217,9 @@ internal sealed class CountingUnitOfWorkScope : IUnitOfWorkScope
         await _inner.StartAsync(cancellationToken);
         _manager.ObserveScopeStarted();
     }
+
+    public CrestCreates.Core.Abstractions.Threading.UnitOfWorkCancellationSnapshot? CaptureCancellationSnapshot()
+        => (_inner as IUnitOfWorkCancellationSource)?.CaptureCancellationSnapshot();
 
     public Task CompleteAsync(CancellationToken cancellationToken = default) => _inner.CompleteAsync(cancellationToken);
     public Task RollbackAsync(CancellationToken cancellationToken = default) => _inner.RollbackAsync(cancellationToken);

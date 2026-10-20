@@ -28,21 +28,22 @@ public sealed class CrestCapabilityEndpointFailurePresenter(
             return Results.Empty;
         }
 
+        if (context.RequestAborted.IsCancellationRequested)
+        {
+            return Results.StatusCode(499);
+        }
+
         if (result.Status == CapabilityExecutionStatus.Cancelled)
         {
-            return context.RequestAborted.IsCancellationRequested
-                ? Results.StatusCode(499)
-                : Write(new CapabilityFailureFacts(
-                    CapabilityFailureKind.NonCaller,
-                    CrestErrorCodes.InternalError,
-                    "服务器内部错误。"), context);
+            return Write(new CapabilityFailureFacts(
+                CapabilityFailureKind.NonCaller,
+                CrestErrorCodes.InternalError,
+                "服务器内部错误。"), context);
         }
 
         if (result.Status == CapabilityExecutionStatus.TimedOut)
         {
-            return context.RequestAborted.IsCancellationRequested
-                ? Results.StatusCode(499)
-                : Results.StatusCode(504);
+            return Results.StatusCode(504);
         }
 
         var facts = result.FailureFacts ?? ClassifyErrorCode(result.ErrorCode, result.ErrorMessage, result.Issues);
@@ -69,6 +70,17 @@ public sealed class CrestCapabilityEndpointFailurePresenter(
 
     private IResult Write(CapabilityFailureFacts facts, HttpContext context)
     {
+        // Binding/not-found entry points share the same transport suppression boundary.
+        if (context.Response.HasStarted)
+        {
+            return Results.Empty;
+        }
+
+        if (context.RequestAborted.IsCancellationRequested)
+        {
+            return Results.StatusCode(499);
+        }
+
         var authenticated = context.User.Identity?.IsAuthenticated == true;
         var kind = facts.Kind == CapabilityFailureKind.Unauthorized && authenticated
             ? CapabilityFailureKind.Forbidden

@@ -612,3 +612,29 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - SaaSHelpdesk 全量 **133 pass / 11 fail / 144**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider），逐 FQN 不变；套件改为串行以消除 Testcontainers 随机端口冲突（2m44s）。
 - Application **177/177**、DynamicApi **140/140**、JsonContracts **162/162**、CRUD NativeAOT **23/23**、Procurement **29/29**、Web **110/114**（4 条仅 worktree `.git` 文件环境项）。
 - 环境项与上轮一致：Asset E2E 缺 durable PG 连接；Boundary 2 条 ControlPlaneReferenceData evidence-ledger 既存 WIP；`CrestCreates.IntegrationTests` 的 `OpenIddictScopes` 缺失在上一 head `993297db` 同条件复现，属既存环境/种子时序，不计入本轮回归。
+
+## S3 统一审查 R2 修复（取消项，2026-10-20）
+
+审查报告：`docs/review/2026-10-20-issue-129-s3-unified-review-round2.md`（head `710b2a48`）。原六项中五项已关闭，保留取消项的两处修订点已闭环。
+
+### A. K/L 接入真实执行链
+
+- 新增 `CrestCreates.Core.Abstractions.Threading.UnitOfWorkCancellationSnapshot`（caller token、execution token、caller 是否已取消、deadline 是否到期）与 `IUnitOfWorkCancellationSource`。
+- 内核 `UnitOfWorkScope.StartAsync` 保留 caller token；`ExecuteAsync` 的 catch 与 `[UnitOfWorkMo]` 拦截器的 `OnExceptionAsync` 在 ambient 帧恢复/回滚之前，把 snapshot 附加到**原始** OCE 的 `Data`（不包装、不替换异常；#137 committed/unknown 事实不变）。
+- `CapabilityPipeline` 的 OCE 分类读取 snapshot：异常 token 为 execution token 且 caller 已取消 → CallerAbort；caller 未取消且 deadline 到期 → ManagedDeadline；token 为 caller token 且未取消 → NonCaller；其余（None/第三 token）→ NonCaller。`configureContext` 的 K/L 显式字段保留给非 UoW 传输。
+- 审查探针（真实 EF UoW `ExecuteAsync` + PostgreSQL + 公共 `CapabilityPipeline`）**4/4**：kernel-deadline → ManagedDeadline、kernel-caller → CallerAbort/Cancelled、direct-caller → CallerAbort/Cancelled、第三 token → NonCaller；真实事务存在、业务一次、ambient 清理。
+
+### B. 响应抑制与分类解耦
+
+- presenter 的共享边界（`Present` 与 `Write`）先检查 `Response.HasStarted` 与 `RequestAborted.IsCancellationRequested`：任一成立即不写 JSON（499/Empty），与失败分类无关；NonCaller facts 仍保留供审计/诊断。
+- 审查 IResult 决策探针 **3/3**：存活 NonCaller 仍返回安全 JSON；R 取消 + Cancelled、R 取消 + NonCaller 均不选择 JSON 响应。
+
+### C. 旧取消断言同步
+
+- `CapabilityEndToEndTests.E2E_Cancelled_RecordsCancelledStatus` 从期望 `TimedOut` 更新为冻结契约：`CapabilityExecutionStatus.Cancelled` + `FailureFacts.Kind == Cancelled`（不跳过、不改语义）；Capability 全套 **178/178**。
+
+### 复跑（修复 head 见 PR）
+
+- SaaSHelpdesk **137 pass / 11 fail / 148**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider）。
+- Web **113/117**（4 条仅 worktree `.git` 环境项）、Application **177/177**、DynamicApi **140/140**、OrmProviders **124/124**、CRUD NativeAOT **23/23**、Procurement **29/29**、JsonContracts **162/162**。
+- 环境项同上：Asset E2E durable PG 前置、Boundary evidence-ledger 既存 WIP、IntegrationTests 的 OpenIddict 种子时序（上一 head 可复现）。

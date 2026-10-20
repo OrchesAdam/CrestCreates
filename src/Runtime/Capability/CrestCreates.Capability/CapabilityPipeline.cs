@@ -1,6 +1,7 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Identity;
+using CrestCreates.Core.Abstractions.Threading;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -171,10 +172,33 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
         var deadline = context.ManagedDeadlineToken;
         var execution = context.ExecutionToken;
         var token = exception.CancellationToken;
+        var snapshot = exception.Data[UnitOfWorkCancellationSnapshot.ExceptionDataKey]
+            as UnitOfWorkCancellationSnapshot;
 
         if (!token.CanBeCanceled)
         {
             return NonCaller();
+        }
+
+        // The unit-of-work kernel attaches the caller/execution identities to the original exception
+        // before unwinding; without this bridge a kernel deadline or a caller cancellation forwarded
+        // through the linked execution token is indistinguishable from an unrelated token.
+        if (snapshot is not null)
+        {
+            if (token == snapshot.ExecutionToken)
+            {
+                if (snapshot.CallerTokenWasCancelled)
+                {
+                    return CallerAbort();
+                }
+
+                return snapshot.DeadlineExpired ? ManagedDeadline() : NonCaller();
+            }
+
+            if (snapshot.CallerToken.CanBeCanceled && token == snapshot.CallerToken)
+            {
+                return snapshot.CallerTokenWasCancelled ? CallerAbort() : NonCaller();
+            }
         }
 
         if (requested.CanBeCanceled && token == requested)

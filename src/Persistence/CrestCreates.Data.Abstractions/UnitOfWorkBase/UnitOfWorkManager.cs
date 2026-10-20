@@ -3,6 +3,7 @@ using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Core.Abstractions.Threading;
 using CrestCreates.Domain.UnitOfWork;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -128,6 +129,7 @@ namespace CrestCreates.Data.Abstractions
             catch (Exception exception)
             {
                 primary = exception;
+                AttachCancellationSnapshot(exception, scope);
                 var rollbackTerminationFailure = await scope.TryRollbackOnFailureAsync().ConfigureAwait(false);
                 if (rollbackTerminationFailure is not null)
                 {
@@ -186,6 +188,19 @@ namespace CrestCreates.Data.Abstractions
         private static void AttachCleanupDiagnostic(Exception primary, string key, Exception diagnostic)
         {
             primary.Data[key] = diagnostic;
+        }
+
+        /// <summary>
+        /// Preserves the caller/execution identities on the original cancellation exception before
+        /// the ambient frame unwinds; transports classify the source from this typed snapshot.
+        /// </summary>
+        private static void AttachCancellationSnapshot(Exception exception, UnitOfWorkScope scope)
+        {
+            if (exception is OperationCanceledException
+                && scope.CaptureCancellationSnapshot() is { } snapshot)
+            {
+                exception.Data[UnitOfWorkCancellationSnapshot.ExceptionDataKey] = snapshot;
+            }
         }
 
         private UnitOfWorkScope BeginRootScope(AmbientFrame? frame, UnitOfWorkOptions options)
@@ -378,7 +393,7 @@ namespace CrestCreates.Data.Abstractions
         /// <summary>
         /// 状态化 scope：承载参与者完成、事务结果、通知结果与释放标志（设计 §3.2）。
         /// </summary>
-        internal sealed class UnitOfWorkScope : IUnitOfWorkScope
+        internal sealed class UnitOfWorkScope : IUnitOfWorkScope, IUnitOfWorkCancellationSource
         {
             private readonly UnitOfWorkManager _manager;
             private readonly IUnitOfWork _unitOfWork;
@@ -395,6 +410,7 @@ namespace CrestCreates.Data.Abstractions
             private readonly IDisposable? _ambientToken;
             private readonly bool _ownsUnitOfWorkDirectly;
             private readonly UnitOfWorkExecutionTokenSource _tokenSource = new();
+            private CancellationToken _callerToken;
             private IDisposable? _tokenRestorer;
             private bool _framePushed;
             private bool _started;
@@ -571,6 +587,7 @@ namespace CrestCreates.Data.Abstractions
                 }
 
                 _started = true;
+                _callerToken = cancellationToken;
 
                 var deadline = ComputeDeadline();
                 _deadlineUtc = deadline;
@@ -592,6 +609,23 @@ namespace CrestCreates.Data.Abstractions
                 }
 
                 return BeginProviderTransactionAsync();
+            }
+
+            public UnitOfWorkCancellationSnapshot? CaptureCancellationSnapshot()
+            {
+                if (!_started || !_tokenSource.Token.CanBeCanceled || !_tokenSource.Token.IsCancellationRequested)
+                {
+                    return null;
+                }
+
+                var callerCancelled = _callerToken.CanBeCanceled && _callerToken.IsCancellationRequested;
+                var deadlineExpired = _deadlineUtc is { } deadline
+                    && (DateTimeOffset.UtcNow >= deadline || !callerCancelled);
+                return new UnitOfWorkCancellationSnapshot(
+                    _callerToken,
+                    _tokenSource.Token,
+                    callerCancelled,
+                    deadlineExpired);
             }
 
             private async Task BeginProviderTransactionAsync()

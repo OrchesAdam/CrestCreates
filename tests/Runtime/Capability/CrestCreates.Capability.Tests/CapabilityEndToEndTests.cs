@@ -190,7 +190,10 @@ public class CapabilityEndToEndTests
 
         var result = await pipeline.ExecuteAsync("slow.handler", ct: cts.Token);
 
-        result.Status.Should().Be(CapabilityExecutionStatus.TimedOut);
+        result.Status.Should().Be(CapabilityExecutionStatus.Cancelled,
+            "a canceled caller token is a caller abort, not a managed timeout");
+        result.FailureFacts.Should().NotBeNull();
+        result.FailureFacts!.Kind.Should().Be(CapabilityFailureKind.Cancelled);
         result.AuditRecordId.Should().NotBeNullOrWhiteSpace();
         var records = audit.GetRecords();
         records.Should().HaveCount(1);
