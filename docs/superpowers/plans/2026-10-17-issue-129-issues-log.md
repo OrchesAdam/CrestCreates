@@ -697,3 +697,33 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - SaaSHelpdesk 全量 **149 pass / 11 fail / 160**（11 条既有红不变；Customer/Category/KB/SLA/Agent 等 legacy 端点仍由显式 Legacy analyzer 生成）。
 - DynamicApi **140/140**、CompatibilityProjection.E2E **20/20**、CapabilityEndpoint AOT fixture **13/13**、Web **109/113**（4 条 worktree `.git` 环境项）。
 - 下一步：S4.2 迁移旧运行时与 Web Add/Map 到 `DynamicApi.Legacy`/`Web.Legacy`，显式激活 + per-owner/action allowlist；S4.3 依赖/符号/运行/变异守卫与归档文档。
+
+## S4.2/S4.3 Legacy runtime 隔离、显式激活与守卫（2026-10-20）
+
+### 交付
+
+- 新增 `src/Framework/Api/CrestCreates.DynamicApi.Legacy`：旧 registry/runtime/body reader/options/descriptors/endpoint conventions 从正式 `CrestCreates.DynamicApi` 移出；Legacy 单向引用正式共享契约（`DynamicApiResponse`/typed mapper 等保持正式）。正式程序集不再包含 `DynamicApiGeneratedRuntime`/`DynamicApiGeneratedRegistryStore`/`DynamicApiOptions`/`IDynamicApiGeneratedProvider`/`CompatibilityBodyReader`/`DynamicApiRouteConvention`。
+- 新增 `src/Platform/CrestCreates.Web.Legacy`：显式 `AddLegacyGeneratedApi`/`MapLegacyGeneratedApi`。正式 `AddCrestWeb`/`MapCrestWeb` 不再无条件调用旧 Add/Map；`CrestWebOptions.GeneratedApi`/`UseGeneratedApi` 移除；旧 `AddCrestAspNetCoreDynamicApi`/`MapCrestAspNetCoreDynamicApi` 只在 Legacy 包内以 `[Obsolete]` 转接。
+- **Allowlist**：`AddLegacyGeneratedApi` 必须显式选择程序集并逐 service/action `Allow<TService>(...)`；Map 前精确校验声明集合（多/少均 `CCHTTP007`），并检测 legacy 内重复路由及与已映射 formal 端点的 method/route 冲突（`CCHTTP005`）。无通配、无按 assembly/namespace 豁免。
+- SaaSHelpdesk 迁移为显式 legacy 激活：7 个仍使用的 service、逐 action allowlist；Ticket 不在 legacy 程序集选择/allowlist 中。LibraryManagement 同样迁移到显式 legacy 激活与 allowlist（Book/Category/Loan/Member）。
+- Legacy analyzer 仅由 opt-in 项目引用：SaaSHelpdesk/LibraryManagement Application、仍需要静态兼容链的 CapabilityEndpoint.AotFixture 与 CompatibilityProjection.E2E；默认 analyzer 不含 legacy 生成器。
+- **L01/L02 守卫**：
+  - `LegacyAnalyzerIsolationTests`：默认 analyzer 无 DynamicApi/AppServiceCompatibility/Controller 生成器；Legacy analyzer 仅含显式保留的 legacy 生成器，controller 生成器不存在。
+  - `LegacyIsolationBoundaryTests`：正式 runtime 不含 legacy 类型；Legacy runtime 含移出类型；正式 Web 程序集不引用 `CrestCreates.DynamicApi.Legacy`/`CrestCreates.Web.Legacy`；`CrestWebOptions` 不再暴露 `GeneratedApi`；无 allowlist 的 `AddLegacyGeneratedApi` 失败。
+  - `LegacyGeneratedApiMapGuardTests`：精确 allowlist 映射、缺/多 action 失败（CCHTTP007）、formal/legacy 重复 method/route 在映射前失败（CCHTTP005）。
+  - `LegacyActivationBaselineTests`（真实 SaaS Host）：legacy provider 不发布 `ITicketAppService`，服务集合精确等于 7 个 allowlisted 服务。
+
+### 证据（S4 head 见 PR）
+
+- SaaSHelpdesk 全量 **150 pass / 11 fail / 161**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider）。
+- Web **116/120**（4 条仅 worktree `.git` 环境项，含 8 条新 S4 守卫）；DynamicApi **140/140**、Application **177/177**、Capability **178/178**、OrmProviders **124/124**、JsonContracts **162/162**、Procurement **29/29**。
+- CRUD NativeAOT **23/23**、Data.Abstractions NativeAOT **1/1**、CompatibilityProjection.E2E **20/20**、CapabilityEndpoint.AotFixture **13/13**（该 fixture 明确为 legacy compatibility fixture，引用 Legacy analyzer/runtime，不作为 formal projection 原生证据）。
+- DependencyBoundaries **176/178**；2 条仍为 ControlPlaneReferenceData evidence-ledger 既存 WIP，无新增 Legacy 依赖违规。
+- LibraryManagement.Web 构建成功（该样例无测试项目）。
+- CodeGenerator 全量 **503/503**（30m30s；归档 legacy 专用测试后总数由 552 降至 503）。
+
+### 非声称
+
+- Legacy 包为 JIT/downloaded 兼容面，未声明 trimming/NativeAOT-verified；其 fixture 的 AOT 结果不外推到正式 Ticket 链（S5 另行交付）。
+- `POST /api/user` 等框架 HTTP 缺失仍按既有账本单列；Asset E2E durable PG 前置、IntegrationTests 的 OpenIddict 种子时序仍为环境项。
+- 外部旧 `GeneratedApiController`/`ApiOverride` 消费者仍会 breaking（按 S4 计划归档，不保留过时推荐）。

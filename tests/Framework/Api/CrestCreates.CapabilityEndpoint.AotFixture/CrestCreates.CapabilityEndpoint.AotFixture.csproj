@@ -41,6 +41,7 @@
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="../../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <ProjectReference Include="../../../../src/Persistence/CrestCreates.Data.Abstractions/CrestCreates.Data.Abstractions.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi.Legacy/CrestCreates.DynamicApi.Legacy.csproj" />
   </ItemGroup>
 
 </Project>

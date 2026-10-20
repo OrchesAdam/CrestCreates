@@ -60,6 +60,7 @@
   <Folder Name="/src/Framework/" />
   <Folder Name="/src/Framework/Api/">
     <Project Path="../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <Project Path="../src/Framework/Api/CrestCreates.DynamicApi.Legacy/CrestCreates.DynamicApi.Legacy.csproj" />
     <Project Path="../src/Framework/Api/CrestCreates.DynamicApi.Abstractions/CrestCreates.DynamicApi.Abstractions.csproj" />
     <Project Path="../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
   </Folder>
@@ -178,6 +179,7 @@
   </Folder>
   <Folder Name="/src/Platform/">
     <Project Path="../src/Platform/CrestCreates.Web/CrestCreates.Web.csproj" />
+    <Project Path="../src/Platform/CrestCreates.Web.Legacy/CrestCreates.Web.Legacy.csproj" />
     <Project Path="../src/Platform/CrestCreates.Platform/CrestCreates.Platform.csproj" />
     <Project Path="../src/Platform/CrestCreates.Platform.AspNetCore/CrestCreates.Platform.AspNetCore.csproj" />
     <Project Path="../src/Platform/CrestCreates.Platform.All/CrestCreates.Platform.All.csproj" />

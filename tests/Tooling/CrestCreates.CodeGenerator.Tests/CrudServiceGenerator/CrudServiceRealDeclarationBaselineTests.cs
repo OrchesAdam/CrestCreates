@@ -96,6 +96,7 @@ public class CrudServiceRealDeclarationBaselineTests
         "CrestCreates.Core.Abstractions",
         "CrestCreates.DynamicApi",
         "CrestCreates.DynamicApi.Abstractions",
+        "CrestCreates.DynamicApi.Legacy",
         "CrestCreates.Capability.Abstractions",
         "CrestCreates.Metadata.Abstractions",
         "CrestCreates.Validation",
@@ -109,6 +110,7 @@ public class CrudServiceRealDeclarationBaselineTests
     {
         var referencePaths = new List<string> { typeof(object).Assembly.Location };
         referencePaths.Add(typeof(GenerateCrudServiceAttribute).Assembly.Location);
+        referencePaths.Add(typeof(CrestCreates.DynamicApi.IDynamicApiGeneratedProvider).Assembly.Location);
         foreach (var referenceName in DeclaredReferenceNames)
         {
             try

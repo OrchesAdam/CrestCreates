@@ -26,6 +26,7 @@
     <ProjectReference Include="../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Application.Contracts/SaaSHelpdesk.Application.Contracts.csproj" />
+    <ProjectReference Include="../../../src/Framework/Api/CrestCreates.DynamicApi.Legacy/CrestCreates.DynamicApi.Legacy.csproj" />
   </ItemGroup>
 
 </Project>

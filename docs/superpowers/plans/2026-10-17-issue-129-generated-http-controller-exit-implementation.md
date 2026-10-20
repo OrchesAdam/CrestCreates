@@ -44,11 +44,11 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 
 ## S4 — Legacy 隔离与归档
 
-- [ ] 仍有消费者的旧 Minimal API runtime/analyzer/adapter 显式隔离、单向依赖、有限允许清单；无 provider 时无自动 fallback。
-- [ ] TicketApi、Controller 两生成器、GeneratedApiController/ApiOverride 分支、旧 CRUD stub bundle、死反射 route helpers 及专用旧测试移到回收站。
-- [ ] scalar helper 留在实际消费者所属边界；保留正式 CrudServiceSourceGenerator 诊断入口；旧 warning 随真实旧实现退出移除。
-- [ ] 更新默认/legacy analyzer 分发、Compile/package globs、SDK 配置，避免归档代码继续生效或新 analyzer 循环依赖。
-- [ ] L01/L02 的依赖、语义符号、运行路由与变异守卫通过。
+- [x] 仍有消费者的旧 Minimal API runtime/analyzer/adapter 显式隔离、单向依赖、有限允许清单；无 provider 时无自动 fallback。证据：`DynamicApi.Legacy`/`CodeGenerator.Legacy`/`Web.Legacy` 三包；`AddLegacyGeneratedApi` + 精确 allowlist；正式 Web/DynamicApi 无旧 Add/Map。
+- [x] TicketApi、Controller 两生成器、GeneratedApiController/ApiOverride 分支、旧 CRUD stub bundle、死反射 route helpers 及专用旧测试移到回收站。证据：`99_RecycleBin/issue-129-controller-exit/`（含 README 调用图/替代/测试迁移）。
+- [x] scalar helper 留在实际消费者所属边界；保留正式 CrudServiceSourceGenerator 诊断入口；旧 warning 随真实旧实现退出移除。证据：`IsScalar` 内联为 legacy runtime 私有分类器；参数化 CRUD 诊断保留，旧 bundle `#warning` 移除。
+- [x] 更新默认/legacy analyzer 分发、Compile/package globs、SDK 配置，避免归档代码继续生效或新 analyzer 循环依赖。证据：Legacy analyzer 显式 opt-in；`Directory.Build.Aot.props` 排除 Legacy；默认 analyzer 不含 legacy 生成器。
+- [x] L01/L02 的依赖、语义符号、运行路由与变异守卫通过。证据：analyzer/runtime/Web 边界、allowlist 精确性、CCHTTP005 重复路由、真实 Host 无 legacy Ticket；见 issues log「S4.2/S4.3」。
 
 ## S5 — Native、回归与交接
 

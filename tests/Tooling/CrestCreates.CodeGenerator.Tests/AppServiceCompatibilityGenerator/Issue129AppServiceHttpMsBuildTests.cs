@@ -130,8 +130,9 @@ public sealed class Issue129AppServiceHttpMsBuildTests
         probe.ExitCode.Should().Be(0, probe.Output);
         probe.Output.Should().NotContain("SYSLIB1030",
             "the official STJ generator must close every root the projection declares");
-        probe.Output.Should().Contain("warning CCHTTP002",
-            "the legacy static registrar declines ownership with a warning, not a silent second publication");
+        probe.Output.Should().NotContain("CCHTTP002",
+            "the legacy static registrar is an explicit opt-in package and is not part of the default "
+            + "toolchain; the formal projection owns this declaration without a second publication warning");
 
         probe.Bundle.Should().NotBeEmpty("the precompile stage must materialize ordinary Compile input");
         probe.Bundle.Should().Contain("GeneratedAppServiceHttpContribution_");

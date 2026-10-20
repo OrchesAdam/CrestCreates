@@ -164,13 +164,6 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(_ =>
             new JsonResourceLocalizationProvider("Localization/Resources"));
 
-        services.AddCrestAspNetCoreDynamicApi(dynamicApi =>
-        {
-            foreach (var markerType in options.GeneratedApi.ServiceMarkerTypes)
-            {
-                dynamicApi.AddApplicationServiceAssembly(markerType.Assembly);
-            }
-        });
         services.AddCrestExceptionHandling();
         services.TryAddSingleton<ICapabilityExceptionClassifier, CrestCapabilityExceptionClassifier>();
         services.TryAddSingleton<ICapabilityEndpointFailurePresenter, CrestCapabilityEndpointFailurePresenter>();
@@ -209,7 +202,6 @@ public static class CrestCreatesWebApplicationExtensions
         }
 
         app.MapCrestHealthChecks();
-        app.MapCrestAspNetCoreDynamicApi();
         app.MapCrestOpenApi();
         return app;
     }

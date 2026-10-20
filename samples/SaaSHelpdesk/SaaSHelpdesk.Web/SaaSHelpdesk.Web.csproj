@@ -35,6 +35,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
     <ProjectReference Include="../../../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
+    <ProjectReference Include="../../../src/Platform/CrestCreates.Web.Legacy/CrestCreates.Web.Legacy.csproj" />
   </ItemGroup>
 
 </Project>

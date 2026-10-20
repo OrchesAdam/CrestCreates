@@ -48,6 +48,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="FluentAssertions" />
+    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi.Legacy/CrestCreates.DynamicApi.Legacy.csproj" />
   </ItemGroup>
 
 </Project>

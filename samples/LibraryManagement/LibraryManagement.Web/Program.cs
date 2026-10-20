@@ -1,5 +1,6 @@
 using CrestCreates.OpenApi;
 using CrestCreates.Modularity;
+using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Application.Services;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Application.Identity;
@@ -10,6 +11,7 @@ using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AspNetCore;
+using CrestCreates.Web.Legacy;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using OpenIddict.Server.AspNetCore;
 using CrestCreates.Authorization;
@@ -78,13 +80,18 @@ builder.Services.AddMultiTenancy(options =>
 });
 builder.Services.AddTenantResolvers(TenantResolutionStrategy.Header);
 builder.Services.AddRepositoryTenantProvider();
-builder.Services.AddCrestAspNetCoreDynamicApi(options =>
+// #129 S4: explicit legacy activation with a per-service/action allowlist.
+builder.Services.AddLegacyGeneratedApi(options =>
 {
     options.AddApplicationServiceAssembly<BookAppService>();
-    options.AddApplicationServiceAssembly<SettingAppService>();
-    options.AddApplicationServiceAssembly<FeatureAppService>();
-    options.AddApplicationServiceAssembly<AuditLogAppService>();
-    options.AddApplicationServiceAssembly<AuditLogCleanupAppService>();
+    options.AddApplicationServiceAssembly<CategoryAppService>();
+    options.AddApplicationServiceAssembly<LoanAppService>();
+    options.AddApplicationServiceAssembly<MemberAppService>();
+
+    options.Allow<IBookAppService>("GetByIsbn", "SearchBooks", "Create", "GetById", "GetList", "Update", "Delete");
+    options.Allow<ICategoryAppService>("Create", "GetById", "GetAll", "GetList", "Query", "Update", "Delete", "Exists", "Count");
+    options.Allow<ILoanAppService>("Search", "GetOverdueLoans", "ReturnBook", "ExtendLoan", "ProcessOverdueLoans", "Create", "GetById", "GetAll", "GetList", "Query", "Update", "Delete", "Exists", "Count");
+    options.Allow<IMemberAppService>("GetByEmail", "GetActiveMembers", "PayBalance", "Create", "GetById", "GetAll", "GetList", "Query", "Update", "Delete", "Exists", "Count");
 });
 
 // Register all modules using the SourceGenerator-generated module discovery system
@@ -103,7 +110,7 @@ app.UseAccountabilityHttpOperationScope();
 app.UseTenantBoundary();
 app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();
-app.MapCrestAspNetCoreDynamicApi();
+app.MapLegacyGeneratedApi();
 app.MapCrestOpenApi();
 
 // Initialize all modules

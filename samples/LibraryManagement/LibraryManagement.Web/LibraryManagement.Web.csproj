@@ -33,6 +33,7 @@
   <ItemGroup>
     <Compile Remove="Controllers\BooksController.cs" />
     <Compile Remove="Controllers\BookCrudDemoController.Custom.cs" />
+    <ProjectReference Include="../../../src/Platform/CrestCreates.Web.Legacy/CrestCreates.Web.Legacy.csproj" />
   </ItemGroup>
 
 </Project>
