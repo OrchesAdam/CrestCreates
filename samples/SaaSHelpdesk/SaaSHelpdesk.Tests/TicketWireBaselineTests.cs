@@ -72,7 +72,7 @@ public class TicketWireBaselineTests : BaseTest
     {
         var dataSource = Factory.Services.GetRequiredService<EndpointDataSource>();
         var ticketEndpoints = dataSource.Endpoints.OfType<RouteEndpoint>()
-            .Where(endpoint => endpoint.RoutePattern.RawText!.StartsWith("api/ticket", StringComparison.OrdinalIgnoreCase))
+            .Where(endpoint => endpoint.RoutePattern.RawText!.StartsWith("/api/ticket", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         ticketEndpoints.Should().HaveCount(11);

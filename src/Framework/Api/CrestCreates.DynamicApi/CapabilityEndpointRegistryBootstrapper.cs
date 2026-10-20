@@ -215,9 +215,9 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
     [
         typeof(DynamicApiResponse),
         typeof(ProblemDetails),
-        // Framework scalar inputs are host-shared: any source-generated host context carries the
-        // same STJ metadata, so the OpenAPI/host context may answer them before the owning
-        // contribution without changing the wire contract (#129 S3).
+        // Framework scalar inputs carry identical STJ metadata across source-generated contexts.
+        // A non-contributed context may answer them only when its metadata is contract-equivalent
+        // to the owning contribution's metadata (S3 review R1).
         typeof(string),
         typeof(Guid),
         typeof(bool),
@@ -310,7 +310,8 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return "The owning contribution declares no source-generated JsonContext.";
         }
 
-        if (!TryGetContributedMetadata(context, required, out _))
+        if (!TryGetContributedMetadata(context, required, out var ownerMetadata)
+            || ownerMetadata is null)
         {
             return "The contribution's source-generated JsonContext does not carry metadata for it.";
         }
@@ -326,13 +327,25 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return null;
         }
 
-        if (Array.IndexOf(HostSharedJsonRootTypes, required.ClrType) >= 0
-            && answering is JsonSerializerContext)
+        // Framework-shared root: an activated contributed context is trusted (the platform emitted
+        // it); any other host context may answer it first only when its metadata is contract-equivalent
+        // to the owning contribution's metadata. A context base type is not evidence of source
+        // generation or equivalence: reflection-backed metadata and modified converters/property names
+        // are rejected (#129 S3 review R1).
+        if (Array.IndexOf(HostSharedJsonRootTypes, required.ClrType) >= 0)
         {
-            // Framework-shared root: every source-generated host context carries identical metadata
-            // for it, so any host context may answer it first (the owning contribution still must
-            // declare it, which TryGetContributedMetadata above already verified).
-            return null;
+            if (answering is JsonSerializerContext answeringContext
+                && hostContexts.Contains(answeringContext))
+            {
+                return null;
+            }
+
+            if (answering is IJsonTypeInfoResolver answeringResolver
+                && TryGetResolverMetadata(answeringResolver, required.ClrType, options, out var candidateMetadata)
+                && SharedContractEquivalent(ownerMetadata, candidateMetadata!))
+            {
+                return null;
+            }
         }
 
         if (answering is JsonSerializerContext foreignContext
@@ -347,6 +360,71 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             + $"'{answering!.GetType().FullName ?? answering.GetType().Name}' before the contribution's "
             + "JsonContext (activate the generated context after the host's own resolvers).";
     }
+
+    private static bool TryGetResolverMetadata(
+        IJsonTypeInfoResolver resolver,
+        Type type,
+        JsonSerializerOptions options,
+        out JsonTypeInfo? metadata)
+    {
+        try
+        {
+            metadata = resolver.GetTypeInfo(type, options);
+            return metadata is not null;
+        }
+        catch (NotSupportedException)
+        {
+            metadata = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Shared framework roots may be answered by another source-generated host context only when the
+    /// wire contract is identical: same kind/type/converter and the same object property names/types.
+    /// Reflection-backed metadata and modified converters/property names are rejected even when their
+    /// current shape happens to serialize the same way (#129 S3 review R1).
+    /// </summary>
+    private static bool SharedContractEquivalent(JsonTypeInfo expected, JsonTypeInfo candidate)
+    {
+        if (candidate.OriginatingResolver is DefaultJsonTypeInfoResolver)
+        {
+            return false;
+        }
+
+        if (expected.Kind != candidate.Kind
+            || expected.Type != candidate.Type
+            || expected.NumberHandling != candidate.NumberHandling)
+        {
+            return false;
+        }
+
+        // Source-generated object converters may be context-local, so object roots are compared by
+        // their property contract below. Value roots (Guid and other framework scalars) must keep the
+        // built-in converter identity; a custom converter changes the wire contract.
+        if (expected.Type.IsValueType
+            && expected.Converter.GetType() != candidate.Converter.GetType())
+        {
+            return false;
+        }
+
+        if (expected.Kind == JsonTypeInfoKind.Object)
+        {
+            var expectedProperties = DescribeJsonPropertyContract(expected);
+            var candidateProperties = DescribeJsonPropertyContract(candidate);
+            if (!expectedProperties.SequenceEqual(candidateProperties, StringComparer.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static IEnumerable<string> DescribeJsonPropertyContract(JsonTypeInfo typeInfo)
+        => typeInfo.Properties.Select(property =>
+            property.Name + "|" + property.PropertyType.FullName + "|" + property.IsRequired
+            + "|" + (property.CustomConverter?.GetType().FullName ?? string.Empty));
 
     /// <summary>
     /// Asks the contributed context for the root's metadata through the resolver interface, using the

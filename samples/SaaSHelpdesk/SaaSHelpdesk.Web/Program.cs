@@ -53,6 +53,29 @@ builder.Host.RegisterModules();
 var app = builder.Build();
 
 app.UseCrestWeb();
+
+// #129 S3: the activated contribution contexts are host-authoritative for their projection roots.
+// Put them before host infrastructure resolvers (for example the OpenAPI schema context) so the
+// map-time JSON verification sees the owning source-generated context, never a reflection-backed
+// or metadata-modified resolver.
+var generatedProjectionContexts = app.Services
+    .GetServices<CapabilityEndpointContribution>()
+    .Select(contribution => contribution.JsonContext)
+    .Where(context => context is not null)
+    .ToArray();
+if (generatedProjectionContexts.Length > 0)
+{
+    var httpJsonOptions = app.Services
+        .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
+        .Value.SerializerOptions;
+    var resolverChain = httpJsonOptions.TypeInfoResolverChain;
+    foreach (var context in generatedProjectionContexts.Reverse())
+    {
+        resolverChain.Remove(context!);
+        resolverChain.Insert(0, context!);
+    }
+}
+
 app.MapCrestCapabilityEndpoints();
 app.MapCrestWeb();
 

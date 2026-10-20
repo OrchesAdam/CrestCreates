@@ -512,3 +512,15 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - Update/Delete 的 client stamp 语义（缺失 428、stale 拒绝、DTO stamp 回读）尚未实现 → S3-c。
 - 租户上下文/双租户生产选库、typed validators、H01–H08 尚未完成 → S3-b/c/d。
 - 本增量不声称 S3 完成；正式 wire 矩阵测试已绿，其余目标测试按上述增量继续。
+
+## S3 第一增量复审 R1 修复（2 项 P2，2026-10-20）
+
+| 发现 | 修复 | 证据 |
+| --- | --- | --- |
+| S3-R2-01 共享 JSON root 校验过宽：仅凭 `JsonSerializerContext` 基类即接受，反射 metadata 与改写 Guid/响应字段的 metadata 均通过 | `CapabilityEndpointRegistryBootstrapper` 对 shared roots：由本 Host **激活的贡献 context** 可信；其他 host context 必须是 source-generated 且与属主 context 的 metadata **契约等价**（kind/type/number handling；object 比较属性名/类型/required/custom converter；value 类型比较内置 converter 身份；`OriginatingResolver` 为 `DefaultJsonTypeInfoResolver` 一律拒绝）。真实 SaaSHelpdesk Host 在 Map 前把激活贡献 context 移到 resolver 链首。 | 审查 `ReviewS3_shared_root_must_not_trust_a_context_base_type_over_actual_contract` **8/8**（owned/canonical-host 通过，modified/reflection 拒绝）；DynamicApi 全套 138/138；既有 shared void root 双贡献测试保持通过。 |
+| S3-R2-02 wire 探针前缀过时：仍匹配 `api/ticket`，正式路由带前导 `/`，筛出零端点 | `TicketWireBaselineTests` 的 authorization-metadata 筛选改为 `/api/ticket`；新增审查路由探针按 `TrimStart('/')` 归一化后断言 11 个正式端点、display prefix 与零 endpoint 授权元数据。 | 审查 `ReviewS3TicketRoutingProbes` 1/1；正式 wire matrix + endpoint metadata 测试 3/3。 |
+
+### 仍属 S3 后续增量
+
+- 失败桥接（权限拒绝空 403 → CrestErrorResponse）、EfCore UoW 重复 binding、stamp/428/stale/DTO 回读、双租户生产选库、typed validators、H01–H08。S3 整体不放行。
+- 本轮证据：DynamicApi 138/138、JsonContracts 162/162、CRUD NativeAOT 23/23。
