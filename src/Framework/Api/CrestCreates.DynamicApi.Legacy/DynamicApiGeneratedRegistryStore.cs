@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.DynamicApi;
 
@@ -78,6 +79,23 @@ public static class DynamicApiGeneratedRegistryStore
     {
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(options);
+
+        var registry = BuildRegistry(options);
+        if (registry is null)
+        {
+            return false;
+        }
+
+        // Every mapping entry point (including the retained raw Map API) passes through this gate.
+        // Without the explicit policy registered by AddLegacyGeneratedApi nothing is mapped.
+        var allowlist = endpoints.ServiceProvider.GetService<ILegacyDynamicApiAllowlist>()
+            ?? throw new InvalidOperationException(
+                "CCHTTP007: legacy Dynamic API mapping requires the explicit per-service/action allowlist "
+                + "registered by AddLegacyGeneratedApi. Calling AddCrestDynamicApi/MapCrestDynamicApi "
+                + "directly never activates the legacy surface without a policy.");
+
+        LegacyDynamicApiActivationGuard.ValidateAllowlist(registry, allowlist);
+        LegacyDynamicApiActivationGuard.ValidateRoutes(endpoints, registry);
 
         var mapped = false;
         var mappedEndpointKeys = new HashSet<string>(StringComparer.Ordinal);

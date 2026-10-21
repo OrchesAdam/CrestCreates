@@ -85,6 +85,7 @@ public class LegacyDynamicApiExtensionsTests
 
         var services = new ServiceCollection();
         services.AddRouting();
+        services.AddSingleton<ILegacyDynamicApiAllowlist>(new EmptyLegacyAllowlist());
         using var serviceProvider = services.BuildServiceProvider();
         var endpointRouteBuilder = new DefaultEndpointRouteBuilder(serviceProvider);
 
@@ -137,6 +138,17 @@ public class LegacyDynamicApiExtensionsTests
 
         action.Should().Throw<InvalidOperationException>()
             .WithMessage("*编译期生成的 provider*");
+    }
+
+    private sealed class EmptyLegacyAllowlist : ILegacyDynamicApiAllowlist
+    {
+        public IReadOnlyCollection<Type> ServiceTypes => Array.Empty<Type>();
+
+        public bool TryGetAllowedActions(Type serviceType, out IReadOnlyCollection<string> actions)
+        {
+            actions = Array.Empty<string>();
+            return false;
+        }
     }
 
     private sealed class DefaultEndpointRouteBuilder : IEndpointRouteBuilder

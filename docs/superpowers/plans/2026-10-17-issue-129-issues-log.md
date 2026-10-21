@@ -684,8 +684,8 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 ### 交付
 
 - 新增显式 `src/Tooling/CrestCreates.CodeGenerator.Legacy`（netstandard2.0 analyzer，`DevelopmentDependency`）：`[CrestService]` 旧 Minimal API 生成器与静态 compatibility 生成器从默认 analyzer 移入；默认 `CrestCreates.CodeGenerator` 不再包含它们。`Directory.Build.Aot.props` 的全局 analyzer/trim 排除同时排除 Legacy；只有 SaaSHelpdesk.Application、LibraryManagement.Application 与仍需要静态兼容/legacy 的 fixture 显式引用 Legacy analyzer。
-- `DynamicApiAotSourceGenerator` 的 controller 分支（`[GeneratedApiController]`/`[ApiOverride]`/controller registration/descriptor）移除；移除前快照归档到 `99_RecycleBin/issue-129-controller-exit/...pre-controller-removal.cs`。`GenerationContext` 只剩 services。
-- `ControllerSourceGenerator`、`CrudControllerSourceGenerator`、`CrestCrudApiControllerAttribute`、`CrestApiController`/`GeneratedApiControllerAttribute`/`ApiOverrideAttribute`/`CrudAction`、以及维护它们的专用测试归档到 `99_RecycleBin/issue-129-controller-exit/`（调用图/替代/测试迁移见该目录 README；`99_RecycleBin` 不入库）。
+- `DynamicApiAotSourceGenerator` 的 controller 分支（`[GeneratedApiController]`/`[ApiOverride]`/controller registration/descriptor）移除；移除前快照入库到 `docs/review/2026-10-21-issue-129-dynamic-api-aot-source-generator-pre-controller-removal.cs.txt`（Git 历史同内容：`26439113^:src/Tooling/CrestCreates.CodeGenerator/DynamicApiGenerator/DynamicApiAotSourceGenerator.cs`）。`GenerationContext` 只剩 services。
+- `ControllerSourceGenerator`、`CrudControllerSourceGenerator`、`CrestCrudApiControllerAttribute`、`CrestApiController`/`GeneratedApiControllerAttribute`/`ApiOverrideAttribute`/`CrudAction`、以及维护它们的专用测试归档到 `99_RecycleBin/issue-129-controller-exit/`；调用图/替代/测试迁移/退出清单的 PR 交付件是 `docs/superpowers/plans/2026-10-21-issue-129-s4-legacy-archive-record.md`（`99_RecycleBin` 仅为本地软删除备份且被 gitignore 忽略，不属于 PR 交付）。
 - `CrudServiceSourceGenerator` 旧无参 stub/bundle/provider/旧 bool ExecuteAsync 发射器全部移除；参数化 `[GenerateCrudService(typeof(TEntity))]` 的正式诊断/ownership 入口保留。旧无参声明现在确定性报告 `InvalidDeclaration`（“parameterless stub retired”），不再生成 DTO/service/endpoint。旧专用测试 `CrudServiceSourceGeneratorTests`、`CrudServiceMainlineSourceGeneratorTests` 归档。
 - `DynamicApiRouteConvention` 删除（实例反射方法零消费者）；唯一活成员 `IsScalar` 变为 `DynamicApiGeneratedRuntime` 内的私有、有限已知类型分类器；DI 注册与 controller configurator hook 删除。
 - `CrestServiceAttribute` 移除 controller-only 的 `GenerateController`/`Route`；测试服务标记同步移除。
@@ -716,7 +716,7 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 ### 证据（S4 head 见 PR）
 
 - SaaSHelpdesk 全量 **150 pass / 11 fail / 161**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider）。
-- Web **116/120**（4 条仅 worktree `.git` 环境项，含 8 条新 S4 守卫）；DynamicApi **140/140**、Application **177/177**、Capability **178/178**、OrmProviders **124/124**、JsonContracts **162/162**、Procurement **29/29**。
+- Web **116/120**；原归因为 4 条 worktree `.git` 环境项，S4 复审更正：其中 `CapabilityEndpointBoundaryTests.Legacy_DynamicApi_Source_DoesNotReference_CapabilityEndpoint_Runtime` 是真实迁移回归（守卫仍读迁移前的正式目录，见 S4-R1-04），不是环境项；其余 3 条才是 `.git` 目录谓词。修复后 Web 全量 **120/120**（不含审查探针；含探针 135/135）并通过 worktree/导出快照根定位。DynamicApi **140/140**、Application **177/177**、Capability **178/178**、OrmProviders **124/124**、JsonContracts **162/162**、Procurement **29/29**。
 - CRUD NativeAOT **23/23**、Data.Abstractions NativeAOT **1/1**、CompatibilityProjection.E2E **20/20**、CapabilityEndpoint.AotFixture **13/13**（该 fixture 明确为 legacy compatibility fixture，引用 Legacy analyzer/runtime，不作为 formal projection 原生证据）。
 - DependencyBoundaries **176/178**；2 条仍为 ControlPlaneReferenceData evidence-ledger 既存 WIP，无新增 Legacy 依赖违规。
 - LibraryManagement.Web 构建成功（该样例无测试项目）。
@@ -727,3 +727,29 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - Legacy 包为 JIT/downloaded 兼容面，未声明 trimming/NativeAOT-verified；其 fixture 的 AOT 结果不外推到正式 Ticket 链（S5 另行交付）。
 - `POST /api/user` 等框架 HTTP 缺失仍按既有账本单列；Asset E2E durable PG 前置、IntegrationTests 的 OpenIddict 种子时序仍为环境项。
 - 外部旧 `GeneratedApiController`/`ApiOverride` 消费者仍会 breaking（按 S4 计划归档，不保留过时推荐）。
+
+## S4-R1 复审修复：统一 allowlist、精确身份、路由语义与守卫迁移（2026-10-21）
+
+复审报告：`docs/review/2026-10-21-issue-129-s4-review-round1.md`（审查 head `8f2f77ab`）；结论为 4 项 P2 + 1 项 P3。本轮只修该五项，不改变 S3 放行结论。
+
+### 修复
+
+- **S4-R1-01 旧公开 Add/Map 绕过**：allowlist 策略收口为 legacy runtime 的内部接口；`AddLegacyGeneratedApi` 注册策略，`MapLegacyGeneratedApi`、保留的 `MapCrestDynamicApi` 与 `DynamicApiGeneratedRegistryStore.MapGeneratedEndpoints` 全部经过同一道门禁。没有策略时任何入口都在映射前抛 `CCHTTP007`，零端点；旧 Obsolete Add 单独调用不再可用（Map 会 fail closed）。
+- **S4-R1-02 跨程序集同名类型**：`LegacyGeneratedApiOptions.Allow<TService>` 改为按 CLR `Type` 身份（含程序集）存储；校验使用 `service.ServiceType` 精确匹配。同名不同程序集的 `Get` 不再共享 allowlist 条目；无 CLR 类型的 service fail closed。
+- **S4-R1-03 路由等价与反向 Map**：新增共享的 `RoutePatternCollisionGuard`（同一源文件链接进 formal 与 Legacy，保持 formal 不引用 Legacy 包），按路由实际匹配语义规范化：大小写不敏感、参数名不参与匹配、约束保留、catch-all/参数区分。`MapCrestCapabilityEndpoints` 在批量注册前对 formal 批次与已映射端点的并集预检（覆盖 legacy-first），Legacy Map 同样在映射前预检；命中 `CCHTTP005` 时零新增端点。
+- **S4-R1-04 守卫路径与根定位**：`CapabilityEndpointBoundaryTests` 的 legacy 源守卫改读 `src/Framework/Api/CrestCreates.DynamicApi.Legacy`，保留存在性与禁止符号断言；`FindRepoRoot` 同时接受 `.git` 文件、`.git` 目录与 `CrestCreates.slnx`，worktree 与导出快照均可运行。
+- **S4-R1-05 P3 归档工件**：库内新增 `docs/superpowers/plans/2026-10-21-issue-129-s4-legacy-archive-record.md`（调用图/替代入口/测试迁移/退出清单），移除前快照入库 `docs/review/2026-10-21-issue-129-dynamic-api-aot-source-generator-pre-controller-removal.cs.txt`；issues log 与实施计划链接同步修正，并明确 `99_RecycleBin/` 只是本地软删除备份、不属于 PR 交付。
+
+### 证据
+
+- 复审探针 `ReviewS4LegacyIsolationProbes` **15/15**（旧 head 为 10 pass / 5 target fail）：旧入口拒绝、跨程序集身份拒绝、大小写/参数名冲突拒绝、正反 Map 顺序均拒绝且零新增、actual router 冲突控制全部通过。
+- Web 全量 **135/135**（含 15 条复审探针；不含探针 120/120，原 `.git` 环境项与迁移回归均消失）。
+- SaaSHelpdesk **150 pass / 11 fail / 161**（旧 11 条既有红不变）；DynamicApi **140/140**、Application **177/177**、Capability **178/178**、OrmProviders **124/124**、JsonContracts **162/162**、Procurement **29/29**、CompatibilityProjection E2E **20/20**。
+- CRUD NativeAOT **23/23**、CapabilityEndpoint AOT fixture **13/13**、Data.Abstractions NativeAOT **1/1**；三者均通过真实 publish/link/run（linux-x64）。
+- DependencyBoundaries **176/178**；2 条仍为 ControlPlaneReferenceData evidence-ledger 既存 WIP。
+- CodeGenerator 全量 **503/503**（32m37s），含 legacy analyzer 隔离与依赖边守卫；`Legacy_dependency_fixture_has_no_formal_to_legacy_edge` 通过（共享路由守卫采用链接源文件，formal 项目不引用 Legacy 包）。
+
+### 非声称
+
+- 本轮未新增 ORM/认证/租户/原生能力声明；CapabilityEndpoint AOT fixture 仍是 legacy compatibility 证据，不外推到正式 Ticket 链（S5）。
+- 既有 11 条 SaaSHelpdesk HTTP 红（10×`POST /api/user` 404 + 1×ITenantProvider）未修、未跳过。

@@ -42,7 +42,8 @@ public static class DynamicApiExtensions
 
     /// <summary>
     /// Legacy AppService-oriented HTTP endpoint mapping.
-    /// This API is kept for AppService compatibility.
+    /// Mapping requires the exact per-service/action allowlist registered by
+    /// AddLegacyGeneratedApi; without it this entry point fails closed with CCHTTP007.
     /// New HTTP endpoint mapping should use the Capability-first endpoint projection path.
     /// Do not extend this path with Capability runtime, topology, activation,
     /// agent authoring, or MCP projection semantics.

@@ -113,7 +113,7 @@ public class CapabilityEndpointBoundaryTests
 
         foreach (var file in files)
         {
-            var path = Path.Combine(FindRepoRoot(), "src/Framework/Api/CrestCreates.DynamicApi", file);
+            var path = Path.Combine(FindRepoRoot(), "src/Framework/Api/CrestCreates.DynamicApi.Legacy", file);
             File.Exists(path).Should().BeTrue($"expected legacy file {file} to exist");
             var content = File.ReadAllText(path);
 
@@ -165,11 +165,19 @@ public class CapabilityEndpointBoundaryTests
         var dir = AppContext.BaseDirectory;
         while (dir is not null)
         {
-            if (Directory.Exists(Path.Combine(dir, ".git")))
+            // A worktree has a .git file (gitdir pointer), an exported snapshot may have no .git at
+            // all; the checked-in solution marker is the stable repository root either way.
+            if (File.Exists(Path.Combine(dir, "CrestCreates.slnx"))
+                || Directory.Exists(Path.Combine(dir, ".git"))
+                || File.Exists(Path.Combine(dir, ".git")))
+            {
                 return dir;
+            }
+
             dir = Directory.GetParent(dir)?.FullName;
         }
-        throw new InvalidOperationException("Could not find repository root (.git directory)");
+
+        throw new InvalidOperationException("Could not find repository root (.git or CrestCreates.slnx)");
     }
 
     private static string FindProjectFile(string projectFileName)

@@ -8,7 +8,8 @@ namespace CrestCreates.AspNetCore;
 
 /// <summary>
 /// Obsolete legacy entry points retained only inside the explicit compatibility package. They do not
-/// register an allowlist themselves; callers must migrate to
+/// register an allowlist themselves, so mapping through them fails closed with CCHTTP007; callers
+/// must migrate to
 /// <see cref="CrestCreates.Web.Legacy.LegacyGeneratedApiExtensions.AddLegacyGeneratedApi"/> and provide
 /// explicit per-service/action entries before mapping.
 /// </summary>

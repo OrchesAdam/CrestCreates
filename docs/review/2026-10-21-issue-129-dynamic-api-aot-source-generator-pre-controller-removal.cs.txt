@@ -1,0 +1,1665 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Text;
+
+namespace CrestCreates.CodeGenerator.DynamicApiGenerator;
+
+[Generator]
+public sealed class DynamicApiAotSourceGenerator : IIncrementalGenerator
+{
+    private const string DynamicApiAotGenerationPropertyName = "build_property.CrestCreatesDynamicApiAotGeneration";
+
+    private static readonly SymbolDisplayFormat FullyQualifiedFormat =
+        SymbolDisplayFormat.FullyQualifiedFormat
+            .WithMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        var generationContextProvider = context.CompilationProvider
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Combine(context.AdditionalTextsProvider.Collect())
+            .Select(static (input, _) =>
+            {
+                var ((compilation, optionsProvider), additionalTexts) = input;
+                return IsGenerationDisabled(optionsProvider)
+                    ? null
+                    : BuildGenerationContext(compilation, additionalTexts);
+            });
+
+        context.RegisterSourceOutput(generationContextProvider, static (productionContext, generationContext) =>
+        {
+            if (generationContext is null || (generationContext.Services.Length == 0 && generationContext.Controllers.Length == 0))
+            {
+                return;
+            }
+
+            productionContext.AddSource(
+                "GeneratedDynamicApiRegistry.g.cs",
+                SourceText.From(GenerateRegistrySource(generationContext), Encoding.UTF8));
+
+            productionContext.AddSource(
+                "GeneratedDynamicApiEndpoints.g.cs",
+                SourceText.From(GenerateEndpointsSource(generationContext), Encoding.UTF8));
+
+            if (generationContext.Controllers.Length > 0)
+            {
+                productionContext.AddSource(
+                    "GeneratedDynamicApiControllerRegistrations.g.cs",
+                    SourceText.From(GenerateControllerRegistrationSource(generationContext), Encoding.UTF8));
+            }
+        });
+    }
+
+    private static bool IsGenerationDisabled(AnalyzerConfigOptionsProvider optionsProvider)
+    {
+        if (!optionsProvider.GlobalOptions.TryGetValue(DynamicApiAotGenerationPropertyName, out var value))
+        {
+            return false;
+        }
+
+        return value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("off", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("disable", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("disabled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static GenerationContext? BuildGenerationContext(
+        Compilation compilation,
+        ImmutableArray<AdditionalText> additionalTexts)
+    {
+        // #128 S4: a service whose contract is owned by the CRUD precompile manifest already has its
+        // formal HTTP surface; materializing the legacy Dynamic API registry/endpoints for it would
+        // consume the legacy provider and body reader that §9 forbids. Ownership is asked once here,
+        // from the same manifest reader the Entity/ServiceRegistration generators use.
+        var ownedCrudArtifacts = CrudServiceGenerator.CrudArtifactOwnership.Read(additionalTexts);
+        if (compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.IEndpointRouteBuilder") is null ||
+            compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.IDynamicApiGeneratedProvider") is null)
+        {
+            return null;
+        }
+
+        var crestServiceAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.CrestServiceAttribute");
+
+        var dynamicApiIgnoreAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.DynamicApiIgnoreAttribute");
+        var compatibilityProjectionAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.CapabilityCompatibilityProjectionAttribute");
+        var compatibilityIgnoreAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.CapabilityCompatibilityIgnoreAttribute");
+        var dynamicApiRouteAttribute = compilation.GetTypeByMetadataName("CrestCreates.Domain.Shared.Attributes.DynamicApiRouteAttribute");
+        var unitOfWorkAttribute = compilation.GetTypeByMetadataName("CrestCreates.Aop.Interceptors.UnitOfWorkMoAttribute");
+        var generatedApiControllerAttribute = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.GeneratedApiControllerAttribute");
+        var apiOverrideAttribute = compilation.GetTypeByMetadataName("CrestCreates.DynamicApi.ApiOverrideAttribute");
+        var authorizeAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Authorization.AuthorizeAttribute");
+        var allowAnonymousAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute");
+        var routeAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.RouteAttribute");
+        var producesResponseTypeAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute");
+        var producesAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ProducesAttribute");
+        var consumesAttribute = compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Mvc.ConsumesAttribute");
+        var services = new List<ServiceModel>();
+        var controllers = new List<GeneratedApiControllerModel>();
+
+        foreach (var type in EnumerateNamedTypes(compilation.Assembly))
+        {
+            if (ownedCrudArtifacts.Count > 0
+                && ownedCrudArtifacts.Contains(type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    .Replace("global::", string.Empty)))
+            {
+                continue;
+            }
+
+            if (crestServiceAttribute is not null &&
+                IsDynamicApiImplementation(type, crestServiceAttribute, dynamicApiIgnoreAttribute, compatibilityProjectionAttribute))
+            {
+                services.AddRange(BuildServiceModels(type, dynamicApiIgnoreAttribute, dynamicApiRouteAttribute, unitOfWorkAttribute, compatibilityProjectionAttribute, compatibilityIgnoreAttribute));
+            }
+
+            if (generatedApiControllerAttribute is not null &&
+                IsGeneratedApiController(type, generatedApiControllerAttribute, dynamicApiIgnoreAttribute))
+            {
+                controllers.Add(BuildGeneratedApiControllerModel(
+                    type,
+                    generatedApiControllerAttribute,
+                    dynamicApiIgnoreAttribute,
+                    unitOfWorkAttribute,
+                    apiOverrideAttribute,
+                    authorizeAttribute,
+                    allowAnonymousAttribute,
+                    routeAttribute,
+                    producesResponseTypeAttribute,
+                    producesAttribute,
+                    consumesAttribute));
+            }
+        }
+
+        return new GenerationContext(
+            compilation.AssemblyName ?? "DynamicApiHost",
+            services.OrderBy(service => service.RouteTemplate, StringComparer.Ordinal).ToImmutableArray(),
+            controllers.OrderBy(controller => controller.RouteTemplate, StringComparer.Ordinal).ToImmutableArray(),
+            BuildOverriddenActions(controllers));
+    }
+
+    private static HashSet<(string RouteTemplate, CrudAction Action)> BuildOverriddenActions(List<GeneratedApiControllerModel> controllers)
+    {
+        var overridden = new HashSet<(string RouteTemplate, CrudAction Action)>();
+        foreach (var controller in controllers)
+        {
+            foreach (var action in controller.Actions)
+            {
+                if (action.OverrideAction.HasValue)
+                {
+                    overridden.Add((controller.RouteTemplate, action.OverrideAction.Value));
+                }
+            }
+        }
+
+        return overridden;
+    }
+
+    private static IEnumerable<INamedTypeSymbol> EnumerateNamedTypes(IAssemblySymbol assembly)
+    {
+        return EnumerateNamespace(assembly.GlobalNamespace);
+    }
+
+    private static IEnumerable<INamedTypeSymbol> EnumerateNamespace(INamespaceSymbol namespaceSymbol)
+    {
+        foreach (var nestedNamespace in namespaceSymbol.GetNamespaceMembers())
+        {
+            foreach (var nestedType in EnumerateNamespace(nestedNamespace))
+            {
+                yield return nestedType;
+            }
+        }
+
+        foreach (var type in namespaceSymbol.GetTypeMembers())
+        {
+            yield return type;
+
+            foreach (var nestedType in EnumerateNestedTypes(type))
+            {
+                yield return nestedType;
+            }
+        }
+    }
+
+    private static IEnumerable<INamedTypeSymbol> EnumerateNestedTypes(INamedTypeSymbol typeSymbol)
+    {
+        foreach (var nestedType in typeSymbol.GetTypeMembers())
+        {
+            yield return nestedType;
+
+            foreach (var child in EnumerateNestedTypes(nestedType))
+            {
+                yield return child;
+            }
+        }
+    }
+
+    private static bool IsDynamicApiImplementation(
+        INamedTypeSymbol typeSymbol,
+        INamedTypeSymbol crestServiceAttribute,
+        INamedTypeSymbol? dynamicApiIgnoreAttribute,
+        INamedTypeSymbol? compatibilityProjectionAttribute)
+    {
+        if (typeSymbol.TypeKind != TypeKind.Class ||
+            typeSymbol.IsAbstract ||
+            typeSymbol.DeclaredAccessibility != Accessibility.Public)
+        {
+            return false;
+        }
+
+        if (dynamicApiIgnoreAttribute is not null && HasAttribute(typeSymbol, dynamicApiIgnoreAttribute))
+        {
+            return false;
+        }
+
+        if (compatibilityProjectionAttribute is not null && HasAttribute(typeSymbol, compatibilityProjectionAttribute))
+        {
+            return false;
+        }
+
+        // Accept [CrestService] classes
+        if (HasAttribute(typeSymbol, crestServiceAttribute))
+        {
+            return true;
+        }
+
+        // Also accept generated CRUD services that implement ICrudAppService<>.
+        // Generated types from other source generators are visible in the same
+        // compilation round when the CRUD generator executes before this generator.
+        if (ImplementsCrudAppService(typeSymbol))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ImplementsCrudAppService(INamedTypeSymbol typeSymbol)
+    {
+        foreach (var iface in typeSymbol.AllInterfaces)
+        {
+            if (iface.Name == "ICrudAppService" && iface.TypeArguments.Length >= 5)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsGeneratedApiController(
+        INamedTypeSymbol typeSymbol,
+        INamedTypeSymbol generatedApiControllerAttribute,
+        INamedTypeSymbol? dynamicApiIgnoreAttribute)
+    {
+        if (typeSymbol.TypeKind != TypeKind.Class ||
+            typeSymbol.IsAbstract ||
+            typeSymbol.DeclaredAccessibility != Accessibility.Public)
+        {
+            return false;
+        }
+
+        if (dynamicApiIgnoreAttribute is not null && HasAttribute(typeSymbol, dynamicApiIgnoreAttribute))
+        {
+            return false;
+        }
+
+        return HasAttribute(typeSymbol, generatedApiControllerAttribute);
+    }
+
+    private static GeneratedApiControllerModel BuildGeneratedApiControllerModel(
+        INamedTypeSymbol controllerType,
+        INamedTypeSymbol generatedApiControllerAttribute,
+        INamedTypeSymbol? dynamicApiIgnoreAttribute,
+        INamedTypeSymbol? unitOfWorkAttribute,
+        INamedTypeSymbol? apiOverrideAttribute,
+        INamedTypeSymbol? authorizeAttribute,
+        INamedTypeSymbol? allowAnonymousAttribute,
+        INamedTypeSymbol? routeAttribute,
+        INamedTypeSymbol? producesResponseTypeAttribute,
+        INamedTypeSymbol? producesAttribute,
+        INamedTypeSymbol? consumesAttribute)
+    {
+        var routeTemplate = ResolveGeneratedApiControllerRoute(controllerType, generatedApiControllerAttribute, routeAttribute);
+        var controllerName = TrimControllerName(controllerType.Name);
+        var actions = controllerType.GetMembers()
+            .OfType<IMethodSymbol>()
+            .Where(method => method.MethodKind == MethodKind.Ordinary &&
+                             method.DeclaredAccessibility == Accessibility.Public &&
+                             !method.IsStatic &&
+                             (dynamicApiIgnoreAttribute is null || !HasAttribute(method, dynamicApiIgnoreAttribute)))
+            .Select(method => BuildGeneratedApiControllerAction(
+                method,
+                controllerType,
+                controllerName,
+                routeTemplate,
+                unitOfWorkAttribute,
+                apiOverrideAttribute,
+                authorizeAttribute,
+                allowAnonymousAttribute,
+                routeAttribute,
+                producesResponseTypeAttribute,
+                producesAttribute,
+                consumesAttribute))
+            .Where(action => action is not null)
+            .Cast<ActionModel>()
+            .ToImmutableArray();
+
+        return new GeneratedApiControllerModel(
+            controllerName,
+            routeTemplate,
+            controllerType.ToDisplayString(FullyQualifiedFormat),
+            actions);
+    }
+
+    private static string ResolveGeneratedApiControllerRoute(
+        INamedTypeSymbol controllerType,
+        INamedTypeSymbol generatedApiControllerAttribute,
+        INamedTypeSymbol? routeAttribute)
+    {
+        var attributeData = controllerType.GetAttributes()
+            .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, generatedApiControllerAttribute));
+
+        if (attributeData is not null &&
+            attributeData.ConstructorArguments.Length > 0 &&
+            attributeData.ConstructorArguments[0].Value is string template &&
+            !string.IsNullOrWhiteSpace(template))
+        {
+            return template.Trim('/');
+        }
+
+        if (routeAttribute is not null)
+        {
+            var routeData = controllerType.GetAttributes()
+                .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, routeAttribute));
+            if (TryGetRouteTemplate(routeData, out var routeTemplate))
+            {
+                return ReplaceRouteTokens(routeTemplate, controllerType, null).Trim('/');
+            }
+        }
+
+        var controllerName = TrimControllerName(controllerType.Name);
+        return "api/" + DynamicApiConventionAnalyzer.ToKebabCase(controllerName);
+    }
+
+    private static string TrimControllerName(string controllerTypeName)
+    {
+        var name = controllerTypeName;
+        if (name.EndsWith("Controller", StringComparison.Ordinal))
+        {
+            name = name.Substring(0, name.Length - "Controller".Length);
+        }
+        else if (name.EndsWith("Api", StringComparison.Ordinal))
+        {
+            name = name.Substring(0, name.Length - "Api".Length);
+        }
+
+        return name;
+    }
+
+    private static ActionModel? BuildGeneratedApiControllerAction(
+        IMethodSymbol method,
+        INamedTypeSymbol controllerType,
+        string controllerName,
+        string routeTemplate,
+        INamedTypeSymbol? unitOfWorkAttribute,
+        INamedTypeSymbol? apiOverrideAttribute,
+        INamedTypeSymbol? authorizeAttribute,
+        INamedTypeSymbol? allowAnonymousAttribute,
+        INamedTypeSymbol? routeAttribute,
+        INamedTypeSymbol? producesResponseTypeAttribute,
+        INamedTypeSymbol? producesAttribute,
+        INamedTypeSymbol? consumesAttribute)
+    {
+        var httpMethod = ResolveControllerMethodHttpMethod(method);
+        var methodRoute = ResolveControllerMethodRoute(method, routeAttribute);
+        var relativeRoute = CombineControllerRoute(routeTemplate, methodRoute);
+        var actionName = DynamicApiConventionAnalyzer.TrimAsyncSuffix(method.Name);
+        var parameters = ResolveParameters(method, relativeRoute, httpMethod).ToImmutableArray();
+        var returnModel = ResolveReturnModel(method.ReturnType);
+        var unitOfWork = ResolveUnitOfWork(method, method, method.ContainingType, method.ContainingType, unitOfWorkAttribute, httpMethod);
+        var allowAnonymous = allowAnonymousAttribute is not null &&
+            (HasAttribute(controllerType, allowAnonymousAttribute) || HasAttribute(method, allowAnonymousAttribute));
+        var metadataCalls = BuildGeneratedApiControllerMetadataCalls(
+            controllerType,
+            method,
+            relativeRoute,
+            returnModel,
+            parameters,
+            authorizeAttribute,
+            allowAnonymousAttribute,
+            routeAttribute,
+            producesResponseTypeAttribute,
+            producesAttribute,
+            consumesAttribute);
+
+        CrudAction? overrideAction = null;
+        if (apiOverrideAttribute is not null)
+        {
+            var overrideAttr = GetAttribute(method, apiOverrideAttribute);
+            if (overrideAttr is not null && overrideAttr.ConstructorArguments.Length > 0)
+            {
+                var arg = overrideAttr.ConstructorArguments[0];
+                if (arg.Value is int intValue && intValue >= 0 && intValue <= 4)
+                {
+                    overrideAction = (CrudAction)intValue;
+                }
+            }
+        }
+
+        return new ActionModel(
+            actionName,
+            method.ContainingType.Name,
+            method.ContainingType.Name + "_" + actionName,
+            relativeRoute,
+            httpMethod,
+            controllerName + "." + actionName,
+            returnModel,
+            parameters,
+            method.Name,
+            method.ContainingType.ToDisplayString(FullyQualifiedFormat),
+            unitOfWork.RequiresUnitOfWork,
+            unitOfWork.RequiresTransaction,
+            metadataCalls,
+            allowAnonymous,
+            overrideAction);
+    }
+
+    private static string ResolveControllerMethodHttpMethod(IMethodSymbol method)
+    {
+        var httpGetAttribute = method.GetAttributes().FirstOrDefault(attr =>
+            attr.AttributeClass is not null && attr.AttributeClass.Name == "HttpGetAttribute" &&
+            attr.AttributeClass.ContainingNamespace.ToDisplayString() == "Microsoft.AspNetCore.Mvc");
+        if (httpGetAttribute is not null)
+        {
+            return "GET";
+        }
+
+        var httpPostAttribute = method.GetAttributes().FirstOrDefault(attr =>
+            attr.AttributeClass is not null && attr.AttributeClass.Name == "HttpPostAttribute" &&
+            attr.AttributeClass.ContainingNamespace.ToDisplayString() == "Microsoft.AspNetCore.Mvc");
+        if (httpPostAttribute is not null)
+        {
+            return "POST";
+        }
+
+        var httpPutAttribute = method.GetAttributes().FirstOrDefault(attr =>
+            attr.AttributeClass is not null && attr.AttributeClass.Name == "HttpPutAttribute" &&
+            attr.AttributeClass.ContainingNamespace.ToDisplayString() == "Microsoft.AspNetCore.Mvc");
+        if (httpPutAttribute is not null)
+        {
+            return "PUT";
+        }
+
+        var httpDeleteAttribute = method.GetAttributes().FirstOrDefault(attr =>
+            attr.AttributeClass is not null && attr.AttributeClass.Name == "HttpDeleteAttribute" &&
+            attr.AttributeClass.ContainingNamespace.ToDisplayString() == "Microsoft.AspNetCore.Mvc");
+        if (httpDeleteAttribute is not null)
+        {
+            return "DELETE";
+        }
+
+        return "GET";
+    }
+
+    private static string ResolveControllerMethodRoute(IMethodSymbol method, INamedTypeSymbol? routeAttribute)
+    {
+        var httpMethodAttributes = method.GetAttributes()
+            .Where(attr =>
+                attr.AttributeClass is not null &&
+                attr.AttributeClass.ContainingNamespace.ToDisplayString() == "Microsoft.AspNetCore.Mvc" &&
+                (attr.AttributeClass.Name == "HttpGetAttribute" ||
+                 attr.AttributeClass.Name == "HttpPostAttribute" ||
+                 attr.AttributeClass.Name == "HttpPutAttribute" ||
+                 attr.AttributeClass.Name == "HttpDeleteAttribute"))
+            .ToArray();
+
+        foreach (var attr in httpMethodAttributes)
+        {
+            if (attr.ConstructorArguments.Length > 0 &&
+                attr.ConstructorArguments[0].Value is string template &&
+                !string.IsNullOrWhiteSpace(template))
+            {
+                return ReplaceRouteTokens(template, method.ContainingType, method).Trim('/');
+            }
+        }
+
+        if (routeAttribute is not null)
+        {
+            var routeData = method.GetAttributes()
+                .FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, routeAttribute));
+            if (TryGetRouteTemplate(routeData, out var routeTemplate))
+            {
+                return ReplaceRouteTokens(routeTemplate, method.ContainingType, method).Trim('/');
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static bool TryGetRouteTemplate(AttributeData? attribute, out string template)
+    {
+        if (attribute is not null &&
+            attribute.ConstructorArguments.Length > 0 &&
+            attribute.ConstructorArguments[0].Value is string value &&
+            !string.IsNullOrWhiteSpace(value))
+        {
+            template = value;
+            return true;
+        }
+
+        template = string.Empty;
+        return false;
+    }
+
+    private static string ReplaceRouteTokens(string template, INamedTypeSymbol controllerType, IMethodSymbol? method)
+    {
+        var controllerName = TrimControllerName(controllerType.Name);
+        var route = ReplaceRouteToken(template, "[controller]", DynamicApiConventionAnalyzer.ToKebabCase(controllerName));
+
+        if (method is not null)
+        {
+            route = ReplaceRouteToken(route, "[action]", DynamicApiConventionAnalyzer.ToKebabCase(DynamicApiConventionAnalyzer.TrimAsyncSuffix(method.Name)));
+        }
+
+        return route;
+    }
+
+    private static string ReplaceRouteToken(string template, string token, string value)
+    {
+        return template
+            .Replace(token, value)
+            .Replace(token.ToUpperInvariant(), value)
+            .Replace(token.ToLowerInvariant(), value);
+    }
+
+    private static string CombineControllerRoute(string controllerRouteTemplate, string methodRoute)
+    {
+        if (string.IsNullOrEmpty(methodRoute))
+        {
+            return controllerRouteTemplate;
+        }
+
+        return controllerRouteTemplate + "/" + methodRoute;
+    }
+
+    private static IEnumerable<ServiceModel> BuildServiceModels(
+        INamedTypeSymbol implementationType,
+        INamedTypeSymbol? dynamicApiIgnoreAttribute,
+        INamedTypeSymbol? dynamicApiRouteAttribute,
+        INamedTypeSymbol? unitOfWorkAttribute,
+        INamedTypeSymbol? compatibilityProjectionAttribute,
+        INamedTypeSymbol? compatibilityIgnoreAttribute)
+    {
+        var serviceInterfaces = implementationType.Interfaces
+            .Where(interfaceSymbol => interfaceSymbol.DeclaredAccessibility == Accessibility.Public)
+            .Where(interfaceSymbol => !interfaceSymbol.IsGenericType)
+            .Where(interfaceSymbol => interfaceSymbol.Name.EndsWith("AppService", StringComparison.Ordinal))
+            .Where(interfaceSymbol => dynamicApiIgnoreAttribute is null || !HasAttribute(interfaceSymbol, dynamicApiIgnoreAttribute))
+            .ToArray();
+
+        foreach (var serviceType in serviceInterfaces)
+        {
+            var serviceName = DynamicApiConventionAnalyzer.TrimServiceName(serviceType.Name);
+            var route = DynamicApiConventionAnalyzer.ResolveServiceRoute(serviceType, serviceName, dynamicApiRouteAttribute);
+            var actions = BuildActionModels(serviceType, implementationType, serviceName, dynamicApiIgnoreAttribute, unitOfWorkAttribute, compatibilityProjectionAttribute, compatibilityIgnoreAttribute).ToImmutableArray();
+            if (actions.Length == 0)
+            {
+                continue;
+            }
+
+            yield return new ServiceModel(
+                serviceName,
+                route.Template,
+                route.IsCustom,
+                serviceType.ToDisplayString(FullyQualifiedFormat),
+                implementationType.ToDisplayString(FullyQualifiedFormat),
+                actions);
+        }
+    }
+
+    private static IEnumerable<ActionModel> BuildActionModels(
+        INamedTypeSymbol serviceType,
+        INamedTypeSymbol implementationType,
+        string serviceName,
+        INamedTypeSymbol? dynamicApiIgnoreAttribute,
+        INamedTypeSymbol? unitOfWorkAttribute,
+        INamedTypeSymbol? compatibilityProjectionAttribute,
+        INamedTypeSymbol? compatibilityIgnoreAttribute)
+    {
+        var seenMethodKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var contractType in DynamicApiConventionAnalyzer.EnumerateContractTypes(serviceType))
+        {
+            foreach (var method in contractType.GetMembers().OfType<IMethodSymbol>())
+            {
+                if (method.MethodKind != MethodKind.Ordinary)
+                {
+                    continue;
+                }
+
+                if (dynamicApiIgnoreAttribute is not null && HasAttribute(method, dynamicApiIgnoreAttribute))
+                {
+                    continue;
+                }
+
+                // P0-2 fix: unified check for [CapabilityCompatibilityProjection] on method
+                // Checks both interface and implementation method regardless of which one we're iterating
+                if (HasCompatibilityProjectionOnMethod(method, implementationType, compatibilityProjectionAttribute))
+                {
+                    continue;
+                }
+
+                if (compatibilityIgnoreAttribute is not null && HasAttribute(method, compatibilityIgnoreAttribute)
+                    && compatibilityProjectionAttribute is not null && HasAttribute(implementationType, compatibilityProjectionAttribute))
+                {
+                    continue;
+                }
+
+                if (!seenMethodKeys.Add(DynamicApiConventionAnalyzer.CreateMethodKey(method)))
+                {
+                    continue;
+                }
+
+        var actionName = DynamicApiConventionAnalyzer.TrimAsyncSuffix(method.Name);
+                var httpMethod = DynamicApiConventionAnalyzer.ResolveHttpMethod(method.Name);
+                var relativeRoute = DynamicApiConventionAnalyzer.ResolveActionRoute(method);
+                var parameters = ResolveParameters(method, relativeRoute, httpMethod).ToImmutableArray();
+                var returnModel = ResolveReturnModel(method.ReturnType);
+                var implementationMethod = implementationType.FindImplementationForInterfaceMember(method) as IMethodSymbol;
+                var unitOfWork = ResolveUnitOfWork(implementationMethod, method, implementationType, serviceType, unitOfWorkAttribute, httpMethod);
+
+                yield return new ActionModel(
+                    actionName,
+                    serviceType.Name,
+                    $"{serviceType.Name}_{actionName}",
+                    relativeRoute,
+                    httpMethod,
+                    DynamicApiConventionAnalyzer.ResolvePermission(serviceName, method.Name),
+                    returnModel,
+                    parameters,
+                    method.Name,
+                    serviceType.ToDisplayString(FullyQualifiedFormat),
+                    unitOfWork.RequiresUnitOfWork,
+                    unitOfWork.RequiresTransaction,
+                    ImmutableArray<string>.Empty,
+                    false);
+            }
+        }
+    }
+
+    private static ImmutableArray<ParameterModel> ResolveParameters(IMethodSymbol methodSymbol, string routePattern, string httpMethod)
+    {
+        var routeTokens = new HashSet<string>(routePattern.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(segment => segment.StartsWith("{", StringComparison.Ordinal) && segment.EndsWith("}", StringComparison.Ordinal))
+            .Select(segment => segment.Substring(1, segment.Length - 2)), StringComparer.OrdinalIgnoreCase);
+
+        var bodyAssigned = false;
+        var parameters = ImmutableArray.CreateBuilder<ParameterModel>();
+        foreach (var parameter in methodSymbol.Parameters)
+        {
+            var source = DynamicApiConventionAnalyzer.ResolveParameterSource(parameter, routeTokens, httpMethod, ref bodyAssigned);
+            parameters.Add(new ParameterModel(
+                parameter.Name,
+                parameter.Type.ToDisplayString(FullyQualifiedFormat),
+                source,
+                parameter.IsOptional || parameter.HasExplicitDefaultValue || (source != ParameterSource.Body && DynamicApiConventionAnalyzer.IsNullableType(parameter.Type)),
+                DynamicApiConventionAnalyzer.IsScalar(parameter.Type),
+                source == ParameterSource.Query && !DynamicApiConventionAnalyzer.IsScalar(parameter.Type)
+                    ? DynamicApiConventionAnalyzer.BuildQueryProperties(parameter.Type)
+                    : ImmutableArray<QueryPropertyModel>.Empty));
+        }
+
+        return parameters.ToImmutable();
+    }
+
+    private static ReturnModel ResolveReturnModel(ITypeSymbol returnType)
+    {
+        if (returnType is INamedTypeSymbol namedType &&
+            namedType.Name == "Task" &&
+            namedType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks")
+        {
+            if (namedType.TypeArguments.Length == 1)
+            {
+                return new ReturnModel(false, namedType.TypeArguments[0].ToDisplayString(FullyQualifiedFormat));
+            }
+
+            return new ReturnModel(true, null);
+        }
+
+        return new ReturnModel(returnType.SpecialType == SpecialType.System_Void, returnType.ToDisplayString(FullyQualifiedFormat));
+    }
+
+    private static (bool RequiresUnitOfWork, bool RequiresTransaction) ResolveUnitOfWork(
+        IMethodSymbol? implementationMethod,
+        IMethodSymbol serviceMethod,
+        INamedTypeSymbol implementationType,
+        INamedTypeSymbol serviceType,
+        INamedTypeSymbol? unitOfWorkAttribute,
+        string httpMethod)
+    {
+        if (unitOfWorkAttribute is not null)
+        {
+            var attribute = GetAttribute(implementationMethod, unitOfWorkAttribute)
+                            ?? GetAttribute(serviceMethod, unitOfWorkAttribute)
+                            ?? GetAttribute(implementationType, unitOfWorkAttribute)
+                            ?? GetAttribute(serviceType, unitOfWorkAttribute);
+            if (attribute is not null)
+            {
+                var requiresTransaction = true;
+                if (attribute.ConstructorArguments.Length > 0 && attribute.ConstructorArguments[0].Value is bool configured)
+                {
+                    requiresTransaction = configured;
+                }
+
+                return (true, requiresTransaction);
+            }
+        }
+
+        return httpMethod == "GET"
+            ? (false, false)
+            : (true, true);
+    }
+
+    private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol attributeSymbol)
+    {
+        return symbol.GetAttributes().Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, attributeSymbol));
+    }
+
+    /// <summary>
+    /// P0-2 fix: unified check for [CapabilityCompatibilityProjection] on a method.
+    /// Checks both the current method symbol AND the corresponding interface/implementation method.
+    /// This handles the case where the attribute is on the interface method but the current
+    /// iteration is over the class method (via EnumerateContractTypes yielding serviceType first).
+    /// </summary>
+    private static bool HasCompatibilityProjectionOnMethod(
+        IMethodSymbol method,
+        INamedTypeSymbol serviceType,
+        INamedTypeSymbol? compatibilityProjectionAttribute)
+    {
+        if (compatibilityProjectionAttribute is null)
+            return false;
+
+        // Check the method itself
+        if (HasAttribute(method, compatibilityProjectionAttribute))
+            return true;
+
+        // If method is on the class (implementation), check the interface methods
+        if (method.ContainingType.TypeKind == TypeKind.Class)
+        {
+            foreach (var iface in serviceType.AllInterfaces)
+            {
+                foreach (var ifaceMethod in iface.GetMembers().OfType<IMethodSymbol>())
+                {
+                    if (ifaceMethod.Name == method.Name &&
+                        ifaceMethod.Parameters.Length == method.Parameters.Length)
+                    {
+                        if (HasAttribute(ifaceMethod, compatibilityProjectionAttribute))
+                            return true;
+                    }
+                }
+            }
+        }
+
+        // If method is on an interface, check the implementation method
+        if (method.ContainingType.TypeKind == TypeKind.Interface)
+        {
+            var implMethod = serviceType.FindImplementationForInterfaceMember(method) as IMethodSymbol;
+            if (implMethod is not null && HasAttribute(implMethod, compatibilityProjectionAttribute))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static AttributeData? GetAttribute(ISymbol? symbol, INamedTypeSymbol attributeSymbol)
+    {
+        if (symbol is null)
+        {
+            return null;
+        }
+
+        return symbol.GetAttributes().FirstOrDefault(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, attributeSymbol));
+    }
+
+    private static CrudAction? MapServiceActionToCrudAction(ActionModel action)
+    {
+        var normalized = action.ActionName;
+        if (normalized == "Create")
+        {
+            return CrudAction.Create;
+        }
+
+        if (normalized == "GetList")
+        {
+            return CrudAction.GetList;
+        }
+
+        if (normalized == "GetAll")
+        {
+            return CrudAction.GetList;
+        }
+
+        if (normalized == "Update")
+        {
+            return CrudAction.Update;
+        }
+
+        if (normalized == "Delete")
+        {
+            return CrudAction.Delete;
+        }
+
+        if (normalized == "GetById" || normalized == "Get" || normalized.StartsWith("GetBy", StringComparison.Ordinal))
+        {
+            return CrudAction.Get;
+        }
+
+        // "Get" with a route parameter like {id} maps to Get
+        if (normalized.StartsWith("Get", StringComparison.Ordinal) && action.Parameters.Any(p => p.Source == ParameterSource.Route))
+        {
+            return CrudAction.Get;
+        }
+
+        return null;
+    }
+
+    private static string GenerateRegistrySource(GenerationContext context)
+    {
+        var providerTypeName = GetProviderTypeName(context.AssemblyName);
+        var builder = new StringBuilder();
+        builder.AppendLine("// <auto-generated />");
+        builder.AppendLine("#nullable enable");
+        builder.AppendLine("using System;");
+        builder.AppendLine("using System.Linq;");
+        builder.AppendLine("using System.Reflection;");
+        builder.AppendLine("using CrestCreates.DynamicApi;");
+        builder.AppendLine();
+        builder.AppendLine("namespace CrestCreates.DynamicApi.Generated;");
+        builder.AppendLine();
+        builder.AppendLine($"internal sealed class {providerTypeName} : IDynamicApiGeneratedProvider");
+        builder.AppendLine("{");
+        builder.AppendLine("    private static readonly (Assembly Assembly, Func<DynamicApiOptions, DynamicApiServiceDescriptor> DescriptorFactory)[] Entries = new (Assembly Assembly, Func<DynamicApiOptions, DynamicApiServiceDescriptor> DescriptorFactory)[]");
+        builder.AppendLine("    {");
+        for (var index = 0; index < context.Services.Length; index++)
+        {
+            var service = context.Services[index];
+            builder.AppendLine($"        (typeof({service.ServiceAssemblyTypeName}).Assembly, CreateService{index}),");
+        }
+        builder.AppendLine("    };");
+        builder.AppendLine();
+        builder.AppendLine("    public System.Collections.Generic.IReadOnlyCollection<Assembly> ServiceAssemblies => Entries.Select(entry => entry.Assembly).Distinct().ToArray();");
+        builder.AppendLine();
+        builder.AppendLine("    public System.Collections.Generic.IReadOnlyCollection<DynamicApiEndpointDescriptor> EndpointDescriptors { get; } =");
+        builder.AppendLine("        new DynamicApiEndpointDescriptor[]");
+        builder.AppendLine("        {");
+        for (var serviceIndex = 0; serviceIndex < context.Services.Length; serviceIndex++)
+        {
+            var service = context.Services[serviceIndex];
+            var routePrefix = service.HasCustomRoute
+                ? Escape(service.RouteTemplate)
+                : $"api/{Escape(service.RouteTemplate)}";
+            for (var actionIndex = 0; actionIndex < service.Actions.Length; actionIndex++)
+            {
+                var action = service.Actions[actionIndex];
+                // Skip if this service action is overridden by a generated controller
+                var serviceCrudAction = MapServiceActionToCrudAction(action);
+                if (serviceCrudAction.HasValue)
+                {
+                    var serviceEffectiveRoute = service.HasCustomRoute
+                        ? service.RouteTemplate
+                        : "api/" + service.RouteTemplate;
+                    if (context.OverriddenActions.Contains((serviceEffectiveRoute, serviceCrudAction.Value)))
+                    {
+                        continue;
+                    }
+                }
+
+                var routePattern = string.IsNullOrEmpty(action.RelativeRoute)
+                    ? routePrefix
+                    : $"{routePrefix}/{Escape(action.RelativeRoute)}";
+                var requestType = ResolveRequestTypeFromAction(action);
+                var responseType = action.ReturnModel.PayloadTypeName is not null
+                    ? $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})"
+                    : "null";
+                var permissions = $"new[] {{ \"{Escape(action.PermissionName)}\" }}";
+                var requiresTransaction = ToBooleanLiteral(action.RequiresTransaction);
+                builder.AppendLine($"            new DynamicApiEndpointDescriptor(");
+                builder.AppendLine($"                \"{Escape(service.ServiceName)}\",");
+                builder.AppendLine($"                \"{Escape(action.ActionName)}\",");
+                builder.AppendLine($"                \"{action.HttpMethod}\",");
+                builder.AppendLine($"                \"{routePattern}\",");
+                builder.AppendLine($"                typeof({service.ServiceTypeName}),");
+                builder.AppendLine($"                {requestType},");
+                builder.AppendLine($"                {responseType},");
+                builder.AppendLine($"                {permissions},");
+                builder.AppendLine($"                {requiresTransaction}),");
+            }
+        }
+        for (var controllerIndex = 0; controllerIndex < context.Controllers.Length; controllerIndex++)
+        {
+            var controller = context.Controllers[controllerIndex];
+            for (var actionIndex = 0; actionIndex < controller.Actions.Length; actionIndex++)
+            {
+                var action = controller.Actions[actionIndex];
+                var requestType = ResolveRequestTypeFromAction(action);
+                var responseType = action.ReturnModel.PayloadTypeName is not null
+                    ? $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})"
+                    : "null";
+                var permissions = $"new[] {{ \"{Escape(action.PermissionName)}\" }}";
+                var requiresTransaction = ToBooleanLiteral(action.RequiresTransaction);
+                builder.AppendLine($"            new DynamicApiEndpointDescriptor(");
+                builder.AppendLine($"                \"{Escape(controller.ControllerName)}\",");
+                builder.AppendLine($"                \"{Escape(action.ActionName)}\",");
+                builder.AppendLine($"                \"{action.HttpMethod}\",");
+                builder.AppendLine($"                \"{Escape(action.RelativeRoute)}\",");
+                builder.AppendLine($"                typeof({action.ServiceTypeName}),");
+                builder.AppendLine($"                {requestType},");
+                builder.AppendLine($"                {responseType},");
+                builder.AppendLine($"                {permissions},");
+                builder.AppendLine($"                {requiresTransaction}),");
+            }
+        }
+        builder.AppendLine("        };");
+        builder.AppendLine();
+        builder.AppendLine();
+        builder.AppendLine("    public DynamicApiRegistry CreateRegistry(DynamicApiOptions options)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        var services = Entries.Where(entry => MatchesAssembly(options, entry.Assembly)).Select(entry => entry.DescriptorFactory(options)).ToArray();");
+        builder.AppendLine("        return new DynamicApiRegistry(services);");
+        builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    public void MapEndpoints(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints, DynamicApiOptions options)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        GeneratedDynamicApiEndpoints.Map(endpoints, options);");
+        builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    private static bool MatchesAssembly(DynamicApiOptions options, Assembly assembly)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        return options.ServiceAssemblies.Count == 0 || options.ServiceAssemblies.Contains(assembly);");
+        builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    private static string ResolveRoutePrefix(DynamicApiOptions options, string routeTemplate, bool hasCustomRoute)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        if (hasCustomRoute)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            return routeTemplate;");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+        builder.AppendLine("        return $\"{options.DefaultRoutePrefix.TrimEnd('/')}/{routeTemplate}\";");
+        builder.AppendLine("    }");
+        builder.AppendLine();
+
+        for (var serviceIndex = 0; serviceIndex < context.Services.Length; serviceIndex++)
+        {
+            var service = context.Services[serviceIndex];
+            builder.AppendLine($"    private static DynamicApiServiceDescriptor CreateService{serviceIndex}(DynamicApiOptions options)");
+            builder.AppendLine("    {");
+            builder.AppendLine($"        var routePrefix = ResolveRoutePrefix(options, \"{Escape(service.RouteTemplate)}\", {ToBooleanLiteral(service.HasCustomRoute)});");
+            builder.AppendLine("        return new DynamicApiServiceDescriptor");
+            builder.AppendLine("        {");
+            builder.AppendLine($"            ServiceName = \"{Escape(service.ServiceName)}\",");
+            builder.AppendLine("            RoutePrefix = routePrefix,");
+            builder.AppendLine($"            ServiceType = typeof({service.ServiceTypeName}),");
+            builder.AppendLine($"            ImplementationType = typeof({service.ServiceAssemblyTypeName}),");
+            builder.AppendLine("            Actions = new DynamicApiActionDescriptor[]");
+            builder.AppendLine("            {");
+            for (var actionIndex = 0; actionIndex < service.Actions.Length; actionIndex++)
+            {
+                var action = service.Actions[actionIndex];
+                // Skip if this service action is overridden by a generated controller
+                var serviceCrudAction = MapServiceActionToCrudAction(action);
+                if (serviceCrudAction.HasValue)
+                {
+                    var serviceEffectiveRoute = service.HasCustomRoute
+                        ? service.RouteTemplate
+                        : "api/" + service.RouteTemplate;
+                    if (context.OverriddenActions.Contains((serviceEffectiveRoute, serviceCrudAction.Value)))
+                    {
+                        continue;
+                    }
+                }
+
+                builder.AppendLine("                new DynamicApiActionDescriptor");
+                builder.AppendLine("                {");
+                builder.AppendLine($"                    ActionName = \"{Escape(action.ActionName)}\",");
+                builder.AppendLine($"                    DeclaringTypeName = \"{Escape(action.DeclaringTypeName)}\",");
+                builder.AppendLine($"                    OperationId = \"{Escape(action.OperationId)}\",");
+                builder.AppendLine($"                    RelativeRoute = \"{Escape(action.RelativeRoute)}\",");
+                builder.AppendLine($"                    HttpMethod = \"{action.HttpMethod}\",");
+                builder.AppendLine("                    RoutePrefix = routePrefix,");
+                builder.AppendLine($"                    ReturnDescriptor = new DynamicApiReturnDescriptor {{ DeclaredType = typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName ?? "void")}), PayloadType = {(action.ReturnModel.PayloadTypeName is null ? "null" : $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})")}, IsVoid = {(action.ReturnModel.IsVoid ? "true" : "false")} }},");
+                builder.AppendLine($"                    Permission = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{Escape(action.PermissionName)}\" }}, RequireAll = false }},");
+                builder.AppendLine("                    Parameters = new DynamicApiParameterDescriptor[]");
+                builder.AppendLine("                    {");
+                for (var parameterIndex = 0; parameterIndex < action.Parameters.Length; parameterIndex++)
+                {
+                    var parameter = action.Parameters[parameterIndex];
+                    builder.AppendLine("                        new DynamicApiParameterDescriptor");
+                    builder.AppendLine("                        {");
+                    builder.AppendLine($"                            Name = \"{Escape(parameter.Name)}\",");
+                    builder.AppendLine($"                            ParameterType = typeof({GetTypeOfTypeName(parameter.TypeName)}),");
+                    builder.AppendLine($"                            Source = DynamicApiParameterSource.{parameter.Source},");
+                    builder.AppendLine($"                            IsOptional = {(parameter.IsOptional ? "true" : "false")}");
+                    builder.AppendLine("                        },");
+                }
+                builder.AppendLine("                    }");
+                builder.AppendLine("                },");
+            }
+            builder.AppendLine("            }");
+            builder.AppendLine("        };");
+            builder.AppendLine("    }");
+            builder.AppendLine();
+        }
+
+        builder.AppendLine("}");
+        builder.AppendLine();
+        builder.AppendLine("internal static class GeneratedDynamicApiRegistration");
+        builder.AppendLine("{");
+        builder.AppendLine("    [System.Runtime.CompilerServices.ModuleInitializer]");
+        builder.AppendLine("    internal static void Register()");
+        builder.AppendLine("    {");
+        builder.AppendLine($"        DynamicApiGeneratedRegistryStore.Register(new {providerTypeName}());");
+        builder.AppendLine("    }");
+        builder.AppendLine("}");
+        return builder.ToString().Replace("\\\"", "\"");
+    }
+
+    private static string GenerateEndpointsSource(GenerationContext context)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("// <auto-generated />");
+        builder.AppendLine("#nullable enable");
+        builder.AppendLine("using System;");
+        builder.AppendLine("using System.Globalization;");
+        builder.AppendLine("using System.Linq;");
+        builder.AppendLine("using CrestCreates.Authorization.Abstractions;");
+        builder.AppendLine("using CrestCreates.DynamicApi;");
+        builder.AppendLine("using CrestCreates.Validation.Modules;");
+        builder.AppendLine("using Microsoft.AspNetCore.Builder;");
+        builder.AppendLine("using Microsoft.AspNetCore.Http;");
+        builder.AppendLine("using Microsoft.AspNetCore.Mvc;");
+        builder.AppendLine("using Microsoft.AspNetCore.Routing;");
+        builder.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+        builder.AppendLine();
+        builder.AppendLine("namespace CrestCreates.DynamicApi.Generated;");
+        builder.AppendLine();
+        builder.AppendLine("internal static class GeneratedDynamicApiEndpoints");
+        builder.AppendLine("{");
+        builder.AppendLine("    public static void Map(IEndpointRouteBuilder endpoints, DynamicApiOptions options)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        ArgumentNullException.ThrowIfNull(endpoints);");
+        builder.AppendLine("        ArgumentNullException.ThrowIfNull(options);");
+
+        for (var serviceIndex = 0; serviceIndex < context.Services.Length; serviceIndex++)
+        {
+            var service = context.Services[serviceIndex];
+            builder.AppendLine($"        var routePrefix_{serviceIndex} = ResolveRoutePrefix(options, \"{Escape(service.RouteTemplate)}\", {ToBooleanLiteral(service.HasCustomRoute)});");
+            builder.AppendLine($"        if (MatchesAssembly(options, typeof({service.ServiceAssemblyTypeName}).Assembly))");
+            builder.AppendLine("        {");
+            for (var actionIndex = 0; actionIndex < service.Actions.Length; actionIndex++)
+            {
+                var action = service.Actions[actionIndex];
+                // Skip if this service action is overridden by a generated controller
+                var serviceCrudAction = MapServiceActionToCrudAction(action);
+                if (serviceCrudAction.HasValue)
+                {
+                    var serviceEffectiveRoute = service.HasCustomRoute
+                        ? service.RouteTemplate
+                        : "api/" + service.RouteTemplate;
+                    if (context.OverriddenActions.Contains((serviceEffectiveRoute, serviceCrudAction.Value)))
+                    {
+                        continue;
+                    }
+                }
+
+                var routeBuilderName = $"routeBuilder_{serviceIndex}_{actionIndex}";
+                var permissionName = $"permission_{serviceIndex}_{actionIndex}";
+                builder.AppendLine($"            var {permissionName} = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{Escape(action.PermissionName)}\" }}, RequireAll = false }};");
+                builder.AppendLine($"            var {routeBuilderName} = endpoints.MapMethods(");
+                builder.AppendLine($"                BuildRoute(routePrefix_{serviceIndex}, \"{Escape(action.RelativeRoute)}\"),");
+                builder.AppendLine($"                new[] {{ \"{action.HttpMethod}\" }},");
+                builder.AppendLine($"                async (HttpContext context, [FromServices] {action.ServiceTypeName} service, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
+                builder.AppendLine("                {");
+                if (!action.AllowAnonymous)
+                {
+                    builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, {permissionName}.Permissions);");
+                }
+                foreach (var parameter in action.Parameters)
+                {
+                    builder.AppendLine(GenerateParameterBinding(parameter));
+                    if (parameter.Source != ParameterSource.CancellationToken && !parameter.IsScalar)
+                    {
+                        builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, {parameter.Name});");
+                    }
+                }
+
+                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "kernelToken" : parameter.Name));
+                var uowOptions = BuildUnitOfWorkOptionsLiteral(action.RequiresTransaction);
+                if (action.ReturnModel.IsVoid)
+                {
+                    if (action.RequiresUnitOfWork)
+                    {
+                        builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ExecuteAsync(context, {uowOptions}, async kernelToken =>");
+                        builder.AppendLine("                    {");
+                        builder.AppendLine($"                        await service.{action.ServiceMethodName}({callArguments});");
+                        builder.AppendLine("                    });");
+                    }
+                    else
+                    {
+                        var plainArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                        builder.AppendLine($"                    await service.{action.ServiceMethodName}({plainArguments});");
+                    }
+                    builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapVoidResult();");
+                }
+                else
+                {
+                    if (action.RequiresUnitOfWork)
+                    {
+                        builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, {uowOptions}, kernelToken => service.{action.ServiceMethodName}({callArguments}));");
+                    }
+                    else
+                    {
+                        var plainArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                        builder.AppendLine($"                    var result = await service.{action.ServiceMethodName}({plainArguments});");
+                    }
+                    builder.AppendLine(action.HttpMethod == "GET"
+                        ? "                    return DynamicApiGeneratedRuntime.WrapGetResult(result);"
+                        : "                    return DynamicApiGeneratedRuntime.WrapResult(result);");
+                }
+
+                builder.AppendLine("                });");
+                builder.AppendLine($"            {routeBuilderName}.WithDisplayName(\"{Escape(action.DeclaringTypeName)}.{Escape(action.ActionName)}\");");
+                builder.AppendLine($"            {routeBuilderName}.WithMetadata({permissionName});");
+                builder.AppendLine($"            {routeBuilderName}.WithMetadata(new global::Microsoft.AspNetCore.Http.TagsAttribute(\"{Escape(service.ServiceName)}\"));");
+                builder.AppendLine();
+                builder.AppendLine($"            var descriptor_{serviceIndex}_{actionIndex} = new global::CrestCreates.DynamicApi.DynamicApiEndpointDescriptor(");
+                builder.AppendLine($"                \"{Escape(service.ServiceName)}\",");
+                builder.AppendLine($"                \"{Escape(action.ActionName)}\",");
+                builder.AppendLine($"                \"{action.HttpMethod}\",");
+                builder.AppendLine($"                BuildRoute(routePrefix_{serviceIndex}, \"{Escape(action.RelativeRoute)}\"),");
+                builder.AppendLine($"                typeof({action.ServiceTypeName}),");
+                builder.AppendLine($"                {ResolveRequestTypeFromAction(action)},");
+                builder.AppendLine($"                {(action.ReturnModel.PayloadTypeName is not null ? $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})" : "null")},");
+                builder.AppendLine($"                new[] {{ \"{Escape(action.PermissionName)}\" }},");
+                builder.AppendLine($"                {ToBooleanLiteral(action.RequiresTransaction)});");
+                builder.AppendLine();
+                builder.AppendLine($"            global::CrestCreates.DynamicApi.DynamicApiEndpointConventionRunner.Apply(");
+                builder.AppendLine($"                endpoints.ServiceProvider,");
+                builder.AppendLine($"                options,");
+                builder.AppendLine($"                new global::CrestCreates.DynamicApi.DynamicApiEndpointConventionContext(");
+                builder.AppendLine($"                    descriptor_{serviceIndex}_{actionIndex},");
+                builder.AppendLine($"                    {routeBuilderName}));");
+            }
+            builder.AppendLine("        }");
+        }
+
+        for (var controllerIndex = 0; controllerIndex < context.Controllers.Length; controllerIndex++)
+        {
+            var controller = context.Controllers[controllerIndex];
+            builder.AppendLine($"        if (MatchesAssembly(options, typeof({controller.ControllerType}).Assembly))");
+            builder.AppendLine("        {");
+            for (var actionIndex = 0; actionIndex < controller.Actions.Length; actionIndex++)
+            {
+                var action = controller.Actions[actionIndex];
+                var routeBuilderName = $"routeBuilder_controller_{controllerIndex}_{actionIndex}";
+                var permissionName = $"permission_controller_{controllerIndex}_{actionIndex}";
+                builder.AppendLine($"            var {permissionName} = new DynamicApiPermissionMetadata {{ Permissions = new[] {{ \"{Escape(action.PermissionName)}\" }}, RequireAll = false }};");
+                builder.AppendLine($"            var {routeBuilderName} = endpoints.MapMethods(");
+                builder.AppendLine($"                \"{Escape(action.RelativeRoute)}\",");
+                builder.AppendLine($"                new[] {{ \"{action.HttpMethod}\" }},");
+                builder.AppendLine($"                async (HttpContext context, [FromServices] IValidationService? validationService, [FromServices] IPermissionChecker? permissionChecker) =>");
+                builder.AppendLine("                {");
+                if (!action.AllowAnonymous)
+                {
+                    builder.AppendLine($"                    await DynamicApiGeneratedRuntime.EnsurePermissionAsync(context, permissionChecker, {permissionName}.Permissions);");
+                }
+                builder.AppendLine($"                    var controller = context.RequestServices.GetRequiredService<{action.ServiceTypeName}>();");
+                foreach (var parameter in action.Parameters)
+                {
+                    builder.AppendLine(GenerateParameterBinding(parameter));
+                    if (parameter.Source != ParameterSource.CancellationToken && !parameter.IsScalar)
+                    {
+                        builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ValidateAsync(validationService, {parameter.Name});");
+                    }
+                }
+
+                var callArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "kernelToken" : parameter.Name));
+                var uowOptions = BuildUnitOfWorkOptionsLiteral(action.RequiresTransaction);
+                if (action.ReturnModel.IsVoid)
+                {
+                    if (action.RequiresUnitOfWork)
+                    {
+                        builder.AppendLine($"                    await DynamicApiGeneratedRuntime.ExecuteAsync(context, {uowOptions}, async kernelToken =>");
+                        builder.AppendLine("                    {");
+                        builder.AppendLine($"                        await controller.{action.ServiceMethodName}({callArguments});");
+                        builder.AppendLine("                    });");
+                    }
+                    else
+                    {
+                        var plainArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                        builder.AppendLine($"                    await controller.{action.ServiceMethodName}({plainArguments});");
+                    }
+                    builder.AppendLine("                    return DynamicApiGeneratedRuntime.WrapVoidResult();");
+                }
+                else
+                {
+                    if (action.RequiresUnitOfWork)
+                    {
+                        builder.AppendLine($"                    var result = await DynamicApiGeneratedRuntime.ExecuteAsync(context, {uowOptions}, kernelToken => controller.{action.ServiceMethodName}({callArguments}));");
+                    }
+                    else
+                    {
+                        var plainArguments = string.Join(", ", action.Parameters.Select(parameter => parameter.Source == ParameterSource.CancellationToken ? "context.RequestAborted" : parameter.Name));
+                        builder.AppendLine($"                    var result = await controller.{action.ServiceMethodName}({plainArguments});");
+                    }
+                    builder.AppendLine(action.HttpMethod == "GET"
+                        ? "                    return DynamicApiGeneratedRuntime.WrapGetResult(result);"
+                        : "                    return DynamicApiGeneratedRuntime.WrapResult(result);");
+                }
+
+                builder.AppendLine("                });");
+                builder.AppendLine($"            {routeBuilderName}.WithDisplayName(\"{Escape(action.DeclaringTypeName)}.{Escape(action.ActionName)}\");");
+                builder.AppendLine($"            {routeBuilderName}.WithMetadata({permissionName});");
+                builder.AppendLine($"            {routeBuilderName}.WithMetadata(new global::Microsoft.AspNetCore.Http.TagsAttribute(\"{Escape(controller.ControllerName)}\"));");
+                foreach (var metadataCall in action.MetadataCalls)
+                {
+                    builder.AppendLine($"            {routeBuilderName}{metadataCall};");
+                }
+                builder.AppendLine();
+                builder.AppendLine($"            var descriptor_controller_{controllerIndex}_{actionIndex} = new global::CrestCreates.DynamicApi.DynamicApiEndpointDescriptor(");
+                builder.AppendLine($"                \"{Escape(controller.ControllerName)}\",");
+                builder.AppendLine($"                \"{Escape(action.ActionName)}\",");
+                builder.AppendLine($"                \"{action.HttpMethod}\",");
+                builder.AppendLine($"                \"{Escape(action.RelativeRoute)}\",");
+                builder.AppendLine($"                typeof({action.ServiceTypeName}),");
+                builder.AppendLine($"                {ResolveRequestTypeFromAction(action)},");
+                builder.AppendLine($"                {(action.ReturnModel.PayloadTypeName is not null ? $"typeof({GetTypeOfTypeName(action.ReturnModel.PayloadTypeName)})" : "null")},");
+                builder.AppendLine($"                new[] {{ \"{Escape(action.PermissionName)}\" }},");
+                builder.AppendLine($"                {ToBooleanLiteral(action.RequiresTransaction)});");
+                builder.AppendLine();
+                builder.AppendLine($"            global::CrestCreates.DynamicApi.DynamicApiEndpointConventionRunner.Apply(");
+                builder.AppendLine($"                endpoints.ServiceProvider,");
+                builder.AppendLine($"                options,");
+                builder.AppendLine($"                new global::CrestCreates.DynamicApi.DynamicApiEndpointConventionContext(");
+                builder.AppendLine($"                    descriptor_controller_{controllerIndex}_{actionIndex},");
+                builder.AppendLine($"                    {routeBuilderName}));");
+            }
+            builder.AppendLine("        }");
+        }
+
+        builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    private static bool MatchesAssembly(DynamicApiOptions options, System.Reflection.Assembly assembly)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        return options.ServiceAssemblies.Count == 0 || options.ServiceAssemblies.Contains(assembly);");
+        builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    private static string ResolveRoutePrefix(DynamicApiOptions options, string routeTemplate, bool hasCustomRoute)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        if (hasCustomRoute)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            return routeTemplate;");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+        builder.AppendLine("        return $\"{options.DefaultRoutePrefix.TrimEnd('/')}/{routeTemplate}\";");
+        builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    private static string BuildRoute(string routePrefix, string relativeRoute)");
+        builder.AppendLine("    {");
+        builder.AppendLine("        return string.IsNullOrWhiteSpace(relativeRoute)");
+        builder.AppendLine("            ? routePrefix");
+        builder.AppendLine("            : $\"{routePrefix}/{relativeRoute}\";");
+        builder.AppendLine("    }");
+        builder.AppendLine("}");
+        return builder.ToString();
+    }
+
+    private static string GenerateControllerRegistrationSource(GenerationContext context)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("// <auto-generated />");
+        builder.AppendLine("#nullable enable");
+        builder.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+        builder.AppendLine("using Microsoft.Extensions.DependencyInjection.Extensions;");
+        builder.AppendLine();
+        builder.AppendLine("namespace CrestCreates.DynamicApi.Generated;");
+        builder.AppendLine();
+        builder.AppendLine("internal static class GeneratedDynamicApiControllerRegistrations");
+        builder.AppendLine("{");
+        builder.AppendLine("    [System.Runtime.CompilerServices.ModuleInitializer]");
+        builder.AppendLine("    internal static void AutoRegister()");
+        builder.AppendLine("    {");
+        builder.AppendLine("        CrestCreates.DynamicApi.DynamicApiGeneratedRegistryStore.RegisterControllerConfigurator(RegisterControllers);");
+        builder.AppendLine("    }");
+        builder.AppendLine();
+        builder.AppendLine("    public static void RegisterControllers(IServiceCollection services)");
+        builder.AppendLine("    {");
+        foreach (var controller in context.Controllers)
+        {
+            builder.AppendLine($"        services.TryAddScoped<{controller.ControllerType}>();");
+        }
+        builder.AppendLine("    }");
+        builder.AppendLine("}");
+        return builder.ToString();
+    }
+
+    private static string GenerateParameterBinding(ParameterModel parameter)
+    {
+        return parameter.Source switch
+        {
+            ParameterSource.CancellationToken => $"                    var {parameter.Name} = context.RequestAborted;",
+            ParameterSource.Route => $"                    var {parameter.Name} = {GenerateParseExpression(parameter.TypeName, $"""context.Request.RouteValues["{parameter.Name}"]?.ToString()!""", parameter.IsOptional)};",
+            ParameterSource.Query when parameter.IsScalar => $"                    var {parameter.Name} = {GenerateParseExpression(parameter.TypeName, $"""context.Request.Query["{parameter.Name}"].ToString()""", parameter.IsOptional)};",
+            ParameterSource.Query => GenerateQueryObjectBinding(parameter),
+            ParameterSource.Body => GenerateBodyBinding(parameter),
+            ParameterSource.Header => $"                    // CRUD delete concurrency token is bound from If-Match.\n                    var {parameter.Name} = context.Request.Headers[\"If-Match\"].FirstOrDefault()?.Trim('\"');",
+            _ => $"                    {parameter.TypeName} {parameter.Name} = default!;"
+        };
+    }
+
+    private static string GenerateQueryObjectBinding(ParameterModel parameter)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"                    var {parameter.Name} = new {parameter.TypeName}();");
+        foreach (var property in parameter.QueryProperties)
+        {
+            builder.AppendLine($"                    if (!string.IsNullOrWhiteSpace(context.Request.Query[\"{property.Name}\"].ToString()))");
+            builder.AppendLine("                    {");
+            builder.AppendLine($"                        {parameter.Name}.{property.Name} = {GenerateParseExpression(property.TypeName, $"""context.Request.Query["{property.Name}"].ToString()""", property.IsOptional)};");
+            builder.AppendLine("                    }");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string GenerateBodyBinding(ParameterModel parameter)
+    {
+        var builder = new StringBuilder();
+        if (parameter.IsOptional)
+        {
+            builder.AppendLine($"                    var {parameter.Name} = await DynamicApiGeneratedRuntime.ReadBodyAsync<{parameter.TypeName}>(context, true);");
+        }
+        else
+        {
+            builder.AppendLine($"                    var {parameter.Name} = (await DynamicApiGeneratedRuntime.ReadBodyAsync<{parameter.TypeName}>(context, false))!;");
+        }
+        return builder.ToString().TrimEnd();
+    }
+
+    private static ImmutableArray<string> BuildGeneratedApiControllerMetadataCalls(
+        INamedTypeSymbol controllerType,
+        IMethodSymbol method,
+        string relativeRoute,
+        ReturnModel returnModel,
+        ImmutableArray<ParameterModel> parameters,
+        INamedTypeSymbol? authorizeAttribute,
+        INamedTypeSymbol? allowAnonymousAttribute,
+        INamedTypeSymbol? routeAttribute,
+        INamedTypeSymbol? producesResponseTypeAttribute,
+        INamedTypeSymbol? producesAttribute,
+        INamedTypeSymbol? consumesAttribute)
+    {
+        var metadataCalls = ImmutableArray.CreateBuilder<string>();
+
+        if (routeAttribute is not null)
+        {
+            metadataCalls.Add($".WithMetadata(new global::Microsoft.AspNetCore.Mvc.RouteAttribute(\"{Escape(relativeRoute)}\"))");
+        }
+
+        if (allowAnonymousAttribute is not null &&
+            (HasAttribute(controllerType, allowAnonymousAttribute) || HasAttribute(method, allowAnonymousAttribute)))
+        {
+            metadataCalls.Add(".WithMetadata(new global::Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute())");
+        }
+        else if (authorizeAttribute is not null)
+        {
+            foreach (var attribute in GetAttributes(controllerType, authorizeAttribute))
+            {
+                metadataCalls.Add(BuildAuthorizeMetadataCall(attribute));
+            }
+
+            foreach (var attribute in GetAttributes(method, authorizeAttribute))
+            {
+                metadataCalls.Add(BuildAuthorizeMetadataCall(attribute));
+            }
+        }
+
+        if (producesResponseTypeAttribute is not null)
+        {
+            foreach (var attribute in GetAttributes(controllerType, producesResponseTypeAttribute))
+            {
+                var metadataCall = BuildProducesResponseTypeMetadataCall(attribute);
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+
+            foreach (var attribute in GetAttributes(method, producesResponseTypeAttribute))
+            {
+                var metadataCall = BuildProducesResponseTypeMetadataCall(attribute);
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+        }
+
+        if (producesAttribute is not null)
+        {
+            foreach (var attribute in GetAttributes(controllerType, producesAttribute))
+            {
+                var metadataCall = BuildStringArrayMetadataCall(attribute, "ProducesAttribute");
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+
+            foreach (var attribute in GetAttributes(method, producesAttribute))
+            {
+                var metadataCall = BuildStringArrayMetadataCall(attribute, "ProducesAttribute");
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+        }
+
+        if (consumesAttribute is not null && parameters.Any(parameter => parameter.Source == ParameterSource.Body))
+        {
+            foreach (var attribute in GetAttributes(controllerType, consumesAttribute))
+            {
+                var metadataCall = BuildStringArrayMetadataCall(attribute, "ConsumesAttribute");
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+
+            foreach (var attribute in GetAttributes(method, consumesAttribute))
+            {
+                var metadataCall = BuildStringArrayMetadataCall(attribute, "ConsumesAttribute");
+                if (metadataCall is not null)
+                {
+                    metadataCalls.Add(metadataCall);
+                }
+            }
+        }
+
+        return metadataCalls.ToImmutable();
+    }
+
+    private static string? BuildProducesResponseTypeMetadataCall(AttributeData attribute)
+    {
+        if (attribute.ConstructorArguments.Length == 2 &&
+            attribute.ConstructorArguments[0].Value is ITypeSymbol responseType &&
+            attribute.ConstructorArguments[1].Value is int statusCode)
+        {
+            return $".WithMetadata(new global::Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute(typeof({responseType.ToDisplayString(FullyQualifiedFormat)}), {statusCode}))";
+        }
+
+        if (attribute.ConstructorArguments.Length == 1 &&
+            attribute.ConstructorArguments[0].Value is int statusCodeOnly)
+        {
+            return $".WithMetadata(new global::Microsoft.AspNetCore.Mvc.ProducesResponseTypeAttribute({statusCodeOnly}))";
+        }
+
+        return null;
+    }
+
+    private static string? BuildStringArrayMetadataCall(AttributeData attribute, string attributeTypeName)
+    {
+        var contentTypes = new List<string>();
+        foreach (var argument in attribute.ConstructorArguments)
+        {
+            if (argument.Kind == TypedConstantKind.Array)
+            {
+                foreach (var value in argument.Values)
+                {
+                    if (value.Value is string contentType && !string.IsNullOrWhiteSpace(contentType))
+                    {
+                        contentTypes.Add($"\"{Escape(contentType)}\"");
+                    }
+                }
+                continue;
+            }
+
+            if (argument.Value is string contentTypeValue && !string.IsNullOrWhiteSpace(contentTypeValue))
+            {
+                contentTypes.Add($"\"{Escape(contentTypeValue)}\"");
+            }
+        }
+
+        if (contentTypes.Count == 0)
+        {
+            return null;
+        }
+
+        return $".WithMetadata(new global::Microsoft.AspNetCore.Mvc.{attributeTypeName}({string.Join(", ", contentTypes)}))";
+    }
+
+    private static string BuildAuthorizeMetadataCall(AttributeData attribute)
+    {
+        var initializers = new List<string>();
+
+        if (TryGetAuthorizePolicy(attribute, out var policy))
+        {
+            initializers.Add($"Policy = \"{Escape(policy)}\"");
+        }
+
+        if (TryGetAttributeStringValue(attribute, "Roles", out var roles))
+        {
+            initializers.Add($"Roles = \"{Escape(roles)}\"");
+        }
+
+        if (TryGetAttributeStringValue(attribute, "AuthenticationSchemes", out var schemes))
+        {
+            initializers.Add($"AuthenticationSchemes = \"{Escape(schemes)}\"");
+        }
+
+        return initializers.Count == 0
+            ? ".WithMetadata(new global::Microsoft.AspNetCore.Authorization.AuthorizeAttribute())"
+            : $".WithMetadata(new global::Microsoft.AspNetCore.Authorization.AuthorizeAttribute() {{ {string.Join(", ", initializers)} }})";
+    }
+
+    private static bool TryGetAuthorizePolicy(AttributeData attribute, out string policy)
+    {
+        if (attribute.ConstructorArguments.Length > 0 &&
+            attribute.ConstructorArguments[0].Value is string constructorPolicy &&
+            !string.IsNullOrWhiteSpace(constructorPolicy))
+        {
+            policy = constructorPolicy;
+            return true;
+        }
+
+        return TryGetAttributeStringValue(attribute, "Policy", out policy);
+    }
+
+    private static bool TryGetAttributeStringValue(AttributeData attribute, string propertyName, out string value)
+    {
+        foreach (var namedArgument in attribute.NamedArguments)
+        {
+            if (namedArgument.Key.Equals(propertyName, StringComparison.Ordinal) && namedArgument.Value.Value is string namedValue)
+            {
+                value = namedValue;
+                return true;
+            }
+        }
+
+        value = string.Empty;
+        return false;
+    }
+
+    private static IEnumerable<AttributeData> GetAttributes(ISymbol symbol, INamedTypeSymbol attributeSymbol)
+    {
+        return symbol.GetAttributes().Where(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, attributeSymbol));
+    }
+
+    private static string GenerateParseExpression(string typeName, string rawExpression, bool optional)
+    {
+        var normalizedType = typeName.EndsWith("?", StringComparison.Ordinal) ? typeName.Substring(0, typeName.Length - 1) : typeName;
+
+        if ((normalizedType == "string" || normalizedType == "global::System.String") && optional)
+        {
+            return $"string.IsNullOrWhiteSpace({rawExpression}) ? null : {rawExpression}";
+        }
+
+        if (normalizedType == "string" || normalizedType == "global::System.String")
+        {
+            return $"(!string.IsNullOrWhiteSpace({rawExpression}) ? {rawExpression} : throw new BadHttpRequestException(\"缺少参数\"))";
+        }
+
+        var parseExpression = normalizedType switch
+        {
+            "bool" or "global::System.Boolean" => $"bool.Parse({rawExpression})",
+            "int" or "global::System.Int32" => $"int.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "long" or "global::System.Int64" => $"long.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "short" or "global::System.Int16" => $"short.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "byte" or "global::System.Byte" => $"byte.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "double" or "global::System.Double" => $"double.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "float" or "global::System.Single" => $"float.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "decimal" or "global::System.Decimal" => $"decimal.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "global::System.Guid" => $"Guid.Parse({rawExpression})",
+            "global::System.DateTime" => $"DateTime.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "global::System.DateTimeOffset" => $"DateTimeOffset.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            "global::System.TimeSpan" => $"TimeSpan.Parse({rawExpression}, CultureInfo.InvariantCulture)",
+            _ => $"({normalizedType})Enum.Parse(typeof({normalizedType}), {rawExpression}, true)"
+        };
+
+        return optional
+            ? typeName.EndsWith("?", StringComparison.Ordinal)
+                ? $"string.IsNullOrWhiteSpace({rawExpression}) ? ({normalizedType}?)null : {parseExpression}"
+                : $"string.IsNullOrWhiteSpace({rawExpression}) ? default({normalizedType}) : {parseExpression}"
+            : parseExpression;
+    }
+
+    private static string GetProviderTypeName(string assemblyName)
+    {
+        var builder = new StringBuilder("GeneratedDynamicApiProvider_");
+        foreach (var character in assemblyName)
+        {
+            builder.Append(char.IsLetterOrDigit(character) ? character : '_');
+        }
+
+        return builder.ToString();
+    }
+
+    private static string GetTypeOfTypeName(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return "void";
+        }
+
+        return typeName!.EndsWith("?", StringComparison.Ordinal)
+            ? typeName.Substring(0, typeName.Length - 1)
+            : typeName;
+    }
+
+    private static string Escape(string value)
+    {
+        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
+    private static string ToBooleanLiteral(bool value)
+    {
+        return value ? "true" : "false";
+    }
+
+    private static string BuildUnitOfWorkOptionsLiteral(bool requiresTransaction)
+    {
+        return requiresTransaction
+            ? "new global::CrestCreates.Data.Abstractions.UnitOfWorkOptions()"
+            : "new global::CrestCreates.Data.Abstractions.UnitOfWorkOptions { IsTransactional = false }";
+    }
+
+    private static string ResolveRequestTypeFromAction(ActionModel action)
+    {
+        foreach (var parameter in action.Parameters)
+        {
+            if (parameter.Source == ParameterSource.Body)
+            {
+                return $"typeof({GetTypeOfTypeName(parameter.TypeName)})";
+            }
+        }
+
+        return "null";
+    }
+
+    private sealed record GenerationContext(
+        string AssemblyName,
+        ImmutableArray<ServiceModel> Services,
+        ImmutableArray<GeneratedApiControllerModel> Controllers,
+        HashSet<(string RouteTemplate, CrudAction Action)> OverriddenActions);
+
+    private sealed record GeneratedApiControllerModel(
+        string ControllerName,
+        string RouteTemplate,
+        string ControllerType,
+        ImmutableArray<ActionModel> Actions);
+
+}
