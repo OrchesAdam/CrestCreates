@@ -3,11 +3,13 @@ using System;
 namespace CrestCreates.Domain.Shared.Attributes
 {
     /// <summary>
-    /// Marks a [CrestService] class or method for compatibility projection to Capability Pipeline.
-    /// Class-level: all eligible methods projected.
-    /// Method-level: projected only that method (class need not have the attribute).
+    /// Marks a class for explicit-host compatibility projection to the Capability Pipeline.
+    /// The anchor declares a <see cref="ContractType"/> (interface or the anchor class itself for a
+    /// self-contract declaration) and the formal HTTP/JSON toolchain materializes its endpoints.
     /// With <see cref="ContractType"/> the declaration may be a local anchor that does not implement
     /// the contract; the contract (and its DTOs) may come from a referenced assembly (#129 addendum).
+    /// Method-level projection belonged to the retired legacy front-end and is rejected with
+    /// CCHTTP001; declare a class-level projection instead.
     /// </summary>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false)]
     public sealed class CapabilityCompatibilityProjectionAttribute : Attribute

@@ -56,8 +56,8 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 
 ## S5 — Native、回归与交接
 
-- [ ] Ticket native fixture 使用真实服务/DTO/正式投影，持久化叶子用诚实声明的静态内存 provider；不换成等价假业务服务。
-- [ ] publish/link/run、loopback、逐场景/总 sentinel、真实 metadata 拒绝和变异、进程回收证据。
+- [x] Ticket native fixture 使用真实服务/DTO/正式投影，持久化叶子用诚实声明的静态内存 provider；不换成等价假业务服务。证据：`tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` + `.Tests`；真实 `TicketAppService`/DTO/validator，内存 Ticket/SLA 仓储与 UoW，fixture 自有 identity/permission/failure presenter；JIT 1/1。
+- [x] publish/link/run、loopback、逐场景/总 sentinel、真实 metadata 拒绝和变异、进程回收证据。证据：原生门禁 3/3（绿色 + wrong-expectation + wrong-validation），15 场景 + `CRESTCREATES_TICKET_NATIVE_OK`，证据 `tests/artifacts/aot-native-evidence/ticket-native-http*.json`。
 - [ ] 复跑 #128、CapabilityEndpoint 与受影响 LocalEvent/RabbitMQ/JSON/package/边界门禁；按最终提交留下实际计数。
 - [ ] 同步 memory/AGENTS/#123 evidence matrix/migration/归档说明/支持边界，发布复审入口。
 - [ ] 本任务不自动合并、不恢复 CI；设计发布不代表任一实现切片已完成。

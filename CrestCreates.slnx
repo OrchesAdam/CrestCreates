@@ -263,6 +263,8 @@
     <Project Path="tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.SecondFeature/CrestCreates.GeneratedCrud.AotFixture.SecondFeature.csproj" />
     <Project Path="tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture/CrestCreates.GeneratedCrud.AotFixture.csproj" />
     <Project Path="tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests/CrestCreates.GeneratedCrud.AotFixture.Tests.csproj" />
+    <Project Path="tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture/CrestCreates.TicketHttpProjection.AotFixture.csproj" />
+    <Project Path="tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture.Tests/CrestCreates.TicketHttpProjection.AotFixture.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Framework/Web/">
     <Project Path="tests/Framework/Web/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj" />

@@ -809,3 +809,26 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - CodeGenerator 全量 **447/447**（32m；旧输出测试归档后 441，新增 analyzer/mapper 相关 6 例）；Application **177/177**、Capability **178/178**、OrmProviders **124/124**、JsonContracts **162/162**、Procurement **29/29**、Boundary **176/178**（2 条既存 WIP）、CRUD AOT **23/23**、Data AOT **1/1**、主解决方案 0 error。
 - 真实 MSBuild 探针：无工具链项目 exit 1 + CCHTTP002 Error、方法级声明/LegacyStatic exit 1 + CCHTTP001 Error；正式包 mapper 仅保留 `JsonTypeInfo` overload，公开表面守卫通过。
 - 未合并、CI 保持暂停；S5 Ticket NativeAOT 仍未开始。
+
+## S5 Ticket NativeAOT 与最终交接（2026-10-21，head 见 PR）
+
+### Ticket 原生 fixture
+
+- 新增 `tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` 与 `.Tests`。fixture 内 local class-level anchor 引用真实 `ITicketAppService`，由正式 AppService HTTP/JSON 工具链生成 11 动作 bundle；运行真实 `TicketAppService`、真实 DTO 与真实 validator（fixture 仅提供继承真实规则的闭包 validator 以获得 precompile 可发现性）。
+- 仅替换持久化叶子与 fixture 设施：内存 Ticket/SLA 仓储、内存 UoW provider（snapshot/restore）、identity/permission checker、fixture-local failure presenter/classifier。Ticket/SLA 查询使用有界静态 queryable（ToList / Id 相等 / IsActive），不使用 BCL EnumerableQuery、Expression.Compile 或反射动态 LINQ。未手写同名 DTO、等价业务 service、JSON root table 或 endpoint map。
+- 原生场景 15 个：create、get-by-id、unknown 404、list-all、by-customer、update stamp、assign+active SLA due date、by-assignee、resolve、close、business-failure 可序列化、delete If-Match、invalid body zero-business、permission 403、metadata rejection。逐场景 PASS + `CRESTCREATES_TICKET_NATIVE_OK` 总 sentinel。
+- 变异：`--ticket-mutation=wrong-expectation` → `create:FAIL`、exit 1、无总 sentinel；`--ticket-mutation=wrong-validation-status` → `invalid-body-zero-business:FAIL`、exit 1、无总 sentinel。原生进程有界退出/回收。
+- 证据：`tests/artifacts/aot-native-evidence/ticket-native-http.json`、`ticket-native-http-wrong-expectation.json`、`ticket-native-http-wrong-validation.json`（publishCommand/exit/log、SHA、RID、gateExitCode/gateOutput、result/failure）。
+
+### 验证
+
+- Ticket fixture JIT **1/1**；原生门禁 **3/3**（绿色 + 两变异，publish/link/run，linux-x64）。fixture 自身无 IL2026/IL3050（框架依赖告警按既有分层保留）。
+- 受影响的既有门禁沿用 S4 最终 head 证据：SaaSHelpdesk 152/11/163（11 条既有红不变）、Web 102/102、DynamicApi 141/141、Application 177/177、Capability 178/178、OrmProviders 124/124、JsonContracts 162/162、Procurement 29/29、CompatibilityProjection E2E 20/20、CapabilityEndpoint AOT 13/13、CRUD AOT 23/23、Data AOT 1/1、Boundary 176/178（2 条 ControlPlaneReferenceData evidence-ledger 既存 WIP）、CodeGenerator 447/447、Library 正式契约基线 2/2；主解决方案 0 error。
+- P3：`CapabilityCompatibilityProjectionAttribute` XML 注释删除方法级推荐，明确方法级为退役/ CCHTTP001，与默认 analyzer 一致。
+
+### 支持声明与限制
+
+- **Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64，该 fixture 范围）**。
+- 仅证明原生组合中的真实 TicketAppService/DTO/validator/正式 bundle + 内存持久化叶子；不证明 EF/PostgreSQL、真实认证/租户/多租户、整个 SaaSHelpdesk、Library HTTP、其他 RID。
+- LibraryManagement 完整 HTTP 仍未验证（既有 `OpenIddictScopes` 测试环境缺失）；S4 旧链退出结论保持。
+- 未合并、CI 保持暂停；不自动合并/恢复 CI。

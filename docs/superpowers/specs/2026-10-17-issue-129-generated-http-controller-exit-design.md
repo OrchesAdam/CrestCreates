@@ -247,7 +247,7 @@ S4 R2 收口补充：正式 projection 的缺工具链诊断由**默认 analyzer
 
 ## 11. NativeAOT 证据设计
 
-新增独立 Ticket HTTP fixture（拟 CrestCreates.TicketHttpProjection.AotFixture + Tests），引用真实 Ticket Domain/Application/Contracts 与正式生成工具链，调用真实 TicketAppService；仅替换 repository/provider 等持久化叶子，不能手写同名 DTO、等价 service、JSON root table 或 endpoint map。
+已实现独立 Ticket HTTP fixture：`tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` + `.Tests`。fixture 以本程序集内的 class-level anchor 引用真实 `ITicketAppService`，由正式 AppService HTTP/JSON 工具链物化 11 个动作；运行真实 `TicketAppService`、真实 DTO 与真实 validator（fixture 只提供继承真实规则的闭包 validator 以获得可发现性）。仅替换持久化叶子（内存 Ticket/SLA 仓储、内存 UoW provider）以及 fixture 的 identity/permission/failure-presenter 设施；未手写同名 DTO、等价业务 service、JSON root table 或 endpoint map。Ticket/SLA 查询使用有界静态 queryable（只执行 `ToList`、`Id` 相等与 `IsActive`），不使用 BCL EnumerableQuery、Expression.Compile 或反射动态 LINQ。NativeAOT 门禁覆盖 15 场景 + 总 sentinel（create/get/all/by-customer/update/assign/resolve/close/delete/validation/permission/business-failure/metadata-rejection）与两个变异（错误期望、错误 validation 状态），三份证据 `ticket-native-http*.json` 均由原生产物产生。
 
 内存查询不得依赖 BCL EnumerableQuery/Expression.Compile/反射动态 LINQ 在 AOT 下碰运气；消费 #128 已落证的静态受支持 provider 方案，为 Ticket 的实际表达式提供强类型执行与明确拒绝。没有宣称支持任意 ORM query shape。
 
