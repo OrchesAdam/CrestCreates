@@ -57,10 +57,10 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 ## S5 — Native、回归与交接
 
 - [x] Ticket native fixture 使用真实服务/DTO/正式投影，持久化叶子用诚实声明的静态内存 provider；不换成等价假业务服务。证据：`tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` + `.Tests`；真实 `TicketAppService`/DTO/validator，内存 Ticket/SLA 仓储与 UoW，fixture 自有 identity/permission/failure presenter；JIT 1/1。
-- [x] publish/link/run、loopback、逐场景/总 sentinel、真实 metadata 拒绝和变异、进程回收证据。证据：原生门禁 3/3（绿色 + wrong-expectation + wrong-validation），15 场景 + `CRESTCREATES_TICKET_NATIVE_OK`，证据 `tests/artifacts/aot-native-evidence/ticket-native-http*.json`。
-- [ ] 复跑 #128、CapabilityEndpoint 与受影响 LocalEvent/RabbitMQ/JSON/package/边界门禁；按最终提交留下实际计数。
-- [ ] 同步 memory/AGENTS/#123 evidence matrix/migration/归档说明/支持边界，发布复审入口。
-- [ ] 本任务不自动合并、不恢复 CI；设计发布不代表任一实现切片已完成。
+- [x] publish/link/run、loopback、逐场景/总 sentinel、真实 metadata 拒绝和变异、进程回收证据。证据：原生门禁 3/3（绿色 + wrong-expectation + wrong-validation），15 场景 + `CRESTCREATES_TICKET_NATIVE_OK`，入库证据 `docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（代码 SHA `eb8e4807`）。
+- [x] 受影响门禁：S5 未修改生产 runtime（仅新增 fixture/测试与 attribute XML 注释），S4 最终 head 的 SaaSHelpdesk 152/11/163、Web 102、DynamicApi 141、Application 177、Capability 178、OrmProviders 124、JsonContracts 162、Procurement 29、E2E 20、CapabilityEndpoint AOT 13、CRUD AOT 23、Data AOT 1、Boundary 176/178（2 既存 WIP）、CodeGenerator 447、Library 契约基线 2 继续有效；主解决方案与分层解决方案 0 error。LocalEvent/RabbitMQ 未被 S5 改动，未重跑并明确不计入本轮独立通过。
+- [x] 同步 memory/AGENTS/#123 evidence matrix/migration/归档说明/支持边界，发布复审入口。
+- [x] 本任务不自动合并、不恢复 CI；设计发布不代表任一实现切片已完成。
 
 ## rev.2 的范围和交接要求
 

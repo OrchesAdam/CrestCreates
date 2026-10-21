@@ -818,7 +818,7 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 仅替换持久化叶子与 fixture 设施：内存 Ticket/SLA 仓储、内存 UoW provider（snapshot/restore）、identity/permission checker、fixture-local failure presenter/classifier。Ticket/SLA 查询使用有界静态 queryable（ToList / Id 相等 / IsActive），不使用 BCL EnumerableQuery、Expression.Compile 或反射动态 LINQ。未手写同名 DTO、等价业务 service、JSON root table 或 endpoint map。
 - 原生场景 15 个：create、get-by-id、unknown 404、list-all、by-customer、update stamp、assign+active SLA due date、by-assignee、resolve、close、business-failure 可序列化、delete If-Match、invalid body zero-business、permission 403、metadata rejection。逐场景 PASS + `CRESTCREATES_TICKET_NATIVE_OK` 总 sentinel。
 - 变异：`--ticket-mutation=wrong-expectation` → `create:FAIL`、exit 1、无总 sentinel；`--ticket-mutation=wrong-validation-status` → `invalid-body-zero-business:FAIL`、exit 1、无总 sentinel。原生进程有界退出/回收。
-- 证据：`tests/artifacts/aot-native-evidence/ticket-native-http.json`、`ticket-native-http-wrong-expectation.json`、`ticket-native-http-wrong-validation.json`（publishCommand/exit/log、SHA、RID、gateExitCode/gateOutput、result/failure）。
+- 证据（入库）：`docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（`ticket-native-http.json`、`ticket-native-http-wrong-expectation.json`、`ticket-native-http-wrong-validation.json`；publishCommand/exit/log、SHA、RID、gateExitCode/gateOutput、result/failure，代码 SHA `eb8e4807`）。
 
 ### 验证
 
