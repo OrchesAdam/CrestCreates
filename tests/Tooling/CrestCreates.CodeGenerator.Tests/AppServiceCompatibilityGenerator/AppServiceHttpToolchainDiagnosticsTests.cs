@@ -71,8 +71,36 @@ public sealed class AppServiceHttpToolchainDiagnosticsTests
 
         diagnostics.Should().Contain(diagnostic =>
             diagnostic.Id == "CCHTTP002"
-            && diagnostic.Severity == DiagnosticSeverity.Warning
+            && diagnostic.Severity == DiagnosticSeverity.Error
             && diagnostic.GetMessage().Contains("toolchain", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Method_level_projection_is_rejected()
+    {
+        var diagnostics = await AnalyzeAsync("""
+            namespace Probe
+            {
+                public interface IService
+                {
+                    System.Threading.Tasks.Task<string> PingAsync(System.Threading.CancellationToken cancellationToken = default);
+                }
+
+                public static class Anchor
+                {
+                    [CrestCreates.Domain.Shared.Attributes.CapabilityCompatibilityProjection(
+                        ContractType = typeof(IService))]
+                    public static System.Threading.Tasks.Task<string> PingAsync(
+                        System.Threading.CancellationToken cancellationToken = default)
+                        => System.Threading.Tasks.Task.FromResult("ok");
+                }
+            }
+            """, toolchainEnabled: true);
+
+        diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Id == "CCHTTP001"
+            && diagnostic.Severity == DiagnosticSeverity.Error
+            && diagnostic.GetMessage().Contains("method-level", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

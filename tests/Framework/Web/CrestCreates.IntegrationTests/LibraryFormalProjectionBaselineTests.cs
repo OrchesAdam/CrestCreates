@@ -110,6 +110,9 @@ public class LibraryFormalProjectionBaselineTests
             typeof(LibraryManagement.Application.Projections.LoanHttpProjection),
             typeof(LibraryManagement.Application.Projections.MemberHttpProjection),
         });
+        requiredServices.Select(type => type.FullName).Should().NotContain(
+            "CrestCreates.Validation.Modules.IValidationService",
+            "the pre-exit Library host did not register validation; the formal migration must not add new body validation");
 
         contributions.Should().OnlyContain(contribution =>
             contribution.JsonContext != null && contribution.RequiredJsonRootTypes.Count > 0);

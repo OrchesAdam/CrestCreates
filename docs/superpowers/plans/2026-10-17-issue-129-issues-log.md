@@ -789,13 +789,13 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 
 - 根因：`CreateAgentDtoValidator` 由默认 `ServiceSourceGenerator` 生成并从 Application 程序集注册；旧 legacy runtime 对所有 complex body 自动 `ValidateAsync`，迁移到正式投影后 `IAgentAppService.CreateAsync` 没有 `RequiresValidator=true`，预编译因此未把 validator 接入 invoker。
 - 修复：在 Application 中**手写** `CreateAgentDtoValidator`（UserName/Email/Password，EmailAddress），正是预编译可发现的闭包；`IAgentAppService.CreateAsync` 声明 `RequiresValidator=true`。`AgentApiTests.CreateAsync_InvalidEmail_ReturnsBadRequest_AndDoesNotPersist` 先断 HTTP 400，再查 repository 确认无写入。
-- 同类迁移补齐：LibraryManagement 的 `CreateLoanDto`/`ReturnBookDto`/`ExtendLoanDto` 手写 validator 并接到对应 adapter action 的 `RequiresValidator`；Library Host 注册 `IValidationService`（CCHTTP007 必需），保持旧 runtime 对复杂 body 的校验语义。
+- Library 对照修正：上一已放行/退出 head 的 Library Host **没有注册** `IValidationService`，legacy runtime 对 Library complex body 的校验实际未启用。R2 初版误加 `CreateLoanDto`/`ReturnBookDto`/`ExtendLoanDto` validator 与 `RequiresValidator`，导致正常借阅载荷被拦；已撤回并归档到 `99_RecycleBin/.../LibraryManagement.Application/Validators/`，Library 正式链保持旧行为（无 validator 要求、无 `IValidationService` 注册）。`LibraryFormalProjectionBaselineTests` 增加“不得要求 IValidationService”守卫。
 
 ### 02 正式声明诊断丢失
 
 - 根因：CCHTTP002 只由 BuildTasks precompile 在运行后发出；项目未导入 JSON/AppService HTTP props/targets 时 precompile 不运行，声明静默无端点。`RegistrationMode.LegacyStatic` 在 `AppServiceHttpProjectionModelBuilder` 中被当作“非正式”静默跳过。
-- 修复：默认 analyzer `AppServiceHttpProjectionDiagnosticAnalyzer` 在每次编译检查 `[CapabilityCompatibilityProjection]`：未设置 `build_property.CrestCreatesAppServiceHttpJsonToolchain=true` → CCHTTP002 Warning（明确提示无端点）；`LegacyStatic` → CCHTTP001 Error（enum 同时标 Obsolete）。`OwnsFormalHttpSurface` 把显式 LegacyStatic 视为正式输入，builder 也报 CCHTTP001，不再静默跳过。
-- 真实 MSBuild 探针：无工具链项目构建出现 CCHTTP002 Warning；LegacyStatic 项目构建 exit 1 + CCHTTP001 Error。单元测试 `AppServiceHttpToolchainDiagnosticsTests` 4/4，旧 `Legacy_static_mode_is_left_to_the_legacy_front_end` 改为拒绝语义。
+- 修复：默认 analyzer `AppServiceHttpProjectionDiagnosticAnalyzer` 在每次编译检查 `[CapabilityCompatibilityProjection]`：未设置 `build_property.CrestCreatesAppServiceHttpJsonToolchain=true` → **CCHTTP002 Error**（构建失败，不再静默成功无端点）；显式 `LegacyStatic`（enum Obsolete）、无 ContractType/RegistrationMode 的隐式静态声明、以及旧的方法级 projection 声明 → **CCHTTP001 Error**。`OwnsFormalHttpSurface` 把显式 LegacyStatic 视为正式输入，builder 也报 CCHTTP001，不再静默跳过。
+- 真实 MSBuild 探针：无工具链项目构建 **exit 1 + CCHTTP002 Error**；方法级声明 **exit 1 + CCHTTP001 Error**；LegacyStatic 项目 **exit 1 + CCHTTP001 Error**。单元测试 `AppServiceHttpToolchainDiagnosticsTests` **6/6**，旧 `Legacy_static_mode_is_left_to_the_legacy_front_end` 改为拒绝语义。
 
 ### 03 旧反射响应入口残留
 
@@ -806,6 +806,6 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 
 - SaaSHelpdesk **152 pass / 11 fail / 163**（新增 Agent 校验回归；11 条既有红不变）。
 - DynamicApi **141/141**（含 mapper 表面守卫）；CompatibilityProjection E2E **20/20**；CapabilityEndpoint AOT **13/13**（native publish/link/run）；Web **102/102**；Library 正式契约基线 **2/2**。
-- CodeGenerator 全量 **446/446**（32m28s；旧输出测试归档后 441，新增 analyzer/mapper 相关 5 例）；Application **177/177**、Capability **178/178**、OrmProviders **124/124**、JsonContracts **162/162**、Procurement **29/29**、Boundary **176/178**（2 条既存 WIP）、CRUD AOT **23/23**、Data AOT **1/1**、主解决方案 0 error。
-- 真实 MSBuild 探针：无工具链项目 CCHTTP002 Warning、LegacyStatic 项目 exit 1 + CCHTTP001 Error；正式包 mapper 仅保留 `JsonTypeInfo` overload，公开表面守卫通过。
+- CodeGenerator 全量 **447/447**（32m；旧输出测试归档后 441，新增 analyzer/mapper 相关 6 例）；Application **177/177**、Capability **178/178**、OrmProviders **124/124**、JsonContracts **162/162**、Procurement **29/29**、Boundary **176/178**（2 条既存 WIP）、CRUD AOT **23/23**、Data AOT **1/1**、主解决方案 0 error。
+- 真实 MSBuild 探针：无工具链项目 exit 1 + CCHTTP002 Error、方法级声明/LegacyStatic exit 1 + CCHTTP001 Error；正式包 mapper 仅保留 `JsonTypeInfo` overload，公开表面守卫通过。
 - 未合并、CI 保持暂停；S5 Ticket NativeAOT 仍未开始。

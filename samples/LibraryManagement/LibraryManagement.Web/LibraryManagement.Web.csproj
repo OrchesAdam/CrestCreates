@@ -31,7 +31,6 @@
     <ProjectReference Include="../../../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
     <ProjectReference Include="../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
     <ProjectReference Include="../../../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
-    <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.Validation/CrestCreates.Validation.csproj" />
   </ItemGroup>
 
   <ItemGroup>

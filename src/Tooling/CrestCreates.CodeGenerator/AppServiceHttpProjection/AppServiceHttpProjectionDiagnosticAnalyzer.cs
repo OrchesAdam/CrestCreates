@@ -29,7 +29,7 @@ public sealed class AppServiceHttpProjectionDiagnosticAnalyzer : DiagnosticAnaly
             + "toolchain is not enabled; no endpoint will be published. Import the JsonContracts Build "
             + "props/targets or enable the AppService HTTP precompile toolchain.",
         category: "CrestCreates.HttpProjection",
-        defaultSeverity: DiagnosticSeverity.Warning,
+        defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor RetiredRegistrationMode = new(
@@ -52,8 +52,23 @@ public sealed class AppServiceHttpProjectionDiagnosticAnalyzer : DiagnosticAnaly
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor MethodLevelProjectionRetired = new(
+        id: "CCHTTP001",
+        title: "Method-level AppService HTTP projection is retired",
+        messageFormat:
+            "'{0}' declares [CapabilityCompatibilityProjection] on a method; method-level projection "
+            + "belonged to the retired legacy front-end. Declare a class-level projection with "
+            + "ContractType and HttpProjectionRegistrationMode.ExplicitHost.",
+        category: "CrestCreates.HttpProjection",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics
-        => ImmutableArray.Create(NotMaterialized, RetiredRegistrationMode, MissingFormalDeclaration);
+        => ImmutableArray.Create(
+            NotMaterialized,
+            RetiredRegistrationMode,
+            MissingFormalDeclaration,
+            MethodLevelProjectionRetired);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -74,7 +89,36 @@ public sealed class AppServiceHttpProjectionDiagnosticAnalyzer : DiagnosticAnaly
             start.RegisterSymbolAction(
                 symbol => Analyze(symbol, projectionAttribute, toolchainEnabled),
                 SymbolKind.NamedType);
+            start.RegisterSymbolAction(
+                symbol => AnalyzeMethod(symbol, projectionAttribute),
+                SymbolKind.Method);
         });
+    }
+
+    private static void AnalyzeMethod(
+        SymbolAnalysisContext context,
+        INamedTypeSymbol projectionAttribute)
+    {
+        if (context.Symbol is not IMethodSymbol method)
+        {
+            return;
+        }
+
+        var attribute = method.GetAttributes().FirstOrDefault(candidate =>
+            SymbolEqualityComparer.Default.Equals(candidate.AttributeClass, projectionAttribute));
+        if (attribute is null)
+        {
+            return;
+        }
+
+        var location = attribute.ApplicationSyntaxReference
+                           ?.GetSyntax(context.CancellationToken)
+                           .GetLocation()
+                       ?? method.Locations.FirstOrDefault();
+        if (location is not null)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(MethodLevelProjectionRetired, location, method.Name));
+        }
     }
 
     private static void Analyze(
