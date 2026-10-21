@@ -294,42 +294,20 @@
     ]
   },
   "legacyProjects": {
-    "CrestCreates.DynamicApi.Legacy": {
-      "dependsOn": [
-        "shared typed runtime",
-        "existing runtime deps"
-      ],
-      "hosts": [
-        "legacy provider",
-        "registry helpers",
-        "body reader"
-      ]
-    },
-    "CrestCreates.CodeGenerator.Legacy": {
-      "targetFramework": "netstandard2.0",
-      "dependsOn": [
-        "shared-source model and emitters"
-      ],
-      "mustNotReference": [
-        "an analyzer package containing the default formal generators"
-      ]
-    },
-    "CrestCreates.Web.Legacy": {
-      "layer": "Platform",
-      "dependsOn": [
-        "CrestCreates.Web",
-        "CrestCreates.DynamicApi.Legacy"
-      ],
-      "provides": [
-        "Add/MapLegacyGeneratedApi"
-      ]
-    },
+    "retained": [],
     "edges": {
       "formalToLegacy": "forbidden",
       "runtimeToApiOrWebOrOrm": "forbidden",
       "defaultAnalyzerOrPackageIncludesLegacy": false,
-      "sampleOptIn": "explicit per owner/action allowlist recorded in the archive table"
-    }
+      "sampleEndpointOwnership": "formal ExplicitHost contributions only",
+      "archivedAt": "99_RecycleBin/issue-129-controller-exit"
+    },
+    "exitEvidence": [
+      "no Legacy project in solutions or any project reference",
+      "no Legacy analyzer/runtime/Web activation reference in samples, tests or fixtures",
+      "no legacy type or Add/Map symbol in formal assemblies",
+      "sample endpoint routes come only from formal contributions"
+    ]
   },
   "diagnostics": {
     "ids": {

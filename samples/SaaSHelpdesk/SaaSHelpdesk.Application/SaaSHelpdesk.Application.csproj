@@ -14,9 +14,6 @@
     <!-- The hand-written domain write actions declare [UnitOfWorkMo] in this assembly and must be
          woven here; base-class actions are woven in CrestCreates.Application. -->
     <PackageReference Include="Rougamo.Fody" />
-    <ProjectReference Include="../../../src/Tooling/CrestCreates.CodeGenerator.Legacy/CrestCreates.CodeGenerator.Legacy.csproj"
-                      OutputItemType="Analyzer"
-                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -26,7 +23,6 @@
     <ProjectReference Include="../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Domain/SaaSHelpdesk.Domain.csproj" />
     <ProjectReference Include="../SaaSHelpdesk.Application.Contracts/SaaSHelpdesk.Application.Contracts.csproj" />
-    <ProjectReference Include="../../../src/Framework/Api/CrestCreates.DynamicApi.Legacy/CrestCreates.DynamicApi.Legacy.csproj" />
   </ItemGroup>
 
 </Project>

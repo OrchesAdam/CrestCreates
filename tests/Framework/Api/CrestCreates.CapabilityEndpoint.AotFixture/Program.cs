@@ -4,6 +4,7 @@ using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
 using CrestCreates.CapabilityEndpoint.AotFixture;
 using CrestCreates.DynamicApi;
+using CrestCreates.Generated.HttpProjection;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Bootstrap;
@@ -30,6 +31,7 @@ builder.Services.AddSingleton(new CapabilityPipelineBuilder());
 
 // Register compatibility projection (endpoint infrastructure + result contract)
 builder.Services.AddCrestCompatibilityProjection();
+builder.Services.AddGeneratedAppServiceHttp();
 
 // Register the test AppService as scoped
 builder.Services.AddScoped<GreetingAppService>();
@@ -45,12 +47,26 @@ builder.Services.AddLogging();
 
 var app = builder.Build();
 
-// Build capability registry from generated providers BEFORE endpoint mapping.
-var capabilityRegistry = (CapabilityRegistry)app.Services.GetRequiredService<ICapabilityRegistry>();
-var capabilityProviders = DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>();
-capabilityRegistry.Build(capabilityProviders);
+// The generated contribution owns its source-generated context; install it ahead of the
+// application-owned context before the map-time JSON verification examines the final chain.
+var generatedContexts = app.Services.GetServices<CapabilityEndpointContribution>()
+    .Select(contribution => contribution.JsonContext)
+    .Where(context => context is not null)
+    .ToArray();
+if (generatedContexts.Length > 0)
+{
+    var httpJsonOptions = app.Services
+        .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
+        .Value.SerializerOptions;
+    foreach (var context in generatedContexts.Reverse())
+    {
+        httpJsonOptions.TypeInfoResolverChain.Remove(context!);
+        httpJsonOptions.TypeInfoResolverChain.Insert(0, context!);
+    }
+}
 
-// Map capability endpoints (includes startup validation of JSON contracts)
+// Map capability endpoints (the map is the single authoritative registry aggregation point,
+// including this host's ExplicitHost contributions, followed by JSON contract validation).
 app.MapCrestCapabilityEndpoints();
 
 app.Run();

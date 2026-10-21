@@ -177,31 +177,32 @@ Create/Update/Delete + Assign/Resolve/Close 共六个写动作均使用 #137 唯
 
 桥接的冻结形状与 code/status 对照见 §14.5，S1 仍须提交引用真实契约的判别探针；桥接必须配现有异常 converter 的同输入等价测试及 unknown-failure 脱敏负例，不成为任意 HttpStatusCode 向 Runtime 泄漏的通道。
 
-## 8. Legacy 隔离与归档清单
+## 8. 消费者迁移与旧链退出
 
-### 8.1 确定归档
+### 8.1 退出定义（取代“隔离兼容”）
 
-- samples/SaaSHelpdesk/SaaSHelpdesk.Application/GeneratedApi/TicketApi.cs：其 all 行为并入正式声明，旧声明不再参与编译。
-- ControllerSourceGenerator、CrudControllerSourceGenerator：核对无真实 GenerateController/CrestCrudApiController 消费者后归档实现与维护其旧输出的测试。两者 Obsolete 提示中的 GeneratedApiController 也要退出，不能保留过时推荐。
-- DynamicApiAotSourceGenerator 的 GeneratedApiController/ApiOverride/controller registration 分支及仅供它的 runtime abstractions：迁移唯一真实 consumer 后归档，不带入新的 legacy analyzer。
-- CrudServiceSourceGenerator 旧无参 stub/bundle/provider/旧 bool ExecuteAsync 发射分支及专用旧测试：#128 正式声明诊断入口保留；#warning 只随该旧分支真实退出而移除，不能整类删除后丢失前阶段缺失诊断。
-- DynamicApiRouteConvention：移出唯一活消费者 IsScalar 后，归档实例反射方法、相关 descriptor 辅助类型（仅在零消费者时）、多余 DI 注册。
+S4 的完成条件不是“保留三个 Legacy 包并加 allowlist”，而是**旧链不再参与构建和运行**：
 
-归档路径建议 `99_RecycleBin/issue-129-controller-exit/<原相对路径>`，附每项调用图、替代入口及测试迁移说明。归档文件从 Compile/analyzer/package glob 显式排除；不能只是挪目录后仍被 SDK 编译或 analyzer 自动发现。
+- 有效构建图、解决方案、包分发和样例 Host 均不包含 `CrestCreates.CodeGenerator.Legacy`、`CrestCreates.DynamicApi.Legacy`、`CrestCreates.Web.Legacy`，也不引用其程序集。
+- SaaSHelpdesk 原有七个 AppService（Agent/Category/Customer/CustomerPortal/Dashboard/KnowledgeBase/SLAPolicy）与 LibraryManagement 的 Book/Category/Loan/Member 全部由正式 AppService HTTP 投影贡献发布；样例端点不再由旧 provider/controller 发布。
+- 正式产物不得调用 `DynamicApiGeneratedRuntime`/`DynamicApiGeneratedRegistryStore`/`CompatibilityBodyReader`/`Add/MapCrestDynamicApi` 等旧符号；旧生成器只在归档区保留源码，不进入任何 Compile/analyzer/package glob。
+- 旧输出形状专用测试随旧链归档；业务行为、错误响应、权限/UoW/校验和原生执行断言必须迁移到正式链，不能用减少测试数量换取通过。
 
-### 8.2 有消费者的 legacy Minimal API
+### 8.2 消费者迁移映射
 
-从正式运行时/默认 analyzer 提取到明确的兼容项目/包，冻结为 CrestCreates.DynamicApi.Legacy 与 CrestCreates.CodeGenerator.Legacy；Platform 的旧 Add/Map 装配放在 CrestCreates.Web.Legacy，不让正式 Web 映射无条件调用它。依赖约束见 §14.4。新 analyzer 仍遵守 netstandard2.0/PrivateAssets 的分发要求，并从根目录默认 runtime Trim/AOT 配置及自动 analyzer ProjectReference 中正确排除，避免自引用、互相引用和运行时依赖渗漏。
+SaaSHelpdesk 使用接口模式：在现有 `I*AppService` 契约方法上声明 `[AppServiceHttpAction]`，在实现类上声明 `[CapabilityCompatibilityProjection(ContractType=接口, RegistrationMode=ExplicitHost, RoutePrefix=旧前缀, CapabilityIdPrefix=...)]`。所有契约方法必须显式标注 verb/route/kind/body/permissions，避免默认路由或默认 body 漂移。自定义写动作（Agent.Create/Deactivate、CustomerPortal.CreateTicket、Category.Move/Reorder、Customer.Activate/Deactivate、KnowledgeBase.Publish/Unpublish/IncrementViewCount）补 `[UnitOfWorkMo]`，与 Ticket 手写写动作同一内核；base CRUD 沿用 `CrestAppServiceBase` 的织入。需要验证的 body 显式 `RequiresValidator=true`，复用现有 validator。
 
-保留对象仅限调用图证明仍使用的旧 AppService generated provider、registry/runtime helpers/body reader；不重新保留已无消费者的 MVC/controller 生成器。非反射 scalar helper 的唯一基线消费者是 legacy ValidateAsync，因此先放 legacy 内部有限类型分类器，不为“共享”向 Core 添加公共基础设施 API。Type flags/有限已知类型判定不等于成员扫描；正式路由仍由 Roslyn symbols 决定。
+LibraryManagement 使用自契约投影适配器：`IBookAppService` 等继承 `ICrudAppService`/`ICrestAppServiceBase`，接口模式会把未标记的继承 CRUD 方法一并投影并按默认 GET/body 绑定，无法保持旧 wire；因此在 Application 内增加 `BookHttpProjection`/`CategoryHttpProjection`/`LoanHttpProjection`/`MemberHttpProjection`，每个适配器只声明需要保留的动作并转发到既有业务服务，`ContractType` 指向适配器自身。适配器在模块中注册一次；业务服务仍由原 owner 注册，不创建第二份业务实例。继承 CRUD 的 `GetListAsync` 用显式 `pageIndex/pageSize` 查询参数构造 `PagedRequestDto`，`QueryAsync` 保留原请求 body 类型；所有可选值用可空参数承接后按旧默认语义回落（缺省 `default(T)`），避免正式 binder 把非空参数视为必填。
 
-compatibility mapper 的旧无 JsonTypeInfo overload 若需保留，放 legacy owner；正式 typed overload/envelope factory 保持共享权威。不得让正式包反向引用 legacy 包造成环；已有外部旧签名按迁移指南明确 breaking/obsolete 处理，不留自动 fallback shim。
+保留的路由/方法/绑定/响应以旧生成 registry 的 11 个服务动作表为基线（`api/agent`、`api/category`、`api/customer`、`api/customer-portal`、`api/dashboard`、`api/knowledge-base`、`api/s-l-a-policy`、`api/book`、`api/category`、`api/loan`、`api/member`；DELETE 的 If-Match、GET 查询参数、POST body 与权限名逐动作对齐）。成功响应继续使用共享 `DynamicApiResponse` 信封；GET null 使用正式 Web 404 `CrestErrorResponse`；绑定失败使用正式 400（旧链路把缺必填 query 变成 500 属旧缺陷，迁移测试按正式错误契约更新并记录差异）。权限名沿用旧 `Service.Perm` 字符串；UoW、validator、stamp 和业务二次校验不得因迁移丢失。
 
-旧代码只经明确的 Add/MapLegacyGeneratedApi 及显式 analyzer/package 引用激活；默认工具链不把加载 legacy DLL 当 opt-in。旧 API 名称可提供短期 obsolete 转接，但只在 legacy package 内，且缺 provider 继续 fail-closed。支持标注 JIT-only/未验证；没有 trim 门禁就不写 trimming-verified。
+### 8.3 归档与测试迁移
 
-SaaSHelpdesk 其他仍需 legacy 的服务允许短期共 Host，但要逐 owner/action 记录允许清单；Ticket 及新 formal fixture 全部排除。不能按整个 sample、整个 namespace 或整个 DynamicApi 程序集豁免守卫。重复 method/route、formal/legacy 对同动作双发布在启动前拒绝，不能靠 Map 调用顺序覆盖。
+`TicketApi`、Controller/CrudController 生成器、GeneratedApiController/ApiOverride 分支、旧 CRUD stub bundle、旧 DynamicApi runtime/provider/registry/body reader、旧 Add/Map、allowlist 与专用适配全部归档；归档路径 `99_RecycleBin/issue-129-controller-exit/<原相对路径>`，并附调用图/替代入口/测试迁移/退出清单。`99_RecycleBin` 只是本地软删除备份，PR 交付以受版本控制的 `docs/superpowers/plans/2026-10-21-issue-129-s4-legacy-archive-record.md` 与 `docs/review/` 快照为准。
 
-若生产手写服务（如 Asset/Procurement）已使用 compatibility projection，迁移到新的 ExplicitHost 默认，不增加 static/global 模式作为第二条正式链。代码位于业务 Application 而无 HTTP 依赖的服务不应因此被迫引入 legacy 包；必要的 HTTP 投影胶水留在现有 Host/Feature HTTP owner 中。
+旧链专用测试（legacy analyzer isolation、allowlist/map guard、legacy runtime/endpoint conventions、S4-R1 legacy probes）随包归档；SaaS/Library 行为测试、IntegrationTests、CompatibilityProjection.E2E 与 CapabilityEndpoint AOT fixture 迁移到正式投影，保留业务行为、错误响应和原生执行断言。新增退出门禁：构建图/解决方案零 Legacy 项目、正式程序集零旧类型、样例 Host 路由只来自正式贡献、归档代码不在 Compile/analyzer/package glob。正式路由冲突检查保留在 `MapCrestCapabilityEndpoints` 的批量预检中（legacy 侧实现随包归档）。
+
+若生产手写服务（如 Asset/Procurement）已使用 compatibility projection，继续走 ExplicitHost 默认，不增加 static/global 模式作为第二条正式链。代码位于业务 Application 而无 HTTP 依赖的服务不应因此被迫引入 legacy 包；必要的 HTTP 投影胶水留在现有 Host/Feature HTTP owner 中。
 
 ## 9. 架构守卫与诊断
 
@@ -233,8 +234,8 @@ SaaSHelpdesk 其他仍需 legacy 的服务允许短期共 Host，但要逐 owner
 | H06 | typed validators 真执行；缺必需 validator 不假绿；CT 向业务/仓储/验证传播 |
 | H07 | PlatformDefault/ApplicationOwned 单 owner，启动验证零/重复绑定；生产与 fixture 都仅一个 EfCore binding；唯一 UoW 真织入、提交/回滚、stale/missing stamp、返回 stamp 与存储精确相等、fresh-scope 零写入与响应失败事实 |
 | H08 | 默认 JIT、Host-only JSON、modifier/派生/wrapper、两个真实 Feature 双序、精确 v1/v2 共存与不等价拒绝均回归通过 |
-| L01 | Controller/旧 CRUD stub 分支真归档；默认 analyzer/compile/package 不加载；原样重新引入任一 formal legacy call 的变异能被守卫捕获 |
-| L02 | 必要 legacy 只经 explicit opt-in；未 opt-in 无旧路由；同一动作 formal/legacy 双发布被拒绝；无自动 fallback |
+| L01 | Controller/旧 CRUD stub 分支真归档；构建图/解决方案/包分发零 Legacy 项目；默认 analyzer/compile/package 不加载；原样重新引入任一 legacy call 的变异能被守卫捕获 |
+| L02 | 样例端点只由正式贡献发布；正式产物不调用旧 runtime/Add/Map；旧链专用测试已归档、业务/错误/原生断言已迁移；不存在 legacy 路由或双发布 |
 | N01 | Native publish/link/run + loopback：Ticket body/组合 envelope/scalar/list/void/404/error 路径真实可执行 |
 | N02 | 错误预期、漏 metadata、错误 owner/typed envelope 的变异必须使目标场景失败、非零退出、无总 sentinel、进程有界回收；metadata 负例仍激活真实贡献并预先核对目标 identities/动作，不能用零端点制造假绿 |
 | R01 | #128 GeneratedCrud、既有 CapabilityEndpoint、LocalEvent/RabbitMQ 共享工具链、package/build、依赖边界的受影响门禁按最终 head 留证 |
@@ -259,7 +260,7 @@ native 场景至少含：create/update body；组合 route/body/If-Match；all �
 | S1 事实/设计冻结 | 全仓调用图、必要 legacy 消费清单、Ticket wire/权限/异常/租户/并发基线；冻结新声明、failure bridge、owner schema 与 package 依赖图 | 纯净红/绿控制与设计入库；所有主动 wire 收紧有迁移表；设计审查通过才进 S2 |
 | S2 通用正式投影与 JSON | shared model/emitter、前阶段普通产物、ownership/诊断、自动 roots、ExplicitHost/handler/JSON 注册；迁移已有 formal compatibility consumers | 单 driver/真实 MSBuild/外部包首次消费及 B01–04、H08 通过；不靠 Ticket 手写基础设施 |
 | S3 Ticket/Host 迁移 | 契约限定11动作、CT、权限/验证/UoW、失败桥接、stamp正确性、生产 Host 正式装配、双租户 factory | H01–08 真实集成通过；旧 Ticket route 每项被正式贡献唯一拥有；尚不宣称 NativeAOT |
-| S4 隔离与归档 | legacy runtime/analyzer/adapter 单向依赖、默认入口退出、Controller与旧stub归档、scalar helper、守卫/迁移诊断 | L01/L02；有真实消费者才保留legacy；无归档文件混入Compile/analyzer/package |
+| S4 消费者迁移与旧链退出 | SaaSHelpdesk 七服务与 LibraryManagement 四服务迁到正式投影；测试/fixture 迁移；三个 Legacy 包及旧生成器/runtime/Add/Map/allowlist 归档；Controller与旧stub归档；scalar helper、路由冲突守卫保留于正式链 | L01/L02；构建图零 Legacy；样例正式端点覆盖迁移动作；无归档文件混入Compile/analyzer/package |
 | S5 原生/回归/交接 | 实际 Ticket native host、分场景/变异门禁、受影响回归、全部文档与支持声明 | N01/N02/R01/D01；精确head证据、零未解释回归；提交合并建议，不自动合并/恢复CI |
 
 建议提交按“基线 → 通用平台能力 → sample迁移 → 隔离归档 → 证据文档”拆分；每阶段更新 issues log，记录实际计数、红例名称、环境态与支持限制。不预写预计测试数作为已验证证据。
@@ -268,7 +269,7 @@ native 场景至少含：create/update body；组合 route/body/If-Match；all �
 
 Ticket 的所有对外动作由唯一正式编译期贡献执行；原 Controller 声明、旧注册和 JSON fallback 不再参与该调用图。普通 Feature 只声明契约、业务服务/validator 与少量动作差异；Host 显式激活。失败、权限、租户与事务复杂性回到既有平台 owner。
 
-必要 legacy 明确隔离并可删除；无人消费残留已归档。真实集成与独立原生证据、变异及架构守卫均成立，支持声明准确。以上工作和设计评审闭环完成后 #129 才可关闭；发布本设计不代表开始实现或授权自动合并。
+旧链已退出：三个 Legacy 项目及旧生成器/runtime/Add/Map/allowlist 全部归档，有效构建图与样例端点只走正式投影；旧链专用测试已归档，业务/错误/原生断言已迁移。真实集成与独立原生证据、变异及架构守卫均成立，支持声明准确。以上工作和设计评审闭环完成后 #129 才可关闭；发布本设计不代表开始实现或授权自动合并。
 
 
 ## 14. rev.2：S1 复核后的设计决策与退出要求（2026-10-17）
@@ -330,10 +331,9 @@ H03 必须有实际登录的非 SuperAdmin：无 grant 403；单 Search 可访�
 项目依赖冻结为：
 
 - 正式 DynamicApi / Web 不引用任何 *.Legacy；Runtime 仍不引用 Api/Web/ORM。声明数据留 Domain.Shared；共享 model/emitter 为 Tooling shared-source，不让 analyzer 运行时加载 net10 工具程序集。
-- CrestCreates.DynamicApi.Legacy 单向引用正式共享契约/typed runtime 和必要的既有依赖；承载旧 provider/registry/helper/body reader，正式 runtime 不转接回去。
-- CrestCreates.CodeGenerator.Legacy 为 netstandard2.0 analyzer，仅包含仍有消费者的旧 Minimal API 前端。小型共用 Roslyn/model/emitter 源码通过 shared-source 引入，不引用一个含默认正式 Generator 集合的 analyzer 来凑实现。
-- CrestCreates.Web.Legacy 放 Platform 层，引用 CrestCreates.Web 与 DynamicApi.Legacy，提供明确旧 Add/Map 适配；主 Web 包不引用它。样例按精确 consumer allowlist 显式 opt-in。
-- 默认 analyzer/包分发不包含 Legacy，根目录自动 analyzer 引用及 AOT/Trim props 排除该 analyzer 自身；归档代码不混入任何 Compile/package glob。Controller 生成器与 TicketApi 的专属分支无消费者后归档，不进入 legacy analyzer。
+- S4 退出的目标是**不保留** `CrestCreates.DynamicApi.Legacy`、`CrestCreates.CodeGenerator.Legacy`、`CrestCreates.Web.Legacy`：消费者清零后从解决方案、项目引用、AOT/Trim props、analyzer/package 分发与样例 Host 中移除，源码整体归档。
+- 默认 analyzer/包分发不包含任何 Legacy 生成器；根目录自动 analyzer 引用及 AOT/Trim props 不再需要 Legacy 例外。归档代码不混入任何 Compile/package glob。Controller 生成器与 TicketApi 的专属分支无消费者后归档。
+- 迁移期间的临时双链仅允许在同一提交内完成消费者切换，最终 head 不得留下 Legacy 项目或旧路由；不得以“兼容门禁”替代旧链退出。
 
 S1 退出仍需将该表细化为具体项目引用图、action/consumer 允许清单和输入输出 schema fixture，并补真实引用程序集负例；仅把未来 API 名称列出来不算冻结完成。
 

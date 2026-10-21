@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Interceptors;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using Microsoft.AspNetCore.Http;
@@ -14,6 +16,11 @@ using SaaSHelpdesk.Domain.Shared.Enums;
 namespace SaaSHelpdesk.Application.Services;
 
 [CrestService]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(ICustomerPortalAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/customer-portal",
+    CapabilityIdPrefix = "compat.appservice.customer-portal")]
 public class CustomerPortalAppService : ICustomerPortalAppService
 {
     private readonly ICrestRepositoryBase<Ticket, Guid> _ticketRepository;
@@ -36,25 +43,26 @@ public class CustomerPortalAppService : ICustomerPortalAppService
         return claim != null ? Guid.Parse(claim.Value) : Guid.Empty;
     }
 
-    public async Task<TicketDto> CreateTicketAsync(CreateTicketDto input)
+    [UnitOfWorkMo]
+    public async Task<TicketDto> CreateTicketAsync(CreateTicketDto input, CancellationToken cancellationToken = default)
     {
         var customerId = GetCurrentCustomerId();
         var ticket = new Ticket(Guid.NewGuid(), input.Title, input.Description,
             input.Priority, input.Type, customerId);
-        await _ticketRepository.InsertAsync(ticket);
+        await _ticketRepository.InsertAsync(ticket, cancellationToken);
         return MapToDto(ticket);
     }
 
-    public async Task<List<TicketDto>> GetMyTicketsAsync()
+    public async Task<List<TicketDto>> GetMyTicketsAsync(CancellationToken cancellationToken = default)
     {
         var customerId = GetCurrentCustomerId();
-        var tickets = await _ticketRepository.GetListAsync(t => t.CustomerId == customerId);
+        var tickets = await _ticketRepository.GetListAsync(t => t.CustomerId == customerId, cancellationToken);
         return tickets.Select(MapToDto).ToList();
     }
 
-    public async Task<TicketDto?> GetTicketAsync(Guid id)
+    public async Task<TicketDto?> GetTicketAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var ticket = await _ticketRepository.GetAsync(id);
+        var ticket = await _ticketRepository.GetAsync(id, cancellationToken);
         if (ticket == null || ticket.CustomerId != GetCurrentCustomerId())
             return null;
         return MapToDto(ticket);

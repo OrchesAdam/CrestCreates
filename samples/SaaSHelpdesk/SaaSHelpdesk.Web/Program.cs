@@ -12,34 +12,13 @@ using CrestCreates.Application.Identity;
 using CrestCreates.Application.Settings;
 using SaaSHelpdesk.Application.Contracts.Interfaces;
 using SaaSHelpdesk.Application.Services;
-using CrestCreates.Web.Legacy;
 using FluentValidation;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddCrestWeb();
 
-// #129 S4: the legacy AppService HTTP chain is an explicit opt-in with a per-service/action
-// allowlist. Ticket is served exclusively by the formal ExplicitHost contribution.
-builder.Services.AddLegacyGeneratedApi(api =>
-{
-    api.AddApplicationServiceAssembly<CustomerAppService>();
-    api.AddApplicationServiceAssembly<CategoryAppService>();
-    api.AddApplicationServiceAssembly<KnowledgeBaseAppService>();
-    api.AddApplicationServiceAssembly<SLAPolicyAppService>();
-    api.AddApplicationServiceAssembly<DashboardAppService>();
-    api.AddApplicationServiceAssembly<AgentAppService>();
-    api.AddApplicationServiceAssembly<CustomerPortalAppService>();
-
-    api.Allow<IAgentAppService>("Create", "GetById", "Deactivate");
-    api.Allow<ICategoryAppService>("Create", "GetById", "GetAll", "Update", "Delete", "GetTree", "GetRoots", "GetChildren", "Move", "Reorder");
-    api.Allow<ICustomerAppService>("Create", "GetById", "GetAll", "Update", "Delete", "Activate", "Deactivate");
-    api.Allow<ICustomerPortalAppService>("CreateTicket", "GetMyTickets", "GetTicket");
-    api.Allow<IDashboardAppService>("GetSummary");
-    api.Allow<IKnowledgeBaseAppService>("Create", "GetById", "GetAll", "Update", "Delete", "Publish", "Unpublish", "IncrementViewCount", "Search", "GetPopular");
-    api.Allow<ISLAPolicyAppService>("Create", "GetById", "GetAll", "Update", "Delete");
-});
-
+// #129 S4: every Helpdesk AppService is served by its formal ExplicitHost projection.
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
 builder.Services.AddCrestCapabilityEndpoints();
@@ -86,7 +65,6 @@ if (generatedProjectionContexts.Length > 0)
 
 app.MapCrestCapabilityEndpoints();
 app.MapCrestWeb();
-app.MapLegacyGeneratedApi();
 
 await app.InitializeCrestApplicationAsync();
 

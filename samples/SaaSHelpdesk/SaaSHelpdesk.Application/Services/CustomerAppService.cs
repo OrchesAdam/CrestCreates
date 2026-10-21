@@ -1,5 +1,7 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Services;
 using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
@@ -14,6 +16,11 @@ using SaaSHelpdesk.Domain.Entities;
 namespace SaaSHelpdesk.Application.Services;
 
 [CrestService]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(ICustomerAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/customer",
+    CapabilityIdPrefix = "compat.appservice.customer")]
 public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDto, CreateCustomerDto, UpdateCustomerDto>, ICustomerAppService
 {
     private readonly ICurrentTenant _currentTenant;
@@ -64,9 +71,10 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
         entity.SetNotes(dto.Notes);
     }
 
-    public async Task<CustomerDto> ActivateAsync(Guid id)
+    [UnitOfWorkMo]
+    public async Task<CustomerDto> ActivateAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var customer = await Repository.GetAsync(id);
+        var customer = await Repository.GetAsync(id, cancellationToken);
         if (customer == null)
             throw new KeyNotFoundException($"Customer with id {id} not found.");
         if (customer.IsActive)
@@ -74,13 +82,14 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
             throw new InvalidOperationException($"Customer with id {id} is already active.");
         }
         customer.Activate();
-        await Repository.UpdateAsync(customer);
+        await Repository.UpdateAsync(customer, cancellationToken);
         return MapToDto(customer);
     }
 
-    public async Task<CustomerDto> DeactivateAsync(Guid id)
+    [UnitOfWorkMo]
+    public async Task<CustomerDto> DeactivateAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var customer = await Repository.GetAsync(id);
+        var customer = await Repository.GetAsync(id, cancellationToken);
         if (customer == null)
             throw new KeyNotFoundException($"Customer with id {id} not found.");
         if (!customer.IsActive)
@@ -88,7 +97,7 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
             throw new InvalidOperationException($"Customer with id {id} is already inactive.");
         }
         customer.Deactivate();
-        await Repository.UpdateAsync(customer);
+        await Repository.UpdateAsync(customer, cancellationToken);
         return MapToDto(customer);
     }
 }

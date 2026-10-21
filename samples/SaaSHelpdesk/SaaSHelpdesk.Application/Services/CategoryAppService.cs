@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Services;
 using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
@@ -15,6 +17,11 @@ using SaaSHelpdesk.Domain.Entities;
 namespace SaaSHelpdesk.Application.Services;
 
 [CrestService]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(ICategoryAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/category",
+    CapabilityIdPrefix = "compat.appservice.category")]
 public class CategoryAppService : CrestAppServiceBase<Category, Guid, CategoryDto, CreateCategoryDto, UpdateCategoryDto>, ICategoryAppService
 {
     public CategoryAppService(
@@ -54,35 +61,36 @@ public class CategoryAppService : CrestAppServiceBase<Category, Guid, CategoryDt
         entity.Reorder(dto.SortOrder);
     }
 
-    public async Task<List<CategoryDto>> GetTreeAsync()
+    public async Task<List<CategoryDto>> GetTreeAsync(CancellationToken cancellationToken = default)
     {
-        var categories = await Repository.GetListAsync();
+        var categories = await Repository.GetListAsync(cancellationToken);
         var dict = categories.ToDictionary(c => c.Id);
         var roots = categories.Where(c => c.ParentId == null).OrderBy(c => c.SortOrder).ToList();
         return roots.Select(r => BuildTree(r, dict)).ToList();
     }
 
-    public async Task<List<CategoryDto>> GetRootsAsync()
+    public async Task<List<CategoryDto>> GetRootsAsync(CancellationToken cancellationToken = default)
     {
-        var categories = await Repository.GetListAsync();
+        var categories = await Repository.GetListAsync(cancellationToken);
         return categories.Where(c => c.ParentId == null).OrderBy(c => c.SortOrder).Select(MapToDto).ToList();
     }
 
-    public async Task<List<CategoryDto>> GetChildrenAsync(Guid parentId)
+    public async Task<List<CategoryDto>> GetChildrenAsync(Guid parentId, CancellationToken cancellationToken = default)
     {
-        var categories = await Repository.GetListAsync();
+        var categories = await Repository.GetListAsync(cancellationToken);
         return categories.Where(c => c.ParentId == parentId).OrderBy(c => c.SortOrder).Select(MapToDto).ToList();
     }
 
-    public async Task<CategoryDto> MoveAsync(Guid id, Guid? newParentId)
+    [UnitOfWorkMo]
+    public async Task<CategoryDto> MoveAsync(Guid id, Guid? newParentId, CancellationToken cancellationToken = default)
     {
-        var category = await Repository.GetAsync(id);
+        var category = await Repository.GetAsync(id, cancellationToken);
         if (category == null)
             throw new KeyNotFoundException($"Category {id} not found");
 
         if (newParentId.HasValue)
         {
-            var allCategories = await Repository.GetListAsync();
+            var allCategories = await Repository.GetListAsync(cancellationToken);
             var currentId = newParentId.Value;
             while (currentId != Guid.Empty)
             {
@@ -97,17 +105,18 @@ public class CategoryAppService : CrestAppServiceBase<Category, Guid, CategoryDt
         }
 
         category.MoveTo(newParentId);
-        await Repository.UpdateAsync(category);
+        await Repository.UpdateAsync(category, cancellationToken);
         return MapToDto(category);
     }
 
-    public async Task ReorderAsync(Guid id, int sortOrder)
+    [UnitOfWorkMo]
+    public async Task ReorderAsync(Guid id, int sortOrder, CancellationToken cancellationToken = default)
     {
-        var category = await Repository.GetAsync(id);
+        var category = await Repository.GetAsync(id, cancellationToken);
         if (category == null)
             throw new KeyNotFoundException($"Category {id} not found");
         category.Reorder(sortOrder);
-        await Repository.UpdateAsync(category);
+        await Repository.UpdateAsync(category, cancellationToken);
     }
 
     private CategoryDto BuildTree(Category node, Dictionary<Guid, Category> allCategories)

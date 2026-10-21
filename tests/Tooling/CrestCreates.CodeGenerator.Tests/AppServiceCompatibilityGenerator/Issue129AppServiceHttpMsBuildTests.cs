@@ -705,9 +705,6 @@ public sealed class Issue129AppServiceHttpMsBuildTests
                 File.Copy(assembly, Path.Combine(lib, Path.GetFileName(assembly)), overwrite: true);
             }
 
-            File.Copy(typeof(CodeGenerator.AppServiceCompatibilityGenerator.AppServiceCompatibilityGenerator).Assembly.Location,
-                Path.Combine(lib, "CrestCreates.CodeGenerator.dll"), overwrite: true);
-
             var project = """
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup>
@@ -723,8 +720,7 @@ public sealed class Issue129AppServiceHttpMsBuildTests
                   <ItemGroup>
                     <PackageReference Include="CrestCreates.JsonContracts.Build" Version="1.0.0" />
                     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-                    <Analyzer Include="lib/CrestCreates.CodeGenerator.dll" />
-                    <Reference Include="lib/*.dll" Exclude="lib/CrestCreates.CodeGenerator.dll" />
+                    <Reference Include="lib/*.dll" />
                   </ItemGroup>
                 </Project>
                 """;

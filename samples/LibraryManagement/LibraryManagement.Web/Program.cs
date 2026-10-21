@@ -1,7 +1,10 @@
 using CrestCreates.OpenApi;
 using CrestCreates.Modularity;
-using LibraryManagement.Application.Contracts.Interfaces;
-using LibraryManagement.Application.Services;
+using CrestCreates.Capability;
+using CrestCreates.DynamicApi;
+using CrestCreates.Generated.HttpProjection;
+using CrestCreates.Schema;
+using CrestCreates.Schema.Abstractions;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Application.Identity;
 using CrestCreates.Application.Permissions;
@@ -11,7 +14,6 @@ using CrestCreates.AuditLogging.Middlewares;
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.AuditLogging.Options;
 using CrestCreates.AspNetCore;
-using CrestCreates.Web.Legacy;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using OpenIddict.Server.AspNetCore;
 using CrestCreates.Authorization;
@@ -34,6 +36,7 @@ using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.Features;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UsePinnedScopeServiceProvider();
 builder.Host.UseCrestSerilog();
 builder.Services.AddCrestLogging(builder.Configuration);
 builder.Services.Configure<AuditLoggingOptions>(
@@ -80,19 +83,11 @@ builder.Services.AddMultiTenancy(options =>
 });
 builder.Services.AddTenantResolvers(TenantResolutionStrategy.Header);
 builder.Services.AddRepositoryTenantProvider();
-// #129 S4: explicit legacy activation with a per-service/action allowlist.
-builder.Services.AddLegacyGeneratedApi(options =>
-{
-    options.AddApplicationServiceAssembly<BookAppService>();
-    options.AddApplicationServiceAssembly<CategoryAppService>();
-    options.AddApplicationServiceAssembly<LoanAppService>();
-    options.AddApplicationServiceAssembly<MemberAppService>();
-
-    options.Allow<IBookAppService>("GetByIsbn", "SearchBooks", "Create", "GetById", "GetList", "Update", "Delete");
-    options.Allow<ICategoryAppService>("Create", "GetById", "GetAll", "GetList", "Query", "Update", "Delete", "Exists", "Count");
-    options.Allow<ILoanAppService>("Search", "GetOverdueLoans", "ReturnBook", "ExtendLoan", "ProcessOverdueLoans", "Create", "GetById", "GetAll", "GetList", "Query", "Update", "Delete", "Exists", "Count");
-    options.Allow<IMemberAppService>("GetByEmail", "GetActiveMembers", "PayBalance", "Create", "GetById", "GetAll", "GetList", "Query", "Update", "Delete", "Exists", "Count");
-});
+// #129 S4: LibraryManagement is served exclusively by formal ExplicitHost projections.
+builder.Services.AddCapabilityRuntime();
+builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
+builder.Services.AddCrestCapabilityEndpoints();
+builder.Services.AddGeneratedAppServiceHttp();
 
 // Register all modules using the SourceGenerator-generated module discovery system
 builder.Host.RegisterModules();
@@ -110,7 +105,7 @@ app.UseAccountabilityHttpOperationScope();
 app.UseTenantBoundary();
 app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();
-app.MapLegacyGeneratedApi();
+app.MapCrestCapabilityEndpoints();
 app.MapCrestOpenApi();
 
 // Initialize all modules

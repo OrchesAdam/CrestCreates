@@ -94,35 +94,81 @@ public class CapabilityEndpointBoundaryTests
     }
 
     [Fact]
-    public void Legacy_DynamicApi_Source_DoesNotReference_CapabilityEndpoint_Runtime()
+    public void Legacy_projects_are_absent_from_the_build_graph_and_solutions()
     {
-        var files = new[]
+        var repoRoot = FindRepoRoot();
+        var legacyNames = new[]
         {
-            "DynamicApiExtensions.cs",
-            "DynamicApiGeneratedRegistryStore.cs",
-            "DynamicApiGeneratedRuntime.cs"
+            "CrestCreates.DynamicApi.Legacy",
+            "CrestCreates.CodeGenerator.Legacy",
+            "CrestCreates.Web.Legacy",
         };
 
-        var forbidden = new[]
+        foreach (var legacyName in legacyNames)
         {
-            "ICapabilityDispatcher",
-            "CapabilityEndpointMapper",
-            "MapCrestCapabilityEndpoints",
-            "CapabilityEndpointBindingRegistry"
-        };
+            Directory.Exists(Path.Combine(repoRoot, "src/Framework/Api", legacyName)).Should().BeFalse();
+            Directory.Exists(Path.Combine(repoRoot, "src/Platform", legacyName)).Should().BeFalse();
+            Directory.Exists(Path.Combine(repoRoot, "src/Tooling", legacyName)).Should().BeFalse();
+        }
 
-        foreach (var file in files)
+        var projectFiles = Directory.EnumerateFiles(repoRoot, "*.csproj", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}99_RecycleBin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                           && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                           && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .ToArray();
+
+        foreach (var projectFile in projectFiles)
         {
-            var path = Path.Combine(FindRepoRoot(), "src/Framework/Api/CrestCreates.DynamicApi.Legacy", file);
-            File.Exists(path).Should().BeTrue($"expected legacy file {file} to exist");
-            var content = File.ReadAllText(path);
-
-            foreach (var symbol in forbidden)
+            var name = Path.GetFileNameWithoutExtension(projectFile);
+            legacyNames.Should().NotContain(name,
+                because: $"archived legacy project {name} must not remain in the build graph");
+            var content = File.ReadAllText(projectFile);
+            foreach (var legacyName in legacyNames)
             {
-                content.Should().NotContain(symbol,
-                    because: $"Legacy file {file} must not reference CapabilityEndpoint runtime symbol {symbol}");
+                content.Should().NotContain(legacyName,
+                    because: $"{Path.GetRelativePath(repoRoot, projectFile)} must not reference the archived legacy package");
             }
         }
+
+        var solutions = Directory.EnumerateFiles(repoRoot, "*.slnx", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}99_RecycleBin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .ToArray();
+        solutions.Should().NotBeEmpty();
+        foreach (var solution in solutions)
+        {
+            var content = File.ReadAllText(solution);
+            foreach (var legacyName in legacyNames)
+            {
+                content.Should().NotContain(legacyName,
+                    because: $"{Path.GetRelativePath(repoRoot, solution)} must not include the archived legacy project");
+            }
+        }
+    }
+
+    [Fact]
+    public void Formal_assemblies_do_not_carry_or_reference_legacy_types()
+    {
+        var formal = typeof(DynamicApiResponse).Assembly;
+        formal.GetName().Name.Should().Be("CrestCreates.DynamicApi");
+
+        foreach (var legacyType in new[]
+                 {
+                     "CrestCreates.DynamicApi.DynamicApiGeneratedRuntime",
+                     "CrestCreates.DynamicApi.DynamicApiGeneratedRegistryStore",
+                     "CrestCreates.DynamicApi.DynamicApiRegistry",
+                     "CrestCreates.DynamicApi.IDynamicApiGeneratedProvider",
+                     "CrestCreates.DynamicApi.DynamicApiOptions",
+                     "CrestCreates.DynamicApi.CompatibilityBodyReader",
+                 })
+        {
+            formal.GetType(legacyType, throwOnError: false).Should().BeNull(
+                $"{legacyType} belongs to the archived legacy runtime");
+        }
+
+        var web = typeof(CrestCreates.Web.CrestWebOptions).Assembly;
+        var references = web.GetReferencedAssemblies().Select(name => name.Name).ToArray();
+        references.Should().NotContain("CrestCreates.DynamicApi.Legacy");
+        references.Should().NotContain("CrestCreates.Web.Legacy");
     }
 
     [Fact]

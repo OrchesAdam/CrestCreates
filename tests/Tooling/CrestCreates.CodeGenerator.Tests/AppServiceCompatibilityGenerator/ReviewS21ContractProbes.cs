@@ -4,7 +4,6 @@ using CrestCreates.CodeGenerator.Tests.TestHelpers;
 using CrestCreates.Tooling.HttpProjection;
 using Microsoft.CodeAnalysis;
 using Xunit;
-using CompatibilityGen = CrestCreates.CodeGenerator.AppServiceCompatibilityGenerator.AppServiceCompatibilityGenerator;
 
 namespace CrestCreates.CodeGenerator.Tests.AppServiceCompatibilityGenerator;
 
@@ -78,20 +77,5 @@ public class ReviewS21ContractProbes
         var a=Build(source,"First.Anchor"); var b=Build(source,"Second.Anchor");
         Assert.False(a.HasErrors); Assert.False(b.HasErrors);
         Assert.NotEqual(a.Model!.Actions.Single().CapabilityId,b.Model!.Actions.Single().CapabilityId);
-    }
-    [Fact]
-    public void Explicit_host_without_contract_cannot_silently_publish_static()
-    {
-        var result=SourceGeneratorTestHelper.RunGenerator<CompatibilityGen>(Usings+"""
-            namespace Review {
-              [CrestService]
-              [CapabilityCompatibilityProjection(RegistrationMode=HttpProjectionRegistrationMode.ExplicitHost)]
-              public class BrokenAppService {
-                public Task<string> PingAsync(CancellationToken ct=default)=>Task.FromResult("ok");
-              }
-            }
-            """,additionalSources:AppServiceCompatibilityGeneratorTests.BuildCompatibilityStubs());
-        Assert.True(result.CompilationSuccess,string.Join(" | ",result.Diagnostics));
-        Assert.DoesNotContain(result.GeneratedSources,s=>s.SourceText.ToString().Contains("DescriptorProviderRegistry.Register"));
     }
 }

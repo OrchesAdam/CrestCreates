@@ -251,13 +251,14 @@ Integrations: PluginSystem, ExternalApi, LegacyDatabase
 - 新测试优先验证 generated path。
 - `DynamicApiScanner`、`DynamicApiEndpointExecutor`、runtime reflection fallback 不应再被当作一等公民长期维护。
 
-Controller 生成器 `ControllerSourceGenerator`、`CrudControllerSourceGenerator` 已归档（#129 S4）；旧 `[CrestService]` Minimal API 生成器只在显式 `CrestCreates.CodeGenerator.Legacy` 中保留，供尚未迁移的 Host 使用。正式链是 CapabilityEndpoint ExplicitHost/AppService HTTP 投影；正式 CRUD（`[GenerateCrudService(typeof(TEntity))]`）走 ExplicitHost 贡献（`AddGeneratedCrud` + Map 期汇总 + 每动作 typed binding/invoker/result mapper），不再经 legacy 生成 provider/注册。
+Controller 生成器 `ControllerSourceGenerator`、`CrudControllerSourceGenerator`、旧 `[CrestService]` Minimal API 生成器与静态 compatibility 生成器均已归档（#129 S4）。正式链是 CapabilityEndpoint ExplicitHost/AppService HTTP 投影；正式 CRUD（`[GenerateCrudService(typeof(TEntity))]`）走 ExplicitHost 贡献（`AddGeneratedCrud` + Map 期汇总 + 每动作 typed binding/invoker/result mapper）。
 
-### Legacy 隔离（#129 S4）
+### 旧链退出（#129 S4）
 
-- 正式 `CrestCreates.DynamicApi`、`CrestCreates.Web` 与默认 `CrestCreates.CodeGenerator` 不包含旧 AppService Minimal API registry/runtime、旧 Add/Map 或 controller 生成器。
-- 仍保留的 legacy 只在显式包：`CrestCreates.DynamicApi.Legacy`（运行时）、`CrestCreates.CodeGenerator.Legacy`（analyzer）、`CrestCreates.Web.Legacy`（激活）。Host 必须调用 `AddLegacyGeneratedApi` 并逐 service/action allowlist；Map 前拒绝缺失/多余声明（CCHTTP007）和 formal/legacy 重复 method/route（CCHTTP005）。
-- Ticket 与正式 fixture 不依赖 legacy 包；legacy 为兼容面，不声明 NativeAOT/trim 支持。
+- `CrestCreates.DynamicApi.Legacy`、`CrestCreates.CodeGenerator.Legacy`、`CrestCreates.Web.Legacy` 已整体归档到 `99_RecycleBin/issue-129-controller-exit/`，不再属于解决方案、项目引用、analyzer/package 分发或 AOT/Trim 配置。
+- SaaSHelpdesk 七个 AppService 与 LibraryManagement 的 Book/Category/Loan/Member 全部由正式 ExplicitHost 投影发布；样例 Host 不再调用旧 Add/Map。
+- 正式路由冲突预检保留在 `MapCrestCapabilityEndpoints` 的批量预检中；旧 allowlist/route guard 随 Legacy 包归档。
+- Ticket 与正式 fixture 不依赖 legacy 包；旧链不再参与构建和运行，旧输出形状专用测试已归档，业务/错误/权限/UoW/原生断言迁移到正式链。
 
 ### 模块系统
 

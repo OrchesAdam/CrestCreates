@@ -92,6 +92,8 @@ R01 的影响面必须显式记账：**在 master 上，SaaSHelpdesk 生产 Host
 
 ## 5. legacy 消费者盘点与允许清单（归档判定依据）
 
+> 2026-10-21 目标修订：本节的“保留仍使用的 legacy 消费者”已被 S4 退出目标取代。SaaSHelpdesk 七服务与 LibraryManagement 四服务已迁到正式投影，`DynamicApi.Legacy`/`CodeGenerator.Legacy`/`Web.Legacy` 及旧 Add/Map/allowlist 已归档；本表仅保留为 S1 事实基线，不再作为保留依据。详见 `docs/superpowers/plans/2026-10-21-issue-129-s4-legacy-archive-record.md` 与 issues log「S4 消费者迁移与旧链退出」。
+
 零代码消费者（可直接归档，仅需同时退役其专属旧输出测试）：
 
 | 对象 | 声明位置 | 消费者事实 |

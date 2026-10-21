@@ -162,30 +162,37 @@ public class Issue129ContractFixtureTests
     }
 
     [Fact]
-    public void Legacy_dependency_fixture_has_no_formal_to_legacy_edge()
+    public void Legacy_projects_are_fully_retired_from_the_build_graph()
     {
         var legacy = Fixture.RootElement.GetProperty("legacyProjects");
-        legacy.EnumerateObject().Select(property => property.Name)
-            .Where(name => name != "edges")
-            .Should().BeEquivalentTo(
-            "CrestCreates.DynamicApi.Legacy", "CrestCreates.CodeGenerator.Legacy", "CrestCreates.Web.Legacy");
+        legacy.GetProperty("retained").EnumerateArray().Should().BeEmpty(
+            "S4 exit requires the three Legacy projects to be archived, not retained behind an allowlist");
 
         legacy.GetProperty("edges").GetProperty("formalToLegacy").GetString().Should().Be("forbidden");
         legacy.GetProperty("edges").GetProperty("defaultAnalyzerOrPackageIncludesLegacy").GetBoolean().Should().BeFalse();
+        legacy.GetProperty("edges").GetProperty("sampleEndpointOwnership").GetString()
+            .Should().Be("formal ExplicitHost contributions only");
+        legacy.GetProperty("exitEvidence").EnumerateArray().Select(value => value.GetString())
+            .Should().Contain(evidence => evidence!.Contains("no Legacy project", StringComparison.Ordinal));
 
         var legacyNames = new[] { "CrestCreates.DynamicApi.Legacy", "CrestCreates.CodeGenerator.Legacy", "CrestCreates.Web.Legacy" };
-        foreach (var projectFile in Directory.GetFiles(Path.Combine(RepoRoot(), "src"), "*.csproj", SearchOption.AllDirectories))
+        var roots = new[] { "src", "samples", "tests" };
+        foreach (var root in roots)
         {
-            if (legacyNames.Any(name => Path.GetFileNameWithoutExtension(projectFile).Equals(name, StringComparison.Ordinal)))
+            foreach (var projectFile in Directory.GetFiles(Path.Combine(RepoRoot(), root), "*.csproj", SearchOption.AllDirectories))
             {
-                continue;
-            }
+                if (projectFile.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                    || projectFile.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                {
+                    continue;
+                }
 
-            var text = File.ReadAllText(projectFile);
-            foreach (var legacyName in legacyNames)
-            {
-                text.Should().NotContain(legacyName,
-                    $"formal project {Path.GetRelativePath(RepoRoot(), projectFile)} must not depend on the isolated legacy package");
+                var text = File.ReadAllText(projectFile);
+                foreach (var legacyName in legacyNames)
+                {
+                    text.Should().NotContain(legacyName,
+                        $"{Path.GetRelativePath(RepoRoot(), projectFile)} must not reference the archived legacy package");
+                }
             }
         }
     }

@@ -32,8 +32,6 @@
     <ProjectReference Include="../../../../src/Platform/CrestCreates.Web/CrestCreates.Web.csproj" />
     <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Localization/CrestCreates.Localization.csproj" />
-    <ProjectReference Include="../../../../src/Framework/Api/CrestCreates.DynamicApi.Legacy/CrestCreates.DynamicApi.Legacy.csproj" />
-    <ProjectReference Include="../../../../src/Platform/CrestCreates.Web.Legacy/CrestCreates.Web.Legacy.csproj" />
   </ItemGroup>
 
 

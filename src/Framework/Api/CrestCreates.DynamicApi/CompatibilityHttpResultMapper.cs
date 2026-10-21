@@ -14,7 +14,7 @@ namespace CrestCreates.DynamicApi;
 ///
 /// Both legacy Dynamic API and compatibility result contracts call this class
 /// so that the response envelope is owned by a single authority rather than
-/// coupling compatibility projections to <see cref="DynamicApiGeneratedRuntime"/>.
+/// coupling compatibility projections to the archived legacy runtime.
 /// </summary>
 public static class CompatibilityHttpResultMapper
 {

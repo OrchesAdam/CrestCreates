@@ -24,20 +24,31 @@
 - 本仓库 `docs/review/2026-10-21-issue-129-dynamic-api-aot-source-generator-pre-controller-removal.cs.txt`（入库文本副本）。
 - Git 历史：`26439113^:src/Tooling/CrestCreates.CodeGenerator/DynamicApiGenerator/DynamicApiAotSourceGenerator.cs`（S4.1 提交的父提交）。
 
-## 仍保留并隔离的 legacy
+## 消费者迁移与 Legacy 项目归档（2026-10-21 目标修订）
 
-- `[CrestService]` 旧 Minimal API 生成器与静态 compatibility 生成器只存在于显式 `CrestCreates.CodeGenerator.Legacy` analyzer；默认 analyzer 不再包含，只有 opt-in 项目引用。
-- 旧运行时（registry/runtime/body reader/options/descriptors/conventions）在 `CrestCreates.DynamicApi.Legacy`；旧 Web 激活在 `CrestCreates.Web.Legacy`。
-- 所有公开激活入口都经过同一 allowlist 门禁：`AddLegacyGeneratedApi` 注册精确的 per-service/action 策略；`MapLegacyGeneratedApi`、保留的 `MapCrestDynamicApi` 以及 `DynamicApiGeneratedRegistryStore.MapGeneratedEndpoints` 都要求该策略，缺失即 `CCHTTP007` 且零映射。策略按 CLR `Type` 身份（含程序集）匹配，不接受同名跨程序集类型。
-- Legacy analyzer/runtime 不声明 trimming/NativeAOT-verified；CapabilityEndpoint.AotFixture 的移动仅保持 legacy compatibility 证据，不外推到正式 Ticket 链。
+S4 的目标由“隔离兼容”修订为“消费者迁移与旧链退出”。迁移顺序：
 
-## 测试迁移与退出清单
+1. SaaSHelpdesk 七个 AppService（Agent/Category/Customer/CustomerPortal/Dashboard/KnowledgeBase/SLAPolicy）改为正式接口投影，逐动作保留旧 route/verb/query/body/If-Match/permission，自定义写动作补 `[UnitOfWorkMo]`，body validator 显式声明。
+2. LibraryManagement Book/Category/Loan/Member 改为正式自契约投影适配器：继承 CRUD 的 `GetListAsync` 用显式分页 query 参数，`QueryAsync` 保留原请求 body，旧默认值语义用可空参数回落；适配器在模块注册一次，业务服务仍由原 owner 注册。
+3. 测试/fixture 迁移：SaaS/Library 行为、错误响应、权限/UoW/校验断言改跑正式链；`CompatibilityProjection.E2E` 与 `CapabilityEndpoint.AotFixture` 去掉 Legacy analyzer/runtime；旧输出形状专用测试归档。
+4. 三个 Legacy 项目（`CodeGenerator.Legacy`/`DynamicApi.Legacy`/`Web.Legacy`）、旧生成器、registry/runtime、Add/Map、allowlist、旧 CRUD stub、TicketApi 与 controller 分支全部归档；从解决方案、项目引用、`Directory.Build.Aot.props` 和 analyzer/package 分发移除。
+5. 正式路由冲突预检保留在 `MapCrestCapabilityEndpoints` 的批量预检中；legacy 侧的 allowlist/route guard 随包归档。
 
-- 归档的专用测试：`LegacyGeneratedApiControllerAbstractionsTests`、`GeneratedApiControllerSourceGeneratorTests`、`CrudControllerSourceGeneratorTests`、`CrudServiceSourceGeneratorTests`、`CrudServiceMainlineSourceGeneratorTests`。
-- 保留并迁移到正式链的测试：正式 wire matrix/路由、CRUD RealDeclaration baseline、JSON 契约闭包、CapabilityEndpoint 注册与 Map 守卫。
-- 退出条件（S4 复审通过即完成）：默认 analyzer/正式 runtime/正式 Web 不含 legacy 生成器、registry/runtime/Add/Map；Host 只能经 `AddLegacyGeneratedApi` + `MapLegacyGeneratedApi` 激活；正式 CRUD 只走 `[GenerateCrudService(typeof(TEntity))]` + ExplicitHost；无 controller 生成入口。
-- 外部旧 `GeneratedApiController`/`ApiOverride` 消费者会 breaking：按 S4 计划归档，不保留过时推荐。
+## 退出门禁
 
-## 本地备份说明
+- 有效构建图、解决方案、包分发与样例 Host **零** Legacy 项目/程序集引用。
+- 正式程序集不含 legacy 类型或旧 Add/Map/runtime 符号；样例端点只由正式贡献发布。
+- 归档代码不在 Compile/analyzer/package glob；原样重新引入 legacy call 的变异能被守卫捕获。
+- 旧链专用测试已归档；SaaS/Library 业务行为、错误响应、权限/UoW/校验与原生断言在正式链保留。
+- 外部旧 `GeneratedApiController`/`ApiOverride` 消费者 breaking：按 S4 计划归档，不保留过时推荐。
 
-`99_RecycleBin/issue-129-controller-exit/` 的源码副本与 README 由本地软删除流程维护，受 `.gitignore` 忽略。PR #152 交付以本文和 `docs/review/artifacts/` 为准；若本地备份缺失，可按上表路径从 Git 历史恢复（`git log --diff-filter=D -- <path>`）。
+## 执行结果（2026-10-21）
+
+- 三个 Legacy 项目的源码与本文件记录的旧测试已通过 `git mv` 归档到：
+  - `99_RecycleBin/issue-129-controller-exit/src/Tooling/CrestCreates.CodeGenerator.Legacy/`
+  - `99_RecycleBin/issue-129-controller-exit/src/Framework/Api/CrestCreates.DynamicApi.Legacy/`
+  - `99_RecycleBin/issue-129-controller-exit/src/Platform/CrestCreates.Web.Legacy/`
+  - `99_RecycleBin/issue-129-controller-exit/tests/...`（legacy analyzer/runtime/map/isolation/probe 专用测试）
+  这些重命名由 Git 跟踪，但从解决方案、项目引用、`Directory.Build.Aot.props`、Compile/analyzer/package glob 中移除，不参与构建。
+- 该目录下的临时 README 与构建产物（`bin/obj`）仍是本地未跟踪内容，不属于 PR 交付；审核入口以本文件和 `docs/review/` 为准。
+- `samples/SaaSHelpdesk` 与 `samples/LibraryManagement` 的正式投影、测试迁移与退出门禁见 issues log 的「S4 消费者迁移与旧链退出」；`CompatibilityProjection.E2E` 与 `CapabilityEndpoint.AotFixture` 已改为正式投影并以真实 publish/link/run 验证。

@@ -26,14 +26,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="DependencyInjection.StaticAccessor.Hosting" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
     <ProjectReference Include="../../../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
+    <ProjectReference Include="../../../src/Metadata/CrestCreates.Schema/CrestCreates.Schema.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Remove="Controllers\BooksController.cs" />
     <Compile Remove="Controllers\BookCrudDemoController.Custom.cs" />
-    <ProjectReference Include="../../../src/Platform/CrestCreates.Web.Legacy/CrestCreates.Web.Legacy.csproj" />
   </ItemGroup>
 
 </Project>

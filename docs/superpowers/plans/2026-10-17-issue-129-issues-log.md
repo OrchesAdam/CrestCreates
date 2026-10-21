@@ -753,3 +753,30 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 
 - 本轮未新增 ORM/认证/租户/原生能力声明；CapabilityEndpoint AOT fixture 仍是 legacy compatibility 证据，不外推到正式 Ticket 链（S5）。
 - 既有 11 条 SaaSHelpdesk HTTP 红（10×`POST /api/user` 404 + 1×ITenantProvider）未修、未跳过。
+
+## S4 消费者迁移与旧链退出（2026-10-21，取代此前的 Legacy 隔离保留方案）
+
+目标修订：S4 不再以“保留三个 Legacy 包 + allowlist”作为退出条件；三个包、旧生成器/runtime/Add/Map 全部归档，样例端点只由正式 ExplicitHost 投影发布。S4-R1 的修复保留为历史记录，不再作为 S4 放行依据。
+
+### 消费者迁移
+
+- **SaaSHelpdesk 七个 AppService**（Agent/Category/Customer/CustomerPortal/Dashboard/KnowledgeBase/SLAPolicy）改为正式接口投影：契约方法逐一 `[AppServiceHttpAction]`，保留旧 route/verb/query/body/If-Match/permission；自定义写动作补 `[UnitOfWorkMo]`（Agent.Create/Deactivate、CustomerPortal.CreateTicket、Category.Move/Reorder、Customer.Activate/Deactivate、KB.Publish/Unpublish/IncrementViewCount）；body validator 显式 `RequiresValidator`；所有动作补 CT 传播。KB `GetPopular` 改为可空 count 以保持旧“缺省→0”的 HTTP 语义。
+- **LibraryManagement Book/Category/Loan/Member** 改为正式自契约投影适配器（`Projections/*HttpProjection.cs`）：继承 CRUD 的 `GetListAsync` 用显式分页 query 参数构造 `PagedRequestDto`，`QueryAsync` 保留原 `QueryRequest<TEntity>` body，旧默认值语义用可空参数回落；`Loan`/`Member` 手写写动作的 `[UnitOfWorkMo]` 在本程序集织入（新增 FodyWeavers）；适配器在 ApplicationModule 注册一次，业务服务仍由原 owner 注册。Host 改为 `AddCapabilityRuntime` + `AddCrestCapabilityEndpoints` + `AddGeneratedAppServiceHttp` + `MapCrestCapabilityEndpoints`。
+- **测试/fixture 迁移**：`CompatibilityProjection.E2E` 的 Greeting 改为自契约正式投影（20/20）；`CapabilityEndpoint.AotFixture` 改为正式投影并保留 native publish/link/run（13/13）；新增 `FormalActivationBaselineTests`（SaaS，正式路由每条一次、legacy 程序集不加载）与 `LibraryFormalProjectionBaselineTests`（42 个 Library 动作、permission、required services、JSON roots，2/2）。旧输出形状专用测试（legacy analyzer isolation、allowlist/map guard、legacy runtime/convention、S4-R1 probes、静态 compatibility 声明探针）归档。
+- **归档**：`CrestCreates.CodeGenerator.Legacy`、`CrestCreates.DynamicApi.Legacy`、`CrestCreates.Web.Legacy` 及旧测试 `git mv` 到 `99_RecycleBin/issue-129-controller-exit/`；从 `.slnx`、项目引用、`Directory.Build.Aot.props` 与 analyzer/package 分发移除。正式路由冲突预检保留在 `MapCrestCapabilityEndpoints`。
+- **退出门禁**：`CapabilityEndpointBoundaryTests` 新增构建图/解决方案零 Legacy 项目、正式程序集无旧类型/旧引用守卫；`Issue129ContractFixtureTests` 的契约 fixture 改为 `legacyProjects.retained=[]`。主解决方案构建 0 error。
+
+### 证据
+
+- SaaSHelpdesk **151 pass / 11 fail / 162**；11 条仍为既有红（10×`POST /api/user` 404 + 1×ITenantProvider），正式迁移后 KB 的绑定失败按正式 400 契约更新，GET 404 改断言正式 `CrestErrorResponse`。
+- Web **99/99**（归档 legacy 专用测试后的剩余正式/守卫测试）；DynamicApi **140/140**、Application **177/177**、Capability **178/178**、OrmProviders **124/124**、JsonContracts **162/162**、Procurement **29/29**、CompatibilityProjection E2E **20/20**。
+- CRUD NativeAOT **23/23**、CapabilityEndpoint AOT **13/13**、Data.Abstractions AOT **1/1**（linux-x64 publish/link/run）。
+- DependencyBoundaries **176/178**；2 条仍为 ControlPlaneReferenceData evidence-ledger 既存 WIP。
+- LibraryManagement IntegrationTests 仍首先被既有 `OpenIddictScopes` 缺失阻断（上一已放行 head 同条件复现）；本轮以正式贡献契约基线验证 42 路由/permission/JSON/DI，未把该环境红计为迁移通过。
+- CodeGenerator 全量 **441/441**（31m20s；归档旧输出形状专用测试后由 503 降至 441，剩余正式生成器/契约/守卫测试全绿）。主解决方案构建 0 error。
+
+### 非声称
+
+- 未修改 Library 业务服务行为；其 full HTTP 业务验收仍受既有 OpenIddict 测试环境项限制。
+- Ticket NativeAOT 仍属 S5；CRUD/CapabilityEndpoint fixture 的原生结果不推导 Ticket/EF/认证/租户全链。
+- 未合并、CI 保持暂停。
