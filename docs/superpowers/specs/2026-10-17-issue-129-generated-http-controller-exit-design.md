@@ -208,6 +208,8 @@ LibraryManagement 使用自契约投影适配器：`IBookAppService` 等继承 `
 
 新增 CCHTTP001–008（本次盘点未发现冲突，实施前复核登记）：001 声明/contract 不支持；002 未物化/缺工具链；003 owner/route/action/identity 冲突；004 JSON/input/output/error 闭包；005 formal 误用 legacy 或双发布；006 transport/manifest/stamp/path 状态；007 必需 Host 装配/验证/错误契约缺失；008 动作权限/Kind/CT/并发声明矛盾。已有 CEP/CCCRUD 诊断各守其 owner，不覆盖或复用不同含义。
 
+S4 R2 收口补充：正式 projection 的缺工具链诊断由**默认 analyzer** 在每次编译时检查 `build_property.CrestCreatesAppServiceHttpJsonToolchain`；声明了 `[CapabilityCompatibilityProjection]` 但未接入工具链时确定性报告 CCHTTP002（Warning，提示不会产生端点），不能静默构建成功。`RegistrationMode.LegacyStatic` 已退役：enum 标记 Obsolete，默认 analyzer 与 precompile builder 均以 CCHTTP001（Error）拒绝，即使工具链已接入也不跳过。正式 `CompatibilityHttpResultMapper` 只保留 `JsonTypeInfo` 必需的 typed overload；legacy 的 `IServiceProvider`/无 metadata 反射 overload 与 `MapAotJson` fallback 随旧链归档，正式包不再暴露反射序列化入口。
+
 守卫分三层：
 
 - **依赖层**：正式 Runtime/Tooling 方向不变；Runtime 不引用 Web/Api；formal package/fixture 不依赖 legacy 包；legacy 单向依赖共享契约，默认 analyzer package 不包含 legacy generator。

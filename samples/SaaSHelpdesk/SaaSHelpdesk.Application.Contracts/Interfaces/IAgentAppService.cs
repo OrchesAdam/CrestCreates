@@ -13,7 +13,8 @@ public interface IAgentAppService
         Route = "",
         Kind = HttpProjectionOperationKind.Command,
         Body = HttpProjectionBodyPolicy.Required,
-        Permissions = new[] { "Agent.Create" })]
+        Permissions = new[] { "Agent.Create" },
+        RequiresValidator = true)]
     Task<IdentityUserDto> CreateAsync(CreateAgentDto input, CancellationToken cancellationToken = default);
 
     [AppServiceHttpAction(

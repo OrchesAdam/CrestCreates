@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using CrestCreates.CodeGenerator.Tests.TestHelpers;
 using CrestCreates.Tooling.HttpProjection;
@@ -209,7 +210,7 @@ public sealed class AppServiceHttpProjectionModelTests
     }
 
     [Fact]
-    public void Legacy_static_mode_is_left_to_the_legacy_front_end()
+    public void Legacy_static_mode_is_rejected_as_retired()
     {
         var result = Build("""
             using System.Threading;
@@ -230,8 +231,12 @@ public sealed class AppServiceHttpProjectionModelTests
             }
             """);
 
-        result.Model.Should().BeNull("the formal model only owns explicit-host projections");
-        result.Diagnostics.Should().BeEmpty("declining ownership is not a diagnostic");
+        result.Model.Should().BeNull("the retired static mode cannot materialize a formal projection");
+        result.HasErrors.Should().BeTrue();
+        result.Diagnostics.Should().ContainSingle(diagnostic =>
+            diagnostic.Id == AppServiceHttpDiagnosticCodes.UnsupportedDeclaration
+            && diagnostic.Severity == AppServiceHttpDiagnosticSeverity.Error
+            && diagnostic.Message.Contains("LegacyStatic", StringComparison.Ordinal));
     }
 
     [Fact]

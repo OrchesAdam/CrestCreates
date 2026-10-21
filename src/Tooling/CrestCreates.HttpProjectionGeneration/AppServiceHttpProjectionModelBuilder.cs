@@ -42,9 +42,10 @@ public static class AppServiceHttpProjectionModelBuilder
 
         if (registrationMode == AppServiceHttpRegistrationMode.LegacyStatic)
         {
-            // The legacy static front-end owns this declaration; the formal model does not apply,
-            // and declining ownership is not a diagnostic.
-            return new AppServiceHttpProjectionBuildResult(null, diagnostics);
+            return Failed(diagnostics, AppServiceHttpDiagnosticCodes.UnsupportedDeclaration,
+                "RegistrationMode.LegacyStatic is retired; formal projections must select "
+                + "HttpProjectionRegistrationMode.ExplicitHost.",
+                anchor);
         }
 
         var contractType = ReadType(projection, "ContractType");
@@ -176,9 +177,11 @@ public static class AppServiceHttpProjectionModelBuilder
     }
 
     /// <summary>
-    /// True when this declaration belongs to the formal explicit-host front-end: it names a
-    /// ContractType, or it explicitly selects ExplicitHost. A mode-less declaration without a
-    /// ContractType, and any explicit LegacyStatic declaration, remain with the legacy registrar.
+    /// True when this declaration belongs to the formal AppService HTTP front-end: it names a
+    /// ContractType, or it explicitly selects a registration mode. An explicit LegacyStatic
+    /// declaration is still formal input so the builder can reject it deterministically with
+    /// CCHTTP001 instead of silently skipping it. A mode-less declaration without ContractType is
+    /// not materializable and stays outside the formal surface.
     /// </summary>
     public static bool OwnsFormalHttpSurface(AttributeData projection)
     {
@@ -188,12 +191,8 @@ public static class AppServiceHttpProjectionModelBuilder
             && argument.Value.Value is not null);
         var mode = projection.NamedArguments.FirstOrDefault(argument => argument.Key == "RegistrationMode");
         var hasMode = mode.Key is not null && mode.Value.Kind == TypedConstantKind.Enum;
-        if (hasMode && Convert.ToInt32(mode.Value.Value) == 1)
-        {
-            return false;
-        }
 
-        return hasContract || (hasMode && Convert.ToInt32(mode.Value.Value) == 0);
+        return hasContract || hasMode;
     }
 
     private static AppServiceHttpActionModel? BuildAction(

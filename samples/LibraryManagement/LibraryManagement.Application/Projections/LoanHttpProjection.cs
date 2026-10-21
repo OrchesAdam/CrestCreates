@@ -40,7 +40,8 @@ public sealed class LoanHttpProjection(ILoanAppService service)
         Route = "return-book",
         Kind = HttpProjectionOperationKind.Command,
         Body = HttpProjectionBodyPolicy.Required,
-        Permissions = new[] { "Loan.Search" })]
+        Permissions = new[] { "Loan.Search" },
+        RequiresValidator = true)]
     public Task<LoanDto> ReturnBookAsync(ReturnBookDto input, CancellationToken cancellationToken = default)
         => service.ReturnBookAsync(input, cancellationToken);
 
@@ -49,7 +50,8 @@ public sealed class LoanHttpProjection(ILoanAppService service)
         Route = "extend-loan",
         Kind = HttpProjectionOperationKind.Command,
         Body = HttpProjectionBodyPolicy.Required,
-        Permissions = new[] { "Loan.Search" })]
+        Permissions = new[] { "Loan.Search" },
+        RequiresValidator = true)]
     public Task<LoanDto> ExtendLoanAsync(ExtendLoanDto input, CancellationToken cancellationToken = default)
         => service.ExtendLoanAsync(input, cancellationToken);
 
@@ -66,7 +68,8 @@ public sealed class LoanHttpProjection(ILoanAppService service)
         Route = "",
         Kind = HttpProjectionOperationKind.Command,
         Body = HttpProjectionBodyPolicy.Required,
-        Permissions = new[] { "Loan.Create" })]
+        Permissions = new[] { "Loan.Create" },
+        RequiresValidator = true)]
     public Task<LoanDto> CreateAsync(CreateLoanDto input, CancellationToken cancellationToken = default)
         => service.CreateAsync(input, cancellationToken);
 

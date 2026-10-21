@@ -5,6 +5,7 @@ using CrestCreates.DynamicApi;
 using CrestCreates.Generated.HttpProjection;
 using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
+using CrestCreates.Validation.Modules;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Application.Identity;
 using CrestCreates.Application.Permissions;
@@ -86,6 +87,7 @@ builder.Services.AddRepositoryTenantProvider();
 // #129 S4: LibraryManagement is served exclusively by formal ExplicitHost projections.
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
+builder.Services.AddScoped<IValidationService, ValidationService>();
 builder.Services.AddCrestCapabilityEndpoints();
 builder.Services.AddGeneratedAppServiceHttp();
 

@@ -58,10 +58,11 @@ public sealed class AppServiceHttpPrecompileEngine
                 attribute.AttributeClass?.ToDisplayString() == ProjectionAttributeName);
             if (projection is null || !AppServiceHttpProjectionModelBuilder.OwnsFormalHttpSurface(projection))
             {
-                // A mode-less declaration without ContractType, and any explicit LegacyStatic
-                // declaration, stays with the legacy static front-end. An explicit ExplicitHost
-                // declaration without ContractType is formal and must reach the builder's CCHTTP001
-                // (S22B-R1-03), never disappear as if it were legacy.
+                // A mode-less declaration without ContractType is not materializable and is left
+                // outside the formal surface. Explicit ExplicitHost and LegacyStatic declarations are
+                // formal input: the former must reach the builder's CCHTTP001 when ContractType is
+                // missing (S22B-R1-03), and the latter must be rejected as retired (CCHTTP001),
+                // never silently skipped.
                 continue;
             }
 
