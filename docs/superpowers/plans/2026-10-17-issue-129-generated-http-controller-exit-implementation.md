@@ -46,13 +46,13 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 
 > 2026-10-21 目标修订：S4 不再以“保留三个 Legacy 包 + allowlist”作为退出条件；必须把剩余消费者迁到正式投影，并让旧链不再参与构建和运行。
 
-- [ ] 更新 Spec/实施计划/契约 fixture/归档记录/PR 描述：S4 退出 = 构建图零 Legacy 项目、样例端点只由正式贡献发布、正式产物不调用旧 runtime/Add/Map。
-- [ ] SaaSHelpdesk 七个 AppService 全部改为正式投影：逐动作保留旧 route/verb/query/body/If-Match/permission，显式 validator；自定义写动作补 `[UnitOfWorkMo]`；删除 `AddLegacyGeneratedApi`/`MapLegacyGeneratedApi` 与 Legacy analyzer/runtime/Web 引用。
-- [ ] LibraryManagement Book/Category/Loan/Member 全部改为正式投影：因继承 CRUD 契约改用自契约投影适配器，保留旧 route/query/body/delete If-Match/permission；接入正式 precompile/JSON/Map 装配，删除 Legacy 引用与旧 Map。
-- [ ] 测试与 fixture 迁移：SaaS/Library 行为、错误响应、权限/UoW/校验断言改跑正式链；CompatibilityProjection.E2E、CapabilityEndpoint AOT fixture 去掉 Legacy analyzer/runtime；旧输出形状专用测试（legacy analyzer isolation、allowlist/map guard、legacy runtime/convention、S4-R1 probes）归档。
-- [ ] 三个 Legacy 项目、旧生成器/runtime/Add/Map/allowlist、Controller 生成器、旧 CRUD stub、TicketApi 与死反射 helpers 归档；从 `.slnx`、项目引用、`Directory.Build.Aot.props`、analyzer/package 分发移除。正式路由冲突预检保留在 `MapCrestCapabilityEndpoints`。
-- [ ] 新增退出门禁：构建图/解决方案零 Legacy 项目；正式程序集零旧类型/旧调用符号；样例 Host 路由集合只来自正式贡献；归档代码不在 Compile/analyzer/package glob；原样重新引入 legacy call 的变异能被守卫捕获。
-- [ ] 受影响回归：SaaSHelpdesk 全量、Library/IntegrationTests、Web、CodeGenerator、DynamicApi、Application、Capability、OrmProviders、JsonContracts、CompatibilityProjection.E2E、CRUD/AOT、Boundary；记录实际计数与既存红。S5 的 Ticket NativeAOT 在 S4 放行后开始。
+- [x] 更新 Spec/实施计划/契约 fixture/归档记录/PR 描述：S4 退出 = 构建图零 Legacy 项目、样例端点只由正式贡献发布、正式产物不调用旧 runtime/Add/Map。
+- [x] SaaSHelpdesk 七个 AppService 全部改为正式投影：逐动作保留旧 route/verb/query/body/If-Match/permission，显式 validator；自定义写动作补 `[UnitOfWorkMo]`；删除 `AddLegacyGeneratedApi`/`MapLegacyGeneratedApi` 与 Legacy analyzer/runtime/Web 引用。
+- [x] LibraryManagement Book/Category/Loan/Member 全部改为正式投影：因继承 CRUD 契约改用自契约投影适配器，保留旧 route/query/body/delete If-Match/permission；接入正式 precompile/JSON/Map 装配，删除 Legacy 引用与旧 Map。
+- [x] 测试与 fixture 迁移：SaaS/Library 行为、错误响应、权限/UoW/校验断言改跑正式链；CompatibilityProjection.E2E、CapabilityEndpoint AOT fixture 去掉 Legacy analyzer/runtime；旧输出形状专用测试（legacy analyzer isolation、allowlist/map guard、legacy runtime/convention、S4-R1 probes）归档。
+- [x] 三个 Legacy 项目、旧生成器/runtime/Add/Map/allowlist、Controller 生成器、旧 CRUD stub、TicketApi 与死反射 helpers 归档；从 `.slnx`、项目引用、`Directory.Build.Aot.props`、analyzer/package 分发移除。正式路由冲突预检保留在 `MapCrestCapabilityEndpoints`。
+- [x] 新增退出门禁：构建图/解决方案零 Legacy 项目；正式程序集零旧类型/旧调用符号；样例 Host 路由集合只来自正式贡献；归档代码不在 Compile/analyzer/package glob；原样重新引入 legacy call 的变异能被守卫捕获。
+- [x] 受影响回归：SaaSHelpdesk 全量、Library/IntegrationTests、Web、CodeGenerator、DynamicApi、Application、Capability、OrmProviders、JsonContracts、CompatibilityProjection.E2E、CRUD/AOT、Boundary；记录实际计数与既存红。S5 的 Ticket NativeAOT 在 S4 放行后开始。
 
 ## S5 — Native、回归与交接
 
