@@ -66,6 +66,35 @@ public class MultiTenancyMiddlewareTests
     }
 
     [Fact]
+    public async Task InvokeAsync_WithUnknownTenant_ReturnsForbiddenInsteadOfFallingBackToHost()
+    {
+        var middleware = new MultiTenancyMiddleware(
+            _ => throw new InvalidOperationException("an unknown tenant must not reach the next middleware"),
+            NullLogger<MultiTenancyMiddleware>.Instance);
+        var context = new DefaultHttpContext { TraceIdentifier = "trace-tenant-unknown" };
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context, new FakeCurrentTenant(null!), new NotFoundTenantResolver());
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden,
+            "an explicitly supplied but unknown tenant must never silently use the host database");
+    }
+
+    [Fact]
+    public async Task CompositeResolver_PreservesTerminalResolutionError()
+    {
+        var resolver = new CompositeTenantResolver(
+            new ITenantResolver[] { new NotFoundTenantResolver(), new NotResolvedTenantResolver() },
+            NullLogger<CompositeTenantResolver>.Instance);
+
+        var result = await resolver.ResolveAsync(new DefaultHttpContext());
+
+        result.IsResolved.Should().BeFalse();
+        result.Error!.Code.Should().Be("TENANT_NOT_FOUND",
+            "a resolver that observed an identifier and failed is terminal; falling through would run in the host tenant");
+    }
+
+    [Fact]
     public async Task InvokeAsync_WithSkipMetadata_SkipsTenantResolution()
     {
         var nextCalled = false;
@@ -181,6 +210,18 @@ public class MultiTenancyMiddlewareTests
         {
             throw new InvalidOperationException("Tenant resolution should have been skipped.");
         }
+    }
+
+    private sealed class NotFoundTenantResolver : ITenantResolver
+    {
+        public Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
+            => Task.FromResult(TenantResolutionResult.NotFound("Test"));
+    }
+
+    private sealed class NotResolvedTenantResolver : ITenantResolver
+    {
+        public Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
+            => Task.FromResult(TenantResolutionResult.NotResolved("Test"));
     }
 
     private sealed class FakeCurrentTenant : ICurrentTenant

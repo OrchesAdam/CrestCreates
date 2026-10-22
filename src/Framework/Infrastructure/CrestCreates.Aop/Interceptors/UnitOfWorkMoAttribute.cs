@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Aop.Abstractions;
 using CrestCreates.Aop.Extensions;
+using CrestCreates.Core.Abstractions.Threading;
 using CrestCreates.Data.Abstractions;
 using Microsoft.Extensions.Logging;
 using Rougamo;
@@ -77,6 +78,17 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
         if (scope is null)
         {
             return default;
+        }
+
+        // The kernel's execution token is the only place the caller/deadline identities survive
+        // after the ambient frame is restored; attach (or merge) them on the original exception
+        // before rollback.
+        if (context.Exception is OperationCanceledException
+            && scope is IUnitOfWorkCancellationSource source)
+        {
+            UnitOfWorkCancellationSnapshot.Attach(
+                context.Exception,
+                source.CaptureCancellationSnapshot());
         }
 
         return new ValueTask(RollbackScopeAsync(scope, context));

@@ -1,3 +1,4 @@
+using System;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Metadata;
 using System.Text.Json;
@@ -24,7 +25,44 @@ internal static class CapabilityEndpointMapper
             new[] { httpMethod },
             async (HttpContext context) =>
             {
-                var input = await binding.BindInputAsync(context, context.RequestAborted);
+                object? input;
+                try
+                {
+                    input = await binding.BindInputAsync(context, context.RequestAborted);
+                }
+                catch (Exception ex) when (ex is BadHttpRequestException
+                    or JsonException or FormatException or ArgumentException)
+                {
+                    // Binding/parse failures are local 400s: no business code and no write ran.
+                    var presenter = context.RequestServices
+                        .GetService<ICapabilityEndpointFailurePresenter>();
+                    return presenter is not null
+                        ? presenter.PresentBindingFailure(ex, context)
+                        : Results.BadRequest();
+                }
+                catch (OperationCanceledException ex)
+                {
+                    // Binding-stage cancellation follows the same frozen identity rules as the
+                    // pipeline: only a canceled caller token suppresses the response; every other
+                    // source is an internal failure rendered as a sanitized 500.
+                    if (ex.CancellationToken == context.RequestAborted
+                        && context.RequestAborted.IsCancellationRequested)
+                    {
+                        return Results.StatusCode(499);
+                    }
+
+                    var facts = new CapabilityFailureFacts(
+                        CapabilityFailureKind.NonCaller,
+                        "Crest.InternalError",
+                        "服务器内部错误。");
+                    var cancelled = CapabilityExecutionResult.Failure(
+                        "PIPELINE_ERROR", ex.Message, TimeSpan.Zero, failureFacts: facts);
+                    var presenter = context.RequestServices
+                        .GetService<ICapabilityEndpointFailurePresenter>();
+                    return presenter is not null
+                        ? presenter.Present(cancelled, context)
+                        : Results.StatusCode(StatusCodes.Status500InternalServerError);
+                }
 
                 var dispatcher = context.RequestServices
                     .GetRequiredService<ICapabilityDispatcher>();
@@ -91,7 +129,13 @@ internal static class CapabilityEndpointMapper
         // must always be mapped by the unified CapabilityEndpointResultMapper so that
         // compatibility projections never swallow a failure as a 200 OK.
         if (!result.IsSuccess)
-            return CapabilityEndpointResultMapper.Map(result, outputMapping, httpContext);
+        {
+            var presenter = httpContext.RequestServices
+                .GetService<ICapabilityEndpointFailurePresenter>();
+            return presenter is not null
+                ? presenter.Present(result, httpContext)
+                : CapabilityEndpointResultMapper.Map(result, outputMapping, httpContext);
+        }
 
         if (resultMapper is not null)
         {
@@ -104,6 +148,15 @@ internal static class CapabilityEndpointMapper
             };
 
             var mapped = resultMapper(ctx, httpContext.RequestServices);
+            if (mapped is CapabilityEndpointNotFoundResult)
+            {
+                var presenter = httpContext.RequestServices
+                    .GetService<ICapabilityEndpointFailurePresenter>();
+                return presenter is not null
+                    ? presenter.PresentNotFound(httpContext)
+                    : Results.NotFound();
+            }
+
             // The mapper returns object to avoid AspNetCore dependency in
             // Abstractions, but the concrete implementation always returns IResult.
             return (IResult)mapped;

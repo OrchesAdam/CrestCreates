@@ -16,6 +16,7 @@ internal static class Program
             Console.Error.WriteLine("Commands:");
             Console.Error.WriteLine("  generate <request-path> <response-path>");
             Console.Error.WriteLine("  prepare-crud <request-path> <response-path>");
+            Console.Error.WriteLine("  prepare-appservice-http <request-path> <response-path>");
             return 2;
         }
 
@@ -27,6 +28,7 @@ internal static class Program
             {
                 "generate" => ExecuteGenerate(args),
                 "prepare-crud" => ExecutePrepareCrud(args),
+                "prepare-appservice-http" => ExecutePrepareAppServiceHttp(args),
                 _ => Fail($"Unknown command: {command}")
             };
         }
@@ -121,6 +123,86 @@ internal static class Program
         return diagnostics.Count > 0 ? 1 : 0;
     }
 
+    /// <summary>
+    /// #129 S2.2-B: materializes hand-written AppService HTTP projections as ordinary source before
+    /// CoreCompile, together with the per-artifact outputs manifest the build stage writes.
+    /// </summary>
+    private static int ExecutePrepareAppServiceHttp(string[] args)
+    {
+        if (args.Length < 3)
+        {
+            Console.Error.WriteLine("Usage: prepare-appservice-http <request-path> <response-path>");
+            return 2;
+        }
+
+        var request = JsonSerializer.Deserialize(
+            File.ReadAllText(args[1]),
+            ToolJsonSerializerContext.Default.AppServiceHttpPrepareRequest);
+        if (request is null)
+        {
+            Console.Error.WriteLine("Failed to deserialize AppService HTTP precompile request.");
+            return 4;
+        }
+
+        var result = !string.IsNullOrEmpty(request.ExpectedModelSchemaVersion)
+            && request.ExpectedModelSchemaVersion != CrestCreates.Tooling.HttpProjection.AppServiceHttpProjectionModel.ModelSchemaVersion
+            ? CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrecompileResult.Failed(
+                [new CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpToolDiagnostic(
+                    CrestCreates.Tooling.HttpProjection.AppServiceHttpDiagnosticCodes.TransportManifestState,
+                    "The requested AppService HTTP model schema version is unsupported.", null, 0, 0)])
+            : new CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrecompileEngine().Run(
+                request.AssemblyName ?? "",
+                request.Sources?.Select(source => (source.Path, source.Text)).ToList() ?? [],
+                request.ReferencePaths ?? [],
+                request.LangVersion ?? "latest",
+                request.DefineConstants ?? [],
+                request.Nullable ?? "enable",
+                request.AllowUnsafeBlocks,
+                request.ValidateOnly);
+
+        var diagnostics = result.Diagnostics
+            .Select(diagnostic => new ToolDiagnosticDto
+            {
+                Id = diagnostic.Id,
+                Severity = diagnostic.IsError ? "Error" : "Warning",
+                Message = diagnostic.Message,
+                FilePath = diagnostic.Path ?? "",
+                Line = diagnostic.Line,
+                Column = diagnostic.Column,
+            })
+            .ToList();
+
+        var bundle = new System.Text.StringBuilder();
+        foreach (var artifact in result.Artifacts)
+        {
+            bundle.AppendLine("// ---- artifact: " + artifact.FileName + " ----");
+            bundle.AppendLine(artifact.Text);
+        }
+
+        var response = new CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrepareResponse
+        {
+            Diagnostics = diagnostics,
+            BundleBytes = result.Succeeded ? System.Text.Encoding.UTF8.GetBytes(bundle.ToString()) : null,
+            // A project without hand-written projections still gets a complete, empty manifest so the
+            // build state stays deterministic and the JSON stage can tell "nothing declared" apart
+            // from "the producer never ran".
+            Outputs = result.Manifest ?? new CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpOutputManifestDocument
+            {
+                SchemaVersion = CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrecompileEngine.ArtifactSchemaVersion,
+                ModelSchemaVersion = CrestCreates.Tooling.HttpProjection.AppServiceHttpProjectionModel.ModelSchemaVersion,
+                Entries = [],
+            },
+            DeclarationCount = result.DeclarationCount,
+            ModelSchemaVersion = CrestCreates.Tooling.HttpProjection.AppServiceHttpProjectionModel.ModelSchemaVersion,
+        };
+
+        File.WriteAllText(
+            args[2],
+            JsonSerializer.Serialize(
+                response, ToolJsonSerializerContext.Default.AppServiceHttpPrepareResponse));
+        return diagnostics.Count > 0 ? 1 : 0;
+    }
+
     private static int ExecuteGenerate(string[] args)
     {
         if (args.Length < 3)
@@ -154,7 +236,8 @@ internal static class Program
             request.Nullable ?? "enable",
             request.AllowUnsafeBlocks,
             request.ManifestAccessibility ?? "Internal",
-            request.CrudOutputsManifestJson);
+            request.CrudOutputsManifestJson,
+            request.AppServiceHttpOutputsManifestJson);
 
         var diagnostics = result.Diagnostics.Select(d => new ToolDiagnosticDto
         {
@@ -205,6 +288,9 @@ internal sealed class GenerateRequest
 
     /// <summary>CRUD precompile outputs manifest, used to reconcile the root matrix against owners.</summary>
     public string? CrudOutputsManifestJson { get; set; }
+
+    /// <summary>AppService HTTP projection outputs manifest, used to reconcile the root plan against artifacts.</summary>
+    public string? AppServiceHttpOutputsManifestJson { get; set; }
 }
 
 internal sealed class SourceDto
@@ -237,4 +323,7 @@ internal sealed class ToolDiagnosticDto
 [JsonSerializable(typeof(GenerateResponse))]
 [JsonSerializable(typeof(CrestCreates.JsonContracts.BuildTasks.Crud.CrudPrepareRequest))]
 [JsonSerializable(typeof(CrestCreates.JsonContracts.BuildTasks.Crud.CrudPrepareResponse))]
+[JsonSerializable(typeof(CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrepareRequest))]
+[JsonSerializable(typeof(CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpPrepareResponse))]
+[JsonSerializable(typeof(CrestCreates.JsonContracts.BuildTasks.HttpProjection.AppServiceHttpOutputManifestDocument))]
 internal sealed partial class ToolJsonSerializerContext : JsonSerializerContext;

@@ -206,6 +206,34 @@ public sealed class CapabilityEndpointHostActivationTests : IDisposable
     }
 
     [Fact]
+    public void ContributedCapability_MissingFromAuthoritativeRegistry_FailsClosed()
+    {
+        // #129 S2.3: a host that activates a generated contribution but composes its capability
+        // registry without that contribution must fail before mapping, never drop the endpoints.
+        var contributed = CreateCapability("contributed-cap");
+        var contribution = new MissingCapabilityContribution
+        {
+            OwnerAssemblyName = "MissingCapability.Generated",
+            CapabilityDescriptors = [contributed],
+            EndpointDescriptors =
+            [
+                CreateEndpoint("ep-missing-cap", capabilityId: contributed.Id, route: "/api/v1/missing-cap")
+            ],
+            Bindings = [CreateBinding("ep-missing-cap")],
+            Handlers = [CreateHandler(contributed.Id)],
+            ResultMappers = [CreateResultBinding("ep-missing-cap", "missing-cap")],
+        };
+        var (_, endpoints) = BuildHost(CreateCapabilityRegistryMock(), CreateDispatcherMock(), contribution);
+
+        var act = () => endpoints.MapCrestCapabilityEndpoints();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*contributed-cap*")
+            .WithMessage("*authoritative registry*");
+        endpoints.DataSources.Should().BeEmpty();
+    }
+
+    [Fact]
     public void SecondMapCall_DoesNotDoubleMap()
     {
         // Arrange
@@ -557,6 +585,8 @@ public sealed class CapabilityEndpointHostActivationTests : IDisposable
     private sealed class NoHandlerContribution : CapabilityEndpointContribution;
 
     private sealed class BodyTypeContribution : CapabilityEndpointContribution;
+
+    private sealed class MissingCapabilityContribution : CapabilityEndpointContribution;
 
     private sealed class ContributedBodyTypeMarker;
 

@@ -31,6 +31,21 @@ public sealed class CapabilityExecutionContext
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public IDictionary<string, object?> Items { get; init; } = new Dictionary<string, object?>();
     public IReadOnlyList<string> RequiredPermissions { get; set; } = Array.Empty<string>();
+    /// <summary>The caller's cancellation identity (R).</summary>
     public CancellationToken CancellationToken { get; init; }
+
+    /// <summary>
+    /// The managed deadline identity (K), when the invocation runs under one. Comparison is by
+    /// token identity; a cancellation exception carrying an unrelated token is never treated as a
+    /// managed deadline.
+    /// </summary>
+    public CancellationToken ManagedDeadlineToken { get; init; }
+
+    /// <summary>
+    /// The linked execution identity (L) when the framework derives one from R/K. Sources are
+    /// consulted in the frozen precedence order: caller abort before managed deadline.
+    /// </summary>
+    public CancellationToken ExecutionToken { get; init; }
+
     public required IServiceProvider ServiceProvider { get; init; }
 }

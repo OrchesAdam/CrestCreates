@@ -380,9 +380,9 @@ public sealed class HelpdeskWebApplicationFactory
             services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
             services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
-            // Unit of Work
-            services.AddUnitOfWork(OrmProvider.EfCore);
-            services.AddEfCoreUnitOfWork();
+            // Unit of Work is owned by the platform preset plus the sample EntityFrameworkCoreModule.
+            // The fixture must not declare a third EfCore binding (issue #129 rev.2 §14.3); the
+            // remaining duplicate is locked by TicketProjectionGapBaselineTests.R01.
 
             // Framework repositories
             services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();

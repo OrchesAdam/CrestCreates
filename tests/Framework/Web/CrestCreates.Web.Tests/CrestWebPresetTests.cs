@@ -1,6 +1,4 @@
-using System.Reflection;
 using System.Threading;
-using CrestCreates.DynamicApi;
 using CrestCreates.ModuleDiagnostics.Modules;
 using CrestCreates.ModuleDiagnostics.Stores;
 using CrestCreates.MultiTenancy.Abstract;
@@ -25,24 +23,11 @@ namespace CrestCreates.Web.Tests;
 public class CrestWebPresetTests
 {
     [Fact]
-    public void CrestWebOptions_ShouldConfigureGeneratedApiAssemblies()
-    {
-        var options = new CrestWebOptions();
-
-        options.UseGeneratedApi(api => api.AddApplicationServiceAssembly<CrestWebPresetTests>());
-
-        options.GeneratedApi.ServiceMarkerTypes.Should().Contain(typeof(CrestWebPresetTests));
-    }
-
-    [Fact]
     public void AddCrestWeb_ShouldAcceptOptionsDelegate()
     {
         var builder = WebApplication.CreateBuilder();
 
-        builder.AddCrestWeb(options =>
-        {
-            options.UseGeneratedApi(api => api.AddApplicationServiceAssembly<CrestWebPresetTests>());
-        });
+        builder.AddCrestWeb(options => options.UseOpenIddict(false));
 
         builder.Services.Should().NotBeEmpty();
     }
@@ -119,8 +104,6 @@ public class CrestWebPresetTests
     [Fact]
     public void MapCrestWeb_ShouldNotMapOpenIddictEndpoints_WhenDisabled()
     {
-        using var snapshot = new DynamicApiRegistryStoreSnapshot();
-        DynamicApiGeneratedRegistryStore.Register(new TestDynamicApiProvider());
 
         var builder = WebApplication.CreateBuilder();
         builder.AddCrestWeb(options => options.UseOpenIddict(false));
@@ -145,8 +128,6 @@ public class CrestWebPresetTests
     [Fact]
     public void MapCrestWeb_ShouldMapHealthEndpoint()
     {
-        using var snapshot = new DynamicApiRegistryStoreSnapshot();
-        DynamicApiGeneratedRegistryStore.Register(new TestDynamicApiProvider());
 
         var builder = WebApplication.CreateBuilder();
         builder.AddCrestWeb(options => options.UseOpenIddict(false));
@@ -172,8 +153,6 @@ public class CrestWebPresetTests
     [Fact]
     public void AddCrestWeb_ShouldRegisterModuleDiagnostics()
     {
-        using var snapshot = new DynamicApiRegistryStoreSnapshot();
-        DynamicApiGeneratedRegistryStore.Register(new TestDynamicApiProvider());
 
         var builder = WebApplication.CreateBuilder();
         builder.AddCrestWeb(options => options.UseOpenIddict(false));
@@ -200,70 +179,5 @@ public class CrestWebPresetTests
             .SingleOrDefault(method => method.Name == "InitializeCrestAsync");
 
         method.Should().NotBeNull();
-    }
-
-    private sealed class DynamicApiRegistryStoreSnapshot : IDisposable
-    {
-        private static readonly FieldInfo ProvidersField =
-            typeof(DynamicApiGeneratedRegistryStore).GetField("Providers", BindingFlags.NonPublic | BindingFlags.Static)
-            ?? throw new InvalidOperationException("Providers field not found.");
-
-        private readonly (string Key, IDynamicApiGeneratedProvider Provider)[] _providers;
-
-        public DynamicApiRegistryStoreSnapshot()
-        {
-            var providers = (IEnumerable<KeyValuePair<string, IDynamicApiGeneratedProvider>>)ProvidersField.GetValue(null)!;
-            _providers = providers.ToArray().Select(pair => (pair.Key, pair.Value)).ToArray();
-            ((ICollection<KeyValuePair<string, IDynamicApiGeneratedProvider>>)ProvidersField.GetValue(null)!).Clear();
-        }
-
-        public void Dispose()
-        {
-            var providers = (ICollection<KeyValuePair<string, IDynamicApiGeneratedProvider>>)ProvidersField.GetValue(null)!;
-            providers.Clear();
-            foreach (var (key, provider) in _providers)
-            {
-                providers.Add(new KeyValuePair<string, IDynamicApiGeneratedProvider>(key, provider));
-            }
-        }
-    }
-
-    private sealed class TestDynamicApiProvider : IDynamicApiGeneratedProvider
-    {
-        public IReadOnlyCollection<System.Reflection.Assembly> ServiceAssemblies => new[] { typeof(CrestWebPresetTests).Assembly };
-
-        public IReadOnlyCollection<DynamicApiEndpointDescriptor> EndpointDescriptors { get; } =
-            new[]
-            {
-                new DynamicApiEndpointDescriptor(
-                    "Test",
-                    "Ping",
-                    "GET",
-                    "test/ping",
-                    typeof(CrestWebPresetTests),
-                    null,
-                    typeof(string),
-                    Array.Empty<string>(),
-                    false)
-            };
-
-        public DynamicApiRegistry CreateRegistry(DynamicApiOptions options)
-        {
-            return new DynamicApiRegistry(new[]
-            {
-                new DynamicApiServiceDescriptor
-                {
-                    ServiceName = "Test",
-                    RoutePrefix = "test",
-                    ServiceType = typeof(CrestWebPresetTests),
-                    ImplementationType = typeof(CrestWebPresetTests),
-                    Actions = Array.Empty<DynamicApiActionDescriptor>()
-                }
-            });
-        }
-
-        public void MapEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options)
-        {
-        }
     }
 }

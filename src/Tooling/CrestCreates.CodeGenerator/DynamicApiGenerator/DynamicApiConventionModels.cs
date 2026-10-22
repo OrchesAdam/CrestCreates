@@ -24,8 +24,7 @@ internal sealed record ActionModel(
     bool RequiresUnitOfWork,
     bool RequiresTransaction,
     ImmutableArray<string> MetadataCalls,
-    bool AllowAnonymous,
-    CrudAction? OverrideAction = null);
+    bool AllowAnonymous);
 
 internal sealed record ParameterModel(
     string Name,
@@ -52,13 +51,4 @@ internal enum ParameterSource
     Body,
     Header,
     CancellationToken
-}
-
-internal enum CrudAction
-{
-    Get = 0,
-    GetList = 1,
-    Create = 2,
-    Update = 3,
-    Delete = 4
 }

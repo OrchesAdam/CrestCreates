@@ -1,0 +1,175 @@
+<Project>
+  <!-- #129 S2.2-B: hand-written AppService HTTP projection precompile chain. The produced bundle is
+       ordinary Compile input that lands before PrepareCrestCreatesJsonContractInputs collects
+       @(Compile), so JsonContracts discovers the real projection surface and the official STJ
+       generator closes it inside the same CoreCompile. -->
+  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.WriteCrestAppServiceHttpInputManifest"
+             AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)"
+             Runtime="NET"
+             Architecture="*" />
+  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateCrestAppServiceHttpArtifacts"
+             AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)"
+             Runtime="NET"
+             Architecture="*" />
+  <UsingTask TaskName="CrestCreates.JsonContracts.BuildTasks.Tasks.CrestPrecompileGenerationState"
+             AssemblyFile="$(CrestCreatesJsonContractsSelectedTaskAssembly)" Runtime="NET" Architecture="*" />
+
+  <PropertyGroup>
+    <CrestCreatesAppServiceHttpModelSchemaVersion Condition="'$(CrestCreatesAppServiceHttpModelSchemaVersion)' == ''">appservice-http-model-v2</CrestCreatesAppServiceHttpModelSchemaVersion>
+  </PropertyGroup>
+
+  <Target Name="SetCrestAppServiceHttpPaths"
+          Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <PropertyGroup>
+      <CrestCreatesCodeGenerationIsDisabled>false</CrestCreatesCodeGenerationIsDisabled>
+      <CrestCreatesCodeGenerationIsDisabled Condition="'$(CrestCreatesCodeGeneration)' == 'false'">true</CrestCreatesCodeGenerationIsDisabled>
+      <_CrestHttpProjectionAllowedOutputRoot>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)'))</_CrestHttpProjectionAllowedOutputRoot>
+      <_CrestHttpProjectionOutputBase>$(IntermediateOutputPath)</_CrestHttpProjectionOutputBase>
+      <_CrestHttpProjectionOutputBase Condition="'$(DesignTimeBuild)' == 'true'">$(IntermediateOutputPath)design-time/</_CrestHttpProjectionOutputBase>
+      <CrestAppServiceHttpBundleFile Condition="'$(CrestAppServiceHttpBundleFile)' == ''">$(_CrestHttpProjectionOutputBase)CrestCreates.AppServiceHttp.g.cs</CrestAppServiceHttpBundleFile>
+      <CrestAppServiceHttpInputManifest Condition="'$(CrestAppServiceHttpInputManifest)' == ''">$(_CrestHttpProjectionOutputBase)CrestCreates.AppServiceHttp.inputs.json</CrestAppServiceHttpInputManifest>
+      <CrestAppServiceHttpOutputsManifest Condition="'$(CrestAppServiceHttpOutputsManifest)' == ''">$(_CrestHttpProjectionOutputBase)CrestCreates.AppServiceHttp.outputs.json</CrestAppServiceHttpOutputsManifest>
+      <CrestAppServiceHttpGenerationStamp Condition="'$(CrestAppServiceHttpGenerationStamp)' == ''">$(_CrestHttpProjectionOutputBase)CrestCreates.AppServiceHttp.stamp</CrestAppServiceHttpGenerationStamp>
+      <CrestAppServiceHttpTemporaryDirectory Condition="'$(CrestAppServiceHttpTemporaryDirectory)' == ''">$(_CrestHttpProjectionOutputBase)CrestCreates.AppServiceHttp.tmp</CrestAppServiceHttpTemporaryDirectory>
+
+      <_CrestAppServiceHttpBundleFullPath>$([System.IO.Path]::GetFullPath('$(CrestAppServiceHttpBundleFile)'))</_CrestAppServiceHttpBundleFullPath>
+      <_CrestAppServiceHttpInputManifestFullPath>$([System.IO.Path]::GetFullPath('$(CrestAppServiceHttpInputManifest)'))</_CrestAppServiceHttpInputManifestFullPath>
+      <_CrestAppServiceHttpOutputsManifestFullPath>$([System.IO.Path]::GetFullPath('$(CrestAppServiceHttpOutputsManifest)'))</_CrestAppServiceHttpOutputsManifestFullPath>
+      <_CrestAppServiceHttpStampFullPath>$([System.IO.Path]::GetFullPath('$(CrestAppServiceHttpGenerationStamp)'))</_CrestAppServiceHttpStampFullPath>
+      <_CrestAppServiceHttpTemporaryFullPath>$([System.IO.Path]::GetFullPath('$(CrestAppServiceHttpTemporaryDirectory)'))</_CrestAppServiceHttpTemporaryFullPath>
+      <_CrestAppServiceHttpBundleRelative>$([System.IO.Path]::GetRelativePath('$(_CrestHttpProjectionAllowedOutputRoot)', '$(CrestAppServiceHttpBundleFile)'))</_CrestAppServiceHttpBundleRelative>
+      <_CrestAppServiceHttpInputRelative>$([System.IO.Path]::GetRelativePath('$(_CrestHttpProjectionAllowedOutputRoot)', '$(CrestAppServiceHttpInputManifest)'))</_CrestAppServiceHttpInputRelative>
+      <_CrestAppServiceHttpOutputsRelative>$([System.IO.Path]::GetRelativePath('$(_CrestHttpProjectionAllowedOutputRoot)', '$(CrestAppServiceHttpOutputsManifest)'))</_CrestAppServiceHttpOutputsRelative>
+      <_CrestAppServiceHttpStampRelative>$([System.IO.Path]::GetRelativePath('$(_CrestHttpProjectionAllowedOutputRoot)', '$(CrestAppServiceHttpGenerationStamp)'))</_CrestAppServiceHttpStampRelative>
+      <_CrestAppServiceHttpTempRelative>$([System.IO.Path]::GetRelativePath('$(_CrestHttpProjectionAllowedOutputRoot)', '$(CrestAppServiceHttpTemporaryDirectory)'))</_CrestAppServiceHttpTempRelative>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="ValidateCrestAppServiceHttpPaths"
+          DependsOnTargets="SetCrestAppServiceHttpPaths"
+          Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <Error Condition="'$(_CrestHttpProjectionAllowedOutputRoot)' == '' OR !$([System.IO.Path]::IsPathRooted('$(_CrestHttpProjectionAllowedOutputRoot)'))"
+           Code="CCHTTP006"
+           Text="IntermediateOutputPath must resolve to an absolute allowed output root for the AppService HTTP projection precompile." />
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestAppServiceHttpBundleRelative)')) OR '$(_CrestAppServiceHttpBundleRelative)' == '..' OR $([System.String]::Copy('$(_CrestAppServiceHttpBundleRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestAppServiceHttpBundleRelative)').StartsWith('..\'))"
+           Code="CCHTTP006" Text="CrestAppServiceHttpBundleFile must remain inside IntermediateOutputPath." />
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestAppServiceHttpInputRelative)')) OR '$(_CrestAppServiceHttpInputRelative)' == '..' OR $([System.String]::Copy('$(_CrestAppServiceHttpInputRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestAppServiceHttpInputRelative)').StartsWith('..\'))"
+           Code="CCHTTP006" Text="CrestAppServiceHttpInputManifest must remain inside IntermediateOutputPath." />
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestAppServiceHttpOutputsRelative)')) OR '$(_CrestAppServiceHttpOutputsRelative)' == '..' OR $([System.String]::Copy('$(_CrestAppServiceHttpOutputsRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestAppServiceHttpOutputsRelative)').StartsWith('..\'))"
+           Code="CCHTTP006" Text="CrestAppServiceHttpOutputsManifest must remain inside IntermediateOutputPath." />
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestAppServiceHttpStampRelative)')) OR '$(_CrestAppServiceHttpStampRelative)' == '..' OR $([System.String]::Copy('$(_CrestAppServiceHttpStampRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestAppServiceHttpStampRelative)').StartsWith('..\'))"
+           Code="CCHTTP006" Text="CrestAppServiceHttpGenerationStamp must remain inside IntermediateOutputPath." />
+    <Error Condition="$([System.IO.Path]::IsPathRooted('$(_CrestAppServiceHttpTempRelative)')) OR '$(_CrestAppServiceHttpTempRelative)' == '..' OR $([System.String]::Copy('$(_CrestAppServiceHttpTempRelative)').StartsWith('../')) OR $([System.String]::Copy('$(_CrestAppServiceHttpTempRelative)').StartsWith('..\'))"
+           Code="CCHTTP006" Text="CrestAppServiceHttpTemporaryDirectory must remain inside IntermediateOutputPath." />
+  </Target>
+
+  <!-- Hooked into the JSON chain so it always runs before the JSON inputs are collected. -->
+  <Target Name="PrepareCrestAppServiceHttpInputs"
+          DependsOnTargets="SetCrestAppServiceHttpPaths;ValidateCrestAppServiceHttpPaths;ValidateCrestCreatesJsonContractTransport"
+          Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <ItemGroup>
+      <CrestAppServiceHttpCompileSources Remove="@(CrestAppServiceHttpCompileSources)" />
+      <CrestAppServiceHttpCompileSources Include="@(Compile)"
+              Exclude="$(_CrestAppServiceHttpBundleFullPath);$(_CrestAppServiceHttpInputManifestFullPath);$(_CrestAppServiceHttpOutputsManifestFullPath);$(_CrestAppServiceHttpTemporaryFullPath)/**;$(_CrestCreatesJsonContractGeneratedFullPath);$(_CrestCrudBundleFullPath);$(_CrestCrudInputManifestFullPath);$(_CrestCrudOutputsManifestFullPath)" />
+      <CrestAppServiceHttpReferenceAssemblies Remove="@(CrestAppServiceHttpReferenceAssemblies)" />
+      <CrestAppServiceHttpReferenceAssemblies Include="@(ReferencePathWithRefAssemblies)" />
+    </ItemGroup>
+    <MakeDir Directories="$(_CrestAppServiceHttpTemporaryFullPath)" />
+  </Target>
+
+  <Target Name="WriteCrestAppServiceHttpInputManifest"
+          DependsOnTargets="PrepareCrestAppServiceHttpInputs"
+          Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.WriteCrestAppServiceHttpInputManifest
+        SourceFiles="@(CrestAppServiceHttpCompileSources)"
+        ReferencePaths="@(CrestAppServiceHttpReferenceAssemblies)"
+        OutputPath="$(_CrestAppServiceHttpInputManifestFullPath)"
+        AllowedOutputRoot="$(_CrestHttpProjectionAllowedOutputRoot)"
+        TemporaryDirectory="$(_CrestAppServiceHttpTemporaryFullPath)"
+        AssemblyName="$(AssemblyName)"
+        LangVersion="$(LangVersion)"
+        DefineConstants="$(DefineConstants)"
+        Nullable="$(Nullable)"
+        AllowUnsafeBlocks="$(AllowUnsafeBlocks)"
+        TargetFramework="$(TargetFramework)"
+        Configuration="$(Configuration)"
+        RuntimeIdentifier="$(RuntimeIdentifier)"
+        ValidateOnly="$(CrestCreatesCodeGenerationIsDisabled)"
+        TaskAssemblyPath="$(CrestCreatesJsonContractsSelectedTaskAssembly)"
+        ModelSchemaVersion="$(CrestCreatesAppServiceHttpModelSchemaVersion)"
+        ToolSemanticVersion="$(CrestCreatesJsonContractsTaskSemanticVersion)"
+        ToolAssemblyPath="$(CrestCreatesJsonContractsToolPath)">
+      <Output TaskParameter="OutputChanged" PropertyName="CrestAppServiceHttpInputManifestChanged" />
+    </CrestCreates.JsonContracts.BuildTasks.Tasks.WriteCrestAppServiceHttpInputManifest>
+  </Target>
+
+  <Target Name="InvalidateMissingCrestAppServiceHttpOutput"
+          DependsOnTargets="WriteCrestAppServiceHttpInputManifest"
+          Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.CrestPrecompileGenerationState
+        StampPath="$(_CrestAppServiceHttpStampFullPath)" InputManifestPath="$(_CrestAppServiceHttpInputManifestFullPath)"
+        BundlePath="$(_CrestAppServiceHttpBundleFullPath)" OutputsManifestPath="$(_CrestAppServiceHttpOutputsManifestFullPath)"
+        AllowedOutputRoot="$(_CrestHttpProjectionAllowedOutputRoot)" TemporaryDirectory="$(_CrestAppServiceHttpTemporaryFullPath)"
+        StateSchema="appservice-http-state-v1" ErrorCode="CCHTTP006">
+      <Output TaskParameter="IsValid" PropertyName="_CrestAppServiceHttpStateValid" />
+    </CrestCreates.JsonContracts.BuildTasks.Tasks.CrestPrecompileGenerationState>
+    <Delete Files="$(_CrestAppServiceHttpStampFullPath)" Condition="'$(_CrestAppServiceHttpStateValid)' != 'true'" />
+  </Target>
+
+  <Target Name="GenerateCrestAppServiceHttpSurface"
+          DependsOnTargets="PrepareCrestAppServiceHttpInputs;WriteCrestAppServiceHttpInputManifest;InvalidateMissingCrestAppServiceHttpOutput"
+          Inputs="@(CrestAppServiceHttpCompileSources);@(CrestAppServiceHttpReferenceAssemblies);$(_CrestAppServiceHttpInputManifestFullPath);$(CrestCreatesJsonContractsSelectedTaskAssembly);$(CrestCreatesJsonContractsToolPath)"
+          Outputs="$(_CrestAppServiceHttpStampFullPath)"
+          Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateCrestAppServiceHttpArtifacts
+        SourceFiles="@(CrestAppServiceHttpCompileSources)"
+        ReferencePaths="@(CrestAppServiceHttpReferenceAssemblies)"
+        BundlePath="$(_CrestAppServiceHttpBundleFullPath)"
+        OutputsManifestPath="$(_CrestAppServiceHttpOutputsManifestFullPath)"
+        AllowedOutputRoot="$(_CrestHttpProjectionAllowedOutputRoot)"
+        TemporaryDirectory="$(_CrestAppServiceHttpTemporaryFullPath)"
+        AssemblyName="$(AssemblyName)"
+        LangVersion="$(LangVersion)"
+        DefineConstants="$(DefineConstants)"
+        Nullable="$(Nullable)"
+        AllowUnsafeBlocks="$(AllowUnsafeBlocks)"
+        TargetFramework="$(TargetFramework)"
+        ExpectedModelSchemaVersion="$(CrestCreatesAppServiceHttpModelSchemaVersion)"
+        ValidateOnly="$(CrestCreatesCodeGenerationIsDisabled)"
+        ToolPath="$(CrestCreatesJsonContractsToolPath)">
+      <Output TaskParameter="DeclarationCount" PropertyName="CrestAppServiceHttpDeclarationCount" />
+      <Output TaskParameter="ArtifactCount" PropertyName="CrestAppServiceHttpArtifactCount" />
+      <Output TaskParameter="OutputChanged" PropertyName="CrestAppServiceHttpOutputChanged" />
+    </CrestCreates.JsonContracts.BuildTasks.Tasks.GenerateCrestAppServiceHttpArtifacts>
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(_CrestAppServiceHttpStampFullPath)'))" />
+    <CrestCreates.JsonContracts.BuildTasks.Tasks.CrestPrecompileGenerationState Write="true"
+        StampPath="$(_CrestAppServiceHttpStampFullPath)" InputManifestPath="$(_CrestAppServiceHttpInputManifestFullPath)"
+        BundlePath="$(_CrestAppServiceHttpBundleFullPath)" OutputsManifestPath="$(_CrestAppServiceHttpOutputsManifestFullPath)"
+        AllowedOutputRoot="$(_CrestHttpProjectionAllowedOutputRoot)" TemporaryDirectory="$(_CrestAppServiceHttpTemporaryFullPath)"
+        StateSchema="appservice-http-state-v1" ErrorCode="CCHTTP006" />
+  </Target>
+
+  <!-- The bundle becomes ordinary Compile input, while the outputs manifest travels as an AdditionalFile:
+       it is not C# source, and the JSON stage must reconcile its roots against the producer's ownership
+       instead of trusting a name it invented. -->
+  <Target Name="IncludeCrestAppServiceHttpArtifacts"
+          DependsOnTargets="GenerateCrestAppServiceHttpSurface"
+          Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <ItemGroup>
+      <Compile Remove="$(_CrestAppServiceHttpBundleFullPath)" />
+      <Compile Include="$(_CrestAppServiceHttpBundleFullPath)"
+               Condition="Exists('$(_CrestAppServiceHttpBundleFullPath)')" />
+      <AdditionalFiles Remove="$(_CrestAppServiceHttpOutputsManifestFullPath)" />
+      <AdditionalFiles Include="$(_CrestAppServiceHttpOutputsManifestFullPath)"
+                       Condition="Exists('$(_CrestAppServiceHttpOutputsManifestFullPath)')" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CleanCrestAppServiceHttpArtifacts"
+          DependsOnTargets="SetCrestAppServiceHttpPaths"
+          AfterTargets="Clean"
+          Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true' AND '$(IsCrossTargetingBuild)' != 'true'">
+    <Delete Files="$(_CrestAppServiceHttpBundleFullPath);$(_CrestAppServiceHttpInputManifestFullPath);$(_CrestAppServiceHttpOutputsManifestFullPath);$(_CrestAppServiceHttpStampFullPath)" />
+    <RemoveDir Directories="$(_CrestAppServiceHttpTemporaryFullPath)" Condition="Exists('$(_CrestAppServiceHttpTemporaryFullPath)')" />
+  </Target>
+</Project>

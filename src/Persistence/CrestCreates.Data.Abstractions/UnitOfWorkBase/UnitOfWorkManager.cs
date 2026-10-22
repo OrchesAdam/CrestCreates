@@ -3,6 +3,7 @@ using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Core.Abstractions.Threading;
 using CrestCreates.Domain.UnitOfWork;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -39,6 +40,7 @@ namespace CrestCreates.Data.Abstractions
         private readonly IServiceProvider? _serviceProvider;
         private readonly bool _ownsResolvedUnitOfWorks;
         private readonly AsyncLocal<AmbientFrame?> _currentFrame = new();
+        private readonly AsyncLocal<UnitOfWorkScope?> _currentExecutionScope = new();
 
         /// <summary>
         /// DI 主链构造函数
@@ -95,17 +97,25 @@ namespace CrestCreates.Data.Abstractions
             ValidateOptions(options);
 
             var frame = _currentFrame.Value;
+            var executionParent = _currentExecutionScope.Value;
+            UnitOfWorkScope scope;
             if (frame is not null && options.Propagation == UnitOfWorkPropagation.Required)
             {
-                return UnitOfWorkScope.CreateJoined(this, frame.Scope, options);
+                scope = UnitOfWorkScope.CreateJoined(this, frame.Scope, executionParent, options);
             }
-
-            if (frame is not null)
+            else if (frame is not null)
             {
-                return BeginIsolatedScope(frame, options);
+                scope = BeginIsolatedScope(frame, executionParent, options);
+            }
+            else
+            {
+                scope = BeginRootScope(frame, executionParent, options);
             }
 
-            return BeginRootScope(frame, options);
+            // Joins do not push an ambient owner frame, but they are real execution parents for
+            // cancellation classification; record the innermost scope synchronously in this frame.
+            _currentExecutionScope.Value = scope;
+            return scope;
         }
 
         /// <inheritdoc />
@@ -128,6 +138,7 @@ namespace CrestCreates.Data.Abstractions
             catch (Exception exception)
             {
                 primary = exception;
+                AttachCancellationSnapshot(exception, scope);
                 var rollbackTerminationFailure = await scope.TryRollbackOnFailureAsync().ConfigureAwait(false);
                 if (rollbackTerminationFailure is not null)
                 {
@@ -188,7 +199,17 @@ namespace CrestCreates.Data.Abstractions
             primary.Data[key] = diagnostic;
         }
 
-        private UnitOfWorkScope BeginRootScope(AmbientFrame? frame, UnitOfWorkOptions options)
+        /// <summary>
+        /// Preserves the caller/execution identities on the original cancellation exception before
+        /// the ambient frame unwinds; transports classify the source from this typed snapshot.
+        /// </summary>
+        private static void AttachCancellationSnapshot(Exception exception, UnitOfWorkScope scope)
+            => UnitOfWorkCancellationSnapshot.Attach(exception, scope.CaptureCancellationSnapshot());
+
+        private UnitOfWorkScope BeginRootScope(
+            AmbientFrame? frame,
+            UnitOfWorkScope? executionParent,
+            UnitOfWorkOptions options)
         {
             var provider = ResolveProvider(options.Provider);
             ValidateIsolationCapability(provider, options);
@@ -204,12 +225,16 @@ namespace CrestCreates.Data.Abstractions
                 node,
                 tenantSnapshot,
                 parentFrame: frame,
+                executionParent,
                 ownedScope: null,
                 ambientToken: null,
                 ownsUnitOfWorkDirectly: _ownsResolvedUnitOfWorks);
         }
 
-        private UnitOfWorkScope BeginIsolatedScope(AmbientFrame parentFrame, UnitOfWorkOptions options)
+        private UnitOfWorkScope BeginIsolatedScope(
+            AmbientFrame parentFrame,
+            UnitOfWorkScope? executionParent,
+            UnitOfWorkOptions options)
         {
             var provider = ResolveProvider(options.Provider);
             ValidateIsolationCapability(provider, options);
@@ -238,6 +263,7 @@ namespace CrestCreates.Data.Abstractions
                     manualNode,
                     ResolveTenantSnapshot(provider, _serviceProvider),
                     parentFrame: parentFrame,
+                    executionParent,
                     ownedScope: null,
                     ambientToken: null,
                     ownsUnitOfWorkDirectly: _ownsResolvedUnitOfWorks);
@@ -274,6 +300,7 @@ namespace CrestCreates.Data.Abstractions
                     childScope.ServiceProvider.GetRequiredService<UnitOfWorkChainNode>(),
                     tenantSnapshot,
                     parentFrame: parentFrame,
+                    executionParent,
                     ownedScope: childScope,
                     ambientToken: ambientToken,
                     ownsUnitOfWorkDirectly: false);
@@ -344,6 +371,18 @@ namespace CrestCreates.Data.Abstractions
         }
 
         /// <summary>
+        /// Restores the execution-parent pointer used for cancellation classification. The caller
+        /// frame already holds the parent value; this only keeps the disposing frame consistent.
+        /// </summary>
+        internal void RestoreExecutionParent(UnitOfWorkScope scope)
+        {
+            if (ReferenceEquals(_currentExecutionScope.Value, scope))
+            {
+                _currentExecutionScope.Value = scope.ExecutionParent;
+            }
+        }
+
+        /// <summary>
         /// 恢复调用方环境（同步段；必须由调用方帧触发）。仅当本 scope 的帧仍为栈顶时恢复。
         /// </summary>
         internal void RestoreCallerEnvironment(UnitOfWorkScope scope)
@@ -378,7 +417,7 @@ namespace CrestCreates.Data.Abstractions
         /// <summary>
         /// 状态化 scope：承载参与者完成、事务结果、通知结果与释放标志（设计 §3.2）。
         /// </summary>
-        internal sealed class UnitOfWorkScope : IUnitOfWorkScope
+        internal sealed class UnitOfWorkScope : IUnitOfWorkScope, IUnitOfWorkCancellationSource
         {
             private readonly UnitOfWorkManager _manager;
             private readonly IUnitOfWork _unitOfWork;
@@ -390,11 +429,13 @@ namespace CrestCreates.Data.Abstractions
             private readonly IsolationLevel? _requestedIsolation;
             private readonly TimeSpan? _requestedTimeout;
             private readonly AmbientFrame? _parentFrame;
+            private readonly UnitOfWorkScope? _executionParent;
             private readonly UnitOfWorkScope? _ownerScope;
             private readonly IServiceScope? _ownedScope;
             private readonly IDisposable? _ambientToken;
             private readonly bool _ownsUnitOfWorkDirectly;
             private readonly UnitOfWorkExecutionTokenSource _tokenSource = new();
+            private CancellationToken _callerToken;
             private IDisposable? _tokenRestorer;
             private bool _framePushed;
             private bool _started;
@@ -417,6 +458,7 @@ namespace CrestCreates.Data.Abstractions
                 bool isOwner,
                 bool isTransactional,
                 AmbientFrame? parentFrame,
+                UnitOfWorkScope? executionParent,
                 UnitOfWorkScope? ownerScope,
                 IServiceScope? ownedScope,
                 IDisposable? ambientToken,
@@ -432,6 +474,7 @@ namespace CrestCreates.Data.Abstractions
                 _requestedIsolation = options.IsolationLevel;
                 _requestedTimeout = options.Timeout;
                 _parentFrame = parentFrame;
+                _executionParent = executionParent;
                 _ownerScope = ownerScope;
                 _ownedScope = ownedScope;
                 _ambientToken = ambientToken;
@@ -454,6 +497,7 @@ namespace CrestCreates.Data.Abstractions
                 UnitOfWorkChainNode? node,
                 TenantKeySnapshot tenantSnapshot,
                 AmbientFrame? parentFrame,
+                UnitOfWorkScope? executionParent,
                 IServiceScope? ownedScope,
                 IDisposable? ambientToken,
                 bool ownsUnitOfWorkDirectly)
@@ -468,6 +512,7 @@ namespace CrestCreates.Data.Abstractions
                     isOwner: true,
                     isTransactional: options.IsTransactional,
                     parentFrame,
+                    executionParent,
                     ownerScope: null,
                     ownedScope,
                     ambientToken,
@@ -478,6 +523,7 @@ namespace CrestCreates.Data.Abstractions
             internal static UnitOfWorkScope CreateJoined(
                 UnitOfWorkManager manager,
                 UnitOfWorkScope owner,
+                UnitOfWorkScope? executionParent,
                 UnitOfWorkOptions options)
             {
                 if (owner._state != UnitOfWorkState.Active)
@@ -528,6 +574,7 @@ namespace CrestCreates.Data.Abstractions
                     isOwner: false,
                     isTransactional: owner._isTransactional,
                     parentFrame: null,
+                    executionParent,
                     ownerScope: owner,
                     ownedScope: null,
                     ambientToken: null,
@@ -536,6 +583,8 @@ namespace CrestCreates.Data.Abstractions
 
             /// <summary>受管链节点（诊断与读方链校验）。</summary>
             internal UnitOfWorkChainNode? Node => _node;
+
+            internal UnitOfWorkScope? ExecutionParent => _executionParent;
 
             public IUnitOfWork UnitOfWork => _unitOfWork;
 
@@ -571,6 +620,7 @@ namespace CrestCreates.Data.Abstractions
                 }
 
                 _started = true;
+                _callerToken = cancellationToken;
 
                 var deadline = ComputeDeadline();
                 _deadlineUtc = deadline;
@@ -592,6 +642,51 @@ namespace CrestCreates.Data.Abstractions
                 }
 
                 return BeginProviderTransactionAsync();
+            }
+
+            public UnitOfWorkCancellationSnapshot? CaptureCancellationSnapshot()
+            {
+                if (!_started)
+                {
+                    return null;
+                }
+
+                // Walk the ownership chain (join -> owner, isolated -> parent frame) so classification
+                // can return to the root transport caller and the real deadline source instead of
+                // mistaking an outer execution token for the caller.
+                var scopes = new System.Collections.Generic.List<UnitOfWorkScope>();
+                for (var scope = this; scope is not null; scope = scope._executionParent)
+                {
+                    if (scope._started)
+                    {
+                        scopes.Add(scope);
+                    }
+                }
+
+                if (scopes.Count == 0)
+                {
+                    return null;
+                }
+
+                var frames = new System.Collections.Generic.List<UnitOfWorkCancellationFrame>(scopes.Count);
+                for (var index = 0; index < scopes.Count; index++)
+                {
+                    var scope = scopes[index];
+                    var callerCancelled = scope._callerToken.CanBeCanceled
+                        && scope._callerToken.IsCancellationRequested;
+                    var deadlineExpired = scope._deadlineUtc is { } deadline
+                        && (DateTimeOffset.UtcNow >= deadline
+                            || (!callerCancelled && scope._tokenSource.Token.IsCancellationRequested));
+                    frames.Add(new UnitOfWorkCancellationFrame(
+                        scope._callerToken,
+                        scope._tokenSource.Token,
+                        callerCancelled,
+                        deadlineExpired,
+                        scope._tokenSource.SnapshotDerivedTokens(),
+                        DepthFromRoot: scopes.Count - 1 - index));
+                }
+
+                return new UnitOfWorkCancellationSnapshot(frames);
             }
 
             private async Task BeginProviderTransactionAsync()
@@ -1018,6 +1113,8 @@ namespace CrestCreates.Data.Abstractions
                     // 成功完成的 join 仅恢复环境（不污染外层）。
                     _ownerScope?.MarkRollbackOnly();
                 }
+
+                _manager.RestoreExecutionParent(this);
 
                 try
                 {

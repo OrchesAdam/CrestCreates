@@ -236,6 +236,10 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
         return await GetListAsync(request, cancellationToken);
     }
 
+    protected virtual bool RequiresConcurrencyStampOnUpdate => false;
+
+    protected virtual bool RequiresConcurrencyStampOnDelete => false;
+
     [UnitOfWorkMo]
     public virtual async Task<TDto> UpdateAsync(TKey id, TUpdateDto input, CancellationToken cancellationToken = default)
     {
@@ -249,6 +253,20 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
             }
 
             await ValidateDataOwnershipAsync(entity);
+
+            if (RequiresConcurrencyStampOnUpdate && entity is IHasConcurrencyStamp concurrencyEntity)
+            {
+                var expectedStamp = (input as IHasConcurrencyStampInput)?.ConcurrencyStamp;
+                if (string.IsNullOrWhiteSpace(expectedStamp))
+                {
+                    throw new CrestPreconditionRequiredException(typeof(TEntity).Name, id);
+                }
+
+                if (!string.Equals(concurrencyEntity.ConcurrencyStamp, expectedStamp, StringComparison.Ordinal))
+                {
+                    throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+                }
+            }
 
             // Preserve concurrency stamp — generated MapToEntity (ApplyTo) may
             // overwrite it from DTO defaults (e.g. null), breaking the optimistic
@@ -301,6 +319,11 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
 
             if (typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
             {
+                if (string.IsNullOrEmpty(expectedStamp) && RequiresConcurrencyStampOnDelete)
+                {
+                    throw new CrestPreconditionRequiredException(typeof(TEntity).Name, id);
+                }
+
                 if (!string.IsNullOrEmpty(expectedStamp))
                 {
                     await Repository.DeleteAsync(id, expectedStamp, cancellationToken);

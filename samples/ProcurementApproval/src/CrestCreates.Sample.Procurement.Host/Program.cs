@@ -13,6 +13,7 @@ using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
 using CrestCreates.DynamicApi;
+using CrestCreates.Generated.HttpProjection;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.Form;
 using CrestCreates.Form.Abstractions;
@@ -55,10 +56,6 @@ var store = new InMemoryProcurementRequestStore();
 var schemaRegistry = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
 schemaRegistry.Build([new ProcurementDescriptorProvider<SchemaDescriptor>(ProcurementDescriptorCatalog.Schemas)]);
 var capabilityRegistry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
-capabilityRegistry.Build(
-    DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>()
-        .Append(new ProcurementDescriptorProvider<CapabilityDescriptor>(
-            ProcurementDescriptorCatalog.NativeCapabilities)));
 var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
 humanTaskRegistry.Build([new ProcurementDescriptorProvider<HumanTaskDescriptor>([ProcurementDescriptorCatalog.ApprovalHumanTask])]);
 var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
@@ -87,6 +84,7 @@ builder.Services.AddSingleton<InMemoryProcurementRequestStore>(store);
 builder.Services.AddScoped<ProcurementApplicationService>();
 builder.Services.AddCrestCapabilityEndpoints();
 builder.Services.AddCrestCompatibilityProjection();
+builder.Services.AddGeneratedAppServiceHttp();
 builder.Services.AddCrestOpenApi();
 builder.Services.AddScoped<ProcurementAppService>();
 builder.Services.AddScoped<ProcurementApprovalTaskService>();
@@ -157,11 +155,37 @@ builder.Services.AddCrestAgentTools(options =>
 
 builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
 {
-    options.SerializerOptions.TypeInfoResolver = new ProcurementCombinedJsonResolver();
+    // #129 S2.3: keep the generated projection context first (it owns the compatibility wire
+    // roots); the host's own source-generated resolver stays ahead of the reflection default.
+    var chain = options.SerializerOptions.TypeInfoResolverChain;
+    var insertionIndex = chain.Count;
+    for (var index = 0; index < chain.Count; index++)
+    {
+        if (chain[index] is System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver resolver
+            && resolver.GetType() == typeof(System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)
+            && resolver.Modifiers.Count == 0)
+        {
+            insertionIndex = index;
+            break;
+        }
+    }
+
+    chain.Insert(insertionIndex, new ProcurementCombinedJsonResolver());
     options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow;
 });
 
 var app = builder.Build();
+
+// #129 S2.3: compose the host's capability registry from its static catalogs plus exactly the
+// generated contributions this host activated. MapCrestCapabilityEndpoints verifies this frozen
+// registry against every contribution; omitting a contribution makes mapping fail closed.
+capabilityRegistry.Build(
+    DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>()
+        .Append(new ProcurementDescriptorProvider<CapabilityDescriptor>(ProcurementDescriptorCatalog.NativeCapabilities))
+        .Append(new ProcurementDescriptorProvider<CapabilityDescriptor>(
+            app.Services.GetServices<CapabilityEndpointContribution>()
+                .SelectMany(contribution => contribution.CapabilityDescriptors)
+                .ToList())));
 
 app.UseAccountabilityHttpTerminalObserver();
 app.UseAuthentication();

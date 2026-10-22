@@ -709,8 +709,82 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                     continue;
                 }
 
+                // A user-declared validator for the same DTO is the authoritative contract. Emitting a
+                // second IValidator<T> would make DI resolution order-dependent and could silently
+                // replace the declared rules with the generated structural ones.
+                if (HasDeclaredValidator(serviceClass.ContainingAssembly, dtoType)
+                    || HasDeclaredValidator(dtoType.ContainingAssembly, dtoType))
+                {
+                    continue;
+                }
+
                 GenerateDtoValidator(context, dtoType, namespaceName);
             }
+        }
+
+        private static bool HasDeclaredValidator(IAssemblySymbol? assembly, ITypeSymbol dtoType)
+        {
+            if (assembly is null)
+            {
+                return false;
+            }
+
+            return ContainsDeclaredValidator(assembly.GlobalNamespace, dtoType.Name + "Validator", dtoType);
+        }
+
+        private static bool ContainsDeclaredValidator(INamespaceSymbol container, string expectedName, ITypeSymbol dtoType)
+        {
+            foreach (var member in container.GetMembers())
+            {
+                if (member is INamespaceSymbol childNamespace)
+                {
+                    if (ContainsDeclaredValidator(childNamespace, expectedName, dtoType))
+                    {
+                        return true;
+                    }
+
+                    continue;
+                }
+
+                if (member is not INamedTypeSymbol type || type.IsImplicitlyDeclared)
+                {
+                    continue;
+                }
+
+                if (IsValidatorFor(type, expectedName, dtoType)
+                    || type.GetTypeMembers().Any(nested => IsValidatorFor(nested, expectedName, dtoType)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsValidatorFor(INamedTypeSymbol type, string expectedName, ITypeSymbol dtoType)
+        {
+            if (!string.Equals(type.Name, expectedName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            for (var baseType = type.BaseType; baseType is not null; baseType = baseType.BaseType)
+            {
+                if (baseType is INamedTypeSymbol named
+                    && named.IsGenericType
+                    && named.TypeArguments.Length == 1
+                    && string.Equals(named.Name, "AbstractValidator", StringComparison.Ordinal)
+                    && SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], dtoType))
+                {
+                    return true;
+                }
+            }
+
+            return type.AllInterfaces.Any(implemented =>
+                implemented.IsGenericType
+                && implemented.TypeArguments.Length == 1
+                && string.Equals(implemented.Name, "IValidator", StringComparison.Ordinal)
+                && SymbolEqualityComparer.Default.Equals(implemented.TypeArguments[0], dtoType));
         }
 
         private bool IsDtoType(ITypeSymbol type)
@@ -777,7 +851,13 @@ namespace CrestCreates.CodeGenerator.ServiceGenerator
                 switch (typeName)
                 {
                     case "String":
-                        builder.AppendLine($"            RuleFor(x => x.{propertyName}).NotEmpty().WithMessage(\"{propertyName} 不能为空\");");
+                        // Nullable strings are optional inputs; requiring them would reject legal
+                        // payloads that simply omit an optional field.
+                        if (property.NullableAnnotation != NullableAnnotation.Annotated)
+                        {
+                            builder.AppendLine($"            RuleFor(x => x.{propertyName}).NotEmpty().WithMessage(\"{propertyName} 不能为空\");");
+                        }
+
                         // 检查是否是邮箱、URL等特殊字符串
                         if (propertyName.Contains("Email", StringComparison.OrdinalIgnoreCase))
                         {

@@ -2,6 +2,7 @@ using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
 using LibraryManagement.Application.Contracts.Interfaces;
 using LibraryManagement.Application.Contracts.Modules;
+using LibraryManagement.Application.Projections;
 using LibraryManagement.Application.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -19,6 +20,11 @@ public class ApplicationModule : ModuleBase
         services.AddScoped<ICategoryAppService, CategoryAppService>();
         services.AddScoped<IMemberAppService, MemberAppService>();
         services.AddScoped<ILoanAppService, LoanAppService>();
+
+        services.AddScoped<BookHttpProjection>();
+        services.AddScoped<CategoryHttpProjection>();
+        services.AddScoped<LoanHttpProjection>();
+        services.AddScoped<MemberHttpProjection>();
     }
 
 }

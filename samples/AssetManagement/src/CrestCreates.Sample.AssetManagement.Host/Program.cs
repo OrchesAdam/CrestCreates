@@ -14,6 +14,7 @@ using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Middleware;
 using CrestCreates.DynamicApi;
+using CrestCreates.Generated.HttpProjection;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.Form;
 using CrestCreates.Form.Abstractions;
@@ -37,6 +38,7 @@ using CrestCreates.Runtime.Persistence.Abstractions.State;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Domain.Shared.Permissions;
 using CrestCreates.Sample.AssetManagement.Application;
+using CrestCreates.Sample.AssetManagement.Host.Projections;
 using CrestCreates.Sample.AssetManagement.Application.Handlers;
 using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Contracts.Json;
@@ -73,9 +75,6 @@ var runtimeSchema = builder.Configuration["AssetManagement:RuntimeSchema"]
 var schemaRegistry = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
 schemaRegistry.Build([new AssetDescriptorProvider<SchemaDescriptor>(AssetDescriptorCatalog.Schemas)]);
 var capabilityRegistry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
-capabilityRegistry.Build(
-    DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>()
-        .Append(new AssetDescriptorProvider<CapabilityDescriptor>(AssetDescriptorCatalog.Capabilities)));
 var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
 humanTaskRegistry.Build([new AssetDescriptorProvider<HumanTaskDescriptor>(candidateGoldenScenario
     ? [AssetDescriptorCatalog.MaintenanceHumanTask, AssetDescriptorCatalog.MaintenanceInitialHumanTask]
@@ -117,8 +116,10 @@ builder.Services.AddSingleton<ICapabilityHandlerModule>(new AssetCapabilityModul
 builder.Services.AddSingleton<IAssetStore>(assetStore);
 builder.Services.AddSingleton<CrestCreates.Domain.Repositories.Permission.IPermissionGrantRepository, AssetPermissionGrantRepository>();
 builder.Services.AddScoped<AssetApplicationService>();
+builder.Services.AddScoped<AssetCompatibilityProjection>();
 builder.Services.AddCrestCapabilityEndpoints();
 builder.Services.AddCrestCompatibilityProjection();
+builder.Services.AddGeneratedAppServiceHttp();
 builder.Services.AddCrestOpenApi();
 builder.Services.AddSingleton<ISchemaRegistry>(schemaRegistry);
 builder.Services.AddSingleton<ICapabilityRegistry>(capabilityRegistry);
@@ -137,7 +138,7 @@ builder.Services.AddScoped<AssetMaintenanceWorkflowService>();
 builder.Services.AddScoped<ILocalEventBus, AssetLocalEventBus>();
 builder.Services.AddSingleton<IDescriptorLookup>(new AssetDescriptorLookup(
     AssetDescriptorCatalog.Schemas.Cast<IDescriptor>()
-        .Concat(capabilityRegistry.GetAll())
+        .Concat(AssetDescriptorCatalog.Capabilities)
         .Append(AssetDescriptorCatalog.MaintenanceForm)
         .Append(AssetDescriptorCatalog.MaintenanceHumanTask)
         .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
@@ -166,11 +167,38 @@ builder.Services.AddSingleton<AssetAgentToolApprovalGate>();
 builder.Services.AddSingleton<IAgentToolApprovalGate>(sp => sp.GetRequiredService<AssetAgentToolApprovalGate>());
 builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
 {
-    options.SerializerOptions.TypeInfoResolver = new AssetCombinedJsonResolver();
+    // #129 S2.3: keep the generated projection context first (it owns the compatibility wire
+    // roots); the host's own source-generated resolver stays ahead of the reflection default.
+    var chain = options.SerializerOptions.TypeInfoResolverChain;
+    var insertionIndex = chain.Count;
+    for (var index = 0; index < chain.Count; index++)
+    {
+        if (chain[index] is System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver resolver
+            && resolver.GetType() == typeof(System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)
+            && resolver.Modifiers.Count == 0)
+        {
+            insertionIndex = index;
+            break;
+        }
+    }
+
+    chain.Insert(insertionIndex, new AssetCombinedJsonResolver());
     options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow;
 });
 
 var app = builder.Build();
+
+// #129 S2.3: compose the host's capability registry from its static catalogs plus exactly the
+// generated contributions this host activated. MapCrestCapabilityEndpoints verifies this frozen
+// registry against every contribution; omitting a contribution makes mapping fail closed.
+capabilityRegistry.Build(
+    DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>()
+        .Append(new AssetDescriptorProvider<CapabilityDescriptor>(AssetDescriptorCatalog.Capabilities))
+        .Append(new AssetDescriptorProvider<CapabilityDescriptor>(
+            app.Services.GetServices<CapabilityEndpointContribution>()
+                .SelectMany(contribution => contribution.CapabilityDescriptors)
+                .ToList())));
+
 await SeedAssetPermissionsAsync(app.Services);
 await assetStore.InitializeAsync();
 app.UseAccountabilityHttpTerminalObserver();

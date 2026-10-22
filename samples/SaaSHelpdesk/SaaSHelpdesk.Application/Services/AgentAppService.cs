@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Interceptors;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Security.Abstractions;
@@ -11,6 +13,11 @@ using SaaSHelpdesk.Application.Contracts.Interfaces;
 namespace SaaSHelpdesk.Application.Services;
 
 [CrestService]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(IAgentAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/agent",
+    CapabilityIdPrefix = "compat.appservice.agent")]
 public class AgentAppService : IAgentAppService
 {
     private readonly ICrestRepositoryBase<CrestCreates.Domain.Permission.User, Guid> _userRepository;
@@ -33,7 +40,8 @@ public class AgentAppService : IAgentAppService
         _currentTenant = currentTenant;
     }
 
-    public async Task<IdentityUserDto> CreateAsync(CreateAgentDto input)
+    [UnitOfWorkMo]
+    public async Task<IdentityUserDto> CreateAsync(CreateAgentDto input, CancellationToken cancellationToken = default)
     {
         var tenantId = _currentTenant.Id ?? "host";
         var user = new CrestCreates.Domain.Permission.User(
@@ -45,17 +53,18 @@ public class AgentAppService : IAgentAppService
             CreationTime = DateTime.UtcNow,
             LastPasswordChangeTime = DateTime.UtcNow
         };
-        await _userRepository.InsertAsync(user);
+        await _userRepository.InsertAsync(user, cancellationToken);
 
         if (!string.IsNullOrEmpty(input.Role))
         {
-            var roles = await _roleRepository.GetListAsync(r => r.Name == input.Role && r.TenantId == tenantId);
+            var roles = await _roleRepository.GetListAsync(
+                r => r.Name == input.Role && r.TenantId == tenantId, cancellationToken);
             var role = roles.FirstOrDefault();
             if (role is not null)
             {
                 var userRole = new CrestCreates.Domain.Permission.UserRole(
                     Guid.NewGuid(), user.Id, role.Id, tenantId);
-                await _userRoleRepository.InsertAsync(userRole);
+                await _userRoleRepository.InsertAsync(userRole, cancellationToken);
             }
         }
 
@@ -69,9 +78,9 @@ public class AgentAppService : IAgentAppService
         };
     }
 
-    public async Task<IdentityUserDto?> GetByIdAsync(Guid id)
+    public async Task<IdentityUserDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var user = await _userRepository.GetAsync(id);
+        var user = await _userRepository.GetAsync(id, cancellationToken);
         if (user == null) return null;
         return new IdentityUserDto
         {
@@ -82,13 +91,14 @@ public class AgentAppService : IAgentAppService
         };
     }
 
-    public async Task<IdentityUserDto> DeactivateAsync(Guid id)
+    [UnitOfWorkMo]
+    public async Task<IdentityUserDto> DeactivateAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var user = await _userRepository.GetAsync(id);
+        var user = await _userRepository.GetAsync(id, cancellationToken);
         if (user == null)
             throw new KeyNotFoundException("Agent not found");
         user.IsActive = false;
-        await _userRepository.UpdateAsync(user);
+        await _userRepository.UpdateAsync(user, cancellationToken);
         return new IdentityUserDto
         {
             Id = user.Id,

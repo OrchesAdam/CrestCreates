@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Services;
 using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
@@ -15,6 +16,11 @@ using SaaSHelpdesk.Domain.Entities;
 namespace SaaSHelpdesk.Application.Services;
 
 [CrestService]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(IKnowledgeBaseAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/knowledge-base",
+    CapabilityIdPrefix = "compat.appservice.knowledge-base")]
 public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle, Guid, KnowledgeBaseArticleDto, CreateKnowledgeBaseArticleDto, UpdateKnowledgeBaseArticleDto>, IKnowledgeBaseAppService
 {
     public KnowledgeBaseAppService(
@@ -60,37 +66,40 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
         entity.SetTags(dto.Tags);
     }
 
-    public async Task<KnowledgeBaseArticleDto> PublishAsync(Guid id)
+    [UnitOfWorkMo]
+    public async Task<KnowledgeBaseArticleDto> PublishAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var article = await Repository.GetAsync(id);
+        var article = await Repository.GetAsync(id, cancellationToken);
         if (article == null)
             throw new KeyNotFoundException($"KnowledgeBaseArticle with id {id} not found.");
         article.Publish();
-        await Repository.UpdateAsync(article);
+        await Repository.UpdateAsync(article, cancellationToken);
         return MapToDto(article);
     }
 
-    public async Task<KnowledgeBaseArticleDto> UnpublishAsync(Guid id)
+    [UnitOfWorkMo]
+    public async Task<KnowledgeBaseArticleDto> UnpublishAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var article = await Repository.GetAsync(id);
+        var article = await Repository.GetAsync(id, cancellationToken);
         if (article == null)
             throw new KeyNotFoundException($"KnowledgeBaseArticle with id {id} not found.");
         article.Unpublish();
-        await Repository.UpdateAsync(article);
+        await Repository.UpdateAsync(article, cancellationToken);
         return MapToDto(article);
     }
 
-    public async Task<KnowledgeBaseArticleDto> IncrementViewCountAsync(Guid id)
+    [UnitOfWorkMo]
+    public async Task<KnowledgeBaseArticleDto> IncrementViewCountAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var article = await Repository.GetAsync(id);
+        var article = await Repository.GetAsync(id, cancellationToken);
         if (article == null)
             throw new KeyNotFoundException($"KnowledgeBaseArticle with id {id} not found.");
         article.IncrementViewCount();
-        await Repository.UpdateAsync(article);
+        await Repository.UpdateAsync(article, cancellationToken);
         return MapToDto(article);
     }
 
-    public async Task<List<KnowledgeBaseArticleDto>> SearchAsync(string keyword)
+    public async Task<List<KnowledgeBaseArticleDto>> SearchAsync(string keyword, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(keyword))
         {
@@ -102,7 +111,7 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
         // string.Contains operations. This is acceptable for small datasets
         // but should be replaced with a database-level query if the article
         // count grows significantly.
-        var articles = await Repository.GetListAsync();
+        var articles = await Repository.GetListAsync(cancellationToken);
         return articles.Where(a => a.IsPublished)
             .Where(a => a.Title.Contains(keyword, StringComparison.OrdinalIgnoreCase)
                      || (a.Tags != null && a.Tags.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
@@ -110,9 +119,10 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
             .ToList();
     }
 
-    public async Task<List<KnowledgeBaseArticleDto>> GetPopularAsync(int count = 10)
+    public async Task<List<KnowledgeBaseArticleDto>> GetPopularAsync(int? count = 10, CancellationToken cancellationToken = default)
     {
-        if (count <= 0)
+        var take = count ?? 0;
+        if (take <= 0)
         {
             return new List<KnowledgeBaseArticleDto>();
         }
@@ -120,10 +130,10 @@ public class KnowledgeBaseAppService : CrestAppServiceBase<KnowledgeBaseArticle,
         // In-memory operation: loads all articles then sorts and takes top N.
         // Acceptable for small datasets; replace with database-level query if
         // the article count grows significantly.
-        var articles = await Repository.GetListAsync();
+        var articles = await Repository.GetListAsync(cancellationToken);
         return articles.Where(a => a.IsPublished)
             .OrderByDescending(a => a.ViewCount)
-            .Take(count)
+            .Take(take)
             .Select(MapToDto)
             .ToList();
     }

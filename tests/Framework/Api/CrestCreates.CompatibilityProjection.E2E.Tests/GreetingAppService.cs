@@ -2,24 +2,35 @@ using CrestCreates.Domain.Shared.Attributes;
 
 namespace CrestCreates.CompatibilityProjection.E2E;
 
-[CrestService]
-[CapabilityCompatibilityProjection]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(GreetingAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/greeting",
+    CapabilityIdPrefix = "compat.appservice.greeting")]
 public class GreetingAppService
 {
-    public Task<GreetingResponse> GreetAsync(GreetingRequest input, CancellationToken cancellationToken = default)
+    [AppServiceHttpAction(
+        Verb = HttpProjectionVerb.Get,
+        Route = "greet",
+        Kind = HttpProjectionOperationKind.Query)]
+    public Task<GreetingResponse> GreetAsync(string? name = null, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(new GreetingResponse { Message = $"Hello, {input.Name}!" });
+        return Task.FromResult(new GreetingResponse { Message = $"Hello, {name}!" });
     }
 
+    [AppServiceHttpAction(
+        Verb = HttpProjectionVerb.Get,
+        Route = "greeting/{name}",
+        Kind = HttpProjectionOperationKind.Query)]
     public Task<GreetingResponse> GetGreetingAsync(string name, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(new GreetingResponse { Message = $"Hello, {name}!" });
     }
 
-    /// <summary>
-    /// List method with no non-CancellationToken parameters — verifies that the generator
-    /// correctly handles no-param methods without producing empty envelope classes.
-    /// </summary>
+    [AppServiceHttpAction(
+        Verb = HttpProjectionVerb.Get,
+        Route = "list-greetings",
+        Kind = HttpProjectionOperationKind.Query)]
     public Task<List<GreetingResponse>> ListGreetingsAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(new List<GreetingResponse>
@@ -29,9 +40,12 @@ public class GreetingAppService
         });
     }
 
+    [AppServiceHttpAction(
+        Verb = HttpProjectionVerb.Delete,
+        Route = "delete-greeting",
+        Kind = HttpProjectionOperationKind.Command)]
     public Task DeleteGreetingAsync(string name, CancellationToken cancellationToken = default)
     {
-        // void-like method — no return value
         return Task.CompletedTask;
     }
 }

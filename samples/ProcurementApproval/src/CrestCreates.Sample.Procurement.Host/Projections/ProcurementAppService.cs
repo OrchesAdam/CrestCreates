@@ -1,3 +1,4 @@
+using System.Threading;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Sample.Procurement.Application;
@@ -6,7 +7,11 @@ using CrestCreates.Sample.Procurement.Contracts.Dtos;
 namespace CrestCreates.Sample.Procurement.Host.Projections;
 
 [CrestService]
-[CapabilityCompatibilityProjection(RoutePrefix = "api/procurement/query")]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(ProcurementAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/procurement/query",
+    CapabilityIdPrefix = "compat.appservice.procurement")]
 public sealed class ProcurementAppService
 {
     private readonly ProcurementApplicationService _application;
@@ -20,8 +25,14 @@ public sealed class ProcurementAppService
         _execution = execution;
     }
 
-    public Task<ProcurementRequestResult> GetAsync(Guid requestId)
+    [AppServiceHttpAction(
+        Verb = HttpProjectionVerb.Get,
+        Route = "{requestId}",
+        Kind = HttpProjectionOperationKind.Query,
+        Permissions = new[] { "Procurement.Get" })]
+    public Task<ProcurementRequestResult> GetAsync(Guid requestId, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var context = RequiredContext();
         return Task.FromResult(_application.Get(
             new GetProcurementRequestInput { RequestId = requestId },

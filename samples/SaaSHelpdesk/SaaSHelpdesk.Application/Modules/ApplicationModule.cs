@@ -1,5 +1,7 @@
+using CrestCreates.Authorization;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Modularity;
+using SaaSHelpdesk.Application.Authorization;
 using SaaSHelpdesk.Application.Contracts.Interfaces;
 using SaaSHelpdesk.Application.Contracts.Modules;
 using SaaSHelpdesk.Application.Services;
@@ -12,6 +14,7 @@ public class ApplicationModule : ModuleBase
 {
     public override void OnConfigureServices(IServiceCollection services)
     {
+        services.AddPermissionDefinitionProvider<TicketPermissionDefinitionProvider>();
         services.AddScoped<ITicketAppService, TicketAppService>();
         services.AddScoped<ICustomerAppService, CustomerAppService>();
         services.AddScoped<ICategoryAppService, CategoryAppService>();

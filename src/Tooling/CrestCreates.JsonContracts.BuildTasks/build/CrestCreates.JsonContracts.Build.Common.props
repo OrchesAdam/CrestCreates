@@ -6,9 +6,12 @@
     <!-- #128 S2: the CRUD precompile chain is explicitly ordered ahead of JSON input collection, so
          JsonContracts and the official STJ generator consume the materialized surface in one build. -->
     <CrestCreatesCrudPrecompileEnabled Condition="'$(CrestCreatesCrudPrecompileEnabled)' == ''">$(CrestCreatesJsonContractGenerationEnabled)</CrestCreatesCrudPrecompileEnabled>
+    <!-- #129 S2.2-B: the hand-written AppService HTTP projection precompile rides the same transport
+         import and is ordered before the JSON input collection. -->
+    <CrestCreatesAppServiceHttpPrecompileEnabled Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == ''">$(CrestCreatesJsonContractGenerationEnabled)</CrestCreatesAppServiceHttpPrecompileEnabled>
     <CrestCreatesCodeGenerationIsDisabled Condition="'$(CrestCreatesCodeGeneration)' == 'false'">true</CrestCreatesCodeGenerationIsDisabled>
     <CrestCreatesCodeGenerationIsDisabled Condition="'$(CrestCreatesCodeGenerationIsDisabled)' == ''">false</CrestCreatesCodeGenerationIsDisabled>
-    <CrestCreatesJsonContractGenerationDependsOn>$(CrestCreatesJsonContractGenerationDependsOn);PrepareCrestCrudInputs;GenerateCrestCrudSurface;IncludeCrestCrudArtifacts</CrestCreatesJsonContractGenerationDependsOn>
+    <CrestCreatesJsonContractGenerationDependsOn>$(CrestCreatesJsonContractGenerationDependsOn);PrepareCrestCrudInputs;GenerateCrestCrudSurface;IncludeCrestCrudArtifacts;PrepareCrestAppServiceHttpInputs;GenerateCrestAppServiceHttpSurface;IncludeCrestAppServiceHttpArtifacts</CrestCreatesJsonContractGenerationDependsOn>
     <CrestCreatesJsonContractsTaskSemanticVersion Condition="'$(CrestCreatesJsonContractsTaskSemanticVersion)' == ''">1.0.0</CrestCreatesJsonContractsTaskSemanticVersion>
     <!-- Marker consumed by the LocalEvent source generator (via CompilerVisibleProperty) to verify
          that this project imports the JSON contract toolchain before declaring replayable events. -->
@@ -20,9 +23,13 @@
          CRUD precompile + JSON toolchain assembled is a deterministic build error, never a legacy
          fallback. -->
     <CrestCreatesCrudJsonToolchain Condition="'$(CrestCreatesCrudPrecompileEnabled)' == 'true'">true</CrestCreatesCrudJsonToolchain>
+    <!-- Marker consumed by the AppService compatibility generator: a formal ContractType projection
+         without the precompile + JSON toolchain assembled must never be treated as a completed surface. -->
+    <CrestCreatesAppServiceHttpJsonToolchain Condition="'$(CrestCreatesAppServiceHttpPrecompileEnabled)' == 'true'">true</CrestCreatesAppServiceHttpJsonToolchain>
   </PropertyGroup>
   <ItemGroup>
     <CompilerVisibleProperty Include="CrestCreatesCrudJsonToolchain" />
+    <CompilerVisibleProperty Include="CrestCreatesAppServiceHttpJsonToolchain" />
     <CompilerVisibleProperty Include="CrestCreatesLocalEventJsonContracts" />
     <CompilerVisibleProperty Include="CrestCreatesEventJsonContracts" />
   </ItemGroup>

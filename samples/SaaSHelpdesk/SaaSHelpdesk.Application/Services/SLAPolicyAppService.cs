@@ -13,6 +13,11 @@ using SaaSHelpdesk.Domain.Shared.Enums;
 namespace SaaSHelpdesk.Application.Services;
 
 [CrestService]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(ISLAPolicyAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/s-l-a-policy",
+    CapabilityIdPrefix = "compat.appservice.sla-policy")]
 public class SLAPolicyAppService : CrestAppServiceBase<SLAPolicy, Guid, SLAPolicyDto, CreateSLAPolicyDto, UpdateSLAPolicyDto>, ISLAPolicyAppService
 {
     public SLAPolicyAppService(

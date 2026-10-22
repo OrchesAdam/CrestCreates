@@ -26,6 +26,8 @@
   <ItemGroup>
     <!-- #128 S2: same source-linked CRUD generation implementation as the analyzer. -->
     <Compile Include="..\CrestCreates.CrudGeneration\*.cs" Link="CrudGeneration\%(Filename)%(Extension)" />
+    <!-- #129 S2: source-linked hand-written HTTP projection model, shared by the analyzer and the precompile tool. -->
+    <Compile Include="..\CrestCreates.HttpProjectionGeneration\*.cs" Link="HttpProjectionGeneration\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

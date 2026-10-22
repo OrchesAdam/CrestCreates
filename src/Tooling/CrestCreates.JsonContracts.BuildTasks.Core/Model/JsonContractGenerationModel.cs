@@ -9,6 +9,8 @@ public sealed class JsonContractGenerationModel
     public List<JsonContractRootModel> IntegrationEventRoots { get; init; } = [];
 
     public List<JsonContractRootModel> CrudRoots { get; init; } = [];
+
+    public List<JsonContractRootModel> AppServiceHttpRoots { get; init; } = [];
     public List<JsonContractDiagnostic> Diagnostics { get; init; } = [];
     public bool HasErrors => Diagnostics.Any(d => d.Severity == JsonContractDiagnosticSeverity.Error);
 }

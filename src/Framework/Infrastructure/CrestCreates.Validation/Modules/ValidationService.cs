@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentValidation;
 using CrestCreates.Validation.Validators;
@@ -29,7 +30,10 @@ namespace CrestCreates.Validation.Modules
             return ConvertResult(fluentResult);
         }
 
-        public async Task<ValidationResult> ValidateAsync<T>(T instance)
+        public Task<ValidationResult> ValidateAsync<T>(T instance)
+            => ValidateAsync(instance, CancellationToken.None);
+
+        public async Task<ValidationResult> ValidateAsync<T>(T instance, CancellationToken cancellationToken)
         {
             var validator = _serviceProvider.GetService<IValidator<T>>();
             if (validator == null)
@@ -37,7 +41,7 @@ namespace CrestCreates.Validation.Modules
                 return ValidationResult.Success;
             }
 
-            var fluentResult = await validator.ValidateAsync(instance);
+            var fluentResult = await validator.ValidateAsync(instance, cancellationToken);
             return ConvertResult(fluentResult);
         }
 

@@ -25,10 +25,17 @@ public sealed class AuthorizationMiddleware : ICapabilityPipelineMiddleware
 
         if (!authorized)
         {
+            var issues = context.RequiredPermissions
+                .Select(permission => new CapabilityExecutionIssue(
+                    "Permission",
+                    $"缺少权限 '{permission}'。",
+                    permission))
+                .ToArray();
             return CapabilityExecutionResult.Failure(
                 "UNAUTHORIZED",
                 $"User '{context.UserId}' is not authorized for capability '{context.CapabilityName}'.",
-                TimeSpan.Zero);
+                TimeSpan.Zero,
+                issues);
         }
 
         return await next(context).ConfigureAwait(false);

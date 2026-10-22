@@ -51,6 +51,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using CrestCreates.OpenApi;
 
+using CrestCreates.Capability.Abstractions;
+using CrestCreates.Web.Errors;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
 namespace CrestCreates.Web;
 
 public static class CrestCreatesWebApplicationExtensions
@@ -108,15 +112,6 @@ public static class CrestCreatesWebApplicationExtensions
             services.AddOpenIddictAuthentication();
         }
 
-        services.AddSingleton<IEfCoreDbContextOptionsContributor>(_ =>
-            new DelegateEfCoreDbContextOptionsContributor((serviceProvider, dbOptions) =>
-            {
-                var currentTenant = serviceProvider.GetService<ICurrentTenant>();
-                var connectionString = currentTenant?.Tenant?.ConnectionString
-                                       ?? configuration.GetConnectionString("Default");
-                dbOptions.UseSqlServer(connectionString);
-            }));
-
         services.AddCrestCreatesEfCoreDbContext();
 
         // Register DbContext types that need migration at startup.
@@ -135,8 +130,8 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
         services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
-        services.AddUnitOfWork(OrmProvider.EfCore);
-        services.AddEfCoreUnitOfWork();
+        // #129 S3: the ORM provider binding is owned by the application persistence module
+        // (EntityFrameworkCoreModule / AddEfCoreUnitOfWork). The platform never presets a provider.
         services.AddDataFilterServices();
         services.AddCrestAuthorization();
         services.AddCrestIdentityAuthentication(configuration);
@@ -169,14 +164,10 @@ public static class CrestCreatesWebApplicationExtensions
         services.AddScoped<ILocalizationProvider, JsonResourceLocalizationProvider>(_ =>
             new JsonResourceLocalizationProvider("Localization/Resources"));
 
-        services.AddCrestAspNetCoreDynamicApi(dynamicApi =>
-        {
-            foreach (var markerType in options.GeneratedApi.ServiceMarkerTypes)
-            {
-                dynamicApi.AddApplicationServiceAssembly(markerType.Assembly);
-            }
-        });
         services.AddCrestExceptionHandling();
+        services.TryAddSingleton<ICapabilityExceptionClassifier, CrestCapabilityExceptionClassifier>();
+        services.TryAddSingleton<ICapabilityEndpointFailurePresenter, CrestCapabilityEndpointFailurePresenter>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, UnitOfWorkCompositionValidator>());
 
         LogRegisteredModules();
         return builder;
@@ -211,7 +202,6 @@ public static class CrestCreatesWebApplicationExtensions
         }
 
         app.MapCrestHealthChecks();
-        app.MapCrestAspNetCoreDynamicApi();
         app.MapCrestOpenApi();
         return app;
     }
