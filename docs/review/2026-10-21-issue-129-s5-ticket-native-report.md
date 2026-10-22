@@ -20,7 +20,7 @@ metadata 判别：破坏 JSON 前锁定 Ticket owner、11 个 endpoint/capabilit
 
 ## 证据
 
-`docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（由本地 `tests/artifacts/aot-native-evidence/ticket-native-http*.json` 原样入库）：green + 两变异的 publish 命令/退出/日志、SHA（`eb8e4807`）、RID、gate 输出、result/failure。publish/link/run 为 linux-x64；fixture 自身无 IL2026/IL3050。
+`docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（由本地 `tests/artifacts/aot-native-evidence/ticket-native-http*.json` 原样入库）：五个控制（green + 两期望变异 + late-validation + decoy-metadata）的 publish 命令/退出/日志、SHA（`5e3878b2`）、RID、gate 输出、result/failure。publish/link/run 为 linux-x64；fixture 自身无 IL2026/IL3050。
 
 ## 范围限制
 

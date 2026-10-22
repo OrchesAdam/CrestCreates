@@ -851,5 +851,5 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 ### 证据
 
 - Ticket fixture JIT **1/1**；NativeAOT **5/5**：绿色 + wrong-expectation + wrong-validation-status + late-validation + decoy-metadata。原生 15 场景 + `CRESTCREATES_TICKET_NATIVE_OK`；五个控制均 publish/link/run 原生产物，失败控制 exit 1 无总 sentinel。
-- 证据入库：`docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（新增 late-validation、decoy-metadata；SHA 绑定本轮代码 head）。
+- 证据入库：`docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（新增 late-validation、decoy-metadata；五份文件 SHA 绑定代码 head `5e3878b2`）。
 - S5 仍不修改生产 runtime；支持声明保持 Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64，该 fixture 范围），不推导 EF/PostgreSQL、真实认证/租户、SaaSHelpdesk、Library HTTP、其他 RID。
