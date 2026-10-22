@@ -1,11 +1,11 @@
 # #129 S5 Ticket NativeAOT 与最终交接
 
-审查入口：PR #152（本报告随最终 head 提交）。S4 已放行；本切片新增 S5 Ticket 原生 fixture，不改既有生产主链。
+审查入口：PR #152（已于 2026-10-22 合并，merge commit `2f4c54024d8e2e9c5b8aecad1a399669dadb28a6`；分支 head `13ad93ef`）。S4 已放行；本切片新增 S5 Ticket 原生 fixture，不改既有生产主链。
 
 ## 交付
 
 - `tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture`：local anchor + 真实 Ticket service/DTO/validator + 正式生成 bundle；内存 Ticket/SLA 持久化叶子与 UoW；fixture identity/permission/failure presenter；有界静态 Ticket/SLA queryable。
-- `tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture.Tests`：JIT HTTP 1/1；NativeAOT 门禁 3/3（绿色 + 两变异）。
+- `tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture.Tests`：JIT HTTP 1/1；NativeAOT 门禁 5/5（绿色 + 四控制）。
 - 主/分层解决方案加入两个 fixture 项目；`CapabilityCompatibilityProjectionAttribute` XML 注释同步 P3。
 
 ## 原生场景
@@ -27,4 +27,4 @@ metadata 判别：破坏 JSON 前锁定 Ticket owner、11 个 endpoint/capabilit
 - 内存持久化叶子；不证明 EF/PostgreSQL、真实认证/租户/多租户、整个 SaaSHelpdesk。
 - LibraryManagement 完整 HTTP 仍未验证（既有 `OpenIddictScopes` 测试环境缺失）；S4 旧链退出结论保持。
 - 其他 RID、Windows/macOS 未验证；CRUD/CapabilityEndpoint 原生结果不推导 Ticket/EF/认证/租户全链。
-- 未合并、CI 暂停；不自动恢复。
+- PR #152 已合并（merge commit `2f4c5402`，2026-10-22）；CI 保持暂停，未自动恢复。证据 JSON 仍绑定代码 head `5e3878b2`；最终文档 head `13ad93ef`。
