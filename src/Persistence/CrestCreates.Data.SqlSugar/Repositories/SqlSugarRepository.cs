@@ -38,7 +38,10 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         private string ColumnName(string clrName)
         {
-            return _sqlSugarClient.EntityMaintenance.GetDbColumnName(clrName, typeof(TEntity));
+            var mappedName = _sqlSugarClient.EntityMaintenance.GetDbColumnName(clrName, typeof(TEntity));
+            return global::SqlSugar.InstanceFactory
+                .GetSqlBuilderWithContext(_sqlSugarClient)
+                .GetTranslationColumnName(mappedName);
         }
 
         public override IQueryable<TEntity> GetQueryable()

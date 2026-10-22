@@ -421,3 +421,58 @@ public sealed class Issue130MappedSoftOnly : IEntity<long>, ISoftDelete
     [SugarColumn(ColumnName = "deleted_by", IsNullable = true)]
     public Guid? DeleterId { get; set; }
 }
+
+/// <summary>Reserved-word mapped soft entity (stamped) for identifier quoting controls.</summary>
+[Table(Name = "S1_ReservedSoftStamped")]
+[SugarTable("S1_ReservedSoftStamped")]
+public sealed class Issue130ReservedSoftStamped :
+    IEntity<long>,
+    IHasConcurrencyStamp,
+    ISoftDelete
+{
+    [Column(Name = "select", IsIdentity = false, IsPrimary = true)]
+    [SugarColumn(ColumnName = "select", IsPrimaryKey = true, IsIdentity = false)]
+    public long Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    [Column(Name = "order")]
+    [SugarColumn(ColumnName = "order")]
+    public bool IsDeleted { get; set; }
+
+    [Column(Name = "deleted_at")]
+    [SugarColumn(ColumnName = "deleted_at", IsNullable = true)]
+    public DateTime? DeletionTime { get; set; }
+
+    [Column(Name = "deleted_by")]
+    [SugarColumn(ColumnName = "deleted_by", IsNullable = true)]
+    public Guid? DeleterId { get; set; }
+
+    [Column(Name = "where")]
+    [SugarColumn(ColumnName = "where")]
+    public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+/// <summary>Reserved-word mapped soft entity (no stamp) for batch delete controls.</summary>
+[Table(Name = "S1_ReservedSoftOnly")]
+[SugarTable("S1_ReservedSoftOnly")]
+public sealed class Issue130ReservedSoftOnly : IEntity<long>, ISoftDelete
+{
+    [Column(Name = "select", IsIdentity = false, IsPrimary = true)]
+    [SugarColumn(ColumnName = "select", IsPrimaryKey = true, IsIdentity = false)]
+    public long Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    [Column(Name = "order")]
+    [SugarColumn(ColumnName = "order")]
+    public bool IsDeleted { get; set; }
+
+    [Column(Name = "deleted_at")]
+    [SugarColumn(ColumnName = "deleted_at", IsNullable = true)]
+    public DateTime? DeletionTime { get; set; }
+
+    [Column(Name = "deleted_by")]
+    [SugarColumn(ColumnName = "deleted_by", IsNullable = true)]
+    public Guid? DeleterId { get; set; }
+}

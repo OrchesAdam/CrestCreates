@@ -53,19 +53,29 @@ namespace CrestCreates.Data.FreeSql.Repositories
             }
         }
 
-        private string ColumnName(string clrName)
+        private static Expression<Func<TEntity, bool>> InterfacePropertyEquals(
+            Type interfaceType,
+            string propertyName,
+            object value)
         {
-            var table = _orm.CodeFirst.GetTableByEntity(typeof(TEntity));
-            if (table.ColumnsByCs.TryGetValue(clrName, out var column) &&
-                !string.IsNullOrEmpty(column.Attribute.Name))
-            {
-                return column.Attribute.Name;
-            }
-
-            return clrName;
+            var parameter = Expression.Parameter(typeof(TEntity), "entity");
+            var property = Expression.Property(Expression.Convert(parameter, interfaceType), propertyName);
+            var body = Expression.Equal(property, Expression.Constant(value, property.Type));
+            return Expression.Lambda<Func<TEntity, bool>>(body, parameter);
         }
 
-        private string LiveRowColumn => ColumnName(nameof(ISoftDelete.IsDeleted));
+        private static Expression<Func<TEntity, bool>> LiveRowPredicate()
+        {
+            return InterfacePropertyEquals(typeof(ISoftDelete), nameof(ISoftDelete.IsDeleted), false);
+        }
+
+        private static Expression<Func<TEntity, bool>> ConcurrencyStampPredicate(string stamp)
+        {
+            return InterfacePropertyEquals(
+                typeof(IHasConcurrencyStamp),
+                nameof(IHasConcurrencyStamp.ConcurrencyStamp),
+                stamp);
+        }
 
         public override IQueryable<TEntity> GetQueryable()
         {
@@ -200,9 +210,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     var rows = await _orm.Update<TEntity>()
                         .SetSource(entity)
                         .Where(e => e.Id.Equals(entity.Id))
-                        .Where(
-                            $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @OldStamp",
-                            new { OldStamp = oldStamp })
+                        .Where(ConcurrencyStampPredicate(oldStamp))
                         .ExecuteAffrowsAsync(cancellationToken);
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
                 }
@@ -251,10 +259,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
                         var rows = await FreeSqlSoftDeleteOperation.ExecuteAsync(
                             _orm.Update<TEntity>()
                                 .Where(e => e.Id.Equals(entity.Id))
-                                .Where(
-                                    $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @Stamp",
-                                    new { Stamp = stamp.ConcurrencyStamp }),
-                            LiveRowColumn,
+                                .Where(ConcurrencyStampPredicate(stamp.ConcurrencyStamp))
+                                .Where(LiveRowPredicate()),
                             _currentUserProvider,
                             advanceConcurrencyStamp: true,
                             cancellationToken);
@@ -263,8 +269,9 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     else
                     {
                         await FreeSqlSoftDeleteOperation.ExecuteAsync(
-                            _orm.Update<TEntity>().Where(e => e.Id.Equals(entity.Id)),
-                            LiveRowColumn,
+                            _orm.Update<TEntity>()
+                                .Where(e => e.Id.Equals(entity.Id))
+                                .Where(LiveRowPredicate()),
                             _currentUserProvider,
                             advanceConcurrencyStamp: false,
                             cancellationToken);
@@ -274,9 +281,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 {
                     var rows = await _orm.Delete<TEntity>()
                         .Where(e => e.Id.Equals(entity.Id))
-                        .Where(
-                            $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @Stamp",
-                            new { Stamp = stamp.ConcurrencyStamp })
+                        .Where(ConcurrencyStampPredicate(stamp.ConcurrencyStamp))
                         .ExecuteAffrowsAsync(cancellationToken);
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
                 }
@@ -301,8 +306,9 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
                     await FreeSqlSoftDeleteOperation.ExecuteAsync(
-                        _orm.Update<TEntity>().Where(e => e.Id.Equals(id)),
-                        LiveRowColumn,
+                        _orm.Update<TEntity>()
+                            .Where(e => e.Id.Equals(id))
+                            .Where(LiveRowPredicate()),
                         _currentUserProvider,
                         advanceConcurrencyStamp: typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)),
                         cancellationToken);
@@ -335,10 +341,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     var softRows = await FreeSqlSoftDeleteOperation.ExecuteAsync(
                         _orm.Update<TEntity>()
                             .Where(e => e.Id.Equals(id))
-                            .Where(
-                                $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @Stamp",
-                                new { Stamp = expectedStamp }),
-                        LiveRowColumn,
+                            .Where(ConcurrencyStampPredicate(expectedStamp))
+                            .Where(LiveRowPredicate()),
                         _currentUserProvider,
                         advanceConcurrencyStamp: true,
                         cancellationToken);
@@ -348,9 +352,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 {
                     var rows = await _orm.Delete<TEntity>()
                         .Where(e => e.Id.Equals(id))
-                        .Where(
-                            $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @Stamp",
-                            new { Stamp = expectedStamp })
+                        .Where(ConcurrencyStampPredicate(expectedStamp))
                         .ExecuteAffrowsAsync(cancellationToken);
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
                 }
@@ -379,8 +381,9 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
                     await FreeSqlSoftDeleteOperation.ExecuteAsync(
-                        _orm.Update<TEntity>().Where(e => ids.Contains(e.Id)),
-                        LiveRowColumn,
+                        _orm.Update<TEntity>()
+                            .Where(e => ids.Contains(e.Id))
+                            .Where(LiveRowPredicate()),
                         _currentUserProvider,
                         advanceConcurrencyStamp: false,
                         cancellationToken);
@@ -407,8 +410,9 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
                     await FreeSqlSoftDeleteOperation.ExecuteAsync(
-                        _orm.Update<TEntity>().Where(predicate),
-                        LiveRowColumn,
+                        _orm.Update<TEntity>()
+                            .Where(predicate)
+                            .Where(LiveRowPredicate()),
                         _currentUserProvider,
                         advanceConcurrencyStamp: false,
                         cancellationToken);

@@ -234,7 +234,7 @@ public class TenantFilterSourceGeneratorTests
 
         var generated = result.GetSourceByFileName("TenantFilter.g.cs");
         Assert.NotNull(generated);
-        Assert.Contains("ConfigureExternal_Domain_BookFilter", generated.SourceText);
+        Assert.Contains("ConfigureExternal_002EDomain_002EBookFilter", generated.SourceText);
         Assert.Contains("External.Domain.Book", generated.SourceText);
     }
 
@@ -310,6 +310,41 @@ public class TenantFilterSourceGeneratorTests
             "(currentTenant.Id == null || e.TenantId == currentTenant.Id) && !e.IsDeleted",
             generated.SourceText);
         Assert.Contains("modelBuilder.Model.FindEntityType", generated.SourceText);
+    }
+
+    [Fact]
+    public void GeneratesDistinctMethodNames_ForNamespaceUnderscoreCollision()
+    {
+        const string softDeleteStub = """
+            namespace CrestCreates.Domain.Shared.Entities.Auditing
+            {
+                public interface ISoftDelete
+                {
+                    bool IsDeleted { get; set; }
+                }
+            }
+            """;
+        const string source = """
+            namespace A.B {
+                [CrestCreates.Domain.Shared.Attributes.Entity]
+                public class Row : CrestCreates.Domain.Shared.Entities.Auditing.ISoftDelete { public bool IsDeleted { get; set; } }
+            }
+            namespace A_B {
+                [CrestCreates.Domain.Shared.Attributes.Entity]
+                public class Row : CrestCreates.Domain.Shared.Entities.Auditing.ISoftDelete { public bool IsDeleted { get; set; } }
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<TenantFilterSourceGenerator>(
+            source,
+            additionalSources: AllStubs.Concat(new[] { softDeleteStub }).ToArray());
+
+        Assert.True(result.CompilationSuccess, string.Join(Environment.NewLine, result.GetErrors()));
+        var generated = result.GetSourceByFileName("TenantFilter.g.cs");
+        Assert.NotNull(generated);
+        Assert.Contains("ConfigureA_002EB_002ERowSoftDeleteFilter", generated.SourceText);
+        Assert.Contains("ConfigureA_005FB_002ERowSoftDeleteFilter", generated.SourceText);
+        Assert.DoesNotContain("ConfigureA_B_RowSoftDeleteFilter", generated.SourceText);
     }
 
     [Fact]

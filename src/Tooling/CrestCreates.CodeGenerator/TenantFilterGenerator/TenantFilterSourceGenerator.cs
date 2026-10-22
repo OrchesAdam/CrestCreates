@@ -284,7 +284,24 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
 
         private static string MethodSuffix(EntityFilterTarget target)
         {
-            return target.FullName.Replace('.', '_').Replace('+', '_');
+            var builder = new StringBuilder(target.FullName.Length);
+            foreach (var character in target.FullName)
+            {
+                if ((character >= 'a' && character <= 'z') ||
+                    (character >= 'A' && character <= 'Z') ||
+                    (character >= '0' && character <= '9'))
+                {
+                    builder.Append(character);
+                }
+                else
+                {
+                    // Escape every structural character so namespace separators, underscores and
+                    // other symbols cannot collapse into the same generated identifier.
+                    builder.Append('_').Append(((int)character).ToString("X4"));
+                }
+            }
+
+            return builder.ToString();
         }
 
         private static void Merge(

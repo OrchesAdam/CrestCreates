@@ -15,7 +15,6 @@ namespace CrestCreates.Data.FreeSql.Repositories
     {
         public static async Task<int> ExecuteAsync<TEntity>(
             IUpdate<TEntity> update,
-            string liveRowColumn,
             ICurrentUserProvider? currentUserProvider,
             bool advanceConcurrencyStamp,
             CancellationToken cancellationToken)
@@ -26,8 +25,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
             update = update
                 .SetByPropertyName(nameof(ISoftDelete.IsDeleted), true)
-                .SetByPropertyName(nameof(ISoftDelete.DeletionTime), now)
-                .Where($"{liveRowColumn} = 0", new { });
+                .SetByPropertyName(nameof(ISoftDelete.DeletionTime), now);
 
             if (userId.HasValue)
             {

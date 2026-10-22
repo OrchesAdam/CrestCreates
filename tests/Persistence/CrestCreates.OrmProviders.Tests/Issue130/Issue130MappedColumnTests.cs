@@ -114,6 +114,82 @@ public sealed class Issue130MappedColumnTests : IDisposable
     }
 
     [Fact]
+    public async Task D01_FreeSql_reserved_columns_cover_stamp_delete_and_update()
+    {
+        var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130FreeSqlRepository<Issue130ReservedSoftStamped>(
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+        await repository.InsertAsync(new Issue130ReservedSoftStamped { Id = 1, Name = "original" });
+
+        var loaded = (await repository.GetAsync(1))!;
+        loaded.Name = "updated";
+        await repository.UpdateAsync(loaded);
+        Assert.Equal(1, _database.Count("S1_ReservedSoftStamped", "\"select\" = 1 AND Name = 'updated'"));
+
+        loaded.ConcurrencyStamp = "stale";
+        await Assert.ThrowsAsync<CrestCreates.Domain.Exceptions.CrestConcurrencyException>(
+            () => repository.UpdateAsync(loaded));
+
+        var stamp = (await repository.GetAsync(1))!.ConcurrencyStamp;
+        await repository.DeleteAsync(1, stamp);
+
+        Assert.Equal(1, _database.Count("S1_ReservedSoftStamped"));
+        Assert.Equal(1, _database.Count("S1_ReservedSoftStamped", "\"order\" = 1"));
+    }
+
+    [Fact]
+    public async Task D01_SqlSugar_reserved_columns_cover_stamp_delete_and_update()
+    {
+        var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130SqlSugarRepository<Issue130ReservedSoftStamped>(client, _userProvider);
+        await repository.InsertAsync(new Issue130ReservedSoftStamped { Id = 1, Name = "original" });
+
+        var loaded = (await repository.GetAsync(1))!;
+        loaded.Name = "updated";
+        await repository.UpdateAsync(loaded);
+        Assert.Equal(1, _database.Count("S1_ReservedSoftStamped", "\"select\" = 1 AND Name = 'updated'"));
+
+        loaded.ConcurrencyStamp = "stale";
+        await Assert.ThrowsAsync<CrestCreates.Domain.Exceptions.CrestConcurrencyException>(
+            () => repository.UpdateAsync(loaded));
+
+        var stamp = (await repository.GetAsync(1))!.ConcurrencyStamp;
+        await repository.DeleteAsync(1, stamp);
+
+        Assert.Equal(1, _database.Count("S1_ReservedSoftStamped"));
+        Assert.Equal(1, _database.Count("S1_ReservedSoftStamped", "\"order\" = 1"));
+    }
+
+    [Fact]
+    public async Task D01_FreeSql_reserved_columns_cover_batch_deletes()
+    {
+        var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130FreeSqlRepository<Issue130ReservedSoftOnly>(
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+        await repository.InsertAsync(new Issue130ReservedSoftOnly { Id = 1, Name = "a" });
+        await repository.InsertAsync(new Issue130ReservedSoftOnly { Id = 2, Name = "b" });
+
+        await repository.DeleteRangeAsync(entity => entity.Id > 0);
+
+        Assert.Equal(2, _database.Count("S1_ReservedSoftOnly"));
+        Assert.Equal(2, _database.Count("S1_ReservedSoftOnly", "\"order\" = 1"));
+    }
+
+    [Fact]
+    public async Task D01_SqlSugar_reserved_columns_cover_batch_deletes()
+    {
+        var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130SqlSugarRepository<Issue130ReservedSoftOnly>(client, _userProvider);
+        await repository.InsertAsync(new Issue130ReservedSoftOnly { Id = 1, Name = "a" });
+        await repository.InsertAsync(new Issue130ReservedSoftOnly { Id = 2, Name = "b" });
+
+        await repository.DeleteRangeAsync(entity => entity.Id > 0);
+
+        Assert.Equal(2, _database.Count("S1_ReservedSoftOnly"));
+        Assert.Equal(2, _database.Count("S1_ReservedSoftOnly", "\"order\" = 1"));
+    }
+
+    [Fact]
     public async Task D01_FreeSql_mapped_columns_cover_batch_deletes()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
