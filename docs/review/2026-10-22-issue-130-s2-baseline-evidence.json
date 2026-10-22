@@ -3,7 +3,7 @@
   "slice": "S2",
   "date": "2026-10-22",
   "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
-  "head": "66947304f0bd329a04f2fbd5e6a1acb8d97c91fa",
+  "head": "c326a07cf6c08b3563cdc59212de5504fd8c519a",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "scope": "Delete semantics and live-row query closure for EF Core, FreeSql and SqlSugar on independent-file SQLite. T/U stay S3.",
@@ -23,7 +23,11 @@
     },
     "code_generator_full": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
-      "outcome": "running in the background at the time of this record; count is updated separately before the slice is reported complete"
+      "total": 453,
+      "passed": 450,
+      "failed": 3,
+      "duration": "32m06s",
+      "outcome": "only the three intentional Issue130 provider-diagnostic red baselines fail; no unrelated regression after the generator change"
     }
   },
   "s2_green_delete_and_query": [

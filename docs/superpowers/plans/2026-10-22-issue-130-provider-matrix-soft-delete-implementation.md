@@ -85,4 +85,4 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 故障控制：S1 物理删除版本作为真实反向对照；D06/D08 断言零写；`U01_EfCore_stale_stamp_delete_reports_conflict_at_complete` 验证延迟 flush 冲突。
 - 证据：[S2 执行记录](../review/2026-10-22-issue-130-s2-baseline.md)、[S2 JSON](../review/2026-10-22-issue-130-s2-baseline-evidence.json)。
 - 延后：T/U 10 条（S3）、Q01（S4）、PG/其他数据库、trim/NativeAOT、in-flight 取消。
-- CodeGenerator 全量套件因生成器改动已在后台复跑；完成前不声明通过，最终计数同步到 S2 证据。
+- CodeGenerator 全量套件因生成器改动已复跑：453 total / 450 passed / 3 failed（32m06s），3 红均为 S1 约定 G 红例。

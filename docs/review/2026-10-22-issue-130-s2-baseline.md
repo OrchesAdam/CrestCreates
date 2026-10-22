@@ -15,6 +15,7 @@ S2 的出口是**三个 Provider 的 D/A 真实 SQLite 矩阵通过**、既有�
 | 其中 S3 范围 T/U 红例 | 10 条，逐条列于 §5；失败原因均为 S3 设计项，不是回归 |
 | 历史 124 条 | 全部通过 |
 | Tenant/Soft filter generator 过滤集 | 8 / 8 passed |
+| CodeGenerator 全量 | **453 total / 450 passed / 3 failed**（32m06s；3 红全部为 S1 约定 G 红例） |
 | CodeGenerator 全量 | 见 §7（本切片修改了生成器，必须复跑） |
 
 S2 期间新增 7 条正式用例（含两条 SQL 级 live-row 证据）：FreeSql/SqlSugar stamped predicate 删除先拒绝、两个 SDK `GetQueryable` 明确拒绝、EF UoW 延迟 flush 冲突在 `CompleteAsync` 抛 `CrestConcurrencyException`。
@@ -105,7 +106,7 @@ dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifi
 # 8 total / 8 passed
 ```
 
-CodeGenerator 全量套件因本切片修改了生成器，已在后台启动复跑；最终计数在 S2 证据 JSON 与 PR 评论中更新，未完成前不声明通过。
+CodeGenerator 全量套件因本切片修改了生成器，已完成复跑：**453 total / 450 passed / 3 failed（32m06s）**；3 条失败全部是 S1 约定的 `CCCREPO001/002` G 红例，无无关回归。
 
 ## 8. 下一步（S3）
 
