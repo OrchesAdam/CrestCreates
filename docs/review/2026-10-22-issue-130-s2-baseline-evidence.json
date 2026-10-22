@@ -79,7 +79,8 @@
       "stamped batch/predicate deletes throw NotSupportedException before any read or write",
       "DbUpdateConcurrencyException at UoW flush is translated to CrestConcurrencyException",
       "the tenant filter generator now emits strongly typed soft-delete filters; tenant+soft entities combine both conditions; guards make the generated registrations safe for multiple DbContexts",
-      "CrestCreatesDbContext applies soft-delete filters before tenant filters, including host context"
+      "CrestCreatesDbContext applies soft-delete filters before tenant filters, including host context",
+      "CrestCreatesDbContext fails closed if a soft-delete entity remains without a query filter after generated registrations apply"
     ],
     "free_sql": [
       "all five delete overloads use one provider-internal conditional UPDATE action for soft entities and keep DELETE for non-soft entities",

@@ -34,7 +34,7 @@ S2 期间新增 5 条正式用例：FreeSql/SqlSugar stamped predicate 删除先
   - 同时具备租户标记与软删除的实体在租户过滤器中组合为 `(tenant condition) && !e.IsDeleted`，避免第二次 `HasQueryFilter` 覆盖；
   - 每个过滤方法先 `modelBuilder.Model.FindEntityType(...) is null` 守卫，支持同进程多个 DbContext；
   - 租户与软删除分别注册到独立 registry。
-- [SoftDeleteFilterRegistryStore](../../src/Persistence/CrestCreates.Data.EFCore/MultiTenancy/SoftDeleteFilterRegistryStore.cs) / [SoftDeleteFilterConfiguration](../../src/Persistence/CrestCreates.Data.EFCore/MultiTenancy/SoftDeleteFilterConfiguration.cs) / [CrestCreatesDbContext](../../src/Persistence/CrestCreates.Data.EFCore/DbContexts/CrestCreatesDbContext.cs)：生产 DbContext 先应用软删除过滤，再应用租户过滤器（组合实体由后者覆盖为含 `!IsDeleted` 的组合表达式）。host（无当前租户）也应用软删除过滤；host 的租户可见性仍是 S1 冻结的兼容差异，S3 收紧。
+- [SoftDeleteFilterRegistryStore](../../src/Persistence/CrestCreates.Data.EFCore/MultiTenancy/SoftDeleteFilterRegistryStore.cs) / [SoftDeleteFilterConfiguration](../../src/Persistence/CrestCreates.Data.EFCore/MultiTenancy/SoftDeleteFilterConfiguration.cs) / [CrestCreatesDbContext](../../src/Persistence/CrestCreates.Data.EFCore/DbContexts/CrestCreatesDbContext.cs)：生产 DbContext 先应用软删除过滤，再应用租户过滤器（组合实体由后者覆盖为含 `!IsDeleted` 的组合表达式）。host（无当前租户）也应用软删除过滤；host 的租户可见性仍是 S1 冻结的兼容差异，S3 收紧。模型构建完成后对「软删除实体仍无 query filter」做 fail-closed 检查，避免生成器/装配缺失时静默返回已删除行。
 
 ### 2.2 FreeSql / SqlSugar
 
