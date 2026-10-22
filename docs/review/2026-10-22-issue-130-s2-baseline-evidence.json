@@ -23,11 +23,11 @@
     },
     "code_generator_full": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
-      "total": 455,
-      "passed": 452,
+      "total": 458,
+      "passed": 455,
       "failed": 3,
-      "duration": "30m51s",
-      "outcome": "re-running after the R2 name-encoding fix; final count appended before the re-review report"
+      "duration": "31m19s",
+      "outcome": "only the three intentional CCCREPO red baselines fail; no unrelated regression after the R2 generator name-encoding fix"
     }
   },
   "s2_green_delete_and_query": [
@@ -210,7 +210,8 @@
           "after": "2 passed / 0 failed / 2"
         },
         "reserved_word_regressions": "4 passed",
-        "r1_probes_still_green": "5/5 ORM and 2/2 generator"
+        "r1_probes_still_green": "5/5 ORM and 2/2 generator",
+        "code_generator_full": "458 total / 455 passed / 3 intentional G red"
       }
     }
   ]

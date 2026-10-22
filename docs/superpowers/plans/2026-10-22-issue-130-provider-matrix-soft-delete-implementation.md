@@ -100,4 +100,4 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 审查 head `b4664572` 剩余 2 项 P2：保留字映射列引用、`A.B.Row`/`A_B.Row` 名称碰撞。
 - 修复提交 `9071e99a`：FreeSql 改用强类型接口表达式（SDK 翻译并引用映射列）；SqlSugar 用 `InstanceFactory.GetSqlBuilderWithContext(...).GetTranslationColumnName(...)` 引用 Id/stamp/live；生成方法名对完整类型身份做无歧义编码。
 - 审查 R2 探针 4/4 与 2/2 通过；新增保留字映射控制 4 条；全量 OrmProviders 203 total / 193 passed / 10 failed（10 仍为 S3 T/U）。
-- 证据：[R2 response](../review/2026-10-22-issue-130-s2-review-round2-response.md)；CodeGenerator 全量复跑中。
+- 证据：[R2 response](../review/2026-10-22-issue-130-s2-review-round2-response.md)；CodeGenerator 全量 **458 total / 455 passed / 3 failed（31m19s，仅 G 红）**。

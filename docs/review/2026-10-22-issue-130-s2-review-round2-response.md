@@ -20,7 +20,7 @@
 | R1 生成器探针 | 2/2 | 2/2（未回归） |
 | 映射列回归（普通 + 保留字） | 6 | **10/10**（新增 4 条保留字 stamped/batch 控制） |
 | OrmProviders 全量 | 195 / 185 / 10 S3 | **203 total / 193 passed / 10 S3 red / 0 skipped** |
-| CodeGenerator 全量 | 455 / 452 / 3 G red | 见 §3（名称编码修复后复跑） |
+| CodeGenerator 全量 | 455 / 452 / 3 G red | **458 / 455 / 3 G red（31m19s）**，3 条仅为本切片约定 G 红例 |
 
 10 条失败仍与既有 S3 T/U 清单逐一相同；未新增 S2 红例。
 
@@ -33,6 +33,6 @@ dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter "FullyQualif
 dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests
 ```
 
-结构化结果：[R2 修复证据](2026-10-22-issue-130-s2-r2-fix-evidence.json)。
+结构化结果：[R2 修复证据](2026-10-22-issue-130-s2-r2-fix-evidence.json)；CodeGenerator 全量 **458 total / 455 passed / 3 failed（31m19s）**。
 
 未声明：PostgreSQL/其他数据库、trim/NativeAOT、in-flight 取消；S3 仍未启动。

@@ -122,7 +122,7 @@ CodeGenerator 全量套件因本切片修改了生成器，已完成复跑：**4
 
 - FreeSql live-row/stamp 条件改为强类型接口表达式，由 SDK 翻译并引用映射列；SqlSugar 通过 `InstanceFactory.GetSqlBuilderWithContext(...).GetTranslationColumnName(...)` 引用 Id/stamp/live 标识符。
 - 生成方法名对完整类型身份做无歧义编码（`A.B.Row` → `A_002EB_002ERow`，`A_B.Row` → `A_005FB_002ERow`）。
-- 审查 R2 探针 4/4 与 2/2 通过；新增保留字映射控制 4 条；全量 OrmProviders 203/193/10（10 仍为 S3）。
+- 审查 R2 探针 4/4 与 2/2 通过；新增保留字映射控制 4 条；全量 OrmProviders 203/193/10（10 仍为 S3）；CodeGenerator 全量 458/455/3（仅 G 红）。
 
 ## 8. 下一步（S3）
 
