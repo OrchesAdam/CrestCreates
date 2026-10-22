@@ -106,7 +106,7 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 
 - 状态：S3 完成，等待审查；S4 未开始。
 - 提交：`64dad166`（实现与测试）、`8754428f`（证据）。
-- 结果：OrmProviders **216 total / 216 passed / 0 failed**；原 10 条 T/U 红例全部转绿；新增 9 条租户矩阵 + 4 条装配/事务/取消控制。CodeGenerator 全量复跑中；Boundary 176/178（2 条既有 #69 evidence-ledger，无关）。
+- 结果：OrmProviders **216 total / 216 passed / 0 failed**；原 10 条 T/U 红例全部转绿；新增 9 条租户矩阵 + 4 条装配/事务/取消控制。CodeGenerator 全量 **458 total / 455 passed / 3 failed（31m34s，仅 G 红）**；Boundary 176/178（2 条既有 #69 evidence-ledger，无关）。
 - 实现：SDK 逐操作租户解析与持久归属校验；EF 生成过滤器区分 required / DataFilter optional / EF 兼容 marker，并在 host 通过 `HostCurrentTenant` 应用；SqlSugar scoped client/interface 与 FreeSql/SqlSugar 装配核心统一；唯一 `ICurrentUserProvider` adapter；SDK 入口取消预检查。
 - 兼容：required host 读 fail closed；optional host 仅共享行；EF 专用 optional host=all 保留为兼容差异；FreeSql 扩展停止仓储扫描；SqlSugar client scoped；租户 `UpdateRange` 拒绝。
 - 证据：[S3 记录](../review/2026-10-22-issue-130-s3-tenant-assembly.md)、[S3 JSON](../review/2026-10-22-issue-130-s3-evidence.json)。

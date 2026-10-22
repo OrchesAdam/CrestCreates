@@ -16,7 +16,7 @@ S3 出口：T/A/U/R 真实 SQLite 矩阵通过；租户/事务故障控制归因
 | 新增 S3 装配/事务/取消矩阵 | 4 / 4 passed |
 | R1/R2 审查探针 | ORM 9/9、生成器 4/4（未回归） |
 | 映射列回归 | 10 / 10（未回归） |
-| CodeGenerator 全量 | 后台复跑中，结果同步到 JSON 与 PR |
+| CodeGenerator 全量 | **458 total / 455 passed / 3 failed（31m34s）**；3 条仅为本切片约定 `CCCREPO` G 红例 |
 | Dependency Boundaries | 176 / 178；2 条为既有 ControlPlane evidence-ledger 守卫（#69），与本切片无关 |
 
 ## 2. 实现变更
@@ -45,7 +45,7 @@ S3 出口：T/A/U/R 真实 SQLite 矩阵通过；租户/事务故障控制归因
 | `DataFilter.IMultiTenant`（可空） | `(currentTenant.Id != null && (e.TenantId == currentTenant.Id || e.TenantId == null)) \|\| (currentTenant.Id == null && e.TenantId == null)` | 仅 null 共享行 |
 | EF 专用 `Data.EFCore.MultiTenancy.IMultiTenant` | 保留 `currentTenant.Id == null \|\| e.TenantId == currentTenant.Id` | 兼容差异：host 仍可见全部租户；收紧需消费者清单与迁移说明，未在本切片悄改 |
 
-软删除条件继续与租户表达式组合（括号优先），并由 `EnsureSoftDeleteFiltersAreApplied` fail closed。
+软删除条件继续与租户表达式组合（括号优先），并由 `EnsureSoftDeleteFiltersAreApplied` fail closed。生产 `CrestCreatesDbContext` 在 host（`_currentTenant == null`）通过内部 `HostCurrentTenant` 应用这些过滤器，因此必填租户 host 查询为 0 行、DataFilter optional 仅共享行；EF 专用 optional 保持 host=all 兼容。
 
 ### 2.3 装配核心、身份与生命周期
 

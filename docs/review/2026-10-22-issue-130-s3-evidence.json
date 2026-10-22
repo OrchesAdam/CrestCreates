@@ -17,7 +17,11 @@
     },
     "code_generator_full": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
-      "outcome": "re-running after the S3 tenant-filter layering change; final count appended before the S3 review request"
+      "total": 458,
+      "passed": 455,
+      "failed": 3,
+      "duration": "31m34s",
+      "outcome": "only the three agreed CCCREPO G red baselines fail; tenant-filter layering caused no unrelated regression"
     },
     "dependency_boundaries": {
       "command": "DOCKER_HOST=... dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests",
@@ -61,7 +65,7 @@
   },
   "implementation": {
     "sdk_tenant": "FreeSql/SqlSugar repositories resolve ICurrentTenant per operation for reads and writes; required tenant host fails closed; optional tenants read own + shared null rows; persisted tenant ownership is checked before writes; range deletes are tenant-scoped; tenant UpdateRange is rejected",
-    "ef_tenant_filters": "generated required and DataFilter-optional expressions now enforce host fail-closed/shared-only semantics; EF-specific optional marker keeps the documented host=all compatibility; production DbContext applies filters in host via HostCurrentTenant",
+    "ef_tenant_filters": "generated required and DataFilter-optional expressions enforce host fail-closed/shared-only semantics; EF-specific optional keeps the documented host=all compatibility; production DbContext applies filters in host via HostCurrentTenant",
     "assembly": "SqlSugar scoped client + ISqlSugarClient alias + UoW core shared by module/extension; FreeSql UoW core shared by module/extensions; single ICurrentUserProvider adapter with fallback; FreeSql repository scanning removed",
     "cancellation": "both SDK repositories check the caller token at every entry; pre-cancelled operations throw OperationCanceledException and SqlSugar connection reuse is verified"
   },
@@ -81,5 +85,6 @@
     "in-flight cancellation",
     "cross-process concurrency"
   ],
-  "native_gate_note": "No AOT-verified formal runtime was modified in S3; ORM packages remain unverified for trim/NativeAOT."
+  "native_gate_note": "No AOT-verified formal runtime was modified in S3; ORM packages remain unverified for trim/NativeAOT.",
+  "tests_note": "existing MultiTenancyInterceptorTests uses IgnoreQueryFilters only to target the write interceptor; normal reads are filtered by S3"
 }
