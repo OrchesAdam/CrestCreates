@@ -235,7 +235,7 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
                 builder.AppendLine("        {");
                 foreach (var target in tenantTargets)
                 {
-                    builder.AppendLine($"            Configure{target.Name}Filter(modelBuilder, currentTenant);");
+                    builder.AppendLine($"            Configure{MethodSuffix(target)}Filter(modelBuilder, currentTenant);");
                 }
                 builder.AppendLine("        }");
                 builder.AppendLine();
@@ -252,7 +252,7 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
                 builder.AppendLine("        {");
                 foreach (var target in softDeleteTargets)
                 {
-                    builder.AppendLine($"            Configure{target.Name}SoftDeleteFilter(modelBuilder);");
+                    builder.AppendLine($"            Configure{MethodSuffix(target)}SoftDeleteFilter(modelBuilder);");
                 }
                 builder.AppendLine("        }");
                 builder.AppendLine();
@@ -282,6 +282,11 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
             context.AddSource("TenantFilter.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
         }
 
+        private static string MethodSuffix(EntityFilterTarget target)
+        {
+            return target.FullName.Replace('.', '_').Replace('+', '_');
+        }
+
         private static void Merge(
             Dictionary<string, EntityFilterTarget> targets,
             EntityFilterTarget? target)
@@ -309,22 +314,22 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
             var filter = "currentTenant.Id == null || e.TenantId == currentTenant.Id";
             if (target.IsSoftDelete)
             {
-                filter += " && !e.IsDeleted";
+                filter = "(" + filter + ") && !e.IsDeleted";
             }
 
-            builder.AppendLine($"        private static void Configure{target.Name}Filter(ModelBuilder modelBuilder, ICurrentTenant currentTenant)");
+            builder.AppendLine($"        private static void Configure{MethodSuffix(target)}Filter(ModelBuilder modelBuilder, ICurrentTenant currentTenant)");
             builder.AppendLine("        {");
             builder.AppendLine($"            if (modelBuilder.Model.FindEntityType(typeof(global::{target.FullName})) is null) return;");
             builder.AppendLine($"            modelBuilder.Entity<global::{target.FullName}>().HasQueryFilter(e => {filter});");
             builder.AppendLine($"            modelBuilder.Entity<global::{target.FullName}>().HasIndex(e => e.TenantId)");
-            builder.AppendLine($"                .HasDatabaseName(\"IX_{target.Name}_TenantId\");");
+            builder.AppendLine($"                .HasDatabaseName(\"IX_{MethodSuffix(target)}_TenantId\");");
             builder.AppendLine("        }");
             builder.AppendLine();
         }
 
         private static void AppendSoftDeleteFilter(StringBuilder builder, EntityFilterTarget target)
         {
-            builder.AppendLine($"        private static void Configure{target.Name}SoftDeleteFilter(ModelBuilder modelBuilder)");
+            builder.AppendLine($"        private static void Configure{MethodSuffix(target)}SoftDeleteFilter(ModelBuilder modelBuilder)");
             builder.AppendLine("        {");
             builder.AppendLine($"            if (modelBuilder.Model.FindEntityType(typeof(global::{target.FullName})) is null) return;");
             builder.AppendLine($"            modelBuilder.Entity<global::{target.FullName}>().HasQueryFilter(e => !e.IsDeleted);");

@@ -366,3 +366,58 @@ public sealed class Issue130TenantEntity :
         Name = name;
     }
 }
+
+/// <summary>Mapped soft entity (stamped) used to prove CLR names are not used as SQL columns.</summary>
+[Table(Name = "S1_MappedSoftStamped")]
+[SugarTable("S1_MappedSoftStamped")]
+public sealed class Issue130MappedSoftStamped :
+    IEntity<long>,
+    IHasConcurrencyStamp,
+    ISoftDelete
+{
+    [Column(Name = "row_id", IsIdentity = false, IsPrimary = true)]
+    [SugarColumn(ColumnName = "row_id", IsPrimaryKey = true, IsIdentity = false)]
+    public long Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    [Column(Name = "deleted_flag")]
+    [SugarColumn(ColumnName = "deleted_flag")]
+    public bool IsDeleted { get; set; }
+
+    [Column(Name = "deleted_at")]
+    [SugarColumn(ColumnName = "deleted_at", IsNullable = true)]
+    public DateTime? DeletionTime { get; set; }
+
+    [Column(Name = "deleted_by")]
+    [SugarColumn(ColumnName = "deleted_by", IsNullable = true)]
+    public Guid? DeleterId { get; set; }
+
+    [Column(Name = "stamp_col")]
+    [SugarColumn(ColumnName = "stamp_col")]
+    public string ConcurrencyStamp { get; set; } = Guid.NewGuid().ToString("N");
+}
+
+/// <summary>Mapped soft entity (no stamp) for batch delete paths.</summary>
+[Table(Name = "S1_MappedSoftOnly")]
+[SugarTable("S1_MappedSoftOnly")]
+public sealed class Issue130MappedSoftOnly : IEntity<long>, ISoftDelete
+{
+    [Column(Name = "row_id", IsIdentity = false, IsPrimary = true)]
+    [SugarColumn(ColumnName = "row_id", IsPrimaryKey = true, IsIdentity = false)]
+    public long Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    [Column(Name = "deleted_flag")]
+    [SugarColumn(ColumnName = "deleted_flag")]
+    public bool IsDeleted { get; set; }
+
+    [Column(Name = "deleted_at")]
+    [SugarColumn(ColumnName = "deleted_at", IsNullable = true)]
+    public DateTime? DeletionTime { get; set; }
+
+    [Column(Name = "deleted_by")]
+    [SugarColumn(ColumnName = "deleted_by", IsNullable = true)]
+    public Guid? DeleterId { get; set; }
+}

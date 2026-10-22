@@ -32,6 +32,13 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             _sqlSugarClient = sqlSugarClient;
             _logger = logger;
             _currentUserProvider = currentUserProvider;
+
+            SqlSugarSoftDeleteFilterRegistration.EnsureRegistered(_sqlSugarClient, typeof(TEntity));
+        }
+
+        private string ColumnName(string clrName)
+        {
+            return _sqlSugarClient.EntityMaintenance.GetDbColumnName(clrName, typeof(TEntity));
         }
 
         public override IQueryable<TEntity> GetQueryable()
@@ -42,10 +49,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         private ISugarQueryable<TEntity> Queryable()
         {
-            var query = _sqlSugarClient.Queryable<TEntity>();
-            return typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity))
-                ? query.Where("IsDeleted = 0", new { })
-                : query;
+            return _sqlSugarClient.Queryable<TEntity>();
         }
 
         public override async Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default)
@@ -228,7 +232,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     {
                         var rows = await SqlSugarSoftDeleteOperation.ExecuteAsync(
                             _sqlSugarClient.Updateable<TEntity>().Where(
-                                "Id = @entityId AND ConcurrencyStamp = @entityStamp AND IsDeleted = 0",
+                                $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp AND {ColumnName(nameof(ISoftDelete.IsDeleted))} = 0",
                                 new { entityId = entity.Id, entityStamp = stamp.ConcurrencyStamp }),
                             _currentUserProvider,
                             advanceConcurrencyStamp: true,
@@ -238,7 +242,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     else
                     {
                         await SqlSugarSoftDeleteOperation.ExecuteAsync(
-                            _sqlSugarClient.Updateable<TEntity>().Where("Id = @entityId AND IsDeleted = 0", new { entityId = entity.Id }),
+                            _sqlSugarClient.Updateable<TEntity>().Where(
+                                $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(ISoftDelete.IsDeleted))} = 0",
+                                new { entityId = entity.Id }),
                             _currentUserProvider,
                             advanceConcurrencyStamp: false,
                             cancellationToken);
@@ -247,7 +253,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 else if (entity is IHasConcurrencyStamp stamp)
                 {
                     var rows = await _sqlSugarClient.Deleteable<TEntity>()
-                        .Where("Id = @Id AND ConcurrencyStamp = @Stamp", new { Id = entity.Id, Stamp = stamp.ConcurrencyStamp })
+                        .Where(
+                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp",
+                            new { entityId = entity.Id, entityStamp = stamp.ConcurrencyStamp })
                         .ExecuteCommandAsync();
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
                 }
@@ -272,7 +280,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
                     await SqlSugarSoftDeleteOperation.ExecuteAsync(
-                        _sqlSugarClient.Updateable<TEntity>().Where("Id = @entityId AND IsDeleted = 0", new { entityId = id }),
+                        _sqlSugarClient.Updateable<TEntity>().Where(
+                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(ISoftDelete.IsDeleted))} = 0",
+                            new { entityId = id }),
                         _currentUserProvider,
                         advanceConcurrencyStamp: typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)),
                         cancellationToken);
@@ -306,7 +316,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 {
                     var softRows = await SqlSugarSoftDeleteOperation.ExecuteAsync(
                         _sqlSugarClient.Updateable<TEntity>().Where(
-                            "Id = @entityId AND ConcurrencyStamp = @entityStamp AND IsDeleted = 0",
+                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp AND {ColumnName(nameof(ISoftDelete.IsDeleted))} = 0",
                             new { entityId = id, entityStamp = expectedStamp }),
                         _currentUserProvider,
                         advanceConcurrencyStamp: true,
@@ -316,7 +326,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 else
                 {
                     var rows = await _sqlSugarClient.Deleteable<TEntity>()
-                        .Where("Id = @Id AND ConcurrencyStamp = @Stamp", new { Id = id, Stamp = expectedStamp })
+                        .Where(
+                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp",
+                            new { entityId = id, entityStamp = expectedStamp })
                         .ExecuteCommandAsync();
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
                 }
@@ -345,7 +357,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
                     await SqlSugarSoftDeleteOperation.ExecuteAsync(
-                        _sqlSugarClient.Updateable<TEntity>().Where(entity => ids.Contains(entity.Id)).Where("IsDeleted = 0", new { }),
+                        _sqlSugarClient.Updateable<TEntity>()
+                            .Where(entity => ids.Contains(entity.Id))
+                            .Where($"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0", new { }),
                         _currentUserProvider,
                         advanceConcurrencyStamp: false,
                         cancellationToken);
@@ -373,7 +387,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
                     await SqlSugarSoftDeleteOperation.ExecuteAsync(
-                        _sqlSugarClient.Updateable<TEntity>().Where(predicate).Where("IsDeleted = 0", new { }),
+                        _sqlSugarClient.Updateable<TEntity>()
+                            .Where(predicate)
+                            .Where($"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0", new { }),
                         _currentUserProvider,
                         advanceConcurrencyStamp: false,
                         cancellationToken);

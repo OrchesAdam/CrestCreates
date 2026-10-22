@@ -4,6 +4,7 @@ using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.DataFilter.Entities;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.SqlSugar.Repositories;
 
 namespace CrestCreates.Data.SqlSugar.Interceptors
 {
@@ -130,8 +131,7 @@ namespace CrestCreates.Data.SqlSugar.Interceptors
         /// </summary>
         public static void ConfigureSoftDeleteFilter(this SqlSugarClient client)
         {
-            // 全局软删除过滤器
-            client.QueryFilter.Add(new TableFilterItem<ISoftDelete>(it => it.IsDeleted == false));
+            SqlSugarSoftDeleteFilterRegistration.EnsureRegistered(client, typeof(ISoftDelete));
         }
 
         /// <summary>

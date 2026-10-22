@@ -234,7 +234,7 @@ public class TenantFilterSourceGeneratorTests
 
         var generated = result.GetSourceByFileName("TenantFilter.g.cs");
         Assert.NotNull(generated);
-        Assert.Contains("ConfigureBookFilter", generated.SourceText);
+        Assert.Contains("ConfigureExternal_Domain_BookFilter", generated.SourceText);
         Assert.Contains("External.Domain.Book", generated.SourceText);
     }
 
@@ -307,8 +307,8 @@ public class TenantFilterSourceGeneratorTests
         var generated = result.GetSourceByFileName("TenantFilter.g.cs");
         Assert.NotNull(generated);
         Assert.Contains(
-            "currentTenant.Id == null || e.TenantId == currentTenant.Id && !e.IsDeleted",
-            generated.SourceText.Replace("(", string.Empty).Replace(")", string.Empty));
+            "(currentTenant.Id == null || e.TenantId == currentTenant.Id) && !e.IsDeleted",
+            generated.SourceText);
         Assert.Contains("modelBuilder.Model.FindEntityType", generated.SourceText);
     }
 

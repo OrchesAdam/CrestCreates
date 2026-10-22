@@ -110,6 +110,8 @@ internal static class Issue130FreeSqlBed
         freeSql.CodeFirst.SyncStructure<Issue130SoftOnly>();
         freeSql.CodeFirst.SyncStructure<Issue130Plain>();
         freeSql.CodeFirst.SyncStructure<Issue130TenantEntity>();
+        freeSql.CodeFirst.SyncStructure<Issue130MappedSoftStamped>();
+        freeSql.CodeFirst.SyncStructure<Issue130MappedSoftOnly>();
 
         freeSql.ConfigureAuditInterceptor(userProvider, tenant);
         return freeSql;
@@ -160,7 +162,9 @@ internal static class Issue130SqlSugarBed
             typeof(Issue130SoftStamped),
             typeof(Issue130SoftOnly),
             typeof(Issue130Plain),
-            typeof(Issue130TenantEntity));
+            typeof(Issue130TenantEntity),
+            typeof(Issue130MappedSoftStamped),
+            typeof(Issue130MappedSoftOnly));
 
         client.ConfigureAuditInterceptor(userProvider, tenant);
         return client;
