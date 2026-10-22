@@ -10,7 +10,7 @@ S2 的出口是**三个 Provider 的 D/A 真实 SQLite 矩阵通过**、既有�
 
 | 套件 | 结果 |
 | --- | --- |
-| OrmProviders（全量，含 R1 修复） | **195 total / 185 passed / 10 failed** |
+| OrmProviders（全量，含 R1 修复） | **203 total / 193 passed / 10 failed** |
 | 其中 S1/S2 的 D/A 用例 | 全部通过（D01–D09、A01–A02） |
 | 其中 S3 范围 T/U 红例 | 10 条，逐条列于 §5；失败原因均为 S3 设计项，不是回归 |
 | 历史 124 条 | 全部通过 |
@@ -114,7 +114,15 @@ CodeGenerator 全量套件因本切片修改了生成器，已完成复跑：**4
 
 - 生成器：租户 OR 先加括号再 AND live-row；方法/索引标识改为全类型身份。
 - SDK：FreeSql/SqlSugar 的 live-row、Id、stamp 条件改由 provider 映射元数据或强类型表达式生成；SqlSugar 查询过滤器按 client 去重注册。
-- 回归：审查 ORM 探针 5/5、生成器探针 2/2；`Issue130MappedColumnTests` 6/6（含 stamped update）；CodeGenerator 全量 455/452/3（仅 G 红）；全量 OrmProviders 195/185/10（10 仍为 S3 T/U）。
+- 回归：审查 ORM 探针 5/5、生成器探针 2/2；`Issue130MappedColumnTests` 6/6（含 stamped update）；CodeGenerator 全量 455/452/3（仅 G 红）；全量 OrmProviders 203/193/10（10 仍为 S3 T/U）。
+
+### R2 复审修复（2026-10-22）
+
+审查 head `b4664572` 指出 R1-2/R1-3 未完整闭合：保留字映射列仍需引用、namespace 下划线与分隔符仍碰撞。修复提交 `9071e99a`：
+
+- FreeSql live-row/stamp 条件改为强类型接口表达式，由 SDK 翻译并引用映射列；SqlSugar 通过 `InstanceFactory.GetSqlBuilderWithContext(...).GetTranslationColumnName(...)` 引用 Id/stamp/live 标识符。
+- 生成方法名对完整类型身份做无歧义编码（`A.B.Row` → `A_002EB_002ERow`，`A_B.Row` → `A_005FB_002ERow`）。
+- 审查 R2 探针 4/4 与 2/2 通过；新增保留字映射控制 4 条；全量 OrmProviders 203/193/10（10 仍为 S3）。
 
 ## 8. 下一步（S3）
 

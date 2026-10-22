@@ -3,15 +3,15 @@
   "slice": "S2",
   "date": "2026-10-22",
   "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
-  "head": "666816c22cae7f6192fe1987cb74b59b21a8b63f",
+  "head": "9071e99a3340fb288c8891d011c14acdb571c34d",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "scope": "Delete semantics and live-row query closure for EF Core, FreeSql and SqlSugar on independent-file SQLite. T/U stay S3.",
   "suites": {
     "orm_providers": {
       "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
-      "total": 195,
-      "passed": 185,
+      "total": 203,
+      "passed": 193,
       "failed": 10,
       "outcome": "all D/A and review-probe cases pass; all 124 historical tests pass; the 10 failures are the deferred S3 T/U red baselines"
     },
@@ -27,7 +27,7 @@
       "passed": 452,
       "failed": 3,
       "duration": "30m51s",
-      "outcome": "only the three intentional CCCREPO red baselines fail; no unrelated regression after the R1 generator fixes"
+      "outcome": "re-running after the R2 name-encoding fix; final count appended before the re-review report"
     }
   },
   "s2_green_delete_and_query": [
@@ -71,7 +71,11 @@
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_mapped_columns_cover_batch_deletes",
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_mapped_columns_cover_batch_deletes",
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.A02_FreeSql_mapped_stamp_update_uses_mapped_columns",
-    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.A02_SqlSugar_mapped_stamp_update_uses_mapped_columns"
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.A02_SqlSugar_mapped_stamp_update_uses_mapped_columns",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_reserved_columns_cover_stamp_delete_and_update",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_reserved_columns_cover_stamp_delete_and_update",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_reserved_columns_cover_batch_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_reserved_columns_cover_batch_deletes"
   ],
   "remaining_s3_red": [
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_EfCore_forged_detached_update_must_not_change_another_tenants_row",
@@ -176,6 +180,37 @@
         },
         "mapped_column_regression": "6 passed",
         "code_generator_full": "455 total / 452 passed / 3 intentional G red"
+      }
+    },
+    {
+      "round": "R2",
+      "reviewed_head": "b466457204ad43612f10de907ff08886f55b9b5f",
+      "fix_head": "9071e99a3340fb288c8891d011c14acdb571c34d",
+      "report": "docs/review/2026-10-22-issue-130-s2-review-round2.md",
+      "response": "docs/review/2026-10-22-issue-130-s2-review-round2-response.md",
+      "findings": [
+        {
+          "id": "R2-1",
+          "status": "fixed",
+          "summary": "FreeSql strong typed interface predicates and SqlSugar quoted mapped identifiers cover reserved-word columns for live/id/stamp conditions and stamped updates"
+        },
+        {
+          "id": "R2-2",
+          "status": "fixed",
+          "summary": "injective full-type identity encoding distinguishes A.B.Row from A_B.Row in methods, calls and index names"
+        }
+      ],
+      "probes": {
+        "mapping_reserved": {
+          "before": "2 passed / 2 failed / 4",
+          "after": "4 passed / 0 failed / 4"
+        },
+        "generator_collision": {
+          "before": "1 passed / 1 failed / 2",
+          "after": "2 passed / 0 failed / 2"
+        },
+        "reserved_word_regressions": "4 passed",
+        "r1_probes_still_green": "5/5 ORM and 2/2 generator"
       }
     }
   ]
