@@ -75,3 +75,14 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 冻结：`CCCREPO001`（非 EF 生成请求）/`CCCREPO002`（未知 Provider），S4 接线；stamped 批次/谓词删除先拒绝形态冻结为 `NotSupportedException` 且零写，若 S2 变更须显式更新冻结记录。
 - 探针：FreeSql/SqlSugar 仓储在显式 scoped 装配下均跟随平台 UoW（abandon 隐藏/Complete 持久）；SqlSugar 模块单例 client 为缺陷红例；两 SDK 的预取消 token 均未保持取消语义（FreeSql 包装为通用异常，SqlSugar 忽略 token）；in-flight 取消未验证。
 - 延后：Q01（S4）、host 语义收紧与 EF 生成过滤器组合（S3）、PG/其他数据库、trim/NativeAOT 均不在 S1 结论内。
+
+## S2 执行记录（2026-10-22）
+
+- 状态：S2 完成，S3 尚未开始；已修改 EF/FreeSql/SqlSugar 仓储、EF UoW 与租户/软删除生成器。
+- 提交：`66947304`（S2 实现与测试）。
+- 结果：OrmProviders 182 total / 172 passed / 10 failed；10 条全部是 S3 范围 T/U 红例；D01–D09 与 A01–A02 全绿，历史 124 条全绿。Tenant/Soft filter 生成器过滤集 8/8。
+- 实现：EF stamped 删除改为 tracked 软删除并保留 AuditInterceptor/concurrency；stamped 批次与谓词删除先拒绝；EF UoW flush 冲突翻译为 `CrestConcurrencyException`；生成强类型软删除过滤器并与租户过滤组合、带目标模型守卫；FreeSql/SqlSugar 五删除重载统一条件 UPDATE + 删除审计/stamp，SDK 查询默认 live-row，`GetQueryable` 明确 `NotSupportedException`。
+- 故障控制：S1 物理删除版本作为真实反向对照；D06/D08 断言零写；`U01_EfCore_stale_stamp_delete_reports_conflict_at_complete` 验证延迟 flush 冲突。
+- 证据：[S2 执行记录](../review/2026-10-22-issue-130-s2-baseline.md)、[S2 JSON](../review/2026-10-22-issue-130-s2-baseline-evidence.json)。
+- 延后：T/U 10 条（S3）、Q01（S4）、PG/其他数据库、trim/NativeAOT、in-flight 取消。
+- CodeGenerator 全量套件因生成器改动已在后台复跑；完成前不声明通过，最终计数同步到 S2 证据。
