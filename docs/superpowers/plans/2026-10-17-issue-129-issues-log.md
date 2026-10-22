@@ -853,3 +853,9 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - Ticket fixture JIT **1/1**；NativeAOT **5/5**：绿色 + wrong-expectation + wrong-validation-status + late-validation + decoy-metadata。原生 15 场景 + `CRESTCREATES_TICKET_NATIVE_OK`；五个控制均 publish/link/run 原生产物，失败控制 exit 1 无总 sentinel。
 - 证据入库：`docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（新增 late-validation、decoy-metadata；五份文件 SHA 绑定代码 head `5e3878b2`）。
 - S5 仍不修改生产 runtime；支持声明保持 Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64，该 fixture 范围），不推导 EF/PostgreSQL、真实认证/租户、SaaSHelpdesk、Library HTTP、其他 RID。
+
+## 合并记录（2026-10-22）
+
+- 维护者批准；PR #152 已合入 master，merge commit `2f4c54024d8e2e9c5b8aecad1a399669dadb28a6`（base `196b6f66`，分支 head `13ad93ef`；含 S1–S5 分阶段提交与 R1–R4 修复轨迹）。#129 于合并后关闭（2026-10-22）。
+- 合并树与分支 head `13ad93ef` 一致（`git diff` 为空），未引入额外源码/文档改动；主/分层解决方案均包含 Ticket fixture 两个项目；入库证据 JSON 仍绑定代码 head `5e3878b2`，未改写。
+- CI 保持暂停；未自动派发 Agent；S4/S5 支持声明与未验证边界不变（EF/PostgreSQL、真实认证/租户、整个 SaaSHelpdesk、Library 完整 HTTP、其他 RID 仍不在声明内）。

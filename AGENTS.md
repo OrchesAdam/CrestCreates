@@ -253,7 +253,7 @@ Integrations: PluginSystem, ExternalApi, LegacyDatabase
 
 Controller 生成器 `ControllerSourceGenerator`、`CrudControllerSourceGenerator`、旧 `[CrestService]` Minimal API 生成器与静态 compatibility 生成器均已归档（#129 S4）。正式链是 CapabilityEndpoint ExplicitHost/AppService HTTP 投影；正式 CRUD（`[GenerateCrudService(typeof(TEntity))]`）走 ExplicitHost 贡献（`AddGeneratedCrud` + Map 期汇总 + 每动作 typed binding/invoker/result mapper）。
 
-### 旧链退出（#129 S4）
+### 旧链退出（#129 S4，随 PR #152 合并）
 
 - `CrestCreates.DynamicApi.Legacy`、`CrestCreates.CodeGenerator.Legacy`、`CrestCreates.Web.Legacy` 已整体归档到 `99_RecycleBin/issue-129-controller-exit/`，不再属于解决方案、项目引用、analyzer/package 分发或 AOT/Trim 配置。
 - SaaSHelpdesk 七个 AppService 与 LibraryManagement 的 Book/Category/Loan/Member 全部由正式 ExplicitHost 投影发布；样例 Host 不再调用旧 Add/Map。
@@ -297,7 +297,7 @@ BuildTasks 编译前链：
 - Agent 治理面主链是 Authoring → deterministic review → Control Plane：authoring 只产出候选草稿；正式契约在 `src/Runtime/Agent/CrestCreates.Agent.Authoring*`、`CrestCreates.Agent.ControlPlane*` 与 `Metadata/Draft/CrestCreates.DescriptorDraft*`。review artifact 与 package/evidence artifact 持久化只提供完整性与证据绑定，不构成批准；activation request/gate 当前为内存实现，不等于 durable activation。
 - JsonContracts 工具链（`src/Tooling/CrestCreates.JsonContracts.BuildTasks`、`.BuildTasks.Core`、`.Tool`）：构建期生成确定性 JSON contract roots，由官方 STJ Source Generator 消费；禁止 runtime reflection / scanner fallback。属构建期 Tooling，不是运行时组件。
 - 正式 CRUD JSON 编译契约（#128）：`[GenerateCrudService(typeof(Entity))]` 声明 → CRUD precompile（普通 Compile 输入）→ JsonContracts root 闭合 → 官方 STJ，同一 CoreCompile；`AddGeneratedCrud()` ExplicitHost 激活（每程序集贡献 + handler module + per-Host JSON configurator），`MapCrestCapabilityEndpoints` 在端点注册前做一次能力注册表权威汇总，必需 identities/JSON root 缺失即 fail-closed（反射 resolver 不作数）；typed query adapter 静态执行（按原生探针矩阵，decimal 过滤为 operator-free 形态）、typed 无 fallback 结果契约、失败路径错误 DTO（ProblemDetails）在闭包内。支持声明：**正式 CRUD + JSON 主链 NativeAOT-verified（linux-x64）**——fixture publish/link/run 15 场景 + 表达式树构造探针 + 两变异反例 + 分场景/总 sentinel；EF/其他 ORM 的查询翻译与 UoW 组合、Windows/macOS 等其他 RID **未验证**（逐项声明，不整体背书）。
-- Ticket 正式 AppService HTTP 投影（#129 S5）：`tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` 使用真实 `TicketAppService`/DTO/validator 与正式生成 bundle，仅替换内存 Ticket/SLA 持久化叶子与 fixture identity/permission/failure presenter；支持声明 **Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64）**——publish/link/run，15 场景（create/get/all/by-customer/update stamp/assign+active SLA/resolve/close/delete If-Match/unknown 404/invalid body zero-business/permission 403/business failure/metadata rejection）+ 总 sentinel；五个原生控制（绿色 + wrong-expectation + wrong-validation-status + late-validation + decoy-metadata），失败控制 exit 1 无 sentinel；零业务由业务入口/UoW/仓储写计数器独立断言，metadata 负例锁定 Ticket owner/11 identities/目标 root。不推导 EF/PostgreSQL、真实认证/租户、整个 SaaSHelpdesk 或 Library HTTP；Library 完整 HTTP 仍未验证，其他 RID 未验证。
+- Ticket 正式 AppService HTTP 投影（#129 S5，PR #152 已合并，merge commit `2f4c5402`）：`tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` 使用真实 `TicketAppService`/DTO/validator 与正式生成 bundle，仅替换内存 Ticket/SLA 持久化叶子与 fixture identity/permission/failure presenter；支持声明 **Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64）**——publish/link/run，15 场景（create/get/all/by-customer/update stamp/assign+active SLA/resolve/close/delete If-Match/unknown 404/invalid body zero-business/permission 403/business failure/metadata rejection）+ 总 sentinel；五个原生控制（绿色 + wrong-expectation + wrong-validation-status + late-validation + decoy-metadata），失败控制 exit 1 无 sentinel；零业务由业务入口/UoW/仓储写计数器独立断言，metadata 负例锁定 Ticket owner/11 identities/目标 root。不推导 EF/PostgreSQL、真实认证/租户、整个 SaaSHelpdesk 或 Library HTTP；Library 完整 HTTP 仍未验证，其他 RID 未验证。
 - `src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql`：承载 runtime state、Control Plane reference data、review/package artifact 持久化与 additive migrations，并提供原生 AotHost 证据。目录位置在 Persistence 依赖层，实际职责跨运行时与控制面持久化；引用仍受依赖边界测试约束。
 
 ---
@@ -415,4 +415,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-10-21
+**最后更新**: 2026-10-22

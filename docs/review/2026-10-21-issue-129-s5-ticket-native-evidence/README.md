@@ -3,6 +3,9 @@
 Code head bound by every JSON `sha`: `5e3878b2f8efd349480099fa401c321faa3c875b` (S5 R1 gate
 strengthening commit; later docs/evidence and memory commits do not change code). RID: linux-x64.
 
+Merged: PR #152, merge commit `2f4c54024d8e2e9c5b8aecad1a399669dadb28a6` (2026-10-22; branch head
+`13ad93ef`). These evidence files were not rewritten by the merge or post-merge cleanup.
+
 - `ticket-native-http.json` — green native gate: `CRESTCREATES_TICKET_NATIVE_OK`, 15 scenario PASS, exit 0.
 - `ticket-native-http-wrong-expectation.json` — `create:FAIL`, exit 1, no total sentinel.
 - `ticket-native-http-wrong-validation.json` — `invalid-body-zero-business:FAIL` (status expectation), exit 1, no sentinel.
