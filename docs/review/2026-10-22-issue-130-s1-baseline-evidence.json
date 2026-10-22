@@ -3,7 +3,7 @@
   "slice": "S1",
   "date": "2026-10-22",
   "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
-  "head": "2f3d64e41360a86c5ce657831df08e67bd265db9",
+  "head": "f2c61f1f0293b5f58ea68fb5502dfe728521cb4c",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "production_runtime_changed": false,
@@ -18,10 +18,10 @@
     },
     "orm_providers_after": {
       "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
-      "total": 173,
+      "total": 174,
       "passed": 146,
-      "failed": 27,
-      "outcome": "all 124 historical tests still pass; 27 failures are the intentional red baselines listed in red_baselines"
+      "failed": 28,
+      "outcome": "all 124 historical tests still pass; 28 failures are the intentional red baselines listed in red_baselines"
     },
     "code_generator_focused": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests",
@@ -38,49 +38,49 @@
   "red_baselines": [
     {
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteAsync_entity_must_preserve_the_row",
-      "claim": "five soft-delete overloads must retain the row and write delete audit",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
       "current_fact": "physical DELETE (row missing)",
       "owner_slice": "S2"
     },
     {
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteAsync_id_must_preserve_the_row",
-      "claim": "five soft-delete overloads must retain the row and write delete audit",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
       "current_fact": "physical DELETE (row missing)",
       "owner_slice": "S2"
     },
     {
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteRangeAsync_entities_must_preserve_rows",
-      "claim": "five soft-delete overloads must retain the row and write delete audit",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
       "current_fact": "physical DELETE (row missing)",
       "owner_slice": "S2"
     },
     {
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteRangeAsync_predicate_must_preserve_rows",
-      "claim": "five soft-delete overloads must retain the row and write delete audit",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
       "current_fact": "physical DELETE (row missing)",
       "owner_slice": "S2"
     },
     {
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteAsync_entity_must_preserve_the_row",
-      "claim": "five soft-delete overloads must retain the row and write delete audit",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
       "current_fact": "physical DELETE (row missing)",
       "owner_slice": "S2"
     },
     {
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteAsync_id_must_preserve_the_row",
-      "claim": "five soft-delete overloads must retain the row and write delete audit",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
       "current_fact": "physical DELETE (row missing)",
       "owner_slice": "S2"
     },
     {
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteRangeAsync_entities_must_preserve_rows",
-      "claim": "five soft-delete overloads must retain the row and write delete audit",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
       "current_fact": "physical DELETE (row missing)",
       "owner_slice": "S2"
     },
     {
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteRangeAsync_predicate_must_preserve_rows",
-      "claim": "five soft-delete overloads must retain the row and write delete audit",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
       "current_fact": "physical DELETE (row missing)",
       "owner_slice": "S2"
     },
@@ -184,6 +184,12 @@
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U03_SqlSugar_module_must_not_register_a_process_wide_client",
       "claim": "SqlSugar client/transaction state must be scoped per request",
       "current_fact": "module registers a process-wide singleton client",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U03_SqlSugar_module_must_register_the_client_interface_used_by_repositories",
+      "claim": "the ISqlSugarClient injected by repositories must be resolvable",
+      "current_fact": "module registers only the concrete SqlSugarClient; ISqlSugarClient has no registration",
       "owner_slice": "S3"
     },
     {
