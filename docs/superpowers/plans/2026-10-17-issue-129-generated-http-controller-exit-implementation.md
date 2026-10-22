@@ -1,6 +1,6 @@
 # #129 实施计划与设计交接
 
-状态：S1/S2/S3 已按各轮审查放行（S3 head `1cca837c`）；S4 于 2026-10-21 修订为“消费者迁移与旧链退出”，当前进行中；S5 未开始。设计基线 `196b6f66048ef32d644eeb856d00d58ae9d34965`；规范见 `docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md`。开工前重新核对 master、进行中的 Tooling/Web PR 和 #128 交接，保持串行。
+状态：S1–S5 已完成并通过各轮审查（S3 head `1cca837c`；S4 head `51fc3b67`；S5 代码 head `5e3878b2`，[S5 最终复审](https://github.com/OrchesAdam/CrestCreates/pull/152#pullrequestreview-5608279047)）。#129 实现审查与最终交接于 2026-10-22 放行；CI 保持暂停。设计基线 `196b6f66048ef32d644eeb856d00d58ae9d34965`；规范见 `docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md`。
 
 rev.2 全文已发布并回读核对：[最新设计](https://github.com/OrchesAdam/CrestCreates/issues/129#issuecomment-6230158783)。
 
@@ -57,7 +57,7 @@ rev.1 详细设计全文曾发布到 [#129 评论](https://github.com/OrchesAdam
 ## S5 — Native、回归与交接
 
 - [x] Ticket native fixture 使用真实服务/DTO/正式投影，持久化叶子用诚实声明的静态内存 provider；不换成等价假业务服务。证据：`tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` + `.Tests`；真实 `TicketAppService`/DTO/validator，内存 Ticket/SLA 仓储与 UoW，fixture 自有 identity/permission/failure presenter；JIT 1/1。
-- [x] publish/link/run、loopback、逐场景/总 sentinel、真实 metadata 拒绝和变异、进程回收证据。证据：原生门禁 5/5（绿色 + wrong-expectation + wrong-validation + late-validation + decoy-metadata），15 场景 + `CRESTCREATES_TICKET_NATIVE_OK`，入库证据 `docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（代码 SHA `eb8e4807`）。
+- [x] publish/link/run、loopback、逐场景/总 sentinel、真实 metadata 拒绝和变异、进程回收证据。证据：原生门禁 5/5（绿色 + wrong-expectation + wrong-validation + late-validation + decoy-metadata），15 场景 + `CRESTCREATES_TICKET_NATIVE_OK`，入库证据 `docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（代码 SHA `5e3878b2`）。
 - [x] 受影响门禁：S5 未修改生产 runtime（仅新增 fixture/测试与 attribute XML 注释），S4 最终 head 的 SaaSHelpdesk 152/11/163、Web 102、DynamicApi 141、Application 177、Capability 178、OrmProviders 124、JsonContracts 162、Procurement 29、E2E 20、CapabilityEndpoint AOT 13、CRUD AOT 23、Data AOT 1、Boundary 176/178（2 既存 WIP）、CodeGenerator 447、Library 契约基线 2 继续有效；主解决方案与分层解决方案 0 error。LocalEvent/RabbitMQ 未被 S5 改动，未重跑并明确不计入本轮独立通过。
 - [x] 同步 memory/AGENTS/#123 evidence matrix/migration/归档说明/支持边界，发布复审入口。
 - [x] 本任务不自动合并、不恢复 CI；设计发布不代表任一实现切片已完成。
