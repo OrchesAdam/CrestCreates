@@ -42,21 +42,21 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     {
         Issue130EfBed.EnsureCreated(_database, _user, _tenant);
         await using var context = new Issue130EfDbContext(Issue130EfBed.Options(_database, _user, _tenant));
-        var repository = Issue130EfBed.Repository<Issue130SoftStamped>(context);
+        var repository = Issue130EfBed.Repository<Issue130SoftOnly>(context);
 
-        await repository.InsertAsync(new Issue130SoftStamped(1, "by-entity"));
-        await repository.InsertAsync(new Issue130SoftStamped(2, "by-id"));
-        await repository.InsertAsync(new Issue130SoftStamped(3, "range"));
-        await repository.InsertAsync(new Issue130SoftStamped(4, "predicate"));
+        await repository.InsertAsync(new Issue130SoftOnly(1, "by-entity"));
+        await repository.InsertAsync(new Issue130SoftOnly(2, "by-id"));
+        await repository.InsertAsync(new Issue130SoftOnly(3, "range"));
+        await repository.InsertAsync(new Issue130SoftOnly(4, "predicate"));
 
-        await repository.DeleteAsync(await repository.GetAsync(1));
+        await repository.DeleteAsync((await repository.GetAsync(1))!);
         await repository.DeleteAsync(2);
         await repository.DeleteRangeAsync(new[] { await repository.GetAsync(3) });
         await repository.DeleteRangeAsync(e => e.Id == 4);
 
         foreach (var id in new long[] { 1, 2, 3, 4 })
         {
-            var row = _database.Read(Issue130Tables.SoftStamped, id);
+            var row = _database.Read(Issue130Tables.SoftOnly, id);
             Assert.True(row.Exists, $"row {id} must be retained");
             Assert.Equal(1, row.Integer("IsDeleted"));
             Assert.NotNull(row.DateTimeValue("DeletionTime"));
@@ -148,7 +148,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         var repository = new Issue130FreeSqlRepository<Issue130SoftOnly>(
-            new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+            new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         await repository.InsertAsync(new Issue130SoftOnly(1, "soft-only"));
 
         await repository.DeleteAsync(1);
@@ -166,7 +166,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D04_SqlSugar_repeated_stamp_less_delete_must_not_refresh_delete_audit()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftOnly>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftOnly>(client, _userProvider);
         await repository.InsertAsync(new Issue130SoftOnly(1, "soft-only"));
 
         await repository.DeleteAsync(1);
@@ -251,7 +251,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D01_FreeSql_DeleteAsync_entity_must_preserve_the_row()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "entity"));
 
         await repository.DeleteAsync(new Issue130SoftStamped(1, "entity") { ConcurrencyStamp = (await repository.GetAsync(1))!.ConcurrencyStamp });
@@ -267,7 +267,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D01_FreeSql_DeleteAsync_id_must_preserve_the_row()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "id"));
 
         await repository.DeleteAsync(1);
@@ -283,17 +283,17 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D01_FreeSql_DeleteRangeAsync_entities_must_preserve_rows()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
-        await repository.InsertAsync(new Issue130SoftStamped(1, "a"));
-        await repository.InsertAsync(new Issue130SoftStamped(2, "b"));
+        var repository = new Issue130FreeSqlRepository<Issue130SoftOnly>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+        await repository.InsertAsync(new Issue130SoftOnly(1, "a"));
+        await repository.InsertAsync(new Issue130SoftOnly(2, "b"));
 
         await repository.DeleteRangeAsync(await repository.GetListAsync());
 
-        Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped));
-        Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 1"));
+        Assert.Equal(2, _database.Count(Issue130Tables.SoftOnly));
+        Assert.Equal(2, _database.Count(Issue130Tables.SoftOnly, "\"IsDeleted\" = 1"));
         foreach (var id in new long[] { 1, 2 })
         {
-            var row = _database.Read(Issue130Tables.SoftStamped, id);
+            var row = _database.Read(Issue130Tables.SoftOnly, id);
             Assert.NotNull(row.DateTimeValue("DeletionTime"));
             Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
         }
@@ -303,17 +303,17 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D01_FreeSql_DeleteRangeAsync_predicate_must_preserve_rows()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
-        await repository.InsertAsync(new Issue130SoftStamped(1, "a"));
-        await repository.InsertAsync(new Issue130SoftStamped(2, "b"));
+        var repository = new Issue130FreeSqlRepository<Issue130SoftOnly>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+        await repository.InsertAsync(new Issue130SoftOnly(1, "a"));
+        await repository.InsertAsync(new Issue130SoftOnly(2, "b"));
 
         await repository.DeleteRangeAsync(e => e.Id > 0);
 
-        Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped));
-        Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 1"));
+        Assert.Equal(2, _database.Count(Issue130Tables.SoftOnly));
+        Assert.Equal(2, _database.Count(Issue130Tables.SoftOnly, "\"IsDeleted\" = 1"));
         foreach (var id in new long[] { 1, 2 })
         {
-            var row = _database.Read(Issue130Tables.SoftStamped, id);
+            var row = _database.Read(Issue130Tables.SoftOnly, id);
             Assert.NotNull(row.DateTimeValue("DeletionTime"));
             Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
         }
@@ -323,7 +323,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D02_FreeSql_production_audit_wiring_filters_deleted_rows_from_reads()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "live"));
         await repository.InsertAsync(new Issue130SoftStamped(2, "hidden"));
         await repository.DeleteAsync(2);
@@ -338,7 +338,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D03_FreeSql_stamped_id_delete_must_preserve_the_row_and_advance_the_stamp()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "stamped"));
         var stamp = (await repository.GetAsync(1))!.ConcurrencyStamp;
 
@@ -356,7 +356,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D06_FreeSql_stale_stamp_delete_throws_and_leaves_the_row_untouched()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "stale"));
 
         await Assert.ThrowsAsync<CrestConcurrencyException>(() => repository.DeleteAsync(1, "stale-stamp"));
@@ -370,7 +370,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D08_FreeSql_batch_delete_of_stamped_entities_must_reject_before_any_write()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "a"));
         await repository.InsertAsync(new Issue130SoftStamped(2, "b"));
         var entities = await repository.GetListAsync();
@@ -386,7 +386,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D05_FreeSql_non_soft_delete_entity_stays_physical()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130FreeSqlRepository<Issue130Plain>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+        var repository = new Issue130FreeSqlRepository<Issue130Plain>(new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         await repository.InsertAsync(new Issue130Plain(1, "plain"));
 
         await repository.DeleteAsync(1);
@@ -400,7 +400,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D01_SqlSugar_DeleteAsync_entity_must_preserve_the_row()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "entity"));
         var loaded = await repository.GetAsync(1);
 
@@ -417,7 +417,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D01_SqlSugar_DeleteAsync_id_must_preserve_the_row()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "id"));
 
         await repository.DeleteAsync(1);
@@ -433,31 +433,31 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D01_SqlSugar_DeleteRangeAsync_entities_must_preserve_rows()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
-        await repository.InsertAsync(new Issue130SoftStamped(1, "a"));
-        await repository.InsertAsync(new Issue130SoftStamped(2, "b"));
+        var repository = new Issue130SqlSugarRepository<Issue130SoftOnly>(client, _userProvider);
+        await repository.InsertAsync(new Issue130SoftOnly(1, "a"));
+        await repository.InsertAsync(new Issue130SoftOnly(2, "b"));
 
         await repository.DeleteRangeAsync(await repository.GetListAsync());
 
-        Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped));
-        Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 1"));
+        Assert.Equal(2, _database.Count(Issue130Tables.SoftOnly));
+        Assert.Equal(2, _database.Count(Issue130Tables.SoftOnly, "\"IsDeleted\" = 1"));
     }
 
     [Fact]
     public async Task D01_SqlSugar_DeleteRangeAsync_predicate_must_preserve_rows()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
-        await repository.InsertAsync(new Issue130SoftStamped(1, "a"));
-        await repository.InsertAsync(new Issue130SoftStamped(2, "b"));
+        var repository = new Issue130SqlSugarRepository<Issue130SoftOnly>(client, _userProvider);
+        await repository.InsertAsync(new Issue130SoftOnly(1, "a"));
+        await repository.InsertAsync(new Issue130SoftOnly(2, "b"));
 
         await repository.DeleteRangeAsync(e => e.Id > 0);
 
-        Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped));
-        Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 1"));
+        Assert.Equal(2, _database.Count(Issue130Tables.SoftOnly));
+        Assert.Equal(2, _database.Count(Issue130Tables.SoftOnly, "\"IsDeleted\" = 1"));
         foreach (var id in new long[] { 1, 2 })
         {
-            var row = _database.Read(Issue130Tables.SoftStamped, id);
+            var row = _database.Read(Issue130Tables.SoftOnly, id);
             Assert.NotNull(row.DateTimeValue("DeletionTime"));
             Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
         }
@@ -469,7 +469,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
         InsertStamped(1, "live");
         InsertStamped(2, "deleted", isDeleted: true);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
 
         var list = await repository.GetListAsync();
         var byId = await repository.GetAsync(2);
@@ -487,7 +487,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D03_SqlSugar_stamped_id_delete_must_preserve_the_row_and_advance_the_stamp()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "stamped"));
         var stamp = (await repository.GetAsync(1))!.ConcurrencyStamp;
 
@@ -505,7 +505,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D06_SqlSugar_stale_stamp_delete_throws_and_leaves_the_row_untouched()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "stale"));
 
         await Assert.ThrowsAsync<CrestConcurrencyException>(() => repository.DeleteAsync(1, "stale-stamp"));
@@ -519,7 +519,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     public async Task D08_SqlSugar_batch_delete_of_stamped_entities_must_reject_before_any_write()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
         await repository.InsertAsync(new Issue130SoftStamped(1, "a"));
         await repository.InsertAsync(new Issue130SoftStamped(2, "b"));
         var entities = await repository.GetListAsync();
@@ -532,10 +532,60 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     }
 
     [Fact]
+    public async Task D08_FreeSql_predicate_delete_of_stamped_entities_must_reject_before_any_write()
+    {
+        var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
+            new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+        await repository.InsertAsync(new Issue130SoftStamped(1, "a"));
+
+        var exception = await Record.ExceptionAsync(() => repository.DeleteRangeAsync(e => e.Id > 0));
+
+        Assert.IsType<NotSupportedException>(exception);
+        Assert.Contains("stamp", exception!.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 0"));
+    }
+
+    [Fact]
+    public async Task D08_SqlSugar_predicate_delete_of_stamped_entities_must_reject_before_any_write()
+    {
+        var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
+        await repository.InsertAsync(new Issue130SoftStamped(1, "a"));
+
+        var exception = await Record.ExceptionAsync(() => repository.DeleteRangeAsync(e => e.Id > 0));
+
+        Assert.IsType<NotSupportedException>(exception);
+        Assert.Contains("stamp", exception!.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 0"));
+    }
+
+    [Fact]
+    public void D09_FreeSql_GetQueryable_must_reject_fake_IQueryable_translation()
+    {
+        var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
+            new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+
+        var exception = Assert.Throws<NotSupportedException>(() => repository.GetQueryable());
+        Assert.Contains("IQueryable", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void D09_SqlSugar_GetQueryable_must_reject_fake_IQueryable_translation()
+    {
+        var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
+
+        var exception = Assert.Throws<NotSupportedException>(() => repository.GetQueryable());
+        Assert.Contains("IQueryable", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task D05_SqlSugar_non_soft_delete_entity_stays_physical()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130Plain>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130Plain>(client, _userProvider);
         await repository.InsertAsync(new Issue130Plain(1, "plain"));
 
         await repository.DeleteAsync(1);

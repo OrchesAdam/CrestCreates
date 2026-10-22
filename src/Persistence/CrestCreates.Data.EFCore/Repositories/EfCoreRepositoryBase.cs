@@ -132,6 +132,11 @@ namespace CrestCreates.Data.EFCore.Repositories
 
         public override async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            if (entity is ISoftDelete { IsDeleted: true })
+            {
+                return;
+            }
+
             if (entity is IHasConcurrencyStamp)
             {
                 var dbContext = (DbContext)_dbContext.GetNativeContext();
@@ -171,22 +176,25 @@ namespace CrestCreates.Data.EFCore.Repositories
                 await DeleteAsync(id, cancellationToken);
                 return;
             }
-            var dbContext = (DbContext)_dbContext.GetNativeContext();
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
-            var rows = await dbContext.Set<TEntity>()
-                .Where(e => e.Id.Equals(id) && EF.Property<string>(e, "ConcurrencyStamp") == expectedStamp)
-                .ExecuteDeleteAsync(effective);
-            if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+
+            await DeleteStampedTrackedAsync(id, expectedStamp, cancellationToken);
         }
 
         public override async Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
-            _dbContext.Set<TEntity>().RemoveRange(entities);
+            ThrowIfBatchDeleteHasNoPerRowStamp();
+
+            var liveEntities = entities
+                .Where(entity => entity is not ISoftDelete { IsDeleted: true })
+                .ToList();
+            _dbContext.Set<TEntity>().RemoveRange(liveEntities);
             await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
         }
 
         public override async Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            ThrowIfBatchDeleteHasNoPerRowStamp();
+
             using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             var entities = await GetQueryable().Where(predicate).ToListAsync(effective);
             _dbContext.Set<TEntity>().RemoveRange(entities);
@@ -259,6 +267,52 @@ namespace CrestCreates.Data.EFCore.Repositories
         {
             using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             return await GetQueryable().AnyAsync(e => e.Id.Equals(id), effective);
+        }
+
+        private async Task DeleteStampedTrackedAsync(TKey id, string expectedStamp, CancellationToken cancellationToken)
+        {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
+
+            var entity = await GetQueryable()
+                .Where(e => e.Id.Equals(id))
+                .FirstOrDefaultAsync(effective);
+            if (entity is null)
+            {
+                // Zero matching rows (including rows hidden by filters) stays a concurrency failure
+                // for stamped deletes so callers cannot probe other tenants' existence.
+                throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+            }
+
+            if (entity is not IHasConcurrencyStamp stampEntity)
+            {
+                _dbContext.Set<TEntity>().Remove(entity);
+            }
+            else
+            {
+                var dbContext = (DbContext)_dbContext.GetNativeContext();
+                var entry = dbContext.Entry(entity);
+                entry.Property(nameof(IHasConcurrencyStamp.ConcurrencyStamp)).OriginalValue = expectedStamp;
+                stampEntity.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+                entry.State = EntityState.Deleted;
+            }
+
+            try
+            {
+                await SaveChangesIfNoActiveTransactionAsync(effective);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+            }
+        }
+
+        private static void ThrowIfBatchDeleteHasNoPerRowStamp()
+        {
+            if (typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
+            {
+                throw new NotSupportedException(
+                    "DeleteRangeAsync does not accept entities with concurrency stamps because the batch overload has no per-row expectedStamp. Delete stamped entities one by one with DeleteAsync(id, expectedStamp).");
+            }
         }
 
         private async Task SaveChangesIfNoActiveTransactionAsync(CancellationToken cancellationToken)

@@ -1,7 +1,9 @@
 using System;
 using System.Linq;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.Interceptors;
+using CrestCreates.Data.EFCore.MultiTenancy;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.FreeSql.Interceptors;
 using CrestCreates.Data.FreeSql.Repositories;
@@ -59,6 +61,8 @@ public sealed class Issue130EfDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        SoftDeleteFilterConfiguration.ApplyAll(modelBuilder);
+
         modelBuilder.Entity<Issue130SoftStamped>(entity =>
         {
             entity.ToTable(Issue130Tables.SoftStamped);
@@ -126,8 +130,10 @@ public sealed class EfCoreRepositoryBaseProbe : EfCoreRepositoryBase<Issue130Sof
 public sealed class Issue130FreeSqlRepository<TEntity> : FreeSqlRepository<TEntity, long>
     where TEntity : class, CrestCreates.Domain.Shared.Entities.IEntity<long>
 {
-    public Issue130FreeSqlRepository(FreeSqlUnitOfWorkManager unitOfWorkManager)
-        : base(unitOfWorkManager)
+    public Issue130FreeSqlRepository(
+        FreeSqlUnitOfWorkManager unitOfWorkManager,
+        ICurrentUserProvider? currentUserProvider = null)
+        : base(unitOfWorkManager, null, currentUserProvider)
     {
     }
 
@@ -164,8 +170,10 @@ internal static class Issue130SqlSugarBed
 public sealed class Issue130SqlSugarRepository<TEntity> : SqlSugarRepository<TEntity, long>
     where TEntity : class, CrestCreates.Domain.Shared.Entities.IEntity<long>, new()
 {
-    public Issue130SqlSugarRepository(ISqlSugarClient client)
-        : base(client)
+    public Issue130SqlSugarRepository(
+        ISqlSugarClient client,
+        ICurrentUserProvider? currentUserProvider = null)
+        : base(client, null, currentUserProvider)
     {
     }
 

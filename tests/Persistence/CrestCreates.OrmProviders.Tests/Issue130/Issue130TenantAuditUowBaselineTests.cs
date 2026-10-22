@@ -4,6 +4,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
+using CrestCreates.Data.EFCore.Interceptors;
+using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.FreeSql.Extensions;
 using CrestCreates.Data.FreeSql.Interceptors;
 using CrestCreates.Data.FreeSql.UnitOfWork;
@@ -15,6 +19,7 @@ using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.Domain.UnitOfWork;
 using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SqlSugar;
 using Xunit;
@@ -66,7 +71,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         InsertTenantRow(1, "tenant-a", "a");
         InsertTenantRow(2, "tenant-b", "b");
         var repository = new Issue130FreeSqlRepository<Issue130TenantEntity>(
-            new FreeSqlUnitOfWorkManager(freeSql));
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
 
         var rows = await repository.GetListAsync();
 
@@ -82,7 +87,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         InsertTenantRow(1, "tenant-a", "a");
         InsertTenantRow(2, "tenant-b", "b");
         var repository = new Issue130FreeSqlRepository<Issue130TenantEntity>(
-            new FreeSqlUnitOfWorkManager(freeSql));
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
 
         _tenant.Id = "tenant-b";
 
@@ -99,7 +104,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         client.ConfigureMultiTenantFilter(_tenant);
         InsertTenantRow(1, "tenant-a", "a");
         InsertTenantRow(2, "tenant-b", "b");
-        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider);
 
         var rows = await repository.GetListAsync();
 
@@ -114,7 +119,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         client.ConfigureMultiTenantFilter(_tenant);
         InsertTenantRow(1, "tenant-a", "a");
         InsertTenantRow(2, "tenant-b", "b");
-        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider);
 
         _tenant.Id = "tenant-b";
 
@@ -168,7 +173,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         _tenant.Id = "tenant-b";
         freeSql.ConfigureMultiTenantFilter(_tenant);
         var repository = new Issue130FreeSqlRepository<Issue130TenantEntity>(
-            new FreeSqlUnitOfWorkManager(freeSql));
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         var forged = new Issue130TenantEntity(1, "tenant-b", "forged") { ConcurrencyStamp = "stamp-1" };
 
         var exception = await Record.ExceptionAsync(() => repository.UpdateAsync(forged));
@@ -187,7 +192,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         _tenant.Id = "tenant-b";
         freeSql.ConfigureMultiTenantFilter(_tenant);
         var repository = new Issue130FreeSqlRepository<Issue130TenantEntity>(
-            new FreeSqlUnitOfWorkManager(freeSql));
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
 
         var exception = await Record.ExceptionAsync(() => repository.DeleteAsync(1));
 
@@ -205,7 +210,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         InsertTenantRow(1, "tenant-a", "original");
         _tenant.Id = "tenant-b";
         client.ConfigureMultiTenantFilter(_tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider);
         var forged = new Issue130TenantEntity(1, "tenant-b", "forged") { ConcurrencyStamp = "stamp-1" };
 
         var exception = await Record.ExceptionAsync(() => repository.UpdateAsync(forged));
@@ -223,7 +228,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         InsertTenantRow(1, "tenant-a", "original");
         _tenant.Id = "tenant-b";
         client.ConfigureMultiTenantFilter(_tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider);
 
         var exception = await Record.ExceptionAsync(() => repository.DeleteAsync(1));
 
@@ -256,7 +261,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
-            new FreeSqlUnitOfWorkManager(freeSql));
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
 
         await repository.InsertAsync(new Issue130SoftStamped(1, "audited"));
 
@@ -270,7 +275,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     public async Task A01_SqlSugar_insert_persists_creation_audit()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
 
         await repository.InsertAsync(new Issue130SoftStamped(1, "audited"));
 
@@ -307,7 +312,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         InsertAuditedRow(1, "original");
         var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
-            new FreeSqlUnitOfWorkManager(freeSql));
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
         var loaded = await repository.GetAsync(1);
         _userProvider.UserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         loaded!.Name = "updated";
@@ -326,7 +331,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
         InsertAuditedRow(1, "original");
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
         var loaded = await repository.GetAsync(1);
         _userProvider.UserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         loaded!.Name = "updated";
@@ -341,6 +346,41 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     }
 
     // ---------------------------------------------------------------- Unit of work and cancellation
+
+    [Fact]
+    public async Task U01_EfCore_stale_stamp_delete_reports_conflict_at_complete()
+    {
+        Issue130EfBed.EnsureCreated(_database, _user, _tenant);
+        InsertAuditedRow(1, "stamped");
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IDomainEventPublisher>(new Issue130NoOpDomainEventPublisher());
+        services.AddDbContext<Issue130EfDbContext>(options => options
+            .UseSqlite(_database.ConnectionString)
+            .AddInterceptors(new AuditInterceptor(_user), new MultiTenancyInterceptor(_tenant)));
+        services.AddScoped<CrestCreates.DbContextProvider.Abstract.IDataBaseContext>(
+            provider => new CrestCreates.Data.EFCore.DbContexts.EfCoreDbContextAdapter(
+                provider.GetRequiredService<Issue130EfDbContext>()));
+        services.AddScoped(provider => new EfCoreRepository<Issue130SoftStamped, long>(
+            provider.GetRequiredService<CrestCreates.DbContextProvider.Abstract.IDataBaseContext>()));
+        services.AddUnitOfWork();
+        services.AddEfCoreUnitOfWork();
+
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+        var repository = scope.ServiceProvider.GetRequiredService<EfCoreRepository<Issue130SoftStamped, long>>();
+
+        await using var unitOfWork = manager.BeginScope();
+        await unitOfWork.StartAsync();
+        await repository.DeleteAsync(1, "stale-stamp");
+
+        await Assert.ThrowsAsync<CrestConcurrencyException>(() => unitOfWork.CompleteAsync());
+
+        var row = _database.Read(Issue130Tables.SoftStamped, 1);
+        Assert.Equal(0, row.Integer("IsDeleted"));
+        Assert.Equal("stamp-1", row.Text("ConcurrencyStamp"));
+    }
 
     [Fact]
     public async Task U01_FreeSql_two_repositories_follow_the_unit_of_work_and_abandon_hides_both_writes()
@@ -512,7 +552,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
-            new FreeSqlUnitOfWorkManager(freeSql));
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => repository.GetListAsync(new CancellationToken(canceled: true)));
@@ -522,7 +562,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     public async Task U07_SqlSugar_repository_honors_a_pre_cancelled_token()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => repository.GetListAsync(new CancellationToken(canceled: true)));

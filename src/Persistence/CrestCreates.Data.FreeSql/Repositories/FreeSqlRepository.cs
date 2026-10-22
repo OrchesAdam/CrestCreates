@@ -5,6 +5,7 @@ using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using FreeSql;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Exceptions;
@@ -30,21 +31,32 @@ namespace CrestCreates.Data.FreeSql.Repositories
     {
         protected readonly IFreeSql _orm;
         protected readonly ILogger<FreeSqlRepository<TEntity, TKey>>? _logger;
+        private readonly ICurrentUserProvider? _currentUserProvider;
 
         /// <summary>
         /// 构造函数（支持 UnitOfWorkManager）
         /// </summary>
         /// <param name="uowManager">工作单元管理器</param>
         /// <param name="logger">日志记录器</param>
-        public FreeSqlRepository(UnitOfWork.FreeSqlUnitOfWorkManager uowManager, ILogger<FreeSqlRepository<TEntity, TKey>>? logger = null)
+        public FreeSqlRepository(
+            UnitOfWork.FreeSqlUnitOfWorkManager uowManager,
+            ILogger<FreeSqlRepository<TEntity, TKey>>? logger = null,
+            ICurrentUserProvider? currentUserProvider = null)
         {
             _orm = uowManager.Orm ?? throw new InvalidOperationException("UnitOfWorkManager.Orm must not be null.");
             _logger = logger;
+            _currentUserProvider = currentUserProvider;
+
+            if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
+            {
+                _orm.GlobalFilter.Apply<ISoftDelete>("SoftDelete", entity => entity.IsDeleted == false);
+            }
         }
 
         public override IQueryable<TEntity> GetQueryable()
         {
-            return _orm.Select<TEntity>().ToList().AsQueryable();
+            throw new NotSupportedException(
+                "FreeSql repositories do not expose a composable IQueryable. Use the asynchronous repository query methods or the SDK query API directly.");
         }
 
         public override async Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default)
@@ -215,7 +227,29 @@ namespace CrestCreates.Data.FreeSql.Repositories
             try
             {
                 _logger?.LogDebug("Deleting entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
-                if (entity is IHasConcurrencyStamp stamp)
+                if (entity is ISoftDelete)
+                {
+                    if (entity is IHasConcurrencyStamp stamp)
+                    {
+                        var rows = await FreeSqlSoftDeleteOperation.ExecuteAsync(
+                            _orm.Update<TEntity>().Where(
+                                "Id = @Id AND ConcurrencyStamp = @Stamp",
+                                new { Id = entity.Id, Stamp = stamp.ConcurrencyStamp }),
+                            _currentUserProvider,
+                            advanceConcurrencyStamp: true,
+                            cancellationToken);
+                        if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
+                    }
+                    else
+                    {
+                        await FreeSqlSoftDeleteOperation.ExecuteAsync(
+                            _orm.Update<TEntity>().Where("Id = @Id", new { Id = entity.Id }),
+                            _currentUserProvider,
+                            advanceConcurrencyStamp: false,
+                            cancellationToken);
+                    }
+                }
+                else if (entity is IHasConcurrencyStamp stamp)
                 {
                     var rows = await _orm.Delete<TEntity>()
                         .Where("Id = @Id AND ConcurrencyStamp = @Stamp", new { Id = entity.Id, Stamp = stamp.ConcurrencyStamp })
@@ -240,7 +274,18 @@ namespace CrestCreates.Data.FreeSql.Repositories
             try
             {
                 _logger?.LogDebug("Deleting entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
-                await _orm.Delete<TEntity>().Where(e => e.Id.Equals(id)).ExecuteAffrowsAsync(cancellationToken);
+                if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
+                {
+                    await FreeSqlSoftDeleteOperation.ExecuteAsync(
+                        _orm.Update<TEntity>().Where("Id = @Id", new { Id = id }),
+                        _currentUserProvider,
+                        advanceConcurrencyStamp: typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)),
+                        cancellationToken);
+                }
+                else
+                {
+                    await _orm.Delete<TEntity>().Where(e => e.Id.Equals(id)).ExecuteAffrowsAsync(cancellationToken);
+                }
                 _logger?.LogDebug("Deleted entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
             }
             catch (Exception ex)
@@ -260,10 +305,24 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     return;
                 }
                 _logger?.LogDebug("Deleting entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
-                var rows = await _orm.Delete<TEntity>()
-                    .Where("Id = @Id AND ConcurrencyStamp = @Stamp", new { Id = id, Stamp = expectedStamp })
-                    .ExecuteAffrowsAsync(cancellationToken);
-                if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+                if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
+                {
+                    var softRows = await FreeSqlSoftDeleteOperation.ExecuteAsync(
+                        _orm.Update<TEntity>().Where(
+                            "Id = @Id AND ConcurrencyStamp = @Stamp",
+                            new { Id = id, Stamp = expectedStamp }),
+                        _currentUserProvider,
+                        advanceConcurrencyStamp: true,
+                        cancellationToken);
+                    if (softRows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+                }
+                else
+                {
+                    var rows = await _orm.Delete<TEntity>()
+                        .Where("Id = @Id AND ConcurrencyStamp = @Stamp", new { Id = id, Stamp = expectedStamp })
+                        .ExecuteAffrowsAsync(cancellationToken);
+                    if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+                }
                 _logger?.LogDebug("Deleted entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
             }
             catch (Exception ex)
@@ -277,10 +336,28 @@ namespace CrestCreates.Data.FreeSql.Repositories
         {
             try
             {
+                ThrowIfBatchDeleteHasNoPerRowStamp();
                 _logger?.LogDebug("Deleting many entities {EntityType}", typeof(TEntity).Name);
-                var ids = entities.Select(e => e.Id).ToList();
-                await _orm.Delete<TEntity>().Where(e => ids.Contains(e.Id)).ExecuteAffrowsAsync(cancellationToken);
-                _logger?.LogDebug("Deleted {Count} entities {EntityType}", entities.Count(), typeof(TEntity).Name);
+                var entityList = entities.ToList();
+                var ids = entityList.Select(e => e.Id).ToList();
+                if (ids.Count == 0)
+                {
+                    return;
+                }
+
+                if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
+                {
+                    await FreeSqlSoftDeleteOperation.ExecuteAsync(
+                        _orm.Update<TEntity>().Where(e => ids.Contains(e.Id)),
+                        _currentUserProvider,
+                        advanceConcurrencyStamp: false,
+                        cancellationToken);
+                }
+                else
+                {
+                    await _orm.Delete<TEntity>().Where(e => ids.Contains(e.Id)).ExecuteAffrowsAsync(cancellationToken);
+                }
+                _logger?.LogDebug("Deleted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
             }
             catch (Exception ex)
             {
@@ -293,14 +370,35 @@ namespace CrestCreates.Data.FreeSql.Repositories
         {
             try
             {
+                ThrowIfBatchDeleteHasNoPerRowStamp();
                 _logger?.LogDebug("Deleting many entities {EntityType} by predicate", typeof(TEntity).Name);
-                await _orm.Delete<TEntity>().Where(predicate).ExecuteAffrowsAsync(cancellationToken);
+                if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
+                {
+                    await FreeSqlSoftDeleteOperation.ExecuteAsync(
+                        _orm.Update<TEntity>().Where(predicate),
+                        _currentUserProvider,
+                        advanceConcurrencyStamp: false,
+                        cancellationToken);
+                }
+                else
+                {
+                    await _orm.Delete<TEntity>().Where(predicate).ExecuteAffrowsAsync(cancellationToken);
+                }
                 _logger?.LogDebug("Deleted entities {EntityType} by predicate", typeof(TEntity).Name);
             }
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Error deleting many entities {EntityType} by predicate", typeof(TEntity).Name);
                 throw;
+            }
+        }
+
+        private static void ThrowIfBatchDeleteHasNoPerRowStamp()
+        {
+            if (typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
+            {
+                throw new NotSupportedException(
+                    "DeleteRangeAsync does not accept entities with concurrency stamps because the batch overload has no per-row expectedStamp. Delete stamped entities one by one with DeleteAsync(id, expectedStamp).");
             }
         }
 

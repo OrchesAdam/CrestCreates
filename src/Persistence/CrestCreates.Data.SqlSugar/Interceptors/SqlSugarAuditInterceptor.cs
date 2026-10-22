@@ -121,6 +121,8 @@ namespace CrestCreates.Data.SqlSugar.Interceptors
                     }
                 }
             };
+
+            ConfigureSoftDeleteFilter(client);
         }
 
         /// <summary>

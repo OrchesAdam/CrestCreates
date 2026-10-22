@@ -48,12 +48,31 @@ public class TenantFilterSourceGeneratorTests
         }
         """;
 
+    private const string SoftDeleteFilterRegistryStoreStub = """
+        using Microsoft.EntityFrameworkCore;
+
+        namespace CrestCreates.Data.EFCore.MultiTenancy
+        {
+            public static class SoftDeleteFilterRegistryStore
+            {
+                public delegate void ApplyAllDelegate(ModelBuilder modelBuilder);
+                public static void Register(ApplyAllDelegate applyAll) { }
+                public static ApplyAllDelegate? GetApplyAll() => null;
+            }
+        }
+        """;
+
     private const string ModelBuilderStub = """
         namespace Microsoft.EntityFrameworkCore
         {
             public class ModelBuilder
             {
                 public EntityTypeBuilder<T> Entity<T>() => new EntityTypeBuilder<T>();
+                public Model Model { get; } = new Model();
+            }
+            public class Model
+            {
+                public object? FindEntityType(System.Type type) => null;
             }
             public class DbContext { }
             public class DbSet<T> { }
@@ -69,7 +88,14 @@ public class TenantFilterSourceGeneratorTests
         }
         """;
 
-    private static string[] AllStubs => new[] { IMultiTenantStub, ICurrentTenantStub, TenantFilterRegistryStoreStub, ModelBuilderStub };
+    private static string[] AllStubs => new[]
+    {
+        IMultiTenantStub,
+        ICurrentTenantStub,
+        TenantFilterRegistryStoreStub,
+        SoftDeleteFilterRegistryStoreStub,
+        ModelBuilderStub
+    };
 
     [Fact]
     public void GeneratesTenantFilter_ForEntityWithIMultiTenant()
@@ -210,6 +236,80 @@ public class TenantFilterSourceGeneratorTests
         Assert.NotNull(generated);
         Assert.Contains("ConfigureBookFilter", generated.SourceText);
         Assert.Contains("External.Domain.Book", generated.SourceText);
+    }
+
+    [Fact]
+    public void GeneratesSoftDeleteFilter_ForEntityWithISoftDelete()
+    {
+        const string softDeleteStub = """
+            namespace CrestCreates.Domain.Shared.Entities.Auditing
+            {
+                public interface ISoftDelete
+                {
+                    bool IsDeleted { get; set; }
+                }
+            }
+            """;
+        const string source = """
+            using CrestCreates.Domain.Shared.Attributes;
+            using CrestCreates.Domain.Shared.Entities.Auditing;
+
+            [Entity]
+            public class Book : ISoftDelete
+            {
+                public bool IsDeleted { get; set; }
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<TenantFilterSourceGenerator>(
+            source,
+            additionalSources: AllStubs.Concat(new[] { softDeleteStub }).ToArray());
+
+        Assert.True(result.CompilationSuccess, string.Join(Environment.NewLine, result.GetErrors()));
+        var generated = result.GetSourceByFileName("TenantFilter.g.cs");
+        Assert.NotNull(generated);
+        Assert.Contains("ConfigureBookSoftDeleteFilter", generated.SourceText);
+        Assert.Contains("HasQueryFilter(e => !e.IsDeleted)", generated.SourceText);
+        Assert.Contains("SoftDeleteFilterRegistryStore.Register(ApplySoftDeleteAll)", generated.SourceText);
+        Assert.DoesNotContain("TenantFilterRegistryStore.Register", generated.SourceText);
+    }
+
+    [Fact]
+    public void CombinesTenantAndSoftDeleteFilters_WithoutReplacingEachOther()
+    {
+        const string softDeleteStub = """
+            namespace CrestCreates.Domain.Shared.Entities.Auditing
+            {
+                public interface ISoftDelete
+                {
+                    bool IsDeleted { get; set; }
+                }
+            }
+            """;
+        const string source = """
+            using CrestCreates.Domain.Shared.Attributes;
+            using CrestCreates.Data.EFCore.MultiTenancy;
+            using CrestCreates.Domain.Shared.Entities.Auditing;
+
+            [Entity]
+            public class Book : IMultiTenant, ISoftDelete
+            {
+                public string? TenantId { get; set; }
+                public bool IsDeleted { get; set; }
+            }
+            """;
+
+        var result = SourceGeneratorTestHelper.RunGenerator<TenantFilterSourceGenerator>(
+            source,
+            additionalSources: AllStubs.Concat(new[] { softDeleteStub }).ToArray());
+
+        Assert.True(result.CompilationSuccess, string.Join(Environment.NewLine, result.GetErrors()));
+        var generated = result.GetSourceByFileName("TenantFilter.g.cs");
+        Assert.NotNull(generated);
+        Assert.Contains(
+            "currentTenant.Id == null || e.TenantId == currentTenant.Id && !e.IsDeleted",
+            generated.SourceText.Replace("(", string.Empty).Replace(")", string.Empty));
+        Assert.Contains("modelBuilder.Model.FindEntityType", generated.SourceText);
     }
 
     [Fact]

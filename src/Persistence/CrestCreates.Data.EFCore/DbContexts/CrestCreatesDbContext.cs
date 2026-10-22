@@ -298,6 +298,11 @@ namespace CrestCreates.Data.EFCore.DbContexts
 
             modelBuilder.ConfigureConcurrencyStamp();
 
+            if (SoftDeleteFilterRegistryStore.HasRegistrations)
+            {
+                SoftDeleteFilterConfiguration.ApplyAll(modelBuilder);
+            }
+
             if (_currentTenant != null && TenantFilterRegistryStore.HasRegistrations)
             {
                 modelBuilder.ConfigureTenantDiscriminator(_currentTenant);
