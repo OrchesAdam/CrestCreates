@@ -37,10 +37,11 @@ internal static class Issue130EfBed
     }
 
     public static EfCoreRepository<TEntity, long> Repository<TEntity>(
-        Issue130EfDbContext context)
+        Issue130EfDbContext context,
+        CrestCreates.MultiTenancy.Abstract.ICurrentTenant? tenant = null)
         where TEntity : class, CrestCreates.Domain.Shared.Entities.IEntity<long>
     {
-        return new EfCoreRepository<TEntity, long>(new EfCoreDbContextAdapter(context));
+        return new EfCoreRepository<TEntity, long>(new EfCoreDbContextAdapter(context), null, tenant);
     }
 }
 
@@ -95,6 +96,48 @@ public sealed class Issue130EfDbContext : DbContext
     }
 }
 
+public sealed class Issue130EfTenantDbContext : DbContext
+{
+    private readonly CrestCreates.MultiTenancy.Abstract.ICurrentTenant _tenant;
+
+    public Issue130EfTenantDbContext(DbContextOptions<Issue130EfTenantDbContext> options)
+        : this(options, new Issue130MutableTenant(null))
+    {
+    }
+
+    public Issue130EfTenantDbContext(
+        DbContextOptions<Issue130EfTenantDbContext> options,
+        CrestCreates.MultiTenancy.Abstract.ICurrentTenant tenant)
+        : base(options)
+    {
+        _tenant = tenant;
+    }
+
+    public DbSet<Issue130TenantEntity> TenantEntities => Set<Issue130TenantEntity>();
+
+    public DbSet<Issue130OptionalTenantEntity> OptionalTenantEntities => Set<Issue130OptionalTenantEntity>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        SoftDeleteFilterConfiguration.ApplyAll(modelBuilder);
+        CrestCreates.Data.EFCore.MultiTenancy.TenantFilterConfiguration.ApplyAll(modelBuilder, _tenant);
+
+        modelBuilder.Entity<Issue130TenantEntity>(entity =>
+        {
+            entity.ToTable(Issue130Tables.Tenant);
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+        });
+
+        modelBuilder.Entity<Issue130OptionalTenantEntity>(entity =>
+        {
+            entity.ToTable("S1_OptionalTenant");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+        });
+    }
+}
+
 internal static class Issue130FreeSqlBed
 {
     public static IFreeSql Create(
@@ -114,6 +157,8 @@ internal static class Issue130FreeSqlBed
         freeSql.CodeFirst.SyncStructure<Issue130MappedSoftOnly>();
         freeSql.CodeFirst.SyncStructure<Issue130ReservedSoftStamped>();
         freeSql.CodeFirst.SyncStructure<Issue130ReservedSoftOnly>();
+        freeSql.CodeFirst.SyncStructure<Issue130OptionalTenantEntity>();
+        freeSql.CodeFirst.SyncStructure<Issue130TenantOnlyEntity>();
 
         freeSql.ConfigureAuditInterceptor(userProvider, tenant);
         return freeSql;
@@ -136,8 +181,9 @@ public sealed class Issue130FreeSqlRepository<TEntity> : FreeSqlRepository<TEnti
 {
     public Issue130FreeSqlRepository(
         FreeSqlUnitOfWorkManager unitOfWorkManager,
-        ICurrentUserProvider? currentUserProvider = null)
-        : base(unitOfWorkManager, null, currentUserProvider)
+        ICurrentUserProvider? currentUserProvider = null,
+        CrestCreates.MultiTenancy.Abstract.ICurrentTenant? currentTenant = null)
+        : base(unitOfWorkManager, null, currentUserProvider, currentTenant)
     {
     }
 
@@ -168,7 +214,9 @@ internal static class Issue130SqlSugarBed
             typeof(Issue130MappedSoftStamped),
             typeof(Issue130MappedSoftOnly),
             typeof(Issue130ReservedSoftStamped),
-            typeof(Issue130ReservedSoftOnly));
+            typeof(Issue130ReservedSoftOnly),
+            typeof(Issue130OptionalTenantEntity),
+            typeof(Issue130TenantOnlyEntity));
 
         client.ConfigureAuditInterceptor(userProvider, tenant);
         return client;
@@ -180,8 +228,9 @@ public sealed class Issue130SqlSugarRepository<TEntity> : SqlSugarRepository<TEn
 {
     public Issue130SqlSugarRepository(
         ISqlSugarClient client,
-        ICurrentUserProvider? currentUserProvider = null)
-        : base(client, null, currentUserProvider)
+        ICurrentUserProvider? currentUserProvider = null,
+        CrestCreates.MultiTenancy.Abstract.ICurrentTenant? currentTenant = null)
+        : base(client, null, currentUserProvider, currentTenant)
     {
     }
 

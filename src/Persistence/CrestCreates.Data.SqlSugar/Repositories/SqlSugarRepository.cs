@@ -6,6 +6,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using SqlSugar;
 using CrestCreates.Data.Abstractions;
+using CrestCreates.DataFilter.Entities;
+using CrestCreates.Domain.Shared.Entities.Auditing;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Entities;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Exceptions;
@@ -23,15 +26,23 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         protected readonly ISqlSugarClient _sqlSugarClient;
         protected readonly ILogger<SqlSugarRepository<TEntity, TKey>>? _logger;
         private readonly ICurrentUserProvider? _currentUserProvider;
+        private readonly ICurrentTenant? _currentTenant;
+        private static readonly bool HasTenantMarker =
+            typeof(IMustHaveTenant).IsAssignableFrom(typeof(TEntity)) ||
+            typeof(IMultiTenant).IsAssignableFrom(typeof(TEntity));
+        private static readonly bool HasRequiredTenantMarker =
+            typeof(IMustHaveTenant).IsAssignableFrom(typeof(TEntity));
 
         protected SqlSugarRepository(
             ISqlSugarClient sqlSugarClient,
             ILogger<SqlSugarRepository<TEntity, TKey>>? logger = null,
-            ICurrentUserProvider? currentUserProvider = null)
+            ICurrentUserProvider? currentUserProvider = null,
+            ICurrentTenant? currentTenant = null)
         {
             _sqlSugarClient = sqlSugarClient;
             _logger = logger;
             _currentUserProvider = currentUserProvider;
+            _currentTenant = currentTenant;
 
             SqlSugarSoftDeleteFilterRegistration.EnsureRegistered(_sqlSugarClient, typeof(TEntity));
         }
@@ -44,6 +55,170 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 .GetTranslationColumnName(mappedName);
         }
 
+
+        private (string Sql, Dictionary<string, object> Parameters)? TenantFilter()
+        {
+            if (!HasTenantMarker)
+            {
+                return null;
+            }
+
+            var tenantId = _currentTenant?.Id;
+            var column = ColumnName(nameof(IMustHaveTenant.TenantId));
+            var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+            if (HasRequiredTenantMarker)
+            {
+                if (string.IsNullOrEmpty(tenantId))
+                {
+                    throw new InvalidOperationException(
+                        $"{typeof(TEntity).Name} requires a current tenant for this operation.");
+                }
+
+                parameters["tenantId"] = tenantId;
+                return ($"{column} = @tenantId", parameters);
+            }
+
+            if (string.IsNullOrEmpty(tenantId))
+            {
+                return ($"{column} IS NULL", parameters);
+            }
+
+            parameters["tenantId"] = tenantId;
+            return ($"({column} = @tenantId OR {column} IS NULL)", parameters);
+        }
+
+        private void AddTenantCondition(List<string> conditions, Dictionary<string, object> parameters)
+        {
+            var filter = TenantFilter();
+            if (filter is null)
+            {
+                return;
+            }
+
+            conditions.Add(filter.Value.Sql);
+            foreach (var parameter in filter.Value.Parameters)
+            {
+                parameters[parameter.Key] = parameter.Value;
+            }
+        }
+
+        private void ApplyTenantOnInsert(TEntity entity)
+        {
+            if (!HasTenantMarker)
+            {
+                return;
+            }
+
+            var tenantId = _currentTenant?.Id;
+            if (HasRequiredTenantMarker)
+            {
+                if (string.IsNullOrEmpty(tenantId))
+                {
+                    throw new InvalidOperationException(
+                        $"{typeof(TEntity).Name} requires a current tenant for insert.");
+                }
+
+                var mustHaveTenant = (IMustHaveTenant)entity;
+                if (string.IsNullOrEmpty(mustHaveTenant.TenantId))
+                {
+                    mustHaveTenant.TenantId = tenantId;
+                }
+                else if (!string.Equals(mustHaveTenant.TenantId, tenantId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot insert {typeof(TEntity).Name} for tenant '{mustHaveTenant.TenantId}' while the current tenant is '{tenantId}'.");
+                }
+                return;
+            }
+
+            var multiTenant = (IMultiTenant)entity;
+            if (string.IsNullOrEmpty(multiTenant.TenantId) && !string.IsNullOrEmpty(tenantId))
+            {
+                multiTenant.TenantId = tenantId;
+            }
+            else if (!string.IsNullOrEmpty(multiTenant.TenantId) &&
+                     !string.Equals(multiTenant.TenantId, tenantId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot insert {typeof(TEntity).Name} for tenant '{multiTenant.TenantId}' while the current tenant is '{tenantId}'.");
+            }
+        }
+
+        private static string? ReadTenantId(TEntity entity)
+        {
+            return entity switch
+            {
+                IMustHaveTenant mustHaveTenant => mustHaveTenant.TenantId,
+                IMultiTenant multiTenant => multiTenant.TenantId,
+                _ => null
+            };
+        }
+
+        private async Task<TEntity?> FindPersistedForTenantCheckAsync(TKey id)
+        {
+            if (!HasTenantMarker)
+            {
+                return null;
+            }
+
+            var query = _sqlSugarClient.Queryable<TEntity>()
+                .ClearFilter()
+                .Where($"{ColumnName("Id")} = @entityId", new { entityId = id });
+            if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
+            {
+                query = query.Where($"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0", new { });
+            }
+
+            return await query.FirstAsync();
+        }
+
+        private void EnsurePersistedTenant(TEntity? persisted, TKey id)
+        {
+            if (!HasTenantMarker || persisted is null)
+            {
+                return;
+            }
+
+            var currentTenant = _currentTenant?.Id;
+            var persistedTenant = ReadTenantId(persisted);
+            if (HasRequiredTenantMarker
+                    ? !string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal)
+                    : !string.IsNullOrEmpty(persistedTenant) &&
+                      !string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"{typeof(TEntity).Name} (Id={id}) belongs to tenant '{persistedTenant}', not the current tenant '{currentTenant}'.");
+            }
+        }
+
+        private void EnsureSubmittedTenant(TEntity entity, TEntity? persisted)
+        {
+            if (!HasTenantMarker)
+            {
+                return;
+            }
+
+            var currentTenant = _currentTenant?.Id;
+            var submittedTenant = ReadTenantId(entity);
+            if (HasRequiredTenantMarker
+                    ? !string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal)
+                    : !string.IsNullOrEmpty(submittedTenant) &&
+                      !string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot write {typeof(TEntity).Name} for tenant '{submittedTenant}' while the current tenant is '{currentTenant}'.");
+            }
+
+            var persistedTenant = persisted is null ? null : ReadTenantId(persisted);
+            if (!HasRequiredTenantMarker &&
+                string.IsNullOrEmpty(submittedTenant) &&
+                !string.IsNullOrEmpty(persistedTenant))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot clear the tenant of {typeof(TEntity).Name} (Id={entity.Id}).");
+            }
+        }
+
         public override IQueryable<TEntity> GetQueryable()
         {
             throw new NotSupportedException(
@@ -52,13 +227,18 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         private ISugarQueryable<TEntity> Queryable()
         {
-            return _sqlSugarClient.Queryable<TEntity>();
+            var query = _sqlSugarClient.Queryable<TEntity>();
+            var tenantFilter = TenantFilter();
+            return tenantFilter is null
+                ? query
+                : query.Where(tenantFilter.Value.Sql, tenantFilter.Value.Parameters);
         }
 
         public override async Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default)
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting all entities {EntityType}", typeof(TEntity).Name);
                 var result = await Queryable()
                     .ToListAsync();
@@ -76,6 +256,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Finding entities {EntityType}", typeof(TEntity).Name);
                 var result = await Queryable()
                     .Where(predicate)
@@ -94,6 +275,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Finding entities {EntityType} with order", typeof(TEntity).Name);
                 var query = Queryable().Where(predicate);
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
@@ -112,6 +294,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
                 var result = await Queryable()
                     .InSingleAsync(id);
@@ -129,6 +312,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting entity {EntityType} by predicate", typeof(TEntity).Name);
                 var result = await Queryable()
                     .Where(predicate)
@@ -147,7 +331,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Adding entity {EntityType}", typeof(TEntity).Name);
+                ApplyTenantOnInsert(entity);
                 await _sqlSugarClient.Insertable(entity).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
                 _logger?.LogDebug("Added entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
@@ -163,8 +349,13 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Inserting many entities {EntityType}", typeof(TEntity).Name);
                 var entityList = entities.ToList();
+                foreach (var item in entityList)
+                {
+                    ApplyTenantOnInsert(item);
+                }
                 await _sqlSugarClient.Insertable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
                 _logger?.LogDebug("Inserted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
                 return entityList;
@@ -180,22 +371,44 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Updating entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
+                if (HasTenantMarker)
+                {
+                    var persistedForTenant = await FindPersistedForTenantCheckAsync(entity.Id);
+                    EnsurePersistedTenant(persistedForTenant, entity.Id);
+                    EnsureSubmittedTenant(entity, persistedForTenant);
+                }
                 if (entity is IHasConcurrencyStamp stamp)
                 {
                     var oldStamp = stamp.ConcurrencyStamp;
                     stamp.ConcurrencyStamp = Guid.NewGuid().ToString();
+                    var conditions = new List<string>
+                    {
+                        $"{ColumnName("Id")} = @entityId",
+                        $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @oldStamp"
+                    };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                    {
+                        ["entityId"] = entity.Id,
+                        ["oldStamp"] = oldStamp
+                    };
+                    AddTenantCondition(conditions, parameters);
                     var rows = await _sqlSugarClient.Updateable(entity)
                         .IgnoreColumns("DomainEvents")
-                        .Where(
-                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @oldStamp",
-                            new { entityId = entity.Id, oldStamp })
+                        .Where(string.Join(" AND ", conditions), parameters)
                         .ExecuteCommandAsync();
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
                 }
                 else
                 {
-                    await _sqlSugarClient.Updateable(entity).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
+                    var update = _sqlSugarClient.Updateable(entity).IgnoreColumns("DomainEvents");
+                    var tenantFilter = TenantFilter();
+                    if (tenantFilter is not null)
+                    {
+                        update = update.Where(tenantFilter.Value.Sql, tenantFilter.Value.Parameters);
+                    }
+                    await update.ExecuteCommandAsync();
                 }
                 _logger?.LogDebug("Updated entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
@@ -211,8 +424,14 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Updating many entities {EntityType}", typeof(TEntity).Name);
                 var entityList = entities.ToList();
+                if (HasTenantMarker)
+                {
+                    throw new NotSupportedException(
+                        "UpdateRangeAsync does not validate persisted tenant ownership. Update tenant-scoped entities one by one with UpdateAsync.");
+                }
                 if (entityList.Any(e => e is IHasConcurrencyStamp))
                     throw new NotSupportedException("UpdateRangeAsync does not support entities with IHasConcurrencyStamp. Use UpdateAsync for concurrency-safe updates.");
                 await _sqlSugarClient.Updateable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
@@ -230,15 +449,32 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Deleting entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
+                if (HasTenantMarker)
+                {
+                    var persistedForTenant = await FindPersistedForTenantCheckAsync(entity.Id);
+                    EnsurePersistedTenant(persistedForTenant, entity.Id);
+                }
                 if (entity is ISoftDelete)
                 {
                     if (entity is IHasConcurrencyStamp stamp)
                     {
+                        var softConditions = new List<string>
+                        {
+                            $"{ColumnName("Id")} = @entityId",
+                            $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp",
+                            $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0"
+                        };
+                        var softParameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                        {
+                            ["entityId"] = entity.Id,
+                            ["entityStamp"] = stamp.ConcurrencyStamp
+                        };
+                        AddTenantCondition(softConditions, softParameters);
                         var rows = await SqlSugarSoftDeleteOperation.ExecuteAsync(
                             _sqlSugarClient.Updateable<TEntity>().Where(
-                                $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp AND {ColumnName(nameof(ISoftDelete.IsDeleted))} = 0",
-                                new { entityId = entity.Id, entityStamp = stamp.ConcurrencyStamp }),
+                                string.Join(" AND ", softConditions), softParameters),
                             _currentUserProvider,
                             advanceConcurrencyStamp: true,
                             cancellationToken);
@@ -246,10 +482,19 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     }
                     else
                     {
+                        var softConditions = new List<string>
+                        {
+                            $"{ColumnName("Id")} = @entityId",
+                            $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0"
+                        };
+                        var softParameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                        {
+                            ["entityId"] = entity.Id
+                        };
+                        AddTenantCondition(softConditions, softParameters);
                         await SqlSugarSoftDeleteOperation.ExecuteAsync(
                             _sqlSugarClient.Updateable<TEntity>().Where(
-                                $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(ISoftDelete.IsDeleted))} = 0",
-                                new { entityId = entity.Id }),
+                                string.Join(" AND ", softConditions), softParameters),
                             _currentUserProvider,
                             advanceConcurrencyStamp: false,
                             cancellationToken);
@@ -257,12 +502,33 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 }
                 else if (entity is IHasConcurrencyStamp stamp)
                 {
+                    var conditions = new List<string>
+                    {
+                        $"{ColumnName("Id")} = @entityId",
+                        $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp"
+                    };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                    {
+                        ["entityId"] = entity.Id,
+                        ["entityStamp"] = stamp.ConcurrencyStamp
+                    };
+                    AddTenantCondition(conditions, parameters);
                     var rows = await _sqlSugarClient.Deleteable<TEntity>()
-                        .Where(
-                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp",
-                            new { entityId = entity.Id, entityStamp = stamp.ConcurrencyStamp })
+                        .Where(string.Join(" AND ", conditions), parameters)
                         .ExecuteCommandAsync();
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
+                }
+                else if (HasTenantMarker)
+                {
+                    var conditions = new List<string> { $"{ColumnName("Id")} = @entityId" };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                    {
+                        ["entityId"] = entity.Id
+                    };
+                    AddTenantCondition(conditions, parameters);
+                    await _sqlSugarClient.Deleteable<TEntity>()
+                        .Where(string.Join(" AND ", conditions), parameters)
+                        .ExecuteCommandAsync();
                 }
                 else
                 {
@@ -281,16 +547,47 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Deleting entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
+                if (HasTenantMarker)
+                {
+                    var persistedForTenant = await FindPersistedForTenantCheckAsync(id);
+                    EnsurePersistedTenant(persistedForTenant, id);
+                    if (persistedForTenant is null)
+                    {
+                        return;
+                    }
+                }
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
+                    var conditions = new List<string>
+                    {
+                        $"{ColumnName("Id")} = @entityId",
+                        $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0"
+                    };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                    {
+                        ["entityId"] = id
+                    };
+                    AddTenantCondition(conditions, parameters);
                     await SqlSugarSoftDeleteOperation.ExecuteAsync(
                         _sqlSugarClient.Updateable<TEntity>().Where(
-                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(ISoftDelete.IsDeleted))} = 0",
-                            new { entityId = id }),
+                            string.Join(" AND ", conditions), parameters),
                         _currentUserProvider,
                         advanceConcurrencyStamp: typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)),
                         cancellationToken);
+                }
+                else if (HasTenantMarker)
+                {
+                    var conditions = new List<string> { $"{ColumnName("Id")} = @entityId" };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                    {
+                        ["entityId"] = id
+                    };
+                    AddTenantCondition(conditions, parameters);
+                    await _sqlSugarClient.Deleteable<TEntity>()
+                        .Where(string.Join(" AND ", conditions), parameters)
+                        .ExecuteCommandAsync();
                 }
                 else
                 {
@@ -317,12 +614,32 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     return;
                 }
                 _logger?.LogDebug("Deleting entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
+                if (HasTenantMarker)
+                {
+                    var persistedForTenant = await FindPersistedForTenantCheckAsync(id);
+                    EnsurePersistedTenant(persistedForTenant, id);
+                    if (persistedForTenant is null)
+                    {
+                        throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+                    }
+                }
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
+                    var softConditions = new List<string>
+                    {
+                        $"{ColumnName("Id")} = @entityId",
+                        $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp",
+                        $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0"
+                    };
+                    var softParameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                    {
+                        ["entityId"] = id,
+                        ["entityStamp"] = expectedStamp
+                    };
+                    AddTenantCondition(softConditions, softParameters);
                     var softRows = await SqlSugarSoftDeleteOperation.ExecuteAsync(
                         _sqlSugarClient.Updateable<TEntity>().Where(
-                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp AND {ColumnName(nameof(ISoftDelete.IsDeleted))} = 0",
-                            new { entityId = id, entityStamp = expectedStamp }),
+                            string.Join(" AND ", softConditions), softParameters),
                         _currentUserProvider,
                         advanceConcurrencyStamp: true,
                         cancellationToken);
@@ -330,10 +647,19 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 }
                 else
                 {
+                    var physicalConditions = new List<string>
+                    {
+                        $"{ColumnName("Id")} = @entityId",
+                        $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp"
+                    };
+                    var physicalParameters = new Dictionary<string, object>(StringComparer.Ordinal)
+                    {
+                        ["entityId"] = id,
+                        ["entityStamp"] = expectedStamp
+                    };
+                    AddTenantCondition(physicalConditions, physicalParameters);
                     var rows = await _sqlSugarClient.Deleteable<TEntity>()
-                        .Where(
-                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp",
-                            new { entityId = id, entityStamp = expectedStamp })
+                        .Where(string.Join(" AND ", physicalConditions), physicalParameters)
                         .ExecuteCommandAsync();
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
                 }
@@ -361,13 +687,26 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
+                    var conditions = new List<string> { $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0" };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+                    AddTenantCondition(conditions, parameters);
                     await SqlSugarSoftDeleteOperation.ExecuteAsync(
                         _sqlSugarClient.Updateable<TEntity>()
                             .Where(entity => ids.Contains(entity.Id))
-                            .Where($"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0", new { }),
+                            .Where(string.Join(" AND ", conditions), parameters),
                         _currentUserProvider,
                         advanceConcurrencyStamp: false,
                         cancellationToken);
+                }
+                else if (HasTenantMarker)
+                {
+                    var conditions = new List<string>();
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+                    AddTenantCondition(conditions, parameters);
+                    await _sqlSugarClient.Deleteable<TEntity>()
+                        .Where(entity => ids.Contains(entity.Id))
+                        .Where(string.Join(" AND ", conditions), parameters)
+                        .ExecuteCommandAsync();
                 }
                 else
                 {
@@ -391,13 +730,26 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Deleting many entities {EntityType} by predicate", typeof(TEntity).Name);
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
+                    var conditions = new List<string> { $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0" };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+                    AddTenantCondition(conditions, parameters);
                     await SqlSugarSoftDeleteOperation.ExecuteAsync(
                         _sqlSugarClient.Updateable<TEntity>()
                             .Where(predicate)
-                            .Where($"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0", new { }),
+                            .Where(string.Join(" AND ", conditions), parameters),
                         _currentUserProvider,
                         advanceConcurrencyStamp: false,
                         cancellationToken);
+                }
+                else if (HasTenantMarker)
+                {
+                    var conditions = new List<string>();
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+                    AddTenantCondition(conditions, parameters);
+                    await _sqlSugarClient.Deleteable<TEntity>()
+                        .Where(predicate)
+                        .Where(string.Join(" AND ", conditions), parameters)
+                        .ExecuteCommandAsync();
                 }
                 else
                 {
@@ -427,6 +779,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting paged entities {EntityType} - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var total = await Queryable().CountAsync();
                 var items = await Queryable()
@@ -447,6 +800,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting paged entities {EntityType} with predicate - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var total = await Queryable().Where(predicate).CountAsync();
                 var items = await Queryable()
@@ -468,6 +822,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting paged entities {EntityType} with predicate and order - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = Queryable().Where(predicate);
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
@@ -490,6 +845,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting paged entities {EntityType} with order - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = Queryable();
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
@@ -512,6 +868,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting count of entities {EntityType}", typeof(TEntity).Name);
                 var count = await Queryable().CountAsync();
                 _logger?.LogDebug("Got count {Count} for entities {EntityType}", count, typeof(TEntity).Name);
@@ -528,6 +885,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting count of entities {EntityType} with predicate", typeof(TEntity).Name);
                 var count = await Queryable().Where(predicate).CountAsync();
                 _logger?.LogDebug("Got count {Count} for entities {EntityType} with predicate", count, typeof(TEntity).Name);
@@ -544,6 +902,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Checking if any entities {EntityType} exist", typeof(TEntity).Name);
                 var result = await Queryable().AnyAsync();
                 _logger?.LogDebug("Any entities {EntityType} exist: {Result}", typeof(TEntity).Name, result);
@@ -560,6 +919,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Checking if any entities {EntityType} match predicate", typeof(TEntity).Name);
                 var result = await Queryable().Where(predicate).AnyAsync();
                 _logger?.LogDebug("Any entities {EntityType} match predicate: {Result}", typeof(TEntity).Name, result);
@@ -576,6 +936,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Checking if entity {EntityType} with id {Id} exists", typeof(TEntity).Name, id);
                 var result = await Queryable().Where(e => e.Id.Equals(id)).AnyAsync();
                 _logger?.LogDebug("Entity {EntityType} with id {Id} exists: {Result}", typeof(TEntity).Name, id, result);

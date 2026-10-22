@@ -67,11 +67,10 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     public async Task T_FreeSql_stable_tenant_filter_isolates_rows()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        freeSql.ConfigureMultiTenantFilter(_tenant);
         InsertTenantRow(1, "tenant-a", "a");
         InsertTenantRow(2, "tenant-b", "b");
         var repository = new Issue130FreeSqlRepository<Issue130TenantEntity>(
-            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider, _tenant);
 
         var rows = await repository.GetListAsync();
 
@@ -83,11 +82,10 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     public async Task T_FreeSql_filter_must_resolve_the_current_tenant_per_operation()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
-        freeSql.ConfigureMultiTenantFilter(_tenant);
         InsertTenantRow(1, "tenant-a", "a");
         InsertTenantRow(2, "tenant-b", "b");
         var repository = new Issue130FreeSqlRepository<Issue130TenantEntity>(
-            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider, _tenant);
 
         _tenant.Id = "tenant-b";
 
@@ -101,10 +99,9 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     public async Task T_SqlSugar_stable_tenant_filter_isolates_rows()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        client.ConfigureMultiTenantFilter(_tenant);
         InsertTenantRow(1, "tenant-a", "a");
         InsertTenantRow(2, "tenant-b", "b");
-        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider);
+        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider, _tenant);
 
         var rows = await repository.GetListAsync();
 
@@ -116,10 +113,9 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     public async Task T_SqlSugar_filter_must_resolve_the_current_tenant_per_operation()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        client.ConfigureMultiTenantFilter(_tenant);
         InsertTenantRow(1, "tenant-a", "a");
         InsertTenantRow(2, "tenant-b", "b");
-        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider);
+        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider, _tenant);
 
         _tenant.Id = "tenant-b";
 
@@ -139,7 +135,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         _tenant.Id = "tenant-b";
 
         await using var context = new Issue130EfDbContext(Issue130EfBed.Options(_database, _user, _tenant));
-        var repository = Issue130EfBed.Repository<Issue130TenantEntity>(context);
+        var repository = Issue130EfBed.Repository<Issue130TenantEntity>(context, _tenant);
         var forged = new Issue130TenantEntity(1, "tenant-b", "forged") { ConcurrencyStamp = "stamp-1" };
 
         var exception = await Record.ExceptionAsync(() => repository.UpdateAsync(forged));
@@ -158,7 +154,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         _tenant.Id = "tenant-b";
 
         await using var context = new Issue130EfDbContext(Issue130EfBed.Options(_database, _user, _tenant));
-        var repository = Issue130EfBed.Repository<Issue130TenantEntity>(context);
+        var repository = Issue130EfBed.Repository<Issue130TenantEntity>(context, _tenant);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => repository.DeleteAsync(1));
 
@@ -171,9 +167,8 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         InsertTenantRow(1, "tenant-a", "original");
         _tenant.Id = "tenant-b";
-        freeSql.ConfigureMultiTenantFilter(_tenant);
         var repository = new Issue130FreeSqlRepository<Issue130TenantEntity>(
-            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider, _tenant);
         var forged = new Issue130TenantEntity(1, "tenant-b", "forged") { ConcurrencyStamp = "stamp-1" };
 
         var exception = await Record.ExceptionAsync(() => repository.UpdateAsync(forged));
@@ -190,9 +185,8 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         InsertTenantRow(1, "tenant-a", "original");
         _tenant.Id = "tenant-b";
-        freeSql.ConfigureMultiTenantFilter(_tenant);
         var repository = new Issue130FreeSqlRepository<Issue130TenantEntity>(
-            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider, _tenant);
 
         var exception = await Record.ExceptionAsync(() => repository.DeleteAsync(1));
 
@@ -209,8 +203,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
         InsertTenantRow(1, "tenant-a", "original");
         _tenant.Id = "tenant-b";
-        client.ConfigureMultiTenantFilter(_tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider);
+        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider, _tenant);
         var forged = new Issue130TenantEntity(1, "tenant-b", "forged") { ConcurrencyStamp = "stamp-1" };
 
         var exception = await Record.ExceptionAsync(() => repository.UpdateAsync(forged));
@@ -227,8 +220,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
         InsertTenantRow(1, "tenant-a", "original");
         _tenant.Id = "tenant-b";
-        client.ConfigureMultiTenantFilter(_tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider);
+        var repository = new Issue130SqlSugarRepository<Issue130TenantEntity>(client, _userProvider, _tenant);
 
         var exception = await Record.ExceptionAsync(() => repository.DeleteAsync(1));
 
@@ -261,7 +253,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
-            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider, _tenant);
 
         await repository.InsertAsync(new Issue130SoftStamped(1, "audited"));
 
@@ -275,7 +267,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     public async Task A01_SqlSugar_insert_persists_creation_audit()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider, _tenant);
 
         await repository.InsertAsync(new Issue130SoftStamped(1, "audited"));
 
@@ -312,7 +304,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         InsertAuditedRow(1, "original");
         var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
-            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider, _tenant);
         var loaded = await repository.GetAsync(1);
         _userProvider.UserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         loaded!.Name = "updated";
@@ -331,7 +323,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
         InsertAuditedRow(1, "original");
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider, _tenant);
         var loaded = await repository.GetAsync(1);
         _userProvider.UserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         loaded!.Name = "updated";
@@ -552,7 +544,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
         var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
-            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider, _tenant);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => repository.GetListAsync(new CancellationToken(canceled: true)));
@@ -562,7 +554,7 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
     public async Task U07_SqlSugar_repository_honors_a_pre_cancelled_token()
     {
         var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
-        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider, _tenant);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => repository.GetListAsync(new CancellationToken(canceled: true)));

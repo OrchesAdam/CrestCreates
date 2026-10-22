@@ -305,9 +305,9 @@ namespace CrestCreates.Data.EFCore.DbContexts
                 SoftDeleteFilterConfiguration.ApplyAll(modelBuilder);
             }
 
-            if (_currentTenant != null && TenantFilterRegistryStore.HasRegistrations)
+            if (TenantFilterRegistryStore.HasRegistrations)
             {
-                modelBuilder.ConfigureTenantDiscriminator(_currentTenant);
+                modelBuilder.ConfigureTenantDiscriminator(_currentTenant ?? HostCurrentTenant.Instance);
             }
 
             EnsureSoftDeleteFiltersAreApplied(modelBuilder);

@@ -47,8 +47,35 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
         private sealed record EntityFilterTarget(
             string FullName,
             string Name,
-            bool IsTenant,
-            bool IsSoftDelete);
+            string TenantKind,
+            bool IsSoftDelete)
+        {
+            public bool IsTenant => TenantKind != TenantKinds.None;
+        }
+
+        private static class TenantKinds
+        {
+            public const string None = "";
+            public const string Required = "Required";
+            public const string OptionalDataFilter = "OptionalDataFilter";
+            public const string OptionalEfCompatibility = "OptionalEfCompatibility";
+
+            public static string Precedence(string current, string candidate)
+            {
+                return Rank(candidate) > Rank(current) ? candidate : current;
+            }
+
+            private static int Rank(string kind)
+            {
+                return kind switch
+                {
+                    Required => 3,
+                    OptionalDataFilter => 2,
+                    OptionalEfCompatibility => 1,
+                    _ => 0
+                };
+            }
+        }
 
         private static bool IsEntityCandidate(SyntaxNode node)
         {
@@ -88,10 +115,10 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
                 return null;
             }
 
-            var isTenant = IsTenantEntity(symbol);
+            var tenantKind = GetTenantKind(symbol);
             var isSoftDelete = IsSoftDeleteEntity(symbol);
-            return isTenant || isSoftDelete
-                ? CreateTarget(symbol, isTenant, isSoftDelete)
+            return tenantKind != TenantKinds.None || isSoftDelete
+                ? CreateTarget(symbol, tenantKind, isSoftDelete)
                 : null;
         }
 
@@ -116,23 +143,23 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
                     continue;
                 }
 
-                var isTenant = IsTenantEntity(entityType);
+                var tenantKind = GetTenantKind(entityType);
                 var isSoftDelete = IsSoftDeleteEntity(entityType);
-                if (isTenant || isSoftDelete)
+                if (tenantKind != TenantKinds.None || isSoftDelete)
                 {
-                    builder.Add(CreateTarget(entityType, isTenant, isSoftDelete));
+                    builder.Add(CreateTarget(entityType, tenantKind, isSoftDelete));
                 }
             }
 
             return builder.ToImmutable();
         }
 
-        private static EntityFilterTarget CreateTarget(INamedTypeSymbol symbol, bool isTenant, bool isSoftDelete)
+        private static EntityFilterTarget CreateTarget(INamedTypeSymbol symbol, string tenantKind, bool isSoftDelete)
         {
             return new EntityFilterTarget(
                 symbol.ToDisplayString(),
                 symbol.Name,
-                isTenant,
+                tenantKind,
                 isSoftDelete);
         }
 
@@ -153,22 +180,33 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
             return false;
         }
 
-        private static bool IsTenantEntity(INamedTypeSymbol symbol)
+        private static string GetTenantKind(INamedTypeSymbol symbol)
         {
+            var kind = TenantKinds.None;
             foreach (var iface in symbol.AllInterfaces)
             {
                 var fullName = iface.ToDisplayString();
-                if (fullName == "CrestCreates.Data.EFCore.MultiTenancy.IMultiTenant" ||
-                    fullName == "CrestCreates.DataFilter.Entities.IMultiTenant" ||
-                    fullName == "CrestCreates.Domain.Shared.Entities.Auditing.IMustHaveTenant" ||
-                    iface.Name == "IMultiTenant" ||
+                if (fullName == "CrestCreates.Domain.Shared.Entities.Auditing.IMustHaveTenant" ||
                     iface.Name == "IMustHaveTenant")
                 {
-                    return true;
+                    return TenantKinds.Required;
+                }
+
+                if (fullName == "CrestCreates.DataFilter.Entities.IMultiTenant")
+                {
+                    kind = TenantKinds.Precedence(kind, TenantKinds.OptionalDataFilter);
+                }
+                else if (fullName == "CrestCreates.Data.EFCore.MultiTenancy.IMultiTenant")
+                {
+                    kind = TenantKinds.Precedence(kind, TenantKinds.OptionalEfCompatibility);
+                }
+                else if (iface.Name == "IMultiTenant")
+                {
+                    kind = TenantKinds.Precedence(kind, TenantKinds.OptionalEfCompatibility);
                 }
             }
 
-            return false;
+            return kind;
         }
 
         private static bool IsSoftDeleteEntity(INamedTypeSymbol symbol)
@@ -317,7 +355,7 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
             {
                 targets[target.FullName] = existing with
                 {
-                    IsTenant = existing.IsTenant || target.IsTenant,
+                    TenantKind = TenantKinds.Precedence(existing.TenantKind, target.TenantKind),
                     IsSoftDelete = existing.IsSoftDelete || target.IsSoftDelete
                 };
                 return;
@@ -328,7 +366,15 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
 
         private static void AppendTenantFilter(StringBuilder builder, EntityFilterTarget target)
         {
-            var filter = "currentTenant.Id == null || e.TenantId == currentTenant.Id";
+            var filter = target.TenantKind switch
+            {
+                TenantKinds.Required =>
+                    "currentTenant.Id != null && e.TenantId == currentTenant.Id",
+                TenantKinds.OptionalDataFilter =>
+                    "((currentTenant.Id != null && (e.TenantId == currentTenant.Id || e.TenantId == null)) || (currentTenant.Id == null && e.TenantId == null))",
+                _ =>
+                    "currentTenant.Id == null || e.TenantId == currentTenant.Id"
+            };
             if (target.IsSoftDelete)
             {
                 filter = "(" + filter + ") && !e.IsDeleted";

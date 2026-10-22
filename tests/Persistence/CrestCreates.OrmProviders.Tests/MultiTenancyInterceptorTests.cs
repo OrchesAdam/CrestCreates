@@ -42,7 +42,9 @@ public class MultiTenancyInterceptorTests
 
         await using (var modifyContext = new CrestCreatesDbContext(CreateOptions(databaseName, "tenant-2")))
         {
-            var user = await modifyContext.Users.SingleAsync();
+            // This test targets the write interceptor; the generated tenant filter (S3) correctly
+            // hides the tenant-1 row from normal reads, so load it via the explicit test bypass.
+            var user = await modifyContext.Users.IgnoreQueryFilters().SingleAsync();
             user.Email = "updated@example.com";
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => modifyContext.SaveChangesAsync());
@@ -53,7 +55,7 @@ public class MultiTenancyInterceptorTests
 
         await using (var deleteContext = new CrestCreatesDbContext(CreateOptions(databaseName, "tenant-2")))
         {
-            var user = await deleteContext.Users.SingleAsync();
+            var user = await deleteContext.Users.IgnoreQueryFilters().SingleAsync();
             deleteContext.Users.Remove(user);
 
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => deleteContext.SaveChangesAsync());

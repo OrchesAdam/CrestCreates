@@ -476,3 +476,32 @@ public sealed class Issue130ReservedSoftOnly : IEntity<long>, ISoftDelete
     [SugarColumn(ColumnName = "deleted_by", IsNullable = true)]
     public Guid? DeleterId { get; set; }
 }
+
+/// <summary>Optional tenant entity used for shared-row and host read matrices.</summary>
+[Table(Name = "S1_OptionalTenant")]
+[SugarTable("S1_OptionalTenant")]
+public sealed class Issue130OptionalTenantEntity : IEntity<long>, CrestCreates.DataFilter.Entities.IMultiTenant
+{
+    [Column(IsIdentity = false, IsPrimary = true)]
+    [SugarColumn(IsPrimaryKey = true, IsIdentity = false)]
+    public long Id { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public string? TenantId { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>Required tenant entity without a concurrency stamp for batch delete matrices.</summary>
+[Table(Name = "S1_TenantOnly")]
+[SugarTable("S1_TenantOnly")]
+public sealed class Issue130TenantOnlyEntity : IEntity<long>, IMustHaveTenant
+{
+    [Column(IsIdentity = false, IsPrimary = true)]
+    [SugarColumn(IsPrimaryKey = true, IsIdentity = false)]
+    public long Id { get; set; }
+
+    public string TenantId { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+}
