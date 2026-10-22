@@ -3,7 +3,7 @@
   "slice": "S1",
   "date": "2026-10-22",
   "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
-  "head": "f2c61f1f0293b5f58ea68fb5502dfe728521cb4c",
+  "head": "54ff414a46fd714280f312651a6c7a2e62574cda",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "production_runtime_changed": false,
@@ -18,10 +18,10 @@
     },
     "orm_providers_after": {
       "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
-      "total": 174,
+      "total": 177,
       "passed": 146,
-      "failed": 28,
-      "outcome": "all 124 historical tests still pass; 28 failures are the intentional red baselines listed in red_baselines"
+      "failed": 31,
+      "outcome": "all 124 historical tests still pass; 31 failures are the intentional red baselines listed in red_baselines"
     },
     "code_generator_focused": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests",
@@ -118,6 +118,24 @@
       "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_SqlSugar_stamped_id_delete_must_preserve_the_row_and_advance_the_stamp",
       "claim": "stamped id delete must retain the row and advance the stamp",
       "current_fact": "conditional physical DELETE",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_EfCore_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+      "claim": "repeated stamp-less delete must be idempotent and keep the first delete audit",
+      "current_fact": "second delete re-runs the soft-delete conversion and refreshes DeleterId",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_FreeSql_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+      "claim": "repeated stamp-less delete must be idempotent and keep the first delete audit",
+      "current_fact": "first delete physically removes the row",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_SqlSugar_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+      "claim": "repeated stamp-less delete must be idempotent and keep the first delete audit",
+      "current_fact": "first delete physically removes the row",
       "owner_slice": "S2"
     },
     {
