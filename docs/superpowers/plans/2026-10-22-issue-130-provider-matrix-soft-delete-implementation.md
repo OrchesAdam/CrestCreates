@@ -101,3 +101,13 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 修复提交 `9071e99a`：FreeSql 改用强类型接口表达式（SDK 翻译并引用映射列）；SqlSugar 用 `InstanceFactory.GetSqlBuilderWithContext(...).GetTranslationColumnName(...)` 引用 Id/stamp/live；生成方法名对完整类型身份做无歧义编码。
 - 审查 R2 探针 4/4 与 2/2 通过；新增保留字映射控制 4 条；全量 OrmProviders 203 total / 193 passed / 10 failed（10 仍为 S3 T/U）。
 - 证据：[R2 response](../review/2026-10-22-issue-130-s2-review-round2-response.md)；CodeGenerator 全量 **458 total / 455 passed / 3 failed（31m19s，仅 G 红）**。
+
+## S3 执行记录（2026-10-22）
+
+- 状态：S3 完成，等待审查；S4 未开始。
+- 提交：`64dad166`（实现与测试）、`8754428f`（证据）。
+- 结果：OrmProviders **216 total / 216 passed / 0 failed**；原 10 条 T/U 红例全部转绿；新增 9 条租户矩阵 + 4 条装配/事务/取消控制。CodeGenerator 全量复跑中；Boundary 176/178（2 条既有 #69 evidence-ledger，无关）。
+- 实现：SDK 逐操作租户解析与持久归属校验；EF 生成过滤器区分 required / DataFilter optional / EF 兼容 marker，并在 host 通过 `HostCurrentTenant` 应用；SqlSugar scoped client/interface 与 FreeSql/SqlSugar 装配核心统一；唯一 `ICurrentUserProvider` adapter；SDK 入口取消预检查。
+- 兼容：required host 读 fail closed；optional host 仅共享行；EF 专用 optional host=all 保留为兼容差异；FreeSql 扩展停止仓储扫描；SqlSugar client scoped；租户 `UpdateRange` 拒绝。
+- 证据：[S3 记录](../review/2026-10-22-issue-130-s3-tenant-assembly.md)、[S3 JSON](../review/2026-10-22-issue-130-s3-evidence.json)。
+- 未验证：EF 专用 marker host 收紧、PG/其他数据库、ORM trim/NativeAOT、in-flight 取消、跨进程并发。
