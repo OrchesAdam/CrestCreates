@@ -10,14 +10,14 @@ S2 的出口是**三个 Provider 的 D/A 真实 SQLite 矩阵通过**、既有�
 
 | 套件 | 结果 |
 | --- | --- |
-| OrmProviders（全量） | **182 total / 172 passed / 10 failed** |
+| OrmProviders（全量） | **184 total / 174 passed / 10 failed** |
 | 其中 S1/S2 的 D/A 用例 | 全部通过（D01–D09、A01–A02） |
 | 其中 S3 范围 T/U 红例 | 10 条，逐条列于 §5；失败原因均为 S3 设计项，不是回归 |
 | 历史 124 条 | 全部通过 |
 | Tenant/Soft filter generator 过滤集 | 8 / 8 passed |
 | CodeGenerator 全量 | 见 §7（本切片修改了生成器，必须复跑） |
 
-S2 期间新增 5 条正式用例：FreeSql/SqlSugar stamped predicate 删除先拒绝、两个 SDK `GetQueryable` 明确拒绝、EF UoW 延迟 flush 冲突在 `CompleteAsync` 抛 `CrestConcurrencyException`。
+S2 期间新增 7 条正式用例（含两条 SQL 级 live-row 证据）：FreeSql/SqlSugar stamped predicate 删除先拒绝、两个 SDK `GetQueryable` 明确拒绝、EF UoW 延迟 flush 冲突在 `CompleteAsync` 抛 `CrestConcurrencyException`。
 
 ## 2. 实现变更
 
@@ -99,7 +99,7 @@ FQN 见 [S2 证据 JSON](2026-10-22-issue-130-s2-baseline-evidence.json)：
 
 ```bash
 dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests
-# 182 total / 172 passed / 10 failed (S3 T/U red baselines)
+# 184 total / 174 passed / 10 failed (S3 T/U red baselines)
 
 dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~TenantFilterSourceGeneratorTests
 # 8 total / 8 passed

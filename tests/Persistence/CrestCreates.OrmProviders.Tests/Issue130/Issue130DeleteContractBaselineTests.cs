@@ -335,6 +335,39 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     }
 
     [Fact]
+    public async Task D02_FreeSql_queries_apply_live_row_condition_in_the_database()
+    {
+        var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
+        var statements = new List<string>();
+        freeSql.Aop.CurdBefore += (_, args) => statements.Add(args.Sql);
+        var repository = new Issue130FreeSqlRepository<Issue130SoftStamped>(
+            new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+        await repository.InsertAsync(new Issue130SoftStamped(1, "live"));
+        statements.Clear();
+
+        await repository.GetListAsync();
+
+        Assert.Contains(statements, statement =>
+            statement.Contains("IsDeleted", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task D02_SqlSugar_queries_apply_live_row_condition_in_the_database()
+    {
+        var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
+        var statements = new List<string>();
+        client.Aop.OnLogExecuting = (sql, _) => statements.Add(sql);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
+        await repository.InsertAsync(new Issue130SoftStamped(1, "live"));
+        statements.Clear();
+
+        await repository.GetListAsync();
+
+        Assert.Contains(statements, statement =>
+            statement.Contains("IsDeleted", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task D03_FreeSql_stamped_id_delete_must_preserve_the_row_and_advance_the_stamp()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
