@@ -12,7 +12,7 @@ S1 出口按计划是「红例触达业务路径 + 正控成立 + 设计差异�
 | 套件 | 命令 | 结果 |
 | --- | --- | --- |
 | OrmProviders（历史基线） | `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 124 passed / 0 failed（改动前复跑） |
-| OrmProviders（含 S1 基线） | 同上 | **174 total / 146 passed / 28 failed**；28 红全部为本文 §3 约定红例，原 124 条全部通过 |
+| OrmProviders（含 S1 基线） | 同上 | **177 total / 146 passed / 31 failed**；31 红全部为本文 §3 约定红例，原 124 条全部通过 |
 | CodeGenerator（S1 新增） | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests` | 4 total / 1 passed（EF 正控）/ 3 failed（§3 G01/G02） |
 
 历史 124 条完整 FQN 见 [基线证据 JSON](2026-10-22-issue-130-baseline-evidence.json) 的 `suite.results`；本轮新增红例完整 FQN 见 [S1 证据 JSON](2026-10-22-issue-130-s1-baseline-evidence.json)。
@@ -53,7 +53,7 @@ S1 出口按计划是「红例触达业务路径 + 正控成立 + 设计差异�
 | [RepositorySourceGenerator](../../src/Tooling/CrestCreates.CodeGenerator/RepositoryGenerator/RepositorySourceGenerator.cs) | `GenerateRepositoryImplementation` 未被调用；`GenerateSqlSugarRepository`/`GenerateFreeSqlRepository` 为空；未知 provider 默认 EF（死分支）；仅生成接口与 DI 注册 |
 | 诊断编号 | S1 冻结 `CCCREPO001`（非 EF 生成请求）/`CCCREPO002`（未知 Provider），见 [RepositoryGeneratorDiagnosticCodes](../../src/Tooling/CrestCreates.CodeGenerator/RepositoryGenerator/RepositoryGeneratorDiagnosticCodes.cs) |
 
-## 3. 目标红例台账（28 ORM + 3 G）
+## 3. 目标红例台账（31 ORM + 3 G）
 
 所有红例先触达真实仓储/生成器入口；数据库断言均通过独立 `Microsoft.Data.Sqlite` 连接读取原表，排除 EF ChangeTracker 与 SDK cache 影响。正控见 §4。
 
@@ -69,6 +69,9 @@ S1 出口按计划是「红例触达业务路径 + 正控成立 + 设计差异�
 | `D01_SqlSugar_DeleteAsync_id_must_preserve_the_row` | 同上 | 物理 DELETE | S2 |
 | `D01_SqlSugar_DeleteRangeAsync_entities_must_preserve_rows` | 同上 | 物理 DELETE | S2 |
 | `D01_SqlSugar_DeleteRangeAsync_predicate_must_preserve_rows` | 同上 | 物理 DELETE | S2 |
+| `D04_EfCore_repeated_stamp_less_delete_must_not_refresh_delete_audit` | 重复无 stamp 删除保持幂等，不刷新删除时间/删除人 | 第二次删除再次执行 soft-delete 转换，DeleterId 被刷新为当前用户 | S2 |
+| `D04_FreeSql_repeated_stamp_less_delete_must_not_refresh_delete_audit` | 同上 | 第一次删除即物理移除，第二次无行可删 | S2 |
+| `D04_SqlSugar_repeated_stamp_less_delete_must_not_refresh_delete_audit` | 同上 | 第一次删除即物理移除 | S2 |
 | `D02_EfCore_default_reads_hide_soft_deleted_rows` | Get/List/Count/Any/Exists/分页统一排除已删除 | 无软删除 query filter，已删除行与 live 行同时返回 | S2 |
 | `D02_SqlSugar_filtering_must_be_applied_by_production_read_paths` | 生产审计装配后默认读隐藏已删除行 | `ConfigureAuditInterceptor` 不注册软删除过滤器 | S2/S3 |
 | `D03_EfCore_generic_repository_stamped_id_delete_must_preserve_the_row` | stamp 删除留行并推进 stamp | `ExecuteDeleteAsync` 物理删除 | S2 |
@@ -198,7 +201,7 @@ dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests
 dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests
 ```
 
-预期：OrmProviders `174 total / 146 passed / 28 failed`（红例见 §3）；G 过滤集 `4 total / 1 passed / 3 failed`。任何额外失败都应视为回归，而不是红基线。
+预期：OrmProviders `177 total / 146 passed / 31 failed`（红例见 §3）；G 过滤集 `4 total / 1 passed / 3 failed`。任何额外失败都应视为回归，而不是红基线。
 
 ## 10. 下一步（S2）
 

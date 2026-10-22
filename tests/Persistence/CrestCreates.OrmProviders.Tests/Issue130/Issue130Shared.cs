@@ -150,7 +150,7 @@ internal sealed class Issue130RawRow
 
 public sealed class Issue130CurrentUser : CrestCreates.Authorization.Abstractions.ICurrentUser
 {
-    public string Id { get; set; } = Guid.Empty.ToString("D");
+    public string Id { get; set; } = "11111111-1111-1111-1111-111111111111";
 
     public string UserName => "issue-130";
 

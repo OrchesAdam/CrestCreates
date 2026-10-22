@@ -125,6 +125,62 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
     }
 
     [Fact]
+    public async Task D04_EfCore_repeated_stamp_less_delete_must_not_refresh_delete_audit()
+    {
+        Issue130EfBed.EnsureCreated(_database, _user, _tenant);
+        await using var context = new Issue130EfDbContext(Issue130EfBed.Options(_database, _user, _tenant));
+        var repository = Issue130EfBed.Repository<Issue130SoftOnly>(context);
+        await repository.InsertAsync(new Issue130SoftOnly(1, "soft-only"));
+
+        await repository.DeleteAsync(1);
+        var firstDeleter = _database.Read(Issue130Tables.SoftOnly, 1).GuidValue("DeleterId");
+        _user.Id = "33333333-3333-3333-3333-333333333333";
+        await repository.DeleteAsync(1);
+
+        var row = _database.Read(Issue130Tables.SoftOnly, 1);
+        Assert.True(row.Exists);
+        Assert.Equal(1, row.Integer("IsDeleted"));
+        Assert.Equal(firstDeleter, row.GuidValue("DeleterId"));
+    }
+
+    [Fact]
+    public async Task D04_FreeSql_repeated_stamp_less_delete_must_not_refresh_delete_audit()
+    {
+        var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130FreeSqlRepository<Issue130SoftOnly>(
+            new CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager(freeSql));
+        await repository.InsertAsync(new Issue130SoftOnly(1, "soft-only"));
+
+        await repository.DeleteAsync(1);
+        var firstDeleter = _database.Read(Issue130Tables.SoftOnly, 1).GuidValue("DeleterId");
+        _userProvider.UserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        await repository.DeleteAsync(1);
+
+        var row = _database.Read(Issue130Tables.SoftOnly, 1);
+        Assert.True(row.Exists);
+        Assert.Equal(1, row.Integer("IsDeleted"));
+        Assert.Equal(firstDeleter, row.GuidValue("DeleterId"));
+    }
+
+    [Fact]
+    public async Task D04_SqlSugar_repeated_stamp_less_delete_must_not_refresh_delete_audit()
+    {
+        var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130SqlSugarRepository<Issue130SoftOnly>(client);
+        await repository.InsertAsync(new Issue130SoftOnly(1, "soft-only"));
+
+        await repository.DeleteAsync(1);
+        var firstDeleter = _database.Read(Issue130Tables.SoftOnly, 1).GuidValue("DeleterId");
+        _userProvider.UserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        await repository.DeleteAsync(1);
+
+        var row = _database.Read(Issue130Tables.SoftOnly, 1);
+        Assert.True(row.Exists);
+        Assert.Equal(1, row.Integer("IsDeleted"));
+        Assert.Equal(firstDeleter, row.GuidValue("DeleterId"));
+    }
+
+    [Fact]
     public async Task D05_EfCore_non_soft_delete_entity_stays_physical()
     {
         Issue130EfBed.EnsureCreated(_database, _user, _tenant);

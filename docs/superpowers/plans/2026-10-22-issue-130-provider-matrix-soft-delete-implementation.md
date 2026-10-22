@@ -71,7 +71,7 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 状态：S1 完成，S2 尚未开始；未修改 EF/FreeSql/SqlSugar 生产仓储、拦截器、模块或扩展。
 - 分支/提交：`feat/issue-130-provider-matrix-soft-delete-20261022-104210`，S1 基线提交 `2f3d64e4`。
 - 证据：[S1 基线与契约冻结](../review/2026-10-22-issue-130-s1-baseline.md)、[结构化证据](../review/2026-10-22-issue-130-s1-baseline-evidence.json)、[设计基线证据](../review/2026-10-22-issue-130-baseline-evidence.json)。
-- 结果：历史基线 124/124 复跑通过；新增 OrmProviders 50 条（22 正控绿 + 28 约定红），全量 174 total/146 passed/28 failed；新增 Generator 过滤集 4 条（1 EF 正控绿 + 3 约定红）。红例逐条对应 D/T/U/G，见证据文档 §3。
+- 结果：历史基线 124/124 复跑通过；新增 OrmProviders 53 条（22 正控绿 + 31 约定红），全量 177 total/146 passed/31 failed；新增 Generator 过滤集 4 条（1 EF 正控绿 + 3 约定红）。红例逐条对应 D/T/U/G，见证据文档 §3。
 - 冻结：`CCCREPO001`（非 EF 生成请求）/`CCCREPO002`（未知 Provider），S4 接线；stamped 批次/谓词删除先拒绝形态冻结为 `NotSupportedException` 且零写，若 S2 变更须显式更新冻结记录。
 - 探针：FreeSql/SqlSugar 仓储在显式 scoped 装配下均跟随平台 UoW（abandon 隐藏/Complete 持久）；SqlSugar 模块单例 client 为缺陷红例；两 SDK 的预取消 token 均未保持取消语义（FreeSql 包装为通用异常，SqlSugar 忽略 token）；in-flight 取消未验证。
 - 延后：Q01（S4）、完整 CodeGenerator 套件（S4）、host 语义收紧与 EF 生成过滤器组合（S3）、PG/其他数据库、trim/NativeAOT 均不在 S1 结论内。
