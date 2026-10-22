@@ -1,6 +1,7 @@
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Accountability.Abstractions.Context;
 using CrestCreates.Accountability.Abstractions.Identity;
+using CrestCreates.Core.Abstractions.Threading;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,19 +15,22 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
     private readonly ICapabilityHandlerResolver _handlerResolver;
     private readonly CapabilityPipelineBuilder _builder;
     private readonly IDescriptorStableHashBuilder _hashBuilder;
+    private readonly ICapabilityExceptionClassifier? _exceptionClassifier;
 
     public CapabilityPipeline(
         IServiceProvider serviceProvider,
         ICapabilityRegistry registry,
         ICapabilityHandlerResolver handlerResolver,
         CapabilityPipelineBuilder builder,
-        IDescriptorStableHashBuilder hashBuilder)
+        IDescriptorStableHashBuilder hashBuilder,
+        ICapabilityExceptionClassifier? exceptionClassifier = null)
     {
         _serviceProvider = serviceProvider;
         _registry = registry;
         _handlerResolver = handlerResolver;
         _builder = builder;
         _hashBuilder = hashBuilder;
+        _exceptionClassifier = exceptionClassifier;
     }
 
     public async Task<CapabilityExecutionResult> ExecuteAsync(
@@ -117,28 +121,175 @@ public sealed class CapabilityPipeline : ICapabilityPipeline
 
             return await handler(context).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            return CapabilityExecutionResult.Timeout(DateTimeOffset.UtcNow - startedAt, context.AuditRecordId);
+            return ClassifyCancellation(ex, context, DateTimeOffset.UtcNow - startedAt);
         }
         catch (CapabilityFailureException ex)
         {
+            // The result keeps the capability/domain code every transport already understands.
+            // The host classifier only adds HTTP-facing facts; rewriting the shared result code here
+            // would change MCP/native error contracts that never see the Web bridge.
+            var facts = _exceptionClassifier?.Classify(ex) ?? ClassifyCapabilityFailure(ex);
             return CapabilityExecutionResult.Failure(
                 ex.ErrorCode,
                 ex.Message,
                 DateTimeOffset.UtcNow - startedAt,
                 ex.Issues,
-                context.AuditRecordId);
+                context.AuditRecordId,
+                facts);
         }
         catch (Exception ex)
         {
+            // The transport-neutral result keeps its historical PIPELINE_ERROR contract (including
+            // the adapter's rejection message for hosts that render it). HTTP hosts that registered
+            // the Web bridge consume the bounded facts instead and never surface this message.
+            var facts = _exceptionClassifier?.Classify(ex)
+                ?? new CapabilityFailureFacts(
+                    CapabilityFailureKind.Unknown,
+                    "Crest.InternalError",
+                    "服务器内部错误。");
             return CapabilityExecutionResult.Failure(
                 "PIPELINE_ERROR",
                 ex.Message,
                 DateTimeOffset.UtcNow - startedAt,
+                failureFacts: facts,
                 auditRecordId: context.AuditRecordId);
         }
     }
+
+    /// <summary>
+    /// Frozen cancellation precedence (addendum rev.4 §3.5): identity is matched before source
+    /// cancellation is trusted. A default token is always NonCaller, an unrelated (third) token is
+    /// never treated as a managed deadline, and only a canceled caller token is a caller abort.
+    /// </summary>
+    private static CapabilityExecutionResult ClassifyCancellation(
+        OperationCanceledException exception,
+        CapabilityExecutionContext context,
+        TimeSpan duration)
+    {
+        var requested = context.CancellationToken;
+        var deadline = context.ManagedDeadlineToken;
+        var execution = context.ExecutionToken;
+        var token = exception.CancellationToken;
+        var snapshot = exception.Data[UnitOfWorkCancellationSnapshot.ExceptionDataKey]
+            as UnitOfWorkCancellationSnapshot;
+
+        if (!token.CanBeCanceled)
+        {
+            return NonCaller();
+        }
+
+        // The unit-of-work kernel attaches the frame chain to the original exception before
+        // unwinding. An operation-derived token is matched against the frame that recorded it; the
+        // root caller (not the inner scope's caller, which may be an outer execution token) decides
+        // caller abort, and any frame deadline decides managed deadline. Unmatched third tokens never
+        // inherit kernel facts.
+        if (snapshot is not null)
+        {
+            if (snapshot.ContainsToken(token))
+            {
+                if (snapshot.RootCallerWasCancelled)
+                {
+                    return CallerAbort();
+                }
+
+                return snapshot.AnyDeadlineExpired ? ManagedDeadline() : NonCaller();
+            }
+
+            if (snapshot.RootCallerToken.CanBeCanceled && token == snapshot.RootCallerToken)
+            {
+                return snapshot.RootCallerWasCancelled ? CallerAbort() : NonCaller();
+            }
+        }
+
+        if (requested.CanBeCanceled && token == requested)
+        {
+            return requested.IsCancellationRequested
+                ? CallerAbort()
+                : NonCaller();
+        }
+
+        if (deadline.CanBeCanceled && token == deadline)
+        {
+            return deadline.IsCancellationRequested ? ManagedDeadline() : NonCaller();
+        }
+
+        if (execution.CanBeCanceled && token == execution)
+        {
+            if (requested.IsCancellationRequested)
+            {
+                return CallerAbort();
+            }
+
+            return deadline.IsCancellationRequested ? ManagedDeadline() : NonCaller();
+        }
+
+        return NonCaller();
+
+        CapabilityExecutionResult CallerAbort()
+        {
+            var facts = new CapabilityFailureFacts(
+                CapabilityFailureKind.Cancelled,
+                "Crest.Request.Cancelled",
+                "请求已取消。");
+            return CapabilityExecutionResult.Cancelled(duration, facts, context.AuditRecordId);
+        }
+
+        CapabilityExecutionResult ManagedDeadline()
+        {
+            var facts = new CapabilityFailureFacts(
+                CapabilityFailureKind.ManagedDeadline,
+                "Crest.InternalError",
+                "服务器内部错误。");
+            return CapabilityExecutionResult.Failure(
+                "PIPELINE_ERROR", exception.Message, duration,
+                failureFacts: facts, auditRecordId: context.AuditRecordId);
+        }
+
+        CapabilityExecutionResult NonCaller()
+        {
+            var facts = new CapabilityFailureFacts(
+                CapabilityFailureKind.NonCaller,
+                "Crest.InternalError",
+                "服务器内部错误。");
+            return CapabilityExecutionResult.Failure(
+                "PIPELINE_ERROR", exception.Message, duration,
+                failureFacts: facts, auditRecordId: context.AuditRecordId);
+        }
+    }
+
+    private static CapabilityFailureFacts ClassifyCapabilityFailure(CapabilityFailureException exception)
+    {
+        var facts = exception.ErrorCode switch
+        {
+            "UNAUTHORIZED" => new CapabilityFailureFacts(
+                CapabilityFailureKind.Unauthorized, "Crest.Auth.Unauthorized", "当前请求未认证。",
+                JoinIssueDetails(exception.Issues)),
+            "CAPABILITY_FORBIDDEN" or "CAPABILITY_INVOCATION_SOURCE_FORBIDDEN" => new CapabilityFailureFacts(
+                CapabilityFailureKind.Forbidden, "Crest.Auth.Forbidden", "没有权限执行当前操作。",
+                JoinIssueDetails(exception.Issues)),
+            "CAPABILITY_CONTEXT_REQUIRED" => new CapabilityFailureFacts(
+                CapabilityFailureKind.Forbidden, "Crest.Auth.Forbidden", "没有可用的受信租户与用户上下文。"),
+            "CAPABILITY_RESOURCE_NOT_FOUND" or "CAPABILITY_NOT_FOUND" => new CapabilityFailureFacts(
+                CapabilityFailureKind.NotFound, "Crest.Entity.NotFound", "资源不存在。",
+                JoinIssueDetails(exception.Issues)),
+            "CAPABILITY_VALIDATION_FAILED" => new CapabilityFailureFacts(
+                CapabilityFailureKind.ValidationFailed, "Crest.Validation.Failed", "数据验证失败。",
+                JoinIssueDetails(exception.Issues)),
+            "CAPABILITY_DECISION_CONFLICT" or "CAPABILITY_DECISION_STATE_INVALID" => new CapabilityFailureFacts(
+                CapabilityFailureKind.Conflict, "Crest.Concurrency.Conflict", "并发冲突。"),
+            _ => new CapabilityFailureFacts(
+                CapabilityFailureKind.InvalidRequest, exception.ErrorCode, exception.Message,
+                JoinIssueDetails(exception.Issues)),
+        };
+        return facts;
+    }
+
+    private static string? JoinIssueDetails(IReadOnlyList<CapabilityExecutionIssue> issues)
+        => issues.Count == 0
+            ? null
+            : string.Join("; ", issues.Select(issue => issue.Message));
 
     private static InvocationSource ParseInvocationSource(string? value)
         => value switch

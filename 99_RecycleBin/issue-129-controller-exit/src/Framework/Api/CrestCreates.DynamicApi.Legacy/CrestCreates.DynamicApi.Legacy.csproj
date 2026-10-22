@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CrestCreates.DynamicApi</RootNamespace>
+    <AssemblyName>CrestCreates.DynamicApi.Legacy</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.Web.Legacy" />
+    <InternalsVisibleTo Include="CrestCreates.Web.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same route-collision semantics as the formal map; linked source keeps a single definition
+         without making the formal assembly reference the legacy package. -->
+    <Compile Include="../CrestCreates.DynamicApi/RoutePatternCollisionGuard.cs"
+             Link="Shared/RoutePatternCollisionGuard.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- One-way compatibility dependency: the legacy surface consumes the shared formal contracts,
+         never the other way around. -->
+    <ProjectReference Include="../CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+  </ItemGroup>
+
+</Project>

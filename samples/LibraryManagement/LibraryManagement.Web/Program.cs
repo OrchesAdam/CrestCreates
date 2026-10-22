@@ -1,6 +1,10 @@
 using CrestCreates.OpenApi;
 using CrestCreates.Modularity;
-using LibraryManagement.Application.Services;
+using CrestCreates.Capability;
+using CrestCreates.DynamicApi;
+using CrestCreates.Generated.HttpProjection;
+using CrestCreates.Schema;
+using CrestCreates.Schema.Abstractions;
 using CrestCreates.AuditLogging.Services;
 using CrestCreates.Application.Identity;
 using CrestCreates.Application.Permissions;
@@ -32,6 +36,7 @@ using CrestCreates.Data.EFCore.Settings;
 using CrestCreates.Data.EFCore.Features;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UsePinnedScopeServiceProvider();
 builder.Host.UseCrestSerilog();
 builder.Services.AddCrestLogging(builder.Configuration);
 builder.Services.Configure<AuditLoggingOptions>(
@@ -78,14 +83,11 @@ builder.Services.AddMultiTenancy(options =>
 });
 builder.Services.AddTenantResolvers(TenantResolutionStrategy.Header);
 builder.Services.AddRepositoryTenantProvider();
-builder.Services.AddCrestAspNetCoreDynamicApi(options =>
-{
-    options.AddApplicationServiceAssembly<BookAppService>();
-    options.AddApplicationServiceAssembly<SettingAppService>();
-    options.AddApplicationServiceAssembly<FeatureAppService>();
-    options.AddApplicationServiceAssembly<AuditLogAppService>();
-    options.AddApplicationServiceAssembly<AuditLogCleanupAppService>();
-});
+// #129 S4: LibraryManagement is served exclusively by formal ExplicitHost projections.
+builder.Services.AddCapabilityRuntime();
+builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
+builder.Services.AddCrestCapabilityEndpoints();
+builder.Services.AddGeneratedAppServiceHttp();
 
 // Register all modules using the SourceGenerator-generated module discovery system
 builder.Host.RegisterModules();
@@ -103,7 +105,7 @@ app.UseAccountabilityHttpOperationScope();
 app.UseTenantBoundary();
 app.UseAuthorization();
 app.MapCrestOpenIddictEndpoints();
-app.MapCrestAspNetCoreDynamicApi();
+app.MapCrestCapabilityEndpoints();
 app.MapCrestOpenApi();
 
 // Initialize all modules

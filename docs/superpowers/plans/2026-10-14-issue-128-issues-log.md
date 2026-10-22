@@ -421,3 +421,4 @@ R2 复审（head `23e920e7`，review 5550193846）：原四条 R1 探针全部�
 - **合并建议**：以 **merge commit** 合入 master（与 #145/#147/#149 一致，保留 S1–S4 分阶段提交与两轮修复轨迹）；base `de50b337`，head `2483d4cd`。CI 保持暂停；合并后不自动派发 Agent。支持声明与未验证项按 S4 收口节（正式 CRUD + JSON 主链 **NativeAOT-verified（linux-x64）**；EF/其他 ORM 查询翻译与 UoW 组合、其他 RID **未验证**）。
 - 合并后需补记：memory.md / AGENTS 的「待合并」状态改为已合并（含 merge sha）；#129 的交接内容已在 S4 收口节，不随本次合并改变范围。
 - **合并记录（2026-10-17）**：维护者批准 merge commit；PR #150 已合入 master，merge commit `196b6f66048ef32d644eeb856d00d58ae9d34965`（base `de50b337`，分支 head `410e2c37`，47 提交）。CI 保持暂停；未自动派发 Agent；#129 交接内容不变。
+- **状态补正（2026-10-22）**：同步 AGENTS/memory 的 #128 已合并状态；原交接给 #129 的旧 CRUD bundle/Controller/Legacy 退出已通过 PR #152 完成（merge `2f4c54024d8e2e9c5b8aecad1a399669dadb28a6`），不得恢复“待归档”双轨描述。EF/其他 ORM 查询翻译与 UoW 组合、其他 RID 的未验证声明保持，CI 保持暂停。

@@ -5,6 +5,7 @@ using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -13,18 +14,18 @@ namespace CrestCreates.MultiTenancy.Resolvers
     public class QueryStringTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
-        private readonly ITenantRepository _tenantRepository;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<QueryStringTenantResolver> _logger;
 
         public QueryStringTenantResolver(
             IOptions<MultiTenancyOptions> options,
-            ITenantRepository tenantRepository,
+            IServiceScopeFactory scopeFactory,
             TenantIdentifierNormalizer normalizer,
             ILogger<QueryStringTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-            _tenantRepository = tenantRepository;
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _normalizer = normalizer;
             _logger = logger;
         }
@@ -53,7 +54,9 @@ namespace CrestCreates.MultiTenancy.Resolvers
         private async Task<TenantResolutionResult> ResolveTenantAsync(string rawValue, string resolvedBy, CancellationToken cancellationToken)
         {
             var normalizedName = _normalizer.NormalizeName(rawValue);
-            var tenant = await _tenantRepository.FindByNameAsync(normalizedName, cancellationToken);
+            using var scope = _scopeFactory.CreateScope();
+            var tenantRepository = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
+            var tenant = await tenantRepository.FindByNameAsync(normalizedName, cancellationToken);
 
             if (tenant == null) return TenantResolutionResult.NotFound(resolvedBy);
             if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active) return TenantResolutionResult.Inactive(resolvedBy);
@@ -65,18 +68,18 @@ namespace CrestCreates.MultiTenancy.Resolvers
     public class CookieTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
-        private readonly ITenantRepository _tenantRepository;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<CookieTenantResolver> _logger;
 
         public CookieTenantResolver(
             IOptions<MultiTenancyOptions> options,
-            ITenantRepository tenantRepository,
+            IServiceScopeFactory scopeFactory,
             TenantIdentifierNormalizer normalizer,
             ILogger<CookieTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-            _tenantRepository = tenantRepository;
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _normalizer = normalizer;
             _logger = logger;
         }
@@ -95,7 +98,9 @@ namespace CrestCreates.MultiTenancy.Resolvers
                 if (!string.IsNullOrWhiteSpace(tenantId))
                 {
                     var normalizedName = _normalizer.NormalizeName(tenantId);
-                    var tenant = await _tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
+                    using var scope = _scopeFactory.CreateScope();
+                    var tenantRepository = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
+                    var tenant = await tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
 
                     if (tenant == null) return TenantResolutionResult.NotFound("Cookie");
                     if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active) return TenantResolutionResult.Inactive("Cookie");
@@ -111,18 +116,18 @@ namespace CrestCreates.MultiTenancy.Resolvers
     public class RouteTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
-        private readonly ITenantRepository _tenantRepository;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<RouteTenantResolver> _logger;
 
         public RouteTenantResolver(
             IOptions<MultiTenancyOptions> options,
-            ITenantRepository tenantRepository,
+            IServiceScopeFactory scopeFactory,
             TenantIdentifierNormalizer normalizer,
             ILogger<RouteTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-            _tenantRepository = tenantRepository;
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _normalizer = normalizer;
             _logger = logger;
         }
@@ -143,7 +148,9 @@ namespace CrestCreates.MultiTenancy.Resolvers
                 if (!string.IsNullOrWhiteSpace(value))
                 {
                     var normalizedName = _normalizer.NormalizeName(value);
-                    var tenant = await _tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
+                    using var scope = _scopeFactory.CreateScope();
+                    var tenantRepository = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
+                    var tenant = await tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
 
                     if (tenant == null) return TenantResolutionResult.NotFound("Route");
                     if (!tenant.IsActive || tenant.LifecycleState != Domain.Permission.TenantLifecycleState.Active) return TenantResolutionResult.Inactive("Route");

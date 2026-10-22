@@ -1,7 +1,10 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
 using CrestCreates.DynamicApi;
 using FluentAssertions;
@@ -35,6 +38,31 @@ internal partial class ResultProbeJsonContext : JsonSerializerContext
 /// </summary>
 public class TypedResultContractTests
 {
+    [Fact]
+    public void Public_response_mapper_exposes_only_metadata_required_overloads()
+    {
+        var methods = typeof(CompatibilityHttpResultMapper)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Where(method => method.Name.StartsWith("Wrap", StringComparison.Ordinal))
+            .ToArray();
+
+        methods.Should().NotBeEmpty();
+        foreach (var method in methods)
+        {
+            method.GetParameters().Should().NotContain(
+                parameter => parameter.ParameterType == typeof(IServiceProvider),
+                $"'{method.Name}' must not expose the archived reflection/IServiceProvider fallback");
+            method.GetParameters().Should().Contain(
+                parameter => parameter.ParameterType.IsGenericType
+                             && parameter.ParameterType.GetGenericTypeDefinition() == typeof(JsonTypeInfo<>),
+                $"'{method.Name}' must require source-generated JSON metadata");
+        }
+
+        typeof(CompatibilityHttpResultMapper)
+            .GetMethod("MapAotJson", BindingFlags.NonPublic | BindingFlags.Static)
+            .Should().BeNull("the reflection fallback helper was archived with the legacy runtime");
+    }
+
     [Fact]
     public async Task Typed_result_must_serialize_through_the_generated_metadata()
     {

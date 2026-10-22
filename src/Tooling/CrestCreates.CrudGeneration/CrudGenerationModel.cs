@@ -14,7 +14,7 @@ namespace CrestCreates.Tooling.CrudGeneration;
 public sealed record CrudGenerationModel
 {
     /// <summary>Schema version of this model; part of the incremental fingerprint.</summary>
-    public const string ModelSchemaVersion = "crud-model-v1";
+    public const string ModelSchemaVersion = CrudGenerationSchema.ModelSchemaVersion;
 
     /// <summary>Owner identity per §5.1: assembly + declaring service full metadata name.</summary>
     public required string OwnerAssemblyName { get; init; }

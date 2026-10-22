@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
@@ -12,6 +13,11 @@ using SaaSHelpdesk.Domain.Shared.Enums;
 namespace SaaSHelpdesk.Application.Services;
 
 [CrestService]
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(IDashboardAppService),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/dashboard",
+    CapabilityIdPrefix = "compat.appservice.dashboard")]
 public class DashboardAppService : IDashboardAppService
 {
     private readonly ICrestRepositoryBase<Ticket, Guid> _ticketRepository;
@@ -21,7 +27,7 @@ public class DashboardAppService : IDashboardAppService
         _ticketRepository = ticketRepository;
     }
 
-    public async Task<DashboardSummaryDto> GetSummaryAsync()
+    public async Task<DashboardSummaryDto> GetSummaryAsync(CancellationToken cancellationToken = default)
     {
         var today = DateTime.UtcNow.Date;
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using SaaSHelpdesk.Tests.Fixtures;
@@ -116,9 +117,9 @@ public class KnowledgeBaseApiTests : BaseTest
         var response = await GetAsync(client, $"/api/knowledge-base/{Guid.NewGuid()}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        var content = await response.Content.ReadAsStringAsync();
-        content.Should().Contain("404");
-        content.Should().Contain("资源不存在");
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("statusCode").GetInt32().Should().Be(404);
+        document.RootElement.GetProperty("message").GetString().Should().Contain("资源不存在");
     }
 
     // ── 3. GetListAsync ──────────────────────────────────────────────
@@ -293,10 +294,9 @@ public class KnowledgeBaseApiTests : BaseTest
     {
         var (client, _) = await CreateAuthenticatedAdminClientAsync();
 
-        // Search endpoint requires keyword (throws BadHttpRequestException if missing/empty).
-        // An empty keyword triggers a server error (500) since BadHttpRequestException is unhandled.
+        // The formal projection treats a missing required query value as a binding failure (400).
         var response = await PostAsync<object>(client, "/api/knowledge-base/search?keyword=", null!);
-        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
         // A valid non-matching keyword returns 200 with empty results
         var response2 = await PostAsync<object>(client, "/api/knowledge-base/search?keyword=nonexistent", null!);
@@ -306,13 +306,13 @@ public class KnowledgeBaseApiTests : BaseTest
     }
 
     [Fact]
-    public async Task SearchAsync_WithoutKeyword_ReturnsServerError()
+    public async Task SearchAsync_WithoutKeyword_ReturnsBadRequest()
     {
         var (client, _) = await CreateAuthenticatedAdminClientAsync();
 
-        // Search endpoint requires keyword — without it, BadHttpRequestException causes 500
+        // The formal projection binds the required keyword as a query input; absence is a 400.
         var response = await PostAsync<object>(client, "/api/knowledge-base/search", null!);
-        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     // ── 10. GetPopularAsync ──────────────────────────────────────────

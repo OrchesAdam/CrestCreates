@@ -33,7 +33,8 @@ namespace CrestCreates.Data.Abstractions
             UnitOfWorkChainNode? readerNode,
             out CancellationToken effective)
         {
-            var current = ResolveVisibleFrame(readerNode)?.Source.Token ?? default;
+            var frame = ResolveVisibleFrame(readerNode);
+            var current = frame?.Source.Token ?? default;
 
             if (!current.CanBeCanceled)
             {
@@ -49,6 +50,10 @@ namespace CrestCreates.Data.Abstractions
 
             var linked = CancellationTokenSource.CreateLinkedTokenSource(incoming, current);
             effective = linked.Token;
+
+            // The derived token is the actual token an EF operation cancels with; associate it with
+            // the frame that produced it so cancellation classification can follow the source.
+            frame!.Source.RecordDerivedToken(effective);
             return linked;
         }
 

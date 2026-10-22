@@ -391,6 +391,105 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
         GetEndpoints(endpoints).Should().HaveCount(2);
     }
 
+    [Theory]
+    [InlineData("owned", false)]
+    [InlineData("owned", true)]
+    [InlineData("canonical-host", false)]
+    [InlineData("canonical-host", true)]
+    [InlineData("modified", false)]
+    [InlineData("modified", true)]
+    [InlineData("reflection", false)]
+    [InlineData("reflection", true)]
+    public void ReviewS3_shared_root_must_not_trust_a_context_base_type_over_actual_contract(string mode, bool scalar)
+    {
+        var root = scalar ? typeof(Guid) : typeof(DynamicApiResponse);
+        var contribution = new WiredContractContribution
+        {
+            OwnerAssemblyName = "ReviewS3.Feature",
+            EndpointDescriptors = [CreateEndpoint("review-s3.endpoint")],
+            Bindings = [CreateBinding("review-s3.endpoint")],
+            Handlers = [CreateHandler("test-cap")],
+            ResultMappers = [CreateResultBinding("review-s3.endpoint", "shared-root")],
+            JsonContext = ReviewS3OwnedContext.Default,
+            RequiredJsonRootTypes = [new(root, "Read", scalar ? "Input" : "VoidEnvelope")]
+        };
+        IJsonTypeInfoResolver first = mode switch
+        {
+            "owned" => ReviewS3OwnedContext.Default,
+            "canonical-host" => ReviewS3CanonicalHostContext.Default,
+            _ => new ReviewS3HostContext(mode)
+        };
+        var (provider, endpoints) = BuildEndpointHost(CreateCapability(), contribution,
+            configureJson: options => options.SerializerOptions.TypeInfoResolver =
+                JsonTypeInfoResolver.Combine(first, ReviewS3OwnedContext.Default));
+        using var lifetime = (IDisposable)provider;
+        var options = provider.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
+        object value = scalar ? Guid.Parse("01234567-89ab-cdef-0123-456789abcdef") : new DynamicApiResponse { Message = "ok" };
+        var actual = first.GetTypeInfo(root, options);
+        actual.Should().NotBeNull();
+        var expected = ((IJsonTypeInfoResolver)ReviewS3OwnedContext.Default).GetTypeInfo(root, ReviewS3OwnedContext.Default.Options)!;
+        var serialized = JsonSerializer.Serialize(value, actual!);
+        var canonical = JsonSerializer.Serialize(value, expected);
+        if (mode == "modified") serialized.Should().NotBe(canonical, "the host context changes the scalar/envelope wire contract");
+        else serialized.Should().Be(canonical);
+        if (mode == "reflection") actual!.OriginatingResolver.Should().BeOfType<DefaultJsonTypeInfoResolver>();
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+        if (mode is "modified" or "reflection")
+        {
+            map.Should().Throw<InvalidOperationException>("a context base type is not evidence of source-generation or equivalent metadata");
+            endpoints.DataSources.Should().BeEmpty();
+        }
+        else
+        {
+            map.Should().NotThrow();
+            GetEndpoints(endpoints).Should().ContainSingle();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReviewS3StringRoot_shared_string_converter_must_preserve_the_wire(bool changed)
+    {
+        var root = typeof(string);
+        var contribution = new WiredContractContribution
+        {
+            OwnerAssemblyName = "ReviewS3.StringFeature",
+            EndpointDescriptors = [CreateEndpoint("review-s3-string.endpoint")],
+            Bindings = [CreateBinding("review-s3-string.endpoint")],
+            Handlers = [CreateHandler("test-cap")],
+            ResultMappers = [CreateResultBinding("review-s3-string.endpoint", "string-root")],
+            JsonContext = ReviewS3OwnedContext.Default,
+            RequiredJsonRootTypes = [new(root, "Read", "Input")]
+        };
+        IJsonTypeInfoResolver first = changed
+            ? ReviewS3ChangedStringContext.Default : ReviewS3CanonicalHostContext.Default;
+        var (provider, endpoints) = BuildEndpointHost(CreateCapability(), contribution,
+            configureJson: options =>
+            {
+                if (changed) options.SerializerOptions.Converters.Add(new ReviewS3StringConverter());
+                options.SerializerOptions.TypeInfoResolver =
+                    JsonTypeInfoResolver.Combine(first, ReviewS3OwnedContext.Default);
+            });
+        using var lifetime = (IDisposable)provider;
+        var options = provider.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
+        var actual = first.GetTypeInfo(root, options)!;
+        actual.Should().NotBeNull();
+        actual.OriginatingResolver.Should().BeAssignableTo<JsonSerializerContext>();
+        JsonSerializer.Serialize("abc", actual).Should().Be(changed ? "\"host:abc\"" : "\"abc\"");
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+        if (changed)
+        {
+            map.Should().Throw<InvalidOperationException>("a source-generated custom string converter changes the shared root wire");
+            endpoints.DataSources.Should().BeEmpty();
+        }
+        else
+        {
+            map.Should().NotThrow();
+            GetEndpoints(endpoints).Should().ContainSingle();
+        }
+    }
+
     private sealed class Review150CapabilityProvider(CapabilityDescriptor descriptor) : IDescriptorProvider<CapabilityDescriptor>
     {
         public IReadOnlyList<CapabilityDescriptor> GetDescriptors() => new[] { descriptor };

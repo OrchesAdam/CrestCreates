@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -12,21 +13,18 @@ namespace CrestCreates.MultiTenancy.Resolvers
     public class SubdomainTenantResolver : ITenantResolver
     {
         private readonly MultiTenancyOptions _options;
-        private readonly ITenantRepository _tenantRepository;
-        private readonly ITenantDomainMappingRepository _domainMappingRepository;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly TenantIdentifierNormalizer _normalizer;
         private readonly ILogger<SubdomainTenantResolver> _logger;
 
         public SubdomainTenantResolver(
             IOptions<MultiTenancyOptions> options,
-            ITenantRepository tenantRepository,
-            ITenantDomainMappingRepository domainMappingRepository,
+            IServiceScopeFactory scopeFactory,
             TenantIdentifierNormalizer normalizer,
             ILogger<SubdomainTenantResolver> logger)
         {
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
-            _tenantRepository = tenantRepository;
-            _domainMappingRepository = domainMappingRepository;
+            _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
             _normalizer = normalizer;
             _logger = logger;
         }
@@ -50,10 +48,13 @@ namespace CrestCreates.MultiTenancy.Resolvers
                 return TenantResolutionResult.NotResolved("Subdomain");
             }
 
-            var domainMapping = await _domainMappingRepository.FindByDomainAsync(normalizedDomain, httpContext.RequestAborted);
+            using var scope = _scopeFactory.CreateScope();
+            var tenantRepository = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
+            var domainMappingRepository = scope.ServiceProvider.GetRequiredService<ITenantDomainMappingRepository>();
+            var domainMapping = await domainMappingRepository.FindByDomainAsync(normalizedDomain, httpContext.RequestAborted);
             if (domainMapping != null && domainMapping.IsActive)
             {
-                var tenant = await _tenantRepository.GetAsync(domainMapping.TenantId, httpContext.RequestAborted);
+                var tenant = await tenantRepository.GetAsync(domainMapping.TenantId, httpContext.RequestAborted);
                 if (tenant != null && tenant.IsActive && tenant.LifecycleState == Domain.Permission.TenantLifecycleState.Active)
                 {
                     return TenantResolutionResult.Success(tenant.Id.ToString(), tenant.Name, tenant.GetDefaultConnectionString(), "Subdomain");
@@ -66,7 +67,7 @@ namespace CrestCreates.MultiTenancy.Resolvers
             if (!string.IsNullOrEmpty(subdomain) && !IsReservedSubdomain(subdomain))
             {
                 var normalizedName = _normalizer.NormalizeName(subdomain);
-                var tenant = await _tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
+                var tenant = await tenantRepository.FindByNameAsync(normalizedName, httpContext.RequestAborted);
 
                 if (tenant != null)
                 {

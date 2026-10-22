@@ -221,7 +221,7 @@ public class CrudServiceRealDeclarationBaselineTests
         var closure = producer.Compilation;
         string[] requiredTypes =
         [
-            "CrestCreates.DynamicApi.IDynamicApiGeneratedProvider",
+            "CrestCreates.DynamicApi.DynamicApiResponse",
             "CrestCreates.Validation.Modules.IValidationService",
             "Microsoft.AspNetCore.Routing.IEndpointRouteBuilder",
             "Microsoft.AspNetCore.Http.HttpContext",

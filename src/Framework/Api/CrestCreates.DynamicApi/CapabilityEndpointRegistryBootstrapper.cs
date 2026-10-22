@@ -80,8 +80,44 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
 
             VerifyHostIdentities();
             VerifyHostJsonContracts();
+            VerifyHostRequiredServices();
 
             _ready = true;
+        }
+    }
+
+    /// <summary>
+    /// CCHTTP007: a contribution's generated invokers resolve the business contract from DI. A host
+    /// that activated the contribution but omitted the business service registration must fail
+    /// before any endpoint is mapped; the first request must never surface a request-time 500.
+    /// </summary>
+    private void VerifyHostRequiredServices()
+    {
+        var entries = _hostActivation.GetRequiredServiceEntries();
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var serviceProbe = _serviceProvider.GetService<IServiceProviderIsService>();
+        if (serviceProbe is null)
+        {
+            throw new InvalidOperationException(
+                "CCHTTP007: the host's service provider cannot verify business contract registrations "
+                + "(IServiceProviderIsService is unavailable); required contracts cannot be validated before mapping.");
+        }
+
+        foreach (var entry in entries)
+        {
+            if (!serviceProbe.IsService(entry.ServiceType))
+            {
+                throw new InvalidOperationException(
+                    $"CCHTTP007: the generated contribution of '{entry.Owner}' requires business contract "
+                    + $"service '{entry.ServiceType.FullName}', but the host has no registration for it. "
+                    + "Register the business service with its owning feature/module before "
+                    + "MapCrestCapabilityEndpoints(); a missing contract registration is never deferred "
+                    + "to the first request.");
+            }
         }
     }
 
@@ -179,6 +215,29 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
     [
         typeof(DynamicApiResponse),
         typeof(ProblemDetails),
+        // Framework scalar inputs carry identical STJ metadata across source-generated contexts.
+        // A non-contributed context may answer them only when its metadata is contract-equivalent
+        // to the owning contribution's metadata (S3 review R1).
+        typeof(string),
+        typeof(Guid),
+        typeof(bool),
+        typeof(byte),
+        typeof(sbyte),
+        typeof(short),
+        typeof(ushort),
+        typeof(int),
+        typeof(uint),
+        typeof(long),
+        typeof(ulong),
+        typeof(char),
+        typeof(decimal),
+        typeof(double),
+        typeof(float),
+        typeof(DateTime),
+        typeof(DateTimeOffset),
+        typeof(TimeSpan),
+        typeof(DateOnly),
+        typeof(TimeOnly),
     ];
 
     /// <summary>
@@ -251,7 +310,8 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return "The owning contribution declares no source-generated JsonContext.";
         }
 
-        if (!TryGetContributedMetadata(context, required, out _))
+        if (!TryGetContributedMetadata(context, required, out var ownerMetadata)
+            || ownerMetadata is null)
         {
             return "The contribution's source-generated JsonContext does not carry metadata for it.";
         }
@@ -267,13 +327,25 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return null;
         }
 
-        if (answering is JsonSerializerContext answeringContext
-            && hostContexts.Contains(answeringContext)
-            && Array.IndexOf(HostSharedJsonRootTypes, required.ClrType) >= 0)
+        // Framework-shared root: an activated contributed context is trusted (the platform emitted
+        // it); any other host context may answer it first only when its metadata is contract-equivalent
+        // to the owning contribution's metadata. A context base type is not evidence of source
+        // generation or equivalence: reflection-backed metadata and modified converters/property names
+        // are rejected (#129 S3 review R1).
+        if (Array.IndexOf(HostSharedJsonRootTypes, required.ClrType) >= 0)
         {
-            // Framework-shared root: every generated contribution carries identical metadata for it,
-            // so any activated source-generated contributor of this host may answer it first.
-            return null;
+            if (answering is JsonSerializerContext answeringContext
+                && hostContexts.Contains(answeringContext))
+            {
+                return null;
+            }
+
+            if (answering is IJsonTypeInfoResolver answeringResolver
+                && TryGetResolverMetadata(answeringResolver, required.ClrType, options, out var candidateMetadata)
+                && SharedContractEquivalent(ownerMetadata, candidateMetadata!))
+            {
+                return null;
+            }
         }
 
         if (answering is JsonSerializerContext foreignContext
@@ -288,6 +360,72 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             + $"'{answering!.GetType().FullName ?? answering.GetType().Name}' before the contribution's "
             + "JsonContext (activate the generated context after the host's own resolvers).";
     }
+
+    private static bool TryGetResolverMetadata(
+        IJsonTypeInfoResolver resolver,
+        Type type,
+        JsonSerializerOptions options,
+        out JsonTypeInfo? metadata)
+    {
+        try
+        {
+            metadata = resolver.GetTypeInfo(type, options);
+            return metadata is not null;
+        }
+        catch (NotSupportedException)
+        {
+            metadata = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Shared framework roots may be answered by another source-generated host context only when the
+    /// wire contract is identical: same kind/type/converter and the same object property names/types.
+    /// Reflection-backed metadata and modified converters/property names are rejected even when their
+    /// current shape happens to serialize the same way (#129 S3 review R1).
+    /// </summary>
+    private static bool SharedContractEquivalent(JsonTypeInfo expected, JsonTypeInfo candidate)
+    {
+        if (candidate.OriginatingResolver is DefaultJsonTypeInfoResolver)
+        {
+            return false;
+        }
+
+        if (expected.Kind != candidate.Kind
+            || expected.Type != candidate.Type
+            || expected.NumberHandling != candidate.NumberHandling)
+        {
+            return false;
+        }
+
+        // Source-generated object/collection converters may be context-local, so those roots are
+        // compared by their property contract below. Scalar roots (value types and reference scalars
+        // such as string) must keep the same converter type: a custom scalar converter changes the
+        // wire even though the type and kind are unchanged.
+        if ((expected.Type.IsValueType || expected.Kind == JsonTypeInfoKind.None)
+            && expected.Converter.GetType() != candidate.Converter.GetType())
+        {
+            return false;
+        }
+
+        if (expected.Kind == JsonTypeInfoKind.Object)
+        {
+            var expectedProperties = DescribeJsonPropertyContract(expected);
+            var candidateProperties = DescribeJsonPropertyContract(candidate);
+            if (!expectedProperties.SequenceEqual(candidateProperties, StringComparer.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static IEnumerable<string> DescribeJsonPropertyContract(JsonTypeInfo typeInfo)
+        => typeInfo.Properties.Select(property =>
+            property.Name + "|" + property.PropertyType.FullName + "|" + property.IsRequired
+            + "|" + (property.CustomConverter?.GetType().FullName ?? string.Empty));
 
     /// <summary>
     /// Asks the contributed context for the root's metadata through the resolver interface, using the

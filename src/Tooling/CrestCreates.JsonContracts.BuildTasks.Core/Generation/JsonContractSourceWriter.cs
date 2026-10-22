@@ -13,7 +13,8 @@ public static class JsonContractSourceWriter
         sb.AppendLine("#nullable enable");
 
         if (model.Contexts.Count == 0 && model.LocalEventRoots.Count == 0
-            && model.IntegrationEventRoots.Count == 0 && model.CrudRoots.Count == 0)
+            && model.IntegrationEventRoots.Count == 0 && model.CrudRoots.Count == 0
+            && model.AppServiceHttpRoots.Count == 0)
             return sb.ToString();
 
         var groupedByNamespace = model.Contexts
@@ -65,7 +66,44 @@ public static class JsonContractSourceWriter
             WriteCrudRootBlock(sb, model.CrudRoots, assemblyName);
         }
 
+        if (model.AppServiceHttpRoots.Count > 0)
+        {
+            sb.AppendLine();
+            WriteAppServiceHttpRootBlock(sb, model.AppServiceHttpRoots, assemblyName);
+        }
+
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// #129 S2.2-B: the hand-written projection roots become one internal context named exactly as the
+    /// generated activation references it, so the official STJ generator closes composed envelopes,
+    /// body/scalar inputs, payloads and typed result envelopes inside the same CoreCompile. HTTP uses
+    /// the camelCase policy of §4.3.
+    /// </summary>
+    private static void WriteAppServiceHttpRootBlock(
+        System.Text.StringBuilder sb,
+        List<JsonContractRootModel> roots,
+        string assemblyName)
+    {
+        var contextName = global::CrestCreates.Tooling.HttpProjection.GeneratedHttpJsonContext.TypePrefix
+            + global::CrestCreates.Tooling.HttpProjection.AppServiceHttpWireConvention.CanonicalToken(assemblyName);
+        sb.AppendLine($"namespace {(global::CrestCreates.Tooling.HttpProjection.GeneratedHttpJsonContext.Namespace)}");
+        sb.AppendLine("{");
+
+        foreach (var root in roots.OrderBy(r => r.FullMetadataName, StringComparer.Ordinal))
+        {
+            var origin = root.Provenance.Origins.FirstOrDefault();
+            sb.AppendLine($"    // HTTP projection root from {(origin?.DeclaringSurface ?? assemblyName)}"
+                + (origin is null ? string.Empty : " (" + origin.RoleName + ")"));
+            sb.AppendLine($"    [global::System.Text.Json.Serialization.JsonSerializable({JsonContractTypeNameWriter.WriteTypeofExpression(root.RootType)})]");
+        }
+
+        sb.AppendLine("    [global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]");
+        sb.AppendLine($"    internal sealed partial class {contextName} : global::System.Text.Json.Serialization.JsonSerializerContext");
+        sb.AppendLine("    {");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
     }
 
     private static void WriteLocalEventCodecBlock(

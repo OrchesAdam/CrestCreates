@@ -120,6 +120,8 @@ public static class CapabilityEndpointExtensions
         var resolvedEndpoints = ResolveEndpoints(
             registry, capabilityRegistry, hostActivation, bootstrapper);
 
+        ValidateRouteCollisions(endpoints, resolvedEndpoints);
+
         foreach (var item in resolvedEndpoints)
         {
             CapabilityEndpointMapper.MapEndpoint(
@@ -174,6 +176,38 @@ public static class CapabilityEndpointExtensions
         }
 
         return resolved;
+    }
+
+    /// <summary>
+    /// The whole batch is checked with the same matching semantics the router uses, before any
+    /// endpoint is registered. This also covers the legacy-first order: routes already mapped by the
+    /// explicit legacy activation are part of the existing endpoint set.
+    /// </summary>
+    private static void ValidateRouteCollisions(
+        IEndpointRouteBuilder endpoints,
+        IReadOnlyList<ResolvedEndpoint> resolvedEndpoints)
+    {
+        if (resolvedEndpoints.Count == 0)
+        {
+            return;
+        }
+
+        var mappedRoutes = RoutePatternCollisionGuard.CollectMappedRoutes(endpoints);
+        var plannedRoutes = new HashSet<(string Method, string Route)>();
+        foreach (var item in resolvedEndpoints)
+        {
+            var method = item.Descriptor.HttpMethod.ToString().ToUpperInvariant();
+            var canonical = RoutePatternCollisionGuard.Canonicalize(item.Descriptor.RoutePattern);
+            if (!plannedRoutes.Add((method, canonical))
+                || mappedRoutes.Contains((method, canonical))
+                || mappedRoutes.Contains(("*", canonical)))
+            {
+                throw new InvalidOperationException(
+                    $"CCHTTP005: capability endpoint '{item.Descriptor.Id}' v{item.Descriptor.Version} publishes "
+                    + $"{method} '{item.Descriptor.RoutePattern}', which is already mapped by another endpoint. "
+                    + "Formal/legacy or duplicate formal routes are rejected before mapping.");
+            }
+        }
     }
 
     private static CapabilityEndpointBindingContract ResolveBinding(

@@ -13,8 +13,6 @@ namespace CrestCreates.Domain.Shared.Attributes
         }
         
         public ServiceLifetime Lifetime { get; set; } = ServiceLifetime.Scoped;
-        public bool GenerateController { get; set; } = false;
-        public string Route { get; set; } = "";
         
         // 授权配置
         public bool GenerateAuthorization { get; set; } = false;

@@ -1,24 +1,42 @@
+using System.Threading;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Sample.AssetManagement.Application;
+using CrestCreates.Sample.AssetManagement.Contracts;
 using CrestCreates.Sample.AssetManagement.Contracts.Dtos;
 
 namespace CrestCreates.Sample.AssetManagement.Host.Projections;
 
 [CrestService]
-[CapabilityCompatibilityProjection(RoutePrefix = "api/assets/compat")]
-public sealed class AssetCompatibilityProjection(AssetApplicationService application, ICapabilityExecutionContextAccessor execution)
+[CapabilityCompatibilityProjection(
+    ContractType = typeof(AssetCompatibilityProjection),
+    RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    RoutePrefix = "api/assets/compat",
+    CapabilityIdPrefix = "compat.appservice.asset-compatibility-projection")]
+public sealed class AssetCompatibilityProjection(
+    AssetApplicationService application,
+    ICapabilityExecutionContextAccessor execution)
 {
-    public async Task<AssetResult?> GetAsync(Guid assetId)
+    [AppServiceHttpAction(
+        Verb = HttpProjectionVerb.Get,
+        Route = "{assetId}",
+        Kind = HttpProjectionOperationKind.Query,
+        Permissions = new[] { AssetPermissions.Assets.Read })]
+    public async Task<AssetResult?> GetAsync(Guid assetId, CancellationToken cancellationToken = default)
     {
         var context = RequiredContext();
-        return await application.GetAsync(assetId, context.TenantId!, CancellationToken.None);
+        return await application.GetAsync(assetId, context.TenantId!, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<AssetResult>> ListAsync()
+    [AppServiceHttpAction(
+        Verb = HttpProjectionVerb.Get,
+        Route = "list",
+        Kind = HttpProjectionOperationKind.Query,
+        Permissions = new[] { AssetPermissions.Assets.Search })]
+    public async Task<IReadOnlyList<AssetResult>> ListAsync(CancellationToken cancellationToken = default)
     {
         var context = RequiredContext();
-        return await application.QueryAsync(new AssetQueryInput(), context.TenantId!, CancellationToken.None);
+        return await application.QueryAsync(new AssetQueryInput(), context.TenantId!, cancellationToken);
     }
 
     private CapabilityExecutionContext RequiredContext()

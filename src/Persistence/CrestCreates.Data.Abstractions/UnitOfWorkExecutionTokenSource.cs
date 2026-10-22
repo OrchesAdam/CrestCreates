@@ -17,9 +17,40 @@ namespace CrestCreates.Data.Abstractions
     public sealed class UnitOfWorkExecutionTokenSource
     {
         private CancellationToken _token;
+        private readonly object _derivedTokensGate = new();
+        private readonly System.Collections.Generic.List<CancellationToken> _derivedTokens = new();
 
         /// <summary>受管执行 token（StartAsync 之前为 default）。</summary>
         public CancellationToken Token => _token;
+
+        /// <summary>
+        /// Records a token derived from the managed execution token by the official composition
+        /// helper (<see cref="UnitOfWorkExecutionContext.CombineWithCurrent"/>), so cancellation
+        /// classification can recognize the actual token an EF operation threw with.
+        /// </summary>
+        internal void RecordDerivedToken(CancellationToken token)
+        {
+            if (!token.CanBeCanceled)
+            {
+                return;
+            }
+
+            lock (_derivedTokensGate)
+            {
+                if (!_derivedTokens.Contains(token))
+                {
+                    _derivedTokens.Add(token);
+                }
+            }
+        }
+
+        internal System.Collections.Generic.IReadOnlyList<CancellationToken> SnapshotDerivedTokens()
+        {
+            lock (_derivedTokensGate)
+            {
+                return _derivedTokens.ToArray();
+            }
+        }
 
         /// <summary>该载体是否为 owner（顶层/隔离）；join 为 false。</summary>
         public bool IsOwner { get; internal set; }

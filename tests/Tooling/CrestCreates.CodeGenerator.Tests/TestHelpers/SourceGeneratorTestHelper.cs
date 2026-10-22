@@ -283,6 +283,17 @@ namespace CrestCreates.Domain.Shared.Attributes
         }
 
         /// <summary>
+        /// 为不运行生成器的语义分析测试创建编译（模型构建器、契约探针）。
+        /// </summary>
+        public static Microsoft.CodeAnalysis.CSharp.CSharpCompilation CreateAnalysisCompilation(
+            string assemblyName,
+            string[] sources,
+            IEnumerable<MetadataReference>? additionalMetadataReferences = null,
+            string[]? additionalReferences = null)
+            => (Microsoft.CodeAnalysis.CSharp.CSharpCompilation)CreateCompilation(
+                assemblyName, sources, additionalSources: null, additionalReferences, additionalMetadataReferences);
+
+        /// <summary>
         /// 将一个程序集编译为 PE 镜像字节（不运行任何生成器），供跨程序集测试作为 MetadataReference 引用。
         /// 编译失败时抛出，附带诊断，避免把编译错误静默当作"引用缺失"。
         /// </summary>

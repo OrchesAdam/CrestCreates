@@ -1,3 +1,6 @@
+using CrestCreates.Domain.Repositories;
+using Microsoft.Extensions.DependencyInjection;
+
 namespace SaaSHelpdesk.Tests;
 
 public class AgentApiTests : BaseTest, IClassFixture<Fixtures.HelpdeskWebApplicationFactory>
@@ -179,6 +182,27 @@ public class AgentApiTests : BaseTest, IClassFixture<Fixtures.HelpdeskWebApplica
 
         var getApiResponse = await ReadApiResponseAsync<AgentResponse>(getResponse);
         getApiResponse.Data!.IsActive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateAsync_InvalidEmail_ReturnsBadRequest_AndDoesNotPersist()
+    {
+        var (client, _) = await CreateAuthenticatedAdminClientAsync();
+        var userName = $"invalid-agent-{Guid.NewGuid():N}";
+
+        var response = await PostAsync<object>(client, "/api/agent", new
+        {
+            userName,
+            email = "not-an-email",
+            password = "AgentPass123!"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var scope = Factory.Services.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<
+            ICrestRepositoryBase<CrestCreates.Domain.Permission.User, Guid>>();
+        var users = await repository.GetListAsync(user => user.UserName == userName);
+        users.Should().BeEmpty("the typed validator must run before the business service or unit of work");
     }
 
     [Fact]

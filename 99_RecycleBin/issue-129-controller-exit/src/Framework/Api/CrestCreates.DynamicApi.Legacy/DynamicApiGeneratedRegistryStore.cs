@@ -1,0 +1,169 @@
+﻿using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace CrestCreates.DynamicApi;
+
+/// <summary>
+/// Legacy static registry for AppService-oriented Dynamic API generated providers.
+/// New Capability Endpoint projection uses its own generated binding registry.
+/// </summary>
+public static class DynamicApiGeneratedRegistryStore
+{
+    private static readonly ConcurrentDictionary<string, IDynamicApiGeneratedProvider> Providers = new(StringComparer.Ordinal);
+
+    public static void Register(IDynamicApiGeneratedProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        Providers.TryAdd(provider.GetType().FullName ?? provider.GetType().Name, provider);
+    }
+
+    public static IReadOnlyCollection<IDynamicApiGeneratedProvider> GetProviders()
+    {
+        return Providers.Values.ToArray();
+    }
+
+    public static DynamicApiRegistry? BuildRegistry(DynamicApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var serviceKeys = new HashSet<string>(StringComparer.Ordinal);
+        var services = new List<DynamicApiServiceDescriptor>();
+        var hasMatchingProvider = false;
+        foreach (var provider in GetProviders())
+        {
+            if (!TryGetMatchingGeneratedRegistry(provider, options, out var registry))
+            {
+                continue;
+            }
+
+            hasMatchingProvider = true;
+
+            foreach (var service in registry.Services)
+            {
+                var key = $"{service.ServiceType.Assembly.GetName().Name}|{service.ServiceType.FullName}|{service.RoutePrefix}";
+                if (serviceKeys.Add(key))
+                {
+                    services.Add(service);
+                }
+            }
+        }
+
+        if (!hasMatchingProvider)
+        {
+            return null;
+        }
+
+        return new DynamicApiRegistry(services);
+    }
+
+    public static DynamicApiRegistry BuildRequiredRegistry(DynamicApiOptions options)
+    {
+        return BuildRegistry(options) ?? throw CreateMissingGeneratedProviderException(options);
+    }
+
+    public static IReadOnlyCollection<DynamicApiEndpointDescriptor> GetEndpointDescriptors(DynamicApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var descriptorKeys = new HashSet<string>(StringComparer.Ordinal);
+        return GetProviders()
+            .SelectMany(provider => provider.EndpointDescriptors)
+            .Where(descriptor => options.ServiceAssemblies.Count == 0 ||
+                                 options.ServiceAssemblies.Contains(descriptor.ServiceType.Assembly))
+            .Where(descriptor => descriptorKeys.Add(CreateEndpointDescriptorKey(descriptor)))
+            .ToArray();
+    }
+
+    public static bool MapGeneratedEndpoints(IEndpointRouteBuilder endpoints, DynamicApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        ArgumentNullException.ThrowIfNull(options);
+
+        var registry = BuildRegistry(options);
+        if (registry is null)
+        {
+            return false;
+        }
+
+        // Every mapping entry point (including the retained raw Map API) passes through this gate.
+        // Without the explicit policy registered by AddLegacyGeneratedApi nothing is mapped.
+        var allowlist = endpoints.ServiceProvider.GetService<ILegacyDynamicApiAllowlist>()
+            ?? throw new InvalidOperationException(
+                "CCHTTP007: legacy Dynamic API mapping requires the explicit per-service/action allowlist "
+                + "registered by AddLegacyGeneratedApi. Calling AddCrestDynamicApi/MapCrestDynamicApi "
+                + "directly never activates the legacy surface without a policy.");
+
+        LegacyDynamicApiActivationGuard.ValidateAllowlist(registry, allowlist);
+        LegacyDynamicApiActivationGuard.ValidateRoutes(endpoints, registry);
+
+        var mapped = false;
+        var mappedEndpointKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var provider in GetProviders())
+        {
+            if (!TryGetMatchingGeneratedRegistry(provider, options, out _))
+            {
+                continue;
+            }
+
+            var matchingEndpointKeys = provider.EndpointDescriptors
+                .Where(descriptor => options.ServiceAssemblies.Count == 0 ||
+                                     options.ServiceAssemblies.Contains(descriptor.ServiceType.Assembly))
+                .Select(CreateEndpointDescriptorKey)
+                .ToArray();
+            if (matchingEndpointKeys.Length > 0 &&
+                matchingEndpointKeys.All(key => mappedEndpointKeys.Contains(key)))
+            {
+                continue;
+            }
+
+            provider.MapEndpoints(endpoints, options);
+            foreach (var key in matchingEndpointKeys)
+            {
+                mappedEndpointKeys.Add(key);
+            }
+
+            mapped = true;
+        }
+
+        return mapped;
+    }
+
+    private static string CreateEndpointDescriptorKey(DynamicApiEndpointDescriptor descriptor)
+    {
+        return string.Join(
+            "|",
+            descriptor.ServiceType.Assembly.FullName,
+            descriptor.ServiceType.FullName,
+            descriptor.HttpMethod,
+            descriptor.RoutePattern);
+    }
+
+    private static bool TryGetMatchingGeneratedRegistry(
+        IDynamicApiGeneratedProvider provider,
+        DynamicApiOptions options,
+        out DynamicApiRegistry registry)
+    {
+        registry = provider.CreateRegistry(options);
+        if (registry.Services.Count > 0)
+        {
+            return true;
+        }
+
+        return provider.EndpointDescriptors.Any(descriptor =>
+            options.ServiceAssemblies.Count == 0 ||
+            options.ServiceAssemblies.Contains(descriptor.ServiceType.Assembly));
+    }
+
+    public static InvalidOperationException CreateMissingGeneratedProviderException(DynamicApiOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var assemblies = options.ServiceAssemblies.Count == 0
+            ? "未配置 ServiceAssemblies"
+            : string.Join(", ", options.ServiceAssemblies.Select(assembly => assembly.GetName().Name));
+
+        return new InvalidOperationException(
+            $"Dynamic API 未找到编译期生成的 provider，当前主链只支持生成链。ServiceAssemblies: {assemblies}。请检查 CrestCreates.CodeGenerator 是否作为 analyzer 引用、应用服务程序集是否被当前项目引用、服务是否符合生成规则，以及 GeneratedDynamicApiRegistry.g.cs / GeneratedDynamicApiEndpoints.g.cs 是否生成并参与编译。");
+    }
+}

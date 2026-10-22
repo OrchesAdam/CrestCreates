@@ -195,28 +195,7 @@ public static class CrudArtifactEmitter
     /// This is the only place the rule exists; the precompile stage and the ownership tests read it here.
     /// </summary>
     public static IReadOnlyList<string> DeclaredTypeFullNames(string source)
-    {
-        if (string.IsNullOrEmpty(source))
-        {
-            return Array.Empty<string>();
-        }
-
-        var tree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source);
-        return tree.GetRoot()
-            .DescendantNodes()
-            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax>()
-            .Select(declaration =>
-            {
-                var namespaceName = declaration.Ancestors()
-                    .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.NamespaceDeclarationSyntax>()
-                    .LastOrDefault()?.Name?.ToString();
-                return string.IsNullOrEmpty(namespaceName)
-                    ? declaration.Identifier.ValueText
-                    : namespaceName + "." + declaration.Identifier.ValueText;
-            })
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-    }
+        => CrestCreates.Tooling.HttpProjection.HttpProjectionShared.DeclaredTypeFullNames(source);
 
     // ---- 1. contracts DTOs ---------------------------------------------------------------------
 
@@ -1112,25 +1091,18 @@ public static class CrudArtifactEmitter
 
     private static CrudArtifact EmitCapabilityInputEnvelope(CrudGenerationModel model, CrudActionModel action)
     {
+        // #129 S2.2: the composed input envelope is declared by the shared wire backend, so the CRUD and
+        // hand-written fronts cannot drift in envelope shape (S22A-R2 review).
         var name = model.EnvelopeName(action.Name);
         var builder = StartDocument(model);
         OpenNamespace(builder, model.EnvelopeNamespace);
-        Line(builder, Indent + "internal sealed class " + name);
-        Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public " + model.IdTypeDisplay + " "
-            + CrudEnvelopeConvention.RouteIdentityMember + " { get; init; }");
-        if (action.BodyPayloadFullName is not null)
+        var wireAction = ToWireAction(model, action);
+        foreach (var line in CrestCreates.Tooling.HttpProjection.HttpWireEmitter.EmitEnvelopeDeclaration(
+                     name, wireAction.Parameters))
         {
-            Line(builder, NestedIndent + "public " + Qualified(action.BodyPayloadFullName) + " "
-                + CrudEnvelopeConvention.BodyMember + " { get; init; } = default!;");
+            Line(builder, line);
         }
 
-        foreach (var header in action.HeaderInputs)
-        {
-            Line(builder, NestedIndent + "public string? " + header.MemberName + " { get; init; }");
-        }
-
-        Line(builder, Indent + "}");
         CloseNamespace(builder);
         return Artifact(name + ".g.cs", builder);
     }
@@ -1219,7 +1191,9 @@ public static class CrudArtifactEmitter
             Line(builder, NestedIndent + Indent
                 + "global::CrestCreates.DynamicApi.CapabilityEndpointExtensions.AddCrestCapabilityEndpointContribution(");
             Line(builder, NestedIndent + Indent + Indent + "services,");
-            Line(builder, NestedIndent + Indent + Indent + "new " + Qualified(model.ContributionFullName) + "());");
+            Line(builder, NestedIndent + Indent + Indent + "new global::"
+                + CrestCreates.Tooling.HttpProjection.HttpWireEmitter.HttpNamespace + "."
+                + model.ContributionTypeName + "());");
         }
 
         Line(builder, string.Empty);
@@ -1280,7 +1254,9 @@ public static class CrudArtifactEmitter
             foreach (var action in model.Actions)
             {
                 Line(builder, NestedIndent + Indent + "resolver.Register(\"" + Escape(action.CapabilityId)
-                    + "\", new " + Qualified(InvokerTypeName(model, action)) + "());");
+                    + "\", new global::" + CrestCreates.Tooling.HttpProjection.HttpWireEmitter.HttpNamespace + "."
+                    + CrestCreates.Tooling.HttpProjection.HttpWireEmitter.InvokerName(
+                        model.ContributionTypeName, ToWireAction(model, action)) + "());");
             }
         }
 
@@ -1303,39 +1279,10 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent
             + "public void Configure(global::Microsoft.AspNetCore.Http.Json.JsonOptions options)");
         Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + Indent + "var generatedContext = "
-            + Qualified(CrudJsonContractConvention.JsonContextFullName) + ".Default;");
-        Line(builder, NestedIndent + Indent
-            + "var chain = options.SerializerOptions.TypeInfoResolverChain;");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + Indent + "for (var index = 0; index < chain.Count; index++)");
-        Line(builder, NestedIndent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + "if (global::System.Object.ReferenceEquals(chain[index], generatedContext))");
-        Line(builder, NestedIndent + Indent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + Indent + "return;");
-        Line(builder, NestedIndent + Indent + Indent + "}");
-        Line(builder, NestedIndent + Indent + "}");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + Indent + "var insertionIndex = chain.Count;");
-        Line(builder, NestedIndent + Indent + "for (var index = 0; index < chain.Count; index++)");
-        Line(builder, NestedIndent + Indent + "{");
-        // #150 R2: only the UNCUSTOMIZED framework-default reflection resolver is a fallback that may
-        // be preceded. A host-configured DefaultJsonTypeInfoResolver (non-empty Modifiers) or a
-        // derived resolver keeps its declared priority — it answers first and the map-time contract
-        // verification then rejects deterministically instead of silently bypassing the host's
-        // explicit JSON customizations.
-        Line(builder, NestedIndent + Indent + Indent
-            + "if (chain[index] is global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver defaultResolver");
-        Line(builder, NestedIndent + Indent + Indent + Indent
-            + "&& defaultResolver.GetType() == typeof(global::System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)");
-        Line(builder, NestedIndent + Indent + Indent + Indent + "&& defaultResolver.Modifiers.Count == 0)");
-        Line(builder, NestedIndent + Indent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + Indent + "insertionIndex = index;");
-        Line(builder, NestedIndent + Indent + Indent + Indent + "break;");
-        Line(builder, NestedIndent + Indent + Indent + "}");
-        Line(builder, NestedIndent + Indent + "}");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + Indent + "chain.Insert(insertionIndex, generatedContext);");
+        CrestCreates.Tooling.HttpProjection.HttpProjectionShared.EmitJsonConfigurator(
+            builder,
+            Qualified(CrudJsonContractConvention.JsonContextFullName),
+            NestedIndent + Indent);
         Line(builder, NestedIndent + "}");
         Line(builder, Indent + "}");
         CloseNamespace(builder);
@@ -1350,222 +1297,153 @@ public static class CrudArtifactEmitter
     /// </summary>
     private static CrudArtifact EmitCapabilityContribution(CrudGenerationModel model)
     {
-        var contribution = model.ContributionTypeName;
-        var builder = StartDocument(model);
-        OpenNamespace(builder, model.ActivationNamespace);
-
-        Line(builder, Indent + "/// <summary>");
-        Line(builder, Indent + "/// ExplicitHost contribution of " + model.ServiceFullName + " (owner "
-            + model.OwnerAssemblyName + "): the five CRUD actions of " + model.EntityClassName
-            + " with their capability/endpoint descriptors, typed input bindings, invokers and typed");
-        Line(builder, Indent + "/// result envelopes. Activated per host by AddGeneratedCrud.");
-        Line(builder, Indent + "/// </summary>");
-        Line(builder, Indent + "internal sealed class " + contribution
-            + " : global::CrestCreates.DynamicApi.CapabilityEndpointContribution");
-        Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public " + contribution + "()");
-        Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + Indent + "OwnerAssemblyName = \"" + Escape(model.OwnerAssemblyName) + "\";");
-        EmitContributionCapabilities(builder, model);
-        EmitContributionEndpoints(builder, model);
-        EmitContributionBindingContracts(builder, model);
-        EmitContributionHandlerBindings(builder, model);
-        EmitContributionResultBindings(builder, model);
-        EmitContributionBodyTypes(builder, model);
-        EmitContributionJsonContract(builder, model);
-        EmitContributionRequiredIdentities(builder, model);
-        Line(builder, NestedIndent + "}");
-        Line(builder, string.Empty);
-
-        foreach (var action in model.Actions)
-        {
-            EmitContributionBindingMethod(builder, model, action);
-            EmitContributionResultMapper(builder, model, action);
-        }
-
-        Line(builder, Indent + "}");
-        Line(builder, string.Empty);
-
-        foreach (var action in model.Actions)
-        {
-            EmitContributionInvoker(builder, model, action);
-        }
-
-        CloseNamespace(builder);
-        return Artifact(contribution + ".g.cs", builder);
+        // #129 S2.2: the CRUD front-end normalizes its action model onto the neutral HTTP wire model and
+        // uses the same emitter as hand-written AppService projections; it no longer owns a copy of the
+        // descriptors/binder/invoker/result rules.
+        var wire = ToWireModel(model);
+        return Artifact(model.ContributionTypeName + ".g.cs",
+            new StringBuilder(CrestCreates.Tooling.HttpProjection.HttpWireEmitter.EmitContribution(wire)));
     }
 
-    private static void EmitContributionCapabilities(StringBuilder builder, CrudGenerationModel model)
+    /// <summary>#129 S2.2: CRUD action model → shared HTTP wire model.</summary>
+    private static CrestCreates.Tooling.HttpProjection.HttpWireModel ToWireModel(CrudGenerationModel model) => new()
     {
-        var kind = "global::CrestCreates.Metadata.Abstractions.DescriptorCapability.";
-        Line(builder, NestedIndent + Indent + "CapabilityDescriptors = new global::CrestCreates.Metadata.CapabilityDescriptor[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
+        OwnerAssemblyName = model.OwnerAssemblyName,
+        ContractFullName = Qualified(model.InterfaceNamespace + "." + model.ServiceInterfaceName),
+        ContributionTypeName = model.ContributionTypeName,
+        JsonContextFullName = Qualified(CrudJsonContractConvention.JsonContextFullName),
+        DiagnosticsTypeName = model.EntityClassName,
+        Actions = model.Actions.Select(action => ToWireAction(model, action)).ToArray(),
+        ExtraJsonRoots = new[]
         {
-            Line(builder, QuadIndent + "new global::CrestCreates.Metadata.CapabilityDescriptor");
-            Line(builder, QuadIndent + "{");
-            Line(builder, QuintIndent + "Namespace = \"capability\",");
-            Line(builder, QuintIndent + "Id = \"" + Escape(action.CapabilityId) + "\",");
-            Line(builder, QuintIndent + "Name = \"" + Escape(action.Name) + "\",");
-            Line(builder, QuintIndent + "State = global::CrestCreates.Metadata.Abstractions.DescriptorState.Active,");
-            Line(builder, QuintIndent + "Version = 1,");
-            Line(builder, QuintIndent + "CapabilityKind = " + kind
-                + (action.OperationKind == CrudOperationKind.Query ? "CapabilityKind.Query," : "CapabilityKind.Command,"));
-            Line(builder, QuintIndent + "Permissions = new[] { \"" + Escape(action.PermissionName) + "\" },");
-            Line(builder, QuintIndent + "RiskLevel = " + kind + "CapabilityRiskLevel.Medium,");
-            Line(builder, QuintIndent + "InputSchema = null,");
-            Line(builder, QuintIndent + "OutputSchema = null,");
-            Line(builder, QuintIndent + "ProjectionKind = " + kind + "CapabilityProjectionKind.AppServiceCompatibility,");
-            Line(builder, QuadIndent + "},");
-        }
+            new CrestCreates.Tooling.HttpProjection.HttpWireJsonRoot(
+                "global::Microsoft.AspNetCore.Mvc.ProblemDetails", "*", "ErrorRoot"),
+        },
+    };
 
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitContributionEndpoints(StringBuilder builder, CrudGenerationModel model)
+    private static CrestCreates.Tooling.HttpProjection.HttpWireAction ToWireAction(
+        CrudGenerationModel model,
+        CrudActionModel action)
     {
-        Line(builder, NestedIndent + Indent + "EndpointDescriptors = new global::CrestCreates.DynamicApi.CapabilityEndpointDescriptor[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
+        var parameters = new List<CrestCreates.Tooling.HttpProjection.HttpWireParameter>();
+        var arguments = new List<CrestCreates.Tooling.HttpProjection.HttpWireArgument>();
+        if (action.RouteIdentityParameter is not null)
         {
-            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointDescriptor");
-            Line(builder, QuadIndent + "{");
-            Line(builder, QuintIndent + "Id = \"" + Escape(action.EndpointId) + "\",");
-            Line(builder, QuintIndent + "Name = \"" + Escape(action.Name) + "\",");
-            Line(builder, QuintIndent + "Version = 1,");
-            Line(builder, QuintIndent + "State = global::CrestCreates.Metadata.Abstractions.DescriptorState.Active,");
-            Line(builder, QuintIndent + "Capability = new global::CrestCreates.Metadata.Abstractions.VersionedDescriptorRef<global::CrestCreates.Metadata.CapabilityDescriptor>(\""
-                + Escape(action.CapabilityId) + "\", 1),");
-            Line(builder, QuintIndent + "HttpMethod = global::CrestCreates.DynamicApi.CapabilityEndpointHttpMethod."
-                + HttpMethodEnum(action.HttpMethod) + ",");
-            Line(builder, QuintIndent + "RoutePattern = \"" + Escape(action.RoutePattern) + "\",");
-            Line(builder, QuintIndent + "AuthorizationMode = global::CrestCreates.DynamicApi.CapabilityEndpointAuthorizationMode.InheritCapability,");
-            Line(builder, QuintIndent + "InputBindings = new global::CrestCreates.DynamicApi.CapabilityEndpointInputBinding[]");
-            Line(builder, QuintIndent + "{");
-            foreach (var input in InputBindingsOf(action, model))
+            parameters.Add(new CrestCreates.Tooling.HttpProjection.HttpWireParameter
             {
-                Line(builder, SextIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointInputBinding");
-                Line(builder, SextIndent + "{");
-                Line(builder, SextIndent + Indent + "Name = \"" + Escape(input.Name) + "\",");
-                Line(builder, SextIndent + Indent + "Source = global::CrestCreates.DynamicApi.CapabilityEndpointParameterSource."
-                    + input.Source + ",");
-                Line(builder, SextIndent + Indent + "Required = " + (input.Required ? "true" : "false") + ",");
-                Line(builder, SextIndent + "},");
-            }
-
-            Line(builder, QuintIndent + "},");
-            Line(builder, QuintIndent + "OutputMapping = new global::CrestCreates.DynamicApi.CapabilityEndpointOutputMapping { SuccessStatusCode = 200 },");
-            Line(builder, QuintIndent + "Projection = new global::CrestCreates.DynamicApi.CapabilityEndpointProjectionMetadata");
-            Line(builder, QuintIndent + "{");
-            Line(builder, QuintIndent + Indent + "OperationId = \"" + Escape(action.CapabilityId.Replace('.', '_')) + "\",");
-            Line(builder, QuintIndent + Indent + "Tags = new[] { \"" + Escape(model.ServiceClassName) + "\" },");
-            Line(builder, QuintIndent + "},");
-            Line(builder, QuadIndent + "},");
+                Name = action.RouteIdentityParameter,
+                Source = "Route",
+                TypeFullName = model.IdTypeDisplay,
+                ClrTypeFullName = model.IdTypeDisplay,
+                Required = true,
+                ScalarKind = IdScalarKind(model.IdWireKind),
+                MemberName = CrudEnvelopeConvention.RouteIdentityMember,
+                LocalName = "id",
+            });
+            arguments.Add(action.UsesCapabilityInputEnvelope
+                ? new CrestCreates.Tooling.HttpProjection.HttpWireArgument(
+                    CrestCreates.Tooling.HttpProjection.HttpWireArgumentKind.EnvelopeMember,
+                    CrudEnvelopeConvention.RouteIdentityMember)
+                : new CrestCreates.Tooling.HttpProjection.HttpWireArgument(
+                    CrestCreates.Tooling.HttpProjection.HttpWireArgumentKind.Local,
+                    "singleInput"));
         }
 
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitContributionBindingContracts(StringBuilder builder, CrudGenerationModel model)
-    {
-        Line(builder, NestedIndent + Indent + "Bindings = new global::CrestCreates.DynamicApi.CapabilityEndpointBindingContract[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
+        if (action.BodyPayloadFullName is not null)
         {
-            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointBindingContract(");
-            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
-            Line(builder, QuintIndent + "1,");
-            Line(builder, QuintIndent + BindingMethodName(action) + "),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitContributionHandlerBindings(StringBuilder builder, CrudGenerationModel model)
-    {
-        Line(builder, NestedIndent + Indent + "Handlers = new global::CrestCreates.DynamicApi.CapabilityEndpointHandlerBinding[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointHandlerBinding(");
-            Line(builder, QuintIndent + "\"" + Escape(action.CapabilityId) + "\",");
-            Line(builder, QuintIndent + "new " + Qualified(InvokerTypeName(model, action)) + "()),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitContributionResultBindings(StringBuilder builder, CrudGenerationModel model)
-    {
-        Line(builder, NestedIndent + Indent + "ResultMappers = new global::CrestCreates.DynamicApi.CapabilityEndpointResultBinding[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointResultBinding(");
-            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
-            Line(builder, QuintIndent + "1,");
-            Line(builder, QuintIndent + ResultMapperName(action) + "),");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-    }
-
-    private static void EmitContributionBodyTypes(StringBuilder builder, CrudGenerationModel model)
-    {
-        var bodyTypes = new List<string>();
-        foreach (var action in model.Actions)
-        {
-            if (action.BodyPayloadFullName is not null
-                && !bodyTypes.Contains(action.BodyPayloadFullName, StringComparer.Ordinal))
+            parameters.Add(new CrestCreates.Tooling.HttpProjection.HttpWireParameter
             {
-                bodyTypes.Add(action.BodyPayloadFullName);
-            }
+                Name = "input",
+                Source = "Body",
+                TypeFullName = Qualified(action.BodyPayloadFullName),
+                ClrTypeFullName = Qualified(action.BodyPayloadFullName),
+                Required = true,
+                ScalarKind = CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.NotScalar,
+                MemberName = CrudEnvelopeConvention.BodyMember,
+                LocalName = "body",
+                NeedsDefaultInitializer = true,
+            });
+            arguments.Add(action.UsesCapabilityInputEnvelope
+                ? new CrestCreates.Tooling.HttpProjection.HttpWireArgument(
+                    CrestCreates.Tooling.HttpProjection.HttpWireArgumentKind.EnvelopeMember,
+                    CrudEnvelopeConvention.BodyMember)
+                : new CrestCreates.Tooling.HttpProjection.HttpWireArgument(
+                    CrestCreates.Tooling.HttpProjection.HttpWireArgumentKind.Local,
+                    "singleInput"));
+        }
 
-            if (action.UsesCapabilityInputEnvelope
-                && !bodyTypes.Contains(model.EnvelopeFullName(action.Name), StringComparer.Ordinal))
+        foreach (var header in action.HeaderInputs)
+        {
+            parameters.Add(new CrestCreates.Tooling.HttpProjection.HttpWireParameter
             {
-                bodyTypes.Add(model.EnvelopeFullName(action.Name));
-            }
+                Name = header.HeaderName,
+                Source = "Header",
+                TypeFullName = "global::System.String?",
+                ClrTypeFullName = "global::System.String",
+                Required = header.Required,
+                ScalarKind = CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.String,
+                MemberName = header.MemberName,
+                HeaderName = header.HeaderName,
+                TrimQuotes = header.TrimQuotes,
+            });
+            arguments.Add(new CrestCreates.Tooling.HttpProjection.HttpWireArgument(
+                CrestCreates.Tooling.HttpProjection.HttpWireArgumentKind.EnvelopeMember,
+                header.MemberName));
         }
 
-        Line(builder, NestedIndent + Indent + "BodyTypes = new global::System.Type[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var bodyType in bodyTypes)
+        arguments.Add(new CrestCreates.Tooling.HttpProjection.HttpWireArgument(
+            CrestCreates.Tooling.HttpProjection.HttpWireArgumentKind.CancellationToken,
+            "ct"));
+
+        var payload = ResultPayloadDisplay(action);
+        return new CrestCreates.Tooling.HttpProjection.HttpWireAction
         {
-            Line(builder, QuadIndent + "typeof(" + Qualified(bodyType) + "),");
-        }
-        Line(builder, NestedIndent + Indent + "};");
+            Name = action.Name,
+            ContractMethodName = action.ServiceMethodName,
+            HttpMethod = action.HttpMethod,
+            RoutePattern = action.RoutePattern,
+            OperationKind = action.OperationKind == CrudOperationKind.Query
+                ? CrestCreates.Tooling.HttpProjection.AppServiceHttpOperationKind.Query
+                : CrestCreates.Tooling.HttpProjection.AppServiceHttpOperationKind.Command,
+            Permissions = new[] { action.PermissionName },
+            CapabilityId = action.CapabilityId,
+            EndpointId = action.EndpointId,
+            Parameters = parameters,
+            UsesEnvelope = action.UsesCapabilityInputEnvelope,
+            EnvelopeFullName = action.UsesCapabilityInputEnvelope ? model.EnvelopeFullName(action.Name) : null,
+            InvokerArguments = arguments,
+            BodyTypeFullName = action.BodyPayloadFullName is null ? null : Qualified(action.BodyPayloadFullName),
+            BodyOptional = false,
+            ResultPayloadFullName = payload,
+            ResultKind = payload is null
+                ? CrestCreates.Tooling.HttpProjection.AppServiceHttpResultKind.TaskVoid
+                : CrestCreates.Tooling.HttpProjection.AppServiceHttpResultKind.TaskValue,
+            ResultIsValueType = false,
+            MapNotFoundOntoNull = payload is not null && string.Equals(action.HttpMethod, "GET", StringComparison.Ordinal),
+            RequiredIdentityTypeName = model.EntityClassName,
+        };
     }
 
-    /// <summary>
-    /// §7.1/§7.2: the generated JSON contract this contribution delivers to the host — the assembly's
-    /// one source-generated context plus the exact roots the host's final Http.Json.JsonOptions must
-    /// answer from it. The root set is derived from the same model that emits the binders and result
-    /// mappers (bodies, capability input envelopes, payloads, typed result envelopes and the void
-    /// envelope), so the verification and the emitted wire shape cannot disagree.
-    /// </summary>
-    private static void EmitContributionJsonContract(StringBuilder builder, CrudGenerationModel model)
+    private static CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind IdScalarKind(CrudIdWireKind kind) => kind switch
     {
-        Line(builder, NestedIndent + Indent + "JsonContext = "
-            + Qualified(CrudJsonContractConvention.JsonContextFullName) + ".Default;");
-        Line(builder, NestedIndent + Indent
-            + "RequiredJsonRootTypes = new global::CrestCreates.DynamicApi.CapabilityEndpointJsonRootType[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var (typeDisplay, action, component) in JsonRootRequirements(model))
-        {
-            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointJsonRootType(");
-            Line(builder, QuintIndent + "typeof(" + typeDisplay + "),");
-            Line(builder, QuintIndent + "\"" + Escape(action) + "\",");
-            Line(builder, QuintIndent + "\"" + component + "\"),");
-        }
+        CrudIdWireKind.Guid => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.Guid,
+        CrudIdWireKind.Int16 => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.Int16,
+        CrudIdWireKind.Int32 => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.Int32,
+        CrudIdWireKind.Int64 => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.Int64,
+        CrudIdWireKind.UInt16 => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.UInt16,
+        CrudIdWireKind.UInt32 => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.UInt32,
+        CrudIdWireKind.UInt64 => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.UInt64,
+        CrudIdWireKind.Byte => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.Byte,
+        CrudIdWireKind.SByte => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.SByte,
+        _ => CrestCreates.Tooling.HttpProjection.AppServiceHttpScalarKind.String,
+    };
 
-        Line(builder, NestedIndent + Indent + "};");
-    }
 
-    /// <summary>
-    /// One wire component label per §7.1 vocabulary; the diagnostics message uses them to say which
-    /// part of the action contract is missing.
-    /// </summary>
+
+
+
+
+
     private const string JsonRootBodyComponent = "Body";
 
     private const string JsonRootCapabilityInputComponent = "CapabilityInput";
@@ -1592,52 +1470,6 @@ public static class CrudArtifactEmitter
     /// shared by several actions is reported against the first action that requires it. The GET branch
     /// also consumes the void envelope for its 404 answer, exactly like the emitted result mapper.
     /// </summary>
-    private static IReadOnlyList<(string TypeDisplay, string Action, string Component)> JsonRootRequirements(
-        CrudGenerationModel model)
-    {
-        var requirements = new List<(string, string, string)>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-
-        void Add(string? typeDisplay, string action, string component)
-        {
-            if (typeDisplay is null || !seen.Add(typeDisplay))
-            {
-                return;
-            }
-
-            requirements.Add((typeDisplay, action, component));
-        }
-
-        foreach (var action in model.Actions)
-        {
-            var payload = ResultPayloadDisplay(action);
-            Add(action.BodyPayloadFullName is null ? null : Qualified(action.BodyPayloadFullName),
-                action.Name, JsonRootBodyComponent);
-            if (action.UsesCapabilityInputEnvelope)
-            {
-                Add(Qualified(model.EnvelopeFullName(action.Name)), action.Name, JsonRootCapabilityInputComponent);
-            }
-
-            Add(payload, action.Name, JsonRootPayloadComponent);
-            Add(
-                payload is null ? CrudResponseContract.VoidEnvelope : CrudResponseContract.EnvelopeOfPayload(payload),
-                action.Name,
-                payload is null ? JsonRootVoidEnvelopeComponent : JsonRootResultEnvelopeComponent);
-            if (payload is not null && string.Equals(action.HttpMethod, "GET", StringComparison.Ordinal))
-            {
-                Add(CrudResponseContract.VoidEnvelope, action.Name, JsonRootVoidEnvelopeComponent);
-            }
-        }
-
-        Add(JsonRootErrorTypeDisplay, JsonRootErrorAction, JsonRootErrorComponent);
-
-        return requirements;
-    }
-
-    /// <summary>
-    /// §7.3 declared result payload display of one action (the paged wrapper applied), or null for the
-    /// void action. The result mapper and the JSON root requirements read this one rule.
-    /// </summary>
     private static string? ResultPayloadDisplay(CrudActionModel action) =>
         action.ResultPayloadFullName is null
             ? null
@@ -1645,371 +1477,19 @@ public static class CrudArtifactEmitter
                 ? CrudResponseContract.PagedPayload(action.ResultPayloadFullName)
                 : Qualified(action.ResultPayloadFullName);
 
-    private static void EmitContributionRequiredIdentities(StringBuilder builder, CrudGenerationModel model)
-    {
-        Line(builder, NestedIndent + Indent + "RequiredIdentityIds = new global::CrestCreates.DynamicApi.CapabilityEndpointRequiredIdentity[]");
-        Line(builder, NestedIndent + Indent + "{");
-        foreach (var action in model.Actions)
-        {
-            Line(builder, QuadIndent + "new global::CrestCreates.DynamicApi.CapabilityEndpointRequiredIdentity(");
-            Line(builder, QuintIndent + "\"" + Escape(action.EndpointId) + "\",");
-            Line(builder, QuintIndent + "\"" + Escape(model.OwnerAssemblyName) + "\",");
-            Line(builder, QuintIndent + "\"" + Escape(action.Name) + "\",");
-            Line(builder, QuintIndent + "\"" + Escape(model.EntityClassName) + "\",");
-            Line(builder, QuintIndent + "1),");
-        }
 
-        Line(builder, NestedIndent + Indent + "};");
-    }
 
-    /// <summary>
-    /// §7.3/§7.4 input binding per action, all through the typed, no-fallback body reader: required
-    /// Create/Search bodies throw 400 on empty/whitespace/null/bad JSON before any business call, the
-    /// route identity parses statically, and the composed envelopes carry the route id and the If-Match
-    /// header.
-    /// </summary>
-    private static void EmitContributionBindingMethod(
-        StringBuilder builder,
-        CrudGenerationModel model,
-        CrudActionModel action)
-    {
-        var readsBody = action.BodyPayloadFullName is not null;
-        Line(builder, NestedIndent + "private static "
-            + (readsBody ? "async " : string.Empty)
-            + "global::System.Threading.Tasks.ValueTask<object?> " + BindingMethodName(action) + "(");
-        Line(builder, NestedIndent + Indent + "global::Microsoft.AspNetCore.Http.HttpContext context,");
-        Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
-        Line(builder, NestedIndent + "{");
 
-        if (action.RouteIdentityParameter is not null)
-        {
-            EmitRouteIdentityParse(builder, model, action);
-        }
-
-        if (readsBody && !action.UsesCapabilityInputEnvelope)
-        {
-            // Create / Search: the required body is the capability input itself.
-            Line(builder, NestedIndent + Indent + "var jsonTypeInfo = global::CrestCreates.DynamicApi.CapabilityEndpointJsonTypeInfoResolver.Require<"
-                + Qualified(action.BodyPayloadFullName!) + ">(context.RequestServices);");
-            Line(builder, NestedIndent + Indent + "return await global::CrestCreates.DynamicApi.CapabilityEndpointBodyReader.ReadNativeBodyAsync(");
-            Line(builder, NestedIndent + Indent + Indent + "context, jsonTypeInfo, optional: false, ct);");
-        }
-        else if (readsBody)
-        {
-            // Update: route id + required body composed into the capability input envelope. The method
-            // already awaits the body read, so the envelope is returned directly.
-            Line(builder, NestedIndent + Indent + "var jsonTypeInfo = global::CrestCreates.DynamicApi.CapabilityEndpointJsonTypeInfoResolver.Require<"
-                + Qualified(action.BodyPayloadFullName!) + ">(context.RequestServices);");
-            Line(builder, NestedIndent + Indent + "var body = await global::CrestCreates.DynamicApi.CapabilityEndpointBodyReader.ReadNativeBodyAsync(");
-            Line(builder, NestedIndent + Indent + Indent + "context, jsonTypeInfo, optional: false, ct);");
-            Line(builder, string.Empty);
-            EmitEnvelopeConstruction(builder, model, action, "body!", returnDirectly: true);
-        }
-        else if (action.HeaderInputs.Count == 0)
-        {
-            // GetById: the route identity is the whole input. The method has nothing to await, so the
-            // parse result is wrapped explicitly instead of relying on an async state machine.
-            Line(builder, NestedIndent + Indent
-                + "return global::System.Threading.Tasks.ValueTask.FromResult<object?>(id);");
-        }
-        else
-        {
-            // Delete: route id + the optional If-Match concurrency header. Nothing is awaited, so the
-            // envelope is built first and then wrapped in a completed ValueTask.
-            EmitEnvelopeConstruction(builder, model, action, bodyExpression: null, returnDirectly: false);
-        }
-
-        Line(builder, NestedIndent + "}");
-        Line(builder, string.Empty);
-    }
-
-    private static void EmitRouteIdentityParse(
-        StringBuilder builder,
-        CrudGenerationModel model,
-        CrudActionModel action)
-    {
-        var routeParameter = action.RouteIdentityParameter!;
-        Line(builder, NestedIndent + Indent + "var routeId = context.Request.RouteValues[\""
-            + Escape(routeParameter) + "\"]?.ToString();");
-        switch (model.IdWireKind)
-        {
-            case CrudIdWireKind.String:
-                Line(builder, NestedIndent + Indent + "if (routeId is null)");
-                Line(builder, NestedIndent + Indent + "{");
-                Line(builder, NestedIndent + Indent + Indent + "throw new global::Microsoft.AspNetCore.Http.BadHttpRequestException(");
-                Line(builder, NestedIndent + Indent + Indent + Indent + "\"The route value '" + Escape(routeParameter) + "' is required.\");");
-                Line(builder, NestedIndent + Indent + "}");
-                Line(builder, string.Empty);
-                Line(builder, NestedIndent + Indent + "var id = routeId;");
-                break;
-            default:
-                Line(builder, NestedIndent + Indent + "if (routeId is null || !"
-                    + IdTryParseExpression(model) + ")");
-                Line(builder, NestedIndent + Indent + "{");
-                Line(builder, NestedIndent + Indent + Indent + "throw new global::Microsoft.AspNetCore.Http.BadHttpRequestException(");
-                Line(builder, NestedIndent + Indent + Indent + Indent + "\"The route value '" + Escape(routeParameter)
-                    + "' must be a valid " + Escape(MessageTypeName(model.IdTypeDisplay)) + ".\");");
-                Line(builder, NestedIndent + Indent + "}");
-                Line(builder, string.Empty);
-                break;
-        }
-    }
-
-    /// <summary>The readable type name for a diagnostic message (drops the emitted <c>global::</c> prefix).</summary>
-    private static string MessageTypeName(string typeDisplay) =>
-        typeDisplay.StartsWith("global::", StringComparison.Ordinal)
-            ? typeDisplay.Substring("global::".Length)
-            : typeDisplay;
-
-    private static void EmitEnvelopeConstruction(
-        StringBuilder builder,
-        CrudGenerationModel model,
-        CrudActionModel action,
-        string? bodyExpression,
-        bool returnDirectly)
-    {
-        // `returnDirectly` is the awaited (async) binding path; otherwise the caller wraps the built
-        // envelope into a completed ValueTask itself.
-        Line(builder, NestedIndent + Indent + (returnDirectly ? "return new " : "var envelope = new ")
-            + Qualified(model.EnvelopeFullName(action.Name)));
-        Line(builder, NestedIndent + Indent + "{");
-        Line(builder, NestedIndent + Indent + Indent + CrudEnvelopeConvention.RouteIdentityMember + " = id,");
-        if (bodyExpression is not null)
-        {
-            Line(builder, NestedIndent + Indent + Indent + CrudEnvelopeConvention.BodyMember + " = " + bodyExpression + ",");
-        }
-
-        foreach (var header in action.HeaderInputs)
-        {
-            Line(builder, NestedIndent + Indent + Indent + header.MemberName + " = "
-                + HeaderValueExpression(header) + ",");
-        }
-
-        Line(builder, NestedIndent + Indent + "};");
-        if (!returnDirectly)
-        {
-            Line(builder, NestedIndent + Indent
-                + "return global::System.Threading.Tasks.ValueTask.FromResult<object?>(envelope);");
-        }
-    }
-
-    private static string HeaderValueExpression(CrudHeaderInputModel header)
-    {
-        // The generated artifact carries no file-level usings, so the LINQ accessor is fully qualified
-        // instead of depending on the consumer's implicit usings.
-        var read = "global::System.Linq.Enumerable.FirstOrDefault(context.Request.Headers[\""
-            + Escape(header.HeaderName) + "\"])";
-        return header.TrimQuotes ? read + "?.Trim('\"')" : read;
-    }
-
-    /// <summary>
-    /// §7.3 result envelope per action: a checked conversion from the declared static payload type into
-    /// the typed, no-fallback mapper overload whose metadata comes from the host's source-generated
-    /// resolver. The void/404 envelope and the GET branch are explicit; nothing is inferred from the
-    /// static type of <c>ctx.Output</c>.
-    /// </summary>
-    private static void EmitContributionResultMapper(
-        StringBuilder builder,
-        CrudGenerationModel model,
-        CrudActionModel action)
-    {
-        var payload = ResultPayloadDisplay(action);
-        var require = "global::CrestCreates.DynamicApi.CapabilityEndpointJsonTypeInfoResolver.Require";
-        var mapper = "global::CrestCreates.DynamicApi.CompatibilityHttpResultMapper";
-
-        string expression;
-        if (payload is null)
-        {
-            expression = mapper + ".WrapVoidResult(" + require
-                + "<" + CrudResponseContract.VoidEnvelope + ">(serviceProvider))";
-        }
-        else if (string.Equals(action.HttpMethod, "GET", StringComparison.Ordinal))
-        {
-            // §7.3/§7.4: the typed GET overload takes the envelope metadata of the declared payload —
-            // for a paged payload that is DynamicApiResponse<PagedResultDto<Dto>>, never the DTO envelope.
-            expression = mapper + ".WrapGetResult<" + payload + ">("
-                + "ctx.Output as " + payload + ", "
-                + require + "<" + CrudResponseContract.EnvelopeOfPayload(payload) + ">(serviceProvider), "
-                + require + "<" + CrudResponseContract.VoidEnvelope + ">(serviceProvider))";
-        }
-        else
-        {
-            expression = mapper + ".WrapResult<" + payload + ">("
-                + "(" + payload + ")ctx.Output!, "
-                + require + "<" + CrudResponseContract.EnvelopeOfPayload(payload) + ">(serviceProvider))";
-        }
-
-        Line(builder, NestedIndent + "private static object " + ResultMapperName(action) + "(");
-        Line(builder, NestedIndent + Indent + "global::CrestCreates.DynamicApi.EndpointExecutionContext ctx,");
-        Line(builder, NestedIndent + Indent + "global::System.IServiceProvider serviceProvider)");
-        Line(builder, NestedIndent + Indent + "=> " + expression + ";");
-        Line(builder, string.Empty);
-    }
-
-    /// <summary>
-    /// §7.4 execution: the invoker resolves the scoped AppService from the capability execution context
-    /// and awaits it with the managed request token, so permission/validation/UoW all run on the unique
-    /// Capability/AppService core. The plain invoker overload is not an entry point.
-    /// </summary>
-    private static void EmitContributionInvoker(
-        StringBuilder builder,
-        CrudGenerationModel model,
-        CrudActionModel action)
-    {
-        var contract = Qualified(model.InterfaceNamespace + "." + model.ServiceInterfaceName);
-        var invocation = "service." + action.ServiceMethodName + "(";
-        var arguments = new List<string>();
-        string? typedInputDeclaration = null;
-
-        if (action.RouteIdentityParameter is null)
-        {
-            typedInputDeclaration = "var typedInput = (" + Qualified(action.BodyPayloadFullName!) + ")context.Input!;";
-            arguments.Add("typedInput");
-        }
-        else if (action.UsesCapabilityInputEnvelope)
-        {
-            typedInputDeclaration = "var envelope = (" + Qualified(model.EnvelopeFullName(action.Name)) + ")context.Input!;";
-            arguments.Add("envelope." + CrudEnvelopeConvention.RouteIdentityMember);
-            if (action.BodyPayloadFullName is not null)
-            {
-                arguments.Add("envelope." + CrudEnvelopeConvention.BodyMember);
-            }
-
-            foreach (var header in action.HeaderInputs)
-            {
-                arguments.Add("envelope." + header.MemberName);
-            }
-        }
-        else
-        {
-            typedInputDeclaration = "var id = (" + model.IdTypeDisplay + ")context.Input!;";
-            arguments.Add("id");
-        }
-
-        arguments.Add("ct");
-
-        Line(builder, Indent + "internal sealed class " + InvokerDeclarationName(model, action)
-            + " : global::CrestCreates.Capability.Abstractions.ICapabilityContextAwareHandlerInvoker");
-        Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public async global::System.Threading.Tasks.Task<object?> InvokeAsync(");
-        Line(builder, NestedIndent + Indent + "global::CrestCreates.Capability.Abstractions.CapabilityExecutionContext context,");
-        Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
-        Line(builder, NestedIndent + "{");
-        Line(builder, NestedIndent + Indent + "var service = global::Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<"
-            + contract + ">(context.ServiceProvider);");
-        Line(builder, NestedIndent + Indent + typedInputDeclaration);
-
-        // §7.4: the GET of an unknown id must answer the declared 404/void envelope. The service keeps
-        // its domain semantics (CrestEntityNotFoundException for a missing entity); the wire contract
-        // maps it onto the null result that the typed WrapGetResult branch already owns.
-        var mapsNotFoundOntoNull = action.ResultPayloadFullName is not null
-            && string.Equals(action.HttpMethod, "GET", StringComparison.Ordinal);
-        if (mapsNotFoundOntoNull)
-        {
-            Line(builder, NestedIndent + Indent + "try");
-            Line(builder, NestedIndent + Indent + "{");
-            Line(builder, NestedIndent + Indent + Indent + "return await " + invocation
-                + string.Join(", ", arguments) + ").ConfigureAwait(false);");
-            Line(builder, NestedIndent + Indent + "}");
-            Line(builder, NestedIndent + Indent
-                + "catch (global::CrestCreates.Domain.Shared.Exceptions.CrestEntityNotFoundException)");
-            Line(builder, NestedIndent + Indent + "{");
-            Line(builder, NestedIndent + Indent + Indent + "return null;");
-            Line(builder, NestedIndent + Indent + "}");
-        }
-        else
-        {
-            Line(builder, NestedIndent + Indent
-                + (action.ResultPayloadFullName is null ? "await " : "return await ")
-                + invocation + string.Join(", ", arguments) + ").ConfigureAwait(false);");
-            if (action.ResultPayloadFullName is null)
-            {
-                Line(builder, NestedIndent + Indent + "return null;");
-            }
-        }
-
-        Line(builder, NestedIndent + "}");
-        Line(builder, string.Empty);
-        Line(builder, NestedIndent + "public global::System.Threading.Tasks.Task<object?> InvokeAsync(");
-        Line(builder, NestedIndent + Indent + "object? input,");
-        Line(builder, NestedIndent + Indent + "global::System.Threading.CancellationToken ct)");
-        Line(builder, NestedIndent + Indent + "=> throw new global::System.InvalidOperationException(");
-        Line(builder, NestedIndent + Indent + Indent
-            + "\"The generated CRUD invoker requires a CapabilityExecutionContext; the plain ICapabilityHandlerInvoker overload is not an entry point.\");");
-        Line(builder, Indent + "}");
-        Line(builder, string.Empty);
-    }
 
     private static string BindingMethodName(CrudActionModel action) => "Bind_" + action.Name + "_Async";
 
     private static string ResultMapperName(CrudActionModel action) => "MapResult_" + action.Name;
 
-    private static string InvokerDeclarationName(CrudGenerationModel model, CrudActionModel action) =>
-        model.ContributionTypeName + "_" + action.Name + "_Invoker";
 
-    private static string InvokerTypeName(CrudGenerationModel model, CrudActionModel action) =>
-        model.ActivationNamespace + "." + InvokerDeclarationName(model, action);
 
-    /// <summary>The static route-id parse call for the frozen id wire kind (§7.4).</summary>
-    private static string IdTryParseExpression(CrudGenerationModel model)
-    {
-        var core = model.IdTypeDisplay;
-        var invariant = "global::System.Globalization.CultureInfo.InvariantCulture";
-        var numeric = "global::System.Globalization.NumberStyles.Integer, " + invariant;
-        return model.IdWireKind switch
-        {
-            CrudIdWireKind.Guid => "global::System.Guid.TryParse(routeId, out var id)",
-            CrudIdWireKind.Int16 => "short.TryParse(routeId, " + numeric + ", out var id)",
-            CrudIdWireKind.Int32 => "int.TryParse(routeId, " + numeric + ", out var id)",
-            CrudIdWireKind.Int64 => "long.TryParse(routeId, " + numeric + ", out var id)",
-            CrudIdWireKind.UInt16 => "ushort.TryParse(routeId, " + numeric + ", out var id)",
-            CrudIdWireKind.UInt32 => "uint.TryParse(routeId, " + numeric + ", out var id)",
-            CrudIdWireKind.UInt64 => "ulong.TryParse(routeId, " + numeric + ", out var id)",
-            CrudIdWireKind.Byte => "byte.TryParse(routeId, " + numeric + ", out var id)",
-            CrudIdWireKind.SByte => "sbyte.TryParse(routeId, " + numeric + ", out var id)",
-            _ => "((global::System.Func<bool>)(() => throw new global::System.InvalidOperationException(\"Unsupported id kind " + core + "\")))()",
-        };
-    }
-
-    private static string HttpMethodEnum(string httpMethod) => httpMethod switch
-    {
-        "GET" => "Get",
-        "POST" => "Post",
-        "PUT" => "Put",
-        "PATCH" => "Patch",
-        "DELETE" => "Delete",
-        _ => "None",
-    };
 
     private sealed record InputBindingModel(string Name, string Source, bool Required);
 
-    private static IEnumerable<InputBindingModel> InputBindingsOf(
-        CrudActionModel action,
-        CrudGenerationModel model)
-    {
-        if (action.RouteIdentityParameter is not null)
-        {
-            yield return new InputBindingModel(action.RouteIdentityParameter, "Route", true);
-        }
-
-        if (action.BodyPayloadFullName is not null)
-        {
-            yield return new InputBindingModel("input", "Body", true);
-        }
-
-        foreach (var header in action.HeaderInputs)
-        {
-            yield return new InputBindingModel(header.HeaderName, "Header", header.Required);
-        }
-    }
-
-    // ---- shared shape helpers ------------------------------------------------------------------
-
-    /// <summary>
-    /// The permission reference the service body uses. With Core.Abstractions it is the typed
-    /// <c>PermissionName</c> the permissions artifact declares; without that assembly the typed property
-    /// is not emitted, so the same model-owned name travels as its literal string value instead.
-    /// </summary>
     private static string Permission(CrudGenerationModel model, string actionName)
     {
         var typed = Qualified(model.PermissionsNamespace + "." + model.PermissionsClassName) + "." + actionName;

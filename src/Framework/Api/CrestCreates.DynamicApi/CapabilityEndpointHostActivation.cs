@@ -27,6 +27,7 @@ public sealed class CapabilityEndpointHostActivation
     private readonly IReadOnlyList<Type> _bodyTypes;
     private readonly IReadOnlyList<CapabilityEndpointRequiredIdentity> _requiredIdentities;
     private readonly IReadOnlyList<RequiredIdentityEntry> _requiredIdentityEntries;
+    private readonly IReadOnlyList<RequiredServiceEntry> _requiredServiceEntries;
     private readonly IReadOnlyList<ContributedJsonContract> _contributedJsonContracts;
 
     public CapabilityEndpointHostActivation(
@@ -47,6 +48,7 @@ public sealed class CapabilityEndpointHostActivation
         var bodyTypes = new List<Type>();
         var requiredIdentities = new List<CapabilityEndpointRequiredIdentity>();
         var requiredIdentityEntries = new List<RequiredIdentityEntry>();
+        var requiredServiceEntries = new List<RequiredServiceEntry>();
         var contributedJsonContracts = new List<ContributedJsonContract>();
 
         foreach (var contribution in contributions)
@@ -128,6 +130,12 @@ public sealed class CapabilityEndpointHostActivation
                 requiredIdentityEntries.Add(new RequiredIdentityEntry(effective, owner));
             }
 
+            foreach (var serviceType in contribution.RequiredServiceTypes)
+            {
+                ArgumentNullException.ThrowIfNull(serviceType);
+                requiredServiceEntries.Add(new RequiredServiceEntry(owner, serviceType));
+            }
+
             // §7.2: the JSON contract requirements of this contribution travel with its owner identity
             // so the map-time verification can name the responsible assembly in its diagnostics.
             if (contribution.RequiredJsonRootTypes.Count > 0)
@@ -146,6 +154,7 @@ public sealed class CapabilityEndpointHostActivation
         _bodyTypes = bodyTypes;
         _requiredIdentities = requiredIdentities;
         _requiredIdentityEntries = requiredIdentityEntries;
+        _requiredServiceEntries = requiredServiceEntries;
         _contributedJsonContracts = contributedJsonContracts;
     }
 
@@ -170,9 +179,16 @@ public sealed class CapabilityEndpointHostActivation
     /// </summary>
     internal IReadOnlyList<RequiredIdentityEntry> GetRequiredIdentityEntries() => _requiredIdentityEntries;
 
+    internal IReadOnlyList<RequiredServiceEntry> GetRequiredServiceEntries() => _requiredServiceEntries;
+
     internal readonly record struct RequiredIdentityEntry(
         CapabilityEndpointRequiredIdentity Identity,
         string RequiredBy);
+
+    /// <summary>One business contract service type this host must have registered (CCHTTP007).</summary>
+    internal readonly record struct RequiredServiceEntry(
+        string Owner,
+        Type ServiceType);
 
     /// <summary>
     /// Per-contribution JSON contract requirements this host must verify against its own final

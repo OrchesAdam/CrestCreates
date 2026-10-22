@@ -7,6 +7,7 @@ using CrestCreates.CompatibilityProjection.E2E.WidgetFeature;
 using CrestCreates.CompatibilityProjection.E2E.WidgetFeature.Generated;
 using CrestCreates.CompatibilityProjection.E2E.WidgetFeature.Services;
 using CrestCreates.DynamicApi;
+using CrestCreates.Generated.HttpProjection;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.Bootstrap;
@@ -38,6 +39,7 @@ builder.Services.AddSingleton(new CapabilityPipelineBuilder()
 
 // Register compatibility projection (endpoint infrastructure + result contract)
 builder.Services.AddCrestCompatibilityProjection();
+builder.Services.AddGeneratedAppServiceHttp();
 
 // Register the test AppService as scoped
 builder.Services.AddScoped<GreetingAppService>();
@@ -75,6 +77,24 @@ builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
 builder.Services.AddLogging();
 
 var app = builder.Build();
+
+// The generated Greeting contribution owns its source-generated JSON context; install it before the
+// map-time JSON verification examines the final resolver chain.
+var greetingContexts = app.Services.GetServices<CapabilityEndpointContribution>()
+    .Select(contribution => contribution.JsonContext)
+    .Where(context => context is not null)
+    .ToArray();
+if (greetingContexts.Length > 0)
+{
+    var httpJsonOptions = app.Services
+        .GetRequiredService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
+        .Value.SerializerOptions;
+    foreach (var context in greetingContexts.Reverse())
+    {
+        httpJsonOptions.TypeInfoResolverChain.Remove(context!);
+        httpJsonOptions.TypeInfoResolverChain.Insert(0, context!);
+    }
+}
 
 // §7.2: no manual capability-registry build here — MapCrestCapabilityEndpoints performs the single
 // authoritative aggregation (static providers + this host's ExplicitHost contributions) before

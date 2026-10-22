@@ -63,14 +63,16 @@ namespace CrestCreates.MultiTenancy.Middleware
             {
                 _logger.LogWarning("Tenant resolution failed: {ErrorCode} - {ErrorMessage}", resolutionResult.Error.Code, resolutionResult.Error.Message);
 
-                if (resolutionResult.Error.Code == "TENANT_INACTIVE")
+                if (resolutionResult.Error.Code is "TENANT_INACTIVE" or "TENANT_NOT_FOUND")
                 {
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     context.Response.ContentType = "application/json";
                     await context.Response.WriteAsync(JsonSerializer.Serialize(new
                     {
                         Code = StatusCodes.Status403Forbidden,
-                        Message = "租户已停用",
+                        Message = resolutionResult.Error.Code == "TENANT_INACTIVE"
+                            ? "租户已停用"
+                            : "租户不存在或已停用",
                         TraceId = context.TraceIdentifier
                     }));
                     return;
@@ -111,6 +113,10 @@ namespace CrestCreates.MultiTenancy.Middleware
 
         public async Task<TenantResolutionResult> ResolveAsync(HttpContext httpContext)
         {
+            // A resolver that actually observed an identifier and failed (unknown/inactive tenant) is
+            // terminal: falling through would silently run the request in the host tenant, which is the
+            // exact fallback the tenant boundary must prevent.
+            TenantResolutionResult? terminal = null;
             foreach (var resolver in _resolvers)
             {
                 var result = await resolver.ResolveAsync(httpContext);
@@ -120,9 +126,15 @@ namespace CrestCreates.MultiTenancy.Middleware
                         resolver.GetType().Name, result.TenantId);
                     return result;
                 }
+
+                if (result.Error is { } error
+                    && !string.Equals(error.Code, "TENANT_NOT_RESOLVED", StringComparison.Ordinal))
+                {
+                    terminal ??= result;
+                }
             }
 
-            return TenantResolutionResult.NotResolved("Composite");
+            return terminal ?? TenantResolutionResult.NotResolved("Composite");
         }
     }
 

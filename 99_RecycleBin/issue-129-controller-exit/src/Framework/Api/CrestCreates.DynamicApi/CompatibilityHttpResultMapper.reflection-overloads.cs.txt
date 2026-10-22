@@ -1,0 +1,63 @@
+// Archived with the #129 legacy chain (S4 exit, 2026-10-21). NOT compiled.
+// These public no-metadata overloads were retained for the legacy runtime. With the legacy runtime
+// archived they had no consumers and allowed reflection-based JSON serialization from the formal
+// package, so they were removed from CompatibilityHttpResultMapper. The formal package now exposes
+// only the JsonTypeInfo-required overloads.
+
+public static IResult WrapResult<T>(T? value, IServiceProvider? serviceProvider = null)
+{
+    var envelope = new DynamicApiResponse<T?>
+    {
+        Code = StatusCodes.Status200OK,
+        Message = "操作成功",
+        Data = value
+    };
+
+    return MapAotJson(envelope, serviceProvider, StatusCodes.Status200OK);
+}
+
+public static IResult WrapVoidResult(IServiceProvider? serviceProvider = null)
+{
+    var envelope = new DynamicApiResponse
+    {
+        Code = StatusCodes.Status200OK,
+        Message = "操作成功"
+    };
+
+    return MapAotJson(envelope, serviceProvider, StatusCodes.Status200OK);
+}
+
+public static IResult WrapGetResult<T>(T? value, IServiceProvider? serviceProvider = null)
+{
+    if (value is null)
+    {
+        var notFoundEnvelope = new DynamicApiResponse
+        {
+            Code = StatusCodes.Status404NotFound,
+            Message = "资源不存在"
+        };
+
+        return MapAotJson(notFoundEnvelope, serviceProvider, StatusCodes.Status404NotFound);
+    }
+
+    return WrapResult(value, serviceProvider);
+}
+
+[UnconditionalSuppressMessage("Trimming", "IL2026:RequiresUnreferencedCode",
+    Justification = "Fallback for applications without JsonSerializerContext — Tier 3/4 scenario.")]
+[UnconditionalSuppressMessage("AOT", "IL3050:RequiresDynamicCode",
+    Justification = "Fallback for applications without JsonSerializerContext — Tier 3/4 scenario.")]
+private static IResult MapAotJson<TEnvelope>(TEnvelope envelope, IServiceProvider? serviceProvider, int statusCode)
+{
+    if (serviceProvider is not null)
+    {
+        var jsonTypeInfo = CapabilityEndpointJsonTypeInfoResolver.Resolve(serviceProvider, typeof(TEnvelope));
+        if (jsonTypeInfo is not null)
+        {
+            return Results.Json(envelope, jsonTypeInfo, statusCode: statusCode);
+        }
+    }
+
+    // Fallback: no service provider or no JsonTypeInfo — use reflection-based serialization.
+    return Results.Json(envelope, statusCode: statusCode);
+}

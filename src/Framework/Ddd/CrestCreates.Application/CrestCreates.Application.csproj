@@ -29,4 +29,10 @@
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- [UnitOfWorkMo] is declared on CrestAppServiceBase in this assembly; without the weaver here
+         the attribute is inert and every inherited write action runs outside the unique kernel. -->
+    <PackageReference Include="Rougamo.Fody" />
+  </ItemGroup>
+
 </Project>

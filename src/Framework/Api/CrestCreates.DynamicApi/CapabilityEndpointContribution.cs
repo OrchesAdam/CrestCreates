@@ -92,4 +92,12 @@ public class CapabilityEndpointContribution
     /// </summary>
     public IReadOnlyList<CapabilityEndpointRequiredIdentity> RequiredIdentityIds { get; init; }
         = Array.Empty<CapabilityEndpointRequiredIdentity>();
+
+    /// <summary>
+    /// Business contract service types this contribution's generated invokers resolve from DI.
+    /// The host activation verifies every type is registered before any endpoint is mapped
+    /// (CCHTTP007); a missing registration is a startup failure, never a request-time 500.
+    /// </summary>
+    public IReadOnlyList<Type> RequiredServiceTypes { get; init; }
+        = Array.Empty<Type>();
 }
