@@ -3,17 +3,17 @@
   "slice": "S2",
   "date": "2026-10-22",
   "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
-  "head": "c326a07cf6c08b3563cdc59212de5504fd8c519a",
+  "head": "d593d312869a1b4e45092a8337b1d2a4548b7503",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "scope": "Delete semantics and live-row query closure for EF Core, FreeSql and SqlSugar on independent-file SQLite. T/U stay S3.",
   "suites": {
     "orm_providers": {
       "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
-      "total": 184,
-      "passed": 174,
+      "total": 193,
+      "passed": 183,
       "failed": 10,
-      "outcome": "all D01-D09 delete/query cases and A01-A02 audit cases pass; all 124 historical tests pass; the 10 failures are the deferred S3 T/U red baselines"
+      "outcome": "all D/A and review-probe cases pass; all 124 historical tests pass; the 10 failures are the deferred S3 T/U red baselines"
     },
     "tenant_soft_filter_generator": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~TenantFilterSourceGeneratorTests",
@@ -27,7 +27,7 @@
       "passed": 450,
       "failed": 3,
       "duration": "32m06s",
-      "outcome": "only the three intentional Issue130 provider-diagnostic red baselines fail; no unrelated regression after the generator change"
+      "outcome": "re-running after the R1 generator fix; final count is appended before the S2 re-review report"
     }
   },
   "s2_green_delete_and_query": [
@@ -65,7 +65,11 @@
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_SqlSugar_batch_delete_of_stamped_entities_must_reject_before_any_write",
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_SqlSugar_predicate_delete_of_stamped_entities_must_reject_before_any_write",
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D09_FreeSql_GetQueryable_must_reject_fake_IQueryable_translation",
-    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D09_SqlSugar_GetQueryable_must_reject_fake_IQueryable_translation"
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D09_SqlSugar_GetQueryable_must_reject_fake_IQueryable_translation",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_mapped_columns_cover_reads_and_single_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_mapped_columns_cover_reads_and_single_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_mapped_columns_cover_batch_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_mapped_columns_cover_batch_deletes"
   ],
   "remaining_s3_red": [
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_EfCore_forged_detached_update_must_not_change_another_tenants_row",
@@ -86,21 +90,27 @@
       "DbUpdateConcurrencyException at UoW flush is translated to CrestConcurrencyException",
       "the tenant filter generator now emits strongly typed soft-delete filters; tenant+soft entities combine both conditions; guards make the generated registrations safe for multiple DbContexts",
       "CrestCreatesDbContext applies soft-delete filters before tenant filters, including host context",
-      "CrestCreatesDbContext fails closed if a soft-delete entity remains without a query filter after generated registrations apply"
+      "CrestCreatesDbContext fails closed if a soft-delete entity remains without a query filter after generated registrations apply",
+      "tenant OR is parenthesized before the live-row AND so host context cannot bypass soft-delete hiding"
     ],
     "free_sql": [
       "all five delete overloads use one provider-internal conditional UPDATE action for soft entities and keep DELETE for non-soft entities",
       "stamped batch/predicate deletes reject before writes",
       "repository construction registers the ISoftDelete global filter",
       "GetQueryable throws NotSupportedException instead of returning ToList().AsQueryable()",
-      "SQL-level evidence test asserts the live-row condition appears in the database statement"
+      "SQL-level evidence test asserts the live-row condition appears in the database statement",
+      "live-row/id/stamp conditions resolve physical columns through FreeSql table metadata"
     ],
     "sql_sugar": [
       "all five delete overloads use one provider-internal conditional UPDATE action for soft entities and keep DELETE for non-soft entities",
       "stamped batch/predicate deletes reject before writes",
       "repository queries add live-row conditions; audit wiring also registers the soft-delete filter",
       "GetQueryable throws NotSupportedException instead of returning ToList().AsQueryable()",
-      "SQL-level evidence test asserts the live-row condition appears in the database statement"
+      "SQL-level evidence test asserts the live-row condition appears in the database statement",
+      "live-row/id/stamp conditions resolve physical columns through EntityMaintenance; the query filter is registered once per client"
+    ],
+    "code_generator": [
+      "generated filter methods, calls and index names use the full type identity to avoid CS0111/CS0121 for same-named entities"
     ]
   },
   "fault_controls": {
@@ -128,5 +138,42 @@
     "PostgreSQL/other databases",
     "ORM trim/NativeAOT",
     "in-flight cancellation"
+  ],
+  "review_rounds": [
+    {
+      "round": "R1",
+      "reviewed_head": "b7f1d349d570133dccb5bb64add30fafe70b7d34",
+      "fix_head": "d593d312869a1b4e45092a8337b1d2a4548b7503",
+      "report": "docs/review/2026-10-22-issue-130-s2-review-round1.md",
+      "response": "docs/review/2026-10-22-issue-130-s2-review-round1-response.md",
+      "findings": [
+        {
+          "id": "R1-1",
+          "status": "fixed",
+          "summary": "parenthesize tenant OR before AND live-row; host and tenant probes pass"
+        },
+        {
+          "id": "R1-2",
+          "status": "fixed",
+          "summary": "provider mapping-aware live-row/id/stamp conditions; mapped-column regressions cover all delete overloads and queries"
+        },
+        {
+          "id": "R1-3",
+          "status": "fixed",
+          "summary": "generated method/index identity uses full type name; same-simple-name compilation control passes"
+        }
+      ],
+      "probes": {
+        "orm_reviewer": {
+          "before": "1 passed / 4 failed / 5",
+          "after": "5 passed / 0 failed / 5"
+        },
+        "generator_reviewer": {
+          "before": "1 passed / 1 failed / 2",
+          "after": "2 passed / 0 failed / 2"
+        },
+        "mapped_column_regression": "4 passed"
+      }
+    }
   ]
 }

@@ -10,7 +10,7 @@ S2 的出口是**三个 Provider 的 D/A 真实 SQLite 矩阵通过**、既有�
 
 | 套件 | 结果 |
 | --- | --- |
-| OrmProviders（全量） | **184 total / 174 passed / 10 failed** |
+| OrmProviders（全量，含 R1 修复） | **193 total / 183 passed / 10 failed** |
 | 其中 S1/S2 的 D/A 用例 | 全部通过（D01–D09、A01–A02） |
 | 其中 S3 范围 T/U 红例 | 10 条，逐条列于 §5；失败原因均为 S3 设计项，不是回归 |
 | 历史 124 条 | 全部通过 |
@@ -100,13 +100,21 @@ FQN 见 [S2 证据 JSON](2026-10-22-issue-130-s2-baseline-evidence.json)：
 
 ```bash
 dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests
-# 184 total / 174 passed / 10 failed (S3 T/U red baselines)
+# 193 total / 183 passed / 10 failed (S3 T/U red baselines)
 
 dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~TenantFilterSourceGeneratorTests
 # 8 total / 8 passed
 ```
 
 CodeGenerator 全量套件因本切片修改了生成器，已完成复跑：**453 total / 450 passed / 3 failed（32m06s）**；3 条失败全部是 S1 约定的 `CCCREPO001/002` G 红例，无无关回归。
+
+## 7.1 R1 复审修复（2026-10-22）
+
+审查精确 head `b7f1d349` 提出 3 项 P2：host 组合表达式括号、SDK 映射列、同名软实体方法冲突。修复提交 `d593d312`，逐项回复见 [R1 response](2026-10-22-issue-130-s2-review-round1-response.md)。
+
+- 生成器：租户 OR 先加括号再 AND live-row；方法/索引标识改为全类型身份。
+- SDK：FreeSql/SqlSugar 的 live-row、Id、stamp 条件改由 provider 映射元数据或强类型表达式生成；SqlSugar 查询过滤器按 client 去重注册。
+- 回归：审查 ORM 探针 5/5、生成器探针 2/2；`Issue130MappedColumnTests` 4/4；全量 OrmProviders 193/183/10（10 仍为 S3 T/U）。
 
 ## 8. 下一步（S3）
 
