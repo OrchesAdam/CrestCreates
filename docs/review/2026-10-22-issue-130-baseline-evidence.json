@@ -1,0 +1,580 @@
+{
+  "date": "2026-10-22",
+  "purpose": "Issue #130 design baseline; not implementation acceptance",
+  "source_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
+  "sdk": "10.0.112",
+  "suite": {
+    "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests/CrestCreates.OrmProviders.Tests.csproj --no-restore --logger 'trx;LogFileName=issue130-baseline.trx' --results-directory /tmp/crest130-baseline",
+    "exit_code": 0,
+    "counters": {
+      "total": "124",
+      "executed": "124",
+      "passed": "124",
+      "failed": "0",
+      "error": "0",
+      "timeout": "0",
+      "aborted": "0",
+      "inconclusive": "0",
+      "passedButRunAborted": "0",
+      "notRunnable": "0",
+      "notExecuted": "0",
+      "disconnected": "0",
+      "warning": "0",
+      "completed": "0",
+      "inProgress": "0",
+      "pending": "0"
+    },
+    "by_class": {
+      "CrestCreates.OrmProviders.Tests.AmbientChainAndOwnershipTests": 6,
+      "CrestCreates.OrmProviders.Tests.AopUnitOfWorkAcceptanceTests": 3,
+      "CrestCreates.OrmProviders.Tests.CapLeaseTests": 9,
+      "CrestCreates.OrmProviders.Tests.ConcurrencyTokenConfigurationTests": 3,
+      "CrestCreates.OrmProviders.Tests.EfCoreConcurrencyTests": 3,
+      "CrestCreates.OrmProviders.Tests.EfCoreDbContextRegistrationTests": 4,
+      "CrestCreates.OrmProviders.Tests.EfCoreRepositoryTests": 3,
+      "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests": 8,
+      "CrestCreates.OrmProviders.Tests.FreeSqlConcurrencyTests": 5,
+      "CrestCreates.OrmProviders.Tests.FreeSqlRepositoryTests": 6,
+      "CrestCreates.OrmProviders.Tests.MultiTenancyInterceptorTests": 2,
+      "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests": 11,
+      "CrestCreates.OrmProviders.Tests.Pr139Round2ReviewerTests": 5,
+      "CrestCreates.OrmProviders.Tests.Pr139Round3ReviewerTests": 3,
+      "CrestCreates.OrmProviders.Tests.ProviderCapabilityTests": 5,
+      "CrestCreates.OrmProviders.Tests.SqlSugarConcurrencyTests": 5,
+      "CrestCreates.OrmProviders.Tests.SqlSugarRepositoryTests": 6,
+      "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests": 15,
+      "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests": 11,
+      "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests": 10,
+      "CrestCreates.OrmProviders.Tests.UnitOfWorkReflectionGuardTests": 1
+    },
+    "results": [
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AmbientChainAndOwnershipTests.Consecutive_top_level_units_of_work_discard_abandoned_tracking",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AmbientChainAndOwnershipTests.Different_connection_configuration_is_rejected",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AmbientChainAndOwnershipTests.Directly_injected_native_context_does_not_follow_isolation",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AmbientChainAndOwnershipTests.Parent_reader_follows_child_frame_while_independent_scope_does_not",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AmbientChainAndOwnershipTests.Same_chain_different_context_declaration_is_rejected",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AmbientChainAndOwnershipTests.Tenant_switch_inside_active_isolation_is_rejected",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AopUnitOfWorkAcceptanceTests.Aop_Method_Ct_Parameter_Is_Combined_With_The_Kernel_Deadline",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AopUnitOfWorkAcceptanceTests.Aop_Method_Without_Ct_Parameter_Still_Observes_The_Kernel_Deadline",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.AopUnitOfWorkAcceptanceTests.Woven_Method_Body_Sees_Ambient_And_Commit_Reaches_The_Repository",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Borrower_and_lease_reject_independent_root_with_native_transaction",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Borrower_and_lease_reject_non_transactional_window_with_native_transaction",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Borrower_and_lease_reject_not_started_carrier_with_native_transaction",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Borrower_and_lease_reject_replaced_transaction",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Issued_lease_must_invalidate_on_rollback_and_release",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Lease_is_rejected_without_transaction_and_invalidated_after_completion",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Lease_proves_same_connection_and_transaction_association",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Old_lease_must_not_revive_with_subsequent_scope",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.CapLeaseTests.Participation_contract_exposes_no_lifecycle_operations",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.ConcurrencyTokenConfigurationTests.CrestCreatesDbContext_AllIHasConcurrencyStampEntities_HaveConcurrencyToken",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.ConcurrencyTokenConfigurationTests.LibraryDbContext_ConfigureConcurrencyStamp_IsCalled",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.ConcurrencyTokenConfigurationTests.ModelBuilderExtensions_ConfigureConcurrencyStamp_Works",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreConcurrencyTests.UpdateAsync_WithCorrectStamp_ShouldSucceed",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreConcurrencyTests.UpdateAsync_WithStaleStamp_ShouldThrowConcurrencyException",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreConcurrencyTests.UpdateRangeAsync_WithConcurrentEntity_ShouldThrowNotSupported",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreDbContextRegistrationTests.AddCrestCreatesEfCoreDbContext_Wires_Provider_Contributor_And_Interceptors",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreDbContextRegistrationTests.CrestCreatesDbContext_OnModelCreating_Should_ApplyGeneratedTenantFilters_WhenRegistryHasRegistrations",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreDbContextRegistrationTests.CrestCreatesDbContext_OnModelCreating_Should_NotThrow_WhenNoTenantFilterRegistrationsExist",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreDbContextRegistrationTests.CrestCreatesDbContext_Should_Save_AuditLog_ExtraProperties",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreRepositoryTests.EfCoreQueryableBuilder_ThenInclude_Should_LoadNestedReferenceNavigation",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreRepositoryTests.EfCoreRepository_GetQueryableUnfiltered_Should_IgnoreQueryFilters",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreRepositoryTests.TenantRepository_FindByNameAsync_Should_LoadConnectionStrings",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests.Abandoned_root_scope_ends_its_transaction_before_next_uow",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests.Commit_persists_changes_to_the_database",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests.Default_framework_context_follows_requires_new_and_commits_via_injected_repository",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests.Domain_events_publish_after_the_commit_is_persisted",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests.Nested_requires_new_execution_commits_inner_and_restores_parent",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests.RequiresNew_binds_preinjected_dependencies_to_the_inner_unit_of_work",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests.Rollback_discards_changes_without_residue",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.EfCoreUnitOfWorkDatabaseTests.Second_level_requires_new_commits_the_context_used_by_business",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlConcurrencyTests.DeleteAsync_WithCorrectStamp_ShouldSucceed",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlConcurrencyTests.DeleteAsync_WithStaleStamp_ShouldThrowConcurrencyException",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlConcurrencyTests.UpdateAsync_WithCorrectStamp_ShouldUpdateStamp",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlConcurrencyTests.UpdateAsync_WithStaleStamp_ShouldThrowConcurrencyException",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlConcurrencyTests.UpdateRangeAsync_WithConcurrentEntity_ShouldThrowNotSupported",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlRepositoryTests.DeleteAsync_ShouldDeleteEntity",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlRepositoryTests.GetAsync_ShouldReturnEntity",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlRepositoryTests.GetListAsync_ShouldReturnAllEntities",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlRepositoryTests.InsertAsync_ShouldAddEntity",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlRepositoryTests.SoftDelete_ShouldMarkEntityAsDeleted",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.FreeSqlRepositoryTests.UpdateAsync_ShouldUpdateEntity",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.MultiTenancyInterceptorTests.SavingChanges_Added_User_WithEmptyTenantId_ShouldSetCurrentTenantId",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.MultiTenancyInterceptorTests.SavingChanges_ModifiedAndDeleted_User_ShouldValidateCurrentTenantId",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Abandoned_join_must_prevent_outer_commit",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Cleanup_failure_must_not_replace_business_exception",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Completed_scope_must_reject_new_repository_writes",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Confirmed_commit_must_not_become_unknown_when_handle_dispose_fails",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Explicit_rollback_must_not_leak_pending_writes_into_next_uow",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Joined_scope_completion_must_observe_its_deadline",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Joined_scope_must_inherit_owner_cancellation_without_deadline",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Lease_must_reject_transaction_outside_managed_scope",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Public_lease_must_not_expose_lifecycle_handle",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Root_uow_must_reject_tenant_change_before_repository_access",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139ReviewerRegressionTests.Tenant_to_host_change_must_be_rejected_inside_isolation",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139Round2ReviewerTests.Business_exception_must_retain_cleanup_diagnostic",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139Round2ReviewerTests.Ef_rollback_failure_must_not_report_successful_rollback",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139Round2ReviewerTests.Lease_must_not_adopt_native_transaction_before_scope_start",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139Round2ReviewerTests.Native_borrower_must_reject_unmanaged_transaction",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139Round2ReviewerTests.Root_scope_must_reject_second_logical_context",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139Round3ReviewerTests.Confirmed_rollback_must_survive_cleanup_failure_on_all_exit_paths",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139Round3ReviewerTests.Confirmed_rollback_must_survive_cleanup_failure_on_all_exit_paths",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.Pr139Round3ReviewerTests.Issued_lease_must_expire_when_confirmed_commit_cleanup_fails",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.ProviderCapabilityTests.Binding_without_declared_levels_rejects_explicit_isolation_before_creating_the_unit_of_work",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.ProviderCapabilityTests.Explicit_read_committed_is_rejected_before_execution_on_sqlite",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.ProviderCapabilityTests.Explicit_serializable_isolation_is_accepted_on_sqlite_and_commits",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.ProviderCapabilityTests.FreeSql_abandonment_terminates_the_pending_unit_of_work",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.ProviderCapabilityTests.FreeSql_explicit_isolation_is_rejected_by_the_capability_gate",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarConcurrencyTests.DeleteAsync_WithCorrectStamp_ShouldSucceed",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarConcurrencyTests.DeleteAsync_WithStaleStamp_ShouldThrowConcurrencyException",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarConcurrencyTests.UpdateAsync_WithCorrectStamp_ShouldUpdateStamp",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarConcurrencyTests.UpdateAsync_WithStaleStamp_ShouldThrowConcurrencyException",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarConcurrencyTests.UpdateRangeAsync_WithConcurrentEntity_ShouldThrowNotSupported",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarRepositoryTests.DeleteAsync_ShouldDeleteEntity",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarRepositoryTests.GetAsync_ShouldReturnEntity",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarRepositoryTests.GetListAsync_ShouldReturnAllEntities",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarRepositoryTests.InsertAsync_ShouldAddEntity",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarRepositoryTests.SoftDelete_ShouldMarkEntityAsDeleted",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.SqlSugarRepositoryTests.UpdateAsync_ShouldUpdateEntity",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Conflicting_default_declarations_fail_at_registration",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Different_custom_factories_fail_deterministically_in_both_orders",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Duplicate_binding_fails_deterministically_instead_of_last_wins",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Explicit_default_declaration_selects_provider_among_multiple_bindings",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Explicit_provider_argument_overrides_declared_default",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Failed_dependency_creation_does_not_pollute_current",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Missing_binding_fails_deterministically_with_registered_providers",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Mixing_binding_and_custom_factory_registration_fails_deterministically",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Multiple_bindings_without_default_fail_deterministically",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Repeated_registration_with_same_default_is_idempotent",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.RequiresNew_uses_child_scope_and_restores_parent_state",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.RequiresNew_when_binding_declares_unsupported_gives_deterministic_diagnostic",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Same_custom_factory_repeated_is_idempotent",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Same_custom_factory_with_conflicting_defaults_fails",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkDiRegistrationTests.Single_binding_supplies_default_provider_when_unspecified",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Abandonment_with_failing_rollback_records_failed_state_and_reports_cleanup_failure",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Caller_Frame_Sees_Activation_After_Async_Suspending_Begin",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Commit_Failure_Records_Unknown_And_Rollback_Attempt_Does_Not_Rewrite_It",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Confirmed_rollback_cleanup_failure_keeps_rolled_back_on_explicit_rollback",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Deadline_Cancels_Execution_Token_And_Completion_Must_Not_Report_Success",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Explicit_rollback_termination_failure_must_not_report_rolled_back",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Joined_Scope_May_Tighten_Deadline_But_Not_Extend_It",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Lifecycle_order_is_flush_commit_notify_cleanup",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Non_transactional_completion_notifies_after_flush",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Post_Commit_Notification_Failure_Preserves_Committed_Fact",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkKernelStateTests.Rollback_termination_failure_is_attached_to_business_root_cause",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.BeginScope_Should_Reuse_Current_UnitOfWork_By_Default",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.BeginScope_Unstarted_Owner_Scope_Is_Abandoned_And_Disposed_On_Exit",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.BeginScope_WithRequiresNew_Should_Restore_Parent_Scope_When_Disposed",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.CompleteAsync_Is_Idempotent_And_RollbackAfterCommit_Is_Rejected",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.Execute_Should_Preserve_Original_Exception_When_Rollback_Fails",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.Joined_Scope_Completion_Records_Participant_Success_Without_Committing_Outer",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.Joined_Scope_Failure_Marks_Owner_RollbackOnly_And_Outer_Refuses_To_Commit",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.Joined_Scope_With_Conflicting_Options_Fails_Before_Execution",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.Non_Transactional_Owner_Flushes_Without_Transaction",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkManagerTests.State_And_Results_Remain_Readable_After_Release",
+        "outcome": "Passed"
+      },
+      {
+        "fqn": "CrestCreates.OrmProviders.Tests.UnitOfWorkReflectionGuardTests.UnitOfWork_assembly_mainline_does_not_use_runtime_type_resolution",
+        "outcome": "Passed"
+      }
+    ],
+    "trx_path": "/tmp/crest130-baseline/issue130-baseline.trx",
+    "trx_sha256": "4d4864e604384145585dff596fcbdf11d07a6d75d376ba8b375ca8c4bd8601cf",
+    "build_and_test_log": "/tmp/crest130-baseline-unrestricted.log",
+    "build_and_test_log_sha256": "91880b24d3fea7eb9f64684d23b8a33b7a015b21835ee0ffb40e9355820ccb57"
+  },
+  "observation": {
+    "command": "dotnet run --project /tmp/crest130-probe/Probe.csproj",
+    "exit_code": 0,
+    "database": "two independent SQLite files under /tmp/crest130-probe; no filters installed",
+    "result": {
+      "FreeSql": {
+        "Before": 1,
+        "After": 0
+      },
+      "SqlSugar": {
+        "Before": 1,
+        "After": 0
+      }
+    },
+    "meaning": "Current production DeleteAsync(entity) physically removes ISoftDelete rows; existing null-only tests do not prove logical deletion.",
+    "probe_source": "docs/review/probes/2026-10-22-issue-130-soft-delete-observation.cs.txt",
+    "probe_project": "docs/review/probes/2026-10-22-issue-130-soft-delete-observation.csproj.txt",
+    "log": "/tmp/crest130-probe/output.log",
+    "log_sha256": "502d5ed56078612a4668c6d5902c3dec47c00720573f4d25c2280dc3db58639f"
+  },
+  "limitations": [
+    "Initial sandbox attempt failed before test execution because MSBuild named pipes were unavailable; unrestricted retry completed.",
+    "Existing suite mixes EF InMemory, SQLite, mocks and structural guards; totals do not imply all Provider contracts pass.",
+    "No new PostgreSQL/trim/NativeAOT runs.",
+    "Only entity delete was independently observed; other delete overloads are source findings and planned acceptance scope.",
+    "No new production code or permanent test changes."
+  ]
+}
