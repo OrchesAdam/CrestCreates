@@ -75,6 +75,45 @@ public sealed class Issue130MappedColumnTests : IDisposable
     }
 
     [Fact]
+    public async Task A02_FreeSql_mapped_stamp_update_uses_mapped_columns()
+    {
+        var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130FreeSqlRepository<Issue130MappedSoftStamped>(
+            new FreeSqlUnitOfWorkManager(freeSql), _userProvider);
+        await repository.InsertAsync(new Issue130MappedSoftStamped { Id = 1, Name = "original" });
+        var loaded = (await repository.GetAsync(1))!;
+        loaded.Name = "updated";
+
+        await repository.UpdateAsync(loaded);
+
+        Assert.Equal(1, _database.Count(MappedStamped, "\"row_id\" = 1 AND Name = 'updated'"));
+        loaded.ConcurrencyStamp = "stale";
+        loaded.Name = "stale-update";
+        await Assert.ThrowsAsync<CrestCreates.Domain.Exceptions.CrestConcurrencyException>(
+            () => repository.UpdateAsync(loaded));
+        Assert.Equal(1, _database.Count(MappedStamped, "\"row_id\" = 1 AND Name = 'updated'"));
+    }
+
+    [Fact]
+    public async Task A02_SqlSugar_mapped_stamp_update_uses_mapped_columns()
+    {
+        var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
+        var repository = new Issue130SqlSugarRepository<Issue130MappedSoftStamped>(client, _userProvider);
+        await repository.InsertAsync(new Issue130MappedSoftStamped { Id = 1, Name = "original" });
+        var loaded = (await repository.GetAsync(1))!;
+        loaded.Name = "updated";
+
+        await repository.UpdateAsync(loaded);
+
+        Assert.Equal(1, _database.Count(MappedStamped, "\"row_id\" = 1 AND Name = 'updated'"));
+        loaded.ConcurrencyStamp = "stale";
+        loaded.Name = "stale-update";
+        await Assert.ThrowsAsync<CrestCreates.Domain.Exceptions.CrestConcurrencyException>(
+            () => repository.UpdateAsync(loaded));
+        Assert.Equal(1, _database.Count(MappedStamped, "\"row_id\" = 1 AND Name = 'updated'"));
+    }
+
+    [Fact]
     public async Task D01_FreeSql_mapped_columns_cover_batch_deletes()
     {
         var freeSql = Issue130FreeSqlBed.Create(_database, _userProvider, _tenant);

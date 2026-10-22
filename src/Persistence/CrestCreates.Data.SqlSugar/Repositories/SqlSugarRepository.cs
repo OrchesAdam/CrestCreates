@@ -184,7 +184,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     stamp.ConcurrencyStamp = Guid.NewGuid().ToString();
                     var rows = await _sqlSugarClient.Updateable(entity)
                         .IgnoreColumns("DomainEvents")
-                        .Where("Id = @entityId AND ConcurrencyStamp = @oldStamp", new { entityId = entity.Id, oldStamp })
+                        .Where(
+                            $"{ColumnName("Id")} = @entityId AND {ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @oldStamp",
+                            new { entityId = entity.Id, oldStamp })
                         .ExecuteCommandAsync();
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
                 }

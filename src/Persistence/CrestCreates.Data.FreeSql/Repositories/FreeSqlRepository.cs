@@ -199,7 +199,10 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     stamp.ConcurrencyStamp = Guid.NewGuid().ToString();
                     var rows = await _orm.Update<TEntity>()
                         .SetSource(entity)
-                        .Where("Id = @Id AND ConcurrencyStamp = @OldStamp", new { Id = entity.Id, OldStamp = oldStamp })
+                        .Where(e => e.Id.Equals(entity.Id))
+                        .Where(
+                            $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @OldStamp",
+                            new { OldStamp = oldStamp })
                         .ExecuteAffrowsAsync(cancellationToken);
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
                 }
