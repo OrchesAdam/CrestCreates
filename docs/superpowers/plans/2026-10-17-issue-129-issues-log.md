@@ -832,3 +832,24 @@ S2.2 提取边界沿用审查意见：共享 HTTP 后端（envelope/contribution
 - 仅证明原生组合中的真实 TicketAppService/DTO/validator/正式 bundle + 内存持久化叶子；不证明 EF/PostgreSQL、真实认证/租户/多租户、整个 SaaSHelpdesk、Library HTTP、其他 RID。
 - LibraryManagement 完整 HTTP 仍未验证（既有 `OpenIddictScopes` 测试环境缺失）；S4 旧链退出结论保持。
 - 未合并、CI 保持暂停；不自动合并/恢复 CI。
+
+## S5 R1 复审修复：门禁判别力（2026-10-22，head 见 PR）
+
+复审结论：原生执行事实成立，但两项门禁判别力缺口；S4 放行保持，不恢复 Legacy。
+
+### 01 P2 零业务断言不足
+
+- 新增 fixture-owned `TicketBusinessObserver` 与 `CountingTicketAppService` 装饰器：真实 `TicketAppService` 前记录业务入口；`MemoryTicketUnitOfWork.BeginTransactionAsync` 记录 UoW 启动；`MemoryTicketRepository` 的 Insert/Update/Delete 记录写路径。计数器与 HTTP 状态、持久化行数独立。
+- create 正向控制同时断言 business/UoW/repository-write 各 +1，排除永远为零的计数器；invalid-body-zero-business 同时断言 HTTP 400、行数不变、business/UoW/write 三项均不增加。
+- 新增内置故障注入 `CREST_TICKET_GATE_MUTATION=late-validation`：验证服务返回 Success，Repository 在业务/UoW 已进入后对 title=x 抛 CrestValidationException（仍返回 400、不写行）。同一 gate 在该注入下 **invalid-body-zero-business:FAIL: invalid input must not enter the real business service**、exit 1、无总 sentinel。JIT 也使用相同计数器断言。
+
+### 02 P2 metadata 拒绝归因不足
+
+- metadata-rejection 负例在破坏 JSON 前锁定 Ticket 目标：owner `CrestCreates.TicketHttpProjection.AotFixture`、11 个 endpoint IDs、11 个 capability IDs、11 个 required identities、生成 JSON context、`CreateTicketDto/CreateAsync/Body` 与 `DynamicApiResponse<TicketDto>/CreateAsync/ResultEnvelope` 目标 root；失败后校验异常包含该 owner/action/type，且零新增路由。
+- 新增内置 decoy 控制 `--ticket-mutation=decoy-metadata`：仅用无 Ticket 端点的 `review-decoy` 贡献替换 contributions；gate 在目标锁定前置失败 **metadata-rejection:FAIL: the metadata probe must contain the Ticket contribution**、exit 1、无总 sentinel。真正的 Ticket 目标 root 归因仍由绿色负例（清空 resolver）验证。
+
+### 证据
+
+- Ticket fixture JIT **1/1**；NativeAOT **5/5**：绿色 + wrong-expectation + wrong-validation-status + late-validation + decoy-metadata。原生 15 场景 + `CRESTCREATES_TICKET_NATIVE_OK`；五个控制均 publish/link/run 原生产物，失败控制 exit 1 无总 sentinel。
+- 证据入库：`docs/review/2026-10-21-issue-129-s5-ticket-native-evidence/`（新增 late-validation、decoy-metadata；SHA 绑定本轮代码 head）。
+- S5 仍不修改生产 runtime；支持声明保持 Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64，该 fixture 范围），不推导 EF/PostgreSQL、真实认证/租户、SaaSHelpdesk、Library HTTP、其他 RID。

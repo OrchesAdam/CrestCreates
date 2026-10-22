@@ -11,14 +11,16 @@ namespace CrestCreates.TicketHttpProjection.AotFixture;
 public sealed class MemoryTicketUnitOfWork : IUnitOfWork
 {
     private readonly TicketMemoryStore _store;
+    private readonly TicketBusinessObserver _observer;
     private readonly object _sync = new();
     private (List<TicketRow> Tickets, SlaRow? Sla)? _snapshot;
     private bool _transactionActive;
     private bool _gateHeld;
 
-    public MemoryTicketUnitOfWork(TicketMemoryStore store)
+    public MemoryTicketUnitOfWork(TicketMemoryStore store, TicketBusinessObserver observer)
     {
         _store = store;
+        _observer = observer;
     }
 
     public async Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
@@ -28,6 +30,7 @@ public sealed class MemoryTicketUnitOfWork : IUnitOfWork
         _gateHeld = true;
         _snapshot = _store.Snapshot();
         _transactionActive = true;
+        _observer.RecordUnitOfWorkBegin();
     }
 
     public Task CommitTransactionAsync(CancellationToken cancellationToken = default)

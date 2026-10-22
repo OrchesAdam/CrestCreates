@@ -28,13 +28,18 @@ public sealed class TicketHttpTests : IClassFixture<WebApplicationFactory<Progra
     {
         using var client = _factory.CreateClient();
         var store = _factory.Services.GetRequiredService<TicketMemoryStore>();
+        var observer = _factory.Services.GetRequiredService<TicketBusinessObserver>();
         var checker = (FixturePermissionChecker)_factory.Services.GetRequiredService<IPermissionChecker>();
         var customerId = Guid.NewGuid();
         var agentId = Guid.NewGuid();
 
+        var beforeCreate = observer.Capture();
         var created = await SendJsonAsync(client, HttpMethod.Post, "/api/ticket",
             CreateBody("JIT ticket", "JIT ticket description", customerId));
         created.StatusCode.Should().Be(HttpStatusCode.OK);
+        observer.BusinessEntries.Should().Be(beforeCreate.BusinessEntries + 1);
+        observer.UnitOfWorkBegins.Should().Be(beforeCreate.UnitOfWorkBegins + 1);
+        observer.RepositoryWrites.Should().Be(beforeCreate.RepositoryWrites + 1);
         using var createdDocument = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
         var data = createdDocument.RootElement.GetProperty("data");
         var id = data.GetProperty("id").GetGuid();
@@ -68,10 +73,14 @@ public sealed class TicketHttpTests : IClassFixture<WebApplicationFactory<Progra
         var closedStamp = closedDocument.RootElement.GetProperty("data").GetProperty("concurrencyStamp").GetString()!;
 
         var before = store.TicketCount;
+        var beforeInvalid = observer.Capture();
         var invalid = await SendJsonAsync(client, HttpMethod.Post, "/api/ticket",
             CreateBody("x", "short", customerId));
         invalid.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         store.TicketCount.Should().Be(before);
+        observer.BusinessEntries.Should().Be(beforeInvalid.BusinessEntries);
+        observer.UnitOfWorkBegins.Should().Be(beforeInvalid.UnitOfWorkBegins);
+        observer.RepositoryWrites.Should().Be(beforeInvalid.RepositoryWrites);
 
         var deniedTicket = await SendJsonAsync(client, HttpMethod.Post, "/api/ticket",
             CreateBody("Denied JIT ticket", "Denied JIT ticket description", customerId));

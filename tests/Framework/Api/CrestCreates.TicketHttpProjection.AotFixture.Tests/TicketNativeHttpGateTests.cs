@@ -135,10 +135,77 @@ public sealed class TicketNativeHttpGateTests
         }
     }
 
-    private static Task<ProcessOutcome> RunGateAsync(string executable, string? mutation)
+    [Fact]
+    public async Task Late_validation_mutation_fails_the_zero_business_scenario()
+    {
+        RequireLinuxX64();
+        var fixture = await Published.Value;
+        var evidence = new EvidenceCollector("ticket-native-http-late-validation", fixture);
+        string? failure = null;
+        try
+        {
+            fixture.PublishExitCode.Should().Be(0, fixture.PublishLog);
+            var execution = await RunGateAsync(
+                fixture.ExecutablePath,
+                mutation: null,
+                environment: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["CREST_TICKET_GATE_MUTATION"] = "late-validation",
+                });
+            evidence.Add("gateExitCode", execution.ExitCode);
+            evidence.Add("gateOutput", execution.Output);
+            execution.TimedOut.Should().BeFalse();
+            execution.ExitCode.Should().NotBe(0);
+            execution.Output.Should().Contain("invalid-body-zero-business:FAIL");
+            execution.Output.Should().NotContain(TicketNativeGate.TotalSentinel);
+        }
+        catch (Exception exception)
+        {
+            failure = $"{exception.GetType().Name}: {exception.Message}";
+            throw;
+        }
+        finally
+        {
+            evidence.Write(failure is null ? "passed" : "failed", failure);
+        }
+    }
+
+    [Fact]
+    public async Task Decoy_metadata_contribution_fails_the_owner_lock()
+    {
+        RequireLinuxX64();
+        var fixture = await Published.Value;
+        var evidence = new EvidenceCollector("ticket-native-http-decoy-metadata", fixture);
+        string? failure = null;
+        try
+        {
+            fixture.PublishExitCode.Should().Be(0, fixture.PublishLog);
+            var execution = await RunGateAsync(fixture.ExecutablePath, "decoy-metadata");
+            evidence.Add("gateExitCode", execution.ExitCode);
+            evidence.Add("gateOutput", execution.Output);
+            execution.TimedOut.Should().BeFalse();
+            execution.ExitCode.Should().NotBe(0);
+            execution.Output.Should().Contain("metadata-rejection:FAIL");
+            execution.Output.Should().NotContain(TicketNativeGate.TotalSentinel);
+        }
+        catch (Exception exception)
+        {
+            failure = $"{exception.GetType().Name}: {exception.Message}";
+            throw;
+        }
+        finally
+        {
+            evidence.Write(failure is null ? "passed" : "failed", failure);
+        }
+    }
+
+    private static Task<ProcessOutcome> RunGateAsync(
+        string executable,
+        string? mutation,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var arguments = mutation is null ? "--ticket-gate" : $"--ticket-gate --ticket-mutation={mutation}";
-        return RunProcessAsync(executable, arguments, TimeSpan.FromMinutes(5));
+        return RunProcessAsync(executable, arguments, TimeSpan.FromMinutes(5), environment);
     }
 
     private static async Task<PublishedFixture> PublishFixtureAsync()
@@ -184,7 +251,11 @@ public sealed class TicketNativeHttpGateTests
         return separator > 0 ? line[..separator] : line;
     }
 
-    private static async Task<ProcessOutcome> RunProcessAsync(string fileName, string arguments, TimeSpan timeout)
+    private static async Task<ProcessOutcome> RunProcessAsync(
+        string fileName,
+        string arguments,
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         using var process = new Process
         {
@@ -198,6 +269,14 @@ public sealed class TicketNativeHttpGateTests
             }
         };
         process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+        if (environment is not null)
+        {
+            foreach (var (key, value) in environment)
+            {
+                process.StartInfo.Environment[key] = value;
+            }
+        }
+
         process.Start();
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();

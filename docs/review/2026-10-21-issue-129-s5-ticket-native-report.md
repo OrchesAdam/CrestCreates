@@ -12,7 +12,11 @@
 
 create / get-by-id / unknown-404 / list-all / by-customer / update-with-stamp / assign-with-active-SLA / by-assignee / resolve / close / business-failure-serializable / delete-If-Match / invalid-body-zero-business / permission-403 / metadata-rejection。每场景 `<name>:PASS`，全部通过后打印 `CRESTCREATES_TICKET_NATIVE_OK`。
 
-变异：`wrong-expectation` 使 create 失败；`wrong-validation-status` 使 invalid-body-zero-business 失败；两者 exit 1 且无总 sentinel。
+零业务判别：fixture 业务入口/UoW 启动/仓储写计数器独立断言；create 正向各 +1，非法输入三项均不增加。内置 `late-validation` 注入（跳过 pre-service validation、业务/UoW 已进入后仓储拒绝）使 invalid-body-zero-business:FAIL。
+
+metadata 判别：破坏 JSON 前锁定 Ticket owner、11 个 endpoint/capability/identity 与 CreateTicketDto body / Ticket result-envelope root；失败异常须含该 owner/action/type 且零新增路由。内置 `decoy-metadata`（无 Ticket 端点的 decoy 贡献）使 metadata-rejection:FAIL。
+
+五控制均 exit 0/1 符合预期，失败控制无总 sentinel。
 
 ## 证据
 

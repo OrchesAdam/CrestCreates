@@ -13,9 +13,10 @@ namespace CrestCreates.TicketHttpProjection.AotFixture;
 /// the real providers, and executes only the query shapes the AppService actually uses. No EF,
 /// EnumerableQuery, Expression.Compile or dynamic LINQ is involved.
 /// </summary>
-public sealed class MemoryTicketRepository(TicketMemoryStore store) : ITicketRepository
+public sealed class MemoryTicketRepository(TicketMemoryStore store, TicketBusinessObserver observer) : ITicketRepository
 {
     private TicketMemoryStore Store { get; } = store;
+    private TicketBusinessObserver Observer { get; } = observer;
 
     public IQueryable<Ticket> GetQueryable()
         => new TicketQueryable(() => Store.TicketRows);
@@ -45,6 +46,20 @@ public sealed class MemoryTicketRepository(TicketMemoryStore store) : ITicketRep
     public Task<Ticket> InsertAsync(Ticket entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
+        Observer.RecordRepositoryWrite();
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("CREST_TICKET_GATE_MUTATION"),
+                "late-validation",
+                StringComparison.Ordinal)
+            && entity.Title == "x")
+        {
+            // Mirrors the reviewer's late-validation probe: the real business service and UoW have
+            // already run, and the repository rejects the invalid row. The gate must catch the
+            // business/UoW/write counters even though the response is still 400 and no row persists.
+            throw new CrestCreates.Domain.Shared.Exceptions.CrestValidationException(
+                "late-validation probe", Array.Empty<string>());
+        }
+
         lock (Store.Sync)
         {
             if (string.IsNullOrWhiteSpace(entity.ConcurrencyStamp))
@@ -77,6 +92,7 @@ public sealed class MemoryTicketRepository(TicketMemoryStore store) : ITicketRep
     public Task<Ticket> UpdateAsync(Ticket entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
+        Observer.RecordRepositoryWrite();
         lock (Store.Sync)
         {
             var current = Store.FindTicket(entity.Id)
@@ -113,12 +129,14 @@ public sealed class MemoryTicketRepository(TicketMemoryStore store) : ITicketRep
 
     public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        Observer.RecordRepositoryWrite();
         Store.RemoveTicket(id, expectedStamp: null, requireStamp: false);
         return Task.CompletedTask;
     }
 
     public Task DeleteAsync(Guid id, string expectedStamp, CancellationToken cancellationToken = default)
     {
+        Observer.RecordRepositoryWrite();
         Store.RemoveTicket(id, expectedStamp, requireStamp: true);
         return Task.CompletedTask;
     }

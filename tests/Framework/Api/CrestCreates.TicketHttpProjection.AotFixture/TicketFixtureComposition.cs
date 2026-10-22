@@ -37,6 +37,7 @@ public static class TicketFixtureComposition
 
         TicketActivation.Add(services);
 
+        services.AddSingleton<TicketBusinessObserver>();
         services.AddSingleton<TicketMemoryStore>();
         services.AddSingleton<MemoryTicketRepository>();
         services.AddSingleton<ITicketRepository>(provider => provider.GetRequiredService<MemoryTicketRepository>());
@@ -45,8 +46,20 @@ public static class TicketFixtureComposition
         services.AddSingleton<ICrestRepositoryBase<SLAPolicy, Guid>>(provider => provider.GetRequiredService<MemorySlaPolicyRepository>());
 
         services.AddScoped<TicketAppService>();
-        services.AddScoped<ITicketAppService>(provider => provider.GetRequiredService<TicketAppService>());
-        services.AddScoped<IValidationService, ValidationService>();
+        services.AddScoped<ITicketAppService>(provider => new CountingTicketAppService(
+            provider.GetRequiredService<TicketAppService>(),
+            provider.GetRequiredService<TicketBusinessObserver>()));
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("CREST_TICKET_GATE_MUTATION"),
+                "late-validation",
+                StringComparison.Ordinal))
+        {
+            services.AddScoped<IValidationService, SkippingValidationService>();
+        }
+        else
+        {
+            services.AddScoped<IValidationService, ValidationService>();
+        }
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
             options.SerializerOptions.TypeInfoResolverChain.Add(TicketFailureJsonContext.Default));
 
