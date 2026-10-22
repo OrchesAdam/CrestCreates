@@ -92,5 +92,5 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 审查 head `b7f1d349` 新增 3 项 P2：host 组合表达式优先级、SDK 映射列、同名软实体方法冲突；S2 暂不放行。
 - 修复提交 `d593d312`：租户 OR 加括号；FreeSql/SqlSugar live-row/Id/stamp 条件改由映射元数据生成；SqlSugar 查询过滤器按 client 去重；生成方法/索引使用全类型身份。
 - 审查探针逐字入库（ORM 5 条、生成器 2 条），修复前 4/5 与 1/2 失败，修复后全部通过；新增映射列回归 4 条。
-- 全量 OrmProviders 193 total / 183 passed / 10 failed（10 仍为 S3 T/U）；模型过滤器 registry 测试加入串行集合并快照/恢复。
-- 证据：[R1 response](../review/2026-10-22-issue-130-s2-review-round1-response.md)；CodeGenerator 全量正在复跑，完成后同步。
+- 全量 OrmProviders **195 total / 185 passed / 10 failed**（10 仍为 S3 T/U）；模型过滤器 registry 测试加入串行集合并快照/恢复；stamped update 的同类映射条件同步修复（`666816c2`）。
+- 证据：[R1 response](../review/2026-10-22-issue-130-s2-review-round1-response.md)；CodeGenerator 全量已复跑 **455 total / 452 passed / 3 failed（30m51s，仅 G 红）**。

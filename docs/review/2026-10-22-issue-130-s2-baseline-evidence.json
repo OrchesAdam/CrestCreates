@@ -3,15 +3,15 @@
   "slice": "S2",
   "date": "2026-10-22",
   "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
-  "head": "d593d312869a1b4e45092a8337b1d2a4548b7503",
+  "head": "666816c22cae7f6192fe1987cb74b59b21a8b63f",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "scope": "Delete semantics and live-row query closure for EF Core, FreeSql and SqlSugar on independent-file SQLite. T/U stay S3.",
   "suites": {
     "orm_providers": {
       "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
-      "total": 193,
-      "passed": 183,
+      "total": 195,
+      "passed": 185,
       "failed": 10,
       "outcome": "all D/A and review-probe cases pass; all 124 historical tests pass; the 10 failures are the deferred S3 T/U red baselines"
     },
@@ -23,11 +23,11 @@
     },
     "code_generator_full": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
-      "total": 453,
-      "passed": 450,
+      "total": 455,
+      "passed": 452,
       "failed": 3,
-      "duration": "32m06s",
-      "outcome": "re-running after the R1 generator fix; final count is appended before the S2 re-review report"
+      "duration": "30m51s",
+      "outcome": "only the three intentional CCCREPO red baselines fail; no unrelated regression after the R1 generator fixes"
     }
   },
   "s2_green_delete_and_query": [
@@ -69,7 +69,9 @@
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_mapped_columns_cover_reads_and_single_deletes",
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_mapped_columns_cover_reads_and_single_deletes",
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_mapped_columns_cover_batch_deletes",
-    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_mapped_columns_cover_batch_deletes"
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_mapped_columns_cover_batch_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.A02_FreeSql_mapped_stamp_update_uses_mapped_columns",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.A02_SqlSugar_mapped_stamp_update_uses_mapped_columns"
   ],
   "remaining_s3_red": [
     "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_EfCore_forged_detached_update_must_not_change_another_tenants_row",
@@ -143,7 +145,7 @@
     {
       "round": "R1",
       "reviewed_head": "b7f1d349d570133dccb5bb64add30fafe70b7d34",
-      "fix_head": "d593d312869a1b4e45092a8337b1d2a4548b7503",
+      "fix_head": "666816c22cae7f6192fe1987cb74b59b21a8b63f",
       "report": "docs/review/2026-10-22-issue-130-s2-review-round1.md",
       "response": "docs/review/2026-10-22-issue-130-s2-review-round1-response.md",
       "findings": [
@@ -172,7 +174,8 @@
           "before": "1 passed / 1 failed / 2",
           "after": "2 passed / 0 failed / 2"
         },
-        "mapped_column_regression": "4 passed"
+        "mapped_column_regression": "6 passed",
+        "code_generator_full": "455 total / 452 passed / 3 intentional G red"
       }
     }
   ]
