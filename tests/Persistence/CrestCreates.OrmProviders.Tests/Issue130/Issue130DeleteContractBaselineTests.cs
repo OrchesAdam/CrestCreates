@@ -219,6 +219,8 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
         var row = _database.Read(Issue130Tables.SoftStamped, 1);
         Assert.True(row.Exists, "FreeSql DeleteAsync(id) must issue an UPDATE, not DELETE");
         Assert.Equal(1, row.Integer("IsDeleted"));
+        Assert.NotNull(row.DateTimeValue("DeletionTime"));
+        Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
     }
 
     [Fact]
@@ -233,6 +235,12 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
 
         Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped));
         Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 1"));
+        foreach (var id in new long[] { 1, 2 })
+        {
+            var row = _database.Read(Issue130Tables.SoftStamped, id);
+            Assert.NotNull(row.DateTimeValue("DeletionTime"));
+            Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
+        }
     }
 
     [Fact]
@@ -247,6 +255,12 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
 
         Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped));
         Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 1"));
+        foreach (var id in new long[] { 1, 2 })
+        {
+            var row = _database.Read(Issue130Tables.SoftStamped, id);
+            Assert.NotNull(row.DateTimeValue("DeletionTime"));
+            Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
+        }
     }
 
     [Fact]
@@ -278,6 +292,8 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
         Assert.True(row.Exists);
         Assert.Equal(1, row.Integer("IsDeleted"));
         Assert.NotEqual(stamp, row.Text("ConcurrencyStamp"));
+        Assert.NotNull(row.DateTimeValue("DeletionTime"));
+        Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
     }
 
     [Fact]
@@ -353,6 +369,8 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
         var row = _database.Read(Issue130Tables.SoftStamped, 1);
         Assert.True(row.Exists, "SqlSugar DeleteAsync(id) must issue an UPDATE, not DELETE");
         Assert.Equal(1, row.Integer("IsDeleted"));
+        Assert.NotNull(row.DateTimeValue("DeletionTime"));
+        Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
     }
 
     [Fact]
@@ -381,6 +399,12 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
 
         Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped));
         Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped, "\"IsDeleted\" = 1"));
+        foreach (var id in new long[] { 1, 2 })
+        {
+            var row = _database.Read(Issue130Tables.SoftStamped, id);
+            Assert.NotNull(row.DateTimeValue("DeletionTime"));
+            Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
+        }
     }
 
     [Fact]
@@ -417,6 +441,8 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
         Assert.True(row.Exists);
         Assert.Equal(1, row.Integer("IsDeleted"));
         Assert.NotEqual(stamp, row.Text("ConcurrencyStamp"));
+        Assert.NotNull(row.DateTimeValue("DeletionTime"));
+        Assert.Equal(_userProvider.UserId, row.GuidValue("DeleterId"));
     }
 
     [Fact]

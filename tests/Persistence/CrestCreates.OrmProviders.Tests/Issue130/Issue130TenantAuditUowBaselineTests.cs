@@ -192,7 +192,10 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         var exception = await Record.ExceptionAsync(() => repository.DeleteAsync(1));
 
         Assert.NotNull(exception);
-        Assert.Equal(1, _database.Count(Issue130Tables.Tenant));
+        var row = _database.Read(Issue130Tables.Tenant, 1);
+        Assert.True(row.Exists);
+        Assert.Equal("tenant-a", row.Text("TenantId"));
+        Assert.Equal("original", row.Text("Name"));
     }
 
     [Fact]
@@ -225,7 +228,10 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         var exception = await Record.ExceptionAsync(() => repository.DeleteAsync(1));
 
         Assert.NotNull(exception);
-        Assert.Equal(1, _database.Count(Issue130Tables.Tenant));
+        var row = _database.Read(Issue130Tables.Tenant, 1);
+        Assert.True(row.Exists);
+        Assert.Equal("tenant-a", row.Text("TenantId"));
+        Assert.Equal("original", row.Text("Name"));
     }
 
     // ---------------------------------------------------------------- Audit readback
@@ -460,6 +466,24 @@ public sealed class Issue130TenantAuditUowBaselineTests : IDisposable
         }
 
         Assert.Equal(2, _database.Count(Issue130Tables.SoftStamped));
+    }
+
+    [Fact]
+    public void U03_SqlSugar_module_must_register_the_client_interface_used_by_repositories()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Default"] = "Server=localhost;Database=unused;"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        new SqlSugarOrmModule(configuration).RegisterOrmServices(services);
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetService<ISqlSugarClient>());
     }
 
     [Fact]

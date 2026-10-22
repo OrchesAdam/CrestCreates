@@ -12,7 +12,7 @@ S1 出口按计划是「红例触达业务路径 + 正控成立 + 设计差异�
 | 套件 | 命令 | 结果 |
 | --- | --- | --- |
 | OrmProviders（历史基线） | `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 124 passed / 0 failed（改动前复跑） |
-| OrmProviders（含 S1 基线） | 同上 | **173 total / 146 passed / 27 failed**；27 红全部为本文 §3 约定红例，原 124 条全部通过 |
+| OrmProviders（含 S1 基线） | 同上 | **174 total / 146 passed / 28 failed**；28 红全部为本文 §3 约定红例，原 124 条全部通过 |
 | CodeGenerator（S1 新增） | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests` | 4 total / 1 passed（EF 正控）/ 3 failed（§3 G01/G02） |
 
 历史 124 条完整 FQN 见 [基线证据 JSON](2026-10-22-issue-130-baseline-evidence.json) 的 `suite.results`；本轮新增红例完整 FQN 见 [S1 证据 JSON](2026-10-22-issue-130-s1-baseline-evidence.json)。
@@ -53,7 +53,7 @@ S1 出口按计划是「红例触达业务路径 + 正控成立 + 设计差异�
 | [RepositorySourceGenerator](../../src/Tooling/CrestCreates.CodeGenerator/RepositoryGenerator/RepositorySourceGenerator.cs) | `GenerateRepositoryImplementation` 未被调用；`GenerateSqlSugarRepository`/`GenerateFreeSqlRepository` 为空；未知 provider 默认 EF（死分支）；仅生成接口与 DI 注册 |
 | 诊断编号 | S1 冻结 `CCCREPO001`（非 EF 生成请求）/`CCCREPO002`（未知 Provider），见 [RepositoryGeneratorDiagnosticCodes](../../src/Tooling/CrestCreates.CodeGenerator/RepositoryGenerator/RepositoryGeneratorDiagnosticCodes.cs) |
 
-## 3. 目标红例台账（27 ORM + 3 G）
+## 3. 目标红例台账（28 ORM + 3 G）
 
 所有红例先触达真实仓储/生成器入口；数据库断言均通过独立 `Microsoft.Data.Sqlite` 连接读取原表，排除 EF ChangeTracker 与 SDK cache 影响。正控见 §4。
 
@@ -101,6 +101,7 @@ S1 出口按计划是「红例触达业务路径 + 正控成立 + 设计差异�
 | 红例 | 目标契约 | 当前事实 | 责任切片 |
 | --- | --- | --- | --- |
 | `U03_SqlSugar_module_must_not_register_a_process_wide_client` | SqlSugar client/事务状态按 scope 隔离 | 模块注册单例 `SqlSugarClient`，两个 scope 解析到同一实例 | S3 |
+| `U03_SqlSugar_module_must_register_the_client_interface_used_by_repositories` | 仓储注入的 `ISqlSugarClient` 必须可解析 | 模块只注册具体 `SqlSugarClient`，`ISqlSugarClient` 无注册 | S3 |
 | `U07_FreeSql_repository_honors_a_pre_cancelled_token` | 取消保持取消语义、不吞来源 | 预取消 token 抛 `System.Exception` 包装 `TaskCanceledException`，取消来源丢失 | S3 |
 | `U07_SqlSugar_repository_honors_a_pre_cancelled_token` | 同上 | 仓储完全不传 CT，预取消 token 被忽略并正常返回 | S3 |
 
@@ -197,7 +198,7 @@ dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests
 dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests
 ```
 
-预期：OrmProviders `173 total / 146 passed / 27 failed`（红例见 §3）；G 过滤集 `4 total / 1 passed / 3 failed`。任何额外失败都应视为回归，而不是红基线。
+预期：OrmProviders `174 total / 146 passed / 28 failed`（红例见 §3）；G 过滤集 `4 total / 1 passed / 3 failed`。任何额外失败都应视为回归，而不是红基线。
 
 ## 10. 下一步（S2）
 
