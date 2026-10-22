@@ -13,7 +13,8 @@ S1 出口按计划是「红例触达业务路径 + 正控成立 + 设计差异�
 | --- | --- | --- |
 | OrmProviders（历史基线） | `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | 124 passed / 0 failed（改动前复跑） |
 | OrmProviders（含 S1 基线） | 同上 | **177 total / 146 passed / 31 failed**；31 红全部为本文 §3 约定红例，原 124 条全部通过 |
-| CodeGenerator（S1 新增） | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests` | 4 total / 1 passed（EF 正控）/ 3 failed（§3 G01/G02） |
+| CodeGenerator（S1 新增过滤集） | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests` | 4 total / 1 passed（EF 正控）/ 3 failed（§3 G01/G02） |
+| CodeGenerator（全量） | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests` | **451 total / 448 passed / 3 failed**（32m39s）；3 红全部为本切片约定 G 红例，无无关回归 |
 
 历史 124 条完整 FQN 见 [基线证据 JSON](2026-10-22-issue-130-baseline-evidence.json) 的 `suite.results`；本轮新增红例完整 FQN 见 [S1 证据 JSON](2026-10-22-issue-130-s1-baseline-evidence.json)。
 
@@ -192,7 +193,7 @@ S4 接线点：
 | PostgreSQL/其他数据库 | 未运行；本切片只使用独立文件 SQLite |
 | trim/NativeAOT | 未运行；ORM SDK 仍为「未验证」，不因本切片改变 |
 | 执行中取消 | 仅预取消 token；不宣称有界终止 |
-| 完整 CodeGenerator 套件 | S1 只跑新增 G 过滤集；完整套件包含耗时 MSBuild 消费项目，S4 出口必须复跑 |
+| CodeGenerator 全量复跑 | 已在 S1 完成：451 total / 448 passed / 3 条约定红；S4 仍应按最终生成器改动复跑 |
 
 ## 9. 复跑命令
 
@@ -201,7 +202,7 @@ dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests
 dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests
 ```
 
-预期：OrmProviders `177 total / 146 passed / 31 failed`（红例见 §3）；G 过滤集 `4 total / 1 passed / 3 failed`。任何额外失败都应视为回归，而不是红基线。
+预期：OrmProviders `177 total / 146 passed / 31 failed`（红例见 §3）；G 过滤集 `4 total / 1 passed / 3 failed`；CodeGenerator 全量 `451 total / 448 passed / 3 failed`。任何额外失败都应视为回归，而不是红基线。
 
 ## 10. 下一步（S2）
 

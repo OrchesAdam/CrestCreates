@@ -32,7 +32,11 @@
     },
     "code_generator_full": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
-      "outcome": "not completed in S1 (long MSBuild consumer tests); S4 exit gate"
+      "total": 451,
+      "passed": 448,
+      "failed": 3,
+      "duration": "32m39s",
+      "outcome": "only the three intentional Issue130 provider-diagnostic red baselines fail; no unrelated regression"
     }
   },
   "red_baselines": [
@@ -299,7 +303,6 @@
     "EF generated tenant filter composition and host semantics tightening (S3)",
     "PostgreSQL and other databases",
     "ORM trim/NativeAOT gates (remain unverified)",
-    "in-flight cancellation and bounded termination",
-    "full CodeGenerator suite (S4)"
+    "in-flight cancellation and bounded termination"
   ]
 }
