@@ -65,7 +65,9 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             }
 
             audited.CreationTime = DateTime.UtcNow;
-            audited.CreatorId ??= _currentUserProvider?.GetCurrentUserId();
+            audited.CreatorId = _currentUserProvider?.GetCurrentUserId();
+            audited.LastModificationTime = null;
+            audited.LastModifierId = null;
         }
 
         private void ApplyModificationAudit(TEntity entity)
@@ -283,7 +285,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting all entities {EntityType}", typeof(TEntity).Name);
                 var result = await Queryable()
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType}", result.Count, typeof(TEntity).Name);
                 return result;
             }
@@ -304,7 +306,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Finding entities {EntityType}", typeof(TEntity).Name);
                 var result = await Queryable()
                     .Where(predicate)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
                 _logger?.LogDebug("Found {Count} entities {EntityType}", result.Count, typeof(TEntity).Name);
                 return result;
             }
@@ -325,7 +327,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Finding entities {EntityType} with order", typeof(TEntity).Name);
                 var query = Queryable().Where(predicate);
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
-                var result = await query.ToListAsync();
+                var result = await query.ToListAsync(cancellationToken);
                 _logger?.LogDebug("Found {Count} entities {EntityType}", result.Count, typeof(TEntity).Name);
                 return result;
             }
@@ -344,6 +346,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
+                cancellationToken.ThrowIfCancellationRequested();
                 var result = await Queryable()
                     .InSingleAsync(id);
                 _logger?.LogDebug("Got entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
@@ -366,7 +369,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Getting entity {EntityType} by predicate", typeof(TEntity).Name);
                 var result = await Queryable()
                     .Where(predicate)
-                    .FirstAsync();
+                    .FirstAsync(cancellationToken);
                 _logger?.LogDebug("Got entity {EntityType}", typeof(TEntity).Name);
                 return result;
             }
@@ -387,7 +390,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Adding entity {EntityType}", typeof(TEntity).Name);
                 ApplyTenantOnInsert(entity);
                 ApplyCreationAudit(entity);
-                await _sqlSugarClient.Insertable(entity).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
+                cancellationToken.ThrowIfCancellationRequested();
+                await _sqlSugarClient.Insertable(entity).IgnoreColumns("DomainEvents").ExecuteCommandAsync(cancellationToken);
                 _logger?.LogDebug("Added entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
             }
@@ -412,7 +416,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     ApplyTenantOnInsert(item);
                     ApplyCreationAudit(item);
                 }
-                await _sqlSugarClient.Insertable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
+                await _sqlSugarClient.Insertable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync(cancellationToken);
                 _logger?.LogDebug("Inserted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
                 return entityList;
             }
@@ -438,6 +442,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     EnsureSubmittedTenant(entity, persistedForTenant);
                 }
                 ApplyModificationAudit(entity);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (entity is IHasConcurrencyStamp stamp)
                 {
                     var oldStamp = stamp.ConcurrencyStamp;
@@ -453,21 +458,30 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                         ["oldStamp"] = oldStamp
                     };
                     AddTenantCondition(conditions, parameters);
-                    var rows = await _sqlSugarClient.Updateable(entity)
-                        .IgnoreColumns("DomainEvents")
+                    var update = _sqlSugarClient.Updateable(entity)
+                        .IgnoreColumns("DomainEvents");
+                    if (typeof(IAuditedEntity).IsAssignableFrom(typeof(TEntity)))
+                    {
+                        update = update.IgnoreColumns(nameof(IAuditedEntity.CreationTime), nameof(IAuditedEntity.CreatorId));
+                    }
+                    var rows = await update
                         .Where(string.Join(" AND ", conditions), parameters)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
                 }
                 else
                 {
                     var update = _sqlSugarClient.Updateable(entity).IgnoreColumns("DomainEvents");
+                    if (typeof(IAuditedEntity).IsAssignableFrom(typeof(TEntity)))
+                    {
+                        update = update.IgnoreColumns(nameof(IAuditedEntity.CreationTime), nameof(IAuditedEntity.CreatorId));
+                    }
                     var tenantFilter = TenantFilter();
                     if (tenantFilter is not null)
                     {
                         update = update.Where(tenantFilter.Value.Sql, tenantFilter.Value.Parameters);
                     }
-                    await update.ExecuteCommandAsync();
+                    await update.ExecuteCommandAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Updated entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
@@ -499,7 +513,12 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 {
                     ApplyModificationAudit(item);
                 }
-                await _sqlSugarClient.Updateable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
+                var updateRange = _sqlSugarClient.Updateable(entityList).IgnoreColumns("DomainEvents");
+                if (typeof(IAuditedEntity).IsAssignableFrom(typeof(TEntity)))
+                {
+                    updateRange = updateRange.IgnoreColumns(nameof(IAuditedEntity.CreationTime), nameof(IAuditedEntity.CreatorId));
+                }
+                await updateRange.ExecuteCommandAsync(cancellationToken);
                 _logger?.LogDebug("Updated {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
                 return entityList;
             }
@@ -582,7 +601,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     AddTenantCondition(conditions, parameters);
                     var rows = await _sqlSugarClient.Deleteable<TEntity>()
                         .Where(string.Join(" AND ", conditions), parameters)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
                 }
                 else if (HasTenantMarker)
@@ -595,11 +614,11 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     AddTenantCondition(conditions, parameters);
                     await _sqlSugarClient.Deleteable<TEntity>()
                         .Where(string.Join(" AND ", conditions), parameters)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                 }
                 else
                 {
-                    await _sqlSugarClient.Deleteable(entity).ExecuteCommandAsync();
+                    await _sqlSugarClient.Deleteable(entity).ExecuteCommandAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Deleted entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
             }
@@ -656,13 +675,13 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     AddTenantCondition(conditions, parameters);
                     await _sqlSugarClient.Deleteable<TEntity>()
                         .Where(string.Join(" AND ", conditions), parameters)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                 }
                 else
                 {
                     await _sqlSugarClient.Deleteable<TEntity>()
                         .In(id)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Deleted entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
             }
@@ -731,7 +750,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     AddTenantCondition(physicalConditions, physicalParameters);
                     var rows = await _sqlSugarClient.Deleteable<TEntity>()
                         .Where(string.Join(" AND ", physicalConditions), physicalParameters)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
                 }
                 _logger?.LogDebug("Deleted entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
@@ -779,12 +798,12 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     await _sqlSugarClient.Deleteable<TEntity>()
                         .Where(entity => ids.Contains(entity.Id))
                         .Where(string.Join(" AND ", conditions), parameters)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                 }
                 else
                 {
                     await _sqlSugarClient.Deleteable(entityList)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Deleted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
             }
@@ -824,13 +843,13 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     await _sqlSugarClient.Deleteable<TEntity>()
                         .Where(predicate)
                         .Where(string.Join(" AND ", conditions), parameters)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                 }
                 else
                 {
                     await _sqlSugarClient.Deleteable<TEntity>()
                         .Where(predicate)
-                        .ExecuteCommandAsync();
+                        .ExecuteCommandAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Deleted entities {EntityType} by predicate", typeof(TEntity).Name);
             }
@@ -858,11 +877,11 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting paged entities {EntityType} - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
-                var total = await Queryable().CountAsync();
+                var total = await Queryable().CountAsync(cancellationToken);
                 var items = await Queryable()
                     .Skip(pageIndex * pageSize)
                     .Take(pageSize)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType} out of {Total}", items.Count, typeof(TEntity).Name, total);
                 return new PagedResult<TEntity>(items, (int)total, pageIndex, pageSize);
             }
@@ -881,12 +900,12 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting paged entities {EntityType} with predicate - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
-                var total = await Queryable().Where(predicate).CountAsync();
+                var total = await Queryable().Where(predicate).CountAsync(cancellationToken);
                 var items = await Queryable()
                     .Where(predicate)
                     .Skip(pageIndex * pageSize)
                     .Take(pageSize)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType} out of {Total}", items.Count, typeof(TEntity).Name, total);
                 return new PagedResult<TEntity>(items, (int)total, pageIndex, pageSize);
             }
@@ -907,11 +926,11 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} with predicate and order - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = Queryable().Where(predicate);
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
-                var total = await query.CountAsync();
+                var total = await query.CountAsync(cancellationToken);
                 var items = await query
                     .Skip(pageIndex * pageSize)
                     .Take(pageSize)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType} out of {Total}", items.Count, typeof(TEntity).Name, total);
                 return new PagedResult<TEntity>(items, (int)total, pageIndex, pageSize);
             }
@@ -932,11 +951,11 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} with order - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = Queryable();
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
-                var total = await query.CountAsync();
+                var total = await query.CountAsync(cancellationToken);
                 var items = await query
                     .Skip(pageIndex * pageSize)
                     .Take(pageSize)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType} out of {Total}", items.Count, typeof(TEntity).Name, total);
                 return new PagedResult<TEntity>(items, (int)total, pageIndex, pageSize);
             }
@@ -955,7 +974,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting count of entities {EntityType}", typeof(TEntity).Name);
-                var count = await Queryable().CountAsync();
+                var count = await Queryable().CountAsync(cancellationToken);
                 _logger?.LogDebug("Got count {Count} for entities {EntityType}", count, typeof(TEntity).Name);
                 return count;
             }
@@ -974,7 +993,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Getting count of entities {EntityType} with predicate", typeof(TEntity).Name);
-                var count = await Queryable().Where(predicate).CountAsync();
+                var count = await Queryable().Where(predicate).CountAsync(cancellationToken);
                 _logger?.LogDebug("Got count {Count} for entities {EntityType} with predicate", count, typeof(TEntity).Name);
                 return count;
             }
@@ -993,7 +1012,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Checking if any entities {EntityType} exist", typeof(TEntity).Name);
-                var result = await Queryable().AnyAsync();
+                var result = await Queryable().AnyAsync(cancellationToken);
                 _logger?.LogDebug("Any entities {EntityType} exist: {Result}", typeof(TEntity).Name, result);
                 return result;
             }
@@ -1012,7 +1031,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Checking if any entities {EntityType} match predicate", typeof(TEntity).Name);
-                var result = await Queryable().Where(predicate).AnyAsync();
+                var result = await Queryable().Where(predicate).AnyAsync(cancellationToken);
                 _logger?.LogDebug("Any entities {EntityType} match predicate: {Result}", typeof(TEntity).Name, result);
                 return result;
             }
@@ -1031,7 +1050,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Checking if entity {EntityType} with id {Id} exists", typeof(TEntity).Name, id);
-                var result = await Queryable().Where(e => e.Id.Equals(id)).AnyAsync();
+                var result = await Queryable().Where(e => e.Id.Equals(id)).AnyAsync(cancellationToken);
                 _logger?.LogDebug("Entity {EntityType} with id {Id} exists: {Result}", typeof(TEntity).Name, id, result);
                 return result;
             }

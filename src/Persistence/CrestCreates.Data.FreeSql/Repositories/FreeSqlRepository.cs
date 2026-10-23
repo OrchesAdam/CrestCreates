@@ -72,7 +72,20 @@ namespace CrestCreates.Data.FreeSql.Repositories
             }
 
             audited.CreationTime = DateTime.UtcNow;
-            audited.CreatorId ??= _currentUserProvider?.GetCurrentUserId();
+            audited.CreatorId = _currentUserProvider?.GetCurrentUserId();
+            audited.LastModificationTime = null;
+            audited.LastModifierId = null;
+        }
+
+        private IUpdate<TEntity> IgnoreCreationAuditColumns(IUpdate<TEntity> update)
+        {
+            return typeof(IAuditedEntity).IsAssignableFrom(typeof(TEntity))
+                ? update.IgnoreColumns(e => new
+                {
+                    CreationTime = ((IAuditedEntity)e).CreationTime,
+                    CreatorId = ((IAuditedEntity)e).CreatorId
+                })
+                : update;
         }
 
         private void ApplyModificationAudit(TEntity entity)
@@ -490,10 +503,10 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 {
                     var oldStamp = stamp.ConcurrencyStamp;
                     stamp.ConcurrencyStamp = Guid.NewGuid().ToString();
-                    var update = _orm.Update<TEntity>()
+                    var update = IgnoreCreationAuditColumns(_orm.Update<TEntity>()
                         .SetSource(entity)
                         .Where(e => e.Id.Equals(entity.Id))
-                        .Where(ConcurrencyStampPredicate(oldStamp));
+                        .Where(ConcurrencyStampPredicate(oldStamp)));
                     if (HasTenantMarker)
                     {
                         update = update.Where(WriteTenantPredicateForCurrentTenant());
@@ -503,7 +516,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 }
                 else
                 {
-                    var update = _orm.Update<TEntity>().SetSource(entity);
+                    var update = IgnoreCreationAuditColumns(_orm.Update<TEntity>().SetSource(entity));
                     if (HasTenantMarker)
                     {
                         update = update.Where(e => e.Id.Equals(entity.Id))
@@ -541,7 +554,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 {
                     ApplyModificationAudit(item);
                 }
-                await _orm.Update<TEntity>().SetSource(entityList).ExecuteAffrowsAsync(cancellationToken);
+                await IgnoreCreationAuditColumns(_orm.Update<TEntity>().SetSource(entityList)).ExecuteAffrowsAsync(cancellationToken);
                 _logger?.LogDebug("Updated {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
                 return entityList;
             }

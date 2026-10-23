@@ -100,10 +100,12 @@ namespace CrestCreates.Data.EFCore.Repositories
                 stampEntity.ConcurrencyStamp = Guid.NewGuid().ToString("N");
                 var entry = dbContext.Set<TEntity>().Update(entity);
                 entry.Property(nameof(IHasConcurrencyStamp.ConcurrencyStamp)).OriginalValue = oldStamp;
+                PreserveCreationAudit(dbContext, entity);
             }
             else
             {
                 _dbContext.Set<TEntity>().Update(entity);
+                PreserveCreationAudit((DbContext)_dbContext.GetNativeContext(), entity);
             }
 
             try
@@ -123,6 +125,11 @@ namespace CrestCreates.Data.EFCore.Repositories
             if (entityList.Any(e => e is IHasConcurrencyStamp))
                 throw new NotSupportedException("UpdateRangeAsync does not support entities with concurrency stamps. Use UpdateAsync for concurrency-safe updates.");
             _dbContext.Set<TEntity>().UpdateRange(entityList);
+            var dbContextForAudit = (DbContext)_dbContext.GetNativeContext();
+            foreach (var item in entityList)
+            {
+                PreserveCreationAudit(dbContextForAudit, item);
+            }
             await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
             return entityList;
         }
@@ -308,6 +315,19 @@ namespace CrestCreates.Data.EFCore.Repositories
                 EfMultiTenant efTenant => efTenant.TenantId,
                 _ => null
             };
+        }
+
+
+        private static void PreserveCreationAudit(DbContext dbContext, TEntity entity)
+        {
+            if (entity is not IAuditedEntity)
+            {
+                return;
+            }
+
+            var entry = dbContext.Entry(entity);
+            entry.Property(nameof(IAuditedEntity.CreationTime)).IsModified = false;
+            entry.Property(nameof(IAuditedEntity.CreatorId)).IsModified = false;
         }
 
         private async Task EnsurePersistedTenantOwnershipAsync(TEntity entity, CancellationToken cancellationToken)

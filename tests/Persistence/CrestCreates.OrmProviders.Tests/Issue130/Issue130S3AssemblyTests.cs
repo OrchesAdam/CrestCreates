@@ -59,6 +59,36 @@ public sealed class Issue130S3AssemblyTests : IDisposable
     }
 
     [Fact]
+    public async Task A03_EfCore_creation_audit_is_authoritative_and_updates_preserve_it()
+    {
+        var user = new Issue130CurrentUser();
+        var tenant = new Issue130MutableTenant(null);
+        Issue130EfBed.EnsureCreated(_database, user, tenant);
+        await using var context = new Issue130EfDbContext(Issue130EfBed.Options(_database, user, tenant));
+        var repository = Issue130EfBed.Repository<Issue130SoftStamped>(context);
+
+        var entity = new Issue130SoftStamped(1, "original")
+        {
+            CreatorId = Guid.Parse("99999999-9999-9999-9999-999999999999"),
+            CreationTime = new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+        };
+        await repository.InsertAsync(entity);
+        var created = _database.Read(Issue130Tables.SoftStamped, 1);
+        Assert.Equal(Guid.Parse(user.Id), created.GuidValue("CreatorId"));
+
+        var loaded = (await repository.GetAsync(1))!;
+        loaded.Name = "updated";
+        loaded.CreatorId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        loaded.CreationTime = new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        await repository.UpdateAsync(loaded);
+
+        var updated = _database.Read(Issue130Tables.SoftStamped, 1);
+        Assert.Equal("updated", updated.Text("Name"));
+        Assert.Equal(created.GuidValue("CreatorId"), updated.GuidValue("CreatorId"));
+        Assert.Equal(created.DateTimeValue("CreationTime"), updated.DateTimeValue("CreationTime"));
+    }
+
+    [Fact]
     public async Task A03_Formal_FreeSql_registration_persists_create_update_delete_audit_across_scopes()
     {
         var user = new Issue130CurrentUser { Id = "11111111-1111-1111-1111-111111111111" };
