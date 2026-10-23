@@ -10,7 +10,7 @@ S3 出口：T/A/U/R 真实 SQLite 矩阵通过；租户/事务故障控制归因
 
 | 套件 | 结果 |
 | --- | --- |
-| OrmProviders（全量，含 R1 复审修复） | **240 total / 240 passed / 0 failed / 0 skipped** |
+| OrmProviders（全量，含 R1/R2 复审修复） | **249 total / 249 passed / 0 failed / 0 skipped** |
 | 原 S1/S2 的 10 条 T/U 红例 | 全部转绿 |
 | 新增 S3 租户矩阵 | 9 / 9 passed |
 | 新增 S3 装配/事务/取消矩阵 | 4 / 4 passed |
@@ -96,6 +96,16 @@ S3 出口：T/A/U/R 真实 SQLite 矩阵通过；租户/事务故障控制归因
 - ReviewS3Probes 22/22；全量 OrmProviders 240/240；CodeGenerator 458/455/3（G 红），Boundary 176/178（既有 #69）。
 
 逐项回复见 [S3 R1 response](2026-10-23-issue-130-s3-review-round1-response.md)。
+
+## 4.2 S3 R2 复审修复（2026-10-23）
+
+审查 head `7b06a5fb` 提出两个 P2，修复提交 `733bea45`：
+
+- 创建审计权威化：插入覆盖调用方 CreatorId/CreationTime；FreeSql/SqlSugar 更新忽略创建字段；EF AuditInterceptor 插入权威赋值、EF 仓储更新保留 DB 创建字段。审查探针 6/6，新增 EF 回归 1/1。
+- SqlSugar 所有 SDK 命令接收组合 token（写入/查询；InSingle 调用前检查），审计快照后、SQL 前再次检查。审查探针 2/2。
+- ReviewS3R2Probes 8/8；R1 探针 22/22；全量 OrmProviders 249/249。
+
+逐项回复见 [S3 R2 response](2026-10-23-issue-130-s3-review-round2-response.md)。
 
 ## 5. 未验证/未覆盖
 

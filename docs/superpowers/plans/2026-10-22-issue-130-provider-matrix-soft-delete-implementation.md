@@ -118,3 +118,10 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - EF 归属预读 `AsNoTracking`；SDK 读写租户谓词分离（共享 null 行 host 独占写）；Provider 仓储内部创建/修改/删除审计；所有 SDK 入口组合受管执行 token。
 - ReviewS3Probes 22/22（修复前 8/22）；全量 OrmProviders **240/240**；新增正式 DI 审计回归 2/2。CodeGenerator 458/455/3（未改生成器），Boundary 176/178（既有 #69）。
 - 证据：[S3 R1 response](../review/2026-10-23-issue-130-s3-review-round1-response.md)。测试按用户要求串行执行。
+
+## S3 R2 复审修复记录（2026-10-23）
+
+- 审查 head `7b06a5fb` 剩余 2 个 P2；修复提交 `733bea45`。
+- 创建审计权威化（覆盖预填值、更新不写创建字段，含 EF）；SqlSugar 所有 SDK 命令传递组合 token，审计快照后/ SQL 前再次检查。
+- ReviewS3R2Probes 8/8（修复前 3/8）；R1 探针 22/22；全量 OrmProviders **249/249**；新增 EF 审计回归 1/1。
+- 证据：[S3 R2 response](../review/2026-10-23-issue-130-s3-review-round2-response.md)。测试串行执行。

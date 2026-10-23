@@ -2,18 +2,18 @@
   "issue": 130,
   "slice": "S3",
   "date": "2026-10-22",
-  "head": "1025368ee63c0ae36878f70f261f29f808d9fd4e",
+  "head": "733bea452d0bd7c27b88d3536158a5cb52aee9d4",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "scope": "Tenant isolation, persisted ownership, identity adapter, provider assembly and cancellation-source preservation on independent-file SQLite.",
   "suites": {
     "orm_providers": {
       "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
-      "total": 240,
-      "passed": 240,
+      "total": 249,
+      "passed": 249,
       "failed": 0,
       "skipped": 0,
-      "outcome": "all S1/S2/R1/R2/S3 tests and the 22 S3 review probes pass; 2 additional formal-DI audit regressions pass"
+      "outcome": "all S1/S2/S3 and R1/R2 tests and probes pass; 30 review probes plus EF/DI audit regressions are green"
     },
     "code_generator_full": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
@@ -67,8 +67,8 @@
     "sdk_tenant": "FreeSql/SqlSugar repositories resolve ICurrentTenant per operation for reads and writes; required tenant host fails closed; optional tenants read own + shared null rows; persisted tenant ownership is checked before writes; range deletes are tenant-scoped; tenant UpdateRange is rejected; write ownership is separate from read visibility (shared null rows are host-owned)",
     "ef_tenant_filters": "generated required and DataFilter-optional expressions enforce host fail-closed/shared-only semantics; EF-specific optional keeps the documented host=all compatibility; production DbContext applies filters in host via HostCurrentTenant; persisted ownership uses AsNoTracking snapshots",
     "assembly": "SqlSugar scoped client + ISqlSugarClient alias + UoW core shared by module/extension; FreeSql UoW core shared by module/extensions; single ICurrentUserProvider adapter with fallback; FreeSql repository scanning removed",
-    "cancellation": "repository entries combine caller and managed execution tokens; pre-entry managed cancellation writes zero rows",
-    "audit": "provider repositories apply creation/modification/deletion audit from the scoped ICurrentUserProvider without manual SDK hook configuration"
+    "cancellation": "combined tokens are passed to every SqlSugar SDK command; audit-snapshot cancellation before SQL writes zero rows",
+    "audit": "creation audit is assigned from the scoped identity provider (caller values overwritten); updates ignore creation columns in FreeSql/SqlSugar and preserve DB values in EF"
   },
   "migration": [
     "SDK required-tenant host reads now throw; use an explicit governance context",
@@ -87,7 +87,7 @@
     "cross-process concurrency"
   ],
   "native_gate_note": "No AOT-verified formal runtime was modified in S3; ORM packages remain unverified for trim/NativeAOT.",
-  "tests_note": "all suites were run serially per the maintainer instruction; reviewer probes are committed verbatim",
+  "tests_note": "all suites were run serially per the maintainer instruction; R1/R2 probes are committed verbatim",
   "review_rounds": [
     {
       "round": "S3-R1",
@@ -130,6 +130,35 @@
         "shared_row_writes": "12/12",
         "formal_audit": "2/2 + 2/2 regressions",
         "managed_cancellation": "2/2"
+      }
+    },
+    {
+      "round": "S3-R2",
+      "reviewed_head": "7b06a5fb8cd0fb77205b6353f962cd1cc4c75b70",
+      "fix_head": "733bea452d0bd7c27b88d3536158a5cb52aee9d4",
+      "report": "docs/review/2026-10-23-issue-130-s3-review-round2.md",
+      "response": "docs/review/2026-10-23-issue-130-s3-review-round2-response.md",
+      "findings": [
+        {
+          "id": "S3-R2-1",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "creation audit is authoritative; caller creation fields are ignored on update for FreeSql/SqlSugar and EF"
+        },
+        {
+          "id": "S3-R2-2",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "SqlSugar SDK commands receive the combined cancellation token; SQL-before cancellation writes zero rows"
+        }
+      ],
+      "probes": {
+        "review_s3_r2": {
+          "before": "3 passed / 5 failed / 8",
+          "after": "8 passed / 0 failed / 8"
+        },
+        "review_s3_r1": "22/22",
+        "ef_audit_regression": "1/1"
       }
     }
   ]
