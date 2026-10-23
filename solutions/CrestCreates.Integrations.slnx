@@ -10,8 +10,6 @@
   </Folder>
   <Folder Name="/src/Integrations/">
     <Project Path="../src/Integrations/CrestCreates.Integration.Abstractions/CrestCreates.Integration.Abstractions.csproj" />
-    <Project Path="../src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj" />
-    <Project Path="../src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj" />
     <Project Path="../src/Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj" />
   </Folder>
   <Folder Name="/src/Persistence/">

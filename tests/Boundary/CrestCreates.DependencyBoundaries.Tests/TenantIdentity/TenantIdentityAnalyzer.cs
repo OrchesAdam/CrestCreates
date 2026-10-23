@@ -260,7 +260,7 @@ internal sealed class TenantIdentityAnalyzer
                 symbol,
                 declarator.Initializer?.Value,
                 IsIdentityName(symbol.Name),
-                Describe(model, declarator.Initializer?.Value, symbol));
+                symbol.Name);
         }
 
         foreach (var assignment in root.DescendantNodes().OfType<AssignmentExpressionSyntax>()
@@ -299,20 +299,7 @@ internal sealed class TenantIdentityAnalyzer
         }
     }
 
-    private static string Describe(SemanticModel model, ExpressionSyntax? expression, ISymbol symbol)
-    {
-        _ = model;
-        _ = expression;
-        return symbol.Name;
-    }
-
     private static bool IsIdentityName(string name) => TenantIdentityPorts.IsIdentityMemberName(name);
-
-    private static bool IsSensitiveText(string text)
-    {
-        var normalized = TenantIdentityPorts.Normalize(text);
-        return normalized.Contains("tenant", StringComparison.Ordinal);
-    }
 
     private IEnumerable<Site> CollectExitSites(SemanticModel model, SyntaxNode root, TenantProjectInput project, string relativePath)
     {
@@ -361,10 +348,17 @@ internal sealed class TenantIdentityAnalyzer
             }
         }
 
-        foreach (var (created, constructor, arguments, positionNode) in CollectCreations(model, root))
+        foreach (var (created, constructor, arguments, typeName) in CollectCreations(model, root))
         {
             if (created is null)
             {
+                if (IsTenantIdentityTypeName(typeName))
+                {
+                    _analysis.Diagnostics.Add(new TenantIdentityDiagnostic(
+                        TenantIdentityRule.TI900, project.Project, relativePath, 0, 0, typeName, "-",
+                        "coverage failure: the created tenant identity type did not bind"));
+                }
+
                 continue;
             }
 
@@ -539,7 +533,7 @@ internal sealed class TenantIdentityAnalyzer
     /// Both <c>new Type(...)</c> and <c>new(...)</c> forms: the collection-expression initialisers in the real
     /// claim builders use the implicit form, so covering only the explicit one would leave the claim slot blind.
     /// </summary>
-    private static IEnumerable<(INamedTypeSymbol? Created, IMethodSymbol? Constructor, IReadOnlyList<ArgumentSyntax> Arguments, SyntaxNode Position)> CollectCreations(
+    private static IEnumerable<(INamedTypeSymbol? Created, IMethodSymbol? Constructor, IReadOnlyList<ArgumentSyntax> Arguments, string TypeName)> CollectCreations(
         SemanticModel model,
         SyntaxNode root)
     {
@@ -550,7 +544,7 @@ internal sealed class TenantIdentityAnalyzer
             yield return (created,
                 constructor,
                 creation.ArgumentList?.Arguments.ToArray() ?? [],
-                creation);
+                creation.Type.ToString());
         }
 
         foreach (var creation in root.DescendantNodes().OfType<ImplicitObjectCreationExpressionSyntax>())
@@ -559,22 +553,9 @@ internal sealed class TenantIdentityAnalyzer
             yield return (constructor?.ContainingType,
                 constructor,
                 creation.ArgumentList?.Arguments.ToArray() ?? [],
-                creation);
+                string.Empty);
         }
     }
-
-    private static bool IsCandidateText(InvocationExpressionSyntax invocation)
-    {
-        var normalized = TenantIdentityPorts.Normalize(invocation.ToString());
-        return normalized.Contains("tenant", StringComparison.Ordinal)
-            || TenantIdentityPorts.ExitMemberTokens.Any(token => normalized.Contains(token, StringComparison.Ordinal));
-    }
-
-    private static bool IsCandidateText(ObjectCreationExpressionSyntax creation) =>
-        TenantIdentityPorts.Normalize(creation.ToString()).Contains("tenant", StringComparison.Ordinal);
-
-    private static bool IsCandidateText(AssignmentExpressionSyntax assignment) =>
-        TenantIdentityPorts.Normalize(assignment.ToString()).Contains("tenant", StringComparison.Ordinal);
 
     private TenantIdentityDiagnostic BindFailure(TenantProjectInput project, string relativePath, SyntaxNode node, string reason)
     {

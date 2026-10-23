@@ -56,7 +56,7 @@ internal sealed class TenantIdentityFlow(
     string assemblyName,
     SemanticModel model,
     TenantSymbolFlags environment,
-    Func<SyntaxTree, SemanticModel>? modelForTree = null,
+    Func<SyntaxTree, SemanticModel?>? modelForTree = null,
     TenantIdentityHelperIndex? helpers = null)
 {
     private const int MaxInlineDepth = 2;
@@ -165,11 +165,6 @@ internal sealed class TenantIdentityFlow(
     private TaintValue EvaluateAssignment(AssignmentExpressionSyntax assignment, int depth)
     {
         var value = Evaluate(assignment.Right, depth);
-        if (assignment is { Left: not { }, Right: not { } })
-        {
-            return value;
-        }
-
         if (model.GetSymbolInfo(assignment.Left).Symbol is { } symbol)
         {
             if (value.IsNameTainted)

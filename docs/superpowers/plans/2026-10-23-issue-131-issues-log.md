@@ -67,7 +67,24 @@
 
 已声明限制：仓库级有限模式守卫，不证明任意跨程序集/动态拼接/外部插件数据流；生成器模板中的字符串不作为已绑定运行时符号，实际生成端点由既有生成器/消费 fixture 回归覆盖。
 
-### I-05 待办与开放项
+### I-05 S3 归档执行（2026-10-23）
+
+按设计 §5 固定顺序执行，未跳过任何输入采集：
+
+1. 引用与方案输入清理（36 条 slnx 成员、1 条 Workflow→Draft.Abstractions、1 条 Workflow.Tests→Draft、2 条 CI Draft.Tests 步骤行、`samples/ProcurementApproval/CrestCreates.Sample.ProcurementApproval.slnx` 1 条 Draft.Abstractions 成员）。CI 仍保持人工禁用，本轮不改启用状态。
+2. 移动到 `99_RecycleBin/issue-131-capability-map/`，保留原相对路径：7 个生产项目 + `tests/Metadata/Draft/CrestCreates.Draft.Tests` + 无消费者的 `CrestCreates.EventBus.Abstract/IEventStore.cs`（共 8 个 csproj + 1 契约文件）；`bin/obj` 随目录留痕，未删除任何文件。
+3. `EventBus.Abstract` 其余在用契约保留在 active 目录，未按目录整包搬走；`IEventStore` 全无实现的断言由 `EventBusAbstractions_KeepTheirLiveContracts_ButNotTheArchivedStoreOnes` 锁定。
+4. 归档 README 记录每项裁定、替代方向与外部消费者未知披露。
+5. 既有防复活守卫 `ControlPlaneReferenceDataKernelArchitectureTests`（PG 不得注册旧 `IDraftStore`）保留；`DependencyBoundaryTests`/`RuntimePersistenceArchitectureTests` 中以禁止片段引用 `CrestCreates.Agent.Runtime` 的断言保留为守卫。
+
+新增守卫：
+- `CapabilityMapCoverageArchitectureTests`（5 例）：active `src/**/*.csproj` 与地图索引集合等价、无重复、路径真实、每行有定位/裁定；12 条裁定条目齐备且保留侧 8 项目、归档侧 8 行（7 生产 + 1 测试）与回收站实际内容一致；地图相对链接（含 `#L` 锚点剥离）全部可解析。
+- `ArchivedProjectRegressionArchitectureTests`（5 例）：active 项目引用、方案成员、源码命名空间与模块名不得回到归档项；归档内容按原相对路径可定位且 README 存在；回收站不得成为任何编译/打包输入。白名单只允许守卫文件自身与历史文档提及旧标识符。
+- `PluginSystemIsolationArchitectureTests`（3 例）：生产链（src + samples 非测试项目）对 PluginSystem 引用为零即隔离成立；`PluginManager` 仍使用 `AssemblyLoadContext`/`GetTypes`/`ActivatorUtilities`，JIT-only 声明不失真；地图 D-12 必须同时含 experimental、JIT-only、未验证、限界保留。
+
+索引重建：归档后 active `src` 项目由 135 → 128，地图 §4 与 §4.1 由脚本按当前文件系统重算，避免手工漂移（I-02 已记录该做法）。
+
+### I-06 待办与开放项
 
 - S3 归档动作、准入/覆盖/隔离守卫未开始；`.github/workflows/*.yml` 与 ProcurementApproval slnx 的 Draft 输入须在 S3 清理（CI 保持人工禁用状态，不改启用）。
 - S4 全量构建/边界/回归验证与 AGENTS/memory/比较文档同步未开始；本轮不提升任何支持声明。

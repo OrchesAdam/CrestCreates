@@ -45,7 +45,6 @@
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching.Abstractions/CrestCreates.Caching.Abstractions.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching/CrestCreates.Caching.csproj" />
-    <Project Path="../src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Localization/CrestCreates.Localization.csproj" />
@@ -96,8 +95,6 @@
   <Folder Name="/src/Metadata/Draft/">
     <Project Path="../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
     <Project Path="../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
-    <Project Path="../src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj" />
-    <Project Path="../src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj" />
   </Folder>
   <Folder Name="/src/Runtime/Capability/">
     <Project Path="../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
@@ -133,7 +130,6 @@
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.ReadCore/CrestCreates.Agent.Memory.ReadCore.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Accountability/CrestCreates.Agent.Memory.Accountability.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Llm/CrestCreates.Agent.Memory.Llm.csproj" />
-    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj" />
@@ -148,7 +144,6 @@
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Local.Channel/CrestCreates.EventBus.Local.Channel.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.MediatorAdapter/CrestCreates.EventBus.MediatorAdapter.csproj" />
-    <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.DeadLetter.EFCore/CrestCreates.EventBus.DeadLetter.EFCore.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj" />
@@ -192,8 +187,6 @@
   <Folder Name="/src/Integrations/">
     <Project Path="../src/Integrations/CrestCreates.Integration.Abstractions/CrestCreates.Integration.Abstractions.csproj" />
     <Project Path="../src/Integrations/CrestCreates.Integration.Cap.EfCore/CrestCreates.Integration.Cap.EfCore.csproj" />
-    <Project Path="../src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj" />
-    <Project Path="../src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj" />
     <Project Path="../src/Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj" />
   </Folder>
   <Folder Name="/tests/" />
@@ -256,7 +249,6 @@
   </Folder>
   <Folder Name="/tests/Metadata/Draft/">
     <Project Path="../tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests/CrestCreates.DescriptorDraft.Tests.csproj" />
-    <Project Path="../tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Capability/">
     <Project Path="../tests/Runtime/Capability/CrestCreates.Capability.Tests/CrestCreates.Capability.Tests.csproj" />
