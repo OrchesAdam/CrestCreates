@@ -2,7 +2,7 @@
 
 日期：2026-10-23  
 依据：[功能设计](../specs/2026-10-23-issue-131-capability-map-tenant-id-guard-design.md)。  
-状态：计划已完成，尚未执行。本轮只提交本地设计材料，不创建实现 PR、不发消息、不修改 GitHub Issue 或恢复 CI。
+状态：S1–S4 已在分支 `feat/issue-131-capability-map-tenant-id-guard-20261023-174957` 执行完毕（S1 `8dfe83f5`、S2 `7b668b0d`、S3 `218ff151`，S4 验证与文档同步随本提交）；设计材料落盘轮的状态为历史。尚未推送、未创建 PR、未修改 GitHub Issue、未恢复 CI，合并按维护者显式授权处理。
 
 ## S1：在实际 master 冻结清单与地图
 

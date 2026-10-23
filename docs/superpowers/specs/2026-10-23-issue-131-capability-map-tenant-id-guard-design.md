@@ -164,3 +164,23 @@ PluginSystem 的隔离由静态引用边界测试证明：正式 Core/Framework/
 | AGENTS/memory/宣传一致，归档前引用/方案/build 验证 | §5–6；迁移/归档证据、根/All 构建与受影响测试；状态同步区分设计/实施/合并 |
 
 主要风险是误把抽象壳当占位、误把名称入口兼容当身份违规、外部消费者未知，以及把架构扫描结果夸大为安全或 AOT 保证。对应控制为逐项消费者核验、目录解析边界正反例、迁移披露、可定位执行证据。#131 设计完成不等于其验收已勾选，Issue 继续 open；具体实施见[实施计划](../plans/2026-10-23-issue-131-capability-map-tenant-id-guard-implementation.md)。
+
+---
+
+## 7. 实施记录（2026-10-23，S1–S4）
+
+设计正文保持原样；本节记录实施时的实现口径与已确认偏差，供评审逐项核对。逐条证据见
+[实施证据](../review/2026-10-23-issue-131-implementation-evidence.json) 与
+[实施日志](2026-10-23-issue-131-issues-log.md)。
+
+- 基线：实施基线为 `348c4d3c`（= `origin/master`）。§1 的只读核对在实施基线上重跑，结果 `TOTAL_DIFF 0`（15 项目、153 源文件、直接消费者、方案成员），裁定无需改判；§5 步骤 1 额外发现并清理了 `samples/ProcurementApproval/CrestCreates.Sample.ProcurementApproval.slnx` 的 Draft.Abstractions 成员与两条运行 `CrestCreates.Draft.Tests` 的 CI 步骤（CI 保持人工禁用）。
+- 归档口径：7 个生产项目 + 通用 Draft 专用测试项目 + 无消费者的 `IEventStore.cs` 移入 `99_RecycleBin/issue-131-capability-map/`，git 记录为 28 条 R100 重命名（逐字节一致、未删除、未改写）；`EventBus.Abstract` 其余在用契约留在 active。7 个项目均非 `IsPackable=true`，故无包输入影响。
+- 守卫实现口径（三项强于或细化设计）：
+  1. **跨项目第一方 helper**：设计要求同项目 helper 的参数→返回值摘要。实施额外建立第一方声明索引，使另一个生产项目里的 helper 也按其**真实源码**内联判定；不可判定仍出 TI900，不放行。
+  2. **生成物的双重角色**：设计排除 `obj`。为避免把 authored 代码判成未绑定（真实构建里生成物就是 Compile 输入），实施把 `obj/{cfg}/{tfm}/{generated,source-generators}` 仅用于**符号解析**，扫描对象仍是 authored 源；生成器模板字符串因此不会被当成已绑定符号，实际生成端点继续由各自 fixture 断言。
+  3. **引用集合**：共享框架 → 项目自身 bin 构建闭包 → `project.assets.json` 的 compile 资产，并按程序集简单名去重。不去重时旧版 `Microsoft.AspNetCore.Http.Abstractions` 2.3.9 与 10.0.0 并存会产生 CS0433，使整个文件所有类型绑定失败并误报数百条 TI900；这是实现约束，评审复现时须保留该去重顺序。
+- 结构断言实现：9 行锁定表（中间件、四个 resolver 与扩展、两类 claim、审计缓存键、租户缓存失效器、contributor 内部转发），断言出口参数的**终端值名**确实来自 `Id`/`TenantId`/`ResolveTenantIdOrNull`；锁定行若找不到对应出口即失败，防止门禁空跑。TI-M02 的 `context.UserName` 变异正是由该断言（而非值流）捕获，与设计 §4.2 第 3 部分一致。
+- 反例计数记录：TI-N01 命中 8 条 = 7×TI001 + 1×TI003（身份名局部变量被赋名称值）；TI-N02 命中 6 条 = 2×TI001（两类 claim，按设计「claim 归 TI001」）+ 4×TI002；TI-N03 命中 3×TI003 + 2×TI001（含一层 helper、named argument、`using` 别名）。设计未规定计数，此处仅为可复核性记录。
+- 已声明限制（写入测试说明与地图）：解构声明 `var (a, b) = ...` 的别名传递不被跟踪；跨程序集动态拼接与外部插件数据流不在覆盖范围；架构测试不作为执行证据或 `NativeAOT-verified` 依据。
+- 故障控制复现：删除地图任一行必须使覆盖门禁失败（已验证）；给正式主链项目加一条 PluginSystem 引用必须使隔离门禁失败（已验证；首次注入因相对路径深度错误指向不存在目录而未被触发，纠正后生效，该无效尝试也已记入证据）。
+- 未做：不提升任何支持声明，不新增 native fixture，不改 CI 启用状态；Issue #131 保持 open，验收由维护者核对 §6 四条后勾选。

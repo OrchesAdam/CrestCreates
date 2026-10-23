@@ -84,7 +84,25 @@
 
 索引重建：归档后 active `src` 项目由 135 → 128，地图 §4 与 §4.1 由脚本按当前文件系统重算，避免手工漂移（I-02 已记录该做法）。
 
-### I-06 待办与开放项
+### I-07 S4 验证与文档闭环（2026-10-23）
+
+| 类别 | 命令 | 结果 |
+| --- | --- | --- |
+| 构建 | `dotnet build CrestCreates.slnx` | EXIT=0，0 error |
+| 构建 | `dotnet build solutions/CrestCreates.All.slnx` | EXIT=0，0 error，5 warning（既有） |
+| 构建 | Framework / Metadata / Platform / Runtime / Integrations 分层 slnx | 全部 0 error |
+| 边界 | `dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests`（podman socket） | 205/207 |
+| 预存失败 | `ControlPlaneReferenceDataSpecTestSkeletonTests.EvidenceLedger*` ×2 | 在 `/tmp/crest131-baseline`（纯净 `348c4d3c`，不含任何 #131 改动）复现同一 2 条失败（176/178）→ 判定为基线预存，不是本轮回归；#131 净增 29 条通过用例 |
+| 保留内核回归 | Workflow 100/100、DescriptorDraft 132/132、Organization 223/223、Localization 12/12、FileManagement 24/24、Web 102/102 | 全绿；Workflow 的 Draft 引用移除后无行为变化 |
+| 租户行为 | `dotnet test …Application.Tests --filter Tenants|Identity` | 102/102（含新增 7 条 TI-B01） |
+| TenantId 门禁 | 同上边界套件内 16 条 | 全绿；真实仓库 0 违规 / 0 覆盖失败（归档后活动项目 128） |
+| 故障控制 | 删除地图一行 / 给 ModuleDiagnostics 注入 PluginSystem 引用 | 分别使覆盖门禁与隔离门禁失败；恢复后 `git status` 干净且两组守卫重新全绿。第一次注入用错相对路径深度（指向不存在目录）未触发门禁，纠正后生效——无效尝试如实记录 |
+| 原生 | 未运行 | 本轮只触及文档、测试守卫与无消费者归档，不提升任何 `NativeAOT-verified`/`trimming-verified` 声明，也不新造空壳 fixture |
+| CI | 未变更 | 三个 workflow 维持人工禁用 |
+
+文档闭环：`docs/Feature/CapabilityMap.md`（状态改「归档（S3 已执行）」、归档证据链接重指向回收站、索引与归档索引按文件系统重建）；`AGENTS.md`（项目结构、依赖图、平台能力新增能力地图与 TenantId 主键契约两条、参考位置、最后更新日期）；`memory.md`（以维护者本地内容为基，新增 #131 实施段与 Wave 3 状态）；`docs/review/crestcreates-abp-comparison.md`（顶部失效横幅 + PluginSystem「生产就绪」两处具体撤回并链接 D-12）；`docs/Feature/OrmProviderSupportMatrix.md`（页首「尚未合并」改为 merge SHA `348c4d3c`，并声明其为 ORM 唯一来源）；设计文档追加 §7 实施记录（正文不改写）；实施计划状态行更新；证据落 `docs/review/2026-10-23-issue-131-implementation-evidence.json`。
+
+### I-08 待办与开放项
 
 - S3 归档动作、准入/覆盖/隔离守卫未开始；`.github/workflows/*.yml` 与 ProcurementApproval slnx 的 Draft 输入须在 S3 清理（CI 保持人工禁用状态，不改启用）。
 - S4 全量构建/边界/回归验证与 AGENTS/memory/比较文档同步未开始；本轮不提升任何支持声明。
