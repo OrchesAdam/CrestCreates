@@ -125,3 +125,10 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 创建审计权威化（覆盖预填值、更新不写创建字段，含 EF）；SqlSugar 所有 SDK 命令传递组合 token，审计快照后/ SQL 前再次检查。
 - ReviewS3R2Probes 8/8（修复前 3/8）；R1 探针 22/22；全量 OrmProviders **249/249**；新增 EF 审计回归 1/1。
 - 证据：[S3 R2 response](../review/2026-10-23-issue-130-s3-review-round2-response.md)。测试串行执行。
+
+## S3 R3 复审修复记录（2026-10-23）
+
+- 审查 head `f6adf610` 最后一项 P2；修复提交 `40940559`。
+- SqlSugar 租户归属预读接收操作 token、调用前检查、`FirstAsync(token)`，四个调用点同步。
+- ReviewS3R3Probes 6/6（修复前 5/6）；全部审查探针 36/36；全量 OrmProviders **255/255**。
+- 证据：[S3 R3 response](../review/2026-10-23-issue-130-s3-review-round3-response.md)。

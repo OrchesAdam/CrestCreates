@@ -10,7 +10,7 @@ S3 出口：T/A/U/R 真实 SQLite 矩阵通过；租户/事务故障控制归因
 
 | 套件 | 结果 |
 | --- | --- |
-| OrmProviders（全量，含 R1/R2 复审修复） | **249 total / 249 passed / 0 failed / 0 skipped** |
+| OrmProviders（全量，含 R1/R2/R3 复审修复） | **255 total / 255 passed / 0 failed / 0 skipped** |
 | 原 S1/S2 的 10 条 T/U 红例 | 全部转绿 |
 | 新增 S3 租户矩阵 | 9 / 9 passed |
 | 新增 S3 装配/事务/取消矩阵 | 4 / 4 passed |
@@ -106,6 +106,12 @@ S3 出口：T/A/U/R 真实 SQLite 矩阵通过；租户/事务故障控制归因
 - ReviewS3R2Probes 8/8；R1 探针 22/22；全量 OrmProviders 249/249。
 
 逐项回复见 [S3 R2 response](2026-10-23-issue-130-s3-review-round2-response.md)。
+
+## 4.3 S3 R3 复审修复（2026-10-23）
+
+审查 head `f6adf610` 最后一项 P2：SqlSugar 租户归属预读未接收 token。修复提交 `40940559`：helper 接收操作 token、调用前检查、`FirstAsync(token)`，四个单行写入口传入组合 token。审查探针 6/6（修复前 5/6）；全部探针 36/36；全量 OrmProviders 255/255。
+
+逐项回复见 [S3 R3 response](2026-10-23-issue-130-s3-review-round3-response.md)。
 
 ## 5. 未验证/未覆盖
 
