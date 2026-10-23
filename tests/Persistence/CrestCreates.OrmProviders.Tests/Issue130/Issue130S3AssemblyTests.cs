@@ -3,6 +3,8 @@ using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.FreeSql.Extensions;
+using CrestCreates.Data.FreeSql.Interceptors;
+using CrestCreates.Data.SqlSugar.Interceptors;
 using CrestCreates.Data.SqlSugar.Extensions;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.UnitOfWork;
@@ -122,6 +124,27 @@ public sealed class Issue130S3AssemblyTests : IDisposable
         var deleted = _database.Read(Issue130Tables.SoftStamped, 1);
         Assert.Equal(1, deleted.Integer("IsDeleted"));
         Assert.Equal(user.Id, deleted.GuidValue("DeleterId")?.ToString("D"));
+    }
+
+    [Fact]
+    public void R_retired_free_sql_tenant_and_soft_delete_hooks_must_reject_silent_weak_configuration()
+    {
+        using var freeSql = new FreeSql.FreeSqlBuilder()
+            .UseConnectionString(FreeSql.DataType.Sqlite, _database.ConnectionString)
+            .Build();
+
+        Assert.Throws<NotSupportedException>(() =>
+            freeSql.ConfigureMultiTenantFilter(new Issue130MutableTenant("tenant-a")));
+        Assert.Throws<NotSupportedException>(() => freeSql.ConfigureSoftDelete());
+    }
+
+    [Fact]
+    public void R_retired_sql_sugar_tenant_hook_must_reject_silent_weak_configuration()
+    {
+        using var client = new SqlSugarClient(Config());
+
+        Assert.Throws<NotSupportedException>(() =>
+            client.ConfigureMultiTenantFilter(new Issue130MutableTenant("tenant-a")));
     }
 
     [Fact]

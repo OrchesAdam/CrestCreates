@@ -139,18 +139,9 @@ namespace CrestCreates.Data.SqlSugar.Interceptors
         /// </summary>
         public static void ConfigureMultiTenantFilter(this SqlSugarClient client, ICurrentTenant currentTenant)
         {
-            if (currentTenant == null || string.IsNullOrEmpty(currentTenant.Id))
-            {
-                return;
-            }
-
-            var tenantId = currentTenant.Id;
-
-            // 多租户过滤器 - IMultiTenant (nullable TenantId)
-            client.QueryFilter.Add(new TableFilterItem<IMultiTenant>(it => it.TenantId == null || it.TenantId == tenantId));
-
-            // 多租户过滤器 - IMustHaveTenant (required TenantId)
-            client.QueryFilter.Add(new TableFilterItem<IMustHaveTenant>(it => it.TenantId == tenantId));
+            throw new NotSupportedException(
+                "SqlSugar tenant filtering is resolved per operation by SqlSugarRepository. " +
+                "Configuring a global filter here would capture a stale tenant; register the repository with ICurrentTenant instead.");
         }
     }
 }
