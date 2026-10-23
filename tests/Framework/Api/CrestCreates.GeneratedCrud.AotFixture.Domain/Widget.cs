@@ -27,5 +27,14 @@ public class Widget : IEntity<Guid>, IHasConcurrencyStamp
 
     public DateTime CreationTime { get; set; }
 
+    public WidgetStatus Status { get; set; }
+
     public string ConcurrencyStamp { get; set; } = string.Empty;
+}
+
+public enum WidgetStatus
+{
+    Draft = 0,
+    Active = 1,
+    Retired = 2
 }

@@ -216,6 +216,14 @@ namespace CrestCreates.CodeGenerator.RepositoryGenerator
 
                     foreach (var (entityClass, generateAsBaseClass, isUsingNewAttribute) in uniqueEntities)
                     {
+                        var ormProvider = GetAttributeProperty(entityClass, "OrmProvider", "EfCore");
+                        var providerDiagnostic = RepositoryGeneratorDiagnostics.Create(entityClass, ormProvider);
+                        if (providerDiagnostic is not null)
+                        {
+                            context.ReportDiagnostic(providerDiagnostic);
+                            continue;
+                        }
+
                         // 注意：现在同时支持 GenerateRepositoryAttribute 和 GenerateEntityAttribute
                         GenerateRepositoryInterface(context, entityClass);
                         // 不生成Repository实现类，由用户手动创建并继承EntitySourceGenerator生成的基类
@@ -863,6 +871,19 @@ namespace CrestCreates.CodeGenerator.RepositoryGenerator
                 var namedArgument = attr.NamedArguments.FirstOrDefault(arg => arg.Key == propertyName);
                 if (namedArgument.Value.Value != null)
                 {
+                    if (namedArgument.Value.Kind == TypedConstantKind.Enum &&
+                        namedArgument.Value.Type is INamedTypeSymbol enumType)
+                    {
+                        foreach (var field in enumType.GetMembers().OfType<IFieldSymbol>())
+                        {
+                            if (field.HasConstantValue &&
+                                Equals(field.ConstantValue, namedArgument.Value.Value))
+                            {
+                                return field.Name;
+                            }
+                        }
+                    }
+
                     return namedArgument.Value.Value.ToString() ?? defaultValue;
                 }
             }
