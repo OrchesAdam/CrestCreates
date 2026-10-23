@@ -142,3 +142,11 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 回归：CodeGenerator 全量 **461/461**（31m11s）；GeneratedCrud JIT **26/26**；NativeAOT 门禁 **3/3**；PG UoW **4/4**；ORM **255/255**；Boundary 176/178（既有 #69）。
 - 证据：[S4 记录](../review/2026-10-23-issue-130-s4-compile-entry-crud.md)、[S4 JSON](../review/2026-10-23-issue-130-s4-evidence.json)。
 - 未验证：SQLServer/MySQL、ORM trim/NativeAOT、SQLite/PostgreSQL 之外的 generated CRUD、in-flight 取消、跨进程并发。
+
+## S4 R1 复审修复记录（2026-10-23）
+
+- 审查 head `824da858` 两项 Q01 验收缺口；修复提交 `1f8e592e`。
+- 查询：单一筛选诱饵行 + 非零页 + 显式排序与默认排序相反；主断言与 SQL 条件断言加强，新增逐项敏感性控制。
+- 写入：测试包装 IDataBaseContext 观测受管事务；事务内 flush 后抛错零残留；缺 UoW 负控证明自动提交会残留。
+- Q01 5/5、CRUD JIT 28/28、NativeAOT 3/3（1m44s）、PG UoW 4/4、ORM 255/255、CodeGenerator 461/461。
+- 证据：[S4 R1 response](../review/2026-10-23-issue-130-s4-review-round1-response.md)。

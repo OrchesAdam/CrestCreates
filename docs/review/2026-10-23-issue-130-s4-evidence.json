@@ -2,7 +2,7 @@
   "issue": 130,
   "slice": "S4",
   "date": "2026-10-23",
-  "head": "9c62a626e53ce4f5f9137fb7d418cc1cf9738a51",
+  "head": "1f8e592e31f6356bb740f830c35680da871078e0",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "scope": "Compile-time provider rejection (CCCREPO001/002), real MSBuild consumer controls, and EF formal generated CRUD relational evidence on SQLite and PostgreSQL; S5 not started.",
@@ -22,16 +22,16 @@
       "outcome": "FreeSql and unknown Dapper consumer builds fail with CCCREPO001/002 and emit no SDK repository; EF control builds and emits EfCoreOrderRepository"
     },
     "generated_crud_jit": {
-      "total": 26,
-      "passed": 26,
+      "total": 28,
+      "passed": 28,
       "failed": 0,
-      "outcome": "includes SQLite and PostgreSQL Q01 relational filter/sort/page and EF UoW write tests"
+      "outcome": "includes SQLite/PG Q01, explicit filter/sort sensitivity and a missing-UoW negative control"
     },
     "generated_crud_native_gate": {
       "total": 3,
       "passed": 3,
       "failed": 0,
-      "duration": "1m41s",
+      "duration": "1m44s",
       "outcome": "publish/link/run with per-scenario and total sentinels after the Widget enum fixture change"
     },
     "postgres_uow": {
@@ -59,7 +59,9 @@
   "q01": {
     "sqlite": "generated WidgetAppService + real typed query adapter on EF Core SQLite: decimal/DateTime/nullable/enum filters, sort, paging, and Create under EF UoW",
     "postgresql": "same query matrix through Testcontainers PostgreSQL 16; SELECT/LIMIT observed on the real database",
-    "not_claimed": "SQLServer/MySQL or other ORM providers; generated CRUD AOT with EF"
+    "not_claimed": "SQLServer/MySQL or other ORM providers; generated CRUD AOT with EF",
+    "sensitivity": "price/date/description/status decoys each change total or first item; clearing explicit sort changes the non-zero page from alpha to zeta; SQL requires Price, CreationTime and ORDER BY",
+    "uow": "the generated Create observes CurrentTransaction; a post-flush failure rolls back with zero residue; without AddUnitOfWork the same failure leaves a committed row"
   },
   "implementation": [
     "RepositoryGeneratorDiagnostics frozen CCCREPO001/002 and wired into both generators",
@@ -78,5 +80,36 @@
     "in-flight SQL cancellation",
     "cross-process concurrency"
   ],
-  "s5_started": false
+  "s5_started": false,
+  "review_rounds": [
+    {
+      "round": "S4-R1",
+      "reviewed_head": "824da858012b706f9ca6f8c18325d63e491800cc",
+      "fix_head": "1f8e592e31f6356bb740f830c35680da871078e0",
+      "report": "docs/review/2026-10-23-issue-130-s4-review-round1.md",
+      "response": "docs/review/2026-10-23-issue-130-s4-review-round1-response.md",
+      "findings": [
+        {
+          "id": "S4-R1-1",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "Q01 seeds decoys per filter and an explicit sort opposite the default; SQL asserts Price/CreationTime/ORDER BY; sensitivity test covers every removal"
+        },
+        {
+          "id": "S4-R1-2",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "test-side IDataBaseContext records the managed transaction; post-save failure rolls back with zero residue; missing-UoW control leaves a row and is detected"
+        }
+      ],
+      "probes": {
+        "updated_q01": "5/5",
+        "crud_jit": "28/28",
+        "native_gate": "3/3",
+        "pg_uow": "4/4",
+        "orm": "255/255",
+        "generator_full": "461/461"
+      }
+    }
+  ]
 }
