@@ -20,6 +20,7 @@ using CrestCreates.GeneratedCrud.AotFixture.Feature.Widgets.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace CrestCreates.GeneratedCrud.AotFixture.Tests;
@@ -49,13 +50,23 @@ public sealed class GeneratedCrudEfCoreRelationalTests : IDisposable
         }
     }
 
-    private ServiceProvider BuildProvider()
+    private ServiceProvider BuildProvider(string? postgresConnectionString = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<WidgetDbContext>(options => options
-            .UseSqlite("Data Source=" + _databasePath)
-            .LogTo(sql => _sql.Add(sql), LogLevel.Information));
+        services.AddDbContext<WidgetDbContext>(options =>
+        {
+            if (postgresConnectionString is null)
+            {
+                options.UseSqlite("Data Source=" + _databasePath);
+            }
+            else
+            {
+                options.UseNpgsql(postgresConnectionString);
+            }
+
+            options.LogTo(sql => _sql.Add(sql), LogLevel.Information);
+        });
         services.AddScoped<IDataBaseContext>(provider =>
             new EfCoreDbContextAdapter(provider.GetRequiredService<WidgetDbContext>()));
         services.AddScoped<ICrestRepositoryBase<Widget, Guid>>(provider =>
@@ -74,6 +85,48 @@ public sealed class GeneratedCrudEfCoreRelationalTests : IDisposable
     public async Task Q01_generated_crud_filters_sort_and_page_execute_on_relational_sqlite()
     {
         await using var provider = BuildProvider();
+        await using var scope = provider.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<WidgetDbContext>();
+        await context.Database.EnsureCreatedAsync();
+        await SeedAsync(context);
+
+        var service = scope.ServiceProvider.GetRequiredService<WidgetAppService>();
+        var request = new WidgetListRequestDto
+        {
+            PageIndex = 0,
+            PageSize = 1,
+            Filters = new List<FilterDescriptor>
+            {
+                new() { Field = "Price", Operator = FilterOperator.GreaterThan, Value = 15m },
+                new() { Field = "CreationTime", Operator = FilterOperator.GreaterThanOrEqual, Value = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc) },
+                new() { Field = "Description", Operator = FilterOperator.Contains, Value = "needle" },
+                new() { Field = "Status", Operator = FilterOperator.Equals, Value = JsonDocument.Parse("\"Active\"").RootElement }
+            },
+            Sorts = new List<SortDescriptor>
+            {
+                new() { Field = "Name", Direction = SortDirection.Descending }
+            }
+        };
+
+        var result = await service.GetListAsync(request);
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Single(result.Items);
+        Assert.Equal("gamma", result.Items[0].Name);
+        Assert.Contains(_sql, sql =>
+            sql.Contains("SELECT", StringComparison.OrdinalIgnoreCase) &&
+            sql.Contains("LIMIT", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Q01_generated_crud_filters_execute_on_postgresql()
+    {
+        await using var container = new PostgreSqlBuilder()
+            .WithImage("postgres:16-alpine")
+            .Build();
+        await container.StartAsync();
+
+        await using var provider = BuildProvider(container.GetConnectionString());
         await using var scope = provider.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<WidgetDbContext>();
         await context.Database.EnsureCreatedAsync();
