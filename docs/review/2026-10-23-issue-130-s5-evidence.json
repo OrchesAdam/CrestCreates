@@ -5,7 +5,7 @@
   "implementation_head": "162bdbee",
   "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
   "pr": 154,
-  "status": "S1-S5 delivered on branch; PR not merged; CI paused",
+  "status": "Final technical review passed on 2ea73e0d; PR not merged; CI paused; merge awaits maintainer",
   "matrix": "docs/Feature/OrmProviderSupportMatrix.md",
   "memory_updated": true,
   "versions": {
@@ -91,7 +91,8 @@
     "pg_generated_query": "supported (Q01 query/filter/sort/page)",
     "pg_generated_write_uow": "unverified (SQLite only)",
     "pg_raw_context_uow": "supported (existing 4/4 requiresNew/isolation, not two-repository or generated CRUD)",
-    "ef_two_repository_abandon_complete_pg": "unverified"
+    "ef_two_repository_abandon_complete_pg": "unverified",
+    "pg_sdk_soft_delete_tenant_audit_cancellation": "unverified"
   },
   "review_rounds": [
     {
@@ -125,5 +126,14 @@
         "generated_crud_total": "28 = 25 non-native + 3 native"
       }
     }
-  ]
+  ],
+  "final_head": "2ea73e0d",
+  "final_review": {
+    "round": "R2",
+    "reviewed_head": "2ea73e0da27c268720198b8225124f157b0c90c2",
+    "independent_orm": "267/267",
+    "independent_crud_non_native": "25/25",
+    "q01": "5/5",
+    "conclusion": "final technical review passed; PG support declarations narrowed to actual evidence; no new blockers"
+  }
 }

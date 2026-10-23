@@ -47,17 +47,17 @@
 - EF 两个入口的无 stamp 租户批次写（UpdateRange、实体/谓词 DeleteRange）在跟踪/写入前确定性拒绝，失败零写；租户单行仍走持久归属校验。
 - 平台 `EfCoreRepositoryBase.GetQueryable()` 改为从受生成过滤器约束的原生查询起步（required 租户条件仅叠加在已过滤查询上），普通读保留 tenant/live-row 组合；`GetQueryableUnfiltered` 仅保留给内部持久快照。
 - 支持矩阵拆分 PostgreSQL 范围：PG generated **查询** supported；PG generated **写入/UoW 回滚** 与 EF 两仓储 abandon/Complete **unverified**；既有 PG 4/4 仅覆盖 raw Context requiresNew/isolation。
-- 最终 ORM **267/267**（含 10 条最终审查探针，10/10）；GeneratedCrud 项目总 28 = 25 非原生 + 3 NativeAOT。
+- 最终 ORM **267/267**（含 10 条最终审查探针，10/10）；GeneratedCrud 项目总 28 = 25 非原生 + 3 NativeAOT。最终复审 R2 已独立确认该范围并按本矩阵放行合并。
 
 ## 2. 证据索引
 
-### 2.1 命令与结果（实现 SHA `e57abee5`）
+### 2.1 命令与结果（最终 head `2ea73e0d`；实现 SHA `162bdbee`）
 
 | 集合 | 命令 | 结果 |
 | --- | --- | --- |
 | ORM 全量 | `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | **267 / 267 passed，0 skipped** |
 | 生成器全量 | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests` | **461 / 461 passed**（31m11s） |
-| GeneratedCrud 非原生 | `dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests`（默认过滤） | **25 / 25 passed**（项目总 28 = 25 非原生 + 3 NativeAOT，不把 28 当作独立 JIT 计数） |
+| GeneratedCrud 非原生 | `dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests --filter "Category!=NativeAotGate"` | **25 / 25 passed**（项目总 28 = 25 非原生 + 3 NativeAOT，不把 28 当作独立 JIT 计数） |
 | GeneratedCrud NativeAOT | `dotnet test ... --filter "Category=NativeAotGate"` | **3 / 3 passed**（1m44s） |
 | PostgreSQL UoW | `dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --filter FullyQualifiedName~UnitOfWorkPostgresIntegrationTests` | **4 / 4 passed** |
 | Dependency Boundaries | `dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests` | 176 / 178（2 条既有 #69 evidence-ledger，无关） |

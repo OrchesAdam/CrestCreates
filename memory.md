@@ -8,22 +8,23 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
-## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (in flight)
+## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (final review passed; merge pending)
 
 - Branch `feat/issue-130-provider-matrix-soft-delete-20261022-104210`, PR #154, based on master
-  `8c8a71de6a47d7c0eb94e8260e9f94035b22a477`; **not merged**, CI paused, awaiting unified review.
+  `8c8a71de6a47d7c0eb94e8260e9f94035b22a477`; **final technical review passed**, not merged,
+  CI paused, merge awaits the maintainer.
 - S1–S5 delivered: provider support matrix, real soft delete, live-row filtering, per-operation
   tenant isolation and persisted ownership, SDK assembly/core consolidation, compile-time
   provider rejection and EF generated CRUD relational Q01.
 - Final matrix: [docs/Feature/OrmProviderSupportMatrix.md](docs/Feature/OrmProviderSupportMatrix.md).
   Summary: EF/FreeSql/SqlSugar SQLite JIT core behaviors supported with execution evidence;
-  EF PostgreSQL UoW and generated CRUD Q01 supported; FreeSql/SqlSugar non-EF generated CRUD
+  EF PostgreSQL generated query Q01 and raw-context UoW supported (PG generated writes/UoW rollback and two-repository combinations unverified); FreeSql/SqlSugar non-EF generated CRUD
   rejected (CCCREPO001/002); unknown provider rejected; SqlServer/MySQL and ORM trim/NativeAOT
   remain **unverified**.
-- Evidence head: `e57abee5` (S5 docs/evidence follow). Key counts: OrmProviders 257/257,
-  CodeGenerator 461/461, GeneratedCrud JIT 28/28, GeneratedCrud NativeAOT 3/3, PG UoW 4/4,
+- Final head: `2ea73e0d` (implementation `162bdbee`). Key counts: OrmProviders 267/267,
+  CodeGenerator 461/461, GeneratedCrud non-native 25/25 + NativeAOT 3/3 (total 28), PG raw-context UoW 4/4,
   Boundary 176/178 (2 existing ControlPlane evidence-ledger guards).
-- Review history: S2 R1/R2, S3 R1/R2/R3, S4 R1 and final S5 R1 all closed; probes are in-repo where accepted. Final S5 R1 fixed EF tenant batch writes and platform-base reads; matrix PG scope split accordingly.
+- Review history: S2 R1/R2, S3 R1/R2/R3, S4 R1, S5 R1 and final R2 all closed; probes are in-repo where accepted. S5 R1 fixed EF tenant batch writes and platform-base reads; matrix PG scope split accordingly. Final R2 independently confirmed OrmProviders 267/267, CRUD non-native 25/25, Q01 5/5, and the narrowed PG declarations.
 - Migration/behavior changes: soft delete becomes logical; stamped batch/predicate delete rejects;
   SDK `GetQueryable` rejects; SDK required-tenant host reads fail closed, optional host sees shared
   only, shared rows are host-owned; SqlSugar client is scoped; FreeSql extension no longer scans;
@@ -31,8 +32,8 @@ never deleted; never output credentials.
 - Not verified: SQLServer/MySQL and other databases; PostgreSQL SDK soft-delete/tenant/audit/
   cancellation details; ORM trim/NativeAOT; in-flight SQL cancellation; cross-process concurrency;
   EF-specific optional marker host tightening.
-- S5 deliverables are complete on this branch; only PR merge and post-merge AGENTS/evidence sync
-  remain, and those are the maintainer's decision.
+- S5 deliverables are complete and final review passed; only PR merge and post-merge AGENTS/evidence
+  sync remain, and those are the maintainer's decision.
 
 ## Delivered capabilities (master)
 
