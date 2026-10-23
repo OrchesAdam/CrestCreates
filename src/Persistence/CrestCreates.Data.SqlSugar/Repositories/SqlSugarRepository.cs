@@ -210,12 +210,16 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             };
         }
 
-        private async Task<TEntity?> FindPersistedForTenantCheckAsync(TKey id)
+        private async Task<TEntity?> FindPersistedForTenantCheckAsync(
+            TKey id,
+            CancellationToken cancellationToken)
         {
             if (!HasTenantMarker)
             {
                 return null;
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             var query = _sqlSugarClient.Queryable<TEntity>()
                 .ClearFilter()
@@ -225,7 +229,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 query = query.Where($"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0", new { });
             }
 
-            return await query.FirstAsync();
+            return await query.FirstAsync(cancellationToken);
         }
 
         private void EnsurePersistedTenant(TEntity? persisted, TKey id)
@@ -437,7 +441,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Updating entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 if (HasTenantMarker)
                 {
-                    var persistedForTenant = await FindPersistedForTenantCheckAsync(entity.Id);
+                    var persistedForTenant = await FindPersistedForTenantCheckAsync(entity.Id, cancellationToken);
                     EnsurePersistedTenant(persistedForTenant, entity.Id);
                     EnsureSubmittedTenant(entity, persistedForTenant);
                 }
@@ -539,7 +543,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Deleting entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 if (HasTenantMarker)
                 {
-                    var persistedForTenant = await FindPersistedForTenantCheckAsync(entity.Id);
+                    var persistedForTenant = await FindPersistedForTenantCheckAsync(entity.Id, cancellationToken);
                     EnsurePersistedTenant(persistedForTenant, entity.Id);
                 }
                 if (entity is ISoftDelete)
@@ -639,7 +643,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Deleting entity {EntityType} by id: {Id}", typeof(TEntity).Name, id);
                 if (HasTenantMarker)
                 {
-                    var persistedForTenant = await FindPersistedForTenantCheckAsync(id);
+                    var persistedForTenant = await FindPersistedForTenantCheckAsync(id, cancellationToken);
                     EnsurePersistedTenant(persistedForTenant, id);
                     if (persistedForTenant is null)
                     {
@@ -706,7 +710,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Deleting entity {EntityType} by id with concurrency check: {Id}", typeof(TEntity).Name, id);
                 if (HasTenantMarker)
                 {
-                    var persistedForTenant = await FindPersistedForTenantCheckAsync(id);
+                    var persistedForTenant = await FindPersistedForTenantCheckAsync(id, cancellationToken);
                     EnsurePersistedTenant(persistedForTenant, id);
                     if (persistedForTenant is null)
                     {
