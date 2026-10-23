@@ -22,10 +22,10 @@
       "outcome": "FreeSql and unknown Dapper consumer builds fail with CCCREPO001/002 and emit no SDK repository; EF control builds and emits EfCoreOrderRepository"
     },
     "generated_crud_jit": {
-      "total": 28,
-      "passed": 28,
+      "total": 25,
+      "passed": 25,
       "failed": 0,
-      "outcome": "includes SQLite/PG Q01, explicit filter/sort sensitivity and a missing-UoW negative control"
+      "outcome": "non-native tests only; project total 28 = 25 non-native + 3 NativeAOT"
     },
     "generated_crud_native_gate": {
       "total": 3,

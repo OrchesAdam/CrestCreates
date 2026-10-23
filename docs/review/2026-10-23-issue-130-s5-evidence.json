@@ -2,7 +2,7 @@
   "issue": 130,
   "slice": "S5",
   "date": "2026-10-23",
-  "implementation_head": "e57abee5dd00ca07e761608cc26f98782d9bf91f",
+  "implementation_head": "162bdbee",
   "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
   "pr": 154,
   "status": "S1-S5 delivered on branch; PR not merged; CI paused",
@@ -17,8 +17,8 @@
   },
   "final_suites": {
     "orm_providers": {
-      "total": 257,
-      "passed": 257,
+      "total": 267,
+      "passed": 267,
       "failed": 0
     },
     "code_generator": {
@@ -26,11 +26,6 @@
       "passed": 461,
       "failed": 0,
       "duration": "31m11s"
-    },
-    "generated_crud_jit": {
-      "total": 28,
-      "passed": 28,
-      "failed": 0
     },
     "generated_crud_native": {
       "total": 3,
@@ -48,6 +43,12 @@
       "passed": 176,
       "failed": 2,
       "failed_scope": "existing ControlPlane evidence-ledger guards for #69, unrelated"
+    },
+    "generated_crud_non_native": {
+      "total": 25,
+      "passed": 25,
+      "failed": 0,
+      "note": "project total 28 = 25 non-native + 3 NativeAOT"
     }
   },
   "review_history": [
@@ -68,7 +69,8 @@
     "EF required host filters return no rows; EF-specific optional marker retains host=all compatibility",
     "non-EF/unknown generated repositories and CRUD fail with CCCREPO001/002",
     "SqlSugar client is scoped; FreeSql extension stops repository scanning",
-    "creation audit is authoritative; retire weak tenant/soft-delete configuration hooks"
+    "creation audit is authoritative; retire weak tenant/soft-delete configuration hooks",
+    "EF tenant batch update/delete is rejected before tracking/write; use per-entity operations"
   ],
   "not_verified": [
     "SQLServer/MySQL and other databases",
@@ -84,5 +86,44 @@
     "deletions": 336
   },
   "ci": "paused",
-  "merged": false
+  "merged": false,
+  "matrix_scope": {
+    "pg_generated_query": "supported (Q01 query/filter/sort/page)",
+    "pg_generated_write_uow": "unverified (SQLite only)",
+    "pg_raw_context_uow": "supported (existing 4/4 requiresNew/isolation, not two-repository or generated CRUD)",
+    "ef_two_repository_abandon_complete_pg": "unverified"
+  },
+  "review_rounds": [
+    {
+      "round": "S5-R1",
+      "reviewed_head": "73d4775e57f584db2b256aa8b13ed666aff3a8a4",
+      "fix_head": "162bdbee",
+      "report": "docs/review/2026-10-23-issue-130-final-review-round1.md",
+      "findings": [
+        {
+          "id": "S5-R1-1",
+          "severity": "P1",
+          "status": "fixed",
+          "summary": "EF tenant UpdateRange and symmetric DeleteRange reject before tracking/write in both repository entries; no-stamp tenant rows stay unchanged"
+        },
+        {
+          "id": "S5-R1-2",
+          "severity": "P1",
+          "status": "fixed",
+          "summary": "EfCoreRepositoryBase.GetQueryable starts from the generated-filtered native query; ordinary reads keep optional tenant and live-row filters"
+        },
+        {
+          "id": "S5-R1-3",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "matrix splits PG generated query, PG generated write/UoW, and raw-context UoW evidence; PG write and two-repository abandon/complete marked unverified"
+        }
+      ],
+      "probes": {
+        "review_s5": "10/10 after fix",
+        "orm_full": "267/267",
+        "generated_crud_total": "28 = 25 non-native + 3 native"
+      }
+    }
+  ]
 }

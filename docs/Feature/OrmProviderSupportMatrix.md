@@ -1,6 +1,6 @@
 # ORM Provider 支持矩阵（Issue #130 最终）
 
-日期：2026-10-23；实现 SHA：`e57abee5`（分支 `feat/issue-130-provider-matrix-soft-delete-20261022-104210`，PR #154；**尚未合并**）。
+日期：2026-10-23；实现 SHA：`162bdbee`（分支 `feat/issue-130-provider-matrix-soft-delete-20261022-104210`，PR #154；**尚未合并**）。
 设计：[Issue #130 设计](../superpowers/specs/2026-10-22-issue-130-provider-matrix-soft-delete-design.md)。S1–S5 证据见 [S1](../review/2026-10-22-issue-130-s1-baseline.md)、[S2](../review/2026-10-22-issue-130-s2-baseline.md)、[S3](../review/2026-10-22-issue-130-s3-tenant-assembly.md)、[S4](../review/2026-10-23-issue-130-s4-compile-entry-crud.md)。
 
 状态术语：
@@ -25,13 +25,16 @@
 | 持久租户写归属（detached/forged/跨租户） | **supported（SQLite）** | **supported（SQLite）** | **supported（SQLite）** |
 | 共享 null 行 host 独占写 | **supported（SQLite）** | **supported（SQLite）** | **supported（SQLite）** |
 | 租户 `UpdateRange` | **unsupported**（拒绝） | **unsupported**（拒绝） | **unsupported**（拒绝） |
+| 租户批次 `DeleteRange`（entities/predicate） | **unsupported**（跟踪/写入前拒绝，零写） | **supported（SQLite）**：谓词/实体批次只作用于当前租户（stamped 批次仍拒绝） | **supported（SQLite）**：同左 |
 | 创建/修改/删除审计字段 | **supported（SQLite）** | **supported（SQLite）** | **supported（SQLite）** |
-| 两仓储共享 UoW 事务 + abandon/Complete | **supported（SQLite）**；PostgreSQL **supported**（既有 4/4） | **supported（SQLite）**；PostgreSQL **unverified** | **supported（SQLite）**；PostgreSQL **unverified** |
+| 两仓储共享 UoW 事务 + abandon/Complete（EF 仓储组合） | **supported（SQLite）**；PostgreSQL **unverified** | **supported（SQLite）**；PostgreSQL **unverified** | **supported（SQLite）**；PostgreSQL **unverified** |
+| PostgreSQL 原始 Context UoW 门禁（既有 4/4：requiresNew 外层回滚 + 三档 isolation） | **supported（仅 raw Context）** | **unverified** | **unverified** |
 | RequiresNew | **supported**（既有 EF/UoW 门禁） | **unsupported**（执行前拒绝） | **unsupported**（执行前拒绝） |
-| 显式 isolation | SQLite Serializable **supported**；PostgreSQL 三档 **supported**（既有 #137 证据） | **unsupported**（执行前拒绝） | **unsupported**（执行前拒绝） |
+| 显式 isolation | SQLite Serializable **supported**；PostgreSQL 三档 **supported**（既有 #137 raw Context 证据） | **unsupported**（执行前拒绝） | **unsupported**（执行前拒绝） |
 | 逐操作取消（命令启动前） | **supported** | **supported（SQLite）** | **supported（SQLite）** |
 | in-flight SQL 取消 | **unverified** | **unverified** | **unverified** |
-| 正式 generated CRUD + typed query + UoW | **supported（SQLite + PostgreSQL 16，JIT）**；SQLServer/MySQL **unverified** | **unsupported**：编译期 `CCCREPO001` | **unsupported**：编译期 `CCCREPO001` |
+| generated CRUD typed query/filter/sort/page | **supported（SQLite + PostgreSQL 16，JIT）**；SQLServer/MySQL **unverified** | **unsupported**：编译期 `CCCREPO001` | **unsupported**：编译期 `CCCREPO001` |
+| generated CRUD 写入 + UoW 参与/事务内失败回滚 | **supported（SQLite）**；PostgreSQL **unverified** | **unsupported** | **unsupported** |
 | 未知 Provider 生成请求 | **unsupported**：`CCCREPO002` | **unsupported** | **unsupported** |
 | SDK `GetQueryable` 伪 IQueryable | EF 原生 IQueryable **supported** | **unsupported**：明确 `NotSupportedException` | **unsupported**：明确 `NotSupportedException` |
 | SqlSugar client 生命周期 | — | — | **supported（SQLite）**：scoped client + `ISqlSugarClient` 同实例 |
@@ -39,15 +42,22 @@
 | SQLServer / MySQL | **unverified** | **unverified** | **unverified**（模块 SqlServer 硬编码不构成证据） |
 | trim / NativeAOT | **unverified** | **unverified** | **unverified** |
 
+## 1.1 最终审查 R1 修复（2026-10-23）
+
+- EF 两个入口的无 stamp 租户批次写（UpdateRange、实体/谓词 DeleteRange）在跟踪/写入前确定性拒绝，失败零写；租户单行仍走持久归属校验。
+- 平台 `EfCoreRepositoryBase.GetQueryable()` 改为从受生成过滤器约束的原生查询起步（required 租户条件仅叠加在已过滤查询上），普通读保留 tenant/live-row 组合；`GetQueryableUnfiltered` 仅保留给内部持久快照。
+- 支持矩阵拆分 PostgreSQL 范围：PG generated **查询** supported；PG generated **写入/UoW 回滚** 与 EF 两仓储 abandon/Complete **unverified**；既有 PG 4/4 仅覆盖 raw Context requiresNew/isolation。
+- 最终 ORM **267/267**（含 10 条最终审查探针，10/10）；GeneratedCrud 项目总 28 = 25 非原生 + 3 NativeAOT。
+
 ## 2. 证据索引
 
 ### 2.1 命令与结果（实现 SHA `e57abee5`）
 
 | 集合 | 命令 | 结果 |
 | --- | --- | --- |
-| ORM 全量 | `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | **257 / 257 passed，0 skipped** |
+| ORM 全量 | `dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests` | **267 / 267 passed，0 skipped** |
 | 生成器全量 | `dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests` | **461 / 461 passed**（31m11s） |
-| GeneratedCrud JIT | `dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests` | **28 / 28 passed** |
+| GeneratedCrud 非原生 | `dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests`（默认过滤） | **25 / 25 passed**（项目总 28 = 25 非原生 + 3 NativeAOT，不把 28 当作独立 JIT 计数） |
 | GeneratedCrud NativeAOT | `dotnet test ... --filter "Category=NativeAotGate"` | **3 / 3 passed**（1m44s） |
 | PostgreSQL UoW | `dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --filter FullyQualifiedName~UnitOfWorkPostgresIntegrationTests` | **4 / 4 passed** |
 | Dependency Boundaries | `dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests` | 176 / 178（2 条既有 #69 evidence-ledger，无关） |
@@ -84,7 +94,7 @@
 
 ## 4. 未验证 / 不承诺
 
-- SQLServer/MySQL 及其他数据库组合；PostgreSQL 的软删除/租户/审计/取消细节（仅 UoW 与 generated CRUD Q01 有 PG 证据）。
+- SQLServer/MySQL 及其他数据库组合；PostgreSQL 的软删除/租户/审计/取消细节（仅 raw Context UoW 4/4 与 generated CRUD **查询** Q01 有 PG 证据；PG 写入/UoW 回滚与 EF 两仓储组合未验证）。
 - ORM 包 trim/NativeAOT；CRUD NativeAOT 门禁是内存 fixture，不是 EF/ORM 原生证据。
 - in-flight SQL 取消、跨进程并发、per-handler checkpoint。
 - EF 专用 optional marker 的 host 收紧。

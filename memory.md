@@ -23,7 +23,7 @@ never deleted; never output credentials.
 - Evidence head: `e57abee5` (S5 docs/evidence follow). Key counts: OrmProviders 257/257,
   CodeGenerator 461/461, GeneratedCrud JIT 28/28, GeneratedCrud NativeAOT 3/3, PG UoW 4/4,
   Boundary 176/178 (2 existing ControlPlane evidence-ledger guards).
-- Review history: S2 R1/R2, S3 R1/R2/R3, S4 R1 all closed; probes are in-repo where accepted.
+- Review history: S2 R1/R2, S3 R1/R2/R3, S4 R1 and final S5 R1 all closed; probes are in-repo where accepted. Final S5 R1 fixed EF tenant batch writes and platform-base reads; matrix PG scope split accordingly.
 - Migration/behavior changes: soft delete becomes logical; stamped batch/predicate delete rejects;
   SDK `GetQueryable` rejects; SDK required-tenant host reads fail closed, optional host sees shared
   only, shared rows are host-owned; SqlSugar client is scoped; FreeSql extension no longer scans;
@@ -263,4 +263,4 @@ never deleted; never output credentials.
 
 - 2026-10-22：补正 #128 合并状态。功能代码已通过 PR #150 合入 master（`196b6f66048ef32d644eeb856d00d58ae9d34965`），旧文档中的“待合并”已更正；原留给 #129 的旧 bundle/Controller/Legacy 归档已通过 PR #152 完成（`2f4c54024d8e2e9c5b8aecad1a399669dadb28a6`）。NativeAOT 支持仍限已验证 fixture/linux-x64，EF/其他 ORM 查询翻译与 UoW 组合、其他 RID 未验证；CI 保持暂停。
 
-- 2026-10-23（#130 S5 最终）：ORM Provider 支持矩阵/软删除/租户/UoW 在 PR #154 完成 S1–S5（分支，未合并）。最终矩阵落 `docs/Feature/OrmProviderSupportMatrix.md`。S1 基线 124/124 → S2 删除/查询闭环 → S3 租户/装配 → S4 生成期拒绝与 EF CRUD Q01；最终 OrmProviders 257/257、CodeGenerator 461/461（G 红例闭合，含真实 MSBuild 消费控制）、GeneratedCrud JIT 28/28（SQLite + PostgreSQL Q01 + 敏感性/缺 UoW 负控）、CRUD NativeAOT 3/3、PG UoW 4/4、Boundary 176/178（2 条既有 #69）。支持声明按矩阵逐项；SQLServer/MySQL、ORM trim/NativeAOT、PG SDK 细节、in-flight 取消、跨进程并发未验证。所有审查轮次（S2 R1/R2、S3 R1/R2/R3、S4 R1）已闭合；PR 未合并、CI 保持暂停。
+- 2026-10-23（#130 S5 最终）：ORM Provider 支持矩阵/软删除/租户/UoW 在 PR #154 完成 S1–S5（分支，未合并）。最终矩阵落 `docs/Feature/OrmProviderSupportMatrix.md`。S1 基线 124/124 → S2 删除/查询闭环 → S3 租户/装配 → S4 生成期拒绝与 EF CRUD Q01；最终 OrmProviders 267/267（含最终审查 10 条探针）、CodeGenerator 461/461（G 红例闭合，含真实 MSBuild 消费控制）、GeneratedCrud 非原生 25/25（项目总 28 = 25 + NativeAOT 3）、PG UoW 4/4、Boundary 176/178（2 条既有 #69）。支持声明按矩阵逐项；SQLServer/MySQL、ORM trim/NativeAOT、PG SDK 细节、in-flight 取消、跨进程并发未验证。所有审查轮次（S2 R1/R2、S3 R1/R2/R3、S4 R1）已闭合；PR 未合并、CI 保持暂停。

@@ -12,7 +12,7 @@
 | 真实 MSBuild G 控制 | **3 / 3 passed**（非 EF FreeSql、未知 Dapper 均失败并带 CCCREPO001/002；EF 正控成功生成） |
 | EF 正式生成 CRUD Q01（SQLite） | **4 / 4 passed**（查询、筛选/排序敏感性、写入 UoW、缺 UoW 负控） |
 | EF 正式生成 CRUD Q01（PostgreSQL） | **1 / 1 passed**（Testcontainers PostgreSQL 16） |
-| GeneratedCrud 全量（JIT） | **28 / 28 passed** |
+| GeneratedCrud 非原生（JIT） | **25 / 25 passed**（项目总 28 = 25 非原生 + 3 NativeAOT） |
 | GeneratedCrud NativeAOT 门禁 | **3 / 3 passed**（1m44s；publish/link/run + sentinels） |
 | PostgreSQL UoW 门禁 | **4 / 4 passed** |
 | OrmProviders 全量 | **255 / 255 passed**（S3 证据保持） |
