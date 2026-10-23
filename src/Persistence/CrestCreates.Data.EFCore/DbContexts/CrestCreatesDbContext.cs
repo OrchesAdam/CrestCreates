@@ -1,9 +1,11 @@
 using System.Collections.Generic;
+using System.Linq;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Settings;
+using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.Extensions;
@@ -298,9 +300,34 @@ namespace CrestCreates.Data.EFCore.DbContexts
 
             modelBuilder.ConfigureConcurrencyStamp();
 
-            if (_currentTenant != null && TenantFilterRegistryStore.HasRegistrations)
+            if (SoftDeleteFilterRegistryStore.HasRegistrations)
             {
-                modelBuilder.ConfigureTenantDiscriminator(_currentTenant);
+                SoftDeleteFilterConfiguration.ApplyAll(modelBuilder);
+            }
+
+            if (TenantFilterRegistryStore.HasRegistrations)
+            {
+                modelBuilder.ConfigureTenantDiscriminator(_currentTenant ?? HostCurrentTenant.Instance);
+            }
+
+            EnsureSoftDeleteFiltersAreApplied(modelBuilder);
+        }
+
+        private static void EnsureSoftDeleteFiltersAreApplied(ModelBuilder modelBuilder)
+        {
+            var missingFilters = modelBuilder.Model.GetEntityTypes()
+                .Where(entityType =>
+                    typeof(ISoftDelete).IsAssignableFrom(entityType.ClrType) &&
+                    entityType.GetQueryFilter() is null)
+                .Select(entityType => entityType.ClrType.FullName)
+                .ToList();
+
+            if (missingFilters.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Missing compile-time generated soft-delete filters for: " +
+                    string.Join(", ", missingFilters) +
+                    ". Apply SoftDeleteFilterConfiguration.ApplyAll and ensure the generator ran.");
             }
         }
 

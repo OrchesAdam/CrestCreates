@@ -12,7 +12,10 @@ using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DTOs;
 using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
+using CrestCreates.DataFilter.Entities;
 using CrestCreates.MultiTenancy.Abstract;
+using DataFilterMultiTenant = CrestCreates.DataFilter.Entities.IMultiTenant;
+using EfMultiTenant = CrestCreates.Data.EFCore.MultiTenancy.IMultiTenant;
 using Microsoft.EntityFrameworkCore;
 using IDbContextProvider = CrestCreates.DbContextProvider.Abstract;
 
@@ -44,6 +47,20 @@ namespace CrestCreates.Data.EFCore.Repositories
         public override IQueryable<TEntity> GetQueryableUnfiltered()
         {
             return GetNativeQueryable(_dbContext.Queryable<TEntity>().IgnoreQueryFilters().GetNativeQuery());
+        }
+
+        public override IQueryable<TEntity> GetQueryable()
+        {
+            var query = GetNativeQueryable(_dbContext.Queryable<TEntity>().GetNativeQuery());
+            if (DataFilterState?.IsEnabled<TenantFilter>() == true &&
+                CurrentTenant != null &&
+                typeof(IMustHaveTenant).IsAssignableFrom(typeof(TEntity)))
+            {
+                var tenantId = CurrentTenant.Id;
+                query = query.Where(e => ((IMustHaveTenant)e).TenantId == tenantId);
+            }
+
+            return query;
         }
 
         protected IDbContextProvider.IDataBaseContext GetDbContext() => _dbContext;
@@ -96,6 +113,8 @@ namespace CrestCreates.Data.EFCore.Repositories
 
         public override async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            await EnsurePersistedTenantOwnershipAsync(entity, cancellationToken);
+
             if (entity is IHasConcurrencyStamp stampEntity)
             {
                 var dbContext = (DbContext)_dbContext.GetNativeContext();
@@ -103,10 +122,12 @@ namespace CrestCreates.Data.EFCore.Repositories
                 stampEntity.ConcurrencyStamp = Guid.NewGuid().ToString("N");
                 var entry = dbContext.Set<TEntity>().Update(entity);
                 entry.Property(nameof(IHasConcurrencyStamp.ConcurrencyStamp)).OriginalValue = oldStamp;
+                PreserveCreationAudit(dbContext, entity);
             }
             else
             {
                 _dbContext.Set<TEntity>().Update(entity);
+                PreserveCreationAudit((DbContext)_dbContext.GetNativeContext(), entity);
             }
 
             try
@@ -122,16 +143,29 @@ namespace CrestCreates.Data.EFCore.Repositories
 
         public override async Task<IEnumerable<TEntity>> UpdateRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            ThrowIfTenantBatchWrite();
             var entityList = entities.ToList();
             if (entityList.Any(e => e is IHasConcurrencyStamp))
                 throw new NotSupportedException("UpdateRangeAsync does not support entities with concurrency stamps. Use UpdateAsync for concurrency-safe updates.");
             _dbContext.Set<TEntity>().UpdateRange(entityList);
+            var dbContextForAudit = (DbContext)_dbContext.GetNativeContext();
+            foreach (var item in entityList)
+            {
+                PreserveCreationAudit(dbContextForAudit, item);
+            }
             await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
             return entityList;
         }
 
         public override async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            await EnsurePersistedTenantOwnershipAsync(entity, cancellationToken);
+
+            if (entity is ISoftDelete { IsDeleted: true })
+            {
+                return;
+            }
+
             if (entity is IHasConcurrencyStamp)
             {
                 var dbContext = (DbContext)_dbContext.GetNativeContext();
@@ -171,22 +205,27 @@ namespace CrestCreates.Data.EFCore.Repositories
                 await DeleteAsync(id, cancellationToken);
                 return;
             }
-            var dbContext = (DbContext)_dbContext.GetNativeContext();
-            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
-            var rows = await dbContext.Set<TEntity>()
-                .Where(e => e.Id.Equals(id) && EF.Property<string>(e, "ConcurrencyStamp") == expectedStamp)
-                .ExecuteDeleteAsync(effective);
-            if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+
+            await DeleteStampedTrackedAsync(id, expectedStamp, cancellationToken);
         }
 
         public override async Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
-            _dbContext.Set<TEntity>().RemoveRange(entities);
+            ThrowIfTenantBatchWrite();
+            ThrowIfBatchDeleteHasNoPerRowStamp();
+
+            var liveEntities = entities
+                .Where(entity => entity is not ISoftDelete { IsDeleted: true })
+                .ToList();
+            _dbContext.Set<TEntity>().RemoveRange(liveEntities);
             await SaveChangesIfNoActiveTransactionAsync(cancellationToken);
         }
 
         public override async Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            ThrowIfTenantBatchWrite();
+            ThrowIfBatchDeleteHasNoPerRowStamp();
+
             using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             var entities = await GetQueryable().Where(predicate).ToListAsync(effective);
             _dbContext.Set<TEntity>().RemoveRange(entities);
@@ -259,6 +298,125 @@ namespace CrestCreates.Data.EFCore.Repositories
         {
             using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
             return await GetQueryable().AnyAsync(e => e.Id.Equals(id), effective);
+        }
+
+        private async Task DeleteStampedTrackedAsync(TKey id, string expectedStamp, CancellationToken cancellationToken)
+        {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
+
+            var entity = await GetQueryable()
+                .Where(e => e.Id.Equals(id))
+                .FirstOrDefaultAsync(effective);
+            if (entity is null)
+            {
+                // Zero matching rows (including rows hidden by filters) stays a concurrency failure
+                // for stamped deletes so callers cannot probe other tenants' existence.
+                throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+            }
+
+            if (entity is not IHasConcurrencyStamp stampEntity)
+            {
+                _dbContext.Set<TEntity>().Remove(entity);
+            }
+            else
+            {
+                var dbContext = (DbContext)_dbContext.GetNativeContext();
+                var entry = dbContext.Entry(entity);
+                entry.Property(nameof(IHasConcurrencyStamp.ConcurrencyStamp)).OriginalValue = expectedStamp;
+                stampEntity.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+                entry.State = EntityState.Deleted;
+            }
+
+            try
+            {
+                await SaveChangesIfNoActiveTransactionAsync(effective);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+            }
+        }
+
+        private static void ThrowIfTenantBatchWrite()
+        {
+            if (HasTenantMarker)
+            {
+                throw new NotSupportedException(
+                    "Batch writes do not validate persisted tenant ownership. Update or delete tenant-scoped entities one by one.");
+            }
+        }
+
+        private static void ThrowIfBatchDeleteHasNoPerRowStamp()
+        {
+            if (typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
+            {
+                throw new NotSupportedException(
+                    "DeleteRangeAsync does not accept entities with concurrency stamps because the batch overload has no per-row expectedStamp. Delete stamped entities one by one with DeleteAsync(id, expectedStamp).");
+            }
+        }
+
+
+        private static readonly bool HasTenantMarker =
+            typeof(IMustHaveTenant).IsAssignableFrom(typeof(TEntity)) ||
+            typeof(DataFilterMultiTenant).IsAssignableFrom(typeof(TEntity)) ||
+            typeof(EfMultiTenant).IsAssignableFrom(typeof(TEntity));
+
+        private static string? ReadTenantId(TEntity entity)
+        {
+            return entity switch
+            {
+                IMustHaveTenant mustHaveTenant => mustHaveTenant.TenantId,
+                DataFilterMultiTenant dataFilterTenant => dataFilterTenant.TenantId,
+                EfMultiTenant efTenant => efTenant.TenantId,
+                _ => null
+            };
+        }
+
+
+        private static void PreserveCreationAudit(DbContext dbContext, TEntity entity)
+        {
+            if (entity is not IAuditedEntity)
+            {
+                return;
+            }
+
+            var entry = dbContext.Entry(entity);
+            entry.Property(nameof(IAuditedEntity.CreationTime)).IsModified = false;
+            entry.Property(nameof(IAuditedEntity.CreatorId)).IsModified = false;
+        }
+
+        private async Task EnsurePersistedTenantOwnershipAsync(TEntity entity, CancellationToken cancellationToken)
+        {
+            if (!HasTenantMarker)
+            {
+                return;
+            }
+
+            var persisted = await GetQueryableUnfiltered()
+                .AsNoTracking()
+                .Where(e => e.Id.Equals(entity.Id))
+                .FirstOrDefaultAsync(cancellationToken);
+            var currentTenant = CurrentTenant?.Id;
+            var persistedTenant = persisted is null ? null : ReadTenantId(persisted);
+            var submittedTenant = ReadTenantId(entity);
+
+            if (persisted is null)
+            {
+                throw new InvalidOperationException(
+                    $"{typeof(TEntity).Name} (Id={entity.Id}) does not exist or is not visible for a tenant-scoped write.");
+            }
+
+            if (!string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"{typeof(TEntity).Name} (Id={entity.Id}) belongs to tenant '{persistedTenant}', not the current tenant '{currentTenant}'.");
+            }
+
+            if (!string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot write {typeof(TEntity).Name} for tenant '{submittedTenant}' while the current tenant is '{currentTenant}'.");
+            }
         }
 
         private async Task SaveChangesIfNoActiveTransactionAsync(CancellationToken cancellationToken)

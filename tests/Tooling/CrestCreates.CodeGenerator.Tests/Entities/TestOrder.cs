@@ -9,7 +9,7 @@ namespace CrestCreates.CodeGenerator.Tests.Entities
     [Entity(
         GenerateRepository = true,
         GenerateAuditing = false,
-        OrmProvider = "FreeSql",
+        OrmProvider = "EfCore",
         TableName = "TestOrders"
     )]
     public class TestOrder : AggregateRoot<long>

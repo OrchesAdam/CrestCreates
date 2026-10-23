@@ -1,0 +1,308 @@
+{
+  "issue": 130,
+  "slice": "S1",
+  "date": "2026-10-22",
+  "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
+  "head": "54ff414a46fd714280f312651a6c7a2e62574cda",
+  "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
+  "sdk": "10.0.112",
+  "production_runtime_changed": false,
+  "scope": "Baseline, contract freeze and intentional red examples. No EF/FreeSql/SqlSugar runtime fix in S1.",
+  "suites": {
+    "orm_providers_before": {
+      "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
+      "total": 124,
+      "passed": 124,
+      "failed": 0,
+      "outcome": "baseline reproduced"
+    },
+    "orm_providers_after": {
+      "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
+      "total": 177,
+      "passed": 146,
+      "failed": 31,
+      "outcome": "all 124 historical tests still pass; 31 failures are the intentional red baselines listed in red_baselines"
+    },
+    "code_generator_focused": {
+      "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~Issue130ProviderDiagnosticsBaselineTests",
+      "total": 4,
+      "passed": 1,
+      "failed": 3,
+      "outcome": "EF positive control passes; three provider-diagnostic red baselines fail for the frozen CCCREPO reason"
+    },
+    "code_generator_full": {
+      "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
+      "total": 451,
+      "passed": 448,
+      "failed": 3,
+      "duration": "32m39s",
+      "outcome": "only the three intentional Issue130 provider-diagnostic red baselines fail; no unrelated regression"
+    }
+  },
+  "red_baselines": [
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteAsync_entity_must_preserve_the_row",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
+      "current_fact": "physical DELETE (row missing)",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteAsync_id_must_preserve_the_row",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
+      "current_fact": "physical DELETE (row missing)",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteRangeAsync_entities_must_preserve_rows",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
+      "current_fact": "physical DELETE (row missing)",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteRangeAsync_predicate_must_preserve_rows",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
+      "current_fact": "physical DELETE (row missing)",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteAsync_entity_must_preserve_the_row",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
+      "current_fact": "physical DELETE (row missing)",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteAsync_id_must_preserve_the_row",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
+      "current_fact": "physical DELETE (row missing)",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteRangeAsync_entities_must_preserve_rows",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
+      "current_fact": "physical DELETE (row missing)",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteRangeAsync_predicate_must_preserve_rows",
+      "claim": "five soft-delete overloads must retain the row, write delete audit and advance stamp where applicable",
+      "current_fact": "physical DELETE (row missing)",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D02_EfCore_default_reads_hide_soft_deleted_rows",
+      "claim": "default reads must hide soft-deleted rows",
+      "current_fact": "no soft-delete query filter",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D02_SqlSugar_filtering_must_be_applied_by_production_read_paths",
+      "claim": "default reads must hide soft-deleted rows",
+      "current_fact": "production audit wiring does not register the soft-delete filter",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_EfCore_generic_repository_stamped_id_delete_must_preserve_the_row",
+      "claim": "stamped id delete must retain the row and advance the stamp",
+      "current_fact": "ExecuteDeleteAsync physically removes the row",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_EfCore_platform_repository_base_stamped_id_delete_must_preserve_the_row",
+      "claim": "stamped id delete must retain the row and advance the stamp",
+      "current_fact": "ExecuteDeleteAsync physically removes the row",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_FreeSql_stamped_id_delete_must_preserve_the_row_and_advance_the_stamp",
+      "claim": "stamped id delete must retain the row and advance the stamp",
+      "current_fact": "conditional physical DELETE",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_SqlSugar_stamped_id_delete_must_preserve_the_row_and_advance_the_stamp",
+      "claim": "stamped id delete must retain the row and advance the stamp",
+      "current_fact": "conditional physical DELETE",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_EfCore_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+      "claim": "repeated stamp-less delete must be idempotent and keep the first delete audit",
+      "current_fact": "second delete re-runs the soft-delete conversion and refreshes DeleterId",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_FreeSql_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+      "claim": "repeated stamp-less delete must be idempotent and keep the first delete audit",
+      "current_fact": "first delete physically removes the row",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_SqlSugar_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+      "claim": "repeated stamp-less delete must be idempotent and keep the first delete audit",
+      "current_fact": "first delete physically removes the row",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_EfCore_batch_delete_of_stamped_entities_must_reject_before_any_write",
+      "claim": "stamped batch/predicate delete must reject before any write",
+      "current_fact": "deletes execute without the batch stamp precheck",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_EfCore_predicate_delete_of_stamped_entities_must_reject_before_any_write",
+      "claim": "stamped batch/predicate delete must reject before any write",
+      "current_fact": "deletes execute without the batch stamp precheck",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_FreeSql_batch_delete_of_stamped_entities_must_reject_before_any_write",
+      "claim": "stamped batch/predicate delete must reject before any write",
+      "current_fact": "deletes execute without the batch stamp precheck",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_SqlSugar_batch_delete_of_stamped_entities_must_reject_before_any_write",
+      "claim": "stamped batch/predicate delete must reject before any write",
+      "current_fact": "deletes execute without the batch stamp precheck",
+      "owner_slice": "S2"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_EfCore_forged_detached_update_must_not_change_another_tenants_row",
+      "claim": "persisted tenant fact must be validated for detached writes",
+      "current_fact": "interceptor only compares the submitted TenantId; cross-tenant update succeeds",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_FreeSql_cross_tenant_id_delete_must_not_remove_the_row",
+      "claim": "id delete must carry the persisted tenant condition",
+      "current_fact": "tenant-less DELETE removes another tenant row",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_FreeSql_filter_must_resolve_the_current_tenant_per_operation",
+      "claim": "tenant filter must resolve the current tenant per operation",
+      "current_fact": "filter captured tenant-a at configuration time",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_SqlSugar_cross_tenant_id_delete_must_not_remove_the_row",
+      "claim": "id delete must carry the persisted tenant condition",
+      "current_fact": "tenant-less DELETE removes another tenant row",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_SqlSugar_filter_must_resolve_the_current_tenant_per_operation",
+      "claim": "tenant filter must resolve the current tenant per operation",
+      "current_fact": "filter captured tenant-a at configuration time",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_SqlSugar_forged_detached_update_must_not_change_another_tenants_row",
+      "claim": "persisted tenant fact must be validated for detached writes",
+      "current_fact": "update by id+stamp; cross-tenant update succeeds",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U03_SqlSugar_module_must_not_register_a_process_wide_client",
+      "claim": "SqlSugar client/transaction state must be scoped per request",
+      "current_fact": "module registers a process-wide singleton client",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U03_SqlSugar_module_must_register_the_client_interface_used_by_repositories",
+      "claim": "the ISqlSugarClient injected by repositories must be resolvable",
+      "current_fact": "module registers only the concrete SqlSugarClient; ISqlSugarClient has no registration",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U07_FreeSql_repository_honors_a_pre_cancelled_token",
+      "claim": "cancellation must preserve its source",
+      "current_fact": "pre-cancelled token is wrapped in a generic Exception",
+      "owner_slice": "S3"
+    },
+    {
+      "fqn": "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U07_SqlSugar_repository_honors_a_pre_cancelled_token",
+      "claim": "cancellation must preserve its source",
+      "current_fact": "repository never passes the token; cancellation is ignored",
+      "owner_slice": "S3"
+    }
+  ],
+  "positive_controls": [
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_EfCore_tracked_delete_overloads_preserve_rows_and_write_delete_audit",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D02_FreeSql_production_audit_wiring_filters_deleted_rows_from_reads",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D05_EfCore_non_soft_delete_entity_stays_physical",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D05_FreeSql_non_soft_delete_entity_stays_physical",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D05_SqlSugar_non_soft_delete_entity_stays_physical",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D06_EfCore_stale_stamp_delete_throws_and_leaves_the_row_untouched",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D06_FreeSql_stale_stamp_delete_throws_and_leaves_the_row_untouched",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D06_SqlSugar_stale_stamp_delete_throws_and_leaves_the_row_untouched",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.A01_EfCore_insert_persists_creation_audit",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.A01_FreeSql_insert_persists_creation_audit",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.A01_SqlSugar_insert_persists_creation_audit",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.A02_EfCore_update_uses_the_current_user_and_preserves_creation_fields",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.A02_FreeSql_update_uses_the_current_user_and_preserves_creation_fields",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.A02_SqlSugar_update_uses_the_current_user_and_preserves_creation_fields",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_EfCore_cross_tenant_id_delete_is_rejected_by_the_save_interceptor",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_FreeSql_forged_detached_update_must_not_change_another_tenants_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_FreeSql_stable_tenant_filter_isolates_rows",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_SqlSugar_stable_tenant_filter_isolates_rows",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U01_FreeSql_complete_persists_both_repository_writes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U01_FreeSql_two_repositories_follow_the_unit_of_work_and_abandon_hides_both_writes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U01_SqlSugar_complete_persists_both_repository_writes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U01_SqlSugar_two_repositories_follow_the_unit_of_work_and_abandon_hides_both_writes"
+  ],
+  "diagnostic_codes": [
+    {
+      "id": "CCCREPO001",
+      "meaning": "non-EF generated repository/CRUD request",
+      "target_severity": "Error"
+    },
+    {
+      "id": "CCCREPO002",
+      "meaning": "unknown ORM provider request",
+      "target_severity": "Error"
+    }
+  ],
+  "probes": {
+    "free_sql_transaction_participation": "verified on SQLite 3.5.308: two repositories share the platform UoW; abandon hides both writes and complete persists both",
+    "sql_sugar_transaction_participation": "verified on SQLite 5.1.4.214 with explicit scoped client assembly; two repositories share the platform UoW; abandon hides both writes and complete persists both",
+    "sql_sugar_client_lifetime": "defect: production module registers a singleton SqlSugarClient; two scopes resolve the same instance",
+    "free_sql_cancellation": "pre-cancelled token surfaces as System.Exception wrapping TaskCanceledException; cancellation source is lost; in-flight cancellation not probed",
+    "sql_sugar_cancellation": "pre-cancelled token is ignored because repository entries do not pass the token; in-flight cancellation not probed",
+    "module_sqlite_runnability": "FreeSql and SqlSugar modules hardcode SqlServer; module-level SQLite behavior cannot be exercised until S3 unifies assembly"
+  },
+  "tenant_marker_freeze": {
+    "imusthavetenant": {
+      "consumers": [
+        "MustHaveTenantOrganizationEntity -> User",
+        "MustHaveTenantOrganizationEntity -> Role",
+        "MustHaveTenantOrganizationEntity -> Organization"
+      ],
+      "current_default": "EF generated filter uses host-null => all tenants; base repository filters only when DataFilterState enables TenantFilter and a tenant is present"
+    },
+    "datafilter_imultitenant": {
+      "consumers": [
+        "abstract MultiTenantEntity<TId>",
+        "abstract MultiTenantSoftDeleteEntity<TId>",
+        "no concrete production consumer found"
+      ],
+      "current_default": "EF generated filter uses host-null => all; FreeSql/SqlSugar register no filter when the current tenant is null"
+    },
+    "ef_imultitenant": {
+      "consumers": [
+        "abstract Data.EFCore.MultiTenancy.MultiTenantEntity",
+        "no concrete production consumer found"
+      ],
+      "current_default": "same generated host-null => all filter"
+    },
+    "target": "Host ordinary reads must not implicitly gain an all-tenant view; optional IMultiTenant host reads only null shared rows; mandatory-tenant writes must validate persisted ownership. Tightening requires real consumers and migration notes in S3."
+  },
+  "deferred": [
+    "Q01 EF formal generated CRUD relational query with UoW (S4 exit)",
+    "R full registration matrix regression (existing tests plus S3)",
+    "EF generated tenant filter composition and host semantics tightening (S3)",
+    "PostgreSQL and other databases",
+    "ORM trim/NativeAOT gates (remain unverified)",
+    "in-flight cancellation and bounded termination"
+  ]
+}

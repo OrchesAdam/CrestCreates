@@ -1,0 +1,218 @@
+{
+  "issue": 130,
+  "slice": "S2",
+  "date": "2026-10-22",
+  "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
+  "head": "9071e99a3340fb288c8891d011c14acdb571c34d",
+  "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
+  "sdk": "10.0.112",
+  "scope": "Delete semantics and live-row query closure for EF Core, FreeSql and SqlSugar on independent-file SQLite. T/U stay S3.",
+  "suites": {
+    "orm_providers": {
+      "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
+      "total": 203,
+      "passed": 193,
+      "failed": 10,
+      "outcome": "all D/A and review-probe cases pass; all 124 historical tests pass; the 10 failures are the deferred S3 T/U red baselines"
+    },
+    "tenant_soft_filter_generator": {
+      "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests --filter FullyQualifiedName~TenantFilterSourceGeneratorTests",
+      "total": 8,
+      "passed": 8,
+      "failed": 0
+    },
+    "code_generator_full": {
+      "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
+      "total": 458,
+      "passed": 455,
+      "failed": 3,
+      "duration": "31m19s",
+      "outcome": "only the three intentional CCCREPO red baselines fail; no unrelated regression after the R2 generator name-encoding fix"
+    }
+  },
+  "s2_green_delete_and_query": [
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_EfCore_tracked_delete_overloads_preserve_rows_and_write_delete_audit",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteAsync_entity_must_preserve_the_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteAsync_id_must_preserve_the_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteRangeAsync_entities_must_preserve_rows",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_FreeSql_DeleteRangeAsync_predicate_must_preserve_rows",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteAsync_entity_must_preserve_the_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteAsync_id_must_preserve_the_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteRangeAsync_entities_must_preserve_rows",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D01_SqlSugar_DeleteRangeAsync_predicate_must_preserve_rows",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D02_EfCore_default_reads_hide_soft_deleted_rows",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D02_FreeSql_production_audit_wiring_filters_deleted_rows_from_reads",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D02_FreeSql_queries_apply_live_row_condition_in_the_database",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D02_SqlSugar_filtering_must_be_applied_by_production_read_paths",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D02_SqlSugar_queries_apply_live_row_condition_in_the_database",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_EfCore_generic_repository_stamped_id_delete_must_preserve_the_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_EfCore_platform_repository_base_stamped_id_delete_must_preserve_the_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_FreeSql_stamped_id_delete_must_preserve_the_row_and_advance_the_stamp",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D03_SqlSugar_stamped_id_delete_must_preserve_the_row_and_advance_the_stamp",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_EfCore_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_FreeSql_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D04_SqlSugar_repeated_stamp_less_delete_must_not_refresh_delete_audit",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D05_EfCore_non_soft_delete_entity_stays_physical",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D05_FreeSql_non_soft_delete_entity_stays_physical",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D05_SqlSugar_non_soft_delete_entity_stays_physical",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D06_EfCore_stale_stamp_delete_throws_and_leaves_the_row_untouched",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D06_FreeSql_stale_stamp_delete_throws_and_leaves_the_row_untouched",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D06_SqlSugar_stale_stamp_delete_throws_and_leaves_the_row_untouched",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_EfCore_batch_delete_of_stamped_entities_must_reject_before_any_write",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_EfCore_predicate_delete_of_stamped_entities_must_reject_before_any_write",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_FreeSql_batch_delete_of_stamped_entities_must_reject_before_any_write",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_FreeSql_predicate_delete_of_stamped_entities_must_reject_before_any_write",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_SqlSugar_batch_delete_of_stamped_entities_must_reject_before_any_write",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D08_SqlSugar_predicate_delete_of_stamped_entities_must_reject_before_any_write",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D09_FreeSql_GetQueryable_must_reject_fake_IQueryable_translation",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130DeleteContractBaselineTests.D09_SqlSugar_GetQueryable_must_reject_fake_IQueryable_translation",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_mapped_columns_cover_reads_and_single_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_mapped_columns_cover_reads_and_single_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_mapped_columns_cover_batch_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_mapped_columns_cover_batch_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.A02_FreeSql_mapped_stamp_update_uses_mapped_columns",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.A02_SqlSugar_mapped_stamp_update_uses_mapped_columns",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_reserved_columns_cover_stamp_delete_and_update",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_reserved_columns_cover_stamp_delete_and_update",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_FreeSql_reserved_columns_cover_batch_deletes",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130MappedColumnTests.D01_SqlSugar_reserved_columns_cover_batch_deletes"
+  ],
+  "remaining_s3_red": [
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_EfCore_forged_detached_update_must_not_change_another_tenants_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_FreeSql_cross_tenant_id_delete_must_not_remove_the_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_FreeSql_filter_must_resolve_the_current_tenant_per_operation",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_SqlSugar_cross_tenant_id_delete_must_not_remove_the_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_SqlSugar_filter_must_resolve_the_current_tenant_per_operation",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.T_SqlSugar_forged_detached_update_must_not_change_another_tenants_row",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U03_SqlSugar_module_must_not_register_a_process_wide_client",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U03_SqlSugar_module_must_register_the_client_interface_used_by_repositories",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U07_FreeSql_repository_honors_a_pre_cancelled_token",
+    "CrestCreates.OrmProviders.Tests.Issue130.Issue130TenantAuditUowBaselineTests.U07_SqlSugar_repository_honors_a_pre_cancelled_token"
+  ],
+  "implementation": {
+    "ef_core": [
+      "both stamped id delete entries load the current row, apply the expected stamp as the original value, advance the stamp, and use tracked Deleted so AuditInterceptor performs the soft delete",
+      "stamped batch/predicate deletes throw NotSupportedException before any read or write",
+      "DbUpdateConcurrencyException at UoW flush is translated to CrestConcurrencyException",
+      "the tenant filter generator now emits strongly typed soft-delete filters; tenant+soft entities combine both conditions; guards make the generated registrations safe for multiple DbContexts",
+      "CrestCreatesDbContext applies soft-delete filters before tenant filters, including host context",
+      "CrestCreatesDbContext fails closed if a soft-delete entity remains without a query filter after generated registrations apply",
+      "tenant OR is parenthesized before the live-row AND so host context cannot bypass soft-delete hiding"
+    ],
+    "free_sql": [
+      "all five delete overloads use one provider-internal conditional UPDATE action for soft entities and keep DELETE for non-soft entities",
+      "stamped batch/predicate deletes reject before writes",
+      "repository construction registers the ISoftDelete global filter",
+      "GetQueryable throws NotSupportedException instead of returning ToList().AsQueryable()",
+      "SQL-level evidence test asserts the live-row condition appears in the database statement",
+      "live-row/id/stamp conditions resolve physical columns through FreeSql table metadata"
+    ],
+    "sql_sugar": [
+      "all five delete overloads use one provider-internal conditional UPDATE action for soft entities and keep DELETE for non-soft entities",
+      "stamped batch/predicate deletes reject before writes",
+      "repository queries add live-row conditions; audit wiring also registers the soft-delete filter",
+      "GetQueryable throws NotSupportedException instead of returning ToList().AsQueryable()",
+      "SQL-level evidence test asserts the live-row condition appears in the database statement",
+      "live-row/id/stamp conditions resolve physical columns through EntityMaintenance; the query filter is registered once per client"
+    ],
+    "code_generator": [
+      "generated filter methods, calls and index names use the full type identity to avoid CS0111/CS0121 for same-named entities"
+    ]
+  },
+  "fault_controls": {
+    "physical_delete_mutation": "the S1 baselines at 2f3d64e4 ran against the old physical-DELETE implementations and failed D01/D03/D04/D08; after the S2 change the same cases pass",
+    "batch_stamp_zero_write": "D08 asserts NotSupportedException and zero live rows changed",
+    "stale_stamp_zero_write": "D06 EF/FreeSql/SqlSugar assert CrestConcurrencyException and an unchanged row",
+    "uow_delayed_conflict": "U01_EfCore_stale_stamp_delete_reports_conflict_at_complete observes CrestConcurrencyException at CompleteAsync with the row unchanged",
+    "idempotent_delete": "D04 changes the current user between deletes and asserts the first DeleterId is preserved"
+  },
+  "migration_notes": {
+    "sdk_get_queryable": "SDK repositories now throw NotSupportedException; use async repository methods or the SDK query API directly",
+    "stamped_batches": "stamped batch/predicate deletes are rejected; use DeleteAsync(id, expectedStamp) per row",
+    "ef_filters": "custom DbContexts must apply the generated soft-delete registration via SoftDeleteFilterConfiguration.ApplyAll; tenant filters remain via ConfigureTenantDiscriminator",
+    "ef_uow_conflicts": "catch CrestConcurrencyException instead of DbUpdateConcurrencyException",
+    "sdk_repository_ctor": "optional ICurrentUserProvider parameter; existing subclasses remain source-compatible; S3 wires the adapter"
+  },
+  "deferred_to_s3": [
+    "persisted tenant ownership for detached writes and cross-tenant id/predicate deletes",
+    "per-operation tenant filters instead of configuration-time tenant capture",
+    "SqlSugar scoped client and ISqlSugarClient registration",
+    "cancellation source preservation and SDK token propagation",
+    "host tenant-visibility tightening with real consumers/migration notes"
+  ],
+  "not_verified": [
+    "PostgreSQL/other databases",
+    "ORM trim/NativeAOT",
+    "in-flight cancellation"
+  ],
+  "review_rounds": [
+    {
+      "round": "R1",
+      "reviewed_head": "b7f1d349d570133dccb5bb64add30fafe70b7d34",
+      "fix_head": "666816c22cae7f6192fe1987cb74b59b21a8b63f",
+      "report": "docs/review/2026-10-22-issue-130-s2-review-round1.md",
+      "response": "docs/review/2026-10-22-issue-130-s2-review-round1-response.md",
+      "findings": [
+        {
+          "id": "R1-1",
+          "status": "fixed",
+          "summary": "parenthesize tenant OR before AND live-row; host and tenant probes pass"
+        },
+        {
+          "id": "R1-2",
+          "status": "fixed",
+          "summary": "provider mapping-aware live-row/id/stamp conditions; mapped-column regressions cover all delete overloads and queries"
+        },
+        {
+          "id": "R1-3",
+          "status": "fixed",
+          "summary": "generated method/index identity uses full type name; same-simple-name compilation control passes"
+        }
+      ],
+      "probes": {
+        "orm_reviewer": {
+          "before": "1 passed / 4 failed / 5",
+          "after": "5 passed / 0 failed / 5"
+        },
+        "generator_reviewer": {
+          "before": "1 passed / 1 failed / 2",
+          "after": "2 passed / 0 failed / 2"
+        },
+        "mapped_column_regression": "6 passed",
+        "code_generator_full": "455 total / 452 passed / 3 intentional G red"
+      }
+    },
+    {
+      "round": "R2",
+      "reviewed_head": "b466457204ad43612f10de907ff08886f55b9b5f",
+      "fix_head": "9071e99a3340fb288c8891d011c14acdb571c34d",
+      "report": "docs/review/2026-10-22-issue-130-s2-review-round2.md",
+      "response": "docs/review/2026-10-22-issue-130-s2-review-round2-response.md",
+      "findings": [
+        {
+          "id": "R2-1",
+          "status": "fixed",
+          "summary": "FreeSql strong typed interface predicates and SqlSugar quoted mapped identifiers cover reserved-word columns for live/id/stamp conditions and stamped updates"
+        },
+        {
+          "id": "R2-2",
+          "status": "fixed",
+          "summary": "injective full-type identity encoding distinguishes A.B.Row from A_B.Row in methods, calls and index names"
+        }
+      ],
+      "probes": {
+        "mapping_reserved": {
+          "before": "2 passed / 2 failed / 4",
+          "after": "4 passed / 0 failed / 4"
+        },
+        "generator_collision": {
+          "before": "1 passed / 1 failed / 2",
+          "after": "2 passed / 0 failed / 2"
+        },
+        "reserved_word_regressions": "4 passed",
+        "r1_probes_still_green": "5/5 ORM and 2/2 generator",
+        "code_generator_full": "458 total / 455 passed / 3 intentional G red"
+      }
+    }
+  ]
+}

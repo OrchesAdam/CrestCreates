@@ -10,6 +10,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using CrestCreates.CodeGenerator.CrudServiceGenerator;
 using CrestCreates.CodeGenerator.ObjectMappingGenerator;
+using CrestCreates.CodeGenerator.RepositoryGenerator;
 
 namespace CrestCreates.CodeGenerator.EntityGenerator
 {
@@ -263,6 +264,12 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             var idType = GetEntityIdType(entityClass);
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
             var ormProvider = GetAttributeProperty(entityClass, "OrmProvider", "EfCore");
+            var providerDiagnostic = RepositoryGeneratorDiagnostics.Create(entityClass, ormProvider);
+            if (providerDiagnostic is not null)
+            {
+                context.ReportDiagnostic(providerDiagnostic);
+                return;
+            }
 
             if (ormProvider == "EfCore")
             {
