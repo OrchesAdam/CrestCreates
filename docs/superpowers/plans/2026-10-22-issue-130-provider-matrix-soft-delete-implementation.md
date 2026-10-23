@@ -111,3 +111,10 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 兼容：required host 读 fail closed；optional host 仅共享行；EF 专用 optional host=all 保留为兼容差异；FreeSql 扩展停止仓储扫描；SqlSugar client scoped；租户 `UpdateRange` 拒绝。
 - 证据：[S3 记录](../review/2026-10-22-issue-130-s3-tenant-assembly.md)、[S3 JSON](../review/2026-10-22-issue-130-s3-evidence.json)。
 - 未验证：EF 专用 marker host 收紧、PG/其他数据库、ORM trim/NativeAOT、in-flight 取消、跨进程并发。
+
+## S3 R1 复审修复记录（2026-10-23）
+
+- 审查 head `8c8b24fe` 提出 2 P1 + 2 P2；修复提交 `1025368e`。
+- EF 归属预读 `AsNoTracking`；SDK 读写租户谓词分离（共享 null 行 host 独占写）；Provider 仓储内部创建/修改/删除审计；所有 SDK 入口组合受管执行 token。
+- ReviewS3Probes 22/22（修复前 8/22）；全量 OrmProviders **240/240**；新增正式 DI 审计回归 2/2。CodeGenerator 458/455/3（未改生成器），Boundary 176/178（既有 #69）。
+- 证据：[S3 R1 response](../review/2026-10-23-issue-130-s3-review-round1-response.md)。测试按用户要求串行执行。

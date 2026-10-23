@@ -2,18 +2,18 @@
   "issue": 130,
   "slice": "S3",
   "date": "2026-10-22",
-  "head": "64dad166b2bfae2052f859213da6c2272a1dda98",
+  "head": "1025368ee63c0ae36878f70f261f29f808d9fd4e",
   "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
   "sdk": "10.0.112",
   "scope": "Tenant isolation, persisted ownership, identity adapter, provider assembly and cancellation-source preservation on independent-file SQLite.",
   "suites": {
     "orm_providers": {
       "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
-      "total": 216,
-      "passed": 216,
+      "total": 240,
+      "passed": 240,
       "failed": 0,
       "skipped": 0,
-      "outcome": "all S1/S2/R1/R2/S3 tests pass, including the former 10 T/U red baselines and 13 new S3 tenant/assembly tests"
+      "outcome": "all S1/S2/R1/R2/S3 tests and the 22 S3 review probes pass; 2 additional formal-DI audit regressions pass"
     },
     "code_generator_full": {
       "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
@@ -64,10 +64,11 @@
     ]
   },
   "implementation": {
-    "sdk_tenant": "FreeSql/SqlSugar repositories resolve ICurrentTenant per operation for reads and writes; required tenant host fails closed; optional tenants read own + shared null rows; persisted tenant ownership is checked before writes; range deletes are tenant-scoped; tenant UpdateRange is rejected",
-    "ef_tenant_filters": "generated required and DataFilter-optional expressions enforce host fail-closed/shared-only semantics; EF-specific optional keeps the documented host=all compatibility; production DbContext applies filters in host via HostCurrentTenant",
+    "sdk_tenant": "FreeSql/SqlSugar repositories resolve ICurrentTenant per operation for reads and writes; required tenant host fails closed; optional tenants read own + shared null rows; persisted tenant ownership is checked before writes; range deletes are tenant-scoped; tenant UpdateRange is rejected; write ownership is separate from read visibility (shared null rows are host-owned)",
+    "ef_tenant_filters": "generated required and DataFilter-optional expressions enforce host fail-closed/shared-only semantics; EF-specific optional keeps the documented host=all compatibility; production DbContext applies filters in host via HostCurrentTenant; persisted ownership uses AsNoTracking snapshots",
     "assembly": "SqlSugar scoped client + ISqlSugarClient alias + UoW core shared by module/extension; FreeSql UoW core shared by module/extensions; single ICurrentUserProvider adapter with fallback; FreeSql repository scanning removed",
-    "cancellation": "both SDK repositories check the caller token at every entry; pre-cancelled operations throw OperationCanceledException and SqlSugar connection reuse is verified"
+    "cancellation": "repository entries combine caller and managed execution tokens; pre-entry managed cancellation writes zero rows",
+    "audit": "provider repositories apply creation/modification/deletion audit from the scoped ICurrentUserProvider without manual SDK hook configuration"
   },
   "migration": [
     "SDK required-tenant host reads now throw; use an explicit governance context",
@@ -86,5 +87,50 @@
     "cross-process concurrency"
   ],
   "native_gate_note": "No AOT-verified formal runtime was modified in S3; ORM packages remain unverified for trim/NativeAOT.",
-  "tests_note": "existing MultiTenancyInterceptorTests uses IgnoreQueryFilters only to target the write interceptor; normal reads are filtered by S3"
+  "tests_note": "all suites were run serially per the maintainer instruction; reviewer probes are committed verbatim",
+  "review_rounds": [
+    {
+      "round": "S3-R1",
+      "reviewed_head": "8c8b24fe6869116b99aafe15ae015725a2f6de49",
+      "fix_head": "1025368ee63c0ae36878f70f261f29f808d9fd4e",
+      "report": "docs/review/2026-10-23-issue-130-s3-review-round1.md",
+      "response": "docs/review/2026-10-23-issue-130-s3-review-round1-response.md",
+      "findings": [
+        {
+          "id": "S3-R1-1",
+          "severity": "P1",
+          "status": "fixed",
+          "summary": "EF ownership preflight reads an AsNoTracking persisted snapshot"
+        },
+        {
+          "id": "S3-R1-2",
+          "severity": "P1",
+          "status": "fixed",
+          "summary": "SDK write ownership excludes shared null rows for ordinary tenants; host maintains shared rows"
+        },
+        {
+          "id": "S3-R1-3",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "provider repositories write creation/modification/deletion audit through the scoped user provider"
+        },
+        {
+          "id": "S3-R1-4",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "repository entries combine caller and managed execution tokens before SQL"
+        }
+      ],
+      "probes": {
+        "review_s3": {
+          "before": "8 passed / 14 failed / 22",
+          "after": "22 passed / 0 failed / 22"
+        },
+        "ef_ownership": "6/6",
+        "shared_row_writes": "12/12",
+        "formal_audit": "2/2 + 2/2 regressions",
+        "managed_cancellation": "2/2"
+      }
+    }
+  ]
 }

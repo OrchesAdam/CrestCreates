@@ -10,7 +10,7 @@ S3 出口：T/A/U/R 真实 SQLite 矩阵通过；租户/事务故障控制归因
 
 | 套件 | 结果 |
 | --- | --- |
-| OrmProviders（全量） | **216 total / 216 passed / 0 failed / 0 skipped** |
+| OrmProviders（全量，含 R1 复审修复） | **240 total / 240 passed / 0 failed / 0 skipped** |
 | 原 S1/S2 的 10 条 T/U 红例 | 全部转绿 |
 | 新增 S3 租户矩阵 | 9 / 9 passed |
 | 新增 S3 装配/事务/取消矩阵 | 4 / 4 passed |
@@ -84,6 +84,18 @@ S3 出口：T/A/U/R 真实 SQLite 矩阵通过；租户/事务故障控制归因
 | FreeSql 扩展不再扫描仓储程序集 | 显式注册闭合泛型仓储 |
 | SqlSugar client 从 singleton 改为 scoped | 每请求/作用域一个 client；仓储与 UoW 共享 |
 | 取消预检查 | 适配器不吞取消；in-flight SQL 取消仍未验证 |
+
+## 4.1 S3 R1 复审修复（2026-10-23）
+
+审查 head `8c8b24fe` 提出 2 P1 + 2 P2，修复提交 `1025368e`：
+
+- EF 持久归属预读改用 `AsNoTracking()` 快照，修复 tracked 伪造与 detached 误冲突；探针 6/6。
+- SDK 分离读范围与写所有权：普通租户只能写自身行，共享 null 行只有 host 可维护；探针 12/12。
+- 审计进入 Provider 内部仓储动作（创建/修改/删除），正式 DI 不依赖手动 `ConfigureAuditInterceptor`；审查探针 2/2 + 跨 scope 回归 2/2。
+- 每个 SDK 仓储入口组合调用方 token 与受管执行 token，入库前取消零写入；探针 2/2。
+- ReviewS3Probes 22/22；全量 OrmProviders 240/240；CodeGenerator 458/455/3（G 红），Boundary 176/178（既有 #69）。
+
+逐项回复见 [S3 R1 response](2026-10-23-issue-130-s3-review-round1-response.md)。
 
 ## 5. 未验证/未覆盖
 
