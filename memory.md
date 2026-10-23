@@ -8,6 +8,32 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
+## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (in flight)
+
+- Branch `feat/issue-130-provider-matrix-soft-delete-20261022-104210`, PR #154, based on master
+  `8c8a71de6a47d7c0eb94e8260e9f94035b22a477`; **not merged**, CI paused, awaiting unified review.
+- S1–S5 delivered: provider support matrix, real soft delete, live-row filtering, per-operation
+  tenant isolation and persisted ownership, SDK assembly/core consolidation, compile-time
+  provider rejection and EF generated CRUD relational Q01.
+- Final matrix: [docs/Feature/OrmProviderSupportMatrix.md](docs/Feature/OrmProviderSupportMatrix.md).
+  Summary: EF/FreeSql/SqlSugar SQLite JIT core behaviors supported with execution evidence;
+  EF PostgreSQL UoW and generated CRUD Q01 supported; FreeSql/SqlSugar non-EF generated CRUD
+  rejected (CCCREPO001/002); unknown provider rejected; SqlServer/MySQL and ORM trim/NativeAOT
+  remain **unverified**.
+- Evidence head: `e57abee5` (S5 docs/evidence follow). Key counts: OrmProviders 257/257,
+  CodeGenerator 461/461, GeneratedCrud JIT 28/28, GeneratedCrud NativeAOT 3/3, PG UoW 4/4,
+  Boundary 176/178 (2 existing ControlPlane evidence-ledger guards).
+- Review history: S2 R1/R2, S3 R1/R2/R3, S4 R1 all closed; probes are in-repo where accepted.
+- Migration/behavior changes: soft delete becomes logical; stamped batch/predicate delete rejects;
+  SDK `GetQueryable` rejects; SDK required-tenant host reads fail closed, optional host sees shared
+  only, shared rows are host-owned; SqlSugar client is scoped; FreeSql extension no longer scans;
+  retired tenant/soft-delete configuration hooks reject; generated repositories/CRUD are EF-only.
+- Not verified: SQLServer/MySQL and other databases; PostgreSQL SDK soft-delete/tenant/audit/
+  cancellation details; ORM trim/NativeAOT; in-flight SQL cancellation; cross-process concurrency;
+  EF-specific optional marker host tightening.
+- Remaining S5 work at this record: final matrix/migration/memory already in this branch; PR merge
+  and post-merge AGENTS/evidence sync are the maintainer's decision.
+
 ## Delivered capabilities (master)
 
 - Core platform mainlines: Tenant / Setting / Feature / Permission / BackgroundJobs /
@@ -236,3 +262,5 @@ never deleted; never output credentials.
 - 2026-10-21（#129 S5 Ticket NativeAOT 与最终交接，code head `5e3878b2`，docs/evidence head `743fc783`）：新增 `tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` + `.Tests`。local class-level anchor 引用真实 `ITicketAppService`，由正式 AppService HTTP/JSON 工具链生成 11 动作 bundle；运行真实 TicketAppService/DTO/validator（fixture 仅用继承真实规则的闭包 validator 以获得 precompile 可发现性）。仅替换内存 Ticket/SLA 仓储、内存 UoW、fixture identity/permission checker 与 failure presenter/classifier；Ticket/SLA 查询使用有界静态 queryable，不使用 BCL EnumerableQuery/Expression.Compile/反射动态 LINQ；未手写同名 DTO/等价 service/JSON root table/endpoint map。原生 15 场景（create/get/all/by-customer/update stamp/assign+active SLA/resolve/close/delete If-Match/unknown 404/invalid body zero-business/permission 403/business failure/metadata rejection）+ `CRESTCREATES_TICKET_NATIVE_OK`；两变异（wrong-expectation、wrong-validation-status）exit 1 无总 sentinel。JIT 1/1、原生门禁 3/3（linux-x64 publish/link/run），证据 `tests/artifacts/aot-native-evidence/ticket-native-http*.json`。P3：`CapabilityCompatibilityProjectionAttribute` XML 注释删除方法级推荐，明确方法级退役/CCHTTP001。支持声明：**Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64，该 fixture 范围）**；不推导 EF/PostgreSQL、真实认证/租户、整个 SaaSHelpdesk、Library HTTP、其他 RID。既有受影响门禁沿用 S4 最终 head 证据（SaaSHelpdesk 152/11/163、Web 102、DynamicApi 141、Application 177、Capability 178、OrmProviders 124、JsonContracts 162、Procurement 29、E2E 20、CapabilityEndpoint AOT 13、CRUD AOT 23、Data AOT 1、Boundary 176/178（2 既存 WIP）、CodeGenerator 447、Library 契约基线 2）；主解决方案 0 error。Library 完整 HTTP 仍未验证（既有 OpenIddictScopes 环境缺失）；未合并，CI 暂停。
 
 - 2026-10-22：补正 #128 合并状态。功能代码已通过 PR #150 合入 master（`196b6f66048ef32d644eeb856d00d58ae9d34965`），旧文档中的“待合并”已更正；原留给 #129 的旧 bundle/Controller/Legacy 归档已通过 PR #152 完成（`2f4c54024d8e2e9c5b8aecad1a399669dadb28a6`）。NativeAOT 支持仍限已验证 fixture/linux-x64，EF/其他 ORM 查询翻译与 UoW 组合、其他 RID 未验证；CI 保持暂停。
+
+- 2026-10-23（#130 S5 最终）：ORM Provider 支持矩阵/软删除/租户/UoW 在 PR #154 完成 S1–S5（分支，未合并）。最终矩阵落 `docs/Feature/OrmProviderSupportMatrix.md`。S1 基线 124/124 → S2 删除/查询闭环 → S3 租户/装配 → S4 生成期拒绝与 EF CRUD Q01；最终 OrmProviders 257/257、CodeGenerator 461/461（G 红例闭合，含真实 MSBuild 消费控制）、GeneratedCrud JIT 28/28（SQLite + PostgreSQL Q01 + 敏感性/缺 UoW 负控）、CRUD NativeAOT 3/3、PG UoW 4/4、Boundary 176/178（2 条既有 #69）。支持声明按矩阵逐项；SQLServer/MySQL、ORM trim/NativeAOT、PG SDK 细节、in-flight 取消、跨进程并发未验证。所有审查轮次（S2 R1/R2、S3 R1/R2/R3、S4 R1）已闭合；PR 未合并、CI 保持暂停。

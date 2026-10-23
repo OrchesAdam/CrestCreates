@@ -143,6 +143,15 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - 证据：[S4 记录](../review/2026-10-23-issue-130-s4-compile-entry-crud.md)、[S4 JSON](../review/2026-10-23-issue-130-s4-evidence.json)。
 - 未验证：SQLServer/MySQL、ORM trim/NativeAOT、SQLite/PostgreSQL 之外的 generated CRUD、in-flight 取消、跨进程并发。
 
+## S5 执行记录（2026-10-23）
+
+- 状态：S5 完成，S1–S5 已全部交付到 PR #154；**未合并**，CI 保持暂停，等待维护者统一审查。
+- 最终矩阵：[docs/Feature/OrmProviderSupportMatrix.md](../../Feature/OrmProviderSupportMatrix.md)；迁移/兼容变化、证据索引与未验证范围见矩阵 §3/§4。
+- memory.md 已新增 2026-10-23 #130 状态与未验证边界。
+- 遗留弱 hook 收口：FreeSql `ConfigureMultiTenantFilter`/`ConfigureSoftDelete`、SqlSugar `ConfigureMultiTenantFilter` 改为确定性拒绝；新增回归 2/2。
+- 最终计数：OrmProviders **257/257**、CodeGenerator **461/461**、GeneratedCrud JIT **28/28**、GeneratedCrud NativeAOT **3/3**、PG UoW **4/4**、Boundary 176/178（2 条既有 #69）。
+- 证据：[S5 JSON](../review/2026-10-23-issue-130-s5-evidence.json)。未验证：SQLServer/MySQL、ORM trim/NativeAOT、PG SDK 细节、in-flight 取消、跨进程并发、EF 专用 optional host 收紧。
+
 ## S4 R1 复审修复记录（2026-10-23）
 
 - 审查 head `824da858` 两项 Q01 验收缺口；修复提交 `1f8e592e`。

@@ -1,0 +1,88 @@
+{
+  "issue": 130,
+  "slice": "S5",
+  "date": "2026-10-23",
+  "implementation_head": "e57abee5dd00ca07e761608cc26f98782d9bf91f",
+  "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
+  "pr": 154,
+  "status": "S1-S5 delivered on branch; PR not merged; CI paused",
+  "matrix": "docs/Feature/OrmProviderSupportMatrix.md",
+  "memory_updated": true,
+  "versions": {
+    "ef_core": "10.0.7",
+    "npgsql_ef": "10.0.1",
+    "freesql": "3.5.308",
+    "sqlsugar": "5.1.4.214",
+    "postgres": "16-alpine"
+  },
+  "final_suites": {
+    "orm_providers": {
+      "total": 257,
+      "passed": 257,
+      "failed": 0
+    },
+    "code_generator": {
+      "total": 461,
+      "passed": 461,
+      "failed": 0,
+      "duration": "31m11s"
+    },
+    "generated_crud_jit": {
+      "total": 28,
+      "passed": 28,
+      "failed": 0
+    },
+    "generated_crud_native": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "duration": "1m44s"
+    },
+    "postgres_uow": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0
+    },
+    "dependency_boundaries": {
+      "total": 178,
+      "passed": 176,
+      "failed": 2,
+      "failed_scope": "existing ControlPlane evidence-ledger guards for #69, unrelated"
+    }
+  },
+  "review_history": [
+    "S2 R1/R2 closed",
+    "S3 R1/R2/R3 closed",
+    "S4 R1 closed"
+  ],
+  "retired_weak_hooks": [
+    "FreeSql ConfigureMultiTenantFilter",
+    "FreeSql ConfigureSoftDelete",
+    "SqlSugar ConfigureMultiTenantFilter"
+  ],
+  "migration_summary": [
+    "soft delete is logical for ISoftDelete; non-soft entities stay physical",
+    "stamped batch/predicate delete rejected; use DeleteAsync(id, expectedStamp)",
+    "SDK GetQueryable throws NotSupportedException",
+    "SDK required-tenant host reads fail closed; optional host sees shared null rows; shared rows are host-owned",
+    "EF required host filters return no rows; EF-specific optional marker retains host=all compatibility",
+    "non-EF/unknown generated repositories and CRUD fail with CCCREPO001/002",
+    "SqlSugar client is scoped; FreeSql extension stops repository scanning",
+    "creation audit is authoritative; retire weak tenant/soft-delete configuration hooks"
+  ],
+  "not_verified": [
+    "SQLServer/MySQL and other databases",
+    "PostgreSQL SDK soft-delete/tenant/audit/cancellation details",
+    "ORM trim/NativeAOT",
+    "in-flight SQL cancellation",
+    "cross-process concurrency",
+    "EF-specific optional host tightening"
+  ],
+  "diff": {
+    "files": 74,
+    "insertions": 8976,
+    "deletions": 336
+  },
+  "ci": "paused",
+  "merged": false
+}
