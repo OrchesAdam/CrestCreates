@@ -347,6 +347,7 @@ namespace CrestCreates.Data.EFCore.Repositories
             }
 
             var persisted = await GetQueryableUnfiltered()
+                .AsNoTracking()
                 .Where(e => e.Id.Equals(entity.Id))
                 .FirstOrDefaultAsync(cancellationToken);
             var currentTenant = CurrentTenant?.Id;

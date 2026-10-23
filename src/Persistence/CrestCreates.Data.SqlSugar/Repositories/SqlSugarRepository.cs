@@ -56,6 +56,29 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         }
 
 
+
+        private void ApplyCreationAudit(TEntity entity)
+        {
+            if (entity is not IAuditedEntity audited)
+            {
+                return;
+            }
+
+            audited.CreationTime = DateTime.UtcNow;
+            audited.CreatorId ??= _currentUserProvider?.GetCurrentUserId();
+        }
+
+        private void ApplyModificationAudit(TEntity entity)
+        {
+            if (entity is not IAuditedEntity audited)
+            {
+                return;
+            }
+
+            audited.LastModificationTime = DateTime.UtcNow;
+            audited.LastModifierId = _currentUserProvider?.GetCurrentUserId();
+        }
+
         private (string Sql, Dictionary<string, object> Parameters)? TenantFilter()
         {
             if (!HasTenantMarker)
@@ -87,9 +110,40 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             return ($"({column} = @tenantId OR {column} IS NULL)", parameters);
         }
 
+        private (string Sql, Dictionary<string, object> Parameters)? WriteTenantFilter()
+        {
+            if (!HasTenantMarker)
+            {
+                return null;
+            }
+
+            var tenantId = _currentTenant?.Id;
+            var column = ColumnName(nameof(IMustHaveTenant.TenantId));
+            var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+            if (HasRequiredTenantMarker)
+            {
+                if (string.IsNullOrEmpty(tenantId))
+                {
+                    throw new InvalidOperationException(
+                        $"{typeof(TEntity).Name} requires a current tenant for this write.");
+                }
+
+                parameters["tenantId"] = tenantId;
+                return ($"{column} = @tenantId", parameters);
+            }
+
+            if (string.IsNullOrEmpty(tenantId))
+            {
+                return ($"{column} IS NULL", parameters);
+            }
+
+            parameters["tenantId"] = tenantId;
+            return ($"{column} = @tenantId", parameters);
+        }
+
         private void AddTenantCondition(List<string> conditions, Dictionary<string, object> parameters)
         {
-            var filter = TenantFilter();
+            var filter = WriteTenantFilter();
             if (filter is null)
             {
                 return;
@@ -181,10 +235,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
             var currentTenant = _currentTenant?.Id;
             var persistedTenant = ReadTenantId(persisted);
-            if (HasRequiredTenantMarker
-                    ? !string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal)
-                    : !string.IsNullOrEmpty(persistedTenant) &&
-                      !string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal))
+            if (!string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     $"{typeof(TEntity).Name} (Id={id}) belongs to tenant '{persistedTenant}', not the current tenant '{currentTenant}'.");
@@ -200,23 +251,12 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
             var currentTenant = _currentTenant?.Id;
             var submittedTenant = ReadTenantId(entity);
-            if (HasRequiredTenantMarker
-                    ? !string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal)
-                    : !string.IsNullOrEmpty(submittedTenant) &&
-                      !string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal))
+            if (!string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     $"Cannot write {typeof(TEntity).Name} for tenant '{submittedTenant}' while the current tenant is '{currentTenant}'.");
             }
 
-            var persistedTenant = persisted is null ? null : ReadTenantId(persisted);
-            if (!HasRequiredTenantMarker &&
-                string.IsNullOrEmpty(submittedTenant) &&
-                !string.IsNullOrEmpty(persistedTenant))
-            {
-                throw new InvalidOperationException(
-                    $"Cannot clear the tenant of {typeof(TEntity).Name} (Id={entity.Id}).");
-            }
         }
 
         public override IQueryable<TEntity> GetQueryable()
@@ -236,6 +276,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -254,6 +296,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<List<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -273,6 +317,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<List<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -292,6 +338,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<TEntity?> GetAsync(TKey id, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -310,6 +358,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<TEntity?> GetAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -329,11 +379,14 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<TEntity> InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Adding entity {EntityType}", typeof(TEntity).Name);
                 ApplyTenantOnInsert(entity);
+                ApplyCreationAudit(entity);
                 await _sqlSugarClient.Insertable(entity).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
                 _logger?.LogDebug("Added entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
@@ -347,6 +400,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<IEnumerable<TEntity>> InsertRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -355,6 +410,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 foreach (var item in entityList)
                 {
                     ApplyTenantOnInsert(item);
+                    ApplyCreationAudit(item);
                 }
                 await _sqlSugarClient.Insertable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
                 _logger?.LogDebug("Inserted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
@@ -369,6 +425,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -379,6 +437,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     EnsurePersistedTenant(persistedForTenant, entity.Id);
                     EnsureSubmittedTenant(entity, persistedForTenant);
                 }
+                ApplyModificationAudit(entity);
                 if (entity is IHasConcurrencyStamp stamp)
                 {
                     var oldStamp = stamp.ConcurrencyStamp;
@@ -422,6 +481,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<IEnumerable<TEntity>> UpdateRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -434,6 +495,10 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 }
                 if (entityList.Any(e => e is IHasConcurrencyStamp))
                     throw new NotSupportedException("UpdateRangeAsync does not support entities with IHasConcurrencyStamp. Use UpdateAsync for concurrency-safe updates.");
+                foreach (var item in entityList)
+                {
+                    ApplyModificationAudit(item);
+                }
                 await _sqlSugarClient.Updateable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync();
                 _logger?.LogDebug("Updated {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
                 return entityList;
@@ -447,6 +512,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -545,6 +612,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task DeleteAsync(TKey id, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -606,6 +675,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task DeleteAsync(TKey id, string expectedStamp, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 if (!typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
@@ -674,6 +745,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 ThrowIfBatchDeleteHasNoPerRowStamp();
@@ -724,6 +797,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 ThrowIfBatchDeleteHasNoPerRowStamp();
@@ -777,6 +852,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -798,6 +875,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -820,6 +899,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -843,6 +924,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -866,6 +949,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<long> GetCountAsync(CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -883,6 +968,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<long> GetCountAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -900,6 +987,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -917,6 +1006,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<bool> AnyAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -934,6 +1025,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
         public override async Task<bool> ExistsAsync(TKey id, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();

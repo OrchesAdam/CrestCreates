@@ -63,6 +63,29 @@ namespace CrestCreates.Data.FreeSql.Repositories
             }
         }
 
+
+        private void ApplyCreationAudit(TEntity entity)
+        {
+            if (entity is not IAuditedEntity audited)
+            {
+                return;
+            }
+
+            audited.CreationTime = DateTime.UtcNow;
+            audited.CreatorId ??= _currentUserProvider?.GetCurrentUserId();
+        }
+
+        private void ApplyModificationAudit(TEntity entity)
+        {
+            if (entity is not IAuditedEntity audited)
+            {
+                return;
+            }
+
+            audited.LastModificationTime = DateTime.UtcNow;
+            audited.LastModifierId = _currentUserProvider?.GetCurrentUserId();
+        }
+
         private static Expression<Func<TEntity, bool>> InterfacePropertyEquals(
             Type interfaceType,
             string propertyName,
@@ -128,6 +151,35 @@ namespace CrestCreates.Data.FreeSql.Repositories
             }
 
             return OptionalTenantPredicate(tenantId);
+        }
+
+        private Expression<Func<TEntity, bool>> WriteTenantPredicateForCurrentTenant()
+        {
+            if (!HasTenantMarker)
+            {
+                throw new InvalidOperationException("The entity has no tenant marker.");
+            }
+
+            var tenantId = _currentTenant?.Id;
+            if (HasRequiredTenantMarker)
+            {
+                if (string.IsNullOrEmpty(tenantId))
+                {
+                    throw new InvalidOperationException(
+                        $"{typeof(TEntity).Name} requires a current tenant for this write.");
+                }
+
+                return InterfacePropertyEquals(
+                    typeof(IMustHaveTenant),
+                    nameof(IMustHaveTenant.TenantId),
+                    tenantId);
+            }
+
+            // Ordinary tenants own only their own rows; host owns shared null rows.
+            return InterfacePropertyEquals(
+                typeof(IMultiTenant),
+                nameof(IMultiTenant.TenantId),
+                tenantId!);
         }
 
         private ISelect<TEntity> SelectForCurrentTenant()
@@ -226,8 +278,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                         $"{typeof(TEntity).Name} (Id={id}) belongs to tenant '{persistedTenant}', not the current tenant '{currentTenant}'.");
                 }
             }
-            else if (!string.IsNullOrEmpty(persistedTenant) &&
-                     !string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal))
+            else if (!string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     $"{typeof(TEntity).Name} (Id={id}) belongs to tenant '{persistedTenant}', not the current tenant '{currentTenant}'.");
@@ -237,12 +288,12 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         private IUpdate<TEntity> WithTenant(IUpdate<TEntity> update)
         {
-            return HasTenantMarker ? update.Where(TenantPredicateForCurrentTenant()) : update;
+            return HasTenantMarker ? update.Where(WriteTenantPredicateForCurrentTenant()) : update;
         }
 
         private IDelete<TEntity> WithTenant(IDelete<TEntity> delete)
         {
-            return HasTenantMarker ? delete.Where(TenantPredicateForCurrentTenant()) : delete;
+            return HasTenantMarker ? delete.Where(WriteTenantPredicateForCurrentTenant()) : delete;
         }
 
         private void EnsureSubmittedTenant(TEntity entity, TEntity? persisted)
@@ -264,18 +315,10 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 return;
             }
 
-            if (!string.IsNullOrEmpty(submittedTenant) &&
-                !string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal))
+            if (!string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
                     $"Cannot write {typeof(TEntity).Name} for tenant '{submittedTenant}' while the current tenant is '{currentTenant}'.");
-            }
-
-            var persistedTenant = persisted is null ? null : ReadTenantId(persisted);
-            if (string.IsNullOrEmpty(submittedTenant) && !string.IsNullOrEmpty(persistedTenant))
-            {
-                throw new InvalidOperationException(
-                    $"Cannot clear the tenant of {typeof(TEntity).Name} (Id={entity.Id}).");
             }
         }
 
@@ -287,6 +330,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<List<TEntity>> GetListAsync(CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -304,6 +349,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<List<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -321,6 +368,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<List<TEntity>> GetListAsync(Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -340,6 +389,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<TEntity?> GetAsync(TKey id, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -357,6 +408,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<TEntity?> GetAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -374,11 +427,14 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<TEntity> InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger?.LogDebug("Adding entity {EntityType}", typeof(TEntity).Name);
                 ApplyTenantOnInsert(entity);
+                ApplyCreationAudit(entity);
                 await _orm.Insert(entity).ExecuteAffrowsAsync(cancellationToken);
                 _logger?.LogDebug("Added entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
                 return entity;
@@ -392,6 +448,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<IEnumerable<TEntity>> InsertRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -400,6 +458,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 foreach (var item in entityList)
                 {
                     ApplyTenantOnInsert(item);
+                    ApplyCreationAudit(item);
                 }
                 await _orm.Insert(entityList).ExecuteAffrowsAsync(cancellationToken);
                 _logger?.LogDebug("Inserted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
@@ -414,6 +473,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -424,6 +485,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     EnsurePersistedTenant(persistedForTenant, entity.Id);
                     EnsureSubmittedTenant(entity, persistedForTenant);
                 }
+                ApplyModificationAudit(entity);
                 if (entity is IHasConcurrencyStamp stamp)
                 {
                     var oldStamp = stamp.ConcurrencyStamp;
@@ -434,7 +496,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                         .Where(ConcurrencyStampPredicate(oldStamp));
                     if (HasTenantMarker)
                     {
-                        update = update.Where(TenantPredicateForCurrentTenant());
+                        update = update.Where(WriteTenantPredicateForCurrentTenant());
                     }
                     var rows = await update.ExecuteAffrowsAsync(cancellationToken);
                     if (rows == 0) throw new CrestConcurrencyException(typeof(TEntity).Name, entity.Id);
@@ -445,7 +507,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     if (HasTenantMarker)
                     {
                         update = update.Where(e => e.Id.Equals(entity.Id))
-                            .Where(TenantPredicateForCurrentTenant());
+                            .Where(WriteTenantPredicateForCurrentTenant());
                     }
                     await update.ExecuteAffrowsAsync(cancellationToken);
                 }
@@ -461,6 +523,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<IEnumerable<TEntity>> UpdateRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -473,6 +537,10 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 }
                 if (entityList.Any(e => e is IHasConcurrencyStamp))
                     throw new NotSupportedException("UpdateRangeAsync does not support entities with IHasConcurrencyStamp. Use UpdateAsync for concurrency-safe updates.");
+                foreach (var item in entityList)
+                {
+                    ApplyModificationAudit(item);
+                }
                 await _orm.Update<TEntity>().SetSource(entityList).ExecuteAffrowsAsync(cancellationToken);
                 _logger?.LogDebug("Updated {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
                 return entityList;
@@ -486,6 +554,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -543,6 +613,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task DeleteAsync(TKey id, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -581,6 +653,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task DeleteAsync(TKey id, string expectedStamp, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 if (!typeof(IHasConcurrencyStamp).IsAssignableFrom(typeof(TEntity)))
@@ -629,6 +703,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 ThrowIfBatchDeleteHasNoPerRowStamp();
@@ -665,6 +741,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 ThrowIfBatchDeleteHasNoPerRowStamp();
@@ -703,6 +781,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -722,6 +802,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -741,6 +823,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -761,6 +845,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<PagedResult<TEntity>> GetPagedAsync(int pageIndex, int pageSize, Expression<Func<TEntity, object>> orderBy, bool ascending = true, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -781,6 +867,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<long> GetCountAsync(CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -798,6 +886,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<long> GetCountAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -815,6 +905,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -832,6 +924,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<bool> AnyAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -849,6 +943,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
 
         public override async Task<bool> ExistsAsync(TKey id, CancellationToken cancellationToken = default)
         {
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, out var effective);
+            cancellationToken = effective;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
