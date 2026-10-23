@@ -31,8 +31,8 @@ never deleted; never output credentials.
 - Not verified: SQLServer/MySQL and other databases; PostgreSQL SDK soft-delete/tenant/audit/
   cancellation details; ORM trim/NativeAOT; in-flight SQL cancellation; cross-process concurrency;
   EF-specific optional marker host tightening.
-- Remaining S5 work at this record: final matrix/migration/memory already in this branch; PR merge
-  and post-merge AGENTS/evidence sync are the maintainer's decision.
+- S5 deliverables are complete on this branch; only PR merge and post-merge AGENTS/evidence sync
+  remain, and those are the maintainer's decision.
 
 ## Delivered capabilities (master)
 
