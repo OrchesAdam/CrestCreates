@@ -1,0 +1,82 @@
+{
+  "issue": 130,
+  "slice": "S4",
+  "date": "2026-10-23",
+  "head": "9c62a626e53ce4f5f9137fb7d418cc1cf9738a51",
+  "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
+  "sdk": "10.0.112",
+  "scope": "Compile-time provider rejection (CCCREPO001/002), real MSBuild consumer controls, and EF formal generated CRUD relational evidence on SQLite and PostgreSQL; S5 not started.",
+  "suites": {
+    "code_generator_full": {
+      "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
+      "total": 461,
+      "passed": 461,
+      "failed": 0,
+      "duration": "31m11s",
+      "outcome": "all former G red baselines are green; no unrelated regression"
+    },
+    "msbuild_provider_controls": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "outcome": "FreeSql and unknown Dapper consumer builds fail with CCCREPO001/002 and emit no SDK repository; EF control builds and emits EfCoreOrderRepository"
+    },
+    "generated_crud_jit": {
+      "total": 26,
+      "passed": 26,
+      "failed": 0,
+      "outcome": "includes SQLite and PostgreSQL Q01 relational filter/sort/page and EF UoW write tests"
+    },
+    "generated_crud_native_gate": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "duration": "1m41s",
+      "outcome": "publish/link/run with per-scenario and total sentinels after the Widget enum fixture change"
+    },
+    "postgres_uow": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0
+    },
+    "orm_providers": {
+      "total": 255,
+      "passed": 255,
+      "failed": 0
+    },
+    "dependency_boundaries": {
+      "total": 178,
+      "passed": 176,
+      "failed": 2,
+      "failed_scope": "existing ControlPlane evidence-ledger guards for #69, unrelated"
+    }
+  },
+  "g_diagnostics": {
+    "CCCREPO001": "non-EF generated repository request rejected in EntitySourceGenerator and RepositorySourceGenerator; no direct SDK repository emitted",
+    "CCCREPO002": "unknown provider rejected; no EF fallback",
+    "positive_control": "real MSBuild EF consumer builds and emits the EF repository surface"
+  },
+  "q01": {
+    "sqlite": "generated WidgetAppService + real typed query adapter on EF Core SQLite: decimal/DateTime/nullable/enum filters, sort, paging, and Create under EF UoW",
+    "postgresql": "same query matrix through Testcontainers PostgreSQL 16; SELECT/LIMIT observed on the real database",
+    "not_claimed": "SQLServer/MySQL or other ORM providers; generated CRUD AOT with EF"
+  },
+  "implementation": [
+    "RepositoryGeneratorDiagnostics frozen CCCREPO001/002 and wired into both generators",
+    "enum provider names resolved before diagnostics",
+    "legacy non-EF test fixture entities moved to EF",
+    "Widget fixture gained an enum field for Q01",
+    "no runtime reflection fallback or generic IQueryable adapter added"
+  ],
+  "migration": [
+    "generated repository/CRUD requests outside EF now fail at compile time; use the verified explicit asynchronous repository entry point"
+  ],
+  "not_verified": [
+    "SQLServer/MySQL",
+    "ORM trim/NativeAOT",
+    "EF generated CRUD on databases other than SQLite/PostgreSQL",
+    "in-flight SQL cancellation",
+    "cross-process concurrency"
+  ],
+  "s5_started": false
+}

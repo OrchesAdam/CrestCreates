@@ -132,3 +132,13 @@ dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests
 - SqlSugar 租户归属预读接收操作 token、调用前检查、`FirstAsync(token)`，四个调用点同步。
 - ReviewS3R3Probes 6/6（修复前 5/6）；全部审查探针 36/36；全量 OrmProviders **255/255**。
 - 证据：[S3 R3 response](../review/2026-10-23-issue-130-s3-review-round3-response.md)。
+
+## S4 执行记录（2026-10-23）
+
+- 状态：S4 实现与门禁完成，等待审查；S5 未开始。
+- 提交：`84f25b8e`（诊断/EF CRUD/Q01）、`9c62a626`（PostgreSQL Q01），证据提交见下。
+- 编译期：EntitySourceGenerator/RepositorySourceGenerator 对非 EF/未知 Provider 报 CCCREPO001/002 Error，跳过 SDK 直连产物，不默认 EF；enum Provider 名称映射修正；真实 MSBuild 消费控制 3/3（非 EF/未知失败、EF 正控成功）。
+- Q01：真实生成 WidgetAppService + typed query adapter 在 EF Core SQLite 与 PostgreSQL 16 执行 decimal/DateTime/nullable/enum 过滤、排序、分页；Create 经 `[UnitOfWorkMo]` + EF UoW 持久化。
+- 回归：CodeGenerator 全量 **461/461**（31m11s）；GeneratedCrud JIT **26/26**；NativeAOT 门禁 **3/3**；PG UoW **4/4**；ORM **255/255**；Boundary 176/178（既有 #69）。
+- 证据：[S4 记录](../review/2026-10-23-issue-130-s4-compile-entry-crud.md)、[S4 JSON](../review/2026-10-23-issue-130-s4-evidence.json)。
+- 未验证：SQLServer/MySQL、ORM trim/NativeAOT、SQLite/PostgreSQL 之外的 generated CRUD、in-flight 取消、跨进程并发。
