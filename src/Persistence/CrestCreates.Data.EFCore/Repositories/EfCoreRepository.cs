@@ -121,6 +121,7 @@ namespace CrestCreates.Data.EFCore.Repositories
 
         public override async Task<IEnumerable<TEntity>> UpdateRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            ThrowIfTenantBatchWrite();
             var entityList = entities.ToList();
             if (entityList.Any(e => e is IHasConcurrencyStamp))
                 throw new NotSupportedException("UpdateRangeAsync does not support entities with concurrency stamps. Use UpdateAsync for concurrency-safe updates.");
@@ -182,6 +183,7 @@ namespace CrestCreates.Data.EFCore.Repositories
 
         public override async Task DeleteRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
+            ThrowIfTenantBatchWrite();
             ThrowIfBatchDeleteHasNoPerRowStamp();
 
             var liveEntities = entities
@@ -193,6 +195,7 @@ namespace CrestCreates.Data.EFCore.Repositories
 
         public override async Task DeleteRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
         {
+            ThrowIfTenantBatchWrite();
             ThrowIfBatchDeleteHasNoPerRowStamp();
 
             using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(cancellationToken, _chainNode, out var effective);
@@ -288,6 +291,15 @@ namespace CrestCreates.Data.EFCore.Repositories
             catch (DbUpdateConcurrencyException)
             {
                 throw new CrestConcurrencyException(typeof(TEntity).Name, id);
+            }
+        }
+
+        private static void ThrowIfTenantBatchWrite()
+        {
+            if (HasTenantMarker)
+            {
+                throw new NotSupportedException(
+                    "Batch writes do not validate persisted tenant ownership. Update or delete tenant-scoped entities one by one.");
             }
         }
 
