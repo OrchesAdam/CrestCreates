@@ -724,6 +724,114 @@ public class TenantIdentityArchitectureTests
         Assert.All(violations, violation => Assert.Equal(TenantIdentityRule.TI003, violation.Rule));
     }
 
+    [Fact]
+    public void TI_C01j_ConditionalCompileRemove_IsHonouredByConfiguration()
+    {
+        // A Release-only Remove must not hide a file that the Debug build actually compiles.
+        var root = Path.Combine(Path.GetTempPath(), $"issue131-conditional-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(root, "Sample.csproj"),
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <Nullable>enable</Nullable>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <Compile Remove="ConditionalTenantSwitch.cs" Condition="'$(Configuration)' == 'Release'" />
+                  </ItemGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(root, "Always.cs"), "namespace Sample { public sealed class Always { } }");
+            File.WriteAllText(
+                Path.Combine(root, "ConditionalTenantSwitch.cs"),
+                "namespace Sample { public sealed class ConditionalTenantSwitch { } }");
+
+            var projectFile = Path.Combine(root, "Sample.csproj");
+            var debug = TenantIdentityProjectInventory.Load(root, projectFile, configurationOverride: "Debug");
+            var release = TenantIdentityProjectInventory.Load(root, projectFile, configurationOverride: "Release");
+
+            Assert.Contains(debug.Sources, source => source.RelativePath.EndsWith("ConditionalTenantSwitch.cs", StringComparison.Ordinal));
+            Assert.DoesNotContain(release.Sources, source => source.RelativePath.EndsWith("ConditionalTenantSwitch.cs", StringComparison.Ordinal));
+            Assert.Contains("DEBUG", debug.DefineConstants.Split(';'), StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("RELEASE", release.DefineConstants.Split(';'), StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TI_N08_NonEmptyConstantFallback_KeepsItsOwnProvenance()
+    {
+        const string sample = """
+            using System.Security.Claims;
+            using CrestCreates.Infrastructure.Authorization;
+
+            namespace CrestCreates.Samples.Fallback;
+
+            public sealed class ClaimFallbacks
+            {
+                public Claim WithNameFallback(IdentityClaimsContext context) =>
+                    new("tenantid", context.TenantId ?? "acme-east");
+
+                public Claim WithEmptyFallback(IdentityClaimsContext context) =>
+                    new("tenantid", context.TenantId ?? string.Empty);
+
+                public Claim WithNullFallback(IdentityClaimsContext context) =>
+                    new("tenantid", context.TenantId ?? null);
+            }
+            """;
+
+        var analysis = TenantIdentitySyntheticFixture.Analyze(("Fallback.cs", sample));
+        var claims = analysis.Exits.Where(exit => exit.PortLabel.Contains("Claim", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(3, claims.Length);
+
+        var withName = claims.Single(claim => claim.ArgumentText.Contains("acme-east", StringComparison.Ordinal));
+        Assert.Contains(withName.Origins, origin => origin.StartsWith("literal:", StringComparison.Ordinal));
+
+        foreach (var neutral in claims.Where(claim => !claim.ArgumentText.Contains("acme-east", StringComparison.Ordinal)))
+        {
+            Assert.DoesNotContain(neutral.Origins, origin => origin.StartsWith("literal:", StringComparison.Ordinal));
+            Assert.Contains(neutral.Origins, origin => origin.EndsWith("IdentityClaimsContext.TenantId", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void TI_N09_PassthroughHelper_KeepsTheCallerProvenance()
+    {
+        const string sample = """
+            using System.Security.Claims;
+            using CrestCreates.Infrastructure.Authorization;
+
+            namespace CrestCreates.Samples.Passthrough;
+
+            public sealed class PassthroughClaims
+            {
+                public Claim Direct(IdentityClaimsContext context) => new("tenantid", context.TenantId);
+
+                public Claim ThroughLocal(IdentityClaimsContext context)
+                {
+                    var tenantId = context.TenantId;
+                    return new Claim("tenantid", tenantId);
+                }
+
+                public Claim ThroughHelper(IdentityClaimsContext context) => new("tenantid", Identity(context.TenantId));
+
+                private static string? Identity(string? value) => value;
+            }
+            """;
+
+        var analysis = TenantIdentitySyntheticFixture.Analyze(("Passthrough.cs", sample));
+        var claims = analysis.Exits.Where(exit => exit.PortLabel.Contains("Claim", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(3, claims.Length);
+        Assert.All(claims, claim => Assert.Equal(["CrestCreates.Infrastructure.Authorization.IdentityClaimsContext.TenantId"], claim.Origins));
+    }
+
     // ------------------------------------------------------------ mutations (TI-M)
 
     [Fact]
@@ -799,7 +907,7 @@ public class TenantIdentityArchitectureTests
     {
         // The build compiles the DEBUG branch, so the guard must analyse it. A file that only exists behind
         // #if DEBUG previously stayed invisible because the parse options carried no preprocessor symbols.
-        var (violations, _) = AnalyzeScratch(
+        var (_, cachingAnalysis) = AnalyzeScratch(
             "src/Framework/Infrastructure/CrestCreates.Caching",
             (scratchRoot, scratchProject) =>
             {
@@ -824,8 +932,8 @@ public class TenantIdentityArchitectureTests
                     """);
             });
 
-        Assert.Contains(violations, violation => violation.Rule == TenantIdentityRule.TI001
-                                                && violation.Exit.Contains("ChangeAsync", StringComparison.Ordinal));
+        Assert.Contains(cachingAnalysis.Violations, violation => violation.Rule == TenantIdentityRule.TI001
+                                                               && violation.Exit.Contains("ChangeAsync", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -833,7 +941,7 @@ public class TenantIdentityArchitectureTests
     {
         // CrudGeneration has no project of its own: it only enters a build through a <Compile Include> that
         // points outside the project directory.
-        var (violations, _) = AnalyzeScratch(
+        var (codeGenerator, linkedAnalysis) = AnalyzeScratch(
             "src/Tooling/CrestCreates.CodeGenerator",
             (scratchRoot, _) =>
             {
@@ -856,15 +964,64 @@ public class TenantIdentityArchitectureTests
                     """);
             });
 
-        Assert.Contains(violations, violation => violation.Rule == TenantIdentityRule.TI001
-                                                && violation.RelativePath.EndsWith("LinkedTenantSwitch.cs", StringComparison.Ordinal));
+        // The tooling project does not reference the tenant contracts, so the sensitive call cannot bind there:
+        // what matters is that the linked file is part of the analysed Compile set and produces a diagnostic
+        // for the guard (TI001 when it binds, TI900 when it cannot) instead of being invisible.
+        Assert.Contains(
+            codeGenerator.Sources,
+            source => source.RelativePath.EndsWith("CrudGeneration/LinkedTenantSwitch.cs", StringComparison.Ordinal));
+        Assert.Contains(
+            linkedAnalysis.Diagnostics,
+            diagnostic => diagnostic.RelativePath.EndsWith("LinkedTenantSwitch.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_M08_ConditionalRemoveInRealProject_StillScansTheDebugFile()
+    {
+        // The reviewer's control: a Release-only Remove plus a compiled identity misuse under Debug. Reading the
+        // evaluated Compile set keeps the file visible; a hand-rolled item reader would have dropped it.
+        var (_, fileManagementAnalysis) = AnalyzeScratch(
+            "src/Framework/Modules/CrestCreates.FileManagement",
+            (_, scratchProject) =>
+            {
+                var projectFile = Directory.EnumerateFiles(scratchProject, "*.csproj").Single();
+                var text = File.ReadAllText(projectFile);
+                File.WriteAllText(
+                    projectFile,
+                    text.Replace(
+                        "</Project>",
+                        "  <ItemGroup>\n"
+                        + "    <Compile Remove=\"ConditionalTenantSwitch.cs\" Condition=\"'$(Configuration)' == 'Release'\" />\n"
+                        + "  </ItemGroup>\n</Project>",
+                        StringComparison.Ordinal));
+
+                File.WriteAllText(
+                    Path.Combine(scratchProject, "ConditionalTenantSwitch.cs"),
+                    """
+                    using System.Threading.Tasks;
+                    using CrestCreates.Domain.Permission;
+                    using CrestCreates.MultiTenancy.Abstract;
+
+                    namespace CrestCreates.FileManagement;
+
+                    public sealed class ConditionalTenantSwitch
+                    {
+                        public async Task SwitchAsync(ICurrentTenant currentTenant, Tenant directory) =>
+                            await currentTenant.ChangeAsync(directory.Name);
+                    }
+                    """);
+            });
+
+        Assert.Contains(fileManagementAnalysis.Violations, violation =>
+            violation.Rule == TenantIdentityRule.TI001
+            && violation.RelativePath.EndsWith("ConditionalTenantSwitch.cs", StringComparison.Ordinal));
     }
 
     /// <summary>
     /// Copies one project (with its build outputs) into a scratch tree, lets the caller arrange extra inputs,
     /// and runs the guard against the copy. Nothing is written back into the repository.
     /// </summary>
-    private static (IReadOnlyList<TenantIdentityDiagnostic> Violations, IReadOnlyList<string> Ledger) AnalyzeScratch(
+    private static (TenantProjectInput Input, TenantIdentityAnalysis Analysis) AnalyzeScratch(
         string projectRelativeDirectory,
         Action<string, string> arrange)
     {
@@ -875,6 +1032,17 @@ public class TenantIdentityArchitectureTests
 
         Directory.CreateDirectory(scratchProject);
         CopyTree(sourceProject, scratchProject);
+
+        // The scratch tree has to evaluate like the repository, otherwise MSBuild would see a project without
+        // the shared TargetFramework/nullable/analyzer properties.
+        foreach (var shared in new[] { "Directory.Build.props", "Directory.Build.targets", "Directory.Build.Aot.props", "Directory.Packages.props" })
+        {
+            var path = Path.Combine(root, shared);
+            if (File.Exists(path))
+            {
+                File.Copy(path, Path.Combine(scratchRoot, shared));
+            }
+        }
 
         try
         {
@@ -887,14 +1055,54 @@ public class TenantIdentityArchitectureTests
 
             var analyzer = new TenantIdentityAnalyzer();
             analyzer.AnalyzeProject(project);
-            var analysis = analyzer.Analysis;
-
-            return ([.. analysis.Violations], [.. TenantIdentityAuthoritativeLedger.Evaluate(analysis)]);
+            return (project, analyzer.Analysis);
         }
         finally
         {
             Directory.Delete(scratchRoot, recursive: true);
         }
+    }
+
+    [Fact]
+    public void TI_M06_NonEmptyClaimFallback_IsRejectedByTheLedger()
+    {
+        var (_, ledger) = Mutate(
+            "src/Framework/Infrastructure/CrestCreates.Infrastructure",
+            "Authorization/IdentityClaimsBuilder.cs",
+            text => text
+                .Replace("new(\"tenantid\", context.TenantId ?? string.Empty),", "new(\"tenantid\", context.TenantId ?? \"acme-east\"),", StringComparison.Ordinal)
+                .Replace("new(\"tenant_id\", context.TenantId ?? string.Empty),", "new(\"tenant_id\", context.TenantId ?? \"acme-east\"),", StringComparison.Ordinal));
+
+        Assert.True(
+            ledger.Count(violation => violation.Contains("IdentityClaimsBuilder.cs", StringComparison.Ordinal)) >= 2,
+            "a non-empty constant fallback must not be erased by the authoritative branch: "
+            + string.Join(Environment.NewLine, ledger));
+    }
+
+    [Fact]
+    public void TI_M07_PassthroughHelperInRealClaimsBuilder_IsNotRejected()
+    {
+        // A pure passthrough helper is an equivalent rewrite: it must stay green, otherwise the gate blocks
+        // legitimate refactoring of the main chain.
+        var (violations, ledger) = Mutate(
+            "src/Framework/Infrastructure/CrestCreates.Infrastructure",
+            "Authorization/IdentityClaimsBuilder.cs",
+            text => text
+                .Replace(
+                    "        var claims = new List<Claim>",
+                    "        static string? Identity(string? value) => value;\n\n        var claims = new List<Claim>",
+                    StringComparison.Ordinal)
+                .Replace("new(\"tenantid\", context.TenantId ?? string.Empty),", "new(\"tenantid\", Identity(context.TenantId) ?? string.Empty),", StringComparison.Ordinal)
+                .Replace("new(\"tenant_id\", context.TenantId ?? string.Empty),", "new(\"tenant_id\", Identity(context.TenantId) ?? string.Empty),", StringComparison.Ordinal));
+
+        Assert.True(
+            ledger.Count == 0,
+            "a passthrough helper must keep the caller's provenance: "
+            + string.Join(Environment.NewLine, ledger));
+        Assert.True(
+            violations.Count == 0,
+            "a passthrough helper must not become a violation:"
+            + Environment.NewLine + string.Join(Environment.NewLine, violations.Select(violation => violation.ToString())));
     }
 
     private static (IReadOnlyList<TenantIdentityDiagnostic> Violations, IReadOnlyList<string> Ledger) Mutate(

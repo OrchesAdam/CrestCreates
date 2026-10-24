@@ -119,7 +119,21 @@
 
 复现审查者的三处可编译注入：`TI_M03`（用户名经 `tenantId` 别名进 claim）、`TI_M04`（真实 Caching 项目内新增 `#if DEBUG` 的身份误用）、`TI_M05`（linked `CrudGeneration` 目录内新增身份误用）现在全部命中。作者侧记录：`BackslashAndForwardSlashReferences_AreEquivalent` 首次编写时把 `..` 深度写错（`src/Consumer` 只需一级回退），导致正斜杠用例未命中；修正后两例均命中，此无效尝试如实保留在本节。
 
-### I-10 待办与开放项
+### I-10 R2 审查修复（2026-10-24）
+
+审查 head `adbbf5dd`，3 项 P2 全部成立，已修复并补回归（同一分支）：
+
+| 发现 | 根因 | 修复 | 回归 |
+| --- | --- | --- | --- |
+| R2-01 条件 Compile 项被无条件执行 | 推导器只读 `Include`/`Remove` 属性，忽略元素与父 ItemGroup 的 `Condition`；Release-only 的 Remove 在 Debug 下也被应用 | 放弃推导，改为**直接读取 MSBuild evaluated 输入**（`dotnet msbuild -t:AddImplicitDefineConstants -getItem:Compile -getProperty:DefineConstants/-getProperty:TargetFramework`，按项目+配置缓存，缓存键含 csproj、共享 props/targets、项目内 props/targets 与文件清单）；求值失败即 `ReferenceError` → TI900，不顺延为「空集合」；条件、导入、属性函数交给 MSBuild | `TI_C01j`（Debug 包含被 Release-only Remove 的文件、Release 排除，且两种配置的常量分别为 `DEBUG`/`RELEASE`）；`TI_C01f/g/i` 在新输入源下继续通过；冷启动 149 项目约 90–120s，缓存后整条矩阵 1m18s |
+| R2-02 非空常量 fallback 丢来源 | 所有字面量返回 Clean 且无来源，`?? "acme-east"` 与 `?? string.Empty` 的来源集合相同 | 区分中性常量（`null`/`default`/空字符串/`throw`）与非空字符串常量；后者保留 `literal:"<值>"` 来源，非权威分支不再被权威分支净化 | `TI_N08`（三类 fallback 的来源集合差异）、`TI_M06`（真实 `IdentityClaimsBuilder` 两条 claim 改 `?? "acme-east"` → ledger 两条都失败） |
+| R2-03 透传 helper 被误报 | `InlineBody` 已把实参状态写入形参，但 `EvaluateSymbol` 又把形参自身的声明角色合并进来源 | 记录「已被实参替换的形参」集合，这些形参不再贡献自身来源（调用方来源胜出）；未被替换的顶层形参保留角色（TI002 的 `tenantId` 参数行仍依赖它） | `TI_N09`（直接属性 / 局部别名 / 透传 helper 三者来源集合完全相同）、`TI_M07`（真实 `IdentityClaimsBuilder` 加入 `Identity(string?)` 透传后 ledger 与违规均为空） |
+
+实现过程中由新回归发现的自有缺陷（如实记录）：evaluated-input 缓存的键最初未包含项目绝对目录，导致复制出来的 scratch/变异副本可能命中另一棵树的 Compile 清单；`TI_M05` 在改造成实体副本后暴露该问题，已把绝对目录加入键。
+
+R1 与 R2 的判据冲突处理：R2-03 要求「透传不新增来源」，R1-06 要求「UserName 别名不得放行」，二者由「替换后的形参不贡献自身来源、但保留调用方来源」同时满足——`TI_M03`（UserName→局部 tenantId）仍被拒绝，`TI_M07`（Identity 透传）通过。
+
+### I-11 待办与开放项
 
 - S3 归档动作、准入/覆盖/隔离守卫未开始；`.github/workflows/*.yml` 与 ProcurementApproval slnx 的 Draft 输入须在 S3 清理（CI 保持人工禁用状态，不改启用）。
 - S4 全量构建/边界/回归验证与 AGENTS/memory/比较文档同步未开始；本轮不提升任何支持声明。

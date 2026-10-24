@@ -87,10 +87,12 @@ internal sealed class TenantIdentityFlow(
     SemanticModel model,
     TenantTaintEnvironment environment,
     Func<SyntaxTree, SemanticModel?>? modelForTree = null,
-    TenantIdentityHelperIndex? helpers = null)
+    TenantIdentityHelperIndex? helpers = null,
+    IReadOnlySet<ISymbol>? substitutedParameters = null)
 {
     private const int MaxInlineDepth = 2;
     private readonly HashSet<ISymbol> _inlining = new(SymbolEqualityComparer.Default);
+    private readonly IReadOnlySet<ISymbol> _substitutedParameters = substitutedParameters ?? new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 
     public TaintValue Evaluate(ExpressionSyntax? expression, int depth = 0)
     {
@@ -102,8 +104,8 @@ internal sealed class TenantIdentityFlow(
         var stripped = Unwrap(expression);
         switch (stripped)
         {
-            case LiteralExpressionSyntax:
-                return TaintValue.Clean;
+            case LiteralExpressionSyntax literal:
+                return EvaluateLiteral(literal);
             case InterpolatedStringExpressionSyntax interpolated:
                 return TaintValue.Merge(interpolated.Contents
                     .OfType<InterpolationSyntax>()
@@ -163,6 +165,24 @@ internal sealed class TenantIdentityFlow(
         }
     }
 
+    /// <summary>
+    /// A literal is normally a neutral value, but a non-empty constant fallback still produces a runtime value:
+    /// erasing it would make <c>context.TenantId ?? "acme-east"</c> indistinguishable from an empty fallback and
+    /// let a name masquerade as identity. Null, default, empty and whitespace-free neutral constants stay clean.
+    /// </summary>
+    private static TaintValue EvaluateLiteral(LiteralExpressionSyntax literal)
+    {
+        if (literal.IsKind(SyntaxKind.NullLiteralExpression)
+            || literal.IsKind(SyntaxKind.DefaultLiteralExpression)
+            || literal.Token.Value is not string text
+            || text.Length == 0)
+        {
+            return TaintValue.Clean;
+        }
+
+        return TaintValue.FromOrigins([$"literal:\"{text}\""]);
+    }
+
     private TaintValue EvaluateAssignment(AssignmentExpressionSyntax assignment, int depth)
     {
         var value = Evaluate(assignment.Right, depth);
@@ -218,7 +238,7 @@ internal sealed class TenantIdentityFlow(
 
         _ = depth;
 
-        var baseValue = BaseValueOf(symbol);
+        var baseValue = _substitutedParameters.Contains(symbol) ? TaintValue.Clean : BaseValueOf(symbol);
         // A local or field keeps the whole state of what was last written to it: dropping the undecidable
         // flag here is exactly how an unknown value silently becomes "clean" after one assignment. The
         // symbol's own provenance is merged in so a parameter keeps its role even when it was seeded clean.
@@ -426,11 +446,13 @@ internal sealed class TenantIdentityFlow(
         }
 
         var localEnvironment = new TenantTaintEnvironment();
+        var substitutedParameters = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
         foreach (var parameter in method.Parameters)
         {
             if (arguments.TryGetValue(parameter.Ordinal, out var argument))
             {
                 localEnvironment[parameter] = Evaluate(argument, depth);
+                substitutedParameters.Add(parameter);
             }
         }
 
@@ -438,7 +460,7 @@ internal sealed class TenantIdentityFlow(
         for (var pass = 0; pass < 6; pass++)
         {
             var changed = false;
-            var nested = new TenantIdentityFlow(projectName, bodyAssembly, effectiveModel, localEnvironment, modelForTree, helpers);
+            var nested = new TenantIdentityFlow(projectName, bodyAssembly, effectiveModel, localEnvironment, modelForTree, helpers, substitutedParameters);
             foreach (var write in writes)
             {
                 var before = localEnvironment.TryGetValue(write.Symbol, out var existing) ? existing : TaintValue.Clean;
@@ -456,7 +478,7 @@ internal sealed class TenantIdentityFlow(
             }
         }
 
-        var flow = new TenantIdentityFlow(projectName, bodyAssembly, effectiveModel, localEnvironment, modelForTree, helpers);
+        var flow = new TenantIdentityFlow(projectName, bodyAssembly, effectiveModel, localEnvironment, modelForTree, helpers, substitutedParameters);
         var results = new List<TaintValue>();
         switch (syntax)
         {

@@ -38,14 +38,14 @@
     "per_project_reference_resolution": "shared framework (TPA + Microsoft.AspNetCore.App) > own bin output > project.assets.json compile assets, deduped by assembly simple name; source-generator output included for symbol resolution only and never scanned",
     "gate_metrics": {
       "active_non_test_projects_enumerated": 149,
-      "authored_compile_sources_enumerated": 2587,
+      "authored_compile_sources_enumerated": 2583,
       "candidate_files": 676,
       "projects_actually_compiled": 97,
       "first_party_helper_members_indexed": 3301,
       "identity_exit_sites_observed": 1034,
       "violations": 0,
       "coverage_failures": 0,
-      "note": "compile inputs are the real Compile set (default glob minus explicit Remove plus explicit Include, including sources linked from outside the project directory) parsed with the project's derived preprocessor symbols; see review_rounds R1-01"
+      "compile_input_source": "MSBuild evaluated Compile items and DefineConstants per project and configuration (cached, keyed by the absolute project directory, build scripts and file list); a failed evaluation is a TI900, never an empty set"
     },
     "acceptance_matrix": {
       "TI-P01_display_log_dto_comments_and_plain_object_Name": "pass (no diagnostics, no coverage failures)",
@@ -363,6 +363,58 @@
             "author_note": "the first injection used the wrong relative depth twice (depth 2, which resolves outside the repository layout) and did not exercise the guard; with the resolvable depth-3 backslash form the guard fails as expected, and both invalid attempts are recorded rather than hidden"
           }
         ]
+      }
+    },
+    {
+      "round": "R2",
+      "review_date": "2026-10-24",
+      "reviewed_head": "adbbf5dd4ed454fdfdd40b35f1051f712194c8f9",
+      "severity": "P2",
+      "findings": 3,
+      "verdict": "all three accepted and fixed on the same branch with regressions for both directions",
+      "items": [
+        {
+          "id": "R2-01",
+          "title": "Compile item conditions were applied unconditionally",
+          "fix": "the guard no longer derives Compile items; it consumes the MSBuild evaluated set (conditions, imports, property functions, TFM/configuration constants) per project and configuration, caches it against the absolute project directory plus build scripts and file list, and turns an evaluation failure into TI900",
+          "regressions": [
+            "TI_C01j (Debug includes the file a Release-only Remove excludes, and constants per configuration)",
+            "TI_M08 (reviewer's real-project control: Release-only Remove + Debug misuse in FileManagement is caught)",
+            "TI_C01f/TI_C01g/TI_C01i keep passing on the new source"
+          ],
+          "cost": "cold evaluation 149 projects ~90-120 s, cached matrix run ~1m15s"
+        },
+        {
+          "id": "R2-02",
+          "title": "non-empty constant fallback erased its provenance",
+          "fix": "neutral constants (null/default/empty string/throw) stay clean; any other non-empty string constant contributes literal:\"<value>\" so an authoritative branch cannot sanitise it",
+          "regressions": [
+            "TI_N08 (three fallbacks produce different origin sets)",
+            "TI_M06 (real IdentityClaimsBuilder with ?? \"acme-east\" rejected on both claim rows)"
+          ]
+        },
+        {
+          "id": "R2-03",
+          "title": "passthrough helper added a spurious parameter origin",
+          "fix": "helper parameters that received a real argument no longer contribute their declared origin (the caller provenance wins); top-level parameters keep their role, so the TI002 identity-parameter rows still work",
+          "regressions": [
+            "TI_N09 (direct property, local alias and Identity(x)=>x produce identical origins)",
+            "TI_M07 (real claims builder with a passthrough helper stays ledger-clean and violation-free)"
+          ]
+        }
+      ],
+      "author_side_defect_found_by_the_new_test": "the first evaluated-input cache key omitted the absolute project directory, so a copied scratch tree could silently reuse another tree's Compile list; TI_M05 exposed it and the key now includes the directory",
+      "measurement_correction": "the reviewer retracted the R1 'three mutations still pass' measurement because a symlinked test run directory made VSTest read the author tree; R2 conclusions come from a material copy, and the author-side controls in this round write to independent temporary directories (AnalyzeScratch/Mutate copy the project, arrange inputs and delete the tree)",
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "33/33",
+        "dependency_boundaries": {
+          "passed": 225,
+          "failed": 2,
+          "total": 227,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "application_tenants_and_identity": "102/102"
       }
     }
   ]

@@ -75,19 +75,22 @@ internal static class TenantIdentityProjectInventory
             || text.Contains("<PackageReference Include=\"xunit", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static TenantProjectInput Load(string repoRoot, string projectFile)
+    /// <summary>
+    /// Loads one project's real build inputs. Compile items and preprocessor symbols come from the evaluated
+    /// MSBuild project (see <see cref="TenantIdentityEvaluatedInputs"/>), so conditions, imports and property
+    /// functions are handled by MSBuild instead of by a partial re-implementation here.
+    /// </summary>
+    public static TenantProjectInput Load(string repoRoot, string projectFile, string? configurationOverride = null)
     {
         var projectRelative = Normalize(Path.GetRelativePath(repoRoot, projectFile));
         var projectDirectory = Path.GetDirectoryName(projectFile)!;
         var assemblyName = Path.GetFileNameWithoutExtension(projectFile);
-        string? rootNamespace = null;
-        string? configuredAssemblyName = null;
         var sdk = XDocument.Load(projectFile).Root?.Attribute("Sdk")?.Value ?? string.Empty;
         var isWebSdk = sdk.Contains("Web", StringComparison.OrdinalIgnoreCase);
 
         var text = File.ReadAllText(projectFile);
-        configuredAssemblyName = MatchValue(text, "AssemblyName");
-        rootNamespace = MatchValue(text, "RootNamespace");
+        var configuredAssemblyName = MatchValue(text, "AssemblyName");
+        var rootNamespace = MatchValue(text, "RootNamespace");
         if (configuredAssemblyName is { Length: > 0 })
         {
             assemblyName = configuredAssemblyName;
@@ -97,19 +100,16 @@ internal static class TenantIdentityProjectInventory
         var outputType = MatchValue(text, "OutputType") ?? "Library";
         var nullable = MatchValue(text, "Nullable") ?? (rootNamespace is null ? "enable" : "enable");
 
-        var (references, error, outputDirectory) = ResolveReferences(repoRoot, projectDirectory, assemblyName);
-        var configuration = ConfigurationOf(outputDirectory);
-        var targetFramework = outputDirectory is null
-            ? MatchValue(text, "TargetFramework") ?? "net10.0"
-            : new DirectoryInfo(outputDirectory).Name;
-        var defineConstants = TenantIdentityCompileInputs.DeriveDefineConstants(
-            configuration,
-            targetFramework,
-            MatchValue(text, "DefineConstants"));
+        var (references, referenceError, outputDirectory) = ResolveReferences(repoRoot, projectDirectory, assemblyName);
+        var configuration = configurationOverride
+            ?? (outputDirectory is null ? "Debug" : new DirectoryInfo(outputDirectory).Parent?.Name ?? "Debug");
 
-        var document = XDocument.Load(projectFile);
-        var sources = TenantIdentityCompileInputs
-            .ResolveCompileFiles(document, projectDirectory)
+        var evaluated = TenantIdentityEvaluatedInputs.Read(repoRoot, projectFile, configuration);
+        var error = referenceError ?? (evaluated.IsAvailable
+            ? null
+            : $"the guard could not evaluate the MSBuild Compile inputs for '{Path.GetFileName(projectFile)}': {evaluated.UnavailableReason}");
+
+        var sources = evaluated.CompileFiles
             .Select(file => new TenantSourceFile(
                 projectRelative,
                 Path.GetRelativePath(repoRoot, file).Replace(Path.DirectorySeparatorChar, '/'),
@@ -126,8 +126,8 @@ internal static class TenantIdentityProjectInventory
             implicitUsings,
             nullable,
             outputType,
-            configuration,
-            defineConstants,
+            evaluated.Configuration,
+            evaluated.DefineConstants,
             sources,
             generated,
             references,
