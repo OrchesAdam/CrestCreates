@@ -150,8 +150,10 @@ internal sealed class TenantIdentityFlow(
                 ]);
             case AssignmentExpressionSyntax assignment:
                 return EvaluateAssignment(assignment, depth);
-            case ThrowExpressionSyntax throwExpression:
-                return Evaluate(throwExpression.Expression, depth);
+            case ThrowExpressionSyntax:
+                // A throw branch never produces a value: its exception message is not a tenant identity source.
+                // Writes inside the exception arguments are still enumerated by the exit scan.
+                return TaintValue.Clean;
             case IsPatternExpressionSyntax pattern:
                 return Evaluate(pattern.Expression, depth);
             case ImplicitElementAccessSyntax implicitAccess:
@@ -257,8 +259,25 @@ internal sealed class TenantIdentityFlow(
             return TaintValue.Tainted(DescribeSource(symbol), [OriginOf(symbol)]);
         }
 
-        // Static members such as string.Empty are constants, not competing tenant sources.
-        if (symbol is IPropertySymbol { IsStatic: true } or IFieldSymbol { IsStatic: true })
+        // A constant member is a compile-time value: an empty constant (or string.Empty) is neutral, any other
+        // non-empty constant is a real value and must keep its provenance even when it lives in another file or
+        // another assembly. Non-constant statics stay neutral.
+        if (symbol is IFieldSymbol field)
+        {
+            if (field.HasConstantValue)
+            {
+                return field.ConstantValue is string text && text.Length > 0
+                    ? TaintValue.FromOrigins([$"literal:\"{text}\""])
+                    : TaintValue.Clean;
+            }
+
+            if (field.IsStatic)
+            {
+                return TaintValue.Clean;
+            }
+        }
+
+        if (symbol is IPropertySymbol { IsStatic: true })
         {
             return TaintValue.Clean;
         }

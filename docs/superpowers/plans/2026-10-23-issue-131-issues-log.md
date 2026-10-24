@@ -133,7 +133,20 @@
 
 R1 与 R2 的判据冲突处理：R2-03 要求「透传不新增来源」，R1-06 要求「UserName 别名不得放行」，二者由「替换后的形参不贡献自身来源、但保留调用方来源」同时满足——`TI_M03`（UserName→局部 tenantId）仍被拒绝，`TI_M07`（Identity 透传）通过。
 
-### I-11 待办与开放项
+### I-11 R3 审查修复（2026-10-24）
+
+审查 head `0cc8ef9b`，4 项 P2 全部成立，已修复并补回归：
+
+| 发现 | 根因 | 修复 | 回归 |
+| --- | --- | --- | --- |
+| R3-01 热缓存漏掉项目外 linked glob 的新增文件 | 缓存键只覆盖项目目录内的 `.cs` 清单，目录外 `Compile Include` 的搜索范围不在键内 | 键新增「项目外 Include/Remove 搜索根」的树签名（根/目录 mtime + `*.cs` 名称/长度/mtime）；读取缓存后校验所有缓存路径仍存在，缺失即重新求值 | `TI_C01k`（预热后新增 linked 文件必须进入清单、删除后必须消失） |
+| R3-02 求值失败因 Sources 为空被过滤 | 分析器仅在 `ReferenceError != null && Sources.Any(敏感候选)` 时报 TI900 | 在任何依赖 Sources 的筛选之前无条件报告覆盖失败（`AnalyzeRepository` 与 `AnalyzeProject` 同口径） | `TI_C01l`（合法 SDK 项目 + 有效 bin + 注入求值错误 → Sources 为空仍必须出 TI900，且原因含求值失败） |
+| R3-03 跨文件非空 const fallback 被抹去 | `BaseValueOf` 把所有静态字段/属性当空值 | 常量字段（含 metadata const）按 `HasConstantValue` 保留值来源：非空字符串 → `literal:"…"`，空常量/`string.Empty`/只读静态中性；非 const 静态仍中性 | `TI_N10`（跨文件 const / 空 const / static readonly 三种来源）、`TI_M09`（真实 claims builder + 另一文件 const → ledger 两条拒绝） |
+| R3-04 throw 的异常消息被计入来源 | `throw` 表达式仍求值其异常对象，消息 literal 进入来源 | 值来源域中 `throw` 直接中性；异常参数内的真实写入仍由出口枚举覆盖 | `TI_N11`（带消息 / 插值消息 / 空消息三种 throw 的来源集合只含权威属性且无诊断）、`TI_M10`（真实 claims builder 改为 fail-closed throw → claims 行 ledger 干净、无违规） |
+
+补充口径（R3-02 修复时确认）：把「求值失败」与「缺符号上下文」拆成两个状态。`EvaluationError`（MSBuild 求值失败）无条件 TI900；`ReferenceError`（已知 Compile 清单但缺 bin/引用）只在清单里确有租户相关源时才 TI900——来源已知且无租户代码时不存在覆盖缺口。这样 `CrestCreates.JsonContracts.Tool`（单文件 CLI，不在任何方案中，唯一源文件不含 tenant）不再产生假失败，而含 tenant 代码却缺引用的项目仍 fail-closed。
+
+### I-12 待办与开放项
 
 - S3 归档动作、准入/覆盖/隔离守卫未开始；`.github/workflows/*.yml` 与 ProcurementApproval slnx 的 Draft 输入须在 S3 清理（CI 保持人工禁用状态，不改启用）。
 - S4 全量构建/边界/回归验证与 AGENTS/memory/比较文档同步未开始；本轮不提升任何支持声明。

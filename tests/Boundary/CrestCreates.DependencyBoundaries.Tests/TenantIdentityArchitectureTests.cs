@@ -311,7 +311,8 @@ public class TenantIdentityArchitectureTests
             Sources: [new TenantSourceFile("synthetic/a.cs", "synthetic/a.cs", "namespace CrestCreates.X { public interface ICurrentTenant { System.Threading.Tasks.Task SwitchAsync(string tenantId); } }")],
             GeneratedSources: [],
             References: [],
-            ReferenceError: "no build output");
+            ReferenceError: "no build output",
+            EvaluationError: null);
 
         var analyzer = new TenantIdentityAnalyzer();
         analyzer.AnalyzeProject(project);
@@ -832,6 +833,200 @@ public class TenantIdentityArchitectureTests
         Assert.All(claims, claim => Assert.Equal(["CrestCreates.Infrastructure.Authorization.IdentityClaimsContext.TenantId"], claim.Origins));
     }
 
+    [Fact]
+    public void TI_C01k_WarmCache_TracksLinkedGlobChanges()
+    {
+        // The cache key must cover the search roots of Compile Include entries that point outside the project
+        // directory; otherwise a warm read keeps an obsolete Compile list after a linked file is added.
+        var root = Path.Combine(Path.GetTempPath(), $"issue131-warm-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(root, "Owned"));
+        Directory.CreateDirectory(Path.Combine(root, "Shared"));
+        try
+        {
+            var projectFile = Path.Combine(root, "Owned", "Sample.csproj");
+            File.WriteAllText(
+                projectFile,
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <Nullable>enable</Nullable>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <Compile Include="../Shared/*.cs" Link="Shared/%(Filename)%(Extension)" />
+                  </ItemGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(root, "Owned", "Owned.cs"), "namespace Sample { public sealed class Owned { } }");
+            File.WriteAllText(Path.Combine(root, "Shared", "Initial.cs"), "namespace Sample { public sealed class Initial { } }");
+
+            var first = TenantIdentityProjectInventory.Load(root, projectFile);
+            Assert.Contains(first.Sources, source => source.RelativePath.EndsWith("Shared/Initial.cs", StringComparison.Ordinal));
+            Assert.DoesNotContain(first.Sources, source => source.RelativePath.EndsWith("NewLinked.cs", StringComparison.Ordinal));
+
+            // Add a new file to the linked root without touching the project or its directory.
+            File.WriteAllText(
+                Path.Combine(root, "Shared", "NewLinked.cs"),
+                """
+                using System.Threading.Tasks;
+                using CrestCreates.MultiTenancy.Abstract;
+
+                namespace Sample;
+
+                public sealed class NewLinked
+                {
+                    public Task Run(ICurrentTenant currentTenant, string tenantName) => currentTenant.SetTenantId(tenantName);
+                }
+                """);
+
+            var warm = TenantIdentityProjectInventory.Load(root, projectFile);
+            Assert.Contains(warm.Sources, source => source.RelativePath.EndsWith("NewLinked.cs", StringComparison.Ordinal));
+
+            // Deleting the linked file must not leave a stale entry behind either.
+            File.Delete(Path.Combine(root, "Shared", "Initial.cs"));
+            var afterDelete = TenantIdentityProjectInventory.Load(root, projectFile);
+            Assert.DoesNotContain(afterDelete.Sources, source => source.RelativePath.EndsWith("Shared/Initial.cs", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TI_C01l_FailedEvaluation_IsACoverageFailureEvenWithoutSources()
+    {
+        // A valid project with build output and authored sources, but MSBuild evaluation fails: "unknown inputs"
+        // must never be treated as "no sensitive inputs".
+        var root = Path.Combine(Path.GetTempPath(), $"issue131-evalfail-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "Sample");
+        var binDirectory = Path.Combine(projectDirectory, "bin", "Debug", "net10.0");
+        Directory.CreateDirectory(binDirectory);
+        try
+        {
+            var projectFile = Path.Combine(projectDirectory, "Sample.csproj");
+            File.WriteAllText(
+                projectFile,
+                """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net10.0</TargetFramework>
+                    <Nullable>enable</Nullable>
+                  </PropertyGroup>
+                  <Target Name="SimulateBrokenEvaluation" BeforeTargets="AddImplicitDefineConstants">
+                    <Error Text="simulated evaluation failure" />
+                  </Target>
+                </Project>
+                """);
+            File.WriteAllText(
+                Path.Combine(projectDirectory, "Canary.cs"),
+                """
+                using System.Threading.Tasks;
+                using CrestCreates.MultiTenancy.Abstract;
+
+                namespace Sample;
+
+                public sealed class Canary
+                {
+                    public Task Run(ICurrentTenant currentTenant, string tenantName) => currentTenant.SetTenantId(tenantName);
+                }
+                """);
+            File.Copy(typeof(object).Assembly.Location, Path.Combine(binDirectory, "Sample.dll"), overwrite: true);
+
+            var project = TenantIdentityProjectInventory.Load(root, projectFile);
+            Assert.True(project.EvaluationError is not null);
+            Assert.Contains("could not evaluate", project.EvaluationError, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(project.Sources);
+
+            var analyzer = new TenantIdentityAnalyzer();
+            analyzer.AnalyzeProject(project);
+
+            Assert.Contains(analyzer.Analysis.CoverageFailures, diagnostic =>
+                diagnostic.Rule == TenantIdentityRule.TI900
+                && diagnostic.Hint.Contains("could not evaluate", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TI_N10_CrossFileConstantFallback_KeepsItsValueProvenance()
+    {
+        const string constants = """
+            namespace CrestCreates.Samples.Constants;
+
+            internal static class TenantClaimDefaults
+            {
+                internal const string Fallback = "acme-east";
+                internal const string Empty = "";
+                internal static readonly string Mutable = "acme-west";
+            }
+            """;
+
+        const string builder = """
+            using System.Security.Claims;
+            using CrestCreates.Infrastructure.Authorization;
+
+            namespace CrestCreates.Samples.Constants;
+
+            public sealed class ConstantClaims
+            {
+                public Claim NameConst(IdentityClaimsContext context) => new("tenantid", context.TenantId ?? TenantClaimDefaults.Fallback);
+
+                public Claim EmptyConst(IdentityClaimsContext context) => new("tenantid", context.TenantId ?? TenantClaimDefaults.Empty);
+
+                public Claim StaticReadOnly(IdentityClaimsContext context) => new("tenantid", context.TenantId ?? TenantClaimDefaults.Mutable);
+            }
+            """;
+
+        var analysis = TenantIdentitySyntheticFixture.Analyze(("Constants.cs", constants), ("Builder.cs", builder));
+        var claims = analysis.Exits.Where(exit => exit.PortLabel.Contains("Claim", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(3, claims.Length);
+
+        var nameConst = claims.Single(claim => claim.ArgumentText.Contains("Fallback", StringComparison.Ordinal));
+        Assert.Contains(nameConst.Origins, origin => origin.StartsWith("literal:", StringComparison.Ordinal));
+
+        var emptyConst = claims.Single(claim => claim.ArgumentText.Contains("Empty", StringComparison.Ordinal));
+        Assert.DoesNotContain(emptyConst.Origins, origin => origin.StartsWith("literal:", StringComparison.Ordinal));
+        Assert.Contains(emptyConst.Origins, origin => origin.EndsWith("IdentityClaimsContext.TenantId", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_N11_ThrowFallback_ProducesNoIdentitySource()
+    {
+        const string sample = """
+            using System;
+            using System.Security.Claims;
+            using CrestCreates.Infrastructure.Authorization;
+
+            namespace CrestCreates.Samples.ThrowFallback;
+
+            public sealed class ThrowClaims
+            {
+                public Claim WithMessage(IdentityClaimsContext context) =>
+                    new("tenantid", context.TenantId ?? throw new InvalidOperationException("missing tenant"));
+
+                public Claim WithInterpolatedMessage(IdentityClaimsContext context) =>
+                    new("tenantid", context.TenantId ?? throw new InvalidOperationException($"tenant {context.TenantId} missing"));
+
+                public Claim WithEmptyMessage(IdentityClaimsContext context) =>
+                    new("tenantid", context.TenantId ?? throw new InvalidOperationException(string.Empty));
+            }
+            """;
+
+        var analysis = TenantIdentitySyntheticFixture.Analyze(("Throw.cs", sample));
+        var claims = analysis.Exits.Where(exit => exit.PortLabel.Contains("Claim", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(3, claims.Length);
+        Assert.All(claims, claim =>
+        {
+            Assert.DoesNotContain(claim.Origins, origin => origin.StartsWith("literal:", StringComparison.Ordinal));
+            Assert.Equal(["CrestCreates.Infrastructure.Authorization.IdentityClaimsContext.TenantId"], claim.Origins);
+        });
+        Assert.Empty(analysis.Diagnostics);
+    }
+
     // ------------------------------------------------------------ mutations (TI-M)
 
     [Fact]
@@ -1015,6 +1210,75 @@ public class TenantIdentityArchitectureTests
         Assert.Contains(fileManagementAnalysis.Violations, violation =>
             violation.Rule == TenantIdentityRule.TI001
             && violation.RelativePath.EndsWith("ConditionalTenantSwitch.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_M09_CrossFileConstFallbackInRealClaimsBuilder_IsRejected()
+    {
+        var (_, analysis) = AnalyzeScratch(
+            "src/Framework/Infrastructure/CrestCreates.Infrastructure",
+            (_, scratchProject) =>
+            {
+                Directory.CreateDirectory(Path.Combine(scratchProject, "Authorization"));
+                File.WriteAllText(
+                    Path.Combine(scratchProject, "Authorization/ReviewFallback.cs"),
+                    """
+                    namespace CrestCreates.Infrastructure.Authorization;
+
+                    internal static class ReviewFallback
+                    {
+                        internal const string Fallback = "acme-east";
+                    }
+                    """);
+
+                var builder = Path.Combine(scratchProject, "Authorization/IdentityClaimsBuilder.cs");
+                var text = File.ReadAllText(builder);
+                File.WriteAllText(
+                    builder,
+                    text.Replace("context.TenantId ?? string.Empty", "context.TenantId ?? ReviewFallback.Fallback", StringComparison.Ordinal));
+            });
+
+        var ledger = TenantIdentityAuthoritativeLedger.Evaluate(analysis)
+            .Where(violation => violation.Contains("IdentityClaimsBuilder.cs", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.True(
+            ledger.Length >= 2,
+            "a non-empty constant declared in another file is still a non-authoritative source: "
+            + string.Join(Environment.NewLine, ledger));
+    }
+
+    [Fact]
+    public void TI_M10_ThrowFallbackInRealClaimsBuilder_StaysClean()
+    {
+        var (_, analysis) = AnalyzeScratch(
+            "src/Framework/Infrastructure/CrestCreates.Infrastructure",
+            (_, scratchProject) =>
+            {
+                var builder = Path.Combine(scratchProject, "Authorization/IdentityClaimsBuilder.cs");
+                var text = File.ReadAllText(builder);
+                File.WriteAllText(
+                    builder,
+                    text.Replace(
+                        "context.TenantId ?? string.Empty",
+                        "context.TenantId ?? throw new InvalidOperationException(\"missing tenant\")",
+                        StringComparison.Ordinal));
+            });
+
+        // Only the claims rows belong to this scratch project; the remaining locked rows legitimately report
+        // as missing because their projects are not part of the copy.
+        var claimRows = TenantIdentityAuthoritativeLedger.Evaluate(analysis)
+            .Where(violation => violation.Contains("IdentityClaimsBuilder.cs", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Empty(claimRows);
+        Assert.Contains(
+            analysis.Exits,
+            exit => exit.RelativePath.EndsWith("IdentityClaimsBuilder.cs", StringComparison.Ordinal)
+                    && exit.PortLabel.Contains("Claim", StringComparison.Ordinal));
+        Assert.True(
+            !analysis.Violations.Any(),
+            "a fail-closed throw branch is not an identity source:"
+            + Environment.NewLine + string.Join(Environment.NewLine, analysis.Violations.Select(violation => violation.ToString())));
     }
 
     /// <summary>

@@ -416,6 +416,62 @@
         },
         "application_tenants_and_identity": "102/102"
       }
+    },
+    {
+      "round": "R3",
+      "review_date": "2026-10-24",
+      "reviewed_head": "0cc8ef9b27d68db33db51e8f332b1f405bd60a04",
+      "severity": "P2",
+      "findings": 4,
+      "verdict": "all four accepted and fixed; cache, coverage-reporting and provenance edges corrected with regressions in both directions",
+      "items": [
+        {
+          "id": "R3-01",
+          "title": "warm cache ignored new files in out-of-project linked globs",
+          "fix": "the cache key now includes a tree signature (directory mtimes plus *.cs name/length/mtime) of every out-of-project Compile Include/Remove search root; cached entries are validated against existing files and re-evaluated when one disappeared",
+          "regressions": [
+            "TI_C01k (warm read sees an added linked file and forgets a deleted one)"
+          ]
+        },
+        {
+          "id": "R3-02",
+          "title": "evaluation failure was filtered out because Sources was empty",
+          "fix": "evaluation failure and missing symbol context are now distinct: unknown inputs (MSBuild evaluation failed) is an unconditional TI900 before any source-based filter; known inputs with missing build output is TI900 only when the known sources contain tenant code",
+          "regressions": [
+            "TI_C01l (valid project, valid bin, injected evaluation error, empty sources -> TI900)",
+            "TI_C01d still covers missing references with candidate sources"
+          ]
+        },
+        {
+          "id": "R3-03",
+          "title": "cross-file non-empty const fallback erased its provenance",
+          "fix": "constant fields (including metadata constants) keep their compile-time value as provenance: non-empty string constant -> literal:\"<value>\", empty constant / string.Empty / non-const statics stay neutral",
+          "regressions": [
+            "TI_N10 (cross-file const, empty const, static readonly)",
+            "TI_M09 (real claims builder plus a const in another file -> both ledger rows rejected)"
+          ]
+        },
+        {
+          "id": "R3-04",
+          "title": "throw message counted as an identity source",
+          "fix": "throw produces no value in the provenance domain; writes inside its arguments are still enumerated by the exit scan",
+          "regressions": [
+            "TI_N11 (message / interpolated / empty message throws keep only the authoritative origin, no diagnostics)",
+            "TI_M10 (real claims builder turned fail-closed throw stays clean)"
+          ]
+        }
+      ],
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "39/39",
+        "dependency_boundaries": {
+          "passed": 231,
+          "failed": 2,
+          "total": 233,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "application_tenants_and_identity": "102/102"
+      }
     }
   ]
 }

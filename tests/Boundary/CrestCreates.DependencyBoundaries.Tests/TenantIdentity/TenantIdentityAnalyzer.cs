@@ -67,16 +67,19 @@ internal sealed class TenantIdentityAnalyzer
             _analysis.ProjectsEnumerated++;
             _analysis.FilesEnumerated += input.Sources.Count;
 
-            if (input.ReferenceError is not null && input.Sources.Any(HasSensitiveCandidate))
+            if (input.EvaluationError is not null)
             {
+                // "I could not obtain the inputs" is not "there is nothing to analyse": report before any
+                // source-based filtering, otherwise an empty or unknown Compile set silently passes.
                 _analysis.Diagnostics.Add(new TenantIdentityDiagnostic(
-                    TenantIdentityRule.TI900,
-                    input.Project,
-                    input.Project,
-                    0,
-                    0,
-                    "-",
-                    "-",
+                    TenantIdentityRule.TI900, input.Project, input.Project, 0, 0, "-", "-",
+                    $"coverage failure: {input.EvaluationError}"));
+            }
+            else if (input.ReferenceError is not null && input.Sources.Any(HasSensitiveCandidate))
+            {
+                // The sources are known and contain tenant code, but the symbol context is missing.
+                _analysis.Diagnostics.Add(new TenantIdentityDiagnostic(
+                    TenantIdentityRule.TI900, input.Project, input.Project, 0, 0, "-", "-",
                     $"coverage failure: {input.ReferenceError}"));
             }
         }
@@ -105,18 +108,20 @@ internal sealed class TenantIdentityAnalyzer
         _analysis.ProjectsEnumerated++;
         _analysis.FilesEnumerated += project.Sources.Count;
 
+        if (project.EvaluationError is not null)
+        {
+            _analysis.Diagnostics.Add(new TenantIdentityDiagnostic(
+                TenantIdentityRule.TI900, project.Project, project.Project, 0, 0, "-", "-",
+                $"coverage failure: {project.EvaluationError}"));
+            return;
+        }
+
         if (project.ReferenceError is not null)
         {
             if (project.Sources.Any(HasSensitiveCandidate))
             {
                 _analysis.Diagnostics.Add(new TenantIdentityDiagnostic(
-                    TenantIdentityRule.TI900,
-                    project.Project,
-                    project.Project,
-                    0,
-                    0,
-                    "-",
-                    "-",
+                    TenantIdentityRule.TI900, project.Project, project.Project, 0, 0, "-", "-",
                     $"coverage failure: {project.ReferenceError}"));
             }
 

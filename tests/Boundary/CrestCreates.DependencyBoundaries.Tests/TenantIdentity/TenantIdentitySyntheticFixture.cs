@@ -73,7 +73,8 @@ internal static class TenantIdentitySyntheticFixture
             Sources: sources,
             GeneratedSources: [],
             References: s_references.Value,
-            ReferenceError: null);
+            ReferenceError: null,
+            EvaluationError: null);
 
         var analyzer = new TenantIdentityAnalyzer();
         analyzer.AnalyzeProject(project);

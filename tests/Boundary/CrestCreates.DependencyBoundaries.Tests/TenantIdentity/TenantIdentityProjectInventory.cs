@@ -19,7 +19,8 @@ internal sealed record TenantProjectInput(
     IReadOnlyList<TenantSourceFile> Sources,
     IReadOnlyList<TenantSourceFile> GeneratedSources,
     IReadOnlyList<MetadataReference> References,
-    string? ReferenceError);
+    string? ReferenceError,
+    string? EvaluationError);
 
 /// <summary>
 /// Collects the real build inputs of every active production project so the guard analyses each
@@ -105,9 +106,12 @@ internal static class TenantIdentityProjectInventory
             ?? (outputDirectory is null ? "Debug" : new DirectoryInfo(outputDirectory).Parent?.Name ?? "Debug");
 
         var evaluated = TenantIdentityEvaluatedInputs.Read(repoRoot, projectFile, configuration);
-        var error = referenceError ?? (evaluated.IsAvailable
+        // "could not obtain the inputs" and "inputs known but no symbol context" are different states: the
+        // first hides everything and is always a coverage failure, the second only matters when the known
+        // sources actually contain something to analyse.
+        var evaluationError = evaluated.IsAvailable
             ? null
-            : $"the guard could not evaluate the MSBuild Compile inputs for '{Path.GetFileName(projectFile)}': {evaluated.UnavailableReason}");
+            : $"the guard could not evaluate the MSBuild Compile inputs for '{Path.GetFileName(projectFile)}': {evaluated.UnavailableReason}";
 
         var sources = evaluated.CompileFiles
             .Select(file => new TenantSourceFile(
@@ -131,7 +135,8 @@ internal static class TenantIdentityProjectInventory
             sources,
             generated,
             references,
-            error);
+            referenceError,
+            evaluationError);
     }
 
     private static (IReadOnlyList<MetadataReference> References, string? Error, string? OutputDirectory) ResolveReferences(

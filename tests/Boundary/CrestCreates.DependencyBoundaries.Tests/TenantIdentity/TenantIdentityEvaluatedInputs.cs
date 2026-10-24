@@ -41,7 +41,8 @@ internal static class TenantIdentityEvaluatedInputs
         var cacheKey = CacheKey(repoRoot, projectFile, projectDirectory, configuration);
         var cachePath = Path.Combine(projectDirectory, "obj", $"crestcreates-tenant-inputs.{configuration}.json");
 
-        if (TryReadCache(cachePath, cacheKey) is { } cached)
+        if (TryReadCache(cachePath, cacheKey) is { } cached
+            && cached.CompileFiles.All(File.Exists))
         {
             return cached;
         }
@@ -167,7 +168,84 @@ internal static class TenantIdentityEvaluatedInputs
             builder.Append(relative).Append(':').Append(new FileInfo(file).Length).Append('\n');
         }
 
+        // Compile Include/Remove entries that point outside the project directory (shared folders, linked
+        // files) live outside the file list above. Their search roots are part of the key, otherwise a warm
+        // cache would keep an obsolete Compile list after a file is added, removed or renamed there.
+        foreach (var root in ExternalIncludeRoots(projectFile, projectDirectory))
+        {
+            AppendTreeSignature(builder, root);
+        }
+
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+    }
+
+    private static IEnumerable<string> ExternalIncludeRoots(string projectFile, string projectDirectory)
+    {
+        System.Xml.Linq.XDocument document;
+        try
+        {
+            document = System.Xml.Linq.XDocument.Load(projectFile);
+        }
+        catch (System.Xml.XmlException)
+        {
+            yield break;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var element in document.Descendants("Compile"))
+        {
+            foreach (var attribute in new[] { "Include", "Remove" })
+            {
+                var value = element.Attribute(attribute)?.Value;
+                if (string.IsNullOrWhiteSpace(value) || value.Contains("$(", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var normalized = value.Replace('\\', '/');
+                var wildcard = normalized.IndexOfAny(['*', '?']);
+                var directoryPart = wildcard < 0
+                    ? Path.GetDirectoryName(normalized)
+                    : normalized[..wildcard] is { } prefix && prefix.Contains('/', StringComparison.Ordinal)
+                        ? prefix[..prefix.LastIndexOf('/')]
+                        : string.Empty;
+
+                if (string.IsNullOrEmpty(directoryPart))
+                {
+                    continue;
+                }
+
+                var resolved = Path.GetFullPath(Path.Combine(projectDirectory, directoryPart));
+                var projectRoot = Path.GetFullPath(projectDirectory);
+                var outside = !resolved.StartsWith(projectRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                    && !string.Equals(resolved, projectRoot, StringComparison.Ordinal);
+                if (outside && Directory.Exists(resolved) && seen.Add(resolved))
+                {
+                    yield return resolved;
+                }
+            }
+        }
+    }
+
+    private static void AppendTreeSignature(StringBuilder builder, string root)
+    {
+        var rootInfo = new DirectoryInfo(root);
+        builder.Append("root:").Append(rootInfo.FullName).Append(':').Append(rootInfo.LastWriteTimeUtc.Ticks).Append('\n');
+
+        foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories)
+                     .OrderBy(path => path, StringComparer.Ordinal))
+        {
+            builder.Append("dir:").Append(Path.GetRelativePath(root, directory)).Append(':')
+                .Append(Directory.GetLastWriteTimeUtc(directory).Ticks).Append('\n');
+        }
+
+        foreach (var file in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+                     .OrderBy(path => path, StringComparer.Ordinal))
+        {
+            builder.Append("file:").Append(Path.GetRelativePath(root, file)).Append(':')
+                .Append(new FileInfo(file).Length).Append(':')
+                .Append(File.GetLastWriteTimeUtc(file).Ticks).Append('\n');
+        }
     }
 
     private static EvaluatedProjectInputs? TryReadCache(string cachePath, string cacheKey)
