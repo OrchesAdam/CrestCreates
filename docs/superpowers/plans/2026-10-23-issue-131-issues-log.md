@@ -146,7 +146,19 @@ R1 与 R2 的判据冲突处理：R2-03 要求「透传不新增来源」，R1-0
 
 补充口径（R3-02 修复时确认）：把「求值失败」与「缺符号上下文」拆成两个状态。`EvaluationError`（MSBuild 求值失败）无条件 TI900；`ReferenceError`（已知 Compile 清单但缺 bin/引用）只在清单里确有租户相关源时才 TI900——来源已知且无租户代码时不存在覆盖缺口。这样 `CrestCreates.JsonContracts.Tool`（单文件 CLI，不在任何方案中，唯一源文件不含 tenant）不再产生假失败，而含 tenant 代码却缺引用的项目仍 fail-closed。
 
-### I-12 待办与开放项
+### I-12 R4 审查修复（2026-10-24）
+
+审查 head `147d7c4e`，1 项 P2 成立（缓存依赖枚举未覆盖属性展开与导入 props 形式的外部 Compile glob），已修复：
+
+- 新增 `TenantIdentityEvaluatedInputs.DependencyProbe`：遍历项目与可解析的 `<Import>` 闭包（含自动导入的根构建文件，深度上限 8、循环保护），收集贡献 Compile 项的构建文件与字面量外部搜索根。
+- **缓存契约收紧为「可证明完整才缓存」**：`Compile Include/Remove` 若在替换**标准文件级属性**（`$(MSBuildThisFileDirectory)` / `$(MSBuildThisFile)` / `$(MSBuildProjectDirectory)` / `$(MSBuildProjectName)`）后仍含 `$(...)`，或任何 `<Import>` 无法解析，都标记 `IsFullyUnderstood=false`，直接调用同一 MSBuild 求值链——**跳过缓存，不跳过守卫**，不重建第二套 MSBuild 解释器。首版实现漏了这四个标准属性的替换，导致 `Directory.Build.props` 的 `$(MSBuildThisFileDirectory)` 导入让全部项目放弃缓存（热跑 4m20s）；补齐后 136 个项目恢复命中，热跑回到约 1m40s，21 个经构建 targets 注入 `$(...)` Compile 项的项目仍按设计每次重新求值。
+- 已声明边界：缓存信任闭包 = 项目 + 可解析导入 + 自动导入的四个根构建文件；SDK 内部 props（不经仓库声明）不在闭包内，若其引入属性展开 Compile 项不会被探针识别（当前 SDK 只引入默认 glob 与生成输出）。
+- 可缓存时的键覆盖：项目绝对目录 + 配置 + 依赖闭包内所有构建文件的**内容** + 项目内 `.cs` 清单 + 字面量外部根的树签名；命中后仍校验缓存路径存在。
+- 代价：仓库中 21 个项目通过 Modules.props / JsonContracts targets 声明了 `$(...)` Compile 项，这些项目每次运行都重新求值（约 +13s），其余项目继续走缓存。
+
+回归：`TI_C01m` 以 literal / import / 属性展开 / 导入内属性展开四种等价形式，验证预热后新增、重命名、删除 linked 文件时热读与强制求值一致；并断言 literal 与 literal-import 形式命中缓存（`msbuild-cache`）、属性形式每次重新求值（`msbuild`）。`TI_C01k`（literal 增删）与条件 Compile 用例保留。
+
+### I-13 待办与开放项
 
 - S3 归档动作、准入/覆盖/隔离守卫未开始；`.github/workflows/*.yml` 与 ProcurementApproval slnx 的 Draft 输入须在 S3 清理（CI 保持人工禁用状态，不改启用）。
 - S4 全量构建/边界/回归验证与 AGENTS/memory/比较文档同步未开始；本轮不提升任何支持声明。

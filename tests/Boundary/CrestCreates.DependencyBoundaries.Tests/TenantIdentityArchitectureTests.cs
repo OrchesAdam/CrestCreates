@@ -894,6 +894,92 @@ public class TenantIdentityArchitectureTests
     }
 
     [Fact]
+    public void TI_C01m_PropertyExpandedAndImportedGlobs_StayFresh()
+    {
+        // Three equivalent ways to declare the same linked glob. Literal items and literal imports are cached but
+        // their key covers the search root; a property-expanded item cannot be proven and must bypass the cache.
+        foreach (var form in new[] { "literal", "import", "property", "import-property" })
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"issue131-evaluated-{form}-{Guid.NewGuid():N}");
+            var projectDirectory = Path.Combine(root, "Owned");
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(Path.Combine(root, "Shared"));
+            try
+            {
+                var projectFile = Path.Combine(projectDirectory, "Sample.csproj");
+                var item = form switch
+                {
+                    "literal" => "<Compile Include=\"../Shared/*.cs\" Link=\"Shared/%(Filename)%(Extension)\" />",
+                    "property" => "<Compile Include=\"$(ReviewShared)/*.cs\" Link=\"Shared/%(Filename)%(Extension)\" />",
+                    "import" => string.Empty,
+                    _ => string.Empty,
+                };
+
+                if (form is "import" or "import-property")
+                {
+                    var propsBody = form == "import"
+                        ? "<Compile Include=\"../Shared/*.cs\" Link=\"Shared/%(Filename)%(Extension)\" />"
+                        : "<Compile Include=\"$(ReviewShared)/*.cs\" />";
+                    File.WriteAllText(
+                        Path.Combine(projectDirectory, "SharedInputs.props"),
+                        $"<Project><PropertyGroup><ReviewShared>../Shared</ReviewShared></PropertyGroup><ItemGroup>{propsBody}</ItemGroup></Project>");
+                    item = "<Import Project=\"SharedInputs.props\" />";
+                }
+
+                var items = form is "import" or "import-property"
+                    ? string.Empty
+                    : $"<ItemGroup>{item}</ItemGroup>";
+                File.WriteAllText(
+                    projectFile,
+                    $"""
+                    <Project Sdk="Microsoft.NET.Sdk">
+                      <PropertyGroup>
+                        <TargetFramework>net10.0</TargetFramework>
+                        <Nullable>enable</Nullable>
+                        <ReviewShared>../Shared</ReviewShared>
+                      </PropertyGroup>
+                      {items}
+                      {(form is "import" or "import-property" ? item : string.Empty)}
+                    </Project>
+                    """);
+                File.WriteAllText(Path.Combine(projectDirectory, "Owned.cs"), "namespace Sample { public sealed class Owned { } }");
+
+                var first = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.True(first.IsAvailable, $"{form}: first evaluation failed: {first.UnavailableReason}");
+                Assert.DoesNotContain(first.CompileFiles, file => file.EndsWith("NewLinked.cs", StringComparison.Ordinal));
+
+                // Warm read with no change: literal forms are served from cache, property forms re-evaluate.
+                var warm = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.True(warm.IsAvailable, $"{form}: warm evaluation failed: {warm.UnavailableReason}");
+                var cacheable = form is "literal" or "import";
+                Assert.Equal(cacheable ? "msbuild-cache" : "msbuild", warm.Source);
+
+                File.WriteAllText(
+                    Path.Combine(root, "Shared", "NewLinked.cs"),
+                    "namespace Sample { public sealed class NewLinked { } }");
+
+                var afterAdd = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.Contains(afterAdd.CompileFiles, file => file.EndsWith("NewLinked.cs", StringComparison.Ordinal));
+
+                File.Move(
+                    Path.Combine(root, "Shared", "NewLinked.cs"),
+                    Path.Combine(root, "Shared", "RenamedLinked.cs"));
+                var afterRename = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.Contains(afterRename.CompileFiles, file => file.EndsWith("RenamedLinked.cs", StringComparison.Ordinal));
+                Assert.DoesNotContain(afterRename.CompileFiles, file => file.EndsWith("NewLinked.cs", StringComparison.Ordinal));
+
+                File.Delete(Path.Combine(root, "Shared", "RenamedLinked.cs"));
+                var afterDelete = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.DoesNotContain(afterDelete.CompileFiles, file => file.EndsWith("RenamedLinked.cs", StringComparison.Ordinal));
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void TI_C01l_FailedEvaluation_IsACoverageFailureEvenWithoutSources()
     {
         // A valid project with build output and authored sources, but MSBuild evaluation fails: "unknown inputs"

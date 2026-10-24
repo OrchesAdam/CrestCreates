@@ -472,6 +472,37 @@
         },
         "application_tenants_and_identity": "102/102"
       }
+    },
+    {
+      "round": "R4",
+      "review_date": "2026-10-24",
+      "reviewed_head": "147d7c4eda348d7f512b62f2f28a4959026277e4",
+      "severity": "P2",
+      "findings": 1,
+      "verdict": "accepted and fixed; the cache now only applies when the Compile dependency set is provably complete",
+      "items": [
+        {
+          "id": "R4-01",
+          "title": "property-expanded or imported external Compile globs were outside the cache-invalidation signature",
+          "fix": "a dependency probe walks the project and its resolvable imports (plus the auto-imported root build files), substitutes only the standard file-scoped properties, and collects literal external search roots; any remaining $(...) Compile item or unresolvable import marks the project as not provably complete, which bypasses the persistent cache and calls the same MSBuild evaluation chain every time; when caching is allowed the key covers the imported build files' contents, the project file list and the external roots' tree signatures",
+          "regressions": [
+            "TI_C01m: literal / import / property / import-with-property forms, each warmed then added, renamed and deleted, must stay equal to a forced evaluation; literal and literal-import forms assert a cache hit, property forms assert bypass"
+          ],
+          "author_note": "the first probe version treated the $(MSBuildThisFileDirectory) import in Directory.Build.props as unresolvable, which disabled caching for every project (warm matrix 4m20s); substituting the four standard file-scoped properties restored caching for 136 projects while the 21 projects that inject $(...) Compile items through build targets still re-evaluate by design",
+          "declared_limit": "the cache trust closure is the project, its resolvable imports and the four auto-imported root build files; SDK-internal props are outside it and currently only add the default glob and generated output"
+        }
+      ],
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "40/40 (warm ~3 min; the 21 property-injecting projects re-evaluate every run)",
+        "dependency_boundaries": {
+          "passed": 232,
+          "failed": 2,
+          "total": 234,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "note": "the Application Tenants|Identity suite was 102/102 before this round and no production source changed"
+      }
     }
   ]
 }

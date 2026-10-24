@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Xml;
+using System.Xml.Linq;
 
 namespace CrestCreates.DependencyBoundaries.Tests;
 
@@ -19,15 +21,19 @@ internal sealed record EvaluatedProjectInputs(
 }
 
 /// <summary>
-/// Reads the Compile items and preprocessor symbols from MSBuild itself. Deriving them from the csproj text
-/// would have to re-implement condition evaluation, imports and property functions — and any item this guard
-/// does not understand would silently be applied or dropped. The evaluated answer is cached per project and
-/// configuration, keyed by the project inputs, so a warm run costs nothing while a changed build script or file
-/// set is always re-evaluated.
+/// Reads the Compile items and preprocessor symbols from MSBuild itself, so conditions, imports and property
+/// functions are evaluated by MSBuild instead of a partial re-implementation here.
+///
+/// The evaluated answer is cached only when the dependency surface can be proven complete: every Compile item in
+/// the project and in its resolvable imports must be a literal path, and every import must resolve without
+/// property expressions. A <c>$(...)</c> Compile item or an unresolvable import may point anywhere, so those
+/// projects skip the persistent cache and call MSBuild again - skipping the cache, never the guard. The cached
+/// key covers the project directory, every imported build file, the project's own file list and the search roots
+/// of literal out-of-directory globs, so a warm read can never hide a new or removed linked file.
 /// </summary>
 internal static class TenantIdentityEvaluatedInputs
 {
-    private static readonly string[] SharedPropertyFiles =
+    private static readonly string[] AutoImportedPropertyFiles =
     [
         "Directory.Build.props",
         "Directory.Build.targets",
@@ -38,11 +44,22 @@ internal static class TenantIdentityEvaluatedInputs
     public static EvaluatedProjectInputs Read(string repoRoot, string projectFile, string configuration)
     {
         var projectDirectory = Path.GetDirectoryName(projectFile)!;
-        var cacheKey = CacheKey(repoRoot, projectFile, projectDirectory, configuration);
+        var dependencies = DependencyProbe.Collect(repoRoot, projectFile, projectDirectory);
+
+        if (!dependencies.IsFullyUnderstood)
+        {
+            // Cannot prove the input set: evaluate every time instead of trusting a possibly stale snapshot.
+            var (fresh, freshError) = Evaluate(projectFile, configuration);
+            return fresh ?? new EvaluatedProjectInputs("msbuild-failed", configuration, string.Empty, [], string.Empty)
+            {
+                UnavailableReason = freshError ?? "dotnet msbuild produced no evaluable output",
+            };
+        }
+
+        var cacheKey = CacheKey(repoRoot, projectFile, projectDirectory, configuration, dependencies);
         var cachePath = Path.Combine(projectDirectory, "obj", $"crestcreates-tenant-inputs.{configuration}.json");
 
-        if (TryReadCache(cachePath, cacheKey) is { } cached
-            && cached.CompileFiles.All(File.Exists))
+        if (TryReadCache(cachePath, cacheKey) is { } cached && cached.CompileFiles.All(File.Exists))
         {
             return cached;
         }
@@ -130,29 +147,20 @@ internal static class TenantIdentityEvaluatedInputs
         }
     }
 
-    private static string CacheKey(string repoRoot, string projectFile, string projectDirectory, string configuration)
+    private static string CacheKey(
+        string repoRoot,
+        string projectFile,
+        string projectDirectory,
+        string configuration,
+        DependencyProbe.Result dependencies)
     {
         var builder = new StringBuilder();
-        // The absolute project directory is part of the key: a copied tree (mutation/scratch controls) has the
-        // same project text and file list but different absolute Compile paths.
         builder.Append(Path.GetFullPath(projectDirectory)).Append('\n');
         builder.Append(configuration).Append('\n');
-        builder.Append(File.ReadAllText(projectFile)).Append('\n');
 
-        foreach (var shared in SharedPropertyFiles)
+        foreach (var file in dependencies.BuildFiles)
         {
-            var path = Path.Combine(repoRoot, shared);
-            if (File.Exists(path))
-            {
-                builder.Append(shared).Append(':').Append(File.ReadAllText(path)).Append('\n');
-            }
-        }
-
-        foreach (var script in Directory.EnumerateFiles(projectDirectory, "*.props", SearchOption.TopDirectoryOnly)
-                     .Concat(Directory.EnumerateFiles(projectDirectory, "*.targets", SearchOption.TopDirectoryOnly))
-                     .OrderBy(path => path, StringComparer.Ordinal))
-        {
-            builder.Append(Path.GetFileName(script)).Append(':').Append(File.ReadAllText(script)).Append('\n');
+            builder.Append(file).Append(':').Append(File.ReadAllText(file)).Append('\n');
         }
 
         foreach (var file in Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories)
@@ -168,63 +176,12 @@ internal static class TenantIdentityEvaluatedInputs
             builder.Append(relative).Append(':').Append(new FileInfo(file).Length).Append('\n');
         }
 
-        // Compile Include/Remove entries that point outside the project directory (shared folders, linked
-        // files) live outside the file list above. Their search roots are part of the key, otherwise a warm
-        // cache would keep an obsolete Compile list after a file is added, removed or renamed there.
-        foreach (var root in ExternalIncludeRoots(projectFile, projectDirectory))
+        foreach (var root in dependencies.ExternalRoots.OrderBy(path => path, StringComparer.Ordinal))
         {
             AppendTreeSignature(builder, root);
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
-    }
-
-    private static IEnumerable<string> ExternalIncludeRoots(string projectFile, string projectDirectory)
-    {
-        System.Xml.Linq.XDocument document;
-        try
-        {
-            document = System.Xml.Linq.XDocument.Load(projectFile);
-        }
-        catch (System.Xml.XmlException)
-        {
-            yield break;
-        }
-
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var element in document.Descendants("Compile"))
-        {
-            foreach (var attribute in new[] { "Include", "Remove" })
-            {
-                var value = element.Attribute(attribute)?.Value;
-                if (string.IsNullOrWhiteSpace(value) || value.Contains("$(", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                var normalized = value.Replace('\\', '/');
-                var wildcard = normalized.IndexOfAny(['*', '?']);
-                var directoryPart = wildcard < 0
-                    ? Path.GetDirectoryName(normalized)
-                    : normalized[..wildcard] is { } prefix && prefix.Contains('/', StringComparison.Ordinal)
-                        ? prefix[..prefix.LastIndexOf('/')]
-                        : string.Empty;
-
-                if (string.IsNullOrEmpty(directoryPart))
-                {
-                    continue;
-                }
-
-                var resolved = Path.GetFullPath(Path.Combine(projectDirectory, directoryPart));
-                var projectRoot = Path.GetFullPath(projectDirectory);
-                var outside = !resolved.StartsWith(projectRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                    && !string.Equals(resolved, projectRoot, StringComparison.Ordinal);
-                if (outside && Directory.Exists(resolved) && seen.Add(resolved))
-                {
-                    yield return resolved;
-                }
-            }
-        }
     }
 
     private static void AppendTreeSignature(StringBuilder builder, string root)
@@ -303,5 +260,153 @@ internal static class TenantIdentityEvaluatedInputs
     {
         var collapsed = value.ReplaceLineEndings(" ").Trim();
         return collapsed.Length <= 300 ? collapsed : collapsed[..300];
+    }
+
+    /// <summary>
+    /// Walks the project and its resolvable imports (plus the auto-imported root build files), collecting the
+    /// build files that contributed Compile items and the external search roots of literal globs. Any
+    /// <c>$(...)</c> Compile item or unresolvable import marks the dependency set as not fully understood.
+    /// </summary>
+    internal static class DependencyProbe
+    {
+        internal sealed record Result(
+            bool IsFullyUnderstood,
+            IReadOnlyList<string> BuildFiles,
+            IReadOnlyList<string> ExternalRoots);
+
+        public static Result Collect(string repoRoot, string projectFile, string projectDirectory)
+        {
+            var buildFiles = new List<string>();
+            var externalRoots = new List<string>();
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            var queue = new Queue<(string File, int Depth)>();
+            queue.Enqueue((Path.GetFullPath(projectFile), 0));
+            foreach (var shared in AutoImportedPropertyFiles)
+            {
+                var path = Path.Combine(repoRoot, shared);
+                if (File.Exists(path))
+                {
+                    queue.Enqueue((Path.GetFullPath(path), 1));
+                }
+            }
+
+            var fullyUnderstood = true;
+            while (queue.Count > 0)
+            {
+                var (file, depth) = queue.Dequeue();
+                if (!visited.Add(file))
+                {
+                    continue;
+                }
+
+                XDocument document;
+                try
+                {
+                    document = XDocument.Load(file);
+                }
+                catch (XmlException)
+                {
+                    fullyUnderstood = false;
+                    continue;
+                }
+
+                buildFiles.Add(file);
+
+                foreach (var element in document.Descendants("Compile"))
+                {
+                    foreach (var attribute in new[] { "Include", "Remove" })
+                    {
+                        var value = element.Attribute(attribute)?.Value;
+                        if (string.IsNullOrWhiteSpace(value))
+                        {
+                            continue;
+                        }
+
+                        var expanded = SubstituteKnownProperties(value, file, projectFile, projectDirectory);
+                        if (expanded is null)
+                        {
+                            // The expansion may point at any directory; its roots cannot be proven from source.
+                            fullyUnderstood = false;
+                            continue;
+                        }
+
+                        var root = ExternalRootOf(expanded.Replace('\\', '/'), projectDirectory);
+                        if (root is not null && !externalRoots.Contains(root, StringComparer.Ordinal))
+                        {
+                            externalRoots.Add(root);
+                        }
+                    }
+                }
+
+                if (depth >= 8)
+                {
+                    continue;
+                }
+
+                foreach (var import in document.Descendants("Import"))
+                {
+                    var value = import.Attribute("Project")?.Value;
+                    if (string.IsNullOrWhiteSpace(value))
+                    {
+                        continue;
+                    }
+
+                    var expanded = SubstituteKnownProperties(value, file, projectFile, projectDirectory);
+                    if (expanded is null)
+                    {
+                        fullyUnderstood = false;
+                        continue;
+                    }
+
+                    var resolved = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, expanded.Replace('\\', '/')));
+                    if (File.Exists(resolved))
+                    {
+                        queue.Enqueue((resolved, depth + 1));
+                    }
+                    else
+                    {
+                        fullyUnderstood = false;
+                    }
+                }
+            }
+
+            return new Result(fullyUnderstood, buildFiles, externalRoots);
+        }
+
+        /// <summary>
+        /// Substitutes the standard file-scoped MSBuild properties that only depend on the importing file. Any
+        /// other property expression stays unresolved, and unresolved means "do not trust the cache".
+        /// </summary>
+        private static string? SubstituteKnownProperties(string value, string importingFile, string projectFile, string projectDirectory)
+        {
+            var expanded = value
+                .Replace("$(MSBuildThisFileDirectory)", Path.GetDirectoryName(importingFile)! + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                .Replace("$(MSBuildThisFile)", Path.GetFileName(importingFile), StringComparison.Ordinal)
+                .Replace("$(MSBuildProjectDirectory)", projectDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                .Replace("$(MSBuildProjectName)", Path.GetFileNameWithoutExtension(projectFile), StringComparison.Ordinal);
+
+            return expanded.Contains("$(", StringComparison.Ordinal) ? null : expanded;
+        }
+
+        private static string? ExternalRootOf(string value, string projectDirectory)
+        {
+            var wildcard = value.IndexOfAny(['*', '?']);
+            var directoryPart = wildcard < 0
+                ? Path.GetDirectoryName(value)
+                : value[..wildcard] is { } prefix && prefix.Contains('/', StringComparison.Ordinal)
+                    ? prefix[..prefix.LastIndexOf('/')]
+                    : string.Empty;
+
+            if (string.IsNullOrEmpty(directoryPart))
+            {
+                return null;
+            }
+
+            var resolved = Path.GetFullPath(Path.Combine(projectDirectory, directoryPart));
+            var projectRoot = Path.GetFullPath(projectDirectory);
+            var outside = !resolved.StartsWith(projectRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && !string.Equals(resolved, projectRoot, StringComparison.Ordinal);
+            return outside && Directory.Exists(resolved) ? resolved : null;
+        }
     }
 }
