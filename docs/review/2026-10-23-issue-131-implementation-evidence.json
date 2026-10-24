@@ -1,0 +1,508 @@
+{
+  "issue": 131,
+  "recorded_date": "2026-10-23",
+  "stage": "implementation S1-S4 delivered locally on the feature branch; not merged, Issue still open",
+  "branch": "feat/issue-131-capability-map-tenant-id-guard-20261023-174957",
+  "baseline": {
+    "master_sha": "348c4d3c35b8682e6b47b6c2dd6058b046c1113a",
+    "remote_verified": "origin/master == local HEAD (git fetch 2026-10-23)",
+    "design_baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
+    "commits": {
+      "S1": "8dfe83f5",
+      "S2": "7b668b0d",
+      "S3": "218ff151"
+    },
+    "sdk": ".NET SDK 10.0.112 (global.json 10.0.100, rollForward latestMinor)",
+    "platform": "linux-x64, Fedora 44, podman socket used for Testcontainers suites"
+  },
+  "S1_inventory_recheck": {
+    "method": "walk excluding bin/obj/99_RecycleBin; SHA-256 per .cs; ProjectReference graph from every .csproj; slnx <Project Path> resolved per solution directory; compared with docs/review/2026-10-23-issue-131-design-inventory.json",
+    "projects": 15,
+    "source_files": 153,
+    "hash_mismatch": 0,
+    "missing_now": 0,
+    "added_now": 0,
+    "consumer_diffs": 0,
+    "solution_membership_diffs": 0,
+    "verdict": "TOTAL_DIFF 0; design adjudications apply unchanged at 348c4d3c",
+    "additional_build_inputs_found": [
+      "samples/ProcurementApproval/CrestCreates.Sample.ProcurementApproval.slnx member of CrestCreates.Draft.Abstractions",
+      ".github/workflows/ci.yml step running tests/Metadata/Draft/CrestCreates.Draft.Tests",
+      ".github/workflows/full-validation.yml same step",
+      "tests/Boundary/.../DependencyBoundaryTests.cs and RuntimePersistenceArchitectureTests.cs mention CrestCreates.Agent.Runtime as forbidden fragments (guards, not consumers)"
+    ],
+    "pack_inputs": "none of the 15 projects is IsPackable=true; repo-wide packable set is Agent.Memory.Projection, Agent.Memory.ReadCore, JsonContracts.BuildTasks plus the BuildTasks nuspec, all out of #131 scope"
+  },
+  "S2_tenantid_guard": {
+    "location": "tests/Boundary/CrestCreates.DependencyBoundaries.Tests/TenantIdentityArchitectureTests.cs + TenantIdentity/*.cs",
+    "per_project_reference_resolution": "shared framework (TPA + Microsoft.AspNetCore.App) > own bin output > project.assets.json compile assets, deduped by assembly simple name; source-generator output included for symbol resolution only and never scanned",
+    "gate_metrics": {
+      "active_non_test_projects_enumerated": 149,
+      "authored_compile_sources_enumerated": 2583,
+      "candidate_files": 676,
+      "projects_actually_compiled": 97,
+      "first_party_helper_members_indexed": 3301,
+      "identity_exit_sites_observed": 1034,
+      "violations": 0,
+      "coverage_failures": 0,
+      "compile_input_source": "MSBuild evaluated Compile items and DefineConstants per project and configuration (cached, keyed by the absolute project directory, build scripts and file list); a failed evaluation is a TI900, never an empty set"
+    },
+    "acceptance_matrix": {
+      "TI-P01_display_log_dto_comments_and_plain_object_Name": "pass (no diagnostics, no coverage failures)",
+      "TI-P02_name_or_guid_header_lookup_then_directory_id_and_id_plus_name_passthrough": "pass",
+      "TI-N01_name_direct_alias_trim_interpolation_coalesce_into_ChangeAsync_Success_slot0_SetTenantContext_slot0": "pass: 7 TI001 + 1 TI003 (identity-named local initialized from a name)",
+      "TI-N02_name_into_tenantid_and_tenant_id_claims_cache_prefix_permission_scope_entity_filter_and_member_write": "pass: 2 TI001 (claims) + 4 TI002",
+      "TI-N03_getter_returning_Name_method_returning_NormalizedName_new_TenantInfo_name_name_one_helper_indirection_named_argument_using_alias_fully_qualified": "pass: 3 TI003 + 2 TI001 in the masquerade file, plus the alias file",
+      "TI-C01_enumeration_covers_new_active_projects_sensitive_symbols_unbound_reports_TI900_scan_cannot_run_empty": "pass: project and file counts equal an independent enumeration; 8 ports observed on the real repository with Success >= 5; unbound ChangeAsync yields TI900; missing build output yields TI900",
+      "TI-B01_real_directory_resolution_behaviour": "pass 7/7 in tests/Framework/Ddd/CrestCreates.Application.Tests/Tenants/TenantIdentityDirectoryResolutionTests.cs using HeaderTenantResolver, CurrentTenant, MultiTenancyMiddleware, IdentityClaimsBuilder and TenantCacheKeyContributor: guid header, name header, name-that-is-a-guid (id lookup miss fails closed, no name fallback), rename keeps partition key, similar names differ, inactive tenant never enters identity, middleware frame holds the entity id and is restored",
+      "TI-M01_resolver_success_first_argument_changed_from_tenant_Id_to_tenant_Name_on_isolated_copy": "pass: TI001 at that exit plus authoritative-ledger failure, copy stays compilable (no TI900 on the mutated file)",
+      "TI-M02_tenant_claim_value_changed_to_context_UserName_and_audit_cache_first_argument_changed_to_currentTenant_Tenant_Name": "pass: claim case fails the authoritative ledger; audit cache case raises TI002 and the ledger"
+    },
+    "declared_limits": "repository-wide bounded pattern guard, not a general interprocedural or security analyser; tuple-deconstruction locals are not tracked as alias carriers; generator template strings are not treated as bound symbols and generated endpoints stay covered by their own fixtures; architecture tests are not promoted to execution evidence"
+  },
+  "S3_archiving": {
+    "destination": "99_RecycleBin/issue-131-capability-map/",
+    "git_record": "28 R100 renames (byte identical), nothing deleted, no content edited; README.md added with per-item adjudication, replacement direction and external-consumer disclosure",
+    "moved": [
+      "src/Integrations/CrestCreates.Integration.ExternalApi",
+      "src/Integrations/CrestCreates.Integration.LegacyDatabase",
+      "src/Runtime/Agent/CrestCreates.Agent.Runtime",
+      "src/Framework/Infrastructure/CrestCreates.Configuration",
+      "src/Metadata/Draft/CrestCreates.Draft.Abstractions",
+      "src/Metadata/Draft/CrestCreates.Draft",
+      "src/Runtime/Eventing/CrestCreates.EventBus.EventStore",
+      "tests/Metadata/Draft/CrestCreates.Draft.Tests",
+      "src/Runtime/Eventing/CrestCreates.EventBus.Abstract/IEventStore.cs"
+    ],
+    "inputs_removed": {
+      "solution_memberships": 36,
+      "project_references": [
+        "src/Runtime/Workflow/CrestCreates.Workflow -> CrestCreates.Draft.Abstractions",
+        "tests/Runtime/Workflow/CrestCreates.Workflow.Tests -> CrestCreates.Draft"
+      ],
+      "ci_steps": 2,
+      "sample_solution_memberships": 1,
+      "note": "GitHub workflows remain manually disabled; nothing was enabled"
+    },
+    "kept_in_place": [
+      "remaining live contracts inside CrestCreates.EventBus.Abstract (not moved by directory)",
+      "ControlPlaneReferenceDataKernelArchitectureTests legacy IDraftStore prohibition",
+      "DependencyBoundaryTests and RuntimePersistenceArchitectureTests forbidden fragments naming Agent.Runtime (guards, not consumers)"
+    ],
+    "new_guards": {
+      "CapabilityMapCoverageArchitectureTests": 5,
+      "ArchivedProjectRegressionArchitectureTests": 5,
+      "PluginSystemIsolationArchitectureTests": 3
+    },
+    "map_index_after_archiving": {
+      "active_src_projects": 128,
+      "archived_index_rows": 8,
+      "regeneration": "index regions are recomputed from the filesystem by script, so no hand-maintained drift"
+    }
+  },
+  "S4_verification": {
+    "builds": [
+      {
+        "command": "dotnet build CrestCreates.slnx",
+        "exit": 0,
+        "errors": 0
+      },
+      {
+        "command": "dotnet build solutions/CrestCreates.All.slnx",
+        "exit": 0,
+        "errors": 0,
+        "warnings": 5
+      },
+      {
+        "command": "dotnet build solutions/CrestCreates.Framework.slnx",
+        "exit": 0,
+        "errors": 0
+      },
+      {
+        "command": "dotnet build solutions/CrestCreates.Metadata.slnx",
+        "exit": 0,
+        "errors": 0
+      },
+      {
+        "command": "dotnet build solutions/CrestCreates.Platform.slnx",
+        "exit": 0,
+        "errors": 0
+      },
+      {
+        "command": "dotnet build solutions/CrestCreates.Runtime.slnx",
+        "exit": 0,
+        "errors": 0
+      },
+      {
+        "command": "dotnet build solutions/CrestCreates.Integrations.slnx",
+        "exit": 0,
+        "errors": 0
+      }
+    ],
+    "baseline_build_condition": "on this worktree the first root build failed with NETSDK1004 because tests/Runtime/Agent/CrestCreates.Agent.Memory.TypeForwardLegacyConsumer had no restored project.assets.json; a targeted dotnet restore fixed it and every subsequent build exited 0. Pre-existing environment condition, unrelated to #131.",
+    "suites": [
+      {
+        "project": "tests/Boundary/CrestCreates.DependencyBoundaries.Tests",
+        "passed": 205,
+        "failed": 2,
+        "total": 207,
+        "note": "the two failures are ControlPlaneReferenceDataSpecTestSkeletonTests EvidenceLedgerSummary_Report and EvidenceLedgerGuard_RequiredTuplesMustBeExecuted"
+      },
+      {
+        "project": "tests/Runtime/Workflow/CrestCreates.Workflow.Tests",
+        "passed": 100,
+        "failed": 0,
+        "note": "after removing the unused Draft.Abstractions reference"
+      },
+      {
+        "project": "tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests",
+        "passed": 132,
+        "failed": 0
+      },
+      {
+        "project": "tests/Framework/Modules/CrestCreates.Organization.Tests",
+        "passed": 223,
+        "failed": 0
+      },
+      {
+        "project": "tests/Framework/Infrastructure/CrestCreates.Localization.Tests",
+        "passed": 12,
+        "failed": 0
+      },
+      {
+        "project": "tests/Framework/Modules/CrestCreates.FileManagement.Tests",
+        "passed": 24,
+        "failed": 0
+      },
+      {
+        "project": "tests/Framework/Web/CrestCreates.Web.Tests",
+        "passed": 102,
+        "failed": 0
+      },
+      {
+        "project": "tests/Framework/Ddd/CrestCreates.Application.Tests --filter Tenants|Identity",
+        "passed": 102,
+        "failed": 0
+      }
+    ],
+    "pre_existing_failures_evidence": {
+      "pristine_baseline_worktree": "/tmp/crest131-baseline at 348c4d3c without any #131 change",
+      "dependency_boundaries_at_baseline": {
+        "passed": 176,
+        "failed": 2,
+        "total": 178,
+        "failing": [
+          "EvidenceLedgerSummary_Report",
+          "EvidenceLedgerGuard_RequiredTuplesMustBeExecuted"
+        ]
+      },
+      "verdict": "identical failures at the baseline; #131 introduces no regression and adds 29 passing guard cases"
+    },
+    "fault_controls": [
+      {
+        "name": "map index row removal must fail the coverage gate",
+        "mutation": "delete the src/Core/CrestCreates.Core index row",
+        "expected": "ProjectIndex_MatchesActiveSrcProjectsExactly fails",
+        "result": "failed as expected (1/5), map restored and git diff clean"
+      },
+      {
+        "name": "new production dependency on PluginSystem must fail the isolation gate",
+        "mutation": "add ProjectReference from CrestCreates.ModuleDiagnostics to CrestCreates.PluginSystem",
+        "first_attempt_note": "the first injected path used the wrong relative depth, so it resolved to a non-existent directory and did not exercise the guard; recorded honestly and repeated",
+        "expected": "ProductionChain_HasNoPluginSystemDependency fails",
+        "result": "failed as expected (1/3) with a resolvable path; csproj restored, both guards green again"
+      }
+    ],
+    "native_scope": "no runtime execution code was touched: archiving removed only unconsumed projects, the guard lives in a test project and the rest is documentation. No NativeAOT or trimming declaration was raised; no new native fixture was created to justify a label.",
+    "ci_state": "unchanged; CI, Full Validation and aot-validation workflows stay manually disabled"
+  },
+  "acceptance_mapping": [
+    {
+      "issue_criterion": "能力表记录定位、真实消费者、功能边界、支持级别、证据和处理结论",
+      "status": "delivered",
+      "evidence": "docs/Feature/CapabilityMap.md 12 adjudications over 15 projects with per-item entry point, real call sites with file:line, functional status, execution evidence and boundaries, ownership and exit conditions; enforced by CapabilityMapCoverageArchitectureTests"
+    },
+    {
+      "issue_criterion": "新项目要求说明为何不能由既有项目承载；不新增执行路径",
+      "status": "delivered",
+      "evidence": "map section 3 admission record requirement plus the index coverage gate; no production source changed, no new registry, scanner, feature flag or execution path"
+    },
+    {
+      "issue_criterion": "TenantId 为租户上下文主键有边界测试；TenantName 作展示/查询文本不误报",
+      "status": "delivered",
+      "evidence": "TenantIdentityArchitectureTests (16 cases) + TenantIdentityDirectoryResolutionTests (7 cases); real-repository gate 0 violations and 0 coverage failures over 1024 identity exit sites"
+    },
+    {
+      "issue_criterion": "AGENTS/memory/宣传与支持声明一致；归档前引用、方案、构建依赖验证通过",
+      "status": "delivered",
+      "evidence": "AGENTS.md and memory.md synced; comparison doc PluginSystem claim retracted with a staleness banner; ORM matrix header records the merge SHA; all solution and build inputs verified by seven builds and the suites above"
+    }
+  ],
+  "open_items": [
+    "PR and merge require explicit maintainer authorization; Issue #131 stays open until the maintainer validates the four acceptance items",
+    "post-merge status synchronization beyond this branch is handled inside the branch (AGENTS/memory), unlike the earlier separate docs PR pattern, because #131 changes only docs, guards and unconsumed archives",
+    "external NuGet consumers of the archived packages cannot be proven absent; disclosed in the archive README rather than claimed as API-compatible"
+  ],
+  "review_rounds": [
+    {
+      "round": "R1",
+      "review_date": "2026-10-24",
+      "reviewed_head": "40bf53eb5b26185658ef5e04ecd9eb9c5715a621",
+      "severity": "P2",
+      "findings": 8,
+      "verdict": "all findings accepted and fixed on the same branch; regression tests added for each",
+      "items": [
+        {
+          "id": "R1-01",
+          "title": "scan used directory globbing and no preprocessor symbols",
+          "fix": "TenantIdentityCompileInputs resolves the real Compile set (default glob - explicit Remove + explicit Include, including out-of-directory linked sources) and derives configuration/TFM constants; parse options carry them",
+          "regressions": [
+            "TI_C01f",
+            "TI_C01g",
+            "TI_C01h",
+            "TI_C01i",
+            "TI_C01a updated"
+          ],
+          "calibration": "TI_C01i compares the derived Compile set and DefineConstants with 'dotnet msbuild -t:AddImplicitDefineConstants -getItem:Compile -getProperty:DefineConstants' for CodeGenerator (netstandard), Caching (net10) and OpenApi; sets are equal"
+        },
+        {
+          "id": "R1-02",
+          "title": "local alias dropped the undecidable state",
+          "fix": "flow environment stores the full TaintValue (tainted / undecidable / origins) and merges on every write",
+          "regressions": [
+            "TI_N04"
+          ]
+        },
+        {
+          "id": "R1-03",
+          "title": "helper summary missed plain local assignment",
+          "fix": "helper inlining binds arguments by symbol, runs the body's declarations/assignments to a fixed point and only then evaluates returns",
+          "regressions": [
+            "TI_N05"
+          ]
+        },
+        {
+          "id": "R1-04",
+          "title": "constructor slots identified by written position",
+          "fix": "Claim and ITenantInfo creations use IObjectCreationOperation argument-to-parameter mapping (named/optional, explicit and implicit new)",
+          "regressions": [
+            "TI_N06"
+          ]
+        },
+        {
+          "id": "R1-05",
+          "title": "ITenantInfo.Id object-initializer writes not checked",
+          "fix": "identity members are classified by declaring type/interface, covering object initializers and later assignments, reported as TI003",
+          "regressions": [
+            "TI_N07"
+          ]
+        },
+        {
+          "id": "R1-06",
+          "title": "authoritative ledger only looked at the terminal variable name",
+          "fix": "flow carries a provenance set (member / parameter / method plus alias tracing); the 9 ledger rows validate the origin set instead of the spelling",
+          "regressions": [
+            "TI_M03",
+            "existing TI_M01/TI_M02 still caught"
+          ],
+          "real_repository_ledger": "9/9 rows pass"
+        },
+        {
+          "id": "R1-07",
+          "title": "backslash ProjectReference bypassed the isolation guard on Linux",
+          "fix": "ArchitecturePath.TryResolve normalises separators and skips MSBuild property expressions before resolving; shared by the isolation and archive guards",
+          "regressions": [
+            "BackslashAndForwardSlashReferences_AreEquivalent",
+            "BackslashReferences_AreResolvedBeforeComparison"
+          ]
+        },
+        {
+          "id": "R1-08",
+          "title": "design inventory not committed and evidence links broken",
+          "fix": "docs/review/2026-10-23-issue-131-design-inventory.json committed; design section 7 links and the three archived source links corrected",
+          "regressions": [
+            "Issue131EvidenceLinks_AllResolve"
+          ]
+        }
+      ],
+      "reviewer_controls_reproduced": [
+        {
+          "control": "user name reached a tenant claim through a local named tenantId in the real IdentityClaimsBuilder",
+          "before": "TI01/TI02/TI03 and the coverage report all passed",
+          "after": "TI_M03 catches it through the authoritative ledger (both claim rows) while TI01/TI03 stay green by design"
+        },
+        {
+          "control": "real #if DEBUG identity misuse added inside the Caching project",
+          "before": "not analysed (no preprocessor symbols)",
+          "after": "TI_M04 catches TI001"
+        },
+        {
+          "control": "identity misuse added to the source-linked CrudGeneration input",
+          "before": "never scanned (no project of its own)",
+          "after": "TI_M05 catches TI001"
+        }
+      ],
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "27/27 (20 previous + 7 new)",
+        "dependency_boundaries": {
+          "passed": 219,
+          "failed": 2,
+          "total": 221,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "application_tenants_and_identity": "102/102",
+        "fault_controls": [
+          {
+            "control": "drop a capability-map index row",
+            "result": "ProjectIndex_MatchesActiveSrcProjectsExactly fails; map restored, git clean for that file"
+          },
+          {
+            "control": "add a backslash ProjectReference from CrestCreates.ModuleDiagnostics to CrestCreates.PluginSystem",
+            "result": "ProductionChain_HasNoPluginSystemDependency fails; csproj restored",
+            "author_note": "the first injection used the wrong relative depth twice (depth 2, which resolves outside the repository layout) and did not exercise the guard; with the resolvable depth-3 backslash form the guard fails as expected, and both invalid attempts are recorded rather than hidden"
+          }
+        ]
+      }
+    },
+    {
+      "round": "R2",
+      "review_date": "2026-10-24",
+      "reviewed_head": "adbbf5dd4ed454fdfdd40b35f1051f712194c8f9",
+      "severity": "P2",
+      "findings": 3,
+      "verdict": "all three accepted and fixed on the same branch with regressions for both directions",
+      "items": [
+        {
+          "id": "R2-01",
+          "title": "Compile item conditions were applied unconditionally",
+          "fix": "the guard no longer derives Compile items; it consumes the MSBuild evaluated set (conditions, imports, property functions, TFM/configuration constants) per project and configuration, caches it against the absolute project directory plus build scripts and file list, and turns an evaluation failure into TI900",
+          "regressions": [
+            "TI_C01j (Debug includes the file a Release-only Remove excludes, and constants per configuration)",
+            "TI_M08 (reviewer's real-project control: Release-only Remove + Debug misuse in FileManagement is caught)",
+            "TI_C01f/TI_C01g/TI_C01i keep passing on the new source"
+          ],
+          "cost": "cold evaluation 149 projects ~90-120 s, cached matrix run ~1m15s"
+        },
+        {
+          "id": "R2-02",
+          "title": "non-empty constant fallback erased its provenance",
+          "fix": "neutral constants (null/default/empty string/throw) stay clean; any other non-empty string constant contributes literal:\"<value>\" so an authoritative branch cannot sanitise it",
+          "regressions": [
+            "TI_N08 (three fallbacks produce different origin sets)",
+            "TI_M06 (real IdentityClaimsBuilder with ?? \"acme-east\" rejected on both claim rows)"
+          ]
+        },
+        {
+          "id": "R2-03",
+          "title": "passthrough helper added a spurious parameter origin",
+          "fix": "helper parameters that received a real argument no longer contribute their declared origin (the caller provenance wins); top-level parameters keep their role, so the TI002 identity-parameter rows still work",
+          "regressions": [
+            "TI_N09 (direct property, local alias and Identity(x)=>x produce identical origins)",
+            "TI_M07 (real claims builder with a passthrough helper stays ledger-clean and violation-free)"
+          ]
+        }
+      ],
+      "author_side_defect_found_by_the_new_test": "the first evaluated-input cache key omitted the absolute project directory, so a copied scratch tree could silently reuse another tree's Compile list; TI_M05 exposed it and the key now includes the directory",
+      "measurement_correction": "the reviewer retracted the R1 'three mutations still pass' measurement because a symlinked test run directory made VSTest read the author tree; R2 conclusions come from a material copy, and the author-side controls in this round write to independent temporary directories (AnalyzeScratch/Mutate copy the project, arrange inputs and delete the tree)",
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "33/33",
+        "dependency_boundaries": {
+          "passed": 225,
+          "failed": 2,
+          "total": 227,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "application_tenants_and_identity": "102/102"
+      }
+    },
+    {
+      "round": "R3",
+      "review_date": "2026-10-24",
+      "reviewed_head": "0cc8ef9b27d68db33db51e8f332b1f405bd60a04",
+      "severity": "P2",
+      "findings": 4,
+      "verdict": "all four accepted and fixed; cache, coverage-reporting and provenance edges corrected with regressions in both directions",
+      "items": [
+        {
+          "id": "R3-01",
+          "title": "warm cache ignored new files in out-of-project linked globs",
+          "fix": "the cache key now includes a tree signature (directory mtimes plus *.cs name/length/mtime) of every out-of-project Compile Include/Remove search root; cached entries are validated against existing files and re-evaluated when one disappeared",
+          "regressions": [
+            "TI_C01k (warm read sees an added linked file and forgets a deleted one)"
+          ]
+        },
+        {
+          "id": "R3-02",
+          "title": "evaluation failure was filtered out because Sources was empty",
+          "fix": "evaluation failure and missing symbol context are now distinct: unknown inputs (MSBuild evaluation failed) is an unconditional TI900 before any source-based filter; known inputs with missing build output is TI900 only when the known sources contain tenant code",
+          "regressions": [
+            "TI_C01l (valid project, valid bin, injected evaluation error, empty sources -> TI900)",
+            "TI_C01d still covers missing references with candidate sources"
+          ]
+        },
+        {
+          "id": "R3-03",
+          "title": "cross-file non-empty const fallback erased its provenance",
+          "fix": "constant fields (including metadata constants) keep their compile-time value as provenance: non-empty string constant -> literal:\"<value>\", empty constant / string.Empty / non-const statics stay neutral",
+          "regressions": [
+            "TI_N10 (cross-file const, empty const, static readonly)",
+            "TI_M09 (real claims builder plus a const in another file -> both ledger rows rejected)"
+          ]
+        },
+        {
+          "id": "R3-04",
+          "title": "throw message counted as an identity source",
+          "fix": "throw produces no value in the provenance domain; writes inside its arguments are still enumerated by the exit scan",
+          "regressions": [
+            "TI_N11 (message / interpolated / empty message throws keep only the authoritative origin, no diagnostics)",
+            "TI_M10 (real claims builder turned fail-closed throw stays clean)"
+          ]
+        }
+      ],
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "39/39",
+        "dependency_boundaries": {
+          "passed": 231,
+          "failed": 2,
+          "total": 233,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "application_tenants_and_identity": "102/102"
+      }
+    },
+    {
+      "round": "R4",
+      "review_date": "2026-10-24",
+      "reviewed_head": "147d7c4eda348d7f512b62f2f28a4959026277e4",
+      "severity": "P2",
+      "findings": 1,
+      "verdict": "accepted and fixed; the cache now only applies when the Compile dependency set is provably complete",
+      "items": [
+        {
+          "id": "R4-01",
+          "title": "property-expanded or imported external Compile globs were outside the cache-invalidation signature",
+          "fix": "a dependency probe walks the project and its resolvable imports (plus the auto-imported root build files), substitutes only the standard file-scoped properties, and collects literal external search roots; any remaining $(...) Compile item or unresolvable import marks the project as not provably complete, which bypasses the persistent cache and calls the same MSBuild evaluation chain every time; when caching is allowed the key covers the imported build files' contents, the project file list and the external roots' tree signatures",
+          "regressions": [
+            "TI_C01m: literal / import / property / import-with-property forms, each warmed then added, renamed and deleted, must stay equal to a forced evaluation; literal and literal-import forms assert a cache hit, property forms assert bypass"
+          ],
+          "author_note": "the first probe version treated the $(MSBuildThisFileDirectory) import in Directory.Build.props as unresolvable, which disabled caching for every project (warm matrix 4m20s); substituting the four standard file-scoped properties restored caching for 136 projects while the 21 projects that inject $(...) Compile items through build targets still re-evaluate by design",
+          "declared_limit": "the cache trust closure is the project, its resolvable imports and the four auto-imported root build files; SDK-internal props are outside it and currently only add the default glob and generated output"
+        }
+      ],
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "40/40 (warm ~3 min; the 21 property-injecting projects re-evaluate every run)",
+        "dependency_boundaries": {
+          "passed": 232,
+          "failed": 2,
+          "total": 234,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "note": "the Application Tenants|Identity suite was 102/102 before this round and no production source changed"
+      }
+    }
+  ]
+}

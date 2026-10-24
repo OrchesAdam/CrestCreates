@@ -176,17 +176,17 @@ CrestCreates/
 │   │   ├── Modules/             # 平台/业务模块
 │   │   └── Testing/             # 测试基础设施
 │   ├── Metadata/                # Metadata.Abstractions, Metadata, ContextPack, Schema, Snapshot
-│   ├── Metadata/Draft/          # DescriptorDraft, Draft
+│   ├── Metadata/Draft/          # DescriptorDraft（通用 Draft 已随 #131 归档）
 │   ├── Runtime/                 # Capability, Workflow, HumanTask, Agent, Eventing, Audit 等
 │   ├── Persistence/             # Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB, Runtime.Persistence.PostgreSql 等
 │   ├── Platform/                # Web, Platform, Platform.AspNetCore, Platform.All
 │   ├── Tooling/                 # CodeGenerator, Metadata.Analyzers, BuildTasks, JsonContracts
-│   └── Integrations/            # PluginSystem, ExternalApi, LegacyDatabase
+│   └── Integrations/            # PluginSystem（实验）、MCP、CAP；ExternalApi/LegacyDatabase 已随 #131 归档
 ├── tests/                       # 按 src 分层镜像组织
 ├── samples/                     # LibraryManagement, SaaSHelpdesk
 ├── docs/
 │   ├── design/
-│   ├── Feature/
+│   ├── Feature/                 # 含 CapabilityMap.md：项目定位、消费者、边界、证据与处理结论的唯一导航入口（#131）
 │   ├── review/
 │   └── superpowers/             # specs/ 和 plans/
 ├── solutions/                   # 分层 .slnx
@@ -224,7 +224,7 @@ Persistence: Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB
   ↑
 Platform: Web, Platform.AspNetCore, Platform.All
 Tooling: CodeGenerator, BuildTasks
-Integrations: PluginSystem, ExternalApi, LegacyDatabase
+Integrations: PluginSystem（实验）, MCP, CAP（ExternalApi/LegacyDatabase 已随 #131 归档）
 ```
 
 依赖边界由 `tests/Boundary/CrestCreates.DependencyBoundaries.Tests` 强制：
@@ -295,6 +295,8 @@ BuildTasks 编译前链：
 - 认证授权不要引入新的真相来源，不要复制 token / claims / permission 逻辑，优先复用现有身份、权限、租户上下文主链。
 - Agent Control Plane 是治理面，不是运行时执行面。它可以审查、预览、提交激活请求，但不能绕过授权、批准自身变更、直接执行 runtime handler 或突变 runtime registry。
 - Agent 治理面主链是 Authoring → deterministic review → Control Plane：authoring 只产出候选草稿；正式契约在 `src/Runtime/Agent/CrestCreates.Agent.Authoring*`、`CrestCreates.Agent.ControlPlane*` 与 `Metadata/Draft/CrestCreates.DescriptorDraft*`。review artifact 与 package/evidence artifact 持久化只提供完整性与证据绑定，不构成批准；activation request/gate 当前为内存实现，不等于 durable activation。
+- 能力地图与长尾裁定（#131）：`docs/Feature/CapabilityMap.md` 是「项目存在」与「能力交付」的唯一导航面。每条记录四维分开写：定位 / 功能状态 / 执行证据 / 处理结论。新增生产 csproj 必须同时在地图项目索引登记并附准入理由（为什么既有项目不能承载、层次与依赖边界、消费者或静态聚合目的、唯一装配入口、验证方式、支持级别、责任、未交付时的退出条件），由 `CapabilityMapCoverageArchitectureTests` 强制；缺记录即门禁失败。归档项落 `99_RecycleBin/<issue-slug>/` 并保留原相对路径与 README，由 `ArchivedProjectRegressionArchitectureTests` 禁止回流。实验能力（FileManagement 本地/内存元数据、PluginSystem 动态 DLL 装载）不得被宣传为已交付平台能力；PluginSystem 动态装载执行面属 JIT-only，功能执行未验证。地图不复制 ORM 支持表，ORM 组合证据唯一来源仍是 `docs/Feature/OrmProviderSupportMatrix.md`。
+- TenantId 是租户上下文唯一主键（#131）：`ICurrentTenant.Id` 为权威；`ITenantInfo.Name` / `Tenant.Name` / `TenantName` 只能用于展示、日志、DTO 与名称检索。名称可以进入解析入口，但必须经既有 tenant repository/provider 查询得到实体、保留入口既有 active/lifecycle 校验，再以实体 Id 进入上下文、claim、授权/隔离与缓存/连接分区；禁止 `TenantId = tenant.Name`、`ChangeAsync(name)`、名称写入 `tenantid`/`tenant_id` claim、名称进入过滤表达式或缓存前缀；查不到 Id 时不得退回名称或 host。守卫位于 `tests/Boundary/CrestCreates.DependencyBoundaries.Tests/TenantIdentityArchitectureTests`：按项目真实引用闭包分析、名称源按成员身份绑定、身份出口由端口表加参数名网覆盖、有限值流加同项目与第一方跨项目 helper 内联、权威来源结构断言锁定主链；敏感节点绑定失败出 TI900，不静默跳过。它是仓库级有限模式守卫，不是通用安全数据流分析器；生成器模板字符串不算已绑定符号，实际生成端点仍由各自 fixture 断言。Resolver 接受 `X-Tenant-Id: <名称>` 是合法兼容入口，不视为违规，也不得为它新增第二套身份真相来源。
 - JsonContracts 工具链（`src/Tooling/CrestCreates.JsonContracts.BuildTasks`、`.BuildTasks.Core`、`.Tool`）：构建期生成确定性 JSON contract roots，由官方 STJ Source Generator 消费；禁止 runtime reflection / scanner fallback。属构建期 Tooling，不是运行时组件。
 - 正式 CRUD JSON 编译契约（#128，PR #150 已合并）：`[GenerateCrudService(typeof(Entity))]` 声明 → CRUD precompile（普通 Compile 输入）→ JsonContracts root 闭合 → 官方 STJ，同一 CoreCompile；`AddGeneratedCrud()` ExplicitHost 激活（每程序集贡献 + handler module + per-Host JSON configurator），`MapCrestCapabilityEndpoints` 在端点注册前做一次能力注册表权威汇总，必需 identities/JSON root 缺失即 fail-closed（反射 resolver 不作数）；typed query adapter 静态执行（按原生探针矩阵，decimal 过滤为 operator-free 形态）、typed 无 fallback 结果契约、失败路径错误 DTO（ProblemDetails）在闭包内。支持声明：**正式 CRUD + JSON 主链 NativeAOT-verified（linux-x64）**——fixture publish/link/run 15 场景 + 表达式树构造探针 + 两变异反例 + 分场景/总 sentinel；EF/其他 ORM 的查询翻译与 UoW 组合、Windows/macOS 等其他 RID **未验证**（逐项声明，不整体背书）。
 - Ticket 正式 AppService HTTP 投影（#129 S5）：`tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` 使用真实 `TicketAppService`/DTO/validator 与正式生成 bundle，仅替换内存 Ticket/SLA 持久化叶子与 fixture identity/permission/failure presenter；支持声明 **Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64）**——publish/link/run，15 场景（create/get/all/by-customer/update stamp/assign+active SLA/resolve/close/delete If-Match/unknown 404/invalid body zero-business/permission 403/business failure/metadata rejection）+ 总 sentinel；五个原生控制（绿色 + wrong-expectation + wrong-validation-status + late-validation + decoy-metadata），失败控制 exit 1 无 sentinel；零业务由业务入口/UoW/仓储写计数器独立断言，metadata 负例锁定 Ticket owner/11 identities/目标 root。不推导 EF/PostgreSQL、真实认证/租户、整个 SaaSHelpdesk 或 Library HTTP；Library 完整 HTTP 仍未验证，其他 RID 未验证。
@@ -407,6 +409,7 @@ TestBase
 参考位置：
 
 - 平台状态记录：`memory.md`
+- 能力地图（项目定位/消费者/边界/证据/结论）：`docs/Feature/CapabilityMap.md`
 - 设计规格：`docs/superpowers/specs/`
 - 工作计划：`docs/superpowers/plans/`
 - 示例项目：`samples/LibraryManagement/`、`samples/SaaSHelpdesk/`
@@ -415,4 +418,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-10-22
+**最后更新**: 2026-10-23

@@ -1,6 +1,6 @@
 # ORM Provider 支持矩阵（Issue #130 最终）
 
-日期：2026-10-23；实现 SHA：`162bdbee`（分支 `feat/issue-130-provider-matrix-soft-delete-20261022-104210`，PR #154；**尚未合并**）。
+日期：2026-10-23；实现 SHA：`162bdbee`（分支 `feat/issue-130-provider-matrix-soft-delete-20261022-104210`），经 PR #154 于 2026-10-23 合入 master，merge commit `348c4d3c35b8682e6b47b6c2dd6058b046c1113a`；Issue #130 已按验收关闭。本矩阵是 ORM Provider 支持的唯一来源，其他文档（含[能力地图](CapabilityMap.md)）只链接、不复制。
 设计：[Issue #130 设计](../superpowers/specs/2026-10-22-issue-130-provider-matrix-soft-delete-design.md)。S1–S5 证据见 [S1](../review/2026-10-22-issue-130-s1-baseline.md)、[S2](../review/2026-10-22-issue-130-s2-baseline.md)、[S3](../review/2026-10-22-issue-130-s3-tenant-assembly.md)、[S4](../review/2026-10-23-issue-130-s4-compile-entry-crud.md)。
 
 状态术语：

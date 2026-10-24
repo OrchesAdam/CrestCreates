@@ -177,7 +177,6 @@ jobs:
       - name: Test — Metadata / Draft
         run: |
           dotnet test tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests --no-build
-          dotnet test tests/Metadata/Draft/CrestCreates.Draft.Tests --no-build
 
       # ── Runtime ──
       - name: Test — Runtime / Capability
