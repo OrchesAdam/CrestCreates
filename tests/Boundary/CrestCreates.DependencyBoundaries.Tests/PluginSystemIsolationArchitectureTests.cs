@@ -16,12 +16,51 @@ public class PluginSystemIsolationArchitectureTests
     public void ProductionChain_HasNoPluginSystemDependency()
     {
         var root = FindRepositoryRoot();
-        var violations = new List<string>();
+        var violations = FindViolations(root);
 
+        Assert.True(
+            violations.Count == 0,
+            "PluginSystem is an opt-in experiment; a production project now depends on it:"
+            + Environment.NewLine + string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
+    public void BackslashAndForwardSlashReferences_AreEquivalent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"issue131-isolation-{Guid.NewGuid():N}");
+
+        try
+        {
+            WriteProject(Path.Combine(root, "src/Consumer/Consumer.csproj"),
+                @"..\Integrations\CrestCreates.PluginSystem\CrestCreates.PluginSystem.csproj");
+            WriteProject(Path.Combine(root, "src/Other/Other.csproj"),
+                "../Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj");
+            WriteProject(Path.Combine(root, "src/Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj"),
+                null);
+
+            var violations = FindViolations(root);
+
+            Assert.Equal(2, violations.Count);
+            Assert.Contains(violations, violation => violation.Contains("src/Consumer/Consumer.csproj", StringComparison.Ordinal));
+            Assert.Contains(violations, violation => violation.Contains("src/Other/Other.csproj", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>Every production ProjectReference must resolve with either separator form.</summary>
+    internal static IReadOnlyList<string> FindViolations(string root)
+    {
+        var violations = new List<string>();
         foreach (var project in ProductionProjects(root))
         {
-            var relative = Relative(root, project);
-            if (relative.StartsWith(PluginSystemProject, StringComparison.Ordinal))
+            var relative = ArchitecturePath.Relative(root, project);
+            if (ArchitecturePath.IsUnder(relative, PluginSystemProject))
             {
                 continue;
             }
@@ -30,18 +69,30 @@ public class PluginSystemIsolationArchitectureTests
                          .Select(element => element.Attribute("Include")?.Value)
                          .OfType<string>())
             {
-                var resolved = Relative(root, Path.GetFullPath(Path.Combine(Path.GetDirectoryName(project)!, reference)));
-                if (resolved.StartsWith(PluginSystemProject, StringComparison.Ordinal))
+                var resolved = ArchitecturePath.TryResolve(Path.GetDirectoryName(project)!, reference);
+                if (resolved is null)
                 {
-                    violations.Add($"{relative} -> {resolved}");
+                    continue;
+                }
+
+                var target = ArchitecturePath.Relative(root, resolved);
+                if (ArchitecturePath.IsUnder(target, PluginSystemProject))
+                {
+                    violations.Add($"{relative} -> {target}");
                 }
             }
         }
 
-        Assert.True(
-            violations.Count == 0,
-            "PluginSystem is an opt-in experiment; a production project now depends on it:"
-            + Environment.NewLine + string.Join(Environment.NewLine, violations));
+        return violations;
+    }
+
+    private static void WriteProject(string path, string? reference)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var content = reference is null
+            ? "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"
+            : $"<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup><ProjectReference Include=\"{reference}\" /></ItemGroup></Project>";
+        File.WriteAllText(path, content);
     }
 
     [Fact]

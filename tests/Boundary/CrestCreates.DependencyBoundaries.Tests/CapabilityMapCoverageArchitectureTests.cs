@@ -150,6 +150,52 @@ public class CapabilityMapCoverageArchitectureTests
         Assert.True(unresolved.Count == 0, "broken map links: " + string.Join(", ", unresolved));
     }
 
+    [Fact]
+    public void Issue131EvidenceLinks_AllResolve()
+    {
+        var root = FindRepositoryRoot();
+        var documents = new[]
+        {
+            "docs/Feature/CapabilityMap.md",
+            "docs/superpowers/specs/2026-10-23-issue-131-capability-map-tenant-id-guard-design.md",
+            "docs/superpowers/plans/2026-10-23-issue-131-capability-map-tenant-id-guard-implementation.md",
+            "docs/superpowers/plans/2026-10-23-issue-131-issues-log.md",
+        };
+
+        var unresolved = new List<string>();
+        foreach (var document in documents)
+        {
+            var path = Path.Combine(root, document);
+            Assert.True(File.Exists(path), $"issue 131 document is missing: {document}");
+
+            var directory = Path.GetDirectoryName(path)!;
+            foreach (var match in Regex.Matches(File.ReadAllText(path), @"\]\((?<target>[^)#][^)]*)\)").Cast<Match>())
+            {
+                var target = match.Groups["target"].Value.Split('#')[0];
+                if (target.Length == 0 || target.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var resolved = Path.GetFullPath(Path.Combine(directory, target));
+                if (!File.Exists(resolved) && !Directory.Exists(resolved))
+                {
+                    unresolved.Add($"{document} -> {target}");
+                }
+            }
+        }
+
+        Assert.True(unresolved.Count == 0, "broken issue 131 evidence links:" + Environment.NewLine + string.Join(Environment.NewLine, unresolved));
+
+        // The baseline inventory is the evidence chain behind the S1 recheck; it must be locatable in the tree.
+        Assert.True(
+            File.Exists(Path.Combine(root, "docs/review/2026-10-23-issue-131-design-inventory.json")),
+            "the design inventory JSON must be committed so a clean checkout can reproduce the S1 comparison");
+        Assert.True(
+            File.Exists(Path.Combine(root, "docs/review/2026-10-23-issue-131-implementation-evidence.json")),
+            "the implementation evidence JSON must be committed");
+    }
+
     private static IReadOnlyList<string> ReadIndexRows(string root, string marker)
     {
         var map = ReadMap(root);

@@ -40,7 +40,7 @@
 | 通用 Draft：`src/Metadata/Draft/CrestCreates.Draft{,.Abstractions}` | 4+2 个源码文件；Workflow 对 abstractions、Workflow.Tests 对实现有引用，但其 C# 中未检出实际使用；其余消费者为自身测试。TenantIsolatedDraftStore.DeleteAsync 直接透传，null context 放行 | 实验性业务草稿，拟归档两个生产项目与专用测试、移除 Workflow 无效引用。不是 DescriptorDraft 的别名，不自动做 payload 转换，不用其现有弱隔离用例证明治理主链安全 |
 | EventStore：`src/Runtime/Eventing/CrestCreates.EventBus.EventStore` | 无 ProjectReference 消费者；仅内存 retry store、反射 JSON serializer；EventRetryService 用 Guid.NewGuid 删除原记录，不能表达真实重试结算 | 未交付可靠事件存储，拟归档。事件投递/重放继续走正式 LocalEvent/RabbitMQ/Outbox；它们不是 event sourcing 数据迁移目标，不宣称具备该能力 |
 
-上述共 7 个生产项目。源码落点：[ConfigurationService](../../../src/Framework/Infrastructure/CrestCreates.Configuration/Services/ConfigurationService.cs)、[Draft wrapper](../../../src/Metadata/Draft/CrestCreates.Draft/TenantIsolatedDraftStore.cs)、[EventRetryService](../../../src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventRetryService.cs)。
+上述共 7 个生产项目。源码落点：[ConfigurationService](../../../99_RecycleBin/issue-131-capability-map/src/Framework/Infrastructure/CrestCreates.Configuration/Services/ConfigurationService.cs)、[Draft wrapper](../../../99_RecycleBin/issue-131-capability-map/src/Metadata/Draft/CrestCreates.Draft/TenantIsolatedDraftStore.cs)、[EventRetryService](../../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventRetryService.cs)。
 
 EventStore 的 `IEventStore` / `IEventStoreSerializer` / `IEventRetryStore` 仍位于 `CrestCreates.EventBus.Abstract/IEventStore.cs`。本轮检索未发现正式链消费；实施须重新核验接口、实现及生成输入，再将无消费者的该契约文件一并归档，不能只搬实现却留下可误导的新入口。独立保留文件中的在用契约，不能按目录名整包搬走 EventBus.Abstract。
 
@@ -170,8 +170,8 @@ PluginSystem 的隔离由静态引用边界测试证明：正式 Core/Framework/
 ## 7. 实施记录（2026-10-23，S1–S4）
 
 设计正文保持原样；本节记录实施时的实现口径与已确认偏差，供评审逐项核对。逐条证据见
-[实施证据](../review/2026-10-23-issue-131-implementation-evidence.json) 与
-[实施日志](2026-10-23-issue-131-issues-log.md)。
+[实施证据](../../review/2026-10-23-issue-131-implementation-evidence.json) 与
+[实施日志](../plans/2026-10-23-issue-131-issues-log.md)。
 
 - 基线：实施基线为 `348c4d3c`（= `origin/master`）。§1 的只读核对在实施基线上重跑，结果 `TOTAL_DIFF 0`（15 项目、153 源文件、直接消费者、方案成员），裁定无需改判；§5 步骤 1 额外发现并清理了 `samples/ProcurementApproval/CrestCreates.Sample.ProcurementApproval.slnx` 的 Draft.Abstractions 成员与两条运行 `CrestCreates.Draft.Tests` 的 CI 步骤（CI 保持人工禁用）。
 - 归档口径：7 个生产项目 + 通用 Draft 专用测试项目 + 无消费者的 `IEventStore.cs` 移入 `99_RecycleBin/issue-131-capability-map/`，git 记录为 28 条 R100 重命名（逐字节一致、未删除、未改写）；`EventBus.Abstract` 其余在用契约留在 active。7 个项目均非 `IsPackable=true`，故无包输入影响。
@@ -184,3 +184,17 @@ PluginSystem 的隔离由静态引用边界测试证明：正式 Core/Framework/
 - 已声明限制（写入测试说明与地图）：解构声明 `var (a, b) = ...` 的别名传递不被跟踪；跨程序集动态拼接与外部插件数据流不在覆盖范围；架构测试不作为执行证据或 `NativeAOT-verified` 依据。
 - 故障控制复现：删除地图任一行必须使覆盖门禁失败（已验证）；给正式主链项目加一条 PluginSystem 引用必须使隔离门禁失败（已验证；首次注入因相对路径深度错误指向不存在目录而未被触发，纠正后生效，该无效尝试也已记入证据）。
 - 未做：不提升任何支持声明，不新增 native fixture，不改 CI 启用状态；Issue #131 保持 open，验收由维护者核对 §6 四条后勾选。
+
+### 7.1 R1 审查修复（2026-10-24）
+
+首轮实现审查（head `40bf53eb`）提出 8 项 P2，全部成立并在同一分支修复，逐条映射见
+[实施日志](../plans/2026-10-23-issue-131-issues-log.md) I-09。相对设计正文的实质性收口：
+
+- **扫描输入改为真实 Compile 集合**：默认 glob − 显式 `Compile Remove` + 显式 `Compile Include`（含项目目录外 linked 源），并用项目实际配置/TFM 的 preprocessor symbols 解析；推导值与 `dotnet msbuild -t:AddImplicitDefineConstants -getItem:Compile -getProperty:DefineConstants` 在代表项目上逐项相等（`TI_C01i`）。§4.2「覆盖所有 active Compile 源」现在按字面成立，而不是按目录近似。
+- **值流状态与来源分离**：环境保存 Clean/Tainted/Undecidable 与来源集合，别名/再赋值/分支合并不再丢失状态；§4.2 第 2 部分的「不能靠 `var tenantId = tenant.Name` 或一层 helper 规避」扩展到未知来源经别名的情形（TI900），helper 内联改为对自身声明与赋值做不动点后只汇总 return。
+- **身份出口按参数/属性符号而非书写位置**：Claim 与 ITenantInfo 构造使用 bound argument→parameter 映射（named/optional/隐式 new），`ITenantInfo.Id` 的对象初始化与后续赋值按属性所属接口识别（TI003）。
+- **权威来源断言按来源集合**：§4.2 第 3 部分的行锁从「终端名像 ID」升级为「来源集合等于该行允许的成员/参数」，因此 `context.UserName → var tenantId → claim` 这类改名别名不再可能放行。
+- **MSBuild 路径归一化**：引用守卫先归一化分隔符再解析（Linux 上反斜杠是普通字符），并覆盖 `$( )` 表达式；正/反斜杠等价负控入库。
+- **证据链提交**：S1 盘点 JSON 纳入版本库，设计 §7 与归档源码链接修正，并新增 `Issue131EvidenceLinks_AllResolve` 覆盖地图/设计/计划/日志四份文档的相对链接。
+
+「未做」不变：不提升任何支持声明、不新增 native fixture、不改 CI 启用状态。

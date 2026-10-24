@@ -57,7 +57,7 @@
 
 | 用例 | 结果 |
 | --- | --- |
-| 真实仓库门禁 TI01/TI02/TI03 | 通过；枚举 156 个 active 非测试项目、2586 个 Compile 源、98 个项目实际编译、3139 个第一方 helper 成员入索引、1024 个身份出口、0 条诊断（既无违规也无覆盖失败） |
+| 真实仓库门禁 TI01/TI02/TI03 | 通过；枚举 156 个 active 非测试项目、2586 个 Compile 源、98 个项目实际编译、3139 个第一方 helper 成员入索引、1024 个身份出口、0 条诊断（既无违规也无覆盖失败）。**注**：这组数字是 R1 之前的目录近似口径；R1-01 修复后按真实 Compile 集合重算为 149 项目 / 2587 源（含 11 个 linked 源）/ 1034 个出口，见 I-09 |
 | TI-C01a/b/c/d | 通过：项目/文件计数与独立枚举一致；八个端口在真实仓库均有观测（Success ≥5）；不可绑定的敏感出口必须出 TI900；缺构建输入出 TI900 |
 | TI-P01/P02 | 通过：展示/日志/DTO/注释、普通对象 `.Name`、名称查目录后取 Id、id+name 双通道均不误报 |
 | TI-N01/N02/N03 | 通过：8/6/6 条命中，规则分类为 TI001（上下文与 claim）/TI002（权限域、缓存前缀、实体过滤、成员写）/TI003（身份 getter、返回契约、构造 Id 槽、身份名局部变量被赋名称）；含别名、Trim、插值、`??`、named argument、`using` 别名、跨文件 helper 与跨项目 helper 规避形态 |
@@ -102,7 +102,24 @@
 
 文档闭环：`docs/Feature/CapabilityMap.md`（状态改「归档（S3 已执行）」、归档证据链接重指向回收站、索引与归档索引按文件系统重建）；`AGENTS.md`（项目结构、依赖图、平台能力新增能力地图与 TenantId 主键契约两条、参考位置、最后更新日期）；`memory.md`（以维护者本地内容为基，新增 #131 实施段与 Wave 3 状态）；`docs/review/crestcreates-abp-comparison.md`（顶部失效横幅 + PluginSystem「生产就绪」两处具体撤回并链接 D-12）；`docs/Feature/OrmProviderSupportMatrix.md`（页首「尚未合并」改为 merge SHA `348c4d3c`，并声明其为 ORM 唯一来源）；设计文档追加 §7 实施记录（正文不改写）；实施计划状态行更新；证据落 `docs/review/2026-10-23-issue-131-implementation-evidence.json`。
 
-### I-08 待办与开放项
+### I-09 R1 审查修复（2026-10-24）
+
+审查 head `40bf53eb`，8 项 P2 全部成立，逐一修复并补回归（同一分支，未合并）：
+
+| 发现 | 根因 | 修复 | 回归 |
+| --- | --- | --- | --- |
+| R1-01 Compile 输入与条件编译 | `Load` 只递归枚举项目目录，且 parse options 未带 `DefineConstants`；`CrestCreates.CrudGeneration`/`HttpProjectionGeneration` 无自身 csproj，11 个 linked 源完全未被扫描 | 新增 `TenantIdentityCompileInputs`：默认 glob − 显式 `Compile Remove` + 显式 `Compile Include`（含目录外 linked 源）；常量按实际配置/TFM 推导（SDK implicit defines + 项目自有），`CSharpParseOptions` 带真实符号 | `TI_C01f`（linked 源必须被扫描）、`TI_C01g`（Remove 不得扫描）、`TI_C01h`（`#if DEBUG` 命中、`#if RELEASE` 不命中）、`TI_C01i`（3 个代表项目的 Compile 集合与 `DefineConstants` 与 `dotnet msbuild -t:AddImplicitDefineConstants -getItem:Compile -getProperty:DefineConstants` **逐项相等**）、`TI_C01a` 期望改为同一解析器 + 独立下界 |
+| R1-02 局部别名丢 Undecidable | 环境只存 `bool`，写入只保留 `IsNameTainted` | 环境改存完整 `TaintValue`（taint/undecidable/origins），写入按合并语义保留最强状态 | `TI_N04`（直接调用 1 条 + 局部别名 1 条 + 再赋值 1 条，共 3 条 TI900） |
+| R1-03 helper 局部赋值 | InlineBody 只把 initializer 与 return 合并，未处理赋值 | InlineBody 用替换后的参数状态对 helper 自身的声明与赋值做不动点，再只汇总 return；不再把任意 initializer 当返回值 | `TI_N05`（`key=""` 后 `key=tenant.Name` 的 helper 命中 2 条；正确解析目录并返回 Id 的 helper 不误报） |
+| R1-04 构造命名参数 | Claim/TenantInfo 构造按书写位置取参数 | 改用 `IObjectCreationOperation` 的 `argument.Parameter` 映射（含显式/隐式 new、named/optional） | `TI_N06`（`new Claim(value:name, type:"tenant_id")`、`new TenantInfo(name:id, id:name)` 均命中） |
+| R1-05 ITenantInfo.Id 写入 | 只看 `TenantId`/`CurrentTenantId` 名称 | 按属性所属类型/接口成员身份识别 `ITenantInfo.Id`，覆盖对象初始化与后续赋值，规则归 TI003 | `TI_N07`（对象初始化写入 + 直接赋值各 1 条；正确赋 Id 不误报） |
+| R1-06 权威来源只看变量名 | 终端名匹配，别名即可放行 | 值流携带**来源集合**（成员/参数/方法 + 局部别名追溯），9 行锁定表改为核对来源集合；`string.Empty` 等静态常量与对象级污点不参与 | `TI_M03`（把 `context.UserName` 赋给局部 `tenantId` 再写两条 claim：TI01/TI03 仍绿，但 ledger 两条都失败）；真实仓库 ledger 仍 9/9 通过 |
+| R1-07 Linux 反斜杠引用 | 直接把 `Include` 交给 `Path.Combine`，反斜杠成普通字符 | 新增 `ArchitecturePath.TryResolve`（先归一化分隔符、跳过 `$( )` 表达式），隔离与归档守卫共用 | `BackslashAndForwardSlashReferences_AreEquivalent`（同一目标两种写法都必须命中）、`BackslashReferences_AreResolvedBeforeComparison` |
+| R1-08 证据链 | 盘点 JSON 未提交；设计 §7 三处链接错误 | 提交 `docs/review/2026-10-23-issue-131-design-inventory.json`；修正 §7 两处路径与三个归档源码链接 | `Issue131EvidenceLinks_AllResolve`（地图 + 设计 + 计划 + 日志四份文档的相对链接全部可解析，且两份证据 JSON 存在） |
+
+复现审查者的三处可编译注入：`TI_M03`（用户名经 `tenantId` 别名进 claim）、`TI_M04`（真实 Caching 项目内新增 `#if DEBUG` 的身份误用）、`TI_M05`（linked `CrudGeneration` 目录内新增身份误用）现在全部命中。作者侧记录：`BackslashAndForwardSlashReferences_AreEquivalent` 首次编写时把 `..` 深度写错（`src/Consumer` 只需一级回退），导致正斜杠用例未命中；修正后两例均命中，此无效尝试如实保留在本节。
+
+### I-10 待办与开放项
 
 - S3 归档动作、准入/覆盖/隔离守卫未开始；`.github/workflows/*.yml` 与 ProcurementApproval slnx 的 Draft 输入须在 S3 清理（CI 保持人工禁用状态，不改启用）。
 - S4 全量构建/边界/回归验证与 AGENTS/memory/比较文档同步未开始；本轮不提升任何支持声明。

@@ -14,7 +14,8 @@ internal sealed record ExitObservation(
     int Line,
     int Column,
     string ArgumentText,
-    IReadOnlyList<string> TerminalNames);
+    IReadOnlyList<string> TerminalNames,
+    IReadOnlyList<string> Origins);
 
 internal sealed class TenantIdentityAnalysis
 {
@@ -171,22 +172,29 @@ internal sealed class TenantIdentityAnalyzer
         var model = context.Models[tree];
         var root = tree.GetRoot();
 
-        var writes = CollectWrites(model, root, project, relativePath);
-        var environment = new TenantSymbolFlags();
+        var writes = CollectWrites(model, root, project, relativePath).ToArray();
+        var environment = new TenantTaintEnvironment();
         foreach (var write in writes)
         {
-            environment.TryAdd(write.Symbol, false);
+            environment.TryAdd(write.Symbol, TaintValue.Clean);
         }
 
+        // Fixed point over declarations and assignments so a value keeps its tainted/undecidable state and its
+        // origins after travelling through a local, a re-assignment or a branch merge.
         for (var pass = 0; pass < 6; pass++)
         {
             var changed = false;
             foreach (var write in writes.Where(entry => entry.Expression is not null))
             {
                 var flow = new TenantIdentityFlow(project.Project, project.AssemblyName, model, environment, context.ModelFor, _helpers);
-                if (flow.Evaluate(write.Expression).IsNameTainted && !environment[write.Symbol])
+                var value = flow.Evaluate(write.Expression);
+                var previous = environment.GetValueOrDefault(write.Symbol, TaintValue.Clean);
+                var merged = TaintValue.Merge([previous, value]);
+                if (merged.IsNameTainted != previous.IsNameTainted
+                    || merged.IsUndecidable != previous.IsUndecidable
+                    || merged.Origins.Count != previous.Origins.Count)
                 {
-                    environment[write.Symbol] = true;
+                    environment[write.Symbol] = merged;
                     changed = true;
                 }
             }
@@ -211,7 +219,8 @@ internal sealed class TenantIdentityAnalyzer
                 position.Line + 1,
                 position.Character + 1,
                 Collapse(site.Expression.ToString()),
-                TenantIdentitySymbols.TerminalValueNames(model, site.Expression)));
+                TenantIdentitySymbols.TerminalValueNames(model, site.Expression),
+                value.Origins));
 
             if (value.IsNameTainted)
             {
@@ -348,43 +357,48 @@ internal sealed class TenantIdentityAnalyzer
             }
         }
 
-        foreach (var (created, constructor, arguments, typeName) in CollectCreations(model, root))
+        foreach (var creation in CollectCreations(model, root))
         {
-            if (created is null)
+            if (creation.Created is null)
             {
-                if (IsTenantIdentityTypeName(typeName))
+                if (IsTenantIdentityTypeName(creation.TypeName))
                 {
                     _analysis.Diagnostics.Add(new TenantIdentityDiagnostic(
-                        TenantIdentityRule.TI900, project.Project, relativePath, 0, 0, typeName, "-",
+                        TenantIdentityRule.TI900, project.Project, relativePath, 0, 0, creation.TypeName, "-",
                         "coverage failure: the created tenant identity type did not bind"));
                 }
 
                 continue;
             }
 
-            if (TenantIdentitySymbols.FullName(created) == TenantIdentityPorts.ClaimType && arguments.Count > 1)
+            if (TenantIdentitySymbols.FullName(creation.Created) == TenantIdentityPorts.ClaimType
+                && creation.Constructor is not null)
             {
-                var claimType = model.GetConstantValue(arguments[0].Expression);
-                var isTenantClaim = claimType.HasValue
-                    ? TenantIdentityPorts.TenantClaimTypes.Contains(TenantIdentityPorts.Normalize((string?)claimType.Value ?? string.Empty), StringComparer.Ordinal)
-                    : arguments[0].Expression.ToString().Contains("tenant", StringComparison.OrdinalIgnoreCase);
-
-                if (isTenantClaim)
+                // Claim's argument order is not guaranteed: resolve the type/value slots by parameter symbol so
+                // reordered named arguments cannot move the identity value into another slot.
+                var typeParameter = creation.Constructor.Parameters.FirstOrDefault(parameter => parameter.Name == "type");
+                var valueParameter = creation.Constructor.Parameters.FirstOrDefault(parameter => parameter.Name == "value");
+                if (typeParameter is not null
+                    && valueParameter is not null
+                    && creation.Arguments.TryGetValue(typeParameter.Ordinal, out var claimTypeExpression)
+                    && creation.Arguments.TryGetValue(valueParameter.Ordinal, out var claimValueExpression)
+                    && IsTenantClaimType(claimTypeExpression, model))
                 {
-                    yield return new Site(arguments[1].Expression, TenantIdentityRule.TI001, "Claim(tenantid|tenant_id) value slot");
+                    yield return new Site(claimValueExpression, TenantIdentityRule.TI001, "Claim(tenantid|tenant_id) value slot");
                 }
             }
 
-            if (created is not null && TenantIdentitySymbols.ImplementsTenantInfo(created) && constructor is not null)
+            if (TenantIdentitySymbols.ImplementsTenantInfo(creation.Created) && creation.Constructor is not null)
             {
-                for (var index = 0; index < constructor.Parameters.Length && index < arguments.Count; index++)
+                foreach (var parameter in creation.Constructor.Parameters)
                 {
-                    if (TenantIdentitySymbols.IsIdentityConstructorParameter(constructor.Parameters[index]))
+                    if (TenantIdentitySymbols.IsIdentityConstructorParameter(parameter)
+                        && creation.Arguments.TryGetValue(parameter.Ordinal, out var expression))
                     {
                         yield return new Site(
-                            arguments[index].Expression,
+                            expression,
                             TenantIdentityRule.TI003,
-                            $"{TenantIdentitySymbols.FullName(created)}.{constructor.Parameters[index].Name} constructor id slot");
+                            $"{TenantIdentitySymbols.FullName(creation.Created)}.{parameter.Name} constructor id slot");
                     }
                 }
             }
@@ -409,8 +423,19 @@ internal sealed class TenantIdentityAnalyzer
         foreach (var assignment in root.DescendantNodes().OfType<AssignmentExpressionSyntax>()
                      .Where(node => node.IsKind(SyntaxKind.SimpleAssignmentExpression)))
         {
-            if (TenantIdentitySymbols.IsTenantIdMember(model, assignment.Left)
-                || IsIdentityName(model.GetSymbolInfo(assignment.Left).Symbol?.Name ?? string.Empty))
+            if (TenantIdentitySymbols.IsTenantIdMember(model, assignment.Left))
+            {
+                // Writing the ITenantInfo id member is identity masquerade (TI003); writing a tenant filter or
+                // partition member is isolation (TI002).
+                var rule = TenantIdentitySymbols.IsTenantInfoIdExpression(model, assignment.Left)
+                    ? TenantIdentityRule.TI003
+                    : TenantIdentityRule.TI002;
+                yield return new Site(
+                    assignment.Right,
+                    rule,
+                    rule == TenantIdentityRule.TI003 ? "ITenantInfo.Id identity write" : "tenant identity member write");
+            }
+            else if (IsIdentityName(model.GetSymbolInfo(assignment.Left).Symbol?.Name ?? string.Empty))
             {
                 yield return new Site(assignment.Right, TenantIdentityRule.TI002, "tenant identity member write");
             }
@@ -530,32 +555,61 @@ internal sealed class TenantIdentityAnalyzer
     }
 
     /// <summary>
-    /// Both <c>new Type(...)</c> and <c>new(...)</c> forms: the collection-expression initialisers in the real
-    /// claim builders use the implicit form, so covering only the explicit one would leave the claim slot blind.
+    /// Both <c>new Type(...)</c> and <c>new(...)</c> forms, with arguments bound to their parameter symbols so
+    /// named and reordered arguments cannot land in the wrong slot.
     /// </summary>
-    private static IEnumerable<(INamedTypeSymbol? Created, IMethodSymbol? Constructor, IReadOnlyList<ArgumentSyntax> Arguments, string TypeName)> CollectCreations(
-        SemanticModel model,
-        SyntaxNode root)
+    private static IEnumerable<Creation> CollectCreations(SemanticModel model, SyntaxNode root)
     {
         foreach (var creation in root.DescendantNodes().OfType<ObjectCreationExpressionSyntax>())
         {
-            var constructor = model.GetSymbolInfo(creation).Symbol as IMethodSymbol;
-            var created = constructor?.ContainingType ?? model.GetSymbolInfo(creation.Type).Symbol as INamedTypeSymbol;
-            yield return (created,
-                constructor,
-                creation.ArgumentList?.Arguments.ToArray() ?? [],
-                creation.Type.ToString());
+            var operation = model.GetOperation(creation) as IObjectCreationOperation;
+            var constructor = operation?.Constructor?.OriginalDefinition
+                ?? model.GetSymbolInfo(creation).Symbol as IMethodSymbol;
+            var created = constructor?.ContainingType
+                ?? model.GetSymbolInfo(creation.Type).Symbol as INamedTypeSymbol;
+            yield return new Creation(created, constructor, ArgumentMap(operation?.Arguments), creation.Type.ToString());
         }
 
         foreach (var creation in root.DescendantNodes().OfType<ImplicitObjectCreationExpressionSyntax>())
         {
-            var constructor = model.GetSymbolInfo(creation).Symbol as IMethodSymbol;
-            yield return (constructor?.ContainingType,
-                constructor,
-                creation.ArgumentList?.Arguments.ToArray() ?? [],
-                string.Empty);
+            var operation = model.GetOperation(creation) as IObjectCreationOperation;
+            var constructor = operation?.Constructor?.OriginalDefinition
+                ?? model.GetSymbolInfo(creation).Symbol as IMethodSymbol;
+            yield return new Creation(constructor?.ContainingType, constructor, ArgumentMap(operation?.Arguments), string.Empty);
         }
     }
+
+    private static IReadOnlyDictionary<int, ExpressionSyntax> ArgumentMap(IEnumerable<IArgumentOperation>? arguments)
+    {
+        var map = new Dictionary<int, ExpressionSyntax>();
+        foreach (var argument in arguments ?? [])
+        {
+            if (argument.Parameter is not null && argument.Value.Syntax is ExpressionSyntax expression)
+            {
+                map[argument.Parameter.Ordinal] = expression;
+            }
+        }
+
+        return map;
+    }
+
+    private static bool IsTenantClaimType(ExpressionSyntax expression, SemanticModel model)
+    {
+        var constant = model.GetConstantValue(expression);
+        if (constant.HasValue && constant.Value is string literal)
+        {
+            return TenantIdentityPorts.TenantClaimTypes.Contains(TenantIdentityPorts.Normalize(literal), StringComparer.Ordinal);
+        }
+
+        return TenantIdentityPorts.TenantClaimTypes.Any(claim =>
+            expression.ToString().Contains($"\"{claim}\"", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private sealed record Creation(
+        INamedTypeSymbol? Created,
+        IMethodSymbol? Constructor,
+        IReadOnlyDictionary<int, ExpressionSyntax> Arguments,
+        string TypeName);
 
     private TenantIdentityDiagnostic BindFailure(TenantProjectInput project, string relativePath, SyntaxNode node, string reason)
     {

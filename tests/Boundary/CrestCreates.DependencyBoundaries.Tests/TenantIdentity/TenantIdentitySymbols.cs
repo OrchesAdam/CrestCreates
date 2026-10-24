@@ -44,8 +44,18 @@ internal static class TenantIdentitySymbols
         }
 
         var text = string.Join(Environment.NewLine, names.Select(name => $"global using {name};"));
-        return [CSharpSyntaxTree.ParseText(SourceText.From(text), new CSharpParseOptions(LanguageVersion.Preview), path: "ImplicitUsings.g.cs")];
+        return [CSharpSyntaxTree.ParseText(SourceText.From(text), ParseOptions(project), path: "ImplicitUsings.g.cs")];
     }
+
+    /// <summary>
+    /// Parse options must carry the project's real preprocessor symbols: otherwise every <c>#if DEBUG</c>
+    /// block is inactive trivia and the code the build actually compiles is never analysed.
+    /// </summary>
+    public static CSharpParseOptions ParseOptions(TenantProjectInput project) =>
+        new(
+            LanguageVersion.Preview,
+            preprocessorSymbols: (project.DefineConstants ?? string.Empty)
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     public static CSharpCompilationOptions Options(TenantProjectInput project) =>
         new(
@@ -152,14 +162,38 @@ internal static class TenantIdentitySymbols
             || normalized.EndsWith("tenantid", StringComparison.Ordinal);
     }
 
-    public static bool IsTenantIdMember(SemanticModel model, ExpressionSyntax expression) =>
-        model.GetSymbolInfo(expression).Symbol is IPropertySymbol property
-            && (TenantIdentityPorts.IsIdentityMemberName(property.Name) || IsMultiTenantIdProperty(property));
+    /// <summary>
+    /// Identity members are classified by declaration, not by the spelling at the call site: entity tenant
+    /// filters (<c>IMultiTenant.TenantId</c>) and the id member of <c>ITenantInfo</c> implementers both count,
+    /// and object-initializer assignments resolve through the bound property reference.
+    /// </summary>
+    public static bool IsTenantIdMember(SemanticModel model, ExpressionSyntax expression)
+    {
+        var symbol = model.GetSymbolInfo(expression).Symbol as IPropertySymbol
+            ?? (model.GetOperation(expression) as Microsoft.CodeAnalysis.Operations.IPropertyReferenceOperation)?.Property;
+        return symbol is not null
+            && (TenantIdentityPorts.IsIdentityMemberName(symbol.Name)
+                || IsMultiTenantIdProperty(symbol)
+                || IsTenantInfoIdProperty(symbol));
+    }
+
+    public static bool IsTenantInfoIdExpression(SemanticModel model, ExpressionSyntax expression)
+    {
+        var symbol = model.GetSymbolInfo(expression).Symbol as IPropertySymbol
+            ?? (model.GetOperation(expression) as Microsoft.CodeAnalysis.Operations.IPropertyReferenceOperation)?.Property;
+        return symbol is not null && IsTenantInfoIdProperty(symbol);
+    }
 
     public static bool IsMultiTenantIdProperty(IPropertySymbol property) =>
         property.Name == "TenantId"
             && property.ContainingType.AllInterfaces.Any(@interface =>
                 FullName(@interface) == TenantIdentityPorts.MultiTenantEntityType);
+
+    public static bool IsTenantInfoIdProperty(IPropertySymbol property) =>
+        property.Name == "Id"
+            && (FullName(property.ContainingType) == TenantIdentityPorts.TenantInfoType
+                || property.ContainingType.AllInterfaces.Any(@interface =>
+                    FullName(@interface) == TenantIdentityPorts.TenantInfoType));
 
     private static readonly SymbolDisplayFormat TypeNameFormat = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,

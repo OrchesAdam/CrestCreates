@@ -60,11 +60,19 @@ public class TenantIdentityArchitectureTests
         Assert.Equal(projectFiles.Count, analysis.ProjectsEnumerated);
 
         var expectedFiles = projectFiles
+            .Sum(project => TenantIdentityProjectInventory.Load(root, project).Sources.Count);
+        Assert.Equal(expectedFiles, analysis.FilesEnumerated);
+
+        // Independent lower bound: the authored files that live inside project directories. Linked sources and
+        // Compile Remove entries make the analysed set differ from it, never fall below it.
+        var insideProjectDirectories = projectFiles
             .Select(project => Path.GetDirectoryName(project)!)
             .Distinct(StringComparer.Ordinal)
             .SelectMany(directory => Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories))
             .Count(IsAuthoredSource);
-        Assert.Equal(expectedFiles, analysis.FilesEnumerated);
+        Assert.True(
+            analysis.FilesEnumerated >= insideProjectDirectories,
+            $"analysed files ({analysis.FilesEnumerated}) fell below the in-directory authored set ({insideProjectDirectories})");
 
         Assert.Contains(
             analysis.CompiledProjects,
@@ -101,6 +109,174 @@ public class TenantIdentityArchitectureTests
     }
 
     [Fact]
+    public void TI_C01f_LinkedCompileInputsOutsideTheProjectDirectory_AreScanned()
+    {
+        var root = FindRepositoryRoot();
+        var project = TenantIdentityProjectInventory.Load(
+            root,
+            Path.Combine(root, "src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj"));
+        var scanned = project.Sources.Select(source => source.RelativePath).ToHashSet(StringComparer.Ordinal);
+
+        // The shared generation sources have no project of their own: they only enter a build through an
+        // explicit <Compile Include> that points outside the project directory.
+        var linked = new[] { "src/Tooling/CrestCreates.CrudGeneration", "src/Tooling/CrestCreates.HttpProjectionGeneration" }
+            .SelectMany(directory => Directory.EnumerateFiles(Path.Combine(root, directory), "*.cs"))
+            .Select(path => Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/'))
+            .ToArray();
+
+        Assert.NotEmpty(linked);
+        foreach (var file in linked)
+        {
+            Assert.Contains(file, scanned);
+        }
+
+        var jsonContracts = TenantIdentityProjectInventory.Load(
+            root,
+            Path.Combine(root, "src/Tooling/CrestCreates.JsonContracts.BuildTasks.Core/CrestCreates.JsonContracts.BuildTasks.Core.csproj"));
+        Assert.Contains(
+            jsonContracts.Sources,
+            source => source.RelativePath.StartsWith("src/Tooling/CrestCreates.CrudGeneration/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_C01g_ExplicitCompileRemoveEntries_AreNotScanned()
+    {
+        var root = FindRepositoryRoot();
+        var project = TenantIdentityProjectInventory.Load(
+            root,
+            Path.Combine(root, "src/Framework/Infrastructure/CrestCreates.Authorization.Abstractions/CrestCreates.Authorization.Abstractions.csproj"));
+
+        Assert.DoesNotContain(
+            project.Sources,
+            source => source.RelativePath.EndsWith("Authorizations.Abstractions/IPermissionStore.cs".Replace("Authorizations", "Authorization"), StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            project.Sources,
+            source => source.RelativePath.EndsWith("/IPermissionStore.cs", StringComparison.Ordinal));
+        Assert.Contains(project.Sources, source => source.RelativePath.EndsWith("/IPermissionReader.cs", StringComparison.Ordinal)
+                                                  || source.RelativePath.Contains("Permission", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_C01h_ActiveConditionalBranches_AreParsedWithProjectConstants()
+    {
+        var root = FindRepositoryRoot();
+        var project = TenantIdentityProjectInventory.Load(
+            root,
+            Path.Combine(root, "src/Framework/Infrastructure/CrestCreates.Caching/CrestCreates.Caching.csproj"));
+        Assert.Contains("DEBUG", project.DefineConstants.Split(';'), StringComparer.OrdinalIgnoreCase);
+
+        const string conditional = """
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Permission;
+            using CrestCreates.MultiTenancy.Abstract;
+
+            namespace CrestCreates.Samples.Conditional;
+
+            public sealed class DebugOnlySwitch
+            {
+                public async Task SwitchAsync(ICurrentTenant currentTenant, Tenant directory)
+                {
+            #if DEBUG
+                    await currentTenant.ChangeAsync(directory.Name);
+            #endif
+                }
+            }
+            """;
+
+        var violations = TenantIdentitySyntheticFixture.Violations(("Conditional.cs", conditional));
+        Assert.Contains(violations, violation => violation.Rule == TenantIdentityRule.TI001);
+
+        const string releaseOnly = """
+            using System.Threading.Tasks;
+            using CrestCreates.Domain.Permission;
+            using CrestCreates.MultiTenancy.Abstract;
+
+            namespace CrestCreates.Samples.Conditional;
+
+            public sealed class ReleaseOnlySwitch
+            {
+                public async Task SwitchAsync(ICurrentTenant currentTenant, Tenant directory)
+                {
+            #if RELEASE
+                    await currentTenant.ChangeAsync(directory.Name);
+            #endif
+                }
+            }
+            """;
+
+        Assert.Empty(TenantIdentitySyntheticFixture.Violations(("Release.cs", releaseOnly)));
+    }
+
+    [Fact]
+    public void TI_C01i_DerivedCompileInputs_MatchEvaluatedMsBuild()
+    {
+        var root = FindRepositoryRoot();
+        var samples = new[]
+        {
+            "src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj",
+            "src/Framework/Infrastructure/CrestCreates.Caching/CrestCreates.Caching.csproj",
+            "src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj",
+        };
+
+        foreach (var relative in samples)
+        {
+            var projectFile = Path.Combine(root, relative);
+            var evaluated = EvaluateWithMsBuild(projectFile);
+            var derived = TenantIdentityProjectInventory.Load(root, projectFile);
+
+            Assert.Equal(
+                evaluated.DefineConstants.Order(StringComparer.OrdinalIgnoreCase),
+                derived.DefineConstants.Split(';', StringSplitOptions.RemoveEmptyEntries).Order(StringComparer.OrdinalIgnoreCase));
+
+            var evaluatedFiles = evaluated.CompileFiles
+                .Select(path => Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/'))
+                .Order(StringComparer.Ordinal);
+            var derivedFiles = derived.Sources
+                .Select(source => source.RelativePath)
+                .Order(StringComparer.Ordinal);
+            Assert.Equal(evaluatedFiles, derivedFiles);
+        }
+    }
+
+    private static (IReadOnlyList<string> CompileFiles, IReadOnlyList<string> DefineConstants) EvaluateWithMsBuild(string projectFile)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("dotnet")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Path.GetDirectoryName(projectFile)!,
+        };
+        start.ArgumentList.Add("msbuild");
+        start.ArgumentList.Add(projectFile);
+        start.ArgumentList.Add("-nologo");
+        start.ArgumentList.Add("-p:Configuration=Debug");
+
+        // The SDK adds the framework *_OR_GREATER constants in a target, so the evaluated value only
+        // appears after it runs; without this target the comparison would ignore the real symbol set.
+        start.ArgumentList.Add("-t:AddImplicitDefineConstants");
+        start.ArgumentList.Add("-getItem:Compile");
+        start.ArgumentList.Add("-getProperty:DefineConstants");
+
+        using var process = System.Diagnostics.Process.Start(start)
+            ?? throw new InvalidOperationException("could not start dotnet msbuild");
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(process.ExitCode == 0, $"dotnet msbuild failed for {projectFile}: {stderr}");
+
+        using var document = System.Text.Json.JsonDocument.Parse(stdout);
+        var root = document.RootElement;
+        var defines = root.GetProperty("Properties").GetProperty("DefineConstants").GetString() ?? string.Empty;
+        var files = root.GetProperty("Items").GetProperty("Compile")
+            .EnumerateArray()
+            .Select(item => item.GetProperty("FullPath").GetString()!)
+            .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        return (files, defines.Split(';', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Fact]
     public void TI_C01c_UnboundSensitivePort_FailsClosedInsteadOfReportingClean()
     {
         const string sample = """
@@ -130,6 +306,8 @@ public class TenantIdentityArchitectureTests
             ImplicitUsings: "disable",
             Nullable: "enable",
             OutputType: "Library",
+            Configuration: "Debug",
+            DefineConstants: "TRACE;DEBUG",
             Sources: [new TenantSourceFile("synthetic/a.cs", "synthetic/a.cs", "namespace CrestCreates.X { public interface ICurrentTenant { System.Threading.Tasks.Task SwitchAsync(string tenantId); } }")],
             GeneratedSources: [],
             References: [],
@@ -400,6 +578,152 @@ public class TenantIdentityArchitectureTests
                                               && violation.Rule == TenantIdentityRule.TI001);
     }
 
+    [Fact]
+    public void TI_N04_UndecidableValueSurvivesLocalAlias()
+    {
+        const string sample = """
+            using CrestCreates.MultiTenancy;
+            using CrestCreates.MultiTenancy.Abstract;
+
+            namespace CrestCreates.Samples.Undecidable;
+
+            public sealed class UnknownSource
+            {
+                private readonly ICurrentTenant _currentTenant = null!;
+                private readonly TenantIdentifierNormalizer _normalizer = null!;
+
+                public void DirectControl(string raw) =>
+                    _currentTenant.SetTenantId(_normalizer.NormalizeName(raw));
+
+                public void ThroughLocal(string raw)
+                {
+                    var key = _normalizer.NormalizeName(raw);
+                    _currentTenant.SetTenantId(key);
+                }
+
+                public void ThroughReassignment(string raw)
+                {
+                    string key = "seed";
+                    key = _normalizer.NormalizeName(raw);
+                    _currentTenant.SetTenantId(key);
+                }
+            }
+            """;
+
+        var coverage = TenantIdentitySyntheticFixture.Analyze(("Undecidable.cs", sample)).CoverageFailures;
+        // An unknown external helper may carry a tenant name: the flag must survive locals and re-assignment
+        // instead of silently becoming clean.
+        Assert.Equal(3, coverage.Count(diagnostic => diagnostic.Rule == TenantIdentityRule.TI900));
+    }
+
+    [Fact]
+    public void TI_N05_HelperLocalAssignment_PropagatesName()
+    {
+        const string sample = """
+            using CrestCreates.Domain.Permission;
+            using CrestCreates.MultiTenancy.Abstract;
+
+            namespace CrestCreates.Samples.HelperAssignment;
+
+            public sealed class HelperIndirection
+            {
+                private readonly ICurrentTenant _currentTenant = null!;
+
+                public void ViaHelperParameter(ITenantInfo tenant) => _currentTenant.SetTenantId(Hide(tenant));
+
+                public void ViaDirectoryEntity(Tenant directory) => _currentTenant.SetTenantId(HideDirectory(directory));
+
+                public void CorrectHelper(Tenant directory) => _currentTenant.SetTenantId(IdOf(directory));
+
+                private static string Hide(ITenantInfo tenant)
+                {
+                    string key = string.Empty;
+                    key = tenant.Name;
+                    return key;
+                }
+
+                private static string HideDirectory(Tenant directory)
+                {
+                    string key = string.Empty;
+                    key = directory.DisplayName;
+                    return key;
+                }
+
+                private static string IdOf(Tenant directory)
+                {
+                    var found = directory;
+                    return found.Id.ToString();
+                }
+            }
+            """;
+
+        var violations = TenantIdentitySyntheticFixture.Violations(("Helper.cs", sample));
+        Assert.Equal(2, violations.Count);
+        Assert.All(violations, violation => Assert.Equal(TenantIdentityRule.TI001, violation.Rule));
+        Assert.All(violations, violation => Assert.Contains("SetTenantId", violation.Exit, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_N06_ReorderedNamedArguments_CannotBypassIdentitySlots()
+    {
+        const string sample = """
+            using System.Security.Claims;
+            using CrestCreates.Domain.Permission;
+            using CrestCreates.MultiTenancy.Abstract;
+
+            namespace CrestCreates.Samples.NamedArguments;
+
+            public sealed class ReorderedArguments
+            {
+                private readonly ICurrentTenant _currentTenant = null!;
+
+                public Claim ClaimReordered(Tenant directory) =>
+                    new Claim(value: directory.Name, type: "tenant_id");
+
+                public ITenantInfo TenantInfoReordered(Tenant directory) =>
+                    new TenantInfo(name: directory.Id.ToString(), id: directory.Name);
+
+                public void ChangeReordered(Tenant directory) => _currentTenant.Change(ClaimReordered(directory));
+            }
+            """;
+
+        var violations = TenantIdentitySyntheticFixture.Violations(("Reordered.cs", sample));
+        Assert.Contains(violations, violation => violation.Rule == TenantIdentityRule.TI001
+                                                && violation.Exit.Contains("Claim", StringComparison.Ordinal));
+        Assert.Contains(violations, violation => violation.Rule == TenantIdentityRule.TI003
+                                                && violation.Exit.Contains("constructor id slot", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_N07_TenantInfoIdWriteThroughObjectInitializer_IsReported()
+    {
+        const string sample = """
+            using CrestCreates.Domain.Permission;
+            using CrestCreates.MultiTenancy.Abstract;
+
+            namespace CrestCreates.Samples.InfoIdWrite;
+
+            public sealed class IdWrite
+            {
+                private readonly ICurrentTenant _currentTenant = null!;
+
+                public void InitializeFromName(Tenant directory)
+                {
+                    var frame = new TenantInfo { Id = directory.Name, Name = "display" };
+                    _currentTenant.Change(frame);
+                }
+
+                public void AssignFromName(Tenant directory, TenantInfo frame) => frame.Id = directory.DisplayName;
+
+                public void Correct(Tenant directory, TenantInfo frame) => frame.Id = directory.Id.ToString();
+            }
+            """;
+
+        var violations = TenantIdentitySyntheticFixture.Violations(("InfoId.cs", sample));
+        Assert.Equal(2, violations.Count);
+        Assert.All(violations, violation => Assert.Equal(TenantIdentityRule.TI003, violation.Rule));
+    }
+
     // ------------------------------------------------------------ mutations (TI-M)
 
     [Fact]
@@ -446,6 +770,131 @@ public class TenantIdentityArchitectureTests
             violation.Rule == TenantIdentityRule.TI002
             && violation.RelativePath.EndsWith("AuditTenantContextResolver.cs", StringComparison.Ordinal));
         Assert.Contains(ledger, violation => violation.Contains("AuditTenantContextResolver.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_M03_ClaimFedThroughTenantIdAliasOfUserName_IsCaughtByTheLedger()
+    {
+        // The value is a user name, but the local is spelled tenantId: only the origin set can reject it, and
+        // the ledger must see through the alias instead of trusting the identifier.
+        var (_, ledger) = Mutate(
+            "src/Framework/Infrastructure/CrestCreates.Infrastructure",
+            "Authorization/IdentityClaimsBuilder.cs",
+            text => text
+                .Replace(
+                    "        var claims = new List<Claim>",
+                    "        var tenantId = context.UserName;\n        var claims = new List<Claim>",
+                    StringComparison.Ordinal)
+                .Replace("new(\"tenantid\", context.TenantId ?? string.Empty),", "new(\"tenantid\", tenantId ?? string.Empty),", StringComparison.Ordinal)
+                .Replace("new(\"tenant_id\", context.TenantId ?? string.Empty),", "new(\"tenant_id\", tenantId ?? string.Empty),", StringComparison.Ordinal));
+
+        Assert.True(
+            ledger.Count(violation => violation.Contains("IdentityClaimsBuilder.cs", StringComparison.Ordinal)) >= 2,
+            "both tenant claim rows must reject a value that came from UserName: "
+            + string.Join(Environment.NewLine, ledger));
+    }
+
+    [Fact]
+    public void TI_M04_DebugOnlyIdentityMisuseInRealProject_IsCaught()
+    {
+        // The build compiles the DEBUG branch, so the guard must analyse it. A file that only exists behind
+        // #if DEBUG previously stayed invisible because the parse options carried no preprocessor symbols.
+        var (violations, _) = AnalyzeScratch(
+            "src/Framework/Infrastructure/CrestCreates.Caching",
+            (scratchRoot, scratchProject) =>
+            {
+                File.WriteAllText(
+                    Path.Combine(scratchProject, "DebugOnlyTenantSwitch.cs"),
+                    """
+                    using System.Threading.Tasks;
+                    using CrestCreates.Domain.Permission;
+                    using CrestCreates.MultiTenancy.Abstract;
+
+                    namespace CrestCreates.Caching;
+
+                    public sealed class DebugOnlyTenantSwitch
+                    {
+                        public async Task SwitchAsync(ICurrentTenant currentTenant, Tenant directory)
+                        {
+                    #if DEBUG
+                            await currentTenant.ChangeAsync(directory.Name);
+                    #endif
+                        }
+                    }
+                    """);
+            });
+
+        Assert.Contains(violations, violation => violation.Rule == TenantIdentityRule.TI001
+                                                && violation.Exit.Contains("ChangeAsync", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TI_M05_IdentityMisuseInSourceLinkedInput_IsCaught()
+    {
+        // CrudGeneration has no project of its own: it only enters a build through a <Compile Include> that
+        // points outside the project directory.
+        var (violations, _) = AnalyzeScratch(
+            "src/Tooling/CrestCreates.CodeGenerator",
+            (scratchRoot, _) =>
+            {
+                var linked = Path.Combine(scratchRoot, "src/Tooling/CrestCreates.CrudGeneration");
+                Directory.CreateDirectory(linked);
+                File.WriteAllText(
+                    Path.Combine(linked, "LinkedTenantSwitch.cs"),
+                    """
+                    using System.Threading.Tasks;
+                    using CrestCreates.Domain.Permission;
+                    using CrestCreates.MultiTenancy.Abstract;
+
+                    namespace CrestCreates.CrudGeneration;
+
+                    public sealed class LinkedTenantSwitch
+                    {
+                        public async Task SwitchAsync(ICurrentTenant currentTenant, Tenant directory) =>
+                            await currentTenant.ChangeAsync(directory.Name);
+                    }
+                    """);
+            });
+
+        Assert.Contains(violations, violation => violation.Rule == TenantIdentityRule.TI001
+                                                && violation.RelativePath.EndsWith("LinkedTenantSwitch.cs", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Copies one project (with its build outputs) into a scratch tree, lets the caller arrange extra inputs,
+    /// and runs the guard against the copy. Nothing is written back into the repository.
+    /// </summary>
+    private static (IReadOnlyList<TenantIdentityDiagnostic> Violations, IReadOnlyList<string> Ledger) AnalyzeScratch(
+        string projectRelativeDirectory,
+        Action<string, string> arrange)
+    {
+        var root = FindRepositoryRoot();
+        var sourceProject = Path.Combine(root, projectRelativeDirectory);
+        var scratchRoot = Path.Combine(Path.GetTempPath(), $"issue131-scratch-{Guid.NewGuid():N}");
+        var scratchProject = Path.Combine(scratchRoot, projectRelativeDirectory);
+
+        Directory.CreateDirectory(scratchProject);
+        CopyTree(sourceProject, scratchProject);
+
+        try
+        {
+            arrange(scratchRoot, scratchProject);
+
+            var project = TenantIdentityProjectInventory.Load(
+                scratchRoot,
+                Path.Combine(scratchProject, Path.GetFileName(sourceProject) + ".csproj"));
+            Assert.True(project.ReferenceError is null, $"scratch copy lost build inputs: {project.ReferenceError}");
+
+            var analyzer = new TenantIdentityAnalyzer();
+            analyzer.AnalyzeProject(project);
+            var analysis = analyzer.Analysis;
+
+            return ([.. analysis.Violations], [.. TenantIdentityAuthoritativeLedger.Evaluate(analysis)]);
+        }
+        finally
+        {
+            Directory.Delete(scratchRoot, recursive: true);
+        }
     }
 
     private static (IReadOnlyList<TenantIdentityDiagnostic> Violations, IReadOnlyList<string> Ledger) Mutate(

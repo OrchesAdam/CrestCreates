@@ -68,6 +68,8 @@ internal static class TenantIdentitySyntheticFixture
             ImplicitUsings: "disable",
             Nullable: "enable",
             OutputType: "Library",
+            Configuration: "Debug",
+            DefineConstants: "TRACE;DEBUG",
             Sources: sources,
             GeneratedSources: [],
             References: s_references.Value,

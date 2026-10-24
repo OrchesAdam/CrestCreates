@@ -32,7 +32,7 @@ internal sealed class TenantIdentityHelperIndex
             return;
         }
 
-        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var parseOptions = TenantIdentitySymbols.ParseOptions(project);
         foreach (var source in project.Sources)
         {
             if (!TenantIdentityPorts.Normalize(source.Text).Contains("tenant", StringComparison.Ordinal))
@@ -167,7 +167,7 @@ internal sealed class TenantProjectContext
 
     public static TenantProjectContext Build(TenantProjectInput project)
     {
-        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var parseOptions = TenantIdentitySymbols.ParseOptions(project);
         var treesByPath = project.Sources.ToDictionary(
             source => source.RelativePath,
             source => (SyntaxTree)CSharpSyntaxTree.ParseText(

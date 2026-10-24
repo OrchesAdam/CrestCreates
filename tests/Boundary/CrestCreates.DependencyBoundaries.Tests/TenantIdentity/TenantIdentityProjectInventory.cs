@@ -14,6 +14,8 @@ internal sealed record TenantProjectInput(
     string ImplicitUsings,
     string Nullable,
     string OutputType,
+    string Configuration,
+    string DefineConstants,
     IReadOnlyList<TenantSourceFile> Sources,
     IReadOnlyList<TenantSourceFile> GeneratedSources,
     IReadOnlyList<MetadataReference> References,
@@ -95,25 +97,26 @@ internal static class TenantIdentityProjectInventory
         var outputType = MatchValue(text, "OutputType") ?? "Library";
         var nullable = MatchValue(text, "Nullable") ?? (rootNamespace is null ? "enable" : "enable");
 
-        var sources = new List<TenantSourceFile>();
-        foreach (var file in Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories))
-        {
-            var normalized = Normalize(file);
-            if (normalized.Contains("/bin/", StringComparison.Ordinal) || normalized.Contains("/obj/", StringComparison.Ordinal)
-                || normalized.Contains("/obj_codex/", StringComparison.Ordinal))
-            {
-                continue;
-            }
+        var (references, error, outputDirectory) = ResolveReferences(repoRoot, projectDirectory, assemblyName);
+        var configuration = ConfigurationOf(outputDirectory);
+        var targetFramework = outputDirectory is null
+            ? MatchValue(text, "TargetFramework") ?? "net10.0"
+            : new DirectoryInfo(outputDirectory).Name;
+        var defineConstants = TenantIdentityCompileInputs.DeriveDefineConstants(
+            configuration,
+            targetFramework,
+            MatchValue(text, "DefineConstants"));
 
-            sources.Add(new TenantSourceFile(
+        var document = XDocument.Load(projectFile);
+        var sources = TenantIdentityCompileInputs
+            .ResolveCompileFiles(document, projectDirectory)
+            .Select(file => new TenantSourceFile(
                 projectRelative,
                 Path.GetRelativePath(repoRoot, file).Replace(Path.DirectorySeparatorChar, '/'),
-                File.ReadAllText(file)));
-        }
+                File.ReadAllText(file)))
+            .OrderBy(source => source.RelativePath, OrdinalPath)
+            .ToArray();
 
-        sources.Sort((left, right) => OrdinalPath.Compare(left.RelativePath, right.RelativePath));
-
-        var (references, error, outputDirectory) = ResolveReferences(repoRoot, projectDirectory, assemblyName);
         var generated = outputDirectory is null ? [] : CollectGenerated(projectDirectory, outputDirectory);
         return new TenantProjectInput(
             projectRelative,
@@ -123,6 +126,8 @@ internal static class TenantIdentityProjectInventory
             implicitUsings,
             nullable,
             outputType,
+            configuration,
+            defineConstants,
             sources,
             generated,
             references,
@@ -403,6 +408,9 @@ internal static class TenantIdentityProjectInventory
             return [];
         }
     }
+
+    private static string ConfigurationOf(string? outputDirectory) =>
+        outputDirectory is null ? "Debug" : new DirectoryInfo(outputDirectory).Parent?.Name ?? "Debug";
 
     private static string? MatchValue(string projectText, string elementName)
     {

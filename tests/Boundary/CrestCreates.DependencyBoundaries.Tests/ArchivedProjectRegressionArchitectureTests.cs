@@ -63,10 +63,16 @@ public class ArchivedProjectRegressionArchitectureTests
                          .Select(element => element.Attribute("Include")?.Value)
                          .Where(value => !string.IsNullOrWhiteSpace(value)))
             {
-                var resolved = Relative(root, Path.GetFullPath(Path.Combine(Path.GetDirectoryName(project)!, reference!)));
-                if (IsArchivedPath(resolved) || resolved.Contains("99_recyclebin/", StringComparison.Ordinal))
+                var resolved = ArchitecturePath.TryResolve(Path.GetDirectoryName(project)!, reference);
+                if (resolved is null)
                 {
-                    violations.Add($"{projectRelative} -> {resolved}");
+                    continue;
+                }
+
+                var target = ArchitecturePath.Relative(root, resolved);
+                if (IsArchivedPath(target) || target.Contains("99_recyclebin/", StringComparison.OrdinalIgnoreCase))
+                {
+                    violations.Add($"{projectRelative} -> {target}");
                 }
             }
         }
@@ -86,8 +92,14 @@ public class ArchivedProjectRegressionArchitectureTests
                          File.ReadAllText(solution), @"<(?:Project|File|Folder)\s+Path=""([^""]+)""")
                      .Cast<System.Text.RegularExpressions.Match>())
             {
-                var resolved = Relative(root, Path.GetFullPath(Path.Combine(Path.GetDirectoryName(solution)!, match.Groups[1].Value)));
-                if (resolved.Contains("99_recyclebin/", StringComparison.Ordinal) || IsArchivedPath(resolved))
+                var resolved = ArchitecturePath.TryResolve(Path.GetDirectoryName(solution)!, match.Groups[1].Value);
+                if (resolved is null)
+                {
+                    continue;
+                }
+
+                var target = ArchitecturePath.Relative(root, resolved);
+                if (target.Contains("99_recyclebin/", StringComparison.OrdinalIgnoreCase) || IsArchivedPath(target))
                 {
                     violations.Add($"{Relative(root, solution)} -> {match.Groups[1].Value}");
                 }
@@ -95,6 +107,40 @@ public class ArchivedProjectRegressionArchitectureTests
         }
 
         Assert.True(violations.Count == 0, "solutions still carry archived or recycle-bin inputs:" + Environment.NewLine + string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
+    public void BackslashReferences_AreResolvedBeforeComparison()
+    {
+        // MSBuild accepts both separators; a guard that only understands forward slashes would let a backslash
+        // ProjectReference point back into an archived project on Linux.
+        var root = Path.Combine(Path.GetTempPath(), $"issue131-archive-{Guid.NewGuid():N}");
+        try
+        {
+            var consumer = Path.Combine(root, "src/Consumer/Consumer.csproj");
+            Directory.CreateDirectory(Path.GetDirectoryName(consumer)!);
+            File.WriteAllText(
+                consumer,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup>"
+                + "<ProjectReference Include=\"..\\Framework\\Infrastructure\\CrestCreates.Configuration\\CrestCreates.Configuration.csproj\" />"
+                + "</ItemGroup></Project>");
+
+            var resolved = ArchitecturePath.TryResolve(
+                Path.GetDirectoryName(consumer)!,
+                "..\\Framework\\Infrastructure\\CrestCreates.Configuration\\CrestCreates.Configuration.csproj");
+
+            Assert.NotNull(resolved);
+            var relative = ArchitecturePath.Relative(root, resolved!);
+            Assert.Equal("src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj", relative);
+            Assert.True(IsArchivedPath(relative));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]
