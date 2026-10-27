@@ -20,6 +20,44 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
+## 2026-10-27 — Issue #132 audit retention governance (V1 implemented; merge pending)
+
+- Branch `feat/issue-132-audit-retention-governance-20261027-180000`, based on master `5f4cfc8f`.
+  Not merged; CI manually disabled; local execution is the gate. Design and implementation plan:
+  [design](docs/superpowers/specs/2026-10-27-issue-132-audit-retention-governance-design.md),
+  [plan](docs/superpowers/plans/2026-10-27-issue-132-audit-retention-governance-implementation.md).
+- V1 scope: PostgreSQL fixed database, Global retention settings, explicit Host or tenant scope
+  (no AllTenants), dual-time cutoff (`OccurredAt` + `FirstAcceptedAt`), single-record holds with
+  version/receipts, bounded body purge with atomic batch receipts, idempotent sink after purge,
+  governance/quarantine protection. Deferred: other ORM providers, per-tenant policy, bulk/legal
+  hold classes, archive/WORM, metadata GC, archive restore, and automatic scheduled execution
+  (the scheduler adapter establishes no authenticated principal, so automatic registration stays off).
+- Contracts: `CrestCreates.Accountability.Abstractions/Retention` (scope, policy + canonical hash,
+  run/batch/hold/result, `IAuditRetentionStore`). Kernel `AuditRetentionExecutor`: persisted-policy
+  binding, persisted batch budget, cancellation finalize, commit-Unknown → receipt reconciliation,
+  mirror outcome reported separately from commit. Application admission
+  (`AuditRetentionAppService`) is the single identity/permission/Setting/tenant gate shared by HTTP,
+  direct DI and `AuditRetentionJob`; host tenant names resolve through `ITenantProvider` to the
+  authoritative id. Generated HTTP projection is the platform anchor
+  `AddCrestAuditRetentionHttp()` (`/api/audit-retention/*`). Legacy
+  `AuditLogCleanupAppService`/`DeleteOlderThanAsync`/date cleanup DTO archived to
+  `99_RecycleBin/issue-132-audit-retention/`.
+- PostgreSQL: V016 ledger/runs/batches/holds/hold receipts/scope locks + body state, V017
+  anti-resurrection FK plus repeatable typed backfill (invalid envelopes quarantined, originals
+  unchanged). Sink dedup authority is the ledger and never rebuilds a purged body; batch/run/hold
+  locks follow scope → run → record with receipts in the same transaction.
+- Evidence (local, 2026-10-27): Application admission 15/15; PostgreSQL retention 14/14; sink +
+  migration 5/5; kernel/composition 31/31; P08 real identity/permission/Setting/generated-HTTP
+  2/2 (rejections leave the provider untouched); NativeAOT PG `AotHost` publish/link/run
+  (linux-x64) emits eight per-case retention sentinels plus
+  `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`; fixture-only negative controls (wrong-count,
+  hold-filter, receipt-fault) exit non-zero and never emit the aggregate sentinel.
+- Support declaration: formal PostgreSQL retention V1 is **NativeAOT-verified** for the executed
+  linux-x64 scenarios only. It does not cover EF/FreeSql/SqlSugar/MongoDB, other RIDs, Quartz
+  identity/self-signed scheduling, or real authentication/Settings plumbing inside the native
+  host (those admission paths are covered by the JIT P08 test). #132 closure is a design ruling;
+  full retention acceptance follows this implementation review and explicit merge.
+
 ## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (final review passed; merge pending)
 
 - Branch `feat/issue-130-provider-matrix-soft-delete-20261022-104210`, PR #154, based on master
@@ -51,7 +89,8 @@ never deleted; never output credentials.
 
 - Core platform mainlines: Tenant / Setting / Feature / Permission / BackgroundJobs /
   ObjectMapping / Dynamic API (compile-time generated) / Workflow + HumanTask /
-  Audit (write-redact-query). Audit retention (cleanup/governance) not delivered.
+  Audit (write-redact-query). Audit retention V1 (PostgreSQL) is implemented on the #132
+  branch (merge pending); other providers/policies remain deferred.
 - Module system: compile-time aggregation only (BuildTasks + generator), closed.
 - Agent governance plane (Authoring -> deterministic review -> Control Plane):
   review artifact store and package/evidence artifact store with InMemory +

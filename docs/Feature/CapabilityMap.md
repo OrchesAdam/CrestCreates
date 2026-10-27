@@ -257,7 +257,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | src/Persistence/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj | Persistence | 导航（本轮未重评，不背书） | [OrmProviderSupportMatrix.md](../../docs/Feature/OrmProviderSupportMatrix.md) |
 | src/Persistence/CrestCreates.DbContextProvider.Abstract/CrestCreates.DbContextProvider.Abstract.csproj | Persistence | 导航（本轮未重评，不背书） | [OrmProviderSupportMatrix.md](../../docs/Feature/OrmProviderSupportMatrix.md) |
 | src/Persistence/CrestCreates.OrmProviders.MongoDB/CrestCreates.OrmProviders.MongoDB.csproj | Persistence | 导航（本轮未重评，不背书） | [OrmProviderSupportMatrix.md](../../docs/Feature/OrmProviderSupportMatrix.md) |
-| src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj | Persistence | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/RuntimePersistence/arch-design.md) |
+| src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj | Persistence | 导航；#132 retention provider + V016/V017 已交付（见 §7） | [arch-design.md](../../docs/Feature/RuntimePersistence/arch-design.md) |
 | src/Platform/CrestCreates.Platform.Agent/CrestCreates.Platform.Agent.csproj | Platform | 导航（本轮未重评，不背书） | — |
 | src/Platform/CrestCreates.Platform.All/CrestCreates.Platform.All.csproj | Platform | 导航（本轮未重评，不背书） | — |
 | src/Platform/CrestCreates.Platform.AspNetCore/CrestCreates.Platform.AspNetCore.csproj | Platform | 导航（本轮未重评，不背书） | — |
@@ -284,10 +284,10 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | src/Runtime/Agent/CrestCreates.Agent.Prompting/CrestCreates.Agent.Prompting.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Agent/CrestCreates.Agent.Tools.Abstractions/CrestCreates.Agent.Tools.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | [usage-guide.md](../../docs/Feature/AgentTools/usage-guide.md) |
 | src/Runtime/Agent/CrestCreates.Agent.Tools/CrestCreates.Agent.Tools.csproj | Runtime | 导航（本轮未重评，不背书） | [usage-guide.md](../../docs/Feature/AgentTools/usage-guide.md) |
-| src/Runtime/Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/Accountability/arch-design.md) |
-| src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/Accountability/arch-design.md) |
-| src/Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | — |
-| src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj | Runtime | 导航（本轮未重评，不背书） | — |
+| src/Runtime/Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj | Runtime | 导航；#132 retention 契约已交付（见 §7） | [arch-design.md](../../docs/Feature/Accountability/arch-design.md) |
+| src/Runtime/Audit/CrestCreates.Accountability/CrestCreates.Accountability.csproj | Runtime | 导航；#132 retention executor 已交付（见 §7） | [arch-design.md](../../docs/Feature/Accountability/arch-design.md) |
+| src/Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj | Runtime | 导航；#132 未改动此项目 | — |
+| src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj | Runtime | 导航；#132 旧 cleanup 退出、admission 归入 Application（见 §7） | — |
 | src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/CapabilityExposure/arch-design.md) |
 | src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj | Runtime | 导航（本轮未重评，不背书） | [arch-design.md](../../docs/Feature/CapabilityExposure/arch-design.md) |
 | src/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP/CrestCreates.DistributedTransaction.CAP.csproj | Runtime | 导航（本轮未重评，不背书） | — |
@@ -349,3 +349,23 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 - 原生执行证据矩阵：`docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md`。
 - 平台闭环状态：`memory.md`；主链共识与支持声明规则：`AGENTS.md`。
 - `docs/review/crestcreates-abp-comparison.md` 中 PluginSystem「生产就绪」为失实的活跃引用，已按本地图 D-12 纠正；历史审查文档保持历史身份并链接本地图。
+
+## 7. #132 审计保留治理（V1 交付记录）
+
+日期：2026-10-27。设计：[设计](../superpowers/specs/2026-10-27-issue-132-audit-retention-governance-design.md)、
+计划：[实施计划](../superpowers/plans/2026-10-27-issue-132-audit-retention-governance-implementation.md)。
+本节只记录交付事实与支持声明，不重评 §2 的 #131 定位结论，不复制 ORM Provider 矩阵。
+
+| 项目 | 定位 | 功能状态 | 执行证据 | 处理结论 |
+| --- | --- | --- | --- | --- |
+| `CrestCreates.Accountability.Abstractions` | 抽象契约（scope/policy/run/batch/hold/`IAuditRetentionStore`） | 已交付指定边界（V1） | 契约与内核 31/31；PG 14/14 | 保留；后续扩展必须保持 receipt/Unknown 语义 |
+| `CrestCreates.Accountability` | 执行实现（`AuditRetentionExecutor`） | 已交付指定边界（V1） | 内核 31/31；PG 14/14；原生八场景 | 保留；不得新增公开故障开关或裸删旁路 |
+| `CrestCreates.AuditLogging` + `CrestCreates.Application` | admission 与 typed job | 已交付指定边界（V1） | Application 15/15；P08 真实身份/权限/Setting/HTTP 2/2 | 保留；旧 cleanup 已归档到 `99_RecycleBin/issue-132-audit-retention/` |
+| `CrestCreates.Runtime.Persistence.PostgreSql` | Provider（V016/V017、sink、retention store） | 已交付指定边界（V1，仅 PostgreSQL 固定数据库） | PG 14/14；sink/migration 5/5；NativeAOT linux-x64 八场景 + 总 sentinel + 三类负控 | 限界保留；EF/FreeSql/SqlSugar/MongoDB、其他 RID、自动调度未验证 |
+
+支持声明：正式 PostgreSQL retention V1 的已执行场景为 **NativeAOT-verified（linux-x64）**；
+真实认证/权限/Setting/generated HTTP 组合由 JIT P08 覆盖，不推导原生认证链；自动 Quartz
+调度因缺少认证主体保持关闭，不属于已交付能力。
+
+纪律：新增 retention Provider/RID/策略类型时按组合单独补证据，更新本表与 `memory.md`；
+不得从本节推导其他项目或组合的支持状态。

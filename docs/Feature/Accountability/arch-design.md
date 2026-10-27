@@ -428,3 +428,61 @@ The Accountability runtime and Phase 9b provider do not provide:
 
 Design specification:
 `docs/superpowers/specs/2026-07-28-phase-9a-accountability-runtime-foundation-design.md`.
+
+---
+
+## 11. Retention and Governance (V1)
+
+Issue #132 adds the first formal retention contract. It deletes bounded audit
+bodies; it does not delete the responsibility facts of the run itself.
+
+### 11.1 Scope and policy
+
+- `AuditRetentionScope` is explicit: `host` (null tenant partition) or one
+  authoritative tenant id. There is no `AllTenants` value and no guessing from
+  empty strings or names.
+- `AuditRetentionPolicy` is an immutable admitted snapshot of the Global
+  settings (`RetentionDays`, `BatchSize`, `MaxBatchesPerRun`, `MaxRunSeconds`).
+  `ComputeHash()` binds a run to its policy; later setting changes only affect
+  new runs. Per-tenant policy is intentionally deferred.
+- Candidates require both `OccurredAt < cutoff` and `FirstAcceptedAt < cutoff`.
+  Late-arriving old events are therefore not treated as long-retained, and a
+  fresh record can never become eligible just because its logical time is old.
+
+### 11.2 Provider protocol
+
+`IAuditRetentionStore` is the provider-side atomic protocol: create-or-read run,
+read-only preview, bounded batch, read run, finalize run outside a batch, place
+hold, release hold. The PostgreSQL V1 implementation (V016/V017) makes the
+ledger the dedup authority, writes body deletion + ledger transition + batch
+receipt + run counters in one transaction, serializes on
+scope → run → record locks, and uses the `(sink, audit, body_state)` foreign key
+to reject body resurrection. Quarantined rows stay out of purge candidates.
+Governance-target facts (`audit-retention-*`) and batch/hold receipts are
+protected from purge.
+
+### 11.3 Kernel and admission
+
+`AuditRetentionExecutor` owns the loop: persisted policy binding, persisted
+batch budget, cancellation finalization, commit-Unknown → receipt
+reconciliation, and a mirror outcome reported separately from the committed
+state. `AuditRetentionAppService` is the single admission gate for HTTP
+(`/api/audit-retention/*`), direct DI and `AuditRetentionJob`: identity,
+`AuditLogging.Retention.*` permissions, Global settings and current tenant.
+Host callers resolve tenant names through `ITenantProvider` to the
+authoritative id. Execution stays disabled until the Global setting is enabled;
+the scheduler adapter establishes no authenticated principal, so automatic
+registration remains off in V1.
+
+### 11.4 Support declaration
+
+The PostgreSQL fixed-database V1 scenario set is **NativeAOT-verified**
+(linux-x64): the PG `AotHost` publishes/links/runs the real store and kernel and
+asserts time boundaries, scope isolation, holds, batch budget, post-purge sink
+dedup, receipt recovery and missing capabilities, followed by
+`CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`. Three fixture-only negative controls
+(wrong count, removed hold filtering, receipt fault) must fail without that
+sentinel. Real identity/permission/Setting/generated-HTTP admission is covered
+by the JIT P08 test; the native host does not establish real authentication.
+EF/FreeSql/SqlSugar/MongoDB, other RIDs, tenant-specific policy, bulk/legal hold
+classes, archive/WORM and metadata GC remain **unverified/deferred**.
