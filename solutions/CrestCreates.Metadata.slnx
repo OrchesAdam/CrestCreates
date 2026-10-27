@@ -15,7 +15,6 @@
   <Folder Name="/src/Framework/Infrastructure/">
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Logging/CrestCreates.Logging.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.VirtualFileSystem/CrestCreates.VirtualFileSystem.csproj" />
-    <Project Path="../src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Aop.Abstractions/CrestCreates.Aop.Abstractions.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Aop/CrestCreates.Aop.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching.Abstractions/CrestCreates.Caching.Abstractions.csproj" />
@@ -36,8 +35,6 @@
   <Folder Name="/src/Metadata/Draft/">
     <Project Path="../src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj" />
     <Project Path="../src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj" />
-    <Project Path="../src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj" />
-    <Project Path="../src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj" />
   </Folder>
   <Folder Name="/src/Tooling/">
     <Project Path="../src/Tooling/CrestCreates.CodeGenerator/CrestCreates.CodeGenerator.csproj" />
@@ -63,7 +60,6 @@
   </Folder>
   <Folder Name="/tests/Metadata/Draft/">
     <Project Path="../tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests/CrestCreates.DescriptorDraft.Tests.csproj" />
-    <Project Path="../tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Runtime/Agent/">
     <Project Path="../tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj" />
