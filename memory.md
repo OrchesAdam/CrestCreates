@@ -1,6 +1,7 @@
 # CrestCreates platform status — 2026-10-23
 
-Baseline: master `348c4d3c` (2026-10-23 fast-forward sync with freshly fetched origin/master;
+Baseline: master `9c39e187` (2026-10-27 merge of PR #155: #131 capability map, archiving and
+TenantId guard; parent base was `348c4d3c`, 2026-10-23 sync with freshly fetched origin/master;
 includes PR #150/#152/#151 and #154: #128 CRUD JSON, #129 legacy exit, #130 ORM matrix/soft-delete).
 #130 ORM Provider matrix/soft-delete was delivered via PR #154; S2 at `545f73d4`
 passed independent R3 review. S3 at `19997ea4` passed independent R4 review:
@@ -207,16 +208,19 @@ never deleted; never output credentials.
   PR #150 (`196b6f66`), merge-status closure via PR #151 (`8c8a71de`).
 - Wave 3: #129 Dynamic API exit merged via PR #152 (`2f4c5402`);
   #130 ORM matrix/soft-delete merged via PR #154 (`348c4d3c`, 2026-10-23);
-  #131 capability map + TenantId guard implemented on its feature branch
-  (S1–S3 landed locally, PR pending user authorization).
+  #131 capability map / long-tail adjudication / TenantId guard merged via PR #155
+  (`9c39e187`, 2026-10-27, ten commits, R1–R7 review rounds with 20 findings fixed;
+  Issue #131 closed as completed).
 - Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
 - At most 2 implementation PRs in flight; verify at current head before merge.
 
 ## #131 capability map, long-tail adjudication and TenantId guard (2026-10-23)
 
-- **Implemented on branch `feat/issue-131-capability-map-tenant-id-guard-20261023-174957`**
-  (commits `8dfe83f5` S1, `7b668b0d` S2, `218ff151` S3) from master `348c4d3c`; not yet merged,
-  Issue #131 stays open.
+- **Merged**: PR #155 merged to master as `9c39e187` on 2026-10-27 (branch
+  `feat/issue-131-capability-map-tenant-id-guard-20261023-174957`, ten commits from `348c4d3c`:
+  S1 `8dfe83f5`, S2 `7b668b0d`, S3 `218ff151`, S4 `40bf53eb`, R1–R6 fixes
+  `adbbf5dd`…`ae7ebe93`, wrap-up `bae2e5bc`). Issue #131 closed as completed; remote branch deleted.
+  R7 technical review passed with 11 independent input forms and the entity matrix 60/60.
 - S1 re-inventoried the 15 in-scope production projects at `348c4d3c` (SHA-256 per source,
   ProjectReference consumers, solution membership): `TOTAL_DIFF 0` versus the design inventory,
   so the 12 adjudications apply unchanged. Extra build inputs found beyond the design list and
