@@ -271,6 +271,8 @@ internal static class TenantIdentityEvaluatedInputs
     /// </summary>
     internal static class DependencyProbe
     {
+        private const int MaxImportDepth = 8;
+
         internal sealed record Result(
             bool IsFullyUnderstood,
             IReadOnlyList<string> BuildFiles,
@@ -317,7 +319,7 @@ internal static class TenantIdentityEvaluatedInputs
 
                 foreach (var element in document.Descendants("Compile"))
                 {
-                    foreach (var attribute in new[] { "Include", "Remove" })
+                    foreach (var attribute in new[] { "Include", "Remove", "Exclude" })
                     {
                         var value = element.Attribute(attribute)?.Value;
                         if (string.IsNullOrWhiteSpace(value))
@@ -325,9 +327,10 @@ internal static class TenantIdentityEvaluatedInputs
                             continue;
                         }
 
-                        // MSBuild splits item lists on ';'. Item metadata references are not expanded here and
-                        // make the whole declaration unprovable.
-                        if (value.Contains("%(", StringComparison.Ordinal))
+                        // Item references and metadata are not expanded here: the referenced items may point
+                        // anywhere, so the declaration is unprovable and the project must not use the cache.
+                        if (value.Contains("%(", StringComparison.Ordinal)
+                            || value.Contains("@(", StringComparison.Ordinal))
                         {
                             fullyUnderstood = false;
                             continue;
@@ -352,12 +355,20 @@ internal static class TenantIdentityEvaluatedInputs
                     }
                 }
 
-                if (depth >= 8)
+                var imports = document.Descendants("Import").ToArray();
+                if (depth >= MaxImportDepth)
                 {
+                    // Reaching the traversal budget with imports still unread means the closure is incomplete;
+                    // an unseen dependency is not the same as no dependency.
+                    if (imports.Length > 0)
+                    {
+                        fullyUnderstood = false;
+                    }
+
                     continue;
                 }
 
-                foreach (var import in document.Descendants("Import"))
+                foreach (var import in imports)
                 {
                     var value = import.Attribute("Project")?.Value;
                     if (string.IsNullOrWhiteSpace(value))

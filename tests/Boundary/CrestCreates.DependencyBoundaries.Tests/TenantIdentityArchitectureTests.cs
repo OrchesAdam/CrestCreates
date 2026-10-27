@@ -1087,6 +1087,108 @@ public class TenantIdentityArchitectureTests
     }
 
     [Fact]
+    public void TI_C01p_ItemReferenceLists_BypassTheCache()
+    {
+        foreach (var form in new[] { "literal", "item-reference", "item-reference-remove" })
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"issue131-itemref-{form}-{Guid.NewGuid():N}");
+            var projectDirectory = Path.Combine(root, "Owned");
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(Path.Combine(root, "Shared"));
+            try
+            {
+                var projectFile = Path.Combine(projectDirectory, "Sample.csproj");
+                var items = form switch
+                {
+                    "literal" => "<Compile Include=\"../Shared/*.cs\" />",
+                    // @(...) is not expanded by the probe: the referenced items may point anywhere.
+                    "item-reference" => "<SharedItems Include=\"../Shared/*.cs\" /><Compile Include=\"@(SharedItems)\" />",
+                    _ => "<SharedItems Include=\"../Shared/*.cs\" /><Compile Include=\"../Shared/*.cs\" /><Compile Remove=\"@(SharedItems)\" />",
+                };
+                File.WriteAllText(
+                    projectFile,
+                    $"""
+                    <Project Sdk="Microsoft.NET.Sdk">
+                      <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+                      <ItemGroup>{items}</ItemGroup>
+                    </Project>
+                    """);
+                File.WriteAllText(Path.Combine(projectDirectory, "Owned.cs"), "namespace Sample { public sealed class Owned { } }");
+
+                var first = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.True(first.IsAvailable, $"{form}: first evaluation failed: {first.UnavailableReason}");
+
+                var warm = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                var cacheable = form == "literal";
+                Assert.Equal(cacheable ? "msbuild-cache" : "msbuild", warm.Source);
+
+                File.WriteAllText(Path.Combine(root, "Shared", "Leak.cs"), "namespace Sample { public sealed class Leak { } }");
+                var afterAdd = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                if (form == "item-reference-remove")
+                {
+                    // The same file is both included literally and removed through the item reference, so a
+                    // trustworthy answer is "not present"; what matters is that the read is re-evaluated.
+                    Assert.Equal("msbuild", afterAdd.Source);
+                }
+                else
+                {
+                    Assert.Contains(afterAdd.CompileFiles, file => file.EndsWith("Leak.cs", StringComparison.Ordinal));
+                }
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void TI_C01q_DeepImportChains_AreNotTrusted()
+    {
+        foreach (var depth in new[] { 8 /* within budget */, 10 /* beyond budget */ })
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"issue131-importdepth-{depth}-{Guid.NewGuid():N}");
+            var projectDirectory = Path.Combine(root, "Owned");
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(Path.Combine(root, "Shared"));
+            try
+            {
+                // Owned -> Depth1 -> ... -> DepthN, and only the last file declares the external glob.
+                for (var index = 1; index <= depth; index++)
+                {
+                    var next = index < depth ? $"<Import Project=\"Depth{index + 1}.props\" />" : string.Empty;
+                    var compile = index == depth ? "<Compile Include=\"../Shared/*.cs\" />" : string.Empty;
+                    File.WriteAllText(
+                        Path.Combine(projectDirectory, $"Depth{index}.props"),
+                        $"<Project>{next}<ItemGroup>{compile}</ItemGroup></Project>");
+                }
+
+                var projectFile = Path.Combine(projectDirectory, "Sample.csproj");
+                File.WriteAllText(
+                    projectFile,
+                    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>"
+                    + "<Import Project=\"Depth1.props\" /></Project>");
+                File.WriteAllText(Path.Combine(projectDirectory, "Owned.cs"), "namespace Sample { public sealed class Owned { } }");
+
+                var first = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.True(first.IsAvailable, $"depth {depth}: first evaluation failed: {first.UnavailableReason}");
+                Assert.DoesNotContain(first.CompileFiles, file => file.EndsWith("DeepLeak.cs", StringComparison.Ordinal));
+
+                var warm = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.Equal(depth <= 8 ? "msbuild-cache" : "msbuild", warm.Source);
+
+                File.WriteAllText(Path.Combine(root, "Shared", "DeepLeak.cs"), "namespace Sample { public sealed class DeepLeak { } }");
+                var afterAdd = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.Contains(afterAdd.CompileFiles, file => file.EndsWith("DeepLeak.cs", StringComparison.Ordinal));
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void TI_C01l_FailedEvaluation_IsACoverageFailureEvenWithoutSources()
     {
         // A valid project with build output and authored sources, but MSBuild evaluation fails: "unknown inputs"

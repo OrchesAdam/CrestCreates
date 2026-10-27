@@ -541,6 +541,43 @@
         },
         "application_tenants_and_identity": "102/102"
       }
+    },
+    {
+      "round": "R6",
+      "review_date": "2026-10-27",
+      "reviewed_head": "45b59f97d91c8b86421dcc07fde301335ffec657",
+      "severity": "P2",
+      "findings": 2,
+      "verdict": "both accepted and fixed; unexpanded item references and truncated import walks no longer count as a provable dependency set",
+      "items": [
+        {
+          "id": "R6-01",
+          "title": "@(Items) references were treated as literal paths",
+          "fix": "the Compile Include/Remove/Exclude scan rejects '@(' item references (and %( metadata) outright: the referenced items may point anywhere, so the project bypasses the persistent cache and re-evaluates every run",
+          "regressions": [
+            "TI_C01p (literal vs @(Items) equivalence: literal hits the cache when unchanged, the item-reference forms re-evaluate and still see a newly added external file)"
+          ]
+        },
+        {
+          "id": "R6-02",
+          "title": "import traversal beyond the depth budget still trusted the partial closure",
+          "fix": "reaching the depth budget while the current file still declares imports marks the dependency set as unprovable instead of silently stopping; the budget stays, the truncation no longer yields a trusted cache",
+          "regressions": [
+            "TI_C01q (8-level chain within budget is cacheable and still fresh; 10-level chain re-evaluates every run and still sees a newly added external file)"
+          ]
+        }
+      ],
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "44/44 (2m3s warm)",
+        "dependency_boundaries": {
+          "passed": 236,
+          "failed": 2,
+          "total": 238,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "application_tenants_and_identity": "102/102"
+      }
     }
   ]
 }
