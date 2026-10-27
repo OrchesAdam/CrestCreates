@@ -3,9 +3,13 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Context;
+using CrestCreates.Accountability.Abstractions.Recording;
+using CrestCreates.Accountability.Abstractions.Retention;
+using CrestCreates.Accountability.Abstractions.Semantics;
 using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Accountability.Abstractions.Json;
 using CrestCreates.Accountability.Bootstrap;
+using CrestCreates.Accountability.Retention;
 using CrestCreates.Agent.Abstractions;
 using CrestCreates.Agent.Tools;
 using CrestCreates.DescriptorDraft;
@@ -43,9 +47,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Microsoft.Extensions.Logging;
 
-if (args.Length is not (2 or 3))
+if (args.Length is not (2 or 3 or 4))
 {
-    Console.Error.WriteLine("Usage: <connection-string> <schema> [predispatch-scenario]");
+    Console.Error.WriteLine("Usage: <connection-string> <schema> [predispatch-scenario] | <connection-string> <schema> retention-negative <wrong-count|hold-filter|receipt-fault>");
     return 2;
 }
 
@@ -57,7 +61,17 @@ var options = new PostgreSqlRuntimePersistenceOptions { ConnectionString = args[
 if (args.Length == 3)
     return await RunPreDispatchCrashChildAsync(options, args[2]);
 
+if (args.Length == 4 && args[2] != "retention-negative")
+{
+    Console.Error.WriteLine($"Unknown mode '{args[2]}'.");
+    return 2;
+}
+
 await new PostgreSqlRuntimeMigrationRunner(options).ApplyAsync(new PostgreSqlRuntimeMigrationOptions { ApplyMigrations = true });
+
+if (args.Length == 4)
+    return await RunAuditRetentionNegativeControlAsync(options, args[3]);
+
 await RunControlPlaneReferenceDataMainlineAsync(options);
 await RunVersionedOrganizationCacheAotScenarioAsync(options);
 
@@ -362,6 +376,10 @@ await RunPreDispatchCrashScenariosAsync(options);
 // Context/Block projection, formal curation through the real service, restart
 // read, Recall/Source Expansion, and #56 Accountability.
 await RunDurableAgentMemoryMainlineAsync(options);
+
+// #132 formal audit retention: real PostgreSQL store + shared typed kernel in
+// the native binary (no reflection/scanner fallback).
+await RunAuditRetentionNativeScenarioAsync(options);
 return 0;
 
 
@@ -1434,6 +1452,450 @@ static ServiceProvider BuildAgentMemoryProvider(PostgreSqlRuntimePersistenceOpti
         .BuildServiceProvider();
 
 
+static ServiceProvider BuildRetentionProvider(PostgreSqlRuntimePersistenceOptions options)
+{
+    var services = new ServiceCollection();
+    services.AddLogging();
+    services.AddAccountability();
+    services.AddAuditRetention();
+    services.AddCrestCreatesPostgreSqlRuntimePersistence(options);
+    services.AddPostgreSqlAuditRetention();
+    return services.BuildServiceProvider();
+}
+
+static async Task<int> RunAuditRetentionNegativeControlAsync(PostgreSqlRuntimePersistenceOptions options, string control)
+{
+    if (control is not ("wrong-count" or "hold-filter" or "receipt-fault"))
+    {
+        Console.Error.WriteLine($"Unknown retention negative control '{control}'.");
+        return 2;
+    }
+
+    try
+    {
+        await RunAuditRetentionNativeScenarioAsync(options, control);
+    }
+    catch (Exception exception)
+    {
+        Console.WriteLine($"CRESTCREATES_AUDIT_RETENTION_NEGATIVE_CONTROL_CAUGHT {control}: {exception.Message}");
+        return 21;
+    }
+
+    Console.WriteLine($"CRESTCREATES_AUDIT_RETENTION_NEGATIVE_CONTROL_NOT_DETECTED {control}");
+    return 22;
+}
+
+static async Task RunAuditRetentionNativeScenarioAsync(PostgreSqlRuntimePersistenceOptions options, string? mutation = null)
+{
+    var now = DateTimeOffset.UtcNow;
+    var wholeSecond = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, now.Second, TimeSpan.Zero);
+    var old = wholeSecond.AddDays(-90);
+    var policy = new AuditRetentionPolicy
+    {
+        RetentionDays = 30,
+        BatchSize = 10,
+        MaxBatchesPerRun = 2,
+        MaxRunSeconds = 60
+    };
+    const string tenantA = "aot-retention-a";
+    const string tenantB = "aot-retention-b";
+    var scopeA = AuditRetentionScope.ForTenant(tenantA);
+    var scopeB = AuditRetentionScope.ForTenant(tenantB);
+    var actor = new AuditActor { Kind = "system", Id = "aot-retention" };
+    const string storeId = PostgreSqlAuditRetentionStore.StoreIdValue;
+    const string sinkId = PostgreSqlAuditRetentionStore.SinkIdValue;
+
+    await using var provider = BuildRetentionProvider(options);
+    using var providerScope = provider.CreateScope();
+    var services = providerScope.ServiceProvider;
+    var sink = services.GetRequiredService<IAuditSink>();
+    var recorder = services.GetRequiredService<IAuditRecorder>();
+    var retention = mutation is null
+        ? services.GetRequiredService<IAuditRetentionService>()
+        : new AuditRetentionExecutor(
+            [new RetentionMutationStore(services.GetRequiredService<IAuditRetentionStore>(), mutation)],
+            recorder);
+
+    AuditRetentionRunRequest Request(string requestId, AuditRetentionScope runScope, AuditRetentionPolicy runPolicy)
+        => new()
+        {
+            StoreId = storeId,
+            SinkId = sinkId,
+            Scope = runScope,
+            RequestId = requestId,
+            ReasonCode = "retention.native",
+            Policy = runPolicy,
+            SnapshotAt = now,
+            Cutoff = runPolicy.ComputeCutoff(now),
+            Actor = actor,
+            CorrelationId = "aot-retention-" + requestId
+        };
+
+    AuditRetentionPreviewRequest PreviewRequest(AuditRetentionScope previewScope, AuditRetentionPolicy previewPolicy)
+        => new()
+        {
+            StoreId = storeId,
+            SinkId = sinkId,
+            Scope = previewScope,
+            Policy = previewPolicy,
+            SnapshotAt = now,
+            Cutoff = previewPolicy.ComputeCutoff(now)
+        };
+
+    async Task SeedAsync(string auditId, string? tenantId, DateTimeOffset occurredAt, string targetKind = "runtime")
+    {
+        var accepted = await sink.WriteAsync(
+            RetentionSeedEnvelope(auditId, tenantId, occurredAt, targetKind, "integrity-" + auditId));
+        RetentionAssert(accepted.Status == AuditSinkWriteStatus.Accepted, $"seed '{auditId}' was {accepted.Status}");
+    }
+
+    await SeedAsync("aot-ret-old-a", tenantA, old);
+    await SeedAsync("aot-ret-old-a2", tenantA, old);
+    await SeedAsync("aot-ret-fresh-a", tenantA, now.AddDays(-1));
+    await SeedAsync("aot-ret-old-b", tenantB, old);
+    await SeedAsync("aot-ret-old-host", null, old);
+    await SeedAsync("aot-ret-governance", tenantA, old, AuditRetentionSemanticNames.RunTargetKind);
+    await ShiftRetentionCandidateAsync(
+        options,
+        ["aot-ret-old-a", "aot-ret-old-a2", "aot-ret-old-b", "aot-ret-old-host", "aot-ret-governance"],
+        old);
+    await SeedQuarantineRetentionRowAsync(options, "aot-ret-quarantine", old);
+
+    var holdId = string.Empty;
+    if (mutation != "hold-filter")
+    {
+        var hold = await retention.PlaceHoldAsync(new AuditHoldPlacement
+        {
+            StoreId = storeId,
+            SinkId = sinkId,
+            Scope = scopeA,
+            AuditId = "aot-ret-old-a",
+            ReasonCode = "litigation",
+            Actor = actor,
+            CorrelationId = "aot-retention-hold"
+        });
+        holdId = hold.Hold.HoldId;
+        RetentionAssert(hold.Hold.Version == 1 && hold.Hold.ReleasedAt is null, "active hold was not placed at version 1");
+        RetentionAssert(
+            hold.MirrorOutcome == AuditRetentionMirrorOutcome.Succeeded,
+            $"hold mirror failed: {hold.MirrorOutcome?.Code}");
+    }
+
+    var previewA = await retention.PreviewAsync(PreviewRequest(scopeA, policy));
+    RetentionAssert(
+        previewA.Sample.Count == 3
+        && previewA.EligibleInSample == 1
+        && previewA.HeldInSample == 1
+        && previewA.ProtectedInSample == 1
+        && previewA.QuarantinedInSample == 0
+        && !previewA.HasMore,
+        $"tenant preview mismatch: eligible={previewA.EligibleInSample}, held={previewA.HeldInSample}, protected={previewA.ProtectedInSample}, quarantined={previewA.QuarantinedInSample}, sample={previewA.Sample.Count}");
+
+    var runA = await retention.ExecuteAsync(Request("aot-retention-run-a", scopeA, policy));
+    RetentionAssert(
+        runA.State == AuditRetentionRunState.Completed
+        && runA.CommitKnowledge == AuditRetentionCommitKnowledge.Committed
+        && runA.CommittedDeletedCount == 1
+        && runA.CommittedBatchCount == 1
+        && !runA.RemainingMayExist,
+        $"tenant A run mismatch: state={runA.State}, knowledge={runA.CommitKnowledge}, deleted={runA.CommittedDeletedCount}, batches={runA.CommittedBatchCount}");
+    RetentionAssert(
+        runA.MirrorOutcome == AuditRetentionMirrorOutcome.Succeeded,
+        $"batch mirror failed: {runA.MirrorOutcome?.Code}");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-old-a2") == "Purged",
+        "expired unheld tenant row was not purged");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-fresh-a") == "BodyPresent",
+        "fresh row was purged above the cutoff");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-old-b") == "BodyPresent",
+        "tenant A run purged tenant B data");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-old-host") == "BodyPresent",
+        "tenant A run purged host data");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_TIME_OK");
+
+    var previewHost = await retention.PreviewAsync(PreviewRequest(AuditRetentionScope.Host, policy));
+    RetentionAssert(
+        previewHost.EligibleInSample == 1 && previewHost.QuarantinedInSample == 1,
+        $"host preview mismatch: eligible={previewHost.EligibleInSample}, quarantined={previewHost.QuarantinedInSample}");
+
+    var runB = await retention.ExecuteAsync(Request("aot-retention-run-b", scopeB, policy));
+    RetentionAssert(
+        runB.State == AuditRetentionRunState.Completed && runB.CommittedDeletedCount == 1,
+        $"tenant B run mismatch: state={runB.State}, deleted={runB.CommittedDeletedCount}");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-old-b") == "Purged",
+        "tenant B expired row was not purged");
+
+    var runHost = await retention.ExecuteAsync(Request("aot-retention-run-host", AuditRetentionScope.Host, policy));
+    RetentionAssert(
+        runHost.State == AuditRetentionRunState.Completed && runHost.CommittedDeletedCount == 1,
+        $"host run mismatch: state={runHost.State}, deleted={runHost.CommittedDeletedCount}");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-old-host") == "Purged",
+        "host expired row was not purged");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-quarantine") == "Quarantined",
+        "quarantined record must never be purged");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-governance") == "BodyPresent",
+        "governance-protected body was purged");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_SCOPE_OK");
+
+    var runAGet = await retention.GetRunAsync(Request("aot-retention-run-a", scopeA, policy).Key);
+    RetentionAssert(
+        runAGet is { State: AuditRetentionRunState.Completed, CommittedDeletedCount: 1 },
+        "persisted run receipt does not reflect the committed batch");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_PROTECTION_OK");
+
+    var purgedHold = await CaptureRetentionErrorAsync(
+        () => retention.PlaceHoldAsync(new AuditHoldPlacement
+        {
+            StoreId = storeId,
+            SinkId = sinkId,
+            Scope = scopeA,
+            AuditId = "aot-ret-old-a2",
+            ReasonCode = "late-hold",
+            Actor = actor,
+            CorrelationId = "aot-retention-late-hold"
+        }).AsTask());
+    RetentionAssert(
+        purgedHold?.Code == AuditRetentionErrorCodes.HoldAlreadyPurged,
+        $"hold on purged row returned {purgedHold?.Code ?? "success"}");
+
+    var versionConflict = await CaptureRetentionErrorAsync(
+        () => retention.ReleaseHoldAsync(new AuditHoldRelease
+        {
+            StoreId = storeId,
+            SinkId = sinkId,
+            Scope = scopeA,
+            HoldId = holdId,
+            ExpectedVersion = 99,
+            ReasonCode = "litigation.closed",
+            Actor = actor,
+            CorrelationId = "aot-retention-release-conflict"
+        }).AsTask());
+    RetentionAssert(
+        versionConflict?.Code == AuditRetentionErrorCodes.HoldVersionConflict,
+        $"stale hold release returned {versionConflict?.Code ?? "success"}");
+
+    var released = await retention.ReleaseHoldAsync(new AuditHoldRelease
+    {
+        StoreId = storeId,
+        SinkId = sinkId,
+        Scope = scopeA,
+        HoldId = holdId,
+        ExpectedVersion = 1,
+        ReasonCode = "litigation.closed",
+        Actor = actor,
+        CorrelationId = "aot-retention-release"
+    });
+    RetentionAssert(
+        released.Hold.Version == 2 && released.Hold.ReleasedAt is not null,
+        $"hold release did not advance the version: {released.Hold.Version}");
+    RetentionAssert(
+        released.MirrorOutcome == AuditRetentionMirrorOutcome.Succeeded,
+        $"hold release mirror failed: {released.MirrorOutcome?.Code}");
+
+    var runA2 = await retention.ExecuteAsync(Request("aot-retention-run-a2", scopeA, policy));
+    RetentionAssert(
+        runA2.State == AuditRetentionRunState.Completed && runA2.CommittedDeletedCount == 1,
+        $"released row was not purged: state={runA2.State}, deleted={runA2.CommittedDeletedCount}");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-old-a") == "Purged",
+        "released hold row was not purged");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_HOLD_OK");
+
+    await SeedAsync("aot-ret-budget-1", tenantA, old);
+    await SeedAsync("aot-ret-budget-2", tenantA, old);
+    await ShiftRetentionCandidateAsync(options, ["aot-ret-budget-1", "aot-ret-budget-2"], old);
+    var budgetPolicy = new AuditRetentionPolicy
+    {
+        RetentionDays = 30,
+        BatchSize = 1,
+        MaxBatchesPerRun = 1,
+        MaxRunSeconds = 60
+    };
+    var budgetRequest = Request("aot-retention-budget-a", scopeA, budgetPolicy);
+    var budget = await retention.ExecuteAsync(budgetRequest);
+    RetentionAssert(
+        budget.State == AuditRetentionRunState.BudgetReached
+        && budget.CommittedDeletedCount == 1
+        && budget.CommittedBatchCount == 1
+        && budget.RemainingMayExist,
+        $"budget run mismatch: state={budget.State}, deleted={budget.CommittedDeletedCount}, batches={budget.CommittedBatchCount}");
+    var budgetReplay = await retention.ExecuteAsync(budgetRequest);
+    RetentionAssert(
+        budgetReplay.State == AuditRetentionRunState.BudgetReached
+        && budgetReplay.CommittedDeletedCount == 1
+        && budgetReplay.MirrorOutcome is null,
+        $"budget replay re-executed: state={budgetReplay.State}, deleted={budgetReplay.CommittedDeletedCount}");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-budget-2") == "BodyPresent",
+        "budget replay consumed an additional batch");
+    var budgetContinuation = await retention.ExecuteAsync(Request("aot-retention-budget-b", scopeA, policy));
+    RetentionAssert(
+        budgetContinuation.State == AuditRetentionRunState.Completed
+        && budgetContinuation.CommittedDeletedCount == 1,
+        $"budget continuation mismatch: state={budgetContinuation.State}, deleted={budgetContinuation.CommittedDeletedCount}");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_BATCH_OK");
+
+    var duplicate = await sink.WriteAsync(
+        RetentionSeedEnvelope("aot-ret-old-a2", tenantA, old, "runtime", "integrity-aot-ret-old-a2"));
+    RetentionAssert(duplicate.Status == AuditSinkWriteStatus.Duplicate, $"post-purge duplicate was {duplicate.Status}");
+    RetentionAssert(duplicate.FirstAcceptedAt == old, "first accepted time changed after purge");
+    RetentionAssert(
+        await ReadRetentionLedgerStateAsync(options, "aot-ret-old-a2") == "Purged",
+        "duplicate write resurrected a purged body");
+    var conflicting = await sink.WriteAsync(
+        RetentionSeedEnvelope("aot-ret-old-a2", tenantA, old, "runtime", "integrity-conflict"));
+    RetentionAssert(conflicting.Status == AuditSinkWriteStatus.Conflict, $"post-purge conflict was {conflicting.Status}");
+    RetentionAssert(
+        conflicting.ExistingIntegrity?.Value == RuntimeHash("integrity-aot-ret-old-a2", "AuditIntegrity").Value,
+        "conflict did not report the accepted integrity");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_SINK_OK");
+
+    var replayRequest = Request("aot-retention-run-a", scopeA, policy);
+    await using (var replayProvider = BuildRetentionProvider(options))
+    {
+        using var replayScope = replayProvider.CreateScope();
+        var replayRetention = replayScope.ServiceProvider.GetRequiredService<IAuditRetentionService>();
+        var replay = await replayRetention.ExecuteAsync(replayRequest);
+        RetentionAssert(
+            replay.State == AuditRetentionRunState.Completed
+            && replay.CommittedDeletedCount == 1
+            && replay.CommittedBatchCount == 1
+            && replay.MirrorOutcome is null,
+            $"same-key recovery mismatch: state={replay.State}, deleted={replay.CommittedDeletedCount}");
+    }
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_RECOVERY_OK");
+
+    var capabilityExecutor = new AuditRetentionExecutor(
+        [new RetentionMutationStore(services.GetRequiredService<IAuditRetentionStore>(), "capability-missing")],
+        recorder);
+    AuditRetentionException? capabilityError = null;
+    try
+    {
+        capabilityExecutor.GetStoreIdentity(storeId);
+    }
+    catch (AuditRetentionException exception)
+    {
+        capabilityError = exception;
+    }
+
+    RetentionAssert(
+        capabilityError?.Code == AuditRetentionErrorCodes.CapabilityMissing,
+        $"incomplete capability returned {capabilityError?.Code ?? "success"}");
+    RetentionAssert(
+        services.GetRequiredService<IAuditRetentionService>().GetStoreIdentity(storeId).Capabilities.IsComplete,
+        "the PostgreSQL store must declare the full retention capability set");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_CAPABILITY_OK");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_OK");
+}
+
+static AuditEnvelope RetentionSeedEnvelope(
+    string auditId,
+    string? tenantId,
+    DateTimeOffset occurredAt,
+    string targetKind,
+    string integritySeed)
+    => new()
+    {
+        AuditId = auditId,
+        OccurredAt = occurredAt,
+        TenantId = tenantId,
+        CorrelationId = "aot-retention-seed",
+        Actor = new AuditActor { Kind = "system", Id = "aot-retention" },
+        Action = new AuditAction { Kind = "runtime", Name = "retention-seed" },
+        Target = new AuditTarget { Kind = targetKind, Id = auditId },
+        Outcome = new AuditOutcome { Status = AuditOutcomeStatuses.Succeeded },
+        Integrity = RuntimeHash(integritySeed, "AuditIntegrity")
+    };
+
+static async Task ShiftRetentionCandidateAsync(
+    PostgreSqlRuntimePersistenceOptions options,
+    string[] auditIds,
+    DateTimeOffset occurredAt)
+{
+    var ledger = RetentionTable(options, "runtime_audit_retention_ledger");
+    await using var connection = new NpgsqlConnection(options.ConnectionString);
+    await connection.OpenAsync();
+    foreach (var auditId in auditIds)
+    {
+        await using var command = new NpgsqlCommand(
+            $"update {ledger} set first_accepted_at=@occurred, occurred_at=@occurred where sink_id=@sink and audit_id=@audit;",
+            connection);
+        command.Parameters.AddWithValue("occurred", occurredAt);
+        command.Parameters.AddWithValue("sink", PostgreSqlAuditRetentionStore.SinkIdValue);
+        command.Parameters.AddWithValue("audit", auditId);
+        await command.ExecuteNonQueryAsync();
+    }
+}
+
+static async Task SeedQuarantineRetentionRowAsync(
+    PostgreSqlRuntimePersistenceOptions options,
+    string auditId,
+    DateTimeOffset occurredAt)
+{
+    var ledger = RetentionTable(options, "runtime_audit_retention_ledger");
+    var envelopes = RetentionTable(options, "runtime_audit_envelopes");
+    await using var connection = new NpgsqlConnection(options.ConnectionString);
+    await connection.OpenAsync();
+    await using var command = new NpgsqlCommand(
+        $"""
+         insert into {ledger}
+             (sink_id, audit_id, integrity_json, first_accepted_at, scope_kind, tenant_id, occurred_at, body_state, protection, quarantine_reason)
+         values (@sink, @audit, 'null'::jsonb, @occurred, 'quarantine', '', @occurred, 'Quarantined', 'none', 'invalid_envelope');
+         insert into {envelopes} (sink_id, audit_id, integrity_json, envelope_json, body_state)
+         values (@sink, @audit, 'null'::jsonb, 'null'::jsonb, 'Quarantined');
+         """,
+        connection);
+    command.Parameters.AddWithValue("sink", PostgreSqlAuditRetentionStore.SinkIdValue);
+    command.Parameters.AddWithValue("audit", auditId);
+    command.Parameters.AddWithValue("occurred", occurredAt);
+    await command.ExecuteNonQueryAsync();
+}
+
+static async Task<string?> ReadRetentionLedgerStateAsync(
+    PostgreSqlRuntimePersistenceOptions options,
+    string auditId)
+{
+    var ledger = RetentionTable(options, "runtime_audit_retention_ledger");
+    await using var connection = new NpgsqlConnection(options.ConnectionString);
+    await connection.OpenAsync();
+    await using var command = new NpgsqlCommand(
+        $"select body_state from {ledger} where sink_id=@sink and audit_id=@audit;",
+        connection);
+    command.Parameters.AddWithValue("sink", PostgreSqlAuditRetentionStore.SinkIdValue);
+    command.Parameters.AddWithValue("audit", auditId);
+    await using var reader = await command.ExecuteReaderAsync();
+    return await reader.ReadAsync() ? reader.GetString(0) : null;
+}
+
+static string RetentionTable(PostgreSqlRuntimePersistenceOptions options, string table)
+    => $"\"{options.Schema.Replace("\"", "\"\"")}\".\"{table}\"";
+
+static async Task<AuditRetentionException?> CaptureRetentionErrorAsync(Func<Task> action)
+{
+    try
+    {
+        await action();
+        return null;
+    }
+    catch (AuditRetentionException exception)
+    {
+        return exception;
+    }
+}
+
+static void RetentionAssert(bool condition, string message)
+{
+    if (!condition)
+        throw new InvalidOperationException("AUDIT_RETENTION_NATIVE_ASSERTION_FAILED: " + message);
+}
+
 internal sealed class SingleDescriptorProvider<TDescriptor>(params TDescriptor[] descriptors) : IDescriptorProvider<TDescriptor>
     where TDescriptor : IDescriptor
 {
@@ -1506,4 +1968,66 @@ internal sealed class AotNoopLocalEventBus : ILocalEventBus
     public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
         where TEvent : ILocalEvent
         => Task.CompletedTask;
+}
+
+/// <summary>
+/// Fixture-only fault injection for the #132 negative controls. Production code has no
+/// failure switches; these mutants prove the native gate fails when the store lies about
+/// counts, loses hold filtering, or cannot persist a batch receipt.
+/// </summary>
+internal sealed class RetentionMutationStore(IAuditRetentionStore inner, string mutation) : IAuditRetentionStore
+{
+    public AuditRetentionStoreIdentity Identity => mutation == "capability-missing"
+        ? inner.Identity with
+        {
+            Capabilities = inner.Identity.Capabilities with { SupportsHolds = false }
+        }
+        : inner.Identity;
+
+    public ValueTask<AuditRetentionRunRecord> CreateOrReadRunAsync(
+        AuditRetentionRunRequest request,
+        CancellationToken cancellationToken = default)
+        => inner.CreateOrReadRunAsync(request, cancellationToken);
+
+    public ValueTask<AuditRetentionPreview> PreviewAsync(
+        AuditRetentionPreviewRequest request,
+        CancellationToken cancellationToken = default)
+        => inner.PreviewAsync(request, cancellationToken);
+
+    public async ValueTask<AuditRetentionBatchOutcome> ExecuteBatchAsync(
+        AuditRetentionBatchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (mutation == "receipt-fault")
+            throw new InvalidOperationException("Negative control: batch receipt persistence fault.");
+
+        var outcome = await inner.ExecuteBatchAsync(request, cancellationToken).ConfigureAwait(false);
+        return mutation == "wrong-count"
+            ? outcome with
+            {
+                DeletedCount = outcome.DeletedCount + 1,
+                CommittedDeletedCount = outcome.CommittedDeletedCount + 1
+            }
+            : outcome;
+    }
+
+    public ValueTask<AuditRetentionRunRecord?> ReadRunAsync(
+        AuditRetentionRunKey key,
+        CancellationToken cancellationToken = default)
+        => inner.ReadRunAsync(key, cancellationToken);
+
+    public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
+        AuditRetentionRunFinalization finalization,
+        CancellationToken cancellationToken = default)
+        => inner.FinalizeRunAsync(finalization, cancellationToken);
+
+    public ValueTask<AuditHold> PlaceHoldAsync(
+        AuditHoldPlacement placement,
+        CancellationToken cancellationToken = default)
+        => inner.PlaceHoldAsync(placement, cancellationToken);
+
+    public ValueTask<AuditHold> ReleaseHoldAsync(
+        AuditHoldRelease release,
+        CancellationToken cancellationToken = default)
+        => inner.ReleaseHoldAsync(release, cancellationToken);
 }

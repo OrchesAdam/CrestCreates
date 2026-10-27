@@ -22,7 +22,9 @@ builder.AddCrestWeb();
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
 builder.Services.AddCrestCapabilityEndpoints();
-builder.Services.AddGeneratedAppServiceHttp();
+// The platform assembly also carries its own generated activation (audit retention). Name the
+// business activation explicitly so the two formally generated extensions never collide.
+GeneratedAppServiceHttpActivation_SaaSHelpdesk_002EApplication.AddGeneratedAppServiceHttp(builder.Services);
 
 builder.Services.AddAuthentication()
     .AddScheme<SaaSHelpdesk.Web.Auth.CustomerApiKeyOptions, SaaSHelpdesk.Web.Auth.CustomerApiKeyAuthenticationHandler>(

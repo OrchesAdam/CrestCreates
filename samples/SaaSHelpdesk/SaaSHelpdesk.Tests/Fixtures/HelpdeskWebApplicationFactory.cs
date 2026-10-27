@@ -368,7 +368,6 @@ public sealed class HelpdeskWebApplicationFactory
             services.AddScoped<IAuditLogWriter, AuditLogWriter>();
             services.AddScoped<IAuditLogService, AuditLogService>();
             services.AddScoped<IAuditLogAppService, AuditLogAppService>();
-            services.AddScoped<IAuditLogCleanupAppService, AuditLogCleanupAppService>();
 
             // OpenIddict with EntityFrameworkCore
             services.AddDbContext<OpenIddictDbContext>(options =>

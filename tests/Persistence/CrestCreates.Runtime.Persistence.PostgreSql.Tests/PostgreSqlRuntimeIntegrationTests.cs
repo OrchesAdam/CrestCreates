@@ -64,9 +64,30 @@ public sealed class PostgreSqlRuntimeIntegrationTests(PostgreSqlRuntimeCollectio
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand(
-            "select count(*) from information_schema.tables where table_schema=@schema and table_name like 'runtime_%';", connection);
+            "select table_name from information_schema.tables where table_schema=@schema and table_name like 'runtime_%';", connection);
         command.Parameters.AddWithValue("schema", lease.Options.Schema);
-        (await command.ExecuteScalarAsync()).Should().Be(6L);
+        var tables = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+                tables.Add(reader.GetString(0));
+        }
+
+        tables.Should().BeEquivalentTo(new[]
+        {
+            "runtime_workflow_instances",
+            "runtime_human_task_instances",
+            "runtime_operation_receipts",
+            "runtime_audit_envelopes",
+            "runtime_outbox_messages",
+            "runtime_workflow_continuation_acceptances",
+            "runtime_audit_retention_ledger",
+            "runtime_audit_retention_scope_locks",
+            "runtime_audit_retention_runs",
+            "runtime_audit_retention_batches",
+            "runtime_audit_retention_holds",
+            "runtime_audit_retention_hold_receipts"
+        });
     }
 
     [Fact]

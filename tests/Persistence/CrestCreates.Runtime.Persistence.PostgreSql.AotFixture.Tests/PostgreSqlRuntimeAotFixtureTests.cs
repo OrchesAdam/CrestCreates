@@ -88,6 +88,35 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.Output.Should().Contain("CRESTCREATES_DURABLE_AGENT_MEMORY_OK");
             execution.Output.Should().Contain("CRESTCREATES_VERSIONED_ORGANIZATION_CACHE_OK");
             execution.Output.Should().Contain("CRESTCREATES_WORKFLOW_CONDITION_AOT_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_TIME_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_SCOPE_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_PROTECTION_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_HOLD_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_BATCH_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_SINK_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_RECOVERY_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_CAPABILITY_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_OK");
+
+            // #132 negative controls: the same native binary runs fixture-only mutants of
+            // wrong counts, missing hold filtering and failed batch receipts. Each must be
+            // detected, exit non-zero, and never emit the aggregate retention sentinel.
+            foreach (var control in new[] { "wrong-count", "hold-filter", "receipt-fault" })
+            {
+                var controlExecution = await RunAsync(
+                    executable,
+                    $"\"{connectionString}\" itest_{Guid.NewGuid():N} retention-negative {control}",
+                    TimeSpan.FromMinutes(5));
+                controlExecution.ExitCode.Should().NotBe(
+                    0,
+                    $"retention negative control '{control}' must fail closed: {controlExecution.Output}");
+                controlExecution.Output.Should().Contain(
+                    $"CRESTCREATES_AUDIT_RETENTION_NEGATIVE_CONTROL_CAUGHT {control}",
+                    controlExecution.Output);
+                controlExecution.Output.Should().NotContain(
+                    "CRESTCREATES_AUDIT_RETENTION_NATIVE_OK",
+                    $"retention negative control '{control}' must not emit the aggregate sentinel");
+            }
         }
         finally
         {
