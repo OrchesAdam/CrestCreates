@@ -158,7 +158,16 @@ R1 与 R2 的判据冲突处理：R2-03 要求「透传不新增来源」，R1-0
 
 回归：`TI_C01m` 以 literal / import / 属性展开 / 导入内属性展开四种等价形式，验证预热后新增、重命名、删除 linked 文件时热读与强制求值一致；并断言 literal 与 literal-import 形式命中缓存（`msbuild-cache`）、属性形式每次重新求值（`msbuild`）。`TI_C01k`（literal 增删）与条件 Compile 用例保留。
 
-### I-13 待办与开放项
+### I-13 R5 审查修复（2026-10-27）
+
+审查 head `a6bd5194`，2 项 P2 成立，已修复：
+
+- **R5-01 自动导入闭包**：探针改为从项目目录逐级向上（至文件系统根）发现 MSBuild 会自动导入的 `Directory.Build.props` / `Directory.Build.targets` / `Directory.Packages.props` / `Directory.Build.Aot.props`，把这些文件及其导入纳入依赖闭包；缓存键额外记录**整条祖先链上每个候选文件的「存在与否 + 内容哈希」**，因此在项目目录或中间目录新增一个更近的 `Directory.Build.props/targets` 会立即失效并重新求值（MSBuild 只导入最近的一个，但「最近的是哪一个」本身就随文件出现而改变）。
+- **R5-02 分号列表**：`Compile Include/Remove` 按 `;` 拆分后逐项解析外部搜索根（此前只取整串、只得到第一个根）；含 `%(...)` 项元数据引用的声明视为不可证明，直接放弃缓存。
+
+回归：`TI_C01n`（中间目录 `Directory.Build.targets` 的外部 glob：预热新增即见；随后在项目目录新增一个更近的 `Directory.Build.props`，只向新目录加文件也必须被读到；未变化时仍命中 `msbuild-cache`）、`TI_C01o`（`A/*.cs;B/*.cs` 单个列表与两个独立项等价，只在第二个根新增/重命名文件都必须反映到热读）。
+
+### I-14 待办与开放项
 
 - S3 归档动作、准入/覆盖/隔离守卫未开始；`.github/workflows/*.yml` 与 ProcurementApproval slnx 的 Draft 输入须在 S3 清理（CI 保持人工禁用状态，不改启用）。
 - S4 全量构建/边界/回归验证与 AGENTS/memory/比较文档同步未开始；本轮不提升任何支持声明。

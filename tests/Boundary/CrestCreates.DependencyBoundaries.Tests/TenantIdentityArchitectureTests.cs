@@ -980,6 +980,113 @@ public class TenantIdentityArchitectureTests
     }
 
     [Fact]
+    public void TI_C01n_NestedAutoImportedBuildFiles_JoinTheClosure()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"issue131-autoimport-{Guid.NewGuid():N}");
+        var projectDirectory = Path.Combine(root, "sub", "Proj");
+        // Item paths are relative to the project directory: ../Shared from sub/Proj is sub/Shared.
+        var sharedDirectory = Path.Combine(root, "sub", "Shared");
+        Directory.CreateDirectory(projectDirectory);
+        Directory.CreateDirectory(sharedDirectory);
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(root, "Directory.Build.props"),
+                "<Project><PropertyGroup><Nullable>enable</Nullable></PropertyGroup></Project>");
+            var projectFile = Path.Combine(projectDirectory, "Proj.csproj");
+            File.WriteAllText(
+                projectFile,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+            File.WriteAllText(Path.Combine(projectDirectory, "Owned.cs"), "namespace Sample { public sealed class Owned { } }");
+
+            // A Directory.Build.targets in an intermediate directory is auto-imported by MSBuild too.
+            File.WriteAllText(
+                Path.Combine(root, "sub", "Directory.Build.targets"),
+                "<Project><ItemGroup><Compile Include=\"../Shared/*.cs\" Link=\"Shared/%(Filename)%(Extension)\" /></ItemGroup></Project>");
+
+            var first = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+            Assert.True(first.IsAvailable, $"first evaluation failed: {first.UnavailableReason}");
+            Assert.DoesNotContain(first.CompileFiles, file => file.EndsWith("IntermediateLeak.cs", StringComparison.Ordinal));
+
+            // The auto-imported closure is provable here, so an unchanged read still uses the cache.
+            Assert.Equal("msbuild-cache", TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug").Source);
+
+            File.WriteAllText(Path.Combine(sharedDirectory, "IntermediateLeak.cs"), "namespace Sample { public sealed class IntermediateLeak { } }");
+            var afterIntermediate = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+            Assert.Contains(afterIntermediate.CompileFiles, file => file.EndsWith("IntermediateLeak.cs", StringComparison.Ordinal));
+
+            // A closer Directory.Build.props appears after the cache was primed: the ancestor chain changed, so
+            // the evaluation (which auto-imports the nearest file) must be repeated.
+            var closerDirectory = Path.Combine(root, "Nested");
+            Directory.CreateDirectory(closerDirectory);
+            File.WriteAllText(
+                Path.Combine(projectDirectory, "Directory.Build.props"),
+                "<Project><ItemGroup><Compile Include=\"../../Nested/*.cs\" /></ItemGroup></Project>");
+
+            var primed = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+            File.WriteAllText(Path.Combine(closerDirectory, "CloserLeak.cs"), "namespace Sample { public sealed class CloserLeak { } }");
+            var afterCloser = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+            Assert.Contains(afterCloser.CompileFiles, file => file.EndsWith("CloserLeak.cs", StringComparison.Ordinal));
+            Assert.Contains(afterCloser.CompileFiles, file => file.EndsWith("IntermediateLeak.cs", StringComparison.Ordinal));
+            _ = primed;
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TI_C01o_SemicolonSeparatedCompileLists_CollectEveryRoot()
+    {
+        foreach (var separatorForm in new[] { "list", "separate" })
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"issue131-semicolon-{separatorForm}-{Guid.NewGuid():N}");
+            var projectDirectory = Path.Combine(root, "Owned");
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(Path.Combine(root, "Stable"));
+            Directory.CreateDirectory(Path.Combine(root, "Shared"));
+            try
+            {
+                var projectFile = Path.Combine(projectDirectory, "Sample.csproj");
+                var items = separatorForm == "list"
+                    ? "<Compile Include=\"../Stable/*.cs;../Shared/*.cs\" />"
+                    : "<Compile Include=\"../Stable/*.cs\" /><Compile Include=\"../Shared/*.cs\" />";
+                File.WriteAllText(
+                    projectFile,
+                    $"""
+                    <Project Sdk="Microsoft.NET.Sdk">
+                      <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+                      <ItemGroup>{items}</ItemGroup>
+                    </Project>
+                    """);
+                File.WriteAllText(Path.Combine(projectDirectory, "Owned.cs"), "namespace Sample { public sealed class Owned { } }");
+
+                var first = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.True(first.IsAvailable, $"{separatorForm}: first evaluation failed: {first.UnavailableReason}");
+                Assert.DoesNotContain(first.CompileFiles, file => file.EndsWith("SharedLeak.cs", StringComparison.Ordinal));
+
+                // Only the second root changes; the first root and every project input stay untouched.
+                File.WriteAllText(Path.Combine(root, "Shared", "SharedLeak.cs"), "namespace Sample { public sealed class SharedLeak { } }");
+
+                var afterAdd = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.Contains(afterAdd.CompileFiles, file => file.EndsWith("SharedLeak.cs", StringComparison.Ordinal));
+
+                File.Move(
+                    Path.Combine(root, "Shared", "SharedLeak.cs"),
+                    Path.Combine(root, "Shared", "SharedRenamed.cs"));
+                var afterRename = TenantIdentityEvaluatedInputs.Read(root, projectFile, "Debug");
+                Assert.Contains(afterRename.CompileFiles, file => file.EndsWith("SharedRenamed.cs", StringComparison.Ordinal));
+                Assert.DoesNotContain(afterRename.CompileFiles, file => file.EndsWith("SharedLeak.cs", StringComparison.Ordinal));
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void TI_C01l_FailedEvaluation_IsACoverageFailureEvenWithoutSources()
     {
         // A valid project with build output and authored sources, but MSBuild evaluation fails: "unknown inputs"

@@ -176,6 +176,8 @@ internal static class TenantIdentityEvaluatedInputs
             builder.Append(relative).Append(':').Append(new FileInfo(file).Length).Append('\n');
         }
 
+        DependencyProbe.AppendAutoImportSignature(builder, projectDirectory);
+
         foreach (var root in dependencies.ExternalRoots.OrderBy(path => path, StringComparer.Ordinal))
         {
             AppendTreeSignature(builder, root);
@@ -281,13 +283,14 @@ internal static class TenantIdentityEvaluatedInputs
             var visited = new HashSet<string>(StringComparer.Ordinal);
             var queue = new Queue<(string File, int Depth)>();
             queue.Enqueue((Path.GetFullPath(projectFile), 0));
-            foreach (var shared in AutoImportedPropertyFiles)
+
+            // MSBuild auto-imports the nearest Directory.Build.props/targets (and NuGet the nearest
+            // Directory.Packages.props) found by walking up from the project directory. Every ancestor can
+            // therefore contribute Compile items or imports, and adding a nearer file changes which one is
+            // imported at all - so the whole ancestor chain is part of the dependency set.
+            foreach (var file in DiscoverAutoImportedFiles(projectDirectory))
             {
-                var path = Path.Combine(repoRoot, shared);
-                if (File.Exists(path))
-                {
-                    queue.Enqueue((Path.GetFullPath(path), 1));
-                }
+                queue.Enqueue((file, 1));
             }
 
             var fullyUnderstood = true;
@@ -322,18 +325,29 @@ internal static class TenantIdentityEvaluatedInputs
                             continue;
                         }
 
-                        var expanded = SubstituteKnownProperties(value, file, projectFile, projectDirectory);
-                        if (expanded is null)
+                        // MSBuild splits item lists on ';'. Item metadata references are not expanded here and
+                        // make the whole declaration unprovable.
+                        if (value.Contains("%(", StringComparison.Ordinal))
                         {
-                            // The expansion may point at any directory; its roots cannot be proven from source.
                             fullyUnderstood = false;
                             continue;
                         }
 
-                        var root = ExternalRootOf(expanded.Replace('\\', '/'), projectDirectory);
-                        if (root is not null && !externalRoots.Contains(root, StringComparer.Ordinal))
+                        foreach (var part in value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                         {
-                            externalRoots.Add(root);
+                            var expanded = SubstituteKnownProperties(part, file, projectFile, projectDirectory);
+                            if (expanded is null)
+                            {
+                                // The expansion may point at any directory; its roots cannot be proven.
+                                fullyUnderstood = false;
+                                continue;
+                            }
+
+                            var root = ExternalRootOf(expanded.Replace('\\', '/'), projectDirectory);
+                            if (root is not null && !externalRoots.Contains(root, StringComparer.Ordinal))
+                            {
+                                externalRoots.Add(root);
+                            }
                         }
                     }
                 }
@@ -371,6 +385,47 @@ internal static class TenantIdentityEvaluatedInputs
             }
 
             return new Result(fullyUnderstood, buildFiles, externalRoots);
+        }
+
+        /// <summary>
+        /// The nearest existing auto-imported build files, walking from the project directory up to the
+        /// filesystem root. Discovery mirrors MSBuild: only the first match per file name is imported, but the
+        /// caller also keys the presence of the whole chain so a nearer file appearing later invalidates.
+        /// </summary>
+        private static IEnumerable<string> DiscoverAutoImportedFiles(string projectDirectory)
+        {
+            var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in AutoImportedPropertyFiles)
+            {
+                for (var directory = new DirectoryInfo(Path.GetFullPath(projectDirectory)); directory is not null; directory = directory.Parent)
+                {
+                    var candidate = Path.Combine(directory.FullName, name);
+                    if (File.Exists(candidate) && found.Add(name))
+                    {
+                        yield return candidate;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Presence and content of every auto-imported candidate along the ancestor chain, so a file that is
+        /// added, removed or edited closer to the project invalidates the cache even when it was absent before.
+        /// </summary>
+        public static void AppendAutoImportSignature(StringBuilder builder, string projectDirectory)
+        {
+            foreach (var name in AutoImportedPropertyFiles)
+            {
+                for (var directory = new DirectoryInfo(Path.GetFullPath(projectDirectory)); directory is not null; directory = directory.Parent)
+                {
+                    var candidate = Path.Combine(directory.FullName, name);
+                    builder.Append("auto:").Append(candidate).Append(':');
+                    builder.Append(File.Exists(candidate)
+                        ? File.GetLastWriteTimeUtc(candidate).Ticks + ":" + new FileInfo(candidate).Length + ":" + Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(candidate)))
+                        : "absent");
+                    builder.Append('\n');
+                }
+            }
         }
 
         /// <summary>

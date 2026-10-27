@@ -503,6 +503,44 @@
         },
         "note": "the Application Tenants|Identity suite was 102/102 before this round and no production source changed"
       }
+    },
+    {
+      "round": "R5",
+      "review_date": "2026-10-27",
+      "reviewed_head": "a6bd519452aa1c1f7fbc04184dbc4bc96ca01c2f",
+      "severity": "P2",
+      "findings": 2,
+      "verdict": "both accepted and fixed; the auto-import closure now follows MSBuild discovery and item lists are split like MSBuild does",
+      "items": [
+        {
+          "id": "R5-01",
+          "title": "only the repository-root auto-imported build files were in the closure",
+          "fix": "the probe discovers Directory.Build.props/targets, Directory.Packages.props and Directory.Build.Aot.props from the project directory upwards to the filesystem root, matching MSBuild auto-import discovery, and walks their imports; the cache key records presence plus content hash for every candidate along the ancestor chain, so a nearer file appearing later invalidates the cache",
+          "regressions": [
+            "TI_C01n (intermediate Directory.Build.targets external glob is seen after a warm add; a closer Directory.Build.props appearing later is honoured; an unchanged read still hits the cache)"
+          ]
+        },
+        {
+          "id": "R5-02",
+          "title": "semicolon-separated Compile lists only registered the first search root",
+          "fix": "Compile Include/Remove values are split on ';' and each part contributes its own external search root; a '%(...)' item-metadata reference makes the declaration unprovable and bypasses the cache",
+          "regressions": [
+            "TI_C01o (single list with two roots equals two separate items; add and rename in the second root after warm-up are both reflected)",
+            "TI_C01m keeps the literal/import/property matrix"
+          ]
+        }
+      ],
+      "verification_on_fixed_head": {
+        "build": "dotnet build CrestCreates.slnx -> 0 errors",
+        "tenant_matrix": "42/42 (~3 min warm)",
+        "dependency_boundaries": {
+          "passed": 234,
+          "failed": 2,
+          "total": 236,
+          "failing": "the two pre-existing EvidenceLedger tests"
+        },
+        "application_tenants_and_identity": "102/102"
+      }
     }
   ]
 }
