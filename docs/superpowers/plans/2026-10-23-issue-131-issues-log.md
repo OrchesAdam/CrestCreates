@@ -176,7 +176,24 @@ R1 与 R2 的判据冲突处理：R2-03 要求「透传不新增来源」，R1-0
 
 回归：`TI_C01p`（literal 与 `@(Items)` 两种等价声明：literal 未变化时命中缓存、`@` 形式每次重新求值且新增外部文件即见；`Remove="@(Skip)"` 同样触发重新求值）、`TI_C01q`（8 层导入链在预算内、可缓存且变化可见；10 层链超出预算 → 每次重新求值，新增外部文件仍必须被读到）。
 
-### I-15 待办与开放项
+### I-15 R7 审查与收尾（2026-10-27）
+
+第七轮审查（head `ae7ebe93`）：**技术审查通过**，R6-01/R6-02 关闭，未发现新的阻断项。审查方以 11 组独立输入对照（literal / import / property / import-property / nested-auto / semicolon / 项引用 Include·Remove·Exclude / 八层 / 十层导入）复核热读与强制求值一致，实体矩阵 60/60，真实 FileManagement 负控现在由 TI01 阻断（新增文件 `ReviewR7Leak.cs` 精确出现在失败信息中）。
+
+收尾核对（`348c4d3c..ae7ebe93`）：
+
+| 类别 | 结果 |
+| --- | --- |
+| 生产代码逻辑 | **零修改**：无新增生产源文件，`src`/`samples` 下唯一的非移动改动是 `CrestCreates.Workflow.csproj` 移除一条无使用的 Draft.Abstractions 引用 |
+| 归档 | 28 条 R100 逐字节重命名进入 `99_RecycleBin/issue-131-capability-map/`，未删除任何文件 |
+| 构建输入 | 根 + 5 个分层 slnx、ProcurementApproval slnx、Workflow.Tests csproj、两条 CI 步骤行 |
+| CI | `.github/workflows/*` 仅各删 1 行（已归档 Draft.Tests 步骤）；`CI` / `Full Validation` / `aot-validation` 仍为 `disabled_manually` |
+| 支持声明 | 未提升任何 `NativeAOT-verified` / `trimming-verified` 标签，未新增 native fixture |
+| 分支状态 | 10 个提交，工作树干净；PR #155 开放，未合并、未关闭 Issue #131、未勾选验收 |
+
+待维护者决策：合并与 Issue #131 的验收勾选/关闭（本轮不自动执行）。
+
+### I-16 待办与开放项
 
 - S3 归档动作、准入/覆盖/隔离守卫未开始；`.github/workflows/*.yml` 与 ProcurementApproval slnx 的 Draft 输入须在 S3 清理（CI 保持人工禁用状态，不改启用）。
 - S4 全量构建/边界/回归验证与 AGENTS/memory/比较文档同步未开始；本轮不提升任何支持声明。
