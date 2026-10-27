@@ -378,6 +378,7 @@ TestBase
 
 以 `memory.md` 为最新状态记录。当前关键共识：
 
+- 能力地图与 TenantId 架构守卫（#131，PR #155 合并于 `9c39e187`）：`docs/Feature/CapabilityMap.md` 为项目/能力导航唯一入口，7 个无消费者项目 + 通用 Draft 实验 + 死契约归档至 `99_RecycleBin/issue-131-capability-map/`；`TenantIdentityArchitectureTests` 以 evaluated MSBuild 输入（缓存仅在依赖可证明完整时启用）扫描 active src/sample 项目，0 违规 0 覆盖失败。有限模式守卫，不是通用安全分析器。
 - Tenant Management：主链已基本闭环。
 - Setting Management：正式平台能力。
 - Feature Management：正式平台能力。
@@ -418,4 +419,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-10-23
+**最后更新**: 2026-10-27
