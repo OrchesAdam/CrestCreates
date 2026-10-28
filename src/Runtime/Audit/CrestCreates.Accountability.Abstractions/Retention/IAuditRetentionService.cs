@@ -21,6 +21,15 @@ public interface IAuditRetentionService
         AuditRetentionRunKey key,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Explicit retry export for one committed batch receipt. It is idempotent: the mirror
+    /// AuditId is derived from the receipt identity and existing sinks deduplicate it.
+    /// </summary>
+    ValueTask<AuditRetentionMirrorOutcome> ExportBatchAsync(
+        AuditRetentionRunKey key,
+        long batchOrdinal,
+        CancellationToken cancellationToken = default);
+
     ValueTask<AuditHoldResult> PlaceHoldAsync(
         AuditHoldPlacement placement,
         CancellationToken cancellationToken = default);

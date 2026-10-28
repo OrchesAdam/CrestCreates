@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Retention;
 using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.Retention;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Runtime.Persistence.PostgreSql;
 using CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
@@ -243,9 +246,9 @@ public sealed class PostgreSqlAuditRetentionTests(PostgreSqlRuntimeCollectionFix
         second.CommittedDeletedCount.Should().Be(4);
         second.CommittedBatchCount.Should().Be(2);
 
-        var third = await store.ExecuteBatchAsync(new AuditRetentionBatchRequest { Key = request.Key, BatchOrdinal = 3 });
-        third.DeletedCount.Should().Be(0);
-        third.RunState.Should().Be(AuditRetentionRunState.BudgetReached);
+        var third = () => store.ExecuteBatchAsync(new AuditRetentionBatchRequest { Key = request.Key, BatchOrdinal = 3 }).AsTask();
+        (await third.Should().ThrowAsync<AuditRetentionException>())
+            .Which.Code.Should().Be(AuditRetentionErrorCodes.RunNotExecutable);
         (await CountBodiesAsync(dataSource, lease.Options, "tenant-a")).Should().Be(1);
     }
 
@@ -516,6 +519,171 @@ public sealed class PostgreSqlAuditRetentionTests(PostgreSqlRuntimeCollectionFix
         var act = () => store.CreateOrReadRunAsync(conflictingBinding).AsTask();
         await act.Should().ThrowAsync<AuditRetentionException>()
             .Where(exception => exception.Code == AuditRetentionErrorCodes.RequestConflict);
+    }
+
+    [Theory]
+    [InlineData(AuditRetentionRunState.Cancelled)]
+    [InlineData(AuditRetentionRunState.Failed)]
+    [InlineData(AuditRetentionRunState.Completed)]
+    public async Task Terminal_run_cannot_execute_a_fresh_batch(AuditRetentionRunState terminal)
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await using var dataSource = CreateDataSource(fixture.ConnectionString);
+        var store = new PostgreSqlAuditRetentionStore(dataSource, lease.Options);
+        var request = RunRequest(AuditRetentionScope.ForTenant("tenant-a"), "terminal-run", Policy(30, 1));
+        var old = Snapshot.AddDays(-90);
+        await InsertBodyAsync(dataSource, lease.Options, "terminal-body", "tenant-a", old, old);
+        await store.CreateOrReadRunAsync(request);
+        await store.FinalizeRunAsync(new AuditRetentionRunFinalization
+        {
+            Key = request.Key,
+            State = terminal,
+            StopReason = "terminal-test"
+        });
+
+        var act = () => store.ExecuteBatchAsync(new AuditRetentionBatchRequest
+        {
+            Key = request.Key,
+            BatchOrdinal = 1
+        }).AsTask();
+
+        (await act.Should().ThrowAsync<AuditRetentionException>())
+            .Which.Code.Should().Be(AuditRetentionErrorCodes.RunNotExecutable);
+        (await ReadBodyStateAsync(dataSource, lease.Options, "terminal-body")).Should().Be("BodyPresent");
+        (await store.ReadRunAsync(request.Key))!.State.Should().Be(terminal);
+        (await store.ReadBatchAsync(request.Key, 1)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Late_commit_observed_by_finalization_keeps_committed_counts()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await using var dataSource = CreateDataSource(fixture.ConnectionString);
+        var inner = new PostgreSqlAuditRetentionStore(dataSource, lease.Options);
+        var request = RunRequest(AuditRetentionScope.ForTenant("tenant-a"), "late-commit-run", Policy(30, 1));
+        var old = Snapshot.AddDays(-90);
+        await InsertBodyAsync(dataSource, lease.Options, "late-body", "tenant-a", old, old);
+        var wrapper = new LateCommitStore(inner);
+        var executor = new AuditRetentionExecutor([wrapper]);
+
+        var result = await executor.ExecuteAsync(request);
+
+        var persisted = (await inner.ReadRunAsync(request.Key))!;
+        persisted.CommittedDeletedCount.Should().Be(1);
+        persisted.State.Should().Be(AuditRetentionRunState.Completed);
+        result.CommittedDeletedCount.Should().Be(persisted.CommittedDeletedCount);
+        result.State.Should().Be(persisted.State);
+        result.StopReason.Should().Be(persisted.StopReason);
+        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.Committed);
+        (await inner.ReadBatchAsync(request.Key, 1))!.DeletedCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReadBatch_returns_the_exact_receipt_and_null_for_unknown_ordinals()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await using var dataSource = CreateDataSource(fixture.ConnectionString);
+        var store = new PostgreSqlAuditRetentionStore(dataSource, lease.Options);
+        var request = RunRequest(AuditRetentionScope.ForTenant("tenant-a"), "receipt-run", Policy(30, 1));
+        var old = Snapshot.AddDays(-90);
+        await InsertBodyAsync(dataSource, lease.Options, "receipt-1", "tenant-a", old, old);
+        await InsertBodyAsync(dataSource, lease.Options, "receipt-2", "tenant-a", old, old);
+        await store.CreateOrReadRunAsync(request);
+        var first = await store.ExecuteBatchAsync(new AuditRetentionBatchRequest { Key = request.Key, BatchOrdinal = 1 });
+        var second = await store.ExecuteBatchAsync(new AuditRetentionBatchRequest { Key = request.Key, BatchOrdinal = 2 });
+
+        var receipt = await store.ReadBatchAsync(request.Key, 1);
+        receipt.Should().NotBeNull();
+        receipt!.BatchOrdinal.Should().Be(1);
+        receipt.DeletedCount.Should().Be(first.DeletedCount);
+        receipt.CommittedAt.Should().Be(first.CommittedAt);
+        (await store.ReadBatchAsync(request.Key, 2))!.DeletedCount.Should().Be(second.DeletedCount);
+        (await store.ReadBatchAsync(request.Key, 3)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Run_cutoff_round_trips_exactly_for_sub_microsecond_snapshots()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await using var dataSource = CreateDataSource(fixture.ConnectionString);
+        var store = new PostgreSqlAuditRetentionStore(dataSource, lease.Options);
+        var policy = Policy(days: 30, batch: 10);
+        // UtcNow ticks are rarely microsecond-aligned; timestamptz would round them away and the
+        // in-memory run would stop matching the re-read run used by export/recovery facts.
+        var snapshot = Snapshot.AddTicks(7);
+        var request = RunRequest(AuditRetentionScope.ForTenant("tenant-a"), "cutoff-run", policy) with
+        {
+            SnapshotAt = snapshot,
+            Cutoff = policy.ComputeCutoff(snapshot)
+        };
+
+        var created = await store.CreateOrReadRunAsync(request);
+        var persisted = await store.ReadRunAsync(request.Key);
+
+        (request.Cutoff.Ticks % TimeSpan.TicksPerMicrosecond).Should().Be(0);
+        created.Cutoff.Should().Be(request.Cutoff);
+        persisted!.Cutoff.Should().Be(created.Cutoff);
+    }
+
+    private sealed class LateCommitStore(IAuditRetentionStore inner) : IAuditRetentionStore
+    {
+        private AuditRetentionBatchRequest? _pending;
+
+        public AuditRetentionStoreIdentity Identity => inner.Identity;
+
+        public ValueTask<AuditRetentionRunRecord> CreateOrReadRunAsync(
+            AuditRetentionRunRequest request,
+            CancellationToken cancellationToken = default)
+            => inner.CreateOrReadRunAsync(request, cancellationToken);
+
+        public ValueTask<AuditRetentionPreview> PreviewAsync(
+            AuditRetentionPreviewRequest request,
+            CancellationToken cancellationToken = default)
+            => inner.PreviewAsync(request, cancellationToken);
+
+        public ValueTask<AuditRetentionBatchOutcome> ExecuteBatchAsync(
+            AuditRetentionBatchRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            _pending = request;
+            throw new IOException("review: commit response lost while database completion is pending");
+        }
+
+        public async ValueTask<AuditRetentionRunRecord?> ReadRunAsync(
+            AuditRetentionRunKey key,
+            CancellationToken cancellationToken = default)
+        {
+            var stale = await inner.ReadRunAsync(key, cancellationToken);
+            if (_pending is not null)
+            {
+                var pending = _pending;
+                _pending = null;
+                await inner.ExecuteBatchAsync(pending, cancellationToken);
+            }
+
+            return stale;
+        }
+
+        public ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+            AuditRetentionRunKey key,
+            long batchOrdinal,
+            CancellationToken cancellationToken = default)
+            => inner.ReadBatchAsync(key, batchOrdinal, cancellationToken);
+
+        public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
+            AuditRetentionRunFinalization finalization,
+            CancellationToken cancellationToken = default)
+            => inner.FinalizeRunAsync(finalization, cancellationToken);
+
+        public ValueTask<AuditHold> PlaceHoldAsync(
+            AuditHoldPlacement placement,
+            CancellationToken cancellationToken = default)
+            => inner.PlaceHoldAsync(placement, cancellationToken);
+
+        public ValueTask<AuditHold> ReleaseHoldAsync(
+            AuditHoldRelease release,
+            CancellationToken cancellationToken = default)
+            => inner.ReleaseHoldAsync(release, cancellationToken);
     }
 
     private static NpgsqlDataSource CreateDataSource(string connectionString)

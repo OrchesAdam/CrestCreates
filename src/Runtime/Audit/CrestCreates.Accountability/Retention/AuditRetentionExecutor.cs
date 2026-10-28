@@ -112,6 +112,19 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
         var lastDeleted = run.CommittedDeletedCount;
         var lastBatches = run.CommittedBatchCount;
         var startedAt = _timeProvider.GetUtcNow();
+        AuditRetentionMirrorOutcome? firstMirrorFailure = null;
+        AuditRetentionMirrorOutcome? lastMirror = null;
+        AuditRetentionMirrorOutcome? AggregateMirror() => firstMirrorFailure ?? lastMirror;
+
+        async ValueTask TrackMirrorAsync(AuditRetentionRunRecord currentRun, AuditRetentionBatchReceipt receipt)
+        {
+            var mirror = await MirrorBatchAsync(currentRun, receipt).ConfigureAwait(false);
+            if (mirror is null)
+                return;
+            lastMirror = mirror;
+            if (mirror.IsFailure && firstMirrorFailure is null)
+                firstMirrorFailure = mirror;
+        }
 
         try
         {
@@ -126,15 +139,25 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                         request.Key,
                         AuditRetentionRunState.BudgetReached,
                         AuditRetentionStopReasons.BudgetReached).ConfigureAwait(false);
-                    return Result(
-                        finalized ?? run,
-                        lastDeleted,
-                        lastBatches,
-                        AuditRetentionRunState.BudgetReached,
-                        AuditRetentionCommitKnowledge.Committed,
-                        remainingMayExist: true,
-                        AuditRetentionStopReasons.BudgetReached,
-                        mirror: null);
+                    return finalized is null
+                        ? Result(
+                            run,
+                            lastDeleted,
+                            lastBatches,
+                            AuditRetentionRunState.BudgetReached,
+                            AuditRetentionCommitKnowledge.Committed,
+                            remainingMayExist: true,
+                            AuditRetentionStopReasons.BudgetReached,
+                            AggregateMirror())
+                        : Result(
+                            finalized,
+                            finalized.CommittedDeletedCount,
+                            finalized.CommittedBatchCount,
+                            finalized.State,
+                            AuditRetentionCommitKnowledge.Committed,
+                            remainingMayExist: finalized.State != AuditRetentionRunState.Completed,
+                            finalized.StopReason,
+                            AggregateMirror());
                 }
 
                 var ordinal = lastBatches + 1;
@@ -144,6 +167,23 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                     batch = await store.ExecuteBatchAsync(
                         new AuditRetentionBatchRequest { Key = request.Key, BatchOrdinal = ordinal },
                         cancellationToken).ConfigureAwait(false);
+                }
+                catch (AuditRetentionException exception) when (exception.Code == AuditRetentionErrorCodes.RunNotExecutable)
+                {
+                    // Another executor sharing the request id finalized the run while this loop
+                    // was queued. The persisted terminal record is authoritative.
+                    var terminal = await TryReadRunAsync(store, request.Key).ConfigureAwait(false);
+                    if (terminal is null)
+                        throw;
+                    return Result(
+                        terminal,
+                        terminal.CommittedDeletedCount,
+                        terminal.CommittedBatchCount,
+                        terminal.State,
+                        AuditRetentionCommitKnowledge.Committed,
+                        remainingMayExist: terminal.State != AuditRetentionRunState.Completed,
+                        terminal.StopReason,
+                        AggregateMirror());
                 }
                 catch (AuditRetentionException)
                 {
@@ -161,8 +201,52 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                         ordinal,
                         request.RequestId);
 
-                    var recovered = await TryReadRunAsync(store, request.Key).ConfigureAwait(false);
-                    if (recovered is null)
+                    // A single stale read is not rollback evidence. First look for the exact
+                    // receipt; when absent, finalization takes the scope/run lock and its
+                    // persisted result is the authoritative commit evidence.
+                    var observed = await TryReadRunAsync(store, request.Key).ConfigureAwait(false);
+                    var observedReceipt = await TryReadBatchAsync(store, request.Key, ordinal).ConfigureAwait(false);
+                    if (observedReceipt is not null)
+                    {
+                        await TrackMirrorAsync(observed ?? run, observedReceipt).ConfigureAwait(false);
+                        var latest = await TryReadRunAsync(store, request.Key).ConfigureAwait(false);
+                        if (latest is null || latest.CommittedBatchCount < ordinal)
+                        {
+                            return Result(
+                                run,
+                                lastDeleted + observedReceipt.DeletedCount,
+                                Math.Max(lastBatches, ordinal),
+                                AuditRetentionRunState.Unknown,
+                                AuditRetentionCommitKnowledge.Unknown,
+                                remainingMayExist: true,
+                                AuditRetentionStopReasons.UnknownCommit,
+                                AggregateMirror());
+                        }
+
+                        if (latest.State is not (AuditRetentionRunState.Running or AuditRetentionRunState.Unknown))
+                        {
+                            return Result(
+                                latest,
+                                latest.CommittedDeletedCount,
+                                latest.CommittedBatchCount,
+                                latest.State,
+                                AuditRetentionCommitKnowledge.Committed,
+                                remainingMayExist: latest.State != AuditRetentionRunState.Completed,
+                                latest.StopReason,
+                                AggregateMirror());
+                        }
+
+                        lastDeleted = latest.CommittedDeletedCount;
+                        lastBatches = latest.CommittedBatchCount;
+                        continue;
+                    }
+
+                    var finalized = await TryFinalizeAsync(
+                        store,
+                        request.Key,
+                        AuditRetentionRunState.Failed,
+                        AuditRetentionStopReasons.Failed).ConfigureAwait(false);
+                    if (finalized is null)
                     {
                         return Result(
                             run,
@@ -172,57 +256,49 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                             AuditRetentionCommitKnowledge.Unknown,
                             remainingMayExist: true,
                             AuditRetentionStopReasons.UnknownCommit,
-                            mirror: null);
+                            AggregateMirror());
                     }
 
-                    if (recovered.CommittedBatchCount >= ordinal)
+                    if (finalized.CommittedBatchCount >= ordinal)
                     {
-                        var deleted = ClampDeleted(recovered.CommittedDeletedCount - lastDeleted);
-                        var recoveredBatch = new AuditRetentionBatchOutcome
-                        {
-                            BatchOrdinal = ordinal,
-                            DeletedCount = deleted,
-                            CommittedDeletedCount = recovered.CommittedDeletedCount,
-                            CommittedBatchCount = recovered.CommittedBatchCount,
-                            RemainingMayExist = recovered.State != AuditRetentionRunState.Completed,
-                            RunState = recovered.State,
-                            StopReason = recovered.StopReason,
-                            FromExistingReceipt = true,
-                            CommittedAt = recovered.UpdatedAt
-                        };
-                        var recoveredMirror = await MirrorBatchAsync(recovered, recoveredBatch).ConfigureAwait(false);
-                        if (recovered.State is not (AuditRetentionRunState.Running or AuditRetentionRunState.Unknown))
+                        // The commit became visible to the locked finalization after the receipt
+                        // read raced. Mirror the exact receipt when it is now readable; never
+                        // synthesize the batch fact from run totals.
+                        var settledReceipt = await TryReadBatchAsync(store, request.Key, ordinal).ConfigureAwait(false);
+                        if (settledReceipt is null)
                         {
                             return Result(
-                                recovered,
-                                recovered.CommittedDeletedCount,
-                                recovered.CommittedBatchCount,
-                                recovered.State,
-                                AuditRetentionCommitKnowledge.Committed,
-                                remainingMayExist: recovered.State != AuditRetentionRunState.Completed,
-                                recovered.StopReason,
-                                recoveredMirror);
+                                finalized,
+                                finalized.CommittedDeletedCount,
+                                finalized.CommittedBatchCount,
+                                AuditRetentionRunState.Unknown,
+                                AuditRetentionCommitKnowledge.Unknown,
+                                remainingMayExist: true,
+                                AuditRetentionStopReasons.UnknownCommit,
+                                AggregateMirror());
                         }
 
-                        lastDeleted = recovered.CommittedDeletedCount;
-                        lastBatches = recovered.CommittedBatchCount;
-                        continue;
+                        await TrackMirrorAsync(finalized, settledReceipt).ConfigureAwait(false);
+                        return Result(
+                            finalized,
+                            finalized.CommittedDeletedCount,
+                            finalized.CommittedBatchCount,
+                            finalized.State,
+                            AuditRetentionCommitKnowledge.Committed,
+                            remainingMayExist: finalized.State != AuditRetentionRunState.Completed,
+                            finalized.StopReason,
+                            AggregateMirror());
                     }
 
-                    var failed = await TryFinalizeAsync(
-                        store,
-                        request.Key,
-                        AuditRetentionRunState.Failed,
-                        AuditRetentionStopReasons.Failed).ConfigureAwait(false);
                     return Result(
-                        failed ?? run,
-                        lastDeleted,
-                        lastBatches,
-                        AuditRetentionRunState.Failed,
+                        finalized,
+                        finalized.CommittedDeletedCount,
+                        finalized.CommittedBatchCount,
+                        finalized.State,
                         AuditRetentionCommitKnowledge.None,
                         remainingMayExist: true,
-                        AuditRetentionStopReasons.Failed,
-                        mirror: null);
+                        finalized.StopReason ?? AuditRetentionStopReasons.Failed,
+                        AggregateMirror());
                 }
 
                 lastDeleted = batch.CommittedDeletedCount;
@@ -235,7 +311,13 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                     StopReason = batch.StopReason,
                     UpdatedAt = batch.CommittedAt
                 };
-                var mirror = await MirrorBatchAsync(updatedRun, batch).ConfigureAwait(false);
+                var receipt = new AuditRetentionBatchReceipt
+                {
+                    BatchOrdinal = ordinal,
+                    DeletedCount = batch.DeletedCount,
+                    CommittedAt = batch.CommittedAt
+                };
+                await TrackMirrorAsync(updatedRun, receipt).ConfigureAwait(false);
 
                 if (batch.RunState is not (AuditRetentionRunState.Running or AuditRetentionRunState.Unknown))
                 {
@@ -247,7 +329,7 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                         AuditRetentionCommitKnowledge.Committed,
                         batch.RemainingMayExist,
                         batch.StopReason,
-                        mirror);
+                        AggregateMirror());
                 }
 
                 if (!batch.RemainingMayExist)
@@ -260,44 +342,68 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                         AuditRetentionCommitKnowledge.Committed,
                         remainingMayExist: false,
                         AuditRetentionStopReasons.NoCandidates,
-                        mirror);
+                        AggregateMirror());
                 }
             }
         }
         catch (OperationCanceledException)
         {
             var recovered = await TryReadRunAsync(store, request.Key).ConfigureAwait(false);
-            if (recovered is not null)
+            if (recovered is null)
             {
-                if (recovered.State is AuditRetentionRunState.Running or AuditRetentionRunState.Unknown)
+                return Result(
+                    run,
+                    lastDeleted,
+                    lastBatches,
+                    AuditRetentionRunState.Unknown,
+                    AuditRetentionCommitKnowledge.Unknown,
+                    remainingMayExist: true,
+                    AuditRetentionStopReasons.Cancelled,
+                    AggregateMirror());
+            }
+
+            if (recovered.State is AuditRetentionRunState.Running or AuditRetentionRunState.Unknown)
+            {
+                var finalized = await TryFinalizeAsync(
+                    store,
+                    request.Key,
+                    AuditRetentionRunState.Cancelled,
+                    AuditRetentionStopReasons.Cancelled).ConfigureAwait(false);
+                if (finalized is null)
                 {
-                    recovered = await TryFinalizeAsync(
-                        store,
-                        request.Key,
-                        AuditRetentionRunState.Cancelled,
-                        AuditRetentionStopReasons.Cancelled).ConfigureAwait(false) ?? recovered;
+                    return Result(
+                        recovered,
+                        recovered.CommittedDeletedCount,
+                        recovered.CommittedBatchCount,
+                        AuditRetentionRunState.Unknown,
+                        AuditRetentionCommitKnowledge.Unknown,
+                        remainingMayExist: true,
+                        AuditRetentionStopReasons.Cancelled,
+                        AggregateMirror());
                 }
 
                 return Result(
-                    recovered,
-                    recovered.CommittedDeletedCount,
-                    recovered.CommittedBatchCount,
-                    AuditRetentionRunState.Cancelled,
+                    finalized,
+                    finalized.CommittedDeletedCount,
+                    finalized.CommittedBatchCount,
+                    finalized.State,
                     AuditRetentionCommitKnowledge.Committed,
-                    remainingMayExist: true,
-                    AuditRetentionStopReasons.Cancelled,
-                    mirror: null);
+                    remainingMayExist: finalized.State != AuditRetentionRunState.Completed,
+                    finalized.StopReason,
+                    AggregateMirror());
             }
 
+            // A committed receipt already produced a terminal state; cancellation must not
+            // downgrade Completed (or another terminal fact) to Cancelled.
             return Result(
-                run,
-                lastDeleted,
-                lastBatches,
-                AuditRetentionRunState.Cancelled,
-                AuditRetentionCommitKnowledge.Unknown,
-                remainingMayExist: true,
-                AuditRetentionStopReasons.Cancelled,
-                mirror: null);
+                recovered,
+                recovered.CommittedDeletedCount,
+                recovered.CommittedBatchCount,
+                recovered.State,
+                AuditRetentionCommitKnowledge.Committed,
+                remainingMayExist: recovered.State != AuditRetentionRunState.Completed,
+                recovered.StopReason,
+                AggregateMirror());
         }
     }
 
@@ -309,6 +415,28 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
         key.EnsureValid();
         var store = ResolveStore(key.StoreId, key.SinkId);
         return await store.ReadRunAsync(key, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<AuditRetentionMirrorOutcome> ExportBatchAsync(
+        AuditRetentionRunKey key,
+        long batchOrdinal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        key.EnsureValid();
+        if (batchOrdinal <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchOrdinal), "BatchOrdinal must be positive.");
+        var store = ResolveStore(key.StoreId, key.SinkId);
+        var run = await store.ReadRunAsync(key, cancellationToken).ConfigureAwait(false)
+            ?? throw new AuditRetentionException(
+                AuditRetentionErrorCodes.RunNotFound,
+                $"Audit retention run '{key.RequestId}' does not exist.");
+        var receipt = await store.ReadBatchAsync(key, batchOrdinal, cancellationToken).ConfigureAwait(false)
+            ?? throw new AuditRetentionException(
+                AuditRetentionErrorCodes.BatchNotFound,
+                $"Audit retention run '{key.RequestId}' has no committed batch {batchOrdinal}.");
+        return await MirrorBatchAsync(run, receipt).ConfigureAwait(false)
+            ?? AuditRetentionMirrorOutcome.Skipped;
     }
 
     public async ValueTask<AuditHoldResult> PlaceHoldAsync(
@@ -404,6 +532,27 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
         }
     }
 
+    private async ValueTask<AuditRetentionBatchReceipt?> TryReadBatchAsync(
+        IAuditRetentionStore store,
+        AuditRetentionRunKey key,
+        long batchOrdinal)
+    {
+        try
+        {
+            using var reconciliation = new CancellationTokenSource(ReceiptReconciliationTimeout);
+            return await store.ReadBatchAsync(key, batchOrdinal, reconciliation.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Audit retention receipt reconciliation failed for run {RequestId} batch {BatchOrdinal}.",
+                key.RequestId,
+                batchOrdinal);
+            return null;
+        }
+    }
+
     private async ValueTask<AuditRetentionRunRecord?> TryFinalizeAsync(
         IAuditRetentionStore store,
         AuditRetentionRunKey key,
@@ -428,16 +577,16 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
         }
     }
 
-    private async ValueTask<AuditRetentionMirrorOutcome> MirrorBatchAsync(
+    private async ValueTask<AuditRetentionMirrorOutcome?> MirrorBatchAsync(
         AuditRetentionRunRecord run,
-        AuditRetentionBatchOutcome batch)
+        AuditRetentionBatchReceipt receipt)
     {
         if (_recorder is null)
-            return AuditRetentionMirrorOutcome.Skipped;
+            return null;
         try
         {
             var result = await _recorder.RecordAsync(
-                AuditRetentionFactFactory.Batch(run, batch),
+                AuditRetentionFactFactory.Batch(run, receipt),
                 CancellationToken.None).ConfigureAwait(false);
             return result.IsAccepted
                 ? AuditRetentionMirrorOutcome.Succeeded
@@ -504,7 +653,4 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
             StopReason = stopReason,
             MirrorOutcome = mirror
         };
-
-    private static int ClampDeleted(long value)
-        => value < 0 ? 0 : value > int.MaxValue ? int.MaxValue : (int)value;
 }

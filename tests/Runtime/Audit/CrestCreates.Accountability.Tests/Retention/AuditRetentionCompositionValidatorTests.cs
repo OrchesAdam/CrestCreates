@@ -176,6 +176,12 @@ public sealed class AuditRetentionCompositionValidatorTests
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
+        public ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+            AuditRetentionRunKey key,
+            long batchOrdinal,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
             AuditRetentionRunFinalization finalization,
             CancellationToken cancellationToken = default)

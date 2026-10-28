@@ -94,6 +94,7 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_HOLD_OK");
             execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_BATCH_OK");
             execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_SINK_OK");
+            execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_EXPORT_OK");
             execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_RECOVERY_OK");
             execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_CAPABILITY_OK");
             execution.Output.Should().Contain("CRESTCREATES_AUDIT_RETENTION_NATIVE_OK");

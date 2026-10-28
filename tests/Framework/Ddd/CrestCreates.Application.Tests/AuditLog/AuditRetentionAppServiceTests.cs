@@ -362,6 +362,76 @@ public sealed class AuditRetentionAppServiceTests
             MirrorOutcome = AuditRetentionMirrorOutcome.Succeeded
         };
 
+    [Fact]
+    public async Task Export_requires_permission_and_forwards_the_exact_receipt_key()
+    {
+        var harness = new Harness(tenantId: "tenant-a");
+        AuditRetentionRunKey? capturedKey = null;
+        long capturedOrdinal = 0;
+        harness.Retention
+            .Setup(service => service.ExportBatchAsync(
+                It.IsAny<AuditRetentionRunKey>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .Callback((AuditRetentionRunKey key, long ordinal, CancellationToken _) =>
+            {
+                capturedKey = key;
+                capturedOrdinal = ordinal;
+            })
+            .ReturnsAsync(AuditRetentionMirrorOutcome.Succeeded);
+
+        var result = await harness.Service.ExportBatchAsync(new AuditRetentionExportInput
+        {
+            StoreId = Identity.StoreId,
+            RequestId = "req-export",
+            BatchOrdinal = 2
+        });
+
+        result.Status.Should().Be("succeeded");
+        capturedKey.Should().NotBeNull();
+        capturedKey!.Scope.TenantId.Should().Be("tenant-a");
+        capturedKey.RequestId.Should().Be("req-export");
+        capturedOrdinal.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Export_without_permission_is_rejected_before_any_retention_call()
+    {
+        var harness = new Harness(permissionDenied: true);
+        var act = () => harness.Service.ExportBatchAsync(new AuditRetentionExportInput
+        {
+            StoreId = Identity.StoreId,
+            RequestId = "req-export",
+            BatchOrdinal = 1
+        });
+
+        await act.Should().ThrowAsync<CrestPermissionException>();
+        harness.Retention.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Export_rejects_invalid_ordinal_and_cross_tenant_scope_before_any_retention_call()
+    {
+        var harness = new Harness(tenantId: "tenant-a");
+        var invalidOrdinal = () => harness.Service.ExportBatchAsync(new AuditRetentionExportInput
+        {
+            StoreId = Identity.StoreId,
+            RequestId = "req-export",
+            BatchOrdinal = 0
+        });
+        (await invalidOrdinal.Should().ThrowAsync<AuditRetentionException>())
+            .Which.Code.Should().Be(AuditRetentionErrorCodes.InvalidRequest);
+
+        var crossTenant = () => harness.Service.ExportBatchAsync(new AuditRetentionExportInput
+        {
+            StoreId = Identity.StoreId,
+            TenantId = "tenant-b",
+            RequestId = "req-export",
+            BatchOrdinal = 1
+        });
+        (await crossTenant.Should().ThrowAsync<AuditRetentionException>())
+            .Which.Code.Should().Be(AuditRetentionErrorCodes.ScopeInvalid);
+        harness.Retention.VerifyNoOtherCalls();
+    }
+
     private sealed class Harness
     {
         private readonly bool _authenticated;

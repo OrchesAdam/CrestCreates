@@ -515,7 +515,7 @@ Settings (Global only):
 - `AuditLogging.Retention.MaxRunSeconds` — default `60`.
 
 Permissions: `AuditLogging.Retention.Preview`, `.Execute`, `.ReadRuns`,
-`.ManageHolds`.
+`.ManageHolds`, `.Export`.
 
 HTTP and jobs share the same admission: tenant callers may only target their
 own authoritative id; host callers either omit the tenant (host partition) or
@@ -531,6 +531,19 @@ Operational notes:
   count;
 - a failed receipt rolls the whole batch back; the previous committed batch
   remains authoritative;
+- a run that already reached a terminal state (`completed`, `budget-reached`,
+  `cancelled`, `failed`) rejects any further batch; retry only resumes a
+  `running` run or returns the persisted result;
+- when a batch receipt was committed but the response was lost,
+  `commitKnowledge = unknown` and the persisted counters/receipt remain the
+  authority — do not read that as "nothing deleted";
+- batch facts are derived from the immutable receipt, so normal commit, replay,
+  recovery and export produce the same audit body;
+- the run's `mirrorStatus`/`mirrorCode` report the first failed mirror across
+  batches (a later successful batch cannot hide it); retry with
+  `POST /api/audit-retention/batches/export` (`AuditLogging.Retention.Export`)
+  to replay one committed batch's receipt envelope idempotently without
+  spending a batch;
 - after purge, re-writing the same audit identity returns `Duplicate` (or
   `Conflict` for a different integrity) and never restores the body;
 - automatic recurring execution is not registered in V1 because the scheduler

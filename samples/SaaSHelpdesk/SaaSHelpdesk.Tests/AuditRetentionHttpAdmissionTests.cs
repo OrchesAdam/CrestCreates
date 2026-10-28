@@ -70,6 +70,10 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
             "/api/audit-retention/execute",
             new { storeId = StoreId, requestId = "http-denied", reasonCode = "retention.manual" });
         deniedResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var deniedExport = await client.PostAsJsonAsync(
+            "/api/audit-retention/batches/export",
+            new { storeId = StoreId, requestId = "http-denied", batchOrdinal = 1 });
+        deniedExport.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         store.DeleteCalls.Should().Be(0);
 
         await GrantAsync(host.Services, userId, AuditRetentionPermissions.Execute);
@@ -101,6 +105,20 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
         run.GetProperty("requestId").GetString().Should().Be("http-granted");
         store.DeleteCalls.Should().Be(1);
         store.LastScopeKind.Should().Be(AuditRetentionScope.TenantKind);
+
+        await GrantAsync(host.Services, userId, AuditRetentionPermissions.Export);
+        var export = await client.PostAsJsonAsync(
+            "/api/audit-retention/batches/export",
+            new { storeId = StoreId, requestId = "http-granted", batchOrdinal = 1 });
+        export.StatusCode.Should().Be(HttpStatusCode.OK, await export.Content.ReadAsStringAsync());
+        using var exportDocument = JsonDocument.Parse(await export.Content.ReadAsStringAsync());
+        exportDocument.RootElement.GetProperty("data").GetProperty("status").GetString()
+            .Should().NotBeNullOrWhiteSpace();
+        var replay = await client.PostAsJsonAsync(
+            "/api/audit-retention/batches/export",
+            new { storeId = StoreId, requestId = "http-granted", batchOrdinal = 1 });
+        replay.StatusCode.Should().Be(HttpStatusCode.OK, await replay.Content.ReadAsStringAsync());
+        store.ReadBatchCalls.Should().Be(2);
     }
 
     [Fact]
@@ -223,7 +241,11 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
 
         public int DeleteCalls { get; private set; }
         public int PreviewCalls { get; private set; }
+        public int ReadBatchCalls { get; private set; }
         public string? LastScopeKind { get; private set; }
+
+        private readonly Dictionary<string, AuditRetentionRunRecord> _runs = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, AuditRetentionBatchReceipt> _receipts = new(StringComparer.Ordinal);
         public long LastCommittedBatchCount { get; private set; }
 
         public ValueTask<AuditRetentionRunRecord> CreateOrReadRunAsync(
@@ -231,7 +253,9 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
             CancellationToken cancellationToken = default)
         {
             LastScopeKind = request.Scope.Kind;
-            return ValueTask.FromResult(new AuditRetentionRunRecord
+            if (_runs.TryGetValue(request.Key.StableSignature(), out var existing))
+                return ValueTask.FromResult(existing);
+            var run = new AuditRetentionRunRecord
             {
                 Key = request.Key,
                 Policy = request.Policy,
@@ -246,7 +270,9 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
                 CommittedBatchCount = 0,
                 CreatedAt = Now,
                 UpdatedAt = Now
-            });
+            };
+            _runs[request.Key.StableSignature()] = run;
+            return ValueTask.FromResult(run);
         }
 
         public ValueTask<AuditRetentionPreview> PreviewAsync(
@@ -296,6 +322,21 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
             DeleteCalls++;
             LastScopeKind = request.Key.Scope.Kind;
             LastCommittedBatchCount = request.BatchOrdinal;
+            var run = _runs[request.Key.StableSignature()] with
+            {
+                CommittedDeletedCount = 1,
+                CommittedBatchCount = request.BatchOrdinal,
+                State = AuditRetentionRunState.Completed,
+                StopReason = AuditRetentionStopReasons.NoCandidates,
+                UpdatedAt = Now
+            };
+            _runs[request.Key.StableSignature()] = run;
+            _receipts[BatchKey(request.Key, request.BatchOrdinal)] = new AuditRetentionBatchReceipt
+            {
+                BatchOrdinal = request.BatchOrdinal,
+                DeletedCount = 1,
+                CommittedAt = Now
+            };
             return ValueTask.FromResult(new AuditRetentionBatchOutcome
             {
                 BatchOrdinal = request.BatchOrdinal,
@@ -313,7 +354,21 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
         public ValueTask<AuditRetentionRunRecord?> ReadRunAsync(
             AuditRetentionRunKey key,
             CancellationToken cancellationToken = default)
-            => ValueTask.FromResult<AuditRetentionRunRecord?>(null);
+            => ValueTask.FromResult<AuditRetentionRunRecord?>(
+                _runs.TryGetValue(key.StableSignature(), out var run) ? run : null);
+
+        public ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+            AuditRetentionRunKey key,
+            long batchOrdinal,
+            CancellationToken cancellationToken = default)
+        {
+            ReadBatchCalls++;
+            return ValueTask.FromResult<AuditRetentionBatchReceipt?>(
+                _receipts.TryGetValue(BatchKey(key, batchOrdinal), out var receipt) ? receipt : null);
+        }
+
+        private static string BatchKey(AuditRetentionRunKey key, long batchOrdinal)
+            => $"{key.StableSignature()}\u001f{batchOrdinal}";
 
         public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
             AuditRetentionRunFinalization finalization,

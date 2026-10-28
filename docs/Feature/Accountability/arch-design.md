@@ -452,23 +452,39 @@ bodies; it does not delete the responsibility facts of the run itself.
 ### 11.2 Provider protocol
 
 `IAuditRetentionStore` is the provider-side atomic protocol: create-or-read run,
-read-only preview, bounded batch, read run, finalize run outside a batch, place
-hold, release hold. The PostgreSQL V1 implementation (V016/V017) makes the
-ledger the dedup authority, writes body deletion + ledger transition + batch
-receipt + run counters in one transaction, serializes on
+read-only preview, bounded batch, read run, read exact batch receipt, finalize
+run outside a batch, place hold, release hold. The PostgreSQL V1 implementation
+(V016/V017) makes the ledger the dedup authority, writes body deletion + ledger
+transition + batch receipt + run counters in one transaction, serializes on
 scope → run → record locks, and uses the `(sink, audit, body_state)` foreign key
 to reject body resurrection. Quarantined rows stay out of purge candidates.
-Governance-target facts (`audit-retention-*`) and batch/hold receipts are
-protected from purge.
+A non-`Running` run rejects any new batch with `RETENTION_RUN_NOT_EXECUTABLE`
+before deleting, receiving or transitioning anything; only an already committed
+receipt may still be read back. Governance-target facts (`audit-retention-*`)
+and batch/hold receipts are protected from purge.
+`ComputeCutoff` truncates to microseconds because `timestamptz` cannot carry
+100ns ticks; every admitted cutoff therefore survives the run-row round trip
+byte-identically, and receipt facts share one canonical hash across normal
+commit, replay, recovery and export.
 
 ### 11.3 Kernel and admission
 
 `AuditRetentionExecutor` owns the loop: persisted policy binding, persisted
 batch budget, cancellation finalization, commit-Unknown → receipt
 reconciliation, and a mirror outcome reported separately from the committed
-state. `AuditRetentionAppService` is the single admission gate for HTTP
-(`/api/audit-retention/*`), direct DI and `AuditRetentionJob`: identity,
-`AuditLogging.Retention.*` permissions, Global settings and current tenant.
+state. Reconciliation trusts only the exact committed receipt plus the
+lock-authoritative `FinalizeRunAsync` result: a single stale run read never
+produces a `Failed` claim or a zeroed count, and a terminal state won the
+earlier race is never overwritten by cancellation. Batch facts derive solely
+from the immutable receipt (ordinal, deleted count, commit time), so recovery
+cannot attribute several batches to one fact. Mirror outcomes aggregate across
+batches with failure precedence, so a later success cannot hide an earlier
+failed append; an explicit idempotent re-export (`ExportBatchAsync`,
+`AuditLogging.Retention.Export`, `POST /api/audit-retention/batches/export`)
+replays the receipt envelope without spending a batch. `AuditRetentionAppService`
+is the single admission gate for HTTP (`/api/audit-retention/*`), direct DI and
+`AuditRetentionJob`: identity, `AuditLogging.Retention.*` permissions, Global
+settings and current tenant.
 Host callers resolve tenant names through `ITenantProvider` to the
 authoritative id. Execution stays disabled until the Global setting is enabled;
 the scheduler adapter establishes no authenticated principal, so automatic
@@ -479,10 +495,12 @@ registration remains off in V1.
 The PostgreSQL fixed-database V1 scenario set is **NativeAOT-verified**
 (linux-x64): the PG `AotHost` publishes/links/runs the real store and kernel and
 asserts time boundaries, scope isolation, holds, batch budget, post-purge sink
-dedup, receipt recovery and missing capabilities, followed by
-`CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`. Three fixture-only negative controls
-(wrong count, removed hold filtering, receipt fault) must fail without that
-sentinel. Real identity/permission/Setting/generated-HTTP admission is covered
+dedup, receipt export idempotency, receipt recovery and missing capabilities,
+followed by `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`. Three fixture-only
+negative controls (wrong count, removed hold filtering, receipt fault) must fail
+without that sentinel; they mutate a store decorator in the fixture, not real
+SQL, so SQL atomicity evidence still comes from the two-connection PG tests.
+Real identity/permission/Setting/generated-HTTP admission is covered
 by the JIT P08 test; the native host does not establish real authentication.
 EF/FreeSql/SqlSugar/MongoDB, other RIDs, tenant-specific policy, bulk/legal hold
 classes, archive/WORM and metadata GC remain **unverified/deferred**.

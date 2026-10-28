@@ -161,6 +161,8 @@ public sealed record AuditRetentionMirrorOutcome(string Status, string? Code)
     public static AuditRetentionMirrorOutcome Succeeded { get; } = new("succeeded", null);
     public static AuditRetentionMirrorOutcome Skipped { get; } = new("skipped", null);
     public static AuditRetentionMirrorOutcome Failed(string code) => new("failed", code);
+
+    public bool IsFailure => string.Equals(Status, "failed", StringComparison.Ordinal);
 }
 
 public sealed record AuditRetentionRunResult
@@ -197,6 +199,17 @@ public sealed record AuditRetentionBatchOutcome
     public required AuditRetentionRunState RunState { get; init; }
     public string? StopReason { get; init; }
     public required bool FromExistingReceipt { get; init; }
+    public required DateTimeOffset CommittedAt { get; init; }
+}
+
+/// <summary>
+/// Immutable committed batch receipt. It is the only source for the batch mirror fact:
+/// replay, reconciliation and explicit re-export must produce the same envelope.
+/// </summary>
+public sealed record AuditRetentionBatchReceipt
+{
+    public required long BatchOrdinal { get; init; }
+    public required int DeletedCount { get; init; }
     public required DateTimeOffset CommittedAt { get; init; }
 }
 

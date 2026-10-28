@@ -34,6 +34,15 @@ public interface IAuditRetentionStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Reads the immutable receipt of one committed batch. Returns null when the ordinal has
+    /// not committed. This is the single source for replay, reconciliation and re-export.
+    /// </summary>
+    ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+        AuditRetentionRunKey key,
+        long batchOrdinal,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Terminal transition for a run the kernel stopped outside a batch receipt (cancel or
     /// failure). An already terminal run is returned unchanged.
     /// </summary>

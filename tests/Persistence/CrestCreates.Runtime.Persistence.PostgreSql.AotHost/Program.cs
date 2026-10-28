@@ -1757,6 +1757,23 @@ static async Task RunAuditRetentionNativeScenarioAsync(PostgreSqlRuntimePersiste
         "conflict did not report the accepted integrity");
     Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_SINK_OK");
 
+    var exportKey = Request("aot-retention-run-a", scopeA, policy).Key;
+    var batchFactAuditId = AuditRetentionSemanticNames.BatchFactAuditId(
+        AuditRetentionSemanticNames.RunReceiptId(exportKey),
+        1);
+    var exported = await retention.ExportBatchAsync(exportKey, 1);
+    RetentionAssert(
+        exported == AuditRetentionMirrorOutcome.Succeeded,
+        $"receipt export failed: {exported.Code}");
+    var exportedAgain = await retention.ExportBatchAsync(exportKey, 1);
+    RetentionAssert(
+        exportedAgain == AuditRetentionMirrorOutcome.Succeeded,
+        $"idempotent receipt export failed: {exportedAgain.Code}");
+    RetentionAssert(
+        await CountRetentionEnvelopesAsync(options, batchFactAuditId) == 1,
+        "receipt export produced a second mirror body");
+    Console.WriteLine("CRESTCREATES_AUDIT_RETENTION_NATIVE_EXPORT_OK");
+
     var replayRequest = Request("aot-retention-run-a", scopeA, policy);
     await using (var replayProvider = BuildRetentionProvider(options))
     {
@@ -1856,6 +1873,21 @@ static async Task SeedQuarantineRetentionRowAsync(
     command.Parameters.AddWithValue("audit", auditId);
     command.Parameters.AddWithValue("occurred", occurredAt);
     await command.ExecuteNonQueryAsync();
+}
+
+static async Task<int> CountRetentionEnvelopesAsync(
+    PostgreSqlRuntimePersistenceOptions options,
+    string auditId)
+{
+    var envelopes = RetentionTable(options, "runtime_audit_envelopes");
+    await using var connection = new NpgsqlConnection(options.ConnectionString);
+    await connection.OpenAsync();
+    await using var command = new NpgsqlCommand(
+        $"select count(*) from {envelopes} where sink_id=@sink and audit_id=@audit;",
+        connection);
+    command.Parameters.AddWithValue("sink", PostgreSqlAuditRetentionStore.SinkIdValue);
+    command.Parameters.AddWithValue("audit", auditId);
+    return Convert.ToInt32(await command.ExecuteScalarAsync());
 }
 
 static async Task<string?> ReadRetentionLedgerStateAsync(
@@ -2015,6 +2047,12 @@ internal sealed class RetentionMutationStore(IAuditRetentionStore inner, string 
         AuditRetentionRunKey key,
         CancellationToken cancellationToken = default)
         => inner.ReadRunAsync(key, cancellationToken);
+
+    public ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+        AuditRetentionRunKey key,
+        long batchOrdinal,
+        CancellationToken cancellationToken = default)
+        => inner.ReadBatchAsync(key, batchOrdinal, cancellationToken);
 
     public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
         AuditRetentionRunFinalization finalization,

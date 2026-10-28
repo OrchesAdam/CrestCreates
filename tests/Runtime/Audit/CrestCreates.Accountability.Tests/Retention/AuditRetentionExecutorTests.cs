@@ -137,6 +137,12 @@ public sealed class AuditRetentionExecutorTests
                 batches: 1,
                 stopReason: AuditRetentionStopReasons.NoCandidates,
                 updatedAt: Snapshot.AddMinutes(1));
+            store.Receipts[1] = new AuditRetentionBatchReceipt
+            {
+                BatchOrdinal = 1,
+                DeletedCount = 40,
+                CommittedAt = Snapshot.AddMinutes(1)
+            };
             throw new IOException("connection reset after commit");
         };
         var recorder = new FakeRecorder();
@@ -156,7 +162,7 @@ public sealed class AuditRetentionExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_AmbiguousBatchFailure_WithoutReceipt_ReportsUnknownCommit()
+    public async Task ExecuteAsync_AmbiguousBatchFailure_WithoutReceipt_FinalizesFailedWithPersistedCounts()
     {
         var request = Request();
         var store = new FakeStore();
@@ -167,15 +173,34 @@ public sealed class AuditRetentionExecutorTests
 
         var result = await executor.ExecuteAsync(request);
 
-        result.State.Should().Be(AuditRetentionRunState.Unknown);
-        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.Unknown);
+        result.State.Should().Be(AuditRetentionRunState.Failed);
+        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.None);
         result.CommittedDeletedCount.Should().Be(0);
         result.CommittedBatchCount.Should().Be(0);
         result.RemainingMayExist.Should().BeTrue();
-        result.StopReason.Should().Be(AuditRetentionStopReasons.UnknownCommit);
+        result.StopReason.Should().Be(AuditRetentionStopReasons.Failed);
         result.MirrorOutcome.Should().BeNull();
-        store.Finalizations.Should().BeEmpty();
+        store.Finalizations.Should().ContainSingle()
+            .Which.State.Should().Be(AuditRetentionRunState.Failed);
         recorder.Envelopes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AmbiguousBatchFailure_FinalizationNull_ReportsUnknownWithoutFailedClaim()
+    {
+        var request = Request();
+        var store = new FakeStore();
+        store.NextBatch = _ => throw new IOException("connection reset before commit");
+        store.Read = _ => ValueTask.FromResult<AuditRetentionRunRecord?>(null);
+        store.Finalize = _ => throw new InvalidOperationException("store unavailable");
+        var executor = CreateExecutor(store, new FakeRecorder(), new MutableTimeProvider { Now = Snapshot });
+
+        var result = await executor.ExecuteAsync(request);
+
+        result.State.Should().Be(AuditRetentionRunState.Unknown);
+        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.Unknown);
+        result.CommittedDeletedCount.Should().Be(0);
+        result.StopReason.Should().Be(AuditRetentionStopReasons.UnknownCommit);
     }
 
     [Fact]
@@ -188,6 +213,12 @@ public sealed class AuditRetentionExecutorTests
             if (batch.BatchOrdinal == 1)
             {
                 store.Run = NewRun(request, AuditRetentionRunState.Running, deleted: 40, batches: 1);
+                store.Receipts[1] = new AuditRetentionBatchReceipt
+                {
+                    BatchOrdinal = 1,
+                    DeletedCount = 40,
+                    CommittedAt = Snapshot
+                };
                 throw new IOException("connection reset after commit");
             }
 
@@ -493,6 +524,160 @@ public sealed class AuditRetentionExecutorTests
             .Which.Action.Name.Should().Be(AuditRetentionSemanticNames.HoldReleaseActionName);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_CancellationAfterCommittedBatch_KeepsPersistedTerminalState()
+    {
+        var request = Request();
+        using var cancellation = new CancellationTokenSource();
+        var store = new FakeStore();
+        store.NextBatch = _ =>
+        {
+            store.Run = NewRun(
+                request,
+                AuditRetentionRunState.Completed,
+                deleted: 1,
+                batches: 1,
+                stopReason: AuditRetentionStopReasons.NoCandidates);
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellation.Token);
+        };
+        var executor = CreateExecutor(store, new FakeRecorder(), new MutableTimeProvider { Now = Snapshot });
+
+        var result = await executor.ExecuteAsync(request, cancellation.Token);
+
+        result.State.Should().Be(AuditRetentionRunState.Completed);
+        result.CommittedDeletedCount.Should().Be(1);
+        result.CommittedBatchCount.Should().Be(1);
+        result.StopReason.Should().Be(AuditRetentionStopReasons.NoCandidates);
+        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.Committed);
+        store.Finalizations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MirrorFailureInEarlierBatch_RemainsVisible()
+    {
+        var request = Request();
+        var store = new FakeStore();
+        store.NextBatch = batch => ValueTask.FromResult(
+            Outcome(batch.BatchOrdinal, deleted: 1, totalDeleted: batch.BatchOrdinal, remaining: batch.BatchOrdinal == 1, committedAt: Snapshot));
+        var recorder = new FakeRecorder();
+        var calls = 0;
+        recorder.OnRecord = envelope => ++calls == 1
+            ? new AuditRecordResult
+            {
+                AuditId = envelope.AuditId,
+                Status = AuditRecordStatus.Rejected,
+                ProcessedAt = Snapshot,
+                Issues = [new AuditRecordIssue("first-batch-mirror-failed")]
+            }
+            : new FakeRecorder().RecordAsync(envelope).GetAwaiter().GetResult();
+        var executor = CreateExecutor(store, recorder, new MutableTimeProvider { Now = Snapshot });
+
+        var result = await executor.ExecuteAsync(request);
+
+        result.State.Should().Be(AuditRetentionRunState.Completed);
+        result.CommittedDeletedCount.Should().Be(2);
+        result.MirrorOutcome.Should().Be(AuditRetentionMirrorOutcome.Failed("first-batch-mirror-failed"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Reconciliation_UsesExactReceiptInsteadOfRunTotals()
+    {
+        var request = Request();
+        var store = new FakeStore();
+        store.NextBatch = _ =>
+        {
+            store.Run = NewRun(
+                request,
+                AuditRetentionRunState.Completed,
+                deleted: 2,
+                batches: 2,
+                stopReason: AuditRetentionStopReasons.NoCandidates,
+                updatedAt: Snapshot.AddSeconds(2));
+            store.Receipts[1] = new AuditRetentionBatchReceipt
+            {
+                BatchOrdinal = 1,
+                DeletedCount = 1,
+                CommittedAt = Snapshot.AddSeconds(1)
+            };
+            throw new IOException("another executor committed batches 1 and 2 before reconciliation");
+        };
+        var recorder = new FakeRecorder();
+        var executor = CreateExecutor(store, recorder, new MutableTimeProvider { Now = Snapshot });
+
+        var result = await executor.ExecuteAsync(request);
+
+        result.State.Should().Be(AuditRetentionRunState.Completed);
+        result.CommittedDeletedCount.Should().Be(2);
+        result.CommittedBatchCount.Should().Be(2);
+        recorder.Envelopes.Should().ContainSingle();
+        recorder.Envelopes[0].Target.Version.Should().Be("1");
+        recorder.Envelopes[0].Tags["retention.deleted"].Should().Be("1");
+        recorder.Envelopes[0].OccurredAt.Should().Be(Snapshot.AddSeconds(1));
+    }
+
+    [Fact]
+    public async Task ExportBatchAsync_ReplaysTheImmutableReceiptEnvelope()
+    {
+        var request = Request();
+        var run = NewRun(request, AuditRetentionRunState.Completed, deleted: 5, batches: 2);
+        var store = new FakeStore { Run = run };
+        store.Receipts[1] = new AuditRetentionBatchReceipt
+        {
+            BatchOrdinal = 1,
+            DeletedCount = 2,
+            CommittedAt = Snapshot.AddSeconds(1)
+        };
+        var recorder = new FakeRecorder();
+        var executor = CreateExecutor(store, recorder, new MutableTimeProvider { Now = Snapshot });
+
+        var first = await executor.ExportBatchAsync(request.Key, 1);
+        var second = await executor.ExportBatchAsync(request.Key, 1);
+
+        first.Should().Be(AuditRetentionMirrorOutcome.Succeeded);
+        second.Should().Be(AuditRetentionMirrorOutcome.Succeeded);
+        recorder.Envelopes.Should().HaveCount(2);
+        recorder.Envelopes[0].AuditId.Should().Be(recorder.Envelopes[1].AuditId);
+        recorder.Envelopes[0].Target.Version.Should().Be("1");
+        recorder.Envelopes[0].Tags["retention.deleted"].Should().Be("2");
+        recorder.Envelopes[0].OccurredAt.Should().Be(Snapshot.AddSeconds(1));
+    }
+
+    [Fact]
+    public async Task ExportBatchAsync_WithoutRecorder_ReturnsSkipped()
+    {
+        var request = Request();
+        var store = new FakeStore { Run = NewRun(request, AuditRetentionRunState.Completed, deleted: 1, batches: 1) };
+        store.Receipts[1] = new AuditRetentionBatchReceipt
+        {
+            BatchOrdinal = 1,
+            DeletedCount = 1,
+            CommittedAt = Snapshot
+        };
+        var executor = new AuditRetentionExecutor([store], timeProvider: new MutableTimeProvider { Now = Snapshot });
+
+        var outcome = await executor.ExportBatchAsync(request.Key, 1);
+
+        outcome.Should().Be(AuditRetentionMirrorOutcome.Skipped);
+    }
+
+    [Fact]
+    public async Task ExportBatchAsync_MissingReceiptOrRun_Rejects()
+    {
+        var request = Request();
+        var store = new FakeStore { Run = NewRun(request, AuditRetentionRunState.Completed, deleted: 1, batches: 1) };
+        var executor = CreateExecutor(store, new FakeRecorder(), new MutableTimeProvider { Now = Snapshot });
+
+        var missingBatch = () => executor.ExportBatchAsync(request.Key, 2).AsTask();
+        (await missingBatch.Should().ThrowAsync<AuditRetentionException>())
+            .Which.Code.Should().Be(AuditRetentionErrorCodes.BatchNotFound);
+
+        store.Run = null;
+        var missingRun = () => executor.ExportBatchAsync(request.Key, 1).AsTask();
+        (await missingRun.Should().ThrowAsync<AuditRetentionException>())
+            .Which.Code.Should().Be(AuditRetentionErrorCodes.RunNotFound);
+    }
+
     private static AuditRetentionExecutor CreateExecutor(FakeStore store, IAuditRecorder recorder, TimeProvider time)
         => new([store], recorder, time);
 
@@ -713,6 +898,10 @@ public sealed class AuditRetentionExecutorTests
 
         public Func<AuditRetentionRunKey, ValueTask<AuditRetentionRunRecord?>>? Read { get; set; }
 
+        public Func<AuditRetentionRunKey, long, ValueTask<AuditRetentionBatchReceipt?>>? ReadBatch { get; set; }
+
+        public Dictionary<long, AuditRetentionBatchReceipt> Receipts { get; } = new();
+
         public Func<AuditRetentionRunFinalization, ValueTask<AuditRetentionRunRecord>>? Finalize { get; set; }
 
         public Func<AuditRetentionPreviewRequest, ValueTask<AuditRetentionPreview>>? Preview { get; set; }
@@ -747,14 +936,27 @@ public sealed class AuditRetentionExecutorTests
                 ? throw new InvalidOperationException("Preview is not scripted.")
                 : Preview(request);
 
-        public ValueTask<AuditRetentionBatchOutcome> ExecuteBatchAsync(
+        public async ValueTask<AuditRetentionBatchOutcome> ExecuteBatchAsync(
             AuditRetentionBatchRequest request,
             CancellationToken cancellationToken = default)
         {
             BatchOrdinals.Add(request.BatchOrdinal);
-            return NextBatch is null
-                ? throw new InvalidOperationException("No batch is scripted.")
-                : NextBatch(request);
+            if (NextBatch is null)
+                throw new InvalidOperationException("No batch is scripted.");
+            var outcome = await NextBatch(request).ConfigureAwait(false);
+            if (Run is not null)
+            {
+                Run = Run with
+                {
+                    CommittedDeletedCount = outcome.CommittedDeletedCount,
+                    CommittedBatchCount = outcome.CommittedBatchCount,
+                    State = outcome.RunState,
+                    StopReason = outcome.StopReason,
+                    UpdatedAt = outcome.CommittedAt
+                };
+            }
+
+            return outcome;
         }
 
         public ValueTask<AuditRetentionRunRecord?> ReadRunAsync(
@@ -767,6 +969,17 @@ public sealed class AuditRetentionExecutorTests
                 : Read(key);
         }
 
+        public ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+            AuditRetentionRunKey key,
+            long batchOrdinal,
+            CancellationToken cancellationToken = default)
+        {
+            if (ReadBatch is not null)
+                return ReadBatch(key, batchOrdinal);
+            return ValueTask.FromResult<AuditRetentionBatchReceipt?>(
+                Receipts.TryGetValue(batchOrdinal, out var receipt) ? receipt : null);
+        }
+
         public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
             AuditRetentionRunFinalization finalization,
             CancellationToken cancellationToken = default)
@@ -774,6 +987,12 @@ public sealed class AuditRetentionExecutorTests
             Finalizations.Add(finalization);
             if (Finalize is not null)
                 return Finalize(finalization);
+
+            if (Run is not null
+                && Run.State is not (AuditRetentionRunState.Running or AuditRetentionRunState.Unknown))
+            {
+                return ValueTask.FromResult(Run);
+            }
 
             Run = Run! with
             {

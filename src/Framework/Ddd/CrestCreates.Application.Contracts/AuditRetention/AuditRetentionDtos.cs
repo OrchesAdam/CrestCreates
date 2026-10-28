@@ -26,6 +26,20 @@ public sealed class AuditRetentionHoldInput
     public string? ReasonCode { get; set; }
 }
 
+public sealed class AuditRetentionExportInput
+{
+    public string? StoreId { get; set; }
+    public string? TenantId { get; set; }
+    public string? RequestId { get; set; }
+    public long BatchOrdinal { get; set; }
+}
+
+public sealed class AuditRetentionMirrorDto
+{
+    public string Status { get; set; } = string.Empty;
+    public string? Code { get; set; }
+}
+
 public sealed class AuditRetentionReleaseInput
 {
     public string? StoreId { get; set; }

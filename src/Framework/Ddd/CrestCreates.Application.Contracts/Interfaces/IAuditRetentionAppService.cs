@@ -41,6 +41,16 @@ public interface IAuditRetentionAppService
 
     [AppServiceHttpAction(
         Verb = HttpProjectionVerb.Post,
+        Route = "batches/export",
+        Kind = HttpProjectionOperationKind.Command,
+        Body = HttpProjectionBodyPolicy.Required,
+        Permissions = new[] { AuditRetentionPermissions.Export })]
+    Task<AuditRetentionMirrorDto> ExportBatchAsync(
+        AuditRetentionExportInput input,
+        CancellationToken cancellationToken = default);
+
+    [AppServiceHttpAction(
+        Verb = HttpProjectionVerb.Post,
         Route = "holds",
         Kind = HttpProjectionOperationKind.Command,
         Body = HttpProjectionBodyPolicy.Required,

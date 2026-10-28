@@ -358,14 +358,17 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 
 | 项目 | 定位 | 功能状态 | 执行证据 | 处理结论 |
 | --- | --- | --- | --- | --- |
-| `CrestCreates.Accountability.Abstractions` | 抽象契约（scope/policy/run/batch/hold/`IAuditRetentionStore`） | 已交付指定边界（V1） | 契约与内核 31/31；PG 14/14 | 保留；后续扩展必须保持 receipt/Unknown 语义 |
-| `CrestCreates.Accountability` | 执行实现（`AuditRetentionExecutor`） | 已交付指定边界（V1） | 内核 31/31；PG 14/14；原生八场景 | 保留；不得新增公开故障开关或裸删旁路 |
-| `CrestCreates.AuditLogging` + `CrestCreates.Application` | admission 与 typed job | 已交付指定边界（V1） | Application 15/15；P08 真实身份/权限/Setting/HTTP 2/2 | 保留；旧 cleanup 已归档到 `99_RecycleBin/issue-132-audit-retention/` |
-| `CrestCreates.Runtime.Persistence.PostgreSql` | Provider（V016/V017、sink、retention store） | 已交付指定边界（V1，仅 PostgreSQL 固定数据库） | PG 14/14；sink/migration 5/5；NativeAOT linux-x64 八场景 + 总 sentinel + 三类负控 | 限界保留；EF/FreeSql/SqlSugar/MongoDB、其他 RID、自动调度未验证 |
+| `CrestCreates.Accountability.Abstractions` | 抽象契约（scope/policy/run/batch/hold/`IAuditRetentionStore`/精确 receipt 读取） | 已交付指定边界（V1） | retention 过滤 38/38；PG 20/20 | 保留；后续扩展必须保持 receipt/Unknown 语义 |
+| `CrestCreates.Accountability` | 执行实现（`AuditRetentionExecutor`，终态拒绝新批、receipt 对账、镜像失败优先、显式导出） | 已交付指定边界（V1） | retention 过滤 38/38；PG 20/20；原生九场景 | 保留；不得新增公开故障开关或裸删旁路 |
+| `CrestCreates.AuditLogging` + `CrestCreates.Application` | admission 与 typed job（含 `AuditLogging.Retention.Export`） | 已交付指定边界（V1） | Application retention 21/21；P08 真实身份/权限/Setting/HTTP 2/2 | 保留；旧 cleanup 已归档到 `99_RecycleBin/issue-132-audit-retention/` |
+| `CrestCreates.Runtime.Persistence.PostgreSql` | Provider（V016/V017、sink、retention store） | 已交付指定边界（V1，仅 PostgreSQL 固定数据库） | PG 20/20；sink/迁移集成过滤 22/22；NativeAOT linux-x64 九场景 + 总 sentinel + 三类负控 | 限界保留；EF/FreeSql/SqlSugar/MongoDB、其他 RID、自动调度未验证 |
 
 支持声明：正式 PostgreSQL retention V1 的已执行场景为 **NativeAOT-verified（linux-x64）**；
 真实认证/权限/Setting/generated HTTP 组合由 JIT P08 覆盖，不推导原生认证链；自动 Quartz
-调度因缺少认证主体保持关闭，不属于已交付能力。
+调度因缺少认证主体保持关闭，不属于已交付能力。PR #157 审查轮 R1 的 2 个 P1/2 个 P2
+（终态 run 仍可提交新批、恢复误报 failed/0 与取消覆盖 Completed、累计删除记入单批事实、
+后批镜像掩盖前批失败且缺显式导出）已修复并补入回归；原生负控为 fixture 内 store 装饰器
+变异，不等价于真实 SQL/事务变异。
 
 纪律：新增 retention Provider/RID/策略类型时按组合单独补证据，更新本表与 `memory.md`；
 不得从本节推导其他项目或组合的支持状态。

@@ -126,6 +126,37 @@ public sealed class AuditRetentionAppService : IAuditRetentionAppService
         return record is null ? null : Map(record);
     }
 
+    public async Task<AuditRetentionMirrorDto> ExportBatchAsync(
+        AuditRetentionExportInput input,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        BuildActor();
+        await _permissions.CheckAsync(AuditRetentionPermissions.Export).ConfigureAwait(false);
+        var scope = await ResolveScopeAsync(input.TenantId, cancellationToken).ConfigureAwait(false);
+        var storeId = RequireText(input.StoreId, nameof(input.StoreId));
+        var requestId = RequireIdentifier(input.RequestId, nameof(input.RequestId));
+        if (input.BatchOrdinal <= 0)
+        {
+            throw new AuditRetentionException(
+                AuditRetentionErrorCodes.InvalidRequest,
+                "BatchOrdinal must be positive.");
+        }
+
+        var identity = _retention.GetStoreIdentity(storeId);
+        var outcome = await _retention.ExportBatchAsync(
+            new AuditRetentionRunKey
+            {
+                StoreId = identity.StoreId,
+                SinkId = identity.SinkId,
+                Scope = scope,
+                RequestId = requestId
+            },
+            input.BatchOrdinal,
+            cancellationToken).ConfigureAwait(false);
+        return new AuditRetentionMirrorDto { Status = outcome.Status, Code = outcome.Code };
+    }
+
     public async Task<AuditHoldDto> PlaceHoldAsync(
         AuditRetentionHoldInput input,
         CancellationToken cancellationToken = default)

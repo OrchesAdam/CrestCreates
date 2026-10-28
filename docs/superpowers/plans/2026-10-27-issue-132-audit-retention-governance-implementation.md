@@ -59,8 +59,8 @@
 | P09 升级 | `Backfill_projects_valid_rows_quarantines_invalid_rows_and_is_repeatable`、`PostgreSqlRuntimeIntegrationTests` 的迁移重放/校验和/schema manifest 断言 | 通过 |
 
 原生门禁：`tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests`
-执行 `-p:CrestCreatesPublishMode=aot -r linux-x64` publish/link/run，断言八个 per-case
-sentinel 与总 sentinel `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`；同一原生二进制以
+执行 `-p:CrestCreatesPublishMode=aot -r linux-x64` publish/link/run，断言九个 per-case
+sentinel（含 `EXPORT_OK`）与总 sentinel `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`；同一原生二进制以
 `retention-negative wrong-count|hold-filter|receipt-fault` 运行时均非零退出且不含总 sentinel，
 输出包含 `CRESTCREATES_AUDIT_RETENTION_NEGATIVE_CONTROL_CAUGHT`。
 
@@ -71,5 +71,28 @@ sentinel 与总 sentinel `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`；同一原生
 - 原生 host 不建立真实认证/Setting/Quartz 身份链；这些由 JIT P08 与 Application 测试覆盖。
 - 未执行：EF/FreeSql/SqlSugar/MongoDB retention、其他 RID、按租户策略、批量/法务 hold、
   archive/WORM、元数据 GC、自动调度注册。
-- 计划中“receipt 显式再导出”未实现：设计未要求独立导出入口；批量/保留事实已通过
-  `IAuditRecorder` 落库，运行记录可由 `GetRunAsync` 与 ledger 查询读取。
+- 原生负控（`wrong-count|hold-filter|receipt-fault`）是 fixture 内 store 装饰器变异，
+  只证明断言对错误计数/漏过滤/失败 receipt 敏感，不等价于真实 SQL/事务变异；
+  SQL 原子性仍由 PG 两连接/触发器用例承担。
+
+## 审查轮 R1 修复记录（2026-10-28，对 `221fd2bc` 的独立审查）
+
+审查发现 2 个 P1、2 个 P2，均在本分支修复并补入回归：
+
+| 发现 | 修复 | 回归 |
+| --- | --- | --- |
+| P1 已取消/完成的 run 仍可提交新批次 | `PostgreSqlAuditRetentionStore.ExecuteBatchAsync` 在既有 receipt 分支之后、新批次之前拒绝非 `Running` run（`RETENTION_RUN_NOT_EXECUTABLE`，零删除/零 receipt/状态不变）；executor 捕获该码并回读权威终态收敛 | `Terminal_run_cannot_execute_a_fresh_batch`（Cancelled/Failed/Completed 三态）；executor 排队批次收敛用例；原生 `RECOVERY_OK`/`BATCH_OK` 复跑 |
+| P1 库中已删 1 条、恢复分支报 failed/0；取消可覆盖 Completed | 歧义恢复改为先读精确 receipt、终态以 `FinalizeRunAsync` 锁内结果为准，禁止用一次陈旧读回推 Failed/0；取消分支先回读，终态直接返回持久终态，仅 `Running` 终结为 Cancelled | `ExecuteAsync_AmbiguousBatchFailure_FinalizationNull_ReportsUnknownWithoutFailedClaim`、`ExecuteAsync_CancellationAfterCommittedBatch_KeepsPersistedTerminalState`、`Late_commit_observed_by_finalization_keeps_committed_counts` |
+| P2 恢复把多批累计删除记入单批事实 | `AuditRetentionFactFactory.Batch` 只从不可变 receipt 派生 AuditId/OccurredAt/Version/deleted/Summary；正常、回放、恢复、导出共用同一 canonical 内容 | `ExecuteAsync_Reconciliation_UsesExactReceiptInsteadOfRunTotals`；原生 `SINK_OK`/`EXPORT_OK` |
+| P2 后批镜像成功掩盖前批失败；缺显式重试导出 | executor 聚合镜像结果（首个失败优先），预算/取消/歧义/终态路径都携带 `AggregateMirror()`；新增 `IAuditRetentionService.ExportBatchAsync`（读 run+receipt 幂等重放）、`AuditLogging.Retention.Export` 权限、`POST /api/audit-retention/batches/export`、`IAuditRetentionStore.ReadBatchAsync` 精确 receipt 读取 | `ExecuteAsync_MirrorFailureInEarlierBatch_RemainsVisible`、`ExportBatchAsync_*`（重放/无 recorder 跳过/缺 run 或 receipt 拒绝）、`AuditRetentionAppServiceTests` export 授权/跨租户/非法序号、P08 export 授权与幂等重放、原生 `EXPORT_OK` |
+
+R1 过程中另发现并修复的导出阻塞问题：`ComputeCutoff` 返回 100ns 精度，而
+`timestamptz` 只保留微秒；首次镜像用内存 run、导出/恢复用库回读 run，`retention.cutoff`
+tag 漂移导致 canonical hash 不同、PG sink 以 Conflict 拒收。修复为 `ComputeCutoff`
+截断到微秒（`EnsureValid` 强制所有合法请求 cutoff 等于 `ComputeCutoff`，覆盖全部路径），
+回归 `Run_cutoff_round_trips_exactly_for_sub_microsecond_snapshots`。
+
+R1 后本地验证：Accountability 152/152、Application 205/205、PG retention 20/20（含新增
+cutoff 回归）、PG sink/迁移过滤 22/22、P08 2/2、AotHost JIT 演练九个 retention sentinel
+全绿且三负控 exit 21 无总 sentinel；NativeAOT publish/link/run 复跑 1/1 通过（linux-x64，
+九个 per-case sentinel 含 `EXPORT_OK`、总 sentinel、三负控均失败且不含总 sentinel）。

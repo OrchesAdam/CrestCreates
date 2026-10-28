@@ -50,7 +50,14 @@ public sealed record AuditRetentionPolicy
 
     public long MaxRunDeletions => (long)BatchSize * MaxBatchesPerRun;
 
-    public DateTimeOffset ComputeCutoff(DateTimeOffset snapshotAt) => snapshotAt - RetentionWindow;
+    // Persistence stores timestamptz at microsecond precision. Truncating here keeps every
+    // admitted cutoff byte-identical after the run row round-trips, so receipt facts built from
+    // the in-memory run and from a re-read run share one canonical hash.
+    public DateTimeOffset ComputeCutoff(DateTimeOffset snapshotAt)
+    {
+        var cutoff = snapshotAt - RetentionWindow;
+        return new DateTimeOffset(cutoff.Ticks - (cutoff.Ticks % TimeSpan.TicksPerMicrosecond), cutoff.Offset);
+    }
 
     public string ComputeHash()
     {

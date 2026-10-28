@@ -21,6 +21,8 @@ public static class AuditRetentionErrorCodes
     public const string RequestConflict = "RETENTION_REQUEST_CONFLICT";
     public const string PolicyHashMismatch = "RETENTION_POLICY_HASH_MISMATCH";
     public const string RunNotFound = "RETENTION_RUN_NOT_FOUND";
+    public const string RunNotExecutable = "RETENTION_RUN_NOT_EXECUTABLE";
+    public const string BatchNotFound = "RETENTION_BATCH_NOT_FOUND";
     public const string BatchOrdinalConflict = "RETENTION_BATCH_ORDINAL_CONFLICT";
     public const string BatchBindingConflict = "RETENTION_BATCH_BINDING_CONFLICT";
     public const string LedgerInvariantViolation = "RETENTION_LEDGER_INVARIANT_VIOLATION";

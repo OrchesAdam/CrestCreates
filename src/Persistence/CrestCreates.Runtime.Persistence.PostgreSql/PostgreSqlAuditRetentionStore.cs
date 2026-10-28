@@ -243,6 +243,13 @@ public sealed class PostgreSqlAuditRetentionStore : IAuditRetentionStore
             };
         }
 
+        if (run.State is not AuditRetentionRunState.Running)
+        {
+            throw new AuditRetentionException(
+                AuditRetentionErrorCodes.RunNotExecutable,
+                $"Audit retention run '{request.Key.RequestId}' is {run.State} and cannot execute a new batch.");
+        }
+
         if (request.BatchOrdinal != run.CommittedBatchCount + 1)
         {
             throw new AuditRetentionException(
@@ -354,6 +361,39 @@ public sealed class PostgreSqlAuditRetentionStore : IAuditRetentionStore
         EnsureStore(key.StoreId, key.SinkId);
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         return await ReadRunByRequestAsync(connection, null, key, forUpdate: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+        AuditRetentionRunKey key,
+        long batchOrdinal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        key.EnsureValid();
+        if (batchOrdinal <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchOrdinal), "BatchOrdinal must be positive.");
+        EnsureStore(key.StoreId, key.SinkId);
+        var runId = AuditRetentionSemanticNames.RunReceiptId(key);
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            $"select deleted_count, committed_at from {_batches} where run_id=@run and batch_ordinal=@ordinal;",
+            connection)
+        {
+            CommandTimeout = _options.CommandTimeoutSeconds
+        };
+        command.Parameters.AddWithValue("run", runId);
+        command.Parameters.AddWithValue("ordinal", batchOrdinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            return null;
+
+        return new AuditRetentionBatchReceipt
+        {
+            BatchOrdinal = batchOrdinal,
+            DeletedCount = reader.GetInt32(0),
+            CommittedAt = reader.GetFieldValue<DateTimeOffset>(1)
+        };
     }
 
     public async ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(

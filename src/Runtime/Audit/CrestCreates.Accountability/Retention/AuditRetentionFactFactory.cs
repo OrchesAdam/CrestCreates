@@ -9,19 +9,18 @@ internal static class AuditRetentionFactFactory
 {
     public static AuditEnvelope Batch(
         AuditRetentionRunRecord run,
-        AuditRetentionBatchOutcome batch)
+        AuditRetentionBatchReceipt receipt)
     {
         var runId = AuditRetentionSemanticNames.RunReceiptId(run.Key);
         var tags = BaseTags(run.Key, run.ReasonCode, run.PolicyHash)
             .Add("retention.cutoff", run.Cutoff.ToString("O"))
-            .Add("retention.batch", batch.BatchOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture))
-            .Add("retention.deleted", batch.DeletedCount.ToString(System.Globalization.CultureInfo.InvariantCulture))
-            .Add("retention.remaining", batch.RemainingMayExist ? "true" : "false");
+            .Add("retention.batch", receipt.BatchOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .Add("retention.deleted", receipt.DeletedCount.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         return new AuditEnvelope
         {
-            AuditId = AuditRetentionSemanticNames.BatchFactAuditId(runId, batch.BatchOrdinal),
-            OccurredAt = batch.CommittedAt,
+            AuditId = AuditRetentionSemanticNames.BatchFactAuditId(runId, receipt.BatchOrdinal),
+            OccurredAt = receipt.CommittedAt,
             TenantId = run.Key.Scope.IsHost ? null : run.Key.Scope.TenantId,
             CorrelationId = run.CorrelationId,
             Actor = run.Actor,
@@ -33,14 +32,14 @@ internal static class AuditRetentionFactFactory
             Target = new AuditTarget
             {
                 Kind = AuditRetentionSemanticNames.BatchTargetKind,
-                Id = AuditRetentionSemanticNames.BatchReceiptId(runId, batch.BatchOrdinal),
-                Version = batch.BatchOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                Id = AuditRetentionSemanticNames.BatchReceiptId(runId, receipt.BatchOrdinal),
+                Version = receipt.BatchOrdinal.ToString(System.Globalization.CultureInfo.InvariantCulture)
             },
             Outcome = new AuditOutcome
             {
                 Status = AuditOutcomeStatuses.Succeeded,
-                Code = batch.DeletedCount == 0 ? "no-candidates" : "purged",
-                SafeSummary = $"deleted={batch.DeletedCount}; batches={batch.CommittedBatchCount}; remaining={batch.RemainingMayExist}"
+                Code = receipt.DeletedCount == 0 ? "no-candidates" : "purged",
+                SafeSummary = $"deleted={receipt.DeletedCount}; batch={receipt.BatchOrdinal}"
             },
             Tags = tags
         };

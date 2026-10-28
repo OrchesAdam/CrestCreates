@@ -46,17 +46,40 @@ never deleted; never output credentials.
   anti-resurrection FK plus repeatable typed backfill (invalid envelopes quarantined, originals
   unchanged). Sink dedup authority is the ledger and never rebuilds a purged body; batch/run/hold
   locks follow scope → run → record with receipts in the same transaction.
-- Evidence (local, 2026-10-27): Application admission 15/15; PostgreSQL retention 14/14; sink +
-  migration 5/5; kernel/composition 31/31; P08 real identity/permission/Setting/generated-HTTP
-  2/2 (rejections leave the provider untouched); NativeAOT PG `AotHost` publish/link/run
-  (linux-x64) emits eight per-case retention sentinels plus
-  `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`; fixture-only negative controls (wrong-count,
+- Evidence (local, 2026-10-27; superseded by the R1 evidence below): Application admission 15/15;
+  PostgreSQL retention 14/14; sink + migration 5/5; kernel/composition 31/31; P08 real
+  identity/permission/Setting/generated-HTTP 2/2 (rejections leave the provider untouched);
+  NativeAOT PG `AotHost` publish/link/run (linux-x64) emitted eight per-case retention sentinels
+  plus `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`; fixture-only negative controls (wrong-count,
   hold-filter, receipt-fault) exit non-zero and never emit the aggregate sentinel.
 - Support declaration: formal PostgreSQL retention V1 is **NativeAOT-verified** for the executed
   linux-x64 scenarios only. It does not cover EF/FreeSql/SqlSugar/MongoDB, other RIDs, Quartz
   identity/self-signed scheduling, or real authentication/Settings plumbing inside the native
   host (those admission paths are covered by the JIT P08 test). #132 closure is a design ruling;
   full retention acceptance follows this implementation review and explicit merge.
+- Review round R1 (2026-10-28, independent review of `221fd2bc`, 2 P1 + 2 P2, all fixed on the
+  branch): (1) terminal runs (`completed`/`budget-reached`/`cancelled`/`failed`) now reject new
+  batches at the store with `RETENTION_RUN_NOT_EXECUTABLE` before deleting/receiving, and the
+  executor converges the queued call to the persisted terminal result; (2) ambiguity recovery now
+  trusts the exact committed receipt plus the lock-authoritative finalization, so a stale read can
+  no longer report `failed`/0 after a committed delete, and cancellation returns a persisted
+  terminal state instead of overwriting `completed`; (3) batch facts derive only from the
+  immutable receipt (ordinal/deleted/committed-at), so recovery never folds several batches into
+  one fact and normal-commit/replay/recovery/export bodies are identical; (4) mirror outcomes
+  aggregate with first-failure precedence, and the design-required explicit receipt re-export is
+  now `IAuditRetentionService.ExportBatchAsync` + `AuditLogging.Retention.Export` +
+  `POST /api/audit-retention/batches/export` + `IAuditRetentionStore.ReadBatchAsync`.
+  R1 also found and fixed an export-blocking precision bug: `ComputeCutoff` now truncates to
+  microseconds so the in-memory run and the `timestamptz` round-trip agree, keeping one canonical
+  batch-fact hash (previously the export/replay mirror conflicted).
+- Evidence after R1 (local): Application retention 21/21; Accountability retention-filtered
+  38/38; PostgreSQL retention 20/20 (incl. cutoff round-trip); sink/migration integration filter
+  22/22; P08 2/2; AotHost JIT rehearsal green on all nine retention sentinels with the three
+  fixture-only negative controls exiting 21 and never emitting the aggregate sentinel. NativeAOT
+  publish/link/run re-run for R1 passed 1/1 (linux-x64): nine per-case sentinels including
+  `CRESTCREATES_AUDIT_RETENTION_NATIVE_EXPORT_OK`, the aggregate
+  `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`, and all three negative controls failing without it;
+  the controls are fixture store-decorator mutants, not real SQL/transaction mutations.
 
 ## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (final review passed; merge pending)
 
