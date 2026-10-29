@@ -104,6 +104,15 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                 "The persisted run was created with a different policy.");
         }
 
+        // The create-fault recovery read is evidence, not admission: the same-key binding must
+        // still hold, or a conflicting retry would execute a run admitted for another reason.
+        if (!string.Equals(run.ReasonCode, request.ReasonCode, StringComparison.Ordinal))
+        {
+            throw new AuditRetentionException(
+                AuditRetentionErrorCodes.RequestConflict,
+                "The audit retention request id is already bound to a different reason code.");
+        }
+
         if (run.State is not (AuditRetentionRunState.Running or AuditRetentionRunState.Unknown))
         {
             return StoredResult(run);
@@ -116,14 +125,18 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
         AuditRetentionMirrorOutcome? lastMirror = null;
         AuditRetentionMirrorOutcome? AggregateMirror() => firstMirrorFailure ?? lastMirror;
 
-        async ValueTask TrackMirrorAsync(AuditRetentionRunRecord currentRun, AuditRetentionBatchReceipt receipt)
+        void TrackMirrorFailure(AuditRetentionMirrorOutcome mirror)
         {
-            var mirror = await MirrorBatchAsync(currentRun, receipt).ConfigureAwait(false);
-            if (mirror is null)
-                return;
             lastMirror = mirror;
             if (mirror.IsFailure && firstMirrorFailure is null)
                 firstMirrorFailure = mirror;
+        }
+
+        async ValueTask TrackMirrorAsync(AuditRetentionRunRecord currentRun, AuditRetentionBatchReceipt receipt)
+        {
+            var mirror = await MirrorBatchAsync(currentRun, receipt).ConfigureAwait(false);
+            if (mirror is not null)
+                TrackMirrorFailure(mirror);
         }
 
         try
@@ -212,12 +225,15 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                         var latest = await TryReadRunAsync(store, request.Key).ConfigureAwait(false);
                         if (latest is null || latest.CommittedBatchCount < ordinal)
                         {
+                            // The exact receipt proves the batch committed; only the run row is
+                            // stale, so the commit fact must stay Committed while the terminal
+                            // state and any later batches remain unknown.
                             return Result(
                                 run,
                                 lastDeleted + observedReceipt.DeletedCount,
                                 Math.Max(lastBatches, ordinal),
                                 AuditRetentionRunState.Unknown,
-                                AuditRetentionCommitKnowledge.Unknown,
+                                AuditRetentionCommitKnowledge.Committed,
                                 remainingMayExist: true,
                                 AuditRetentionStopReasons.UnknownCommit,
                                 AggregateMirror());
@@ -267,14 +283,18 @@ public sealed class AuditRetentionExecutor : IAuditRetentionService
                         var settledReceipt = await TryReadBatchAsync(store, request.Key, ordinal).ConfigureAwait(false);
                         if (settledReceipt is null)
                         {
+                            // Finalization confirmed the commit under the scope/run lock; only the
+                            // receipt needed to rebuild the mirror is unreadable. Keep the committed
+                            // fact and report the mirror gap so an explicit export can retry later.
+                            TrackMirrorFailure(AuditRetentionMirrorOutcome.Failed("AUDIT_RETENTION_RECEIPT_UNAVAILABLE"));
                             return Result(
                                 finalized,
                                 finalized.CommittedDeletedCount,
                                 finalized.CommittedBatchCount,
-                                AuditRetentionRunState.Unknown,
-                                AuditRetentionCommitKnowledge.Unknown,
-                                remainingMayExist: true,
-                                AuditRetentionStopReasons.UnknownCommit,
+                                finalized.State,
+                                AuditRetentionCommitKnowledge.Committed,
+                                remainingMayExist: finalized.State != AuditRetentionRunState.Completed,
+                                finalized.StopReason,
                                 AggregateMirror());
                         }
 

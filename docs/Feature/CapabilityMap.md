@@ -367,8 +367,9 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 真实认证/权限/Setting/generated HTTP 组合由 JIT P08 覆盖，不推导原生认证链；自动 Quartz
 调度因缺少认证主体保持关闭，不属于已交付能力。PR #157 审查轮 R1 的 2 个 P1/2 个 P2
 （终态 run 仍可提交新批、恢复误报 failed/0 与取消覆盖 Completed、累计删除记入单批事实、
-后批镜像掩盖前批失败且缺显式导出）已修复并补入回归；原生负控为 fixture 内 store 装饰器
-变异，不等价于真实 SQL/事务变异。
+后批镜像掩盖前批失败且缺显式导出）与 R2 的 2 个 P2（创建故障恢复跳过 ReasonCode 绑定、
+确认提交后 receipt 读故障降级为 Unknown）已修复并补入回归；原生负控为 fixture 内 store
+装饰器变异，不等价于真实 SQL/事务变异。
 
 纪律：新增 retention Provider/RID/策略类型时按组合单独补证据，更新本表与 `memory.md`；
 不得从本节推导其他项目或组合的支持状态。

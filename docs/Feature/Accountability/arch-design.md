@@ -475,7 +475,16 @@ reconciliation, and a mirror outcome reported separately from the committed
 state. Reconciliation trusts only the exact committed receipt plus the
 lock-authoritative `FinalizeRunAsync` result: a single stale run read never
 produces a `Failed` claim or a zeroed count, and a terminal state won the
-earlier race is never overwritten by cancellation. Batch facts derive solely
+earlier race is never overwritten by cancellation. A create-fault recovery read
+is evidence, not admission: the recovered run must still match the request's
+policy hash and reason code, otherwise the call fails with
+`RETENTION_REQUEST_CONFLICT` before any batch runs (naturally changing
+snapshot/cutoff values are not treated as conflicts). When the locked
+finalization confirms the commit but the receipt needed to rebuild the mirror
+is temporarily unreadable, the result keeps the persisted state, counts, stop
+reason and `Committed` knowledge and reports only
+`MirrorOutcome = failed("AUDIT_RETENTION_RECEIPT_UNAVAILABLE")`, so the mirror
+gap never masquerades as an unknown transaction. Batch facts derive solely
 from the immutable receipt (ordinal, deleted count, commit time), so recovery
 cannot attribute several batches to one fact. Mirror outcomes aggregate across
 batches with failure precedence, so a later success cannot hide an earlier

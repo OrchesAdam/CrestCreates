@@ -80,6 +80,29 @@ never deleted; never output credentials.
   `CRESTCREATES_AUDIT_RETENTION_NATIVE_EXPORT_OK`, the aggregate
   `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`, and all three negative controls failing without it;
   the controls are fixture store-decorator mutants, not real SQL/transaction mutations.
+- Review round R2 (2026-10-29, independent review of `e95fdc84`; R1's seven assertions passed,
+  two new P2 fixed on the branch): (1) the create-fault recovery read now re-applies the same-key
+  binding admission — a recovered run whose policy hash or `ReasonCode` differs is rejected
+  (`RETENTION_POLICY_HASH_MISMATCH` / `RETENTION_REQUEST_CONFLICT`) before any batch runs, and
+  naturally changing `SnapshotAt`/cutoff is never treated as a conflict; (2) when the locked
+  finalization confirms the batch committed but the receipt needed to rebuild the mirror is
+  unreadable, the result keeps the persisted state, counts, stop reason and
+  `CommitKnowledge.Committed` and reports only `MirrorOutcome =
+  failed("AUDIT_RETENTION_RECEIPT_UNAVAILABLE")` so an explicit export can retry; an exactly read
+  receipt likewise keeps `Committed` even when the run row is stale. R2 regressions use test
+  wrappers at the existing fixture boundary (no new production fault switches): unit
+  `ExecuteAsync_RecoveredRunWithDifferentReason_RejectsBeforeExecutingBatch`,
+  `ExecuteAsync_ConfirmedFinalizationWithUnreadableReceipt_KeepsCommittedFactAndReportsMirrorFault`,
+  `ExecuteAsync_StaleRunWithExactReceipt_ReportsCommitDespiteUnknownState`; real PG
+  `Create_fault_recovery_rejects_a_different_reason_binding_without_deleting`,
+  `Create_fault_recovery_with_the_same_binding_resumes_the_run`,
+  `Confirmed_finalization_keeps_the_committed_fact_when_the_receipt_read_fails`.
+- Evidence after R2 (local): PostgreSQL retention 23/23; Accountability 155/155
+  (retention-filtered 41/41); Application 205/205; P08 2/2; AotHost JIT rehearsal green on all
+  nine retention sentinels; NativeAOT publish/link/run re-run passed 1/1 (linux-x64: nine
+  sentinels + aggregate sentinel, three fixture-only negative controls failing without it);
+  full solution build 0 errors. Native coverage scope is unchanged and still excludes real
+  authentication/Settings/Quartz.
 
 ## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (final review passed; merge pending)
 

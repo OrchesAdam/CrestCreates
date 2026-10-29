@@ -579,6 +579,78 @@ public sealed class PostgreSqlAuditRetentionTests(PostgreSqlRuntimeCollectionFix
     }
 
     [Fact]
+    public async Task Create_fault_recovery_rejects_a_different_reason_binding_without_deleting()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await using var dataSource = CreateDataSource(fixture.ConnectionString);
+        var inner = new PostgreSqlAuditRetentionStore(dataSource, lease.Options);
+        var original = RunRequest(AuditRetentionScope.ForTenant("tenant-a"), "reason-binding", Policy(30, 10));
+        await inner.CreateOrReadRunAsync(original);
+        var old = Snapshot.AddDays(-90);
+        await InsertBodyAsync(dataSource, lease.Options, "binding-body", "tenant-a", old, old);
+        var executor = new AuditRetentionExecutor([new CreateFaultStore(inner)]);
+        var conflicting = original with { ReasonCode = "retention.changed" };
+
+        var act = () => executor.ExecuteAsync(conflicting).AsTask();
+
+        (await act.Should().ThrowAsync<AuditRetentionException>())
+            .Which.Code.Should().Be(AuditRetentionErrorCodes.RequestConflict);
+        (await ReadBodyStateAsync(dataSource, lease.Options, "binding-body")).Should().Be("BodyPresent");
+        var persisted = (await inner.ReadRunAsync(original.Key))!;
+        persisted.CommittedBatchCount.Should().Be(0);
+        persisted.State.Should().Be(AuditRetentionRunState.Running);
+        (await inner.ReadBatchAsync(original.Key, 1)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Create_fault_recovery_with_the_same_binding_resumes_the_run()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await using var dataSource = CreateDataSource(fixture.ConnectionString);
+        var inner = new PostgreSqlAuditRetentionStore(dataSource, lease.Options);
+        var request = RunRequest(AuditRetentionScope.ForTenant("tenant-a"), "reason-control", Policy(30, 10));
+        await inner.CreateOrReadRunAsync(request);
+        var old = Snapshot.AddDays(-90);
+        await InsertBodyAsync(dataSource, lease.Options, "control-body", "tenant-a", old, old);
+        var executor = new AuditRetentionExecutor([new CreateFaultStore(inner)]);
+
+        var result = await executor.ExecuteAsync(request);
+
+        result.State.Should().Be(AuditRetentionRunState.Completed);
+        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.Committed);
+        result.CommittedDeletedCount.Should().Be(1);
+        (await ReadBodyStateAsync(dataSource, lease.Options, "control-body")).Should().Be("Purged");
+        (await inner.ReadBatchAsync(request.Key, 1))!.DeletedCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Confirmed_finalization_keeps_the_committed_fact_when_the_receipt_read_fails()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        await using var dataSource = CreateDataSource(fixture.ConnectionString);
+        var inner = new PostgreSqlAuditRetentionStore(dataSource, lease.Options);
+        var request = RunRequest(AuditRetentionScope.ForTenant("tenant-a"), "receipt-fault-run", Policy(30, 1));
+        var old = Snapshot.AddDays(-90);
+        await InsertBodyAsync(dataSource, lease.Options, "receipt-fault-body", "tenant-a", old, old);
+        var executor = new AuditRetentionExecutor([new ReceiptFaultStore(inner)]);
+
+        var result = await executor.ExecuteAsync(request);
+
+        result.State.Should().Be(AuditRetentionRunState.Completed);
+        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.Committed);
+        result.CommittedDeletedCount.Should().Be(1);
+        result.CommittedBatchCount.Should().Be(1);
+        result.RemainingMayExist.Should().BeFalse();
+        result.StopReason.Should().Be(AuditRetentionStopReasons.NoCandidates);
+        result.MirrorOutcome.Should().Be(AuditRetentionMirrorOutcome.Failed("AUDIT_RETENTION_RECEIPT_UNAVAILABLE"));
+        var persisted = (await inner.ReadRunAsync(request.Key))!;
+        persisted.State.Should().Be(AuditRetentionRunState.Completed);
+        persisted.CommittedDeletedCount.Should().Be(1);
+        (await ReadBodyStateAsync(dataSource, lease.Options, "receipt-fault-body")).Should().Be("Purged");
+        (await inner.ReadBatchAsync(request.Key, 1))!.DeletedCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task ReadBatch_returns_the_exact_receipt_and_null_for_unknown_ordinals()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();
@@ -669,6 +741,123 @@ public sealed class PostgreSqlAuditRetentionTests(PostgreSqlRuntimeCollectionFix
             long batchOrdinal,
             CancellationToken cancellationToken = default)
             => inner.ReadBatchAsync(key, batchOrdinal, cancellationToken);
+
+        public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
+            AuditRetentionRunFinalization finalization,
+            CancellationToken cancellationToken = default)
+            => inner.FinalizeRunAsync(finalization, cancellationToken);
+
+        public ValueTask<AuditHold> PlaceHoldAsync(
+            AuditHoldPlacement placement,
+            CancellationToken cancellationToken = default)
+            => inner.PlaceHoldAsync(placement, cancellationToken);
+
+        public ValueTask<AuditHold> ReleaseHoldAsync(
+            AuditHoldRelease release,
+            CancellationToken cancellationToken = default)
+            => inner.ReleaseHoldAsync(release, cancellationToken);
+    }
+
+    private sealed class CreateFaultStore(IAuditRetentionStore inner) : IAuditRetentionStore
+    {
+        private bool _failNextCreate = true;
+
+        public AuditRetentionStoreIdentity Identity => inner.Identity;
+
+        public ValueTask<AuditRetentionRunRecord> CreateOrReadRunAsync(
+            AuditRetentionRunRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            if (_failNextCreate)
+            {
+                _failNextCreate = false;
+                throw new IOException("review: create response lost before the run row was read");
+            }
+
+            return inner.CreateOrReadRunAsync(request, cancellationToken);
+        }
+
+        public ValueTask<AuditRetentionPreview> PreviewAsync(
+            AuditRetentionPreviewRequest request,
+            CancellationToken cancellationToken = default)
+            => inner.PreviewAsync(request, cancellationToken);
+
+        public ValueTask<AuditRetentionBatchOutcome> ExecuteBatchAsync(
+            AuditRetentionBatchRequest request,
+            CancellationToken cancellationToken = default)
+            => inner.ExecuteBatchAsync(request, cancellationToken);
+
+        public ValueTask<AuditRetentionRunRecord?> ReadRunAsync(
+            AuditRetentionRunKey key,
+            CancellationToken cancellationToken = default)
+            => inner.ReadRunAsync(key, cancellationToken);
+
+        public ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+            AuditRetentionRunKey key,
+            long batchOrdinal,
+            CancellationToken cancellationToken = default)
+            => inner.ReadBatchAsync(key, batchOrdinal, cancellationToken);
+
+        public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
+            AuditRetentionRunFinalization finalization,
+            CancellationToken cancellationToken = default)
+            => inner.FinalizeRunAsync(finalization, cancellationToken);
+
+        public ValueTask<AuditHold> PlaceHoldAsync(
+            AuditHoldPlacement placement,
+            CancellationToken cancellationToken = default)
+            => inner.PlaceHoldAsync(placement, cancellationToken);
+
+        public ValueTask<AuditHold> ReleaseHoldAsync(
+            AuditHoldRelease release,
+            CancellationToken cancellationToken = default)
+            => inner.ReleaseHoldAsync(release, cancellationToken);
+    }
+
+    private sealed class ReceiptFaultStore(IAuditRetentionStore inner) : IAuditRetentionStore
+    {
+        private AuditRetentionBatchRequest? _pending;
+
+        public AuditRetentionStoreIdentity Identity => inner.Identity;
+
+        public ValueTask<AuditRetentionRunRecord> CreateOrReadRunAsync(
+            AuditRetentionRunRequest request,
+            CancellationToken cancellationToken = default)
+            => inner.CreateOrReadRunAsync(request, cancellationToken);
+
+        public ValueTask<AuditRetentionPreview> PreviewAsync(
+            AuditRetentionPreviewRequest request,
+            CancellationToken cancellationToken = default)
+            => inner.PreviewAsync(request, cancellationToken);
+
+        public ValueTask<AuditRetentionBatchOutcome> ExecuteBatchAsync(
+            AuditRetentionBatchRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            _pending = request;
+            throw new IOException("review: commit response lost while the batch completed");
+        }
+
+        public async ValueTask<AuditRetentionRunRecord?> ReadRunAsync(
+            AuditRetentionRunKey key,
+            CancellationToken cancellationToken = default)
+        {
+            var stale = await inner.ReadRunAsync(key, cancellationToken);
+            if (_pending is not null)
+            {
+                var pending = _pending;
+                _pending = null;
+                await inner.ExecuteBatchAsync(pending, cancellationToken);
+            }
+
+            return stale;
+        }
+
+        public ValueTask<AuditRetentionBatchReceipt?> ReadBatchAsync(
+            AuditRetentionRunKey key,
+            long batchOrdinal,
+            CancellationToken cancellationToken = default)
+            => throw new IOException("review: receipt read unavailable after the commit");
 
         public ValueTask<AuditRetentionRunRecord> FinalizeRunAsync(
             AuditRetentionRunFinalization finalization,

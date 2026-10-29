@@ -536,7 +536,13 @@ Operational notes:
   `running` run or returns the persisted result;
 - when a batch receipt was committed but the response was lost,
   `commitKnowledge = unknown` and the persisted counters/receipt remain the
-  authority — do not read that as "nothing deleted";
+  authority — do not read that as "nothing deleted"; once the locked
+  finalization confirms the commit, the result reports `committed` even if the
+  receipt needed for the mirror is temporarily unreadable, and the gap surfaces
+  only as `mirrorStatus = failed` / `AUDIT_RETENTION_RECEIPT_UNAVAILABLE`;
+- a retry that recovers a run after a create fault still enforces the same-key
+  binding: a different policy hash or reason code fails with
+  `RETENTION_REQUEST_CONFLICT` and deletes nothing;
 - batch facts are derived from the immutable receipt, so normal commit, replay,
   recovery and export produce the same audit body;
 - the run's `mirrorStatus`/`mirrorCode` report the first failed mirror across

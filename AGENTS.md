@@ -402,9 +402,10 @@ TestBase
   V1 限界：仅 PostgreSQL 固定库、Global 期限、单条 hold，延期其他 Provider/RID、按租户策略、
   批量/法务 hold、archive/WORM、元数据 GC、自动调度（当前 scheduler 不建立认证主体）。
   支持声明：正式 PostgreSQL retention 场景为 **NativeAOT-verified（linux-x64，仅已执行场景）**；
-  PR #157 审查轮 R1 的 2 个 P1/2 个 P2 已修复并补入回归；真实身份/权限/Setting/HTTP 组合由
-  JIT P08 覆盖，不推导原生认证链；原生负控是 fixture 内 store 装饰器变异，不等价于真实
-  SQL/事务变异。证据与 P01–P09 映射见实施计划与 `memory.md`。
+  PR #157 审查轮 R1 的 2 个 P1/2 个 P2 与 R2 的 2 个 P2 已修复并补入回归（终态拒绝新批、
+  恢复绑定校验、receipt-only 事实、镜像首败优先与显式导出、确认提交后 receipt 读故障不降级）；
+  真实身份/权限/Setting/HTTP 组合由 JIT P08 覆盖，不推导原生认证链；原生负控是 fixture 内
+  store 装饰器变异，不等价于真实 SQL/事务变异。证据与 P01–P09 映射见实施计划与 `memory.md`。
 - CRUD 主链（#128 已实施并合并，PR #150，merge commit `196b6f66`）：formal 链 = 真实 `[GenerateCrudService]` 声明 + BuildTasks 前置物化 + JsonContracts root 闭合 + ExplicitHost typed HTTP 投影 + typed query adapter + 生成 JSON context + 唯一 UoW（`[UnitOfWorkMo]` 织入后经生成服务 `ServiceProvider` 成员接入内核）；旧 bundle/Controller/Legacy 路径已随 #129/PR #152 归档退出（merge commit `2f4c5402`），正式链不保留双轨。证据与支持声明见本文件「平台能力」与 `docs/superpowers/plans/2026-10-14-issue-128-issues-log.md`。
 - 权限系统：授予、撤销、缓存、租户边界、SuperAdmin、AOP 已收口。
 - 后台作业：ISchedulerService + Quartz + 重试策略 + 租户上下文。

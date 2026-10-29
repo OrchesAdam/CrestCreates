@@ -96,3 +96,17 @@ R1 后本地验证：Accountability 152/152、Application 205/205、PG retention
 cutoff 回归）、PG sink/迁移过滤 22/22、P08 2/2、AotHost JIT 演练九个 retention sentinel
 全绿且三负控 exit 21 无总 sentinel；NativeAOT publish/link/run 复跑 1/1 通过（linux-x64，
 九个 per-case sentinel 含 `EXPORT_OK`、总 sentinel、三负控均失败且不含总 sentinel）。
+
+## 审查轮 R2 修复记录（2026-10-29，对 `e95fdc84` 的复审）
+
+R1 七条独立断言通过；R2 另发现两项 P2，均在本分支修复并补入回归：
+
+| 发现 | 修复 | 回归 |
+| --- | --- | --- |
+| P2 创建故障恢复跳过 ReasonCode 绑定，冲突请求仍会删除正文 | `AuditRetentionExecutor` 在 `CreateOrReadRunAsync` 之后统一补做同 key 绑定校验：policy hash 不符 → `RETENTION_POLICY_HASH_MISMATCH`，ReasonCode 不符 → `RETENTION_REQUEST_CONFLICT`；恢复读取只作证据，不替代 admission，且不比较自然变化的 SnapshotAt/Cutoff | `ExecuteAsync_RecoveredRunWithDifferentReason_RejectsBeforeExecutingBatch`；PG `Create_fault_recovery_rejects_a_different_reason_binding_without_deleting`（零删除/零 receipt/状态不变）；同绑定控制 `Create_fault_recovery_with_the_same_binding_resumes_the_run` |
+| P2 锁内已确认 Completed/删除 1 条，却因镜像 receipt 读取失败降级为 Unknown | 权威终结已确认提交时保留 State/计数/StopReason/`CommitKnowledge.Committed`；receipt 暂时不可读只记 `MirrorOutcome = failed("AUDIT_RETENTION_RECEIPT_UNAVAILABLE")`，由有权限的显式导出重试；精确 receipt 已读到时同样保留 Committed（陈旧 run 只影响终态与后续未知） | `ExecuteAsync_ConfirmedFinalizationWithUnreadableReceipt_KeepsCommittedFactAndReportsMirrorFault`、`ExecuteAsync_StaleRunWithExactReceipt_ReportsCommitDespiteUnknownState`；PG `Confirmed_finalization_keeps_the_committed_fact_when_the_receipt_read_fails`（真实 PG 丢响应 + receipt 读故障） |
+
+R2 后本地验证：Accountability 155/155（retention 过滤 41/41）、Application 205/205、
+PG retention 23/23、P08 2/2、全量构建 0 错误；AotHost JIT 演练九个 retention sentinel 全绿；
+NativeAOT publish/link/run 复跑 1/1 通过（linux-x64，九 sentinel + 总 sentinel + 三负控）。
+R2 故障均以测试 wrapper 在既有 fixture 边界注入，不新增生产公开故障开关。

@@ -320,6 +320,80 @@ public sealed class AuditRetentionExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_RecoveredRunWithDifferentReason_RejectsBeforeExecutingBatch()
+    {
+        var request = Request();
+        var store = new FakeStore();
+        store.CreateOrRead = _ => throw new IOException("connection reset after insert");
+        store.Read = _ => ValueTask.FromResult<AuditRetentionRunRecord?>(
+            NewRun(request, AuditRetentionRunState.Running, reasonCode: "retention.changed"));
+        var executor = CreateExecutor(store, new FakeRecorder(), new MutableTimeProvider { Now = Snapshot });
+
+        var act = () => executor.ExecuteAsync(request).AsTask();
+
+        (await act.Should().ThrowAsync<AuditRetentionException>())
+            .Which.Code.Should().Be(AuditRetentionErrorCodes.RequestConflict);
+        store.BatchOrdinals.Should().BeEmpty();
+        store.Finalizations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ConfirmedFinalizationWithUnreadableReceipt_KeepsCommittedFactAndReportsMirrorFault()
+    {
+        var request = Request();
+        var store = new FakeStore();
+        store.NextBatch = _ => throw new IOException("connection reset after commit");
+        store.Read = _ => ValueTask.FromResult<AuditRetentionRunRecord?>(null);
+        store.ReadBatch = (_, _) => throw new IOException("receipt read unavailable");
+        store.Finalize = _ => ValueTask.FromResult(NewRun(
+            request,
+            AuditRetentionRunState.Completed,
+            deleted: 1,
+            batches: 1,
+            stopReason: AuditRetentionStopReasons.NoCandidates));
+        var executor = CreateExecutor(store, new FakeRecorder(), new MutableTimeProvider { Now = Snapshot });
+
+        var result = await executor.ExecuteAsync(request);
+
+        result.State.Should().Be(AuditRetentionRunState.Completed);
+        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.Committed);
+        result.CommittedDeletedCount.Should().Be(1);
+        result.CommittedBatchCount.Should().Be(1);
+        result.RemainingMayExist.Should().BeFalse();
+        result.StopReason.Should().Be(AuditRetentionStopReasons.NoCandidates);
+        result.MirrorOutcome.Should().Be(AuditRetentionMirrorOutcome.Failed("AUDIT_RETENTION_RECEIPT_UNAVAILABLE"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_StaleRunWithExactReceipt_ReportsCommitDespiteUnknownState()
+    {
+        var request = Request();
+        var store = new FakeStore();
+        store.NextBatch = _ => throw new IOException("connection reset after commit");
+        store.Run = NewRun(request, AuditRetentionRunState.Running, deleted: 0, batches: 0);
+        store.Receipts[1] = new AuditRetentionBatchReceipt
+        {
+            BatchOrdinal = 1,
+            DeletedCount = 4,
+            CommittedAt = Snapshot
+        };
+        var recorder = new FakeRecorder();
+        var executor = CreateExecutor(store, recorder, new MutableTimeProvider { Now = Snapshot });
+
+        var result = await executor.ExecuteAsync(request);
+
+        result.State.Should().Be(AuditRetentionRunState.Unknown);
+        result.CommitKnowledge.Should().Be(AuditRetentionCommitKnowledge.Committed);
+        result.CommittedDeletedCount.Should().Be(4);
+        result.CommittedBatchCount.Should().Be(1);
+        result.RemainingMayExist.Should().BeTrue();
+        result.StopReason.Should().Be(AuditRetentionStopReasons.UnknownCommit);
+        result.MirrorOutcome.Should().Be(AuditRetentionMirrorOutcome.Succeeded);
+        recorder.Envelopes.Should().ContainSingle()
+            .Which.Tags["retention.deleted"].Should().Be("4");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_MirrorRejection_IsReportedWithoutChangingRunState()
     {
         var request = Request();
@@ -748,7 +822,8 @@ public sealed class AuditRetentionExecutorTests
         long batches = 0,
         string? stopReason = null,
         string? policyHash = null,
-        DateTimeOffset? updatedAt = null)
+        DateTimeOffset? updatedAt = null,
+        string? reasonCode = null)
         => new()
         {
             Key = request.Key,
@@ -756,7 +831,7 @@ public sealed class AuditRetentionExecutorTests
             PolicyHash = policyHash ?? request.Policy.ComputeHash(),
             SnapshotAt = request.SnapshotAt,
             Cutoff = request.Cutoff,
-            ReasonCode = request.ReasonCode,
+            ReasonCode = reasonCode ?? request.ReasonCode,
             Actor = request.Actor,
             CorrelationId = request.CorrelationId,
             State = state,
