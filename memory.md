@@ -20,6 +20,97 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
+## 2026-10-27 — Issue #132 audit retention governance (V1 implemented; merge pending)
+
+- Branch `feat/issue-132-audit-retention-governance-20261027-180000`, based on master `5f4cfc8f`.
+  Not merged; CI manually disabled; local execution is the gate. Design and implementation plan:
+  [design](docs/superpowers/specs/2026-10-27-issue-132-audit-retention-governance-design.md),
+  [plan](docs/superpowers/plans/2026-10-27-issue-132-audit-retention-governance-implementation.md).
+- V1 scope: PostgreSQL fixed database, Global retention settings, explicit Host or tenant scope
+  (no AllTenants), dual-time cutoff (`OccurredAt` + `FirstAcceptedAt`), single-record holds with
+  version/receipts, bounded body purge with atomic batch receipts, idempotent sink after purge,
+  governance/quarantine protection. Deferred: other ORM providers, per-tenant policy, bulk/legal
+  hold classes, archive/WORM, metadata GC, archive restore, and automatic scheduled execution
+  (the scheduler adapter establishes no authenticated principal, so automatic registration stays off).
+- Contracts: `CrestCreates.Accountability.Abstractions/Retention` (scope, policy + canonical hash,
+  run/batch/hold/result, `IAuditRetentionStore`). Kernel `AuditRetentionExecutor`: persisted-policy
+  binding, persisted batch budget, cancellation finalize, commit-Unknown → receipt reconciliation,
+  mirror outcome reported separately from commit. Application admission
+  (`AuditRetentionAppService`) is the single identity/permission/Setting/tenant gate shared by HTTP,
+  direct DI and `AuditRetentionJob`; host tenant names resolve through `ITenantProvider` to the
+  authoritative id. Generated HTTP projection is the platform anchor
+  `AddCrestAuditRetentionHttp()` (`/api/audit-retention/*`). Legacy
+  `AuditLogCleanupAppService`/`DeleteOlderThanAsync`/date cleanup DTO archived to
+  `99_RecycleBin/issue-132-audit-retention/`.
+- PostgreSQL: V016 ledger/runs/batches/holds/hold receipts/scope locks + body state, V017
+  anti-resurrection FK plus repeatable typed backfill (invalid envelopes quarantined, originals
+  unchanged). Sink dedup authority is the ledger and never rebuilds a purged body; batch/run/hold
+  locks follow scope → run → record with receipts in the same transaction.
+- Evidence (local, 2026-10-27; superseded by the R1 evidence below): Application admission 15/15;
+  PostgreSQL retention 14/14; sink + migration 5/5; kernel/composition 31/31; P08 real
+  identity/permission/Setting/generated-HTTP 2/2 (rejections leave the provider untouched);
+  NativeAOT PG `AotHost` publish/link/run (linux-x64) emitted eight per-case retention sentinels
+  plus `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`; fixture-only negative controls (wrong-count,
+  hold-filter, receipt-fault) exit non-zero and never emit the aggregate sentinel.
+- Support declaration: formal PostgreSQL retention V1 is **NativeAOT-verified** for the executed
+  linux-x64 scenarios only. It does not cover EF/FreeSql/SqlSugar/MongoDB, other RIDs, Quartz
+  identity/self-signed scheduling, or real authentication/Settings plumbing inside the native
+  host (those admission paths are covered by the JIT P08 test). #132 closure is a design ruling;
+  full retention acceptance follows this implementation review and explicit merge.
+- Review round R1 (2026-10-28, independent review of `221fd2bc`, 2 P1 + 2 P2, all fixed on the
+  branch): (1) terminal runs (`completed`/`budget-reached`/`cancelled`/`failed`) now reject new
+  batches at the store with `RETENTION_RUN_NOT_EXECUTABLE` before deleting/receiving, and the
+  executor converges the queued call to the persisted terminal result; (2) ambiguity recovery now
+  trusts the exact committed receipt plus the lock-authoritative finalization, so a stale read can
+  no longer report `failed`/0 after a committed delete, and cancellation returns a persisted
+  terminal state instead of overwriting `completed`; (3) batch facts derive only from the
+  immutable receipt (ordinal/deleted/committed-at), so recovery never folds several batches into
+  one fact and normal-commit/replay/recovery/export bodies are identical; (4) mirror outcomes
+  aggregate with first-failure precedence, and the design-required explicit receipt re-export is
+  now `IAuditRetentionService.ExportBatchAsync` + `AuditLogging.Retention.Export` +
+  `POST /api/audit-retention/batches/export` + `IAuditRetentionStore.ReadBatchAsync`.
+  R1 also found and fixed an export-blocking precision bug: `ComputeCutoff` now truncates to
+  microseconds so the in-memory run and the `timestamptz` round-trip agree, keeping one canonical
+  batch-fact hash (previously the export/replay mirror conflicted).
+- Evidence after R1 (local): Application retention 21/21; Accountability retention-filtered
+  38/38; PostgreSQL retention 20/20 (incl. cutoff round-trip); sink/migration integration filter
+  22/22; P08 2/2; AotHost JIT rehearsal green on all nine retention sentinels with the three
+  fixture-only negative controls exiting 21 and never emitting the aggregate sentinel. NativeAOT
+  publish/link/run re-run for R1 passed 1/1 (linux-x64): nine per-case sentinels including
+  `CRESTCREATES_AUDIT_RETENTION_NATIVE_EXPORT_OK`, the aggregate
+  `CRESTCREATES_AUDIT_RETENTION_NATIVE_OK`, and all three negative controls failing without it;
+  the controls are fixture store-decorator mutants, not real SQL/transaction mutations.
+- Review round R2 (2026-10-29, independent review of `e95fdc84`; R1's seven assertions passed,
+  two new P2 fixed on the branch): (1) the create-fault recovery read now re-applies the same-key
+  binding admission — a recovered run whose policy hash or `ReasonCode` differs is rejected
+  (`RETENTION_POLICY_HASH_MISMATCH` / `RETENTION_REQUEST_CONFLICT`) before any batch runs, and
+  naturally changing `SnapshotAt`/cutoff is never treated as a conflict; (2) when the locked
+  finalization confirms the batch committed but the receipt needed to rebuild the mirror is
+  unreadable, the result keeps the persisted state, counts, stop reason and
+  `CommitKnowledge.Committed` and reports only `MirrorOutcome =
+  failed("AUDIT_RETENTION_RECEIPT_UNAVAILABLE")` so an explicit export can retry; an exactly read
+  receipt likewise keeps `Committed` even when the run row is stale. R2 regressions use test
+  wrappers at the existing fixture boundary (no new production fault switches): unit
+  `ExecuteAsync_RecoveredRunWithDifferentReason_RejectsBeforeExecutingBatch`,
+  `ExecuteAsync_ConfirmedFinalizationWithUnreadableReceipt_KeepsCommittedFactAndReportsMirrorFault`,
+  `ExecuteAsync_StaleRunWithExactReceipt_ReportsCommitDespiteUnknownState`; real PG
+  `Create_fault_recovery_rejects_a_different_reason_binding_without_deleting`,
+  `Create_fault_recovery_with_the_same_binding_resumes_the_run`,
+  `Confirmed_finalization_keeps_the_committed_fact_when_the_receipt_read_fails`.
+- Evidence after R2 (local): PostgreSQL retention 23/23; Accountability 155/155
+  (retention-filtered 41/41); Application 205/205; P08 2/2; AotHost JIT rehearsal green on all
+  nine retention sentinels; NativeAOT publish/link/run re-run passed 1/1 (linux-x64: nine
+  sentinels + aggregate sentinel, three fixture-only negative controls failing without it);
+  full solution build 0 errors. Native coverage scope is unchanged and still excludes real
+  authentication/Settings/Quartz.
+- Review round R3 (2026-10-30): both R2 P2s closed, no new blockers; independent validation
+  PostgreSQL retention 23/23, Accountability 155/155, original R1/R2 probes 10/10 and NativeAOT
+  1/1 (nine scenario sentinels, aggregate sentinel, three negative controls). Technical verdict:
+  mergeable; PR #157 merge is the maintainer's action, CI stays disabled. S0 gap evidence
+  (`docs/review/2026-10-27-issue-132-design-gap-evidence.*`) and the author-side reproduction
+  probe (`docs/review/probes/issue132/`) are committed with this branch as baseline
+  characterization, not production acceptance.
+
 ## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (final review passed; merge pending)
 
 - Branch `feat/issue-130-provider-matrix-soft-delete-20261022-104210`, PR #154, based on master
@@ -51,7 +142,8 @@ never deleted; never output credentials.
 
 - Core platform mainlines: Tenant / Setting / Feature / Permission / BackgroundJobs /
   ObjectMapping / Dynamic API (compile-time generated) / Workflow + HumanTask /
-  Audit (write-redact-query). Audit retention (cleanup/governance) not delivered.
+  Audit (write-redact-query). Audit retention V1 (PostgreSQL) is implemented on the #132
+  branch (merge pending); other providers/policies remain deferred.
 - Module system: compile-time aggregation only (BuildTasks + generator), closed.
 - Agent governance plane (Authoring -> deterministic review -> Control Plane):
   review artifact store and package/evidence artifact store with InMemory +

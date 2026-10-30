@@ -38,6 +38,11 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             ValidateHistory(applied, allowPending: true);
             foreach (var migration in Catalog.Skip(applied.Count))
             {
+                if (string.Equals(migration.Version, PostgreSqlAuditRetentionLedgerBackfill.Version, StringComparison.Ordinal))
+                {
+                    await PostgreSqlAuditRetentionLedgerBackfill.RunAsync(connection, _options, cancellationToken).ConfigureAwait(false);
+                }
+
                 await PostgreSqlRuntimeTestHooks.NotifyBeforeMigrationAsync(migration.Version, cancellationToken).ConfigureAwait(false);
                 await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
                 await ExecuteAsync(connection, migration.Sql.Replace("{schema}", QuotedSchema(), StringComparison.Ordinal), [], cancellationToken, transaction).ConfigureAwait(false);
@@ -196,6 +201,12 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             ,"agent_review_artifacts"
             ,"agent_package_artifacts"
             ,"agent_evidence_artifacts"
+            ,"runtime_audit_retention_ledger"
+            ,"runtime_audit_retention_scope_locks"
+            ,"runtime_audit_retention_runs"
+            ,"runtime_audit_retention_batches"
+            ,"runtime_audit_retention_holds"
+            ,"runtime_audit_retention_hold_receipts"
         };
         var count = await ScalarAsync<long>(connection,
             "select count(*) from information_schema.tables where table_schema=@schema and table_name = any(@tables);",
@@ -721,8 +732,85 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             new("runtime_audit_envelopes", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["sink_id"] = Text, ["audit_id"] = Text, ["integrity_json"] = Json,
-                ["envelope_json"] = Json, ["accepted_at"] = Timestamp
-            }, ["sink_id", "audit_id"], [], [], []),
+                ["envelope_json"] = Json, ["accepted_at"] = Timestamp, ["body_state"] = Text
+            }, ["sink_id", "audit_id"],
+             [new("ck_runtime_audit_envelopes_body_state", "check ((body_state = 'bodypresent') or (body_state = 'quarantined'))")],
+             [new("uq_runtime_audit_envelopes_identity", ["sink_id", "audit_id", "body_state"], "")],
+             [new("sink_id, audit_id, body_state", "runtime_audit_retention_ledger", "sink_id, audit_id, body_state", Deferrable: false, InitiallyDeferred: false, DeleteAction: "RESTRICT")]),
+            new("runtime_audit_retention_ledger", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["sink_id"] = Text, ["audit_id"] = Text, ["integrity_json"] = NullableJson,
+                ["first_accepted_at"] = Timestamp, ["scope_kind"] = Text, ["tenant_id"] = Text,
+                ["occurred_at"] = Timestamp, ["body_state"] = Text, ["protection"] = Text,
+                ["quarantine_reason"] = NullableText, ["projected_at"] = Timestamp
+            }, ["sink_id", "audit_id"],
+             [new("ck_runtime_audit_retention_ledger_scope", "check (((scope_kind = 'host') and (tenant_id = '')) or ((scope_kind = 'tenant') and (tenant_id <> '')) or ((scope_kind = 'quarantine') and (tenant_id = '')))"),
+              new("ck_runtime_audit_retention_ledger_state", "check ((body_state = 'bodypresent') or (body_state = 'purged') or (body_state = 'quarantined'))"),
+              new("ck_runtime_audit_retention_ledger_protection", "check ((protection = 'none') or (protection = 'governance'))"),
+              new("ck_runtime_audit_retention_ledger_quarantine", "check ((body_state = 'quarantined') = (quarantine_reason is not null))")],
+             [new("uq_runtime_audit_retention_ledger_state", ["sink_id", "audit_id", "body_state"], ""),
+              new("ix_runtime_audit_retention_candidates", ["sink_id", "scope_kind", "tenant_id", "first_accepted_at", "audit_id"], "body_state = 'bodypresent' and protection = 'none'", Unique: false)],
+             []),
+            new("runtime_audit_retention_scope_locks", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["sink_id"] = Text, ["scope_kind"] = Text, ["tenant_id"] = Text, ["created_at"] = Timestamp
+            }, ["sink_id", "scope_kind", "tenant_id"],
+             [new("ck_runtime_audit_retention_scope_locks_scope", "check (((scope_kind = 'host') and (tenant_id = '')) or ((scope_kind = 'tenant') and (tenant_id <> '')))")],
+             [], []),
+            new("runtime_audit_retention_runs", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["run_id"] = Text, ["store_id"] = Text, ["sink_id"] = Text, ["scope_kind"] = Text,
+                ["tenant_id"] = Text, ["request_id"] = Text, ["reason_code"] = Text,
+                ["actor_kind"] = Text, ["actor_id"] = Text, ["actor_display_name"] = NullableText,
+                ["correlation_id"] = Text, ["retention_days"] = Integer, ["batch_size"] = Integer,
+                ["max_batches"] = Integer, ["max_run_seconds"] = Integer, ["policy_hash"] = Text,
+                ["snapshot_at"] = Timestamp, ["cutoff"] = Timestamp, ["state"] = Integer,
+                ["committed_deleted_count"] = BigInt, ["committed_batch_count"] = BigInt,
+                ["stop_reason"] = NullableText, ["created_at"] = Timestamp, ["updated_at"] = Timestamp
+            }, ["run_id"],
+             [new("ck_runtime_audit_retention_runs_scope", "check (((scope_kind = 'host') and (tenant_id = '')) or ((scope_kind = 'tenant') and (tenant_id <> '')))"),
+              new("ck_runtime_audit_retention_runs_state", "check ((state >= 1) and (state <= 6))"),
+              new("ck_runtime_audit_retention_runs_policy", "check ((retention_days > 0) and (batch_size > 0) and (max_batches > 0) and (max_run_seconds > 0))"),
+              new("ck_runtime_audit_retention_runs_counts", "check ((committed_deleted_count >= 0) and (committed_batch_count >= 0))")],
+             [new("uq_runtime_audit_retention_runs_request", ["store_id", "sink_id", "scope_kind", "tenant_id", "request_id"], "")],
+             []),
+            new("runtime_audit_retention_batches", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["run_id"] = Text, ["batch_ordinal"] = BigInt, ["sink_id"] = Text,
+                ["scope_kind"] = Text, ["tenant_id"] = Text, ["actor_kind"] = Text,
+                ["actor_id"] = Text, ["policy_hash"] = Text, ["cutoff"] = Timestamp,
+                ["batch_size"] = Integer, ["deleted_count"] = Integer, ["selected_digest"] = Text,
+                ["committed_at"] = Timestamp
+            }, ["run_id", "batch_ordinal"],
+             [new("ck_runtime_audit_retention_batches_values", "check ((batch_ordinal > 0) and (deleted_count >= 0) and (deleted_count <= batch_size))"),
+              new("ck_runtime_audit_retention_batches_scope", "check (((scope_kind = 'host') and (tenant_id = '')) or ((scope_kind = 'tenant') and (tenant_id <> '')))")],
+             [],
+             [new("run_id", "runtime_audit_retention_runs", "run_id", Deferrable: false, InitiallyDeferred: false, DeleteAction: "RESTRICT")]),
+            new("runtime_audit_retention_holds", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["hold_id"] = Text, ["sink_id"] = Text, ["audit_id"] = Text, ["scope_kind"] = Text,
+                ["tenant_id"] = Text, ["reason_code"] = Text, ["actor_kind"] = Text,
+                ["actor_id"] = Text, ["actor_display_name"] = NullableText, ["correlation_id"] = Text,
+                ["version"] = BigInt, ["created_at"] = Timestamp, ["released_at"] = NullableTimestamp,
+                ["release_reason_code"] = NullableText, ["release_actor_kind"] = NullableText,
+                ["release_actor_id"] = NullableText, ["release_correlation_id"] = NullableText
+            }, ["hold_id"],
+             [new("ck_runtime_audit_retention_holds_version", "check (version > 0)"),
+              new("ck_runtime_audit_retention_holds_release", "check (((released_at is null) and (release_reason_code is null) and (release_actor_kind is null) and (release_actor_id is null) and (release_correlation_id is null)) or ((released_at is not null) and (release_reason_code is not null) and (release_actor_kind is not null) and (release_actor_id is not null) and (release_correlation_id is not null)))"),
+              new("ck_runtime_audit_retention_holds_scope", "check (((scope_kind = 'host') and (tenant_id = '')) or ((scope_kind = 'tenant') and (tenant_id <> '')))")],
+             [new("ix_runtime_audit_retention_holds_active", ["sink_id", "audit_id"], "released_at is null", Unique: false)],
+             [new("sink_id, audit_id", "runtime_audit_retention_ledger", "sink_id, audit_id", Deferrable: false, InitiallyDeferred: false, DeleteAction: "RESTRICT")]),
+            new("runtime_audit_retention_hold_receipts", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
+            {
+                ["hold_id"] = Text, ["version"] = BigInt, ["action"] = Text, ["sink_id"] = Text,
+                ["audit_id"] = Text, ["scope_kind"] = Text, ["tenant_id"] = Text,
+                ["reason_code"] = Text, ["actor_kind"] = Text, ["actor_id"] = Text,
+                ["correlation_id"] = Text, ["committed_at"] = Timestamp
+            }, ["hold_id", "version"],
+             [new("ck_runtime_audit_retention_hold_receipts_action", "check ((action = 'place') or (action = 'release'))"),
+              new("ck_runtime_audit_retention_hold_receipts_version", "check (version > 0)")],
+             [],
+             [new("hold_id", "runtime_audit_retention_holds", "hold_id", Deferrable: false, InitiallyDeferred: false, DeleteAction: "RESTRICT")]),
             new("agent_tool_pre_dispatch_checkpoints", new Dictionary<string, (string Type, string Nullable, string? Collation)>(StringComparer.Ordinal)
             {
                 ["tenant_id"] = Text, ["audit_id"] = Text, ["attempt_id"] = Text,
@@ -1765,6 +1853,177 @@ public sealed class PostgreSqlRuntimeMigrationRunner
             );
             create index ix_agent_evidence_artifacts_package
                 on {schema}.agent_evidence_artifacts (tenant_id, package_preview_id, captured_at_utc_ticks, evidence_preview_id);
+            """),
+        new RuntimeMigration("V016", "audit_retention_ledger_and_receipts", """
+            create table {schema}.runtime_audit_retention_ledger (
+                sink_id text not null,
+                audit_id text not null,
+                integrity_json jsonb null,
+                first_accepted_at timestamptz not null,
+                scope_kind text not null,
+                tenant_id text not null default '',
+                occurred_at timestamptz not null,
+                body_state text not null,
+                protection text not null,
+                quarantine_reason text null,
+                projected_at timestamptz not null default clock_timestamp(),
+                constraint pk_runtime_audit_retention_ledger primary key (sink_id, audit_id),
+                constraint uq_runtime_audit_retention_ledger_state unique (sink_id, audit_id, body_state),
+                constraint ck_runtime_audit_retention_ledger_scope check (
+                    ((scope_kind = 'host') and (tenant_id = ''))
+                    or ((scope_kind = 'tenant') and (tenant_id <> ''))
+                    or ((scope_kind = 'quarantine') and (tenant_id = ''))),
+                constraint ck_runtime_audit_retention_ledger_state check (
+                    (body_state = 'BodyPresent') or (body_state = 'Purged') or (body_state = 'Quarantined')),
+                constraint ck_runtime_audit_retention_ledger_protection check (
+                    (protection = 'none') or (protection = 'governance')),
+                constraint ck_runtime_audit_retention_ledger_quarantine check (
+                    (body_state = 'Quarantined') = (quarantine_reason is not null))
+            );
+            create index ix_runtime_audit_retention_candidates
+                on {schema}.runtime_audit_retention_ledger (sink_id, scope_kind, tenant_id, first_accepted_at, audit_id)
+                where body_state = 'BodyPresent' and protection = 'none';
+
+            alter table {schema}.runtime_audit_envelopes
+                add column body_state text not null default 'BodyPresent';
+            alter table {schema}.runtime_audit_envelopes
+                add constraint ck_runtime_audit_envelopes_body_state check (
+                    (body_state = 'BodyPresent') or (body_state = 'Quarantined'));
+            alter table {schema}.runtime_audit_envelopes
+                add constraint uq_runtime_audit_envelopes_identity unique (sink_id, audit_id, body_state);
+
+            create table {schema}.runtime_audit_retention_scope_locks (
+                sink_id text not null,
+                scope_kind text not null,
+                tenant_id text not null default '',
+                created_at timestamptz not null default clock_timestamp(),
+                constraint pk_runtime_audit_retention_scope_locks primary key (sink_id, scope_kind, tenant_id),
+                constraint ck_runtime_audit_retention_scope_locks_scope check (
+                    ((scope_kind = 'host') and (tenant_id = ''))
+                    or ((scope_kind = 'tenant') and (tenant_id <> '')))
+            );
+
+            create table {schema}.runtime_audit_retention_runs (
+                run_id text not null,
+                store_id text not null,
+                sink_id text not null,
+                scope_kind text not null,
+                tenant_id text not null default '',
+                request_id text not null,
+                reason_code text not null,
+                actor_kind text not null,
+                actor_id text not null,
+                actor_display_name text null,
+                correlation_id text not null,
+                retention_days integer not null,
+                batch_size integer not null,
+                max_batches integer not null,
+                max_run_seconds integer not null,
+                policy_hash text not null,
+                snapshot_at timestamptz not null,
+                cutoff timestamptz not null,
+                state integer not null,
+                committed_deleted_count bigint not null default 0,
+                committed_batch_count bigint not null default 0,
+                stop_reason text null,
+                created_at timestamptz not null default clock_timestamp(),
+                updated_at timestamptz not null default clock_timestamp(),
+                constraint pk_runtime_audit_retention_runs primary key (run_id),
+                constraint uq_runtime_audit_retention_runs_request unique (store_id, sink_id, scope_kind, tenant_id, request_id),
+                constraint ck_runtime_audit_retention_runs_scope check (
+                    ((scope_kind = 'host') and (tenant_id = ''))
+                    or ((scope_kind = 'tenant') and (tenant_id <> ''))),
+                constraint ck_runtime_audit_retention_runs_state check ((state >= 1) and (state <= 6)),
+                constraint ck_runtime_audit_retention_runs_policy check (
+                    (retention_days > 0) and (batch_size > 0) and (max_batches > 0) and (max_run_seconds > 0)),
+                constraint ck_runtime_audit_retention_runs_counts check (
+                    (committed_deleted_count >= 0) and (committed_batch_count >= 0))
+            );
+
+            create table {schema}.runtime_audit_retention_batches (
+                run_id text not null,
+                batch_ordinal bigint not null,
+                sink_id text not null,
+                scope_kind text not null,
+                tenant_id text not null default '',
+                actor_kind text not null,
+                actor_id text not null,
+                policy_hash text not null,
+                cutoff timestamptz not null,
+                batch_size integer not null,
+                deleted_count integer not null,
+                selected_digest text not null,
+                committed_at timestamptz not null default clock_timestamp(),
+                constraint pk_runtime_audit_retention_batches primary key (run_id, batch_ordinal),
+                constraint fk_runtime_audit_retention_batches_run foreign key (run_id)
+                    references {schema}.runtime_audit_retention_runs (run_id) on delete restrict,
+                constraint ck_runtime_audit_retention_batches_values check (
+                    (batch_ordinal > 0) and (deleted_count >= 0) and (deleted_count <= batch_size)),
+                constraint ck_runtime_audit_retention_batches_scope check (
+                    ((scope_kind = 'host') and (tenant_id = ''))
+                    or ((scope_kind = 'tenant') and (tenant_id <> '')))
+            );
+
+            create table {schema}.runtime_audit_retention_holds (
+                hold_id text not null,
+                sink_id text not null,
+                audit_id text not null,
+                scope_kind text not null,
+                tenant_id text not null default '',
+                reason_code text not null,
+                actor_kind text not null,
+                actor_id text not null,
+                actor_display_name text null,
+                correlation_id text not null,
+                version bigint not null,
+                created_at timestamptz not null default clock_timestamp(),
+                released_at timestamptz null,
+                release_reason_code text null,
+                release_actor_kind text null,
+                release_actor_id text null,
+                release_correlation_id text null,
+                constraint pk_runtime_audit_retention_holds primary key (hold_id),
+                constraint fk_runtime_audit_retention_holds_ledger foreign key (sink_id, audit_id)
+                    references {schema}.runtime_audit_retention_ledger (sink_id, audit_id) on delete restrict,
+                constraint ck_runtime_audit_retention_holds_version check (version > 0),
+                constraint ck_runtime_audit_retention_holds_release check (
+                    ((released_at is null) and (release_reason_code is null) and (release_actor_kind is null) and (release_actor_id is null) and (release_correlation_id is null))
+                    or ((released_at is not null) and (release_reason_code is not null) and (release_actor_kind is not null) and (release_actor_id is not null) and (release_correlation_id is not null))),
+                constraint ck_runtime_audit_retention_holds_scope check (
+                    ((scope_kind = 'host') and (tenant_id = ''))
+                    or ((scope_kind = 'tenant') and (tenant_id <> '')))
+            );
+            create index ix_runtime_audit_retention_holds_active
+                on {schema}.runtime_audit_retention_holds (sink_id, audit_id)
+                where released_at is null;
+
+            create table {schema}.runtime_audit_retention_hold_receipts (
+                hold_id text not null,
+                version bigint not null,
+                action text not null,
+                sink_id text not null,
+                audit_id text not null,
+                scope_kind text not null,
+                tenant_id text not null default '',
+                reason_code text not null,
+                actor_kind text not null,
+                actor_id text not null,
+                correlation_id text not null,
+                committed_at timestamptz not null default clock_timestamp(),
+                constraint pk_runtime_audit_retention_hold_receipts primary key (hold_id, version),
+                constraint fk_runtime_audit_retention_hold_receipts_hold foreign key (hold_id)
+                    references {schema}.runtime_audit_retention_holds (hold_id) on delete restrict,
+                constraint ck_runtime_audit_retention_hold_receipts_action check (
+                    (action = 'place') or (action = 'release')),
+                constraint ck_runtime_audit_retention_hold_receipts_version check (version > 0)
+            );
+            """),
+        new RuntimeMigration("V017", "audit_retention_body_anti_resurrection", """
+            alter table {schema}.runtime_audit_envelopes
+                add constraint fk_runtime_audit_envelopes_ledger
+                foreign key (sink_id, audit_id, body_state)
+                references {schema}.runtime_audit_retention_ledger (sink_id, audit_id, body_state)
+                on delete restrict;
             """),
     ];
 }

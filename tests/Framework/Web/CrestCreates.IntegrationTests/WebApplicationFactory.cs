@@ -332,7 +332,6 @@ public sealed class LibraryManagementWebApplicationFactory
             services.AddScoped<IAuditLogWriter, AuditLogWriter>();
             services.AddScoped<IAuditLogService, AuditLogService>();
             services.AddScoped<IAuditLogAppService, AuditLogAppService>();
-            services.AddScoped<IAuditLogCleanupAppService, AuditLogCleanupAppService>();
 
             // Configure OpenIddict to use EntityFrameworkCore for testing
             // Register a dedicated OpenIddict test DbContext
