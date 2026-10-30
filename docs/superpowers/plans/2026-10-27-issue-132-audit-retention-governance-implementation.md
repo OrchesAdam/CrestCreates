@@ -110,3 +110,11 @@ R2 后本地验证：Accountability 155/155（retention 过滤 41/41）、Applic
 PG retention 23/23、P08 2/2、全量构建 0 错误；AotHost JIT 演练九个 retention sentinel 全绿；
 NativeAOT publish/link/run 复跑 1/1 通过（linux-x64，九 sentinel + 总 sentinel + 三负控）。
 R2 故障均以测试 wrapper 在既有 fixture 边界注入，不新增生产公开故障开关。
+
+## 审查轮 R3 复审结论（2026-10-30）
+
+两项 R2 P2 关闭，未发现新的阻断问题。独立验证：PG retention 23/23、Accountability
+155/155、原 R1/R2 探针 10/10、NativeAOT 1/1（九个场景 sentinel、总 sentinel、三类负控断言）。
+技术结论为可以合并；PR #157 由维护者执行合并，CI 保持禁用，本轮不改 Issue 状态与 CI 开关。
+S0 缺口证据与复现探针随本分支入库：`docs/review/2026-10-27-issue-132-design-gap-evidence.*`、
+`docs/review/probes/issue132/`（作者侧基线 characterization，不是生产验收或正式测试）。

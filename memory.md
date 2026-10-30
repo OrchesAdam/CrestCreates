@@ -103,6 +103,13 @@ never deleted; never output credentials.
   sentinels + aggregate sentinel, three fixture-only negative controls failing without it);
   full solution build 0 errors. Native coverage scope is unchanged and still excludes real
   authentication/Settings/Quartz.
+- Review round R3 (2026-10-30): both R2 P2s closed, no new blockers; independent validation
+  PostgreSQL retention 23/23, Accountability 155/155, original R1/R2 probes 10/10 and NativeAOT
+  1/1 (nine scenario sentinels, aggregate sentinel, three negative controls). Technical verdict:
+  mergeable; PR #157 merge is the maintainer's action, CI stays disabled. S0 gap evidence
+  (`docs/review/2026-10-27-issue-132-design-gap-evidence.*`) and the author-side reproduction
+  probe (`docs/review/probes/issue132/`) are committed with this branch as baseline
+  characterization, not production acceptance.
 
 ## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (final review passed; merge pending)
 
