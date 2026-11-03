@@ -3,7 +3,7 @@
 > Date: 2026-11-03
 > Status: Proposed (rev.1, 待静态审查)
 > Issue: #159
-> Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence
+> Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence (merged to master as `91d6574e` on 2026-11-03)
 
 ## 1. Goal
 
@@ -29,7 +29,7 @@ payload, or an empty `items` array.
 The change is a contract change, not a heuristic: no string matching on refusal text, no "ask again" retry loop, no
 runtime fallback.
 
-## 2. Current Codebase Facts (verified on master `9909365a`)
+## 2. Current Codebase Facts (verified on master `91d6574e`, 2026-11-03 — production code identical to `9909365a`; #158 changed tests and docs only)
 
 | Fact | Location |
 | --- | --- |
@@ -48,8 +48,8 @@ runtime fallback.
 | `IDescriptorAuthoringAgent.AuthorAsync` has **no production caller**: consumers are the DescriptorControlPlane sample runner, the Asset harness and tests | grep of `IDescriptorAuthoringAgent` / `.AuthorAsync(` across `src`, `samples`, `tests` |
 | Review suppresses `IsActivationEligible` on any Error/Blocker diagnostic; it is entered per draft, so zero drafts means no governance entry | `src/Metadata/Draft/CrestCreates.DescriptorDraft/DefaultDescriptorDraftReviewService.cs:211-235` |
 | Native gate already round-trips the authoring wire contract: `AgentAuthoringOptionalReferences`, `AgentAuthoringUpdateBaseVersion`, `AgentAuthoringWireDisclosure` (asserts `ContractVersion == "7g.v1"`) | `tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/Program.cs:341,428,538,544` |
-| `7g.v1` literals on master `9909365a`: 5 `src` files, 11 test/fixture files, 2 Asset sample test files, and 10 doc files — of the docs only `docs/Feature/AgentControlPlane/usage-guide.md` is a live usage contract (2 registration samples); the other 9 are historical review/plan/spec records that must not be rewritten | grep `7g.v1` (see §9) |
-| #133 locked the gap with `IntentMissingPolicyInformation_FailsClosed_AndClarificationIsNotDistinguishable`, and the oracle accepts only `ExplicitUnsupportedResult` keyed on the three intent-level codes | PR #158 head `1db29f48`: `samples/AssetManagement/tests/.../AssetUnsupportedIntentNegativeCaseTests.cs:151`、`AssetUnsupportedIntentOracle.cs` |
+| `7g.v1` literals on master `91d6574e`: 5 `src` files, 11 test/fixture files, 4 Asset sample test files, and 11 doc files — of the docs only `docs/Feature/AgentControlPlane/usage-guide.md` is a live usage contract (2 prompt-registration samples); the other 10 are historical review/plan/spec records that must not be rewritten | grep `7g.v1` (see §9) |
+| #133 locked the gap with `IntentMissingPolicyInformation_FailsClosed_AndClarificationIsNotDistinguishable`, and the oracle accepts only `ExplicitUnsupportedResult` keyed on the three intent-level codes | master `91d6574e`（PR #158，head `1db29f48`）：`samples/AssetManagement/tests/.../AssetUnsupportedIntentNegativeCaseTests.cs:151`、`AssetUnsupportedIntentOracle.cs`、`AssetAuthoringDiagnosticClassifier.cs`、`ReviewerLiveOracleProbeTests.cs` |
 
 ## 3. Non-Goals
 
@@ -228,7 +228,7 @@ as the main mechanical risk of the version bump).
 | Prompt | `DefaultDescriptorAuthoringPromptBuilder.cs`, `DescriptorAuthoringWireDisclosure.cs`, `DefaultDescriptorAuthoringPromptInputFactory.cs`, `LlmDescriptorAuthoringAgentOptions.cs` |
 | Unit tests | `OutputParserTests.cs`, `AuthoringContractTests.cs`, `WireDisclosureTests.cs`, `PromptInputHashTests.cs`, `LlmDescriptorAuthoringAgentTests.cs`, `UpdateBaseVersionParserTests.cs`, `ModelRequestProvenanceActivationProbeFixture.cs`, `Fixtures/CompanyCertificationLlmFixture.cs`, `CrestCreates.Agent.Prompting.Tests/PromptingRegistryTests.cs` (registered template pins `7g.v1`), `CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs` — every `7g.v1` literal → `8a.v1` |
 | Sample consumers | `CompanyCertificationAuthoringGoldenScenarioRunner.cs`, `FakeCompanyCertificationAuthoringAgent.cs`, `tests/Framework/Testing/CrestCreates.Samples.Tests/CompanyCertificationAuthoringGoldenScenarioTests.cs` |
-| Real-chain evidence | Asset E2E: `AssetUnsupportedIntentOracle.cs` (accept the two new statuses; keep the reject list), `AssetUnsupportedIntentNegativeCaseTests.cs` (the gap-lock case flips to a positive distinguishability case + a retained "prose refusal is not a clarification" negative), `AssetAuthoringDiagnosticClassifier.cs`, `AssetDeepSeekLiveAuthoringEvaluationTests.cs` (B12 live entry verdict), probe fixtures — lands after #158 merges |
+| Real-chain evidence | Asset E2E: `AssetUnsupportedIntentOracle.cs` (accept the two new statuses; keep the reject list), `AssetUnsupportedIntentNegativeCaseTests.cs` (the gap-lock case flips to a positive distinguishability case + a retained "prose refusal is not a clarification" negative), `AssetAuthoringDiagnosticClassifier.cs`, `AssetDeepSeekLiveAuthoringEvaluationTests.cs` (B12 live entry verdict), `ReviewerLiveOracleProbeTests.cs` — all present on master `91d6574e` after #158 merged |
 | Native gate | `CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/Program.cs` + its `.Tests` harness expectations |
 | Docs | `docs/Feature/AgentControlPlane/usage-guide.md` (live usage contract: two prompt-registration samples pin `7g.v1`), `docs/Feature/CapabilityMap.md` (authoring capability row, four dimensions), `memory.md`, `AGENTS.md` 当前平台状态 (+ AOT tier line for the new native scenarios), `docs/review/2026-10-10-framework-architecture-review-follow-up.md` §5.1 B12 verdict, `docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md` (new scenario row), 7g spec addendum. The historical `docs/review/2026-09-*` records and the 7h/base-version/wire-disclosure plans keep their `7g.v1` text as history |
 
