@@ -1,7 +1,7 @@
 # Explicit Unsupported / Needs-Clarification Authoring Outcomes
 
 > Date: 2026-11-03
-> Status: Proposed (rev.1, 待静态审查)
+> Status: Proposed (rev.2, 修订 R1 四项 P2；待复审)
 > Issue: #159
 > Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence (merged to master as `91d6574e` on 2026-11-03)
 
@@ -86,15 +86,22 @@ runtime fallback.
     "missingInputs": ["riskThreshold"], "candidateValues": [] } ] } }
 ```
 
-| `outcome` | required | forbidden | result |
+| `outcome` | required members | forbidden members | result |
 | --- | --- | --- | --- |
-| `drafts` | `plan` (non-null), `items` (≥1, exactly as today — the parser has no upper bound on `items` and this issue does not add one) | `unsupported`, `needsClarification` | `Succeeded` / `SucceededWithDiagnostics` |
-| `unsupported` | `unsupported.reasons` (1..4) | `plan`, `items`, `needsClarification` | `UnsupportedIntent` |
-| `needsClarification` | `needsClarification.questions` (1..4) | `plan`, `items`, `unsupported` | `NeedsClarification` |
+| `drafts` | `plan` and `items` **present with the declared kind** (`items` ≥1, exactly as today — the parser has no upper bound on `items` and this issue does not add one) | `unsupported`, `needsClarification` **absent** | `Succeeded` / `SucceededWithDiagnostics` |
+| `unsupported` | `unsupported` present, `reasons` 1..4 | `plan`, `items`, `needsClarification` absent | `UnsupportedIntent` |
+| `needsClarification` | `needsClarification` present, `questions` 1..4 | `plan`, `items`, `unsupported` absent | `NeedsClarification` |
 
-Missing `outcome`, an unknown value, or a forbidden sibling present is **`InvalidProviderOutput`** with the exact reason in
-the diagnostic message. The parser never drops a forbidden section to make an answer valid: "drafts must be empty on
-refuse/clarify" is guaranteed by the shape, not by an assertion downstream.
+**Presence, not truthiness.** "forbidden" means the member name exists in the raw envelope with *any* value — `null`,
+`{}`, `[]` or content. "Required" means the name exists **and** carries the declared kind (`object` / `array`), so
+`plan: null` for `outcome=drafts` is a required-member violation, not an "empty plan". A nullable DTO property cannot
+express either distinction (see §4.4 for the verified mechanics), so both checks are made on the raw envelope before
+projection.
+
+Missing `outcome`, an unknown `outcome` value, a forbidden member, or a required member that is absent / `null` / of the
+wrong kind is **`InvalidProviderOutput`** with the exact reason in the diagnostic message. The parser never drops a
+forbidden section to make an answer valid: "drafts must be empty on refuse/clarify" is guaranteed by the shape, not by an
+assertion downstream.
 
 For `unsupported` / `needsClarification` the result still populates the required `Plan` and `DraftSet` with the
 established placeholder ids (`plan_intent_unsupported` / `plan_needs_clarification`, `draftset_intent_unsupported` /
@@ -124,16 +131,89 @@ and is never a decision input. This keeps the R1 attribution rule intact: no ver
 
 ### 4.3 Bounds (deterministic, over-bound ⇒ `InvalidProviderOutput`)
 
+Normalization is defined first, because every bound below is measured on the normalized form:
+
+```text
+normalize(text): control characters (U+0000-U+001F, U+007F) -> space; runs of whitespace collapse to one space;
+                 leading/trailing whitespace trimmed.
+```
+
+No truncation, no rewriting of visible content, and no natural-language judgement — normalization only makes the bounds
+and the equality rules decidable. A field that is empty after normalization is **absent content**, not a valid short
+value: `"question": "\t\n"` and `"missingInputs": [" "]` are rejected (rev.1 allowed them, since length alone was
+measured on the raw text).
+
 | field | bound |
 | --- | --- |
 | `unsupported.reasons` | 1..4 entries |
 | `needsClarification.questions` | 1..4 entries |
-| `question.id` | 1..64 chars, `[A-Za-z0-9._-]` only, unique within the answer |
-| `message` / `question` text | 1..400 chars after control-character normalization; no truncation |
-| `missingInputs` / `candidateValues` / `evidenceRefs` | 0..8 entries each, 1..120 chars each |
+| `question.id` | 1..64 chars, `[A-Za-z0-9._-]` only (charset checked on the raw value), unique within the answer |
+| `message` / `question` text | 1..400 chars **after normalization**; non-empty after normalization |
+| `missingInputs` / `candidateValues` / `evidenceRefs` | 0..8 entries each; 1..120 chars each after normalization, each non-empty |
 | `missingInputs` | **1..8** for a clarification question (a question with no named gap is not actionable) |
 
+Duplicate-entry equality is ordinal-exact on normalized values: duplicate `question.id` (raw compare, since the charset
+has no whitespace) ⇒ rejected; duplicate reason entries (same `code` **and** same normalized `message`) ⇒ rejected as a
+duplicated obstacle; two reasons sharing one code with different messages are allowed (a model may list two distinct
+obstacles of the same class).
+
 Provider text stays bounded and is never stored into governance artifacts: no draft exists to carry it.
+
+### 4.4 Envelope facts are read before projection
+
+A nullable-DTO shape check cannot implement §4.1, because deserialization has already destroyed the facts. Verified on
+.NET 10 with `JsonSerializerIsReflectionEnabledByDefault=false` and a source-generated context (probe in the R1 audit
+record; reproduced locally at revision time):
+
+| Mechanism | Observed fact | Consequence for this contract |
+| --- | --- | --- |
+| `JsonDocument.Parse` | a duplicate member is preserved: `{"outcome":…,"promptInputHash":"WRONG","promptInputHash":"RIGHT",…}` enumerates 5 members with `promptInputHash` twice | the raw stage can see duplicates that the DTO cannot |
+| `JsonDocument.Parse` | `"items":null` enumerates as a member with `ValueKind=Null`, while an absent `items` enumerates as no member at all | presence vs explicit null is distinguishable only here |
+| STJ deserialization, default options | `JsonSerializerOptions.AllowDuplicateProperties` defaults to **`true`**; the duplicate envelope projects to `promptInputHash = "RIGHT"`, `outcome = drafts` | last-value-wins is the inherited behaviour the R1 audit characterized on the shipped `7g.v1` parser; the contract must not inherit it |
+| STJ deserialization, `AllowDuplicateProperties = false` | throws `JsonException: Duplicate property 'promptInputHash' encountered during deserialization of type 'Envelope'` through the source-generated path, no reflection | usable as defense in depth after the raw stage, not as the only guard |
+| STJ DTO projection | absent `items` and explicit `"items":null` both project to `null`; an empty `"unsupported":{}` projects to a non-null object with `null` reasons | a null-check-only shape test would accept `outcome=unsupported` + `"items":null` as a valid refusal |
+
+Parsing is therefore two-stage and deterministic, with no reflection, no scanner and no new production extension point:
+
+```text
+Stage A  JsonDocument.Parse(providerOutputText)          raw facts: member names, duplicates, ValueKind
+Stage B  source-generated DTO deserialization            values: bounds, code tables, per-item material
+         with AllowDuplicateProperties = false
+```
+
+Rules fixed for Stage A (and they apply at every object level: root, `plan`, each `items` element, `unsupported`, each
+reason, `needsClarification`, each question):
+
+1. **Name matching is ordinal-exact** against the declared wire vocabulary (the camelCase names in §4.1/§4.2). No
+   case-insensitive matching, no aliases, no `JsonPropertyNameCaseInsensitive`: `PromptInputHash` and `promptinputhash`
+   are unknown members, not the declared one. The raw check and the DTO mapping use the same table, so they cannot drift.
+2. **Duplicate member name at the same level ⇒ `InvalidProviderOutput`** (`Envelope contains duplicate member '…'`),
+   whatever the two values are. This closes the wrong-hash-first / right-hash-second and needsClarification-then-drafts
+   rows of the audit table: an envelope containing two contradictory facts never reaches an outcome branch.
+3. **Member outside the declared vocabulary ⇒ `InvalidProviderOutput`** (`Envelope contains unknown member '…'`),
+   so a drifted provider answer cannot silently lose a section. This is a deliberate tightening over `7g.v1`, where
+   unknown properties are ignored by deserialization; it is recorded as part of the `8a.v1` migration in §9.
+4. **Required member** must exist with the declared `ValueKind`; **forbidden member** must not exist at all.
+5. Stage B then enforces its own kind/bounds on the projected values. A `JsonException` from Stage B is a contract
+   breach and is reported as `InvalidProviderOutput` with the deserialization message, never as a clarification.
+
+The declared vocabulary is one table, reused by the raw check and by the DTO mapping (a name listed nowhere is an unknown
+member; a name listed twice in the table is a design bug caught by the §10.1 matrix):
+
+| object level | declared members |
+| --- | --- |
+| root | `contractVersion`, `promptInputHash`, `outcome`, `plan`, `items`, `unsupported`, `needsClarification` |
+| `plan` | `planId`, `intentText`, `assumptions`, `plannedDescriptorRefs` |
+| `plannedDescriptorRefs[]` | `namespace`, `id`, `version` |
+| `items[]` | `descriptorKind`, `descriptorId`, `operation`, `baseVersion`, `rationale`, `payload`, `evidenceRefs`, `memoryRefs`, `assumptions` |
+| `unsupported` | `reasons` |
+| `unsupported.reasons[]` | `code`, `message`, `evidenceRefs` |
+| `needsClarification` | `questions` |
+| `needsClarification.questions[]` | `id`, `reasonCode`, `question`, `missingInputs`, `candidateValues` |
+
+`payload` stays an open `JsonElement` object: its inner keys are descriptor content validated by the existing per-item
+materialization, not envelope members, so the unknown-member rule above stops at the `payload` boundary. The disclosure
+examples must contain no member outside this table.
 
 ## 5. Contract: .NET surface
 
@@ -155,9 +235,15 @@ DescriptorAuthoringDiagnosticCodes   + IntentUnsupportedValue        = "AUTHORIN
   answer is a legitimate, contract-shaped outcome that needs human input; it is not a provider failure. Nothing in the
   review/activation path sees it — zero drafts means the review service is never invoked.
 - `Snapshot()` deep-copies the new lists (`IReadOnlyList` → arrays) like the existing `Diagnostics` handling.
-- `JsonSerializable` additions in **both** contexts: parser side (`DescriptorAuthoringProviderOutputDto` stays the only
-  wire root; the new nested DTOs are reached through it) and contract side (`UnsupportedOutcome`, `ClarificationOutcome`,
-  reason/question types, and the unchanged `DescriptorAuthoringStatus`). No `JsonSerializerOptions`-with-reflection path.
+- JSON closure, stated precisely (rev.2, D13): the **authoritative roots** are `DescriptorAuthoringProviderOutputDto` in
+  the parser context and `DescriptorAuthoringResult` in the contract context. The new nested DTOs (`Unsupported`,
+  `Clarification`, reason/question types) are reachable from those roots, so the generator emits their metadata from
+  reachability alone — declaring them additionally is documentation of intent, **not** a runtime prerequisite, and no test
+  may treat a redundant annotation as the lock. A type must be registered explicitly only if some consumer serializes it
+  **detached** from any registered root; none does today, and none is added by this issue. No `JsonSerializerOptions`
+  path that relies on reflection, in either direction.
+- Stage A reads the envelope through `JsonDocument` (trim/AOT-safe, no reflection, no scanner) before any DTO exists, so
+  the raw facts (§4.4) survive the projection that would otherwise merge them.
 - **Decision point D1**: adding two status members vs. keeping `Blocked` and carrying a sub-code. This spec takes the new
   members: `Blocked` already means "structural/governance rejection of produced artifacts" (see the R1 oracle:
   `BlockedWithoutUnsupportedIntentDiagnoses`), and reusing it would force every consumer to re-read diagnostic codes to
@@ -168,23 +254,42 @@ DescriptorAuthoringDiagnosticCodes   + IntentUnsupportedValue        = "AUTHORIN
 Fixed order; the first failing check returns, with `Plan`/`DraftSet` empty and zero drafts:
 
 ```text
-1 deserialize            -> AUTHORING_INVALID_PROVIDER_OUTPUT      ("Failed to deserialize ...")
-2 contractVersion == 8a.v1 -> AUTHORING_INVALID_PROVIDER_OUTPUT    ("Unsupported contract version ...")
-3 promptInputHash echo   -> AUTHORING_PROMPT_HASH_MISMATCH (Blocker), status Blocked
-4 outcome discriminator present and known -> else AUTHORING_INVALID_PROVIDER_OUTPUT
-5 outcome-specific shape (required present, forbidden absent) -> else AUTHORING_INVALID_PROVIDER_OUTPUT
-6 bounds + code tables + id charset/uniqueness -> else AUTHORING_INVALID_PROVIDER_OUTPUT
-7 per-outcome build:
-    drafts               -> existing per-item atomic validation (unchanged semantics)
-    unsupported          -> UnsupportedIntent  + one Warning diagnostic per reason
-    needsClarification   -> NeedsClarification + one Warning diagnostic per question
+Stage A (raw envelope, §4.4)
+1 JsonDocument.Parse            -> AUTHORING_INVALID_PROVIDER_OUTPUT ("Failed to deserialize provider output as JSON.")
+                                   also: non-object root
+2 member names: duplicate       -> AUTHORING_INVALID_PROVIDER_OUTPUT ("... duplicate member '…'")
+   at any object level          (checked before any value, so contradictory envelopes never reach a branch)
+3 member names: unknown/alias   -> AUTHORING_INVALID_PROVIDER_OUTPUT ("... unknown member '…'")
+4 contractVersion member        -> absent/null/non-string/non-8a.v1 -> "Unsupported contract version …"
+                                   (message prefix kept: the Asset classifier maps it to ContractVersionMismatch)
+5 promptInputHash member        -> absent/null/non-string -> AUTHORING_INVALID_PROVIDER_OUTPUT
+6 promptInputHash value         -> != expected echo -> AUTHORING_PROMPT_HASH_MISMATCH (Blocker), status Blocked
+7 outcome member                -> absent/null/unknown value -> AUTHORING_INVALID_PROVIDER_OUTPUT
+8 shape per outcome             -> required member absent/null/wrong kind, or forbidden member present
+                                   (null, {}, [] or content) -> AUTHORING_INVALID_PROVIDER_OUTPUT
+
+Stage B (source-generated DTO, AllowDuplicateProperties = false)
+9 deserialize                   -> JsonException -> AUTHORING_INVALID_PROVIDER_OUTPUT (kind/type mismatch)
+10 bounds + normalization       -> over-bound or empty-after-normalization -> AUTHORING_INVALID_PROVIDER_OUTPUT
+11 closed code tables          -> unknown reason code / reasonCode -> AUTHORING_INVALID_PROVIDER_OUTPUT
+12 id charset + uniqueness,    -> AUTHORING_INVALID_PROVIDER_OUTPUT
+   duplicate-entry rules (§4.3)
+
+Stage C (outcome build)
+13 drafts              -> existing per-item atomic validation (unchanged semantics)
+   unsupported         -> UnsupportedIntent  + one Warning diagnostic per reason
+   needsClarification  -> NeedsClarification + one Warning diagnostic per question
 ```
 
-Integrity before semantics is non-negotiable: a wrong-hash answer must never be interpretable as a clarification
-(#133 R1-01). Version boundary is single-valued: `7g.v1` answers now fail as `Unsupported contract version`, the same
-observable class the Asset classifier already records as `ContractVersionMismatch`. **Decision point D2**: no transitional
-dual acceptance — a second accepted version is the dual-track the repo forbids, and every producer of that envelope is
-inside this repository.
+Integrity before semantics stays non-negotiable: a wrong-hash answer must never be interpretable as a clarification
+(#133 R1-01) — and, after step 2, neither can an answer that carries a wrong hash *and* a right hash in the same
+envelope. Steps 1–8 read the raw envelope, so presence, nullity and duplication are decided before any value is merged
+by last-wins deserialization. Version boundary is single-valued: `7g.v1` answers now fail as `Unsupported contract
+version`, the same observable class the Asset classifier already records as `ContractVersionMismatch`. **D2**: no
+transitional dual acceptance — a second accepted version is the dual-track the repo forbids, and every producer of that
+envelope is inside this repository. **D9 (rev.2)**: the "non-draft outcome cannot carry drafts" invariant is enforced by
+Stage A shape rules plus the source-generated projection, inside the parser; no public validation hook, no new extension
+point.
 
 `LlmDescriptorAuthoringAgent` passes the parser result through unchanged (it already attaches prompt input/output
 evidence before parsing); the provider-failure branch (§ "empty response", `LlmDescriptorAuthoringAgent.cs:113-172`)
@@ -204,6 +309,11 @@ The prompt must teach exactly the contract the parser enforces — one source of
 - `DescriptorAuthoringWireDisclosure.BuildPromptSection()` adds the `8a.v1` envelope rules, both non-draft examples
   (serialized through the same parser context as every other example, so examples cannot drift from the DTO), and the
   closed code lists.
+- The disclosure must state the strictness the parser will enforce, because it is not inferable from a permissive JSON
+  habit: send **only** the declared member names, **never** repeat a member, and when refusing or asking, **omit**
+  `plan`/`items` entirely — writing `"items": null` or `"plan": {}` is a contract violation, not an empty section.
+  The generated examples satisfy this by construction (`DefaultIgnoreCondition = WhenWritingNull` drops unset members),
+  so the examples and the rules cannot disagree.
 
 Because `contractVersion` is inside the hashed prompt input, **every recorded hash-bearing fixture must be re-derived**;
 `PromptInputHashTests` asserts determinism, and any literal hash pinned in a fixture is a migration item for S1 (flagged
@@ -213,7 +323,7 @@ as the main mechanical risk of the version bump).
 
 | Invariant | Enforcement | Locked by |
 | --- | --- | --- |
-| An `unsupported` or `needsClarification` answer creates no draft | shape forbids `items`; parser builds an empty `DescriptorDraftSet` | unit matrix + Asset real-chain case (draft store, review-artifact store, control-plane audit, gate counters, inventory identity) |
+| An `unsupported` or `needsClarification` answer creates no draft | Stage A shape rules: a forbidden member is rejected **whatever its value** (`null`, `{}`, `[]`, content), so a refusal carrying `items` never reaches an outcome branch; the parser then builds an empty `DescriptorDraftSet` | unit matrix (§10.1, incl. the null/empty/duplicate forms) + Asset real-chain case (draft store, review-artifact store, control-plane audit, gate counters, inventory identity) |
 | Such an answer cannot enter review / approval / activation | review runs per draft; zero drafts ⇒ nothing to review; `DescriptorDraftReviewService` untouched | Asset case asserts review-passed count 0 and gate calls 0 |
 | Authoring text from these answers cannot become an artifact or claim | no draft ⇒ no review artifact ⇒ no package/evidence artifact | same as above |
 | A provider failure is never re-labelled as clarification | separate statuses + precedence in §6 | unit decision table; the Asset oracle keeps its reject list |
@@ -224,49 +334,100 @@ as the main mechanical risk of the version bump).
 | Area | Files |
 | --- | --- |
 | Contract | `DescriptorAuthoringStatus.cs`, `DescriptorAuthoringResult.cs`, `DescriptorAuthoringDiagnosticCodes.cs`, new outcome/type files, `DescriptorAuthoringJsonSerializerContext.cs` (all under `CrestCreates.Agent.Authoring.Abstractions`) |
-| Parser + DTO | `JsonDescriptorAuthoringOutputParser.cs`, `DescriptorAuthoringProviderOutputDto.cs`, `DescriptorAuthoringParserJsonSerializerContext.cs` |
+| Parser + DTO | `JsonDescriptorAuthoringOutputParser.cs` (two-stage: Stage A raw facts, Stage B strict DTO), new internal `DescriptorAuthoringEnvelopeFacts.cs` (member inventory over the declared vocabulary: duplicate / unknown / presence / kind rules; internal to the Authoring assembly, no public hook), `DescriptorAuthoringProviderOutputDto.cs` (+ `unsupported` / `needsClarification` DTOs), `DescriptorAuthoringParserJsonSerializerContext.cs`; the parser's deserialization options gain `AllowDuplicateProperties = false` |
 | Prompt | `DefaultDescriptorAuthoringPromptBuilder.cs`, `DescriptorAuthoringWireDisclosure.cs`, `DefaultDescriptorAuthoringPromptInputFactory.cs`, `LlmDescriptorAuthoringAgentOptions.cs` |
 | Unit tests | `OutputParserTests.cs`, `AuthoringContractTests.cs`, `WireDisclosureTests.cs`, `PromptInputHashTests.cs`, `LlmDescriptorAuthoringAgentTests.cs`, `UpdateBaseVersionParserTests.cs`, `ModelRequestProvenanceActivationProbeFixture.cs`, `Fixtures/CompanyCertificationLlmFixture.cs`, `CrestCreates.Agent.Prompting.Tests/PromptingRegistryTests.cs` (registered template pins `7g.v1`), `CrestCreates.Agent.ControlPlane.Tests/AssetHumanApprovalActivationHandoffAcceptanceTests.cs` — every `7g.v1` literal → `8a.v1` |
 | Sample consumers | `CompanyCertificationAuthoringGoldenScenarioRunner.cs`, `FakeCompanyCertificationAuthoringAgent.cs`, `tests/Framework/Testing/CrestCreates.Samples.Tests/CompanyCertificationAuthoringGoldenScenarioTests.cs` |
 | Real-chain evidence | Asset E2E: `AssetUnsupportedIntentOracle.cs` (accept the two new statuses; keep the reject list), `AssetUnsupportedIntentNegativeCaseTests.cs` (the gap-lock case flips to a positive distinguishability case + a retained "prose refusal is not a clarification" negative), `AssetAuthoringDiagnosticClassifier.cs`, `AssetDeepSeekLiveAuthoringEvaluationTests.cs` (B12 live entry verdict), `ReviewerLiveOracleProbeTests.cs` — all present on master `91d6574e` after #158 merged |
-| Native gate | `CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/Program.cs` + its `.Tests` harness expectations |
+| Native gate | `CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/Program.cs` (new scenarios, §10.5) **and** `CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests`: today the harness publishes and runs one green artifact and requires exit 0 + the total sentinel, so S3 must extend it to name-check per-scenario sentinels and to execute the failure controls as separate runs. Without that harness change, a missing code-table scenario could still let the slice end green |
 | Docs | `docs/Feature/AgentControlPlane/usage-guide.md` (live usage contract: two prompt-registration samples pin `7g.v1`), `docs/Feature/CapabilityMap.md` (authoring capability row, four dimensions), `memory.md`, `AGENTS.md` 当前平台状态 (+ AOT tier line for the new native scenarios), `docs/review/2026-10-10-framework-architecture-review-follow-up.md` §5.1 B12 verdict, `docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md` (new scenario row), 7g spec addendum. The historical `docs/review/2026-09-*` records and the 7h/base-version/wire-disclosure plans keep their `7g.v1` text as history |
 
 ## 10. Testing strategy
 
 1. **Parser decision table (unit)** — every rejection class gets its own case with an exact diagnostic code and message
-   prefix: missing/unknown `outcome`, `unsupported` + `items`, `needsClarification` + `plan`, unknown reason code, empty
-   `missingInputs`, over-bound text, non-unique `question.id`, duplicate entries, `7g.v1` answer, hash mismatch with an
-   otherwise valid `needsClarification` body (must stay `Blocked`/`PromptHashMismatch`).
+   prefix. The envelope forms the R1 audit characterized become expected-red fixtures rather than prose promises:
+
+   | raw envelope form | decided at | expected |
+   | --- | --- | --- |
+   | `outcome=unsupported`, `items` absent | — | `UnsupportedIntent` (control) |
+   | `outcome=unsupported`, `"items": null` | §6 step 8 (forbidden member present) | `InvalidProviderOutput` |
+   | `outcome=unsupported`, `"plan": {}` | §6 step 8 | `InvalidProviderOutput` |
+   | `outcome=drafts`, `"unsupported": {}` | §6 step 8 | `InvalidProviderOutput` |
+   | `outcome=drafts`, `"items": []` | §6 step 10 (required member present, under the ≥1 bound) | `InvalidProviderOutput` |
+   | `promptInputHash` wrong first, right second | §6 step 2 (duplicate member) | `InvalidProviderOutput` — never `Succeeded` |
+   | `outcome=needsClarification` then `outcome=drafts` with `"needsClarification": null` | §6 step 2 | `InvalidProviderOutput` — never enters the drafts branch |
+   | `items` present twice, both non-empty | §6 step 2 | `InvalidProviderOutput` |
+   | `contractVersion` `7g.v1` | §6 step 4 | `InvalidProviderOutput` (`Unsupported contract version …`) |
+   | `contractVersion` wrong first, right second | §6 step 2 | `InvalidProviderOutput` |
+   | single `promptInputHash` mismatch with an otherwise valid `needsClarification` body | §6 step 6 | `Blocked` + `AUTHORING_PROMPT_HASH_MISMATCH` |
+   | unknown member, or alias case (`PromptInputHash`) | §6 step 3 | `InvalidProviderOutput` (`unknown member …`) |
+   | unknown `unsupported.reasons[].code` / unknown `questions[].reasonCode` | §6 step 11 | `InvalidProviderOutput` |
+   | `"question": "\t\n"`, `"missingInputs": [" "]` | §6 step 10 (empty after normalization) | `InvalidProviderOutput` |
+   | duplicate `question.id`; duplicated identical reason entry | §6 step 12 | `InvalidProviderOutput` |
+   | 401-char text, 5 reasons/questions, 9 collection entries | §6 step 10 | `InvalidProviderOutput` |
+
 2. **Positive round-trips (unit + source-generated JSON)** — all three outcomes deserialize to the exact status, carry the
-   expected structured fields, and `Snapshot()` preserves them with no reflection (`JsonSerializerContext` types asserted,
-   and the existing `ReflectionFallback_IsDisabled` style check in the native fixture).
+   expected structured fields, and `Snapshot()` preserves them. The JSON evidence asserts the **required contract**, not
+   the presence of annotations: metadata must resolve for every root the production path actually serializes
+   (`DescriptorAuthoringProviderOutputDto` on the parser side, `DescriptorAuthoringResult` and the standalone-serialized
+   types on the contract side) with reflection disabled, and the round-trip must preserve each declared wire name.
 3. **Real-chain Asset cases** — recorded `unsupported` and `needsClarification` answers on the Asset chain: status and
    codes asserted, and every governance counter measured through the existing test-side decorators (draft store,
    review-passed count, saved count, gate calls/successes, inventory identity). Green control stays: a supported intent
    still produces a reviewable draft and deploys only after human approval.
-4. **Retained negative** — a prose refusal, and any JSON answer that omits `outcome` or emits `items: []` without an
-   `unsupported` / `needsClarification` section, stays `InvalidProviderOutput`. The contract makes clarification
-   *expressible*; it does not turn every refusal into a clarification.
-5. **Native publish/link/run** — new scenarios with per-scenario `name:PASS` sentinels: `AgentAuthoringClarificationOutcome`,
-   `AgentAuthoringUnsupportedOutcome`, `AgentAuthoringOutcomeShapeConflict`, plus the extended `AgentAuthoringWireDisclosure`
-   (now asserting `8a.v1`). Negative controls exit non-zero and print no total sentinel.
-6. **Mutation audit (each must redden only its target)** — (a) treat any `outcome` as `drafts` when `items` is absent;
-   (b) drop the `forbidden sibling` checks; (c) move the hash check after the outcome check; (d) replace the closed code
-   tables with permissive `Enum`/string parsing; (e) remove a new type from the JSON contexts.
-7. **Live evaluation** — one credentialed run of the B12 case with the new prompt. If the model returns a structured
-   outcome, the verdict moves to covered for that model/scenario; if it returns prose, the case records
-   `ProviderOutputRejected_PendingManualAdjudication` honestly and the capability stays "candidate gap / unverified".
-   Never converted to a pass by relaxing the oracle.
+4. **Retained negatives** — a prose refusal, and any JSON answer that omits `outcome` or emits `items: []` without an
+   `unsupported` / `needsClarification` section, stays `InvalidProviderOutput`; and a `drafts` answer to the B12
+   unsupported intent stays a rejection (`FabricatedCapabilityClaim` class in the Asset oracle). The contract makes
+   clarification *expressible*; it does not turn every refusal into a clarification and does not make a structurally
+   valid candidate draft business-correct.
+5. **Native publish/link/run** — scenarios with per-scenario `name:PASS` sentinels:
+   - `AgentAuthoringClarificationOutcome` and `AgentAuthoringUnsupportedOutcome` — structured outcome round-trip, status and
+     fields read back inside the native process;
+   - `AgentAuthoringOutcomeShapeConflict` — forbidden-member forms (absent / `null` / `{}`) rejected with zero drafts;
+   - **`AgentAuthoringCodeTableRejection`** — one unknown `unsupported.reasons[].code` and one unknown
+     `needsClarification.questions[].reasonCode`, each asserted to yield `InvalidProviderOutput` with zero drafts. This is
+     the native execution of the closed-code requirement that Issue acceptance item 8 asks for; a unit row does not
+     substitute for it;
+   - `AgentAuthoringWireDisclosure` extended to assert `8a.v1` and the new disclosure rules;
+   - existing `ReflectionFallback_IsDisabled` gate kept, so an incomplete JSON closure fails the native run rather than
+     falling back.
+   Two execution layers stay distinct, and the harness runs them separately: a **correct-rejection scenario** is a green
+   run (the native process asserts the expected `InvalidProviderOutput` and exits 0 with its sentinel); a **gate negative
+   control** (wrong expected value, or a fixture-side decoration that skips the code-table/shape check) must exit
+   non-zero and print no total sentinel.
+6. **Mutation audit (each must redden only its target)** —
+   - (a) bypass the `outcome` discriminator and treat a missing `items` as `drafts`;
+   - (b) weaken the forbidden-member rule to a null/empty check — this must redden the `"items": null` and `"plan": {}`
+     rows of §10.1, which is exactly the case a null-only implementation cannot distinguish;
+   - (c) move the hash check after the outcome check;
+   - (d) replace the closed code tables with permissive `Enum`/string parsing;
+   - (e) **cut a real closure edge**: remove the wire-root `JsonSerializable` registration from the parser context, or
+     drift a `[JsonPropertyName]` on `outcome` / `unsupported` / `code` — the round-trip or the native run must fail;
+   - (f) remove the Stage A raw-envelope check while keeping Stage B — the duplicate-envelope rows of §10.1 must redden
+     (last-wins acceptance returns).
+     Retired on purpose: *removing a subtype's `[JsonSerializable]`* is **not** a lock. Verified with a root-only source
+     generated context under reflection-disabled: metadata for `Item` and for an `unsupported` property type resolves and
+     round-trips from reachability alone, so that mutation can stay green while claiming to prove the closure. Redundant
+     annotations must not become runtime prerequisites, and no production test hook may be added to make one observable.
+7. **Live evaluation (required acceptance step, not optional)** — at least one credentialed run of the B12 unsupported
+   intent against the new prompt and `8a.v1`, with the recorded artifact retained outside the repository. B12 counts as
+   covered **only** when that run yields `UnsupportedIntent` or `NeedsClarification` with a legal code-table entry,
+   non-empty reason/question content, and zero drafts / zero review-passed / zero saved / zero gate calls / unchanged
+   deployed inventory. Prose refusal (`InvalidProviderOutput`), a `drafts` answer to the unsupported intent, provider
+   failures and budget exhaustion keep their own labels and the gap stays open. If no credential is available when this
+   step is reached, the item stays **pending** — it is not auto-checked and the issue is not closed on the unit/native
+   evidence alone. This does not make live evaluation a CI gate and does not require the model to be green: it requires
+   the execution to have happened and its outcome to be recorded.
 
 ## 11. Implementation slices
 
 | Slice | Content | Exit condition |
 | --- | --- | --- |
-| S1 | Contract + DTO + parser + code tables + bounds + both JSON contexts + prompt disclosure/template version + unit matrix + migration of every `7g.v1` literal | Authoring unit suite green with the new matrix; mutations (a)(c)(d)(e) each redden their target |
-| S2 | Consumers (sample runner/fake agent), Asset real-chain cases incl. the #133 gap-lock flip, oracle/classifier rev, B12 live entry accepts the new statuses | Asset E2E green with PG; oracle rejects every non-intent outcome as before; mutation (b) reddens the shape-conflict case |
-| S3 | Native AOT fixture scenarios + sentinel/negative-control wiring | `PublishAot` + native run green on linux-x64 for the executed scenarios |
-| S4 | Docs and status sync (CapabilityMap, `memory.md`, `AGENTS.md`, §5.1 B12 verdict, #123 evidence matrix, 7g addendum) + optional credentialed live run recorded | Claims written to match executed evidence only |
+| S1 | Contract + DTO + Stage A raw-envelope facts (duplicate / unknown / presence / kind) + Stage B strict DTO (`AllowDuplicateProperties = false`) + code tables + normalization and bounds + both JSON contexts + prompt disclosure and template version + §10.1 matrix + migration of every `7g.v1` literal | Authoring unit suite green with the new matrix; mutations (a)(c)(d)(e)(f) each redden their target; §10.6 retired-mutation note respected |
+| S2 | Consumers (sample runner/fake agent), Asset real-chain cases incl. the #133 gap-lock flip, oracle/classifier rev, B12 live entry accepts the new statuses **only** under the §10.4/§10.7 criteria | Asset E2E green with PG; oracle still rejects every non-intent outcome, and a `drafts` answer to the unsupported intent stays a rejection; mutation (b) reddens the null/empty forbidden-member rows |
+| S3 | Native fixture scenarios §10.5 (`ClarificationOutcome`, `UnsupportedOutcome`, `OutcomeShapeConflict`, **`CodeTableRejection`**, extended `WireDisclosure`) **plus the harness change** to name-check per-scenario sentinels and run the failure controls separately | `PublishAot` + native run green on linux-x64 for the executed scenarios; each named sentinel present in the green run; each negative control non-zero with no total sentinel |
+| S4 | Docs and status sync (CapabilityMap, `memory.md`, `AGENTS.md`, §5.1 B12 verdict, #123 evidence matrix, 7g addendum) | Claims written to match executed evidence only; the live item is reported as pending if S5 has not run |
+| S5 | Required live step (§10.7): one credentialed run of the B12 unsupported intent on the new prompt/`8a.v1`, artifact recorded outside the repo, verdict written per §10.4 | Run executed and recorded — covered, or honestly kept as unmet/pending. Absence of a credential keeps this item pending; it cannot be checked off, and the issue is not closed on unit/native evidence alone |
 
 Slices land in order on one branch after this design is approved; each slice is verified locally before push (CI stays
 paused), and merging stays with the maintainer.
@@ -275,25 +436,51 @@ paused), and merging stays with the maintainer.
 
 - [ ] `DescriptorAuthoringResult` distinguishes `UnsupportedIntent` and `NeedsClarification` from `InvalidProviderOutput`
       without reading diagnostic text.
-- [ ] Both new outcomes are structurally incapable of producing a draft (shape + parser + measured counters).
+- [ ] Both new outcomes are structurally incapable of producing a draft: forbidden members are rejected **as members**,
+      covering `null`, `{}`, `[]` and content, decided on the raw envelope before projection (§4.1/§4.4/§6).
+- [ ] Duplicate or unknown members are rejected before any value-level check, so a contradictory envelope (two hashes,
+      two outcomes) cannot reach an outcome branch (§10.1).
 - [ ] Wire version is single-valued (`8a.v1`); no dual acceptance, no reflection JSON path.
-- [ ] Full unit matrix, Asset real-chain cases, and native publish/link/run scenarios green; five named mutations each
-      redden their target and revert.
-- [ ] `7g.v1` migration complete with no stale literal outside historical docs.
+- [ ] Full unit matrix, Asset real-chain cases, and native publish/link/run scenarios green — including the
+      `AgentAuthoringCodeTableRejection` native scenario and the harness that names each sentinel and runs the failure
+      controls separately; the six named mutations (a)–(f) each redden their target and revert.
+- [ ] JSON-closure evidence asserts the required contract (roots resolve, names round-trip, reflection disabled), not the
+      existence of redundant annotations; the retired subtype-registration mutation is not used as a lock.
+- [ ] `7g.v1` migration complete: no stale `7g.v1` literal in `src` or in production prompt/contract text, **except** the
+      old-version rejection fixtures, which must keep the literal to prove the boundary — they are exempt by name in the
+      grep check, and the check must not be satisfied by string concatenation or by deleting the negative case.
+      Historical review/plan/spec records keep their text.
+- [ ] One credentialed live run executed and recorded (S5). Covered only under the §10.4/§10.7 criteria; if credentials
+      were unavailable the item stays pending and the issue is not closed on unit/native evidence alone.
 - [ ] Support statements updated to match executed evidence; live verdict recorded either way without reclassification.
-- [ ] No new framework abstraction, no evaluation platform, no persisted artifact, no review/approval/activation change.
+- [ ] No new framework abstraction, no evaluation platform, no persisted artifact, no review/approval/activation change,
+      no production test hook.
 
-## 13. Open decisions for the static audit
+## 13. Decisions and audit mapping
 
-| ID | Question | This spec's position |
+| ID | Question | Position / rev.2 landing |
 | --- | --- | --- |
-| D1 | New status members vs. reuse `Blocked` + sub-code | New members (see §5) |
-| D2 | Single accepted wire version vs. transitional dual read | Single, fail-closed |
-| D3 | `Warning` vs `Info` severity for the new diagnostics | `Warning` (needs human action, not a failure) |
-| D4 | Allow `plan` alongside unsupported/clarification | Forbidden — co-existence is a shape conflict |
-| D5 | Bound numbers (1..4 reasons/questions, 400-char text, 8 entries/120 chars) | As specified; adjustable, must stay deterministic |
-| D6 | Persist a clarification/unsupported evidence artifact | Out of scope (§3) |
-| D7 | Whether `unsupported.reasons[].code` should also allow `OUT_OF_SCOPE_DOMAIN` | Not in v1; `CAPABILITY_UNSUPPORTED` covers it, and a closed table that grows by guess is worse |
-| D8 | Caller loop for answers (re-entering authoring with补充输入) | Application-side; this issue ships the contract, not the conversation |
-| D9 | Where the "no drafts with a non-draft outcome" invariant is enforced | Parser shape + tests; no public validation hook, no new extension point |
-| D10 | Does `AgentAuthoringRequest` need an explicit "answered questions" field so a second call is attributable | Deferred; needs its own evidence question, and adding a field without a consumer is speculative |
+| D1 | New status members vs. reuse `Blocked` + sub-code | New members, existing numbers kept (§5). Audit agrees: callers must not infer the next action from diagnostic text |
+| D2 | Single accepted wire version vs. transitional dual read | Single, fail-closed (§6 step 4); the old-version rejection negative stays as a fixture and is exempt from the literal sweep (§12) |
+| D3 | `Warning` vs `Info` severity | `Warning` accepted, on the condition that the terminal state comes from the explicit status/structure and Warning is never reused as an approval input (§5) |
+| D4 | Allow `plan` alongside unsupported/clarification | Still forbidden; rev.2 defines *forbidden = member present*, whatever its value, checked on the raw envelope (§4.1, §4.4, §6 step 8) — closing R1-01 |
+| D5 | Bound numbers and their measurement | Numbers kept; rev.2 adds the normalization definition, non-empty-after-normalization, and duplicate-entry equality (§4.3) — closing the audit's whitespace-only hole |
+| D6 | Persist a clarification/unsupported evidence artifact | Out of scope (§3); no new table or approval fact |
+| D7 | Extend the reason-code vocabulary (e.g. `OUT_OF_SCOPE_DOMAIN`) | Not in v1; closed tables, unknown values rejected, and the rejection is executed natively in S3 (§4.2, §10.5) |
+| D8 | Caller loop for answers | Application-side; no session engine here (§3) |
+| D9 | Where the no-drafts-with-non-draft-outcome invariant is enforced | Inside the parser: Stage A raw facts + source-generated Stage B; no public validation hook, no production extension point (§4.4, §6) |
+| D10 | `AgentAuthoringRequest` "answered questions" field | Still deferred; no consumer evidence yet |
+| **D11 (new, rev.2)** | Two-stage raw-envelope parsing vs. presence flags on the DTO | Two-stage: `JsonDocument` facts then the strict source-generated DTO. Flags on the DTO would need an extra parallel structure that can drift from the wire names; `AllowDuplicateProperties = false` alone cannot separate absent from `null` (both verified) |
+| **D12 (new, rev.2)** | Unknown members: ignore (STJ default) or reject | Reject at every object level, ordinal-exact names, no aliases. This tightens `7g.v1` behaviour and is called out as part of the migration (§4.4 rule 1/3) |
+| **D13 (new, rev.2)** | What counts as JSON-closure evidence | Required roots resolve + names round-trip + reflection disabled + native run; redundant subtype annotations are explicitly not a lock, and the mutation targets were retargeted to real closure edges (§10.2, §10.6) — closing R1-02 |
+
+## Changelog
+
+- **rev.2 (2026-11-03, 修订设计审计 R1 四项 P2)** — R1-01: presence/duplicate semantics moved to a raw-envelope stage with
+  a verified mechanics table, strict DTO options, ordinal-exact name policy and an expanded decision matrix; R1-02: the
+  JSON-closure mutation retargeted to real closure edges and the redundant subtype-registration mutation retired with the
+  reason recorded; R1-03: `AgentAuthoringCodeTableRejection` native scenario plus the required AotFixture harness change,
+  with correct-rejection and gate-negative-control layers separated; R1-04: live execution promoted from optional to a
+  required acceptance step (S5) with tightened B12 success criteria. Also landed the audit's two wording items
+  (normalization/whitespace, `7g.v1` literal sweep exception) and recorded D11–D13.
+- **rev.1 (2026-11-03)** — initial proposal; baseline re-pointed to master `91d6574e` after #158 merged.
