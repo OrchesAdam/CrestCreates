@@ -35,9 +35,12 @@ namespace CrestCreates.Sample.AssetManagement.E2E.Tests;
 /// draft review so a provider response cannot approve, activate, or mutate the
 /// Asset runtime.
 /// </summary>
+[Collection(AssetLiveEnvironmentCollection.Name)]
 public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
 {
     private const string TenantId = "asset-live-eval-tenant";
+    private const string ArtifactVariable = "CREST_ASSET_LIVE_EVAL_ARTIFACT";
+    private const string MaxOutputTokensVariable = "CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS";
     private const string AuthorId = "asset-live-eval-author";
     private const string RequestedModel = "deepseek-v4-flash";
     private const string MaintenanceDecisionSchema = "asset-management.schema.maintenance-decision";
@@ -48,7 +51,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
     public async Task DeepSeek_AuthoringAndReview_ProducesAuditedAssetDraftEvidence()
     {
         var runId = Guid.NewGuid().ToString("N");
-        var artifactPath = Environment.GetEnvironmentVariable("CREST_ASSET_LIVE_EVAL_ARTIFACT")
+        var artifactPath = Environment.GetEnvironmentVariable(ArtifactVariable)
             ?? Path.Combine(Path.GetTempPath(), $"crest-asset-live-eval-{runId}.json");
         var baseline = AssetControlPlaneApprovalHarness.BuildDeployedBaseline();
         var artifact = new LiveEvaluationArtifact(runId, RequestedModel);
@@ -56,7 +59,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
         var semantic = new SemanticResult();
         var retention = AssetLiveProposalRetention.FromEnvironment();
         artifact.Retention = new { enabled = retention.Enabled, preflightCode = retention.PreflightCode };
-        var outputBudget = ResolveOutputBudget(Environment.GetEnvironmentVariable("CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS"));
+        var outputBudget = ResolveOutputBudget(Environment.GetEnvironmentVariable(MaxOutputTokensVariable));
         artifact.OutputBudget = new
         {
             configuredMaxOutputTokens = outputBudget.MaxOutputTokens,
@@ -320,15 +323,29 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
     [AssetLiveEvalFact]
     public async Task DeepSeek_UnsupportedIntent_YieldsRestrictedResult_AndFabricatesNoCapability()
     {
-        var artifactPath = Environment.GetEnvironmentVariable(UnsupportedArtifactVariable)
-            ?? Path.Combine(
-                Path.GetTempPath(),
-                $"crest-asset-live-eval-unsupported-{Guid.NewGuid():N}.json");
+        var environment = await CaptureLiveUnsupportedEnvironmentAsync();
 
         await EvaluateUnsupportedIntentAsync(
-            artifactPath,
+            environment.ArtifactPath,
             recordedProviderFactory: null,
-            ResolveOutputBudget(Environment.GetEnvironmentVariable("CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS")));
+            environment.OutputBudget);
+    }
+
+    /// <summary>
+    /// The live entry captures its destination and output budget under
+    /// <see cref="AssetLiveEnvironmentGate"/>, so an offline regression that temporarily installs
+    /// its own destination cannot redirect a live run starting beside it. The captured values stay
+    /// locals for the rest of the evaluation; nothing re-reads the process environment afterwards.
+    /// </summary>
+    internal static async Task<AssetLiveUnsupportedEnvironment> CaptureLiveUnsupportedEnvironmentAsync()
+    {
+        await using var gate = await AssetLiveEnvironmentGate.HoldAsync("live-unsupported-entry");
+        return new AssetLiveUnsupportedEnvironment(
+            Environment.GetEnvironmentVariable(UnsupportedArtifactVariable)
+                ?? Path.Combine(
+                    Path.GetTempPath(),
+                    $"crest-asset-live-eval-unsupported-{Guid.NewGuid():N}.json"),
+            ResolveOutputBudget(Environment.GetEnvironmentVariable(MaxOutputTokensVariable)));
     }
 
     /// <summary>
@@ -726,6 +743,10 @@ internal readonly record struct AssetLiveOutputBudgetResolution(
     bool IsValid,
     int MaxOutputTokens,
     string DiagnosticCode);
+
+internal readonly record struct AssetLiveUnsupportedEnvironment(
+    string ArtifactPath,
+    AssetLiveOutputBudgetResolution OutputBudget);
 
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
 public sealed class AssetLiveEvalFactAttribute : FactAttribute
