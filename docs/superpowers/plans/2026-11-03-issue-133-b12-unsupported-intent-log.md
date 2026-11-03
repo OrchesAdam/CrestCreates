@@ -76,7 +76,9 @@ B12 的期望文本是「显式 unsupported / needs-clarification 结果」。�
 - 开关仍是 `AssetLiveEvalFact`（`CREST_ASSET_LIVE_EVAL=1`），默认 `Skip`，不设 CI 门禁；
 - artifact 走 `CREST_ASSET_LIVE_EVAL_UNSUPPORTED_ARTIFACT`（缺省临时路径），记录 runId、requestedModel、context（focus ref/scope/描述符数/diagnostic 码）、authoring（status、诊断码、诊断分类、prompt 输入/输出 hash、observed provider/model、draftCount）、OutputBudget（`CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS` 解析结果与 `OUTPUT_BUDGET_*` 码）、HTTP 响应元数据、逐草稿/逐评审记录、semantic 结论；
 - 结果分类：`ExplicitUnsupportedResult`（Blocked）、`NeedsClarificationNotExpressible`（InvalidProviderOutput，非预算耗尽）、`SubsetDraftOnlyNoUnsupportedClaim`（有草稿但没有可批准地声称部署面变更）、`OutputBudgetExhausted`、`ProviderUnavailable`、`AuthoringFailure`、`InvalidOutputBudget`、`UnhandledEvaluationFailure`；
+  —— 本条分类与接受集合已被 R1 修订废弃（见「R1 审查轮」）：现只接受 `ExplicitUnsupportedResult`，其余状态各有独立标签且默认失败。原描述保留为该轮交付时的真实状态记录。
 - 无条件硬断言（与模型输出形态无关）：`FabricatedCapabilityObserved == false`（评审通过且指向 `wf_asset_maintenance_review` / `ht_asset_maintenance_review` 的草稿即判为伪造能力）、草稿库保存数 0、gate 调用 0、成功 0、部署目录不变；结果必须落在三种受限形态之一。
+  —— 其中「指向固定 ID 的草稿才算伪造」的判定与「三种受限形态」的接受集合已被 R1 取代：现按「任何评审通过候选即伪造声明」判定，并额外硬断言评审通过候选数为 0。
 - `AssetActivationGateObserver` 的替换由 `ConfigureUnsupportedIntentServices` 统一提供，并被 `UnsupportedIntentEvalWiring_ReplacesGateWithObserver_WithoutNetwork` 在无网络条件下验证（可解析 agent 与观测器、观测器计数 0、HTTP 状态 0）。
 
 诚实边界：本轮环境没有 `DEEPSEEK_API_KEY`，该 live 用例**未真实执行**，只验证了编译、默认 `Skip` 与接线探针；行为层「候选缺口/待验证」需要维护者用凭据跑一次并回填 artifact 结论后才能升级为已证实/已排除。
@@ -105,6 +107,53 @@ B12 的期望文本是「显式 unsupported / needs-clarification 结果」。�
 | `CrestCreates.DescriptorDraft.Tests` | 132 passed / 0 failed | 同上 |
 | `CrestCreates.Sample.AssetManagement.Tests` | 29 passed / 0 failed | 同上 |
 | NativeAOT 门禁 | 未运行 | 本轮为测试/文档增量，无生产代码变化，未新增原生门禁，支持声明不变 |
+
+## R1 审查轮（2026-11-03，PR #158）
+
+审查报告：`docs/review/2026-11-03-issue-133-pr158-review-round1.md`（head `23fa7a09`）；探针归档：`docs/review/probes/issue133-pr158-r1/`。两项 P2 均成立，属评估证据可信度缺陷，不涉及生产越权。
+
+### R1-01 [P2] 无关失败被误判为受限结果
+
+根因：live 用例的分类只看 `DescriptorAuthoringStatus`——任意 `Blocked` 记作 `ExplicitUnsupportedResult`，任意非预算耗尽的 `InvalidProviderOutput` 记作 `NeedsClarificationNotExpressible`，而这两个标签都在接受集合内，于是畸形 JSON、契约版本错误、prompt hash 不匹配都会绿灯。
+
+修复：分类抽出为 `AssetUnsupportedIntentOracle.Classify`，接受标签只剩 `ExplicitUnsupportedResult`，且要求诊断码是意图级不支持码之一（`AUTHORING_UNKNOWN_DESCRIPTOR_KIND` / `AUTHORING_UNSUPPORTED_DRAFT_OPERATION` / `AUTHORING_GOVERNANCE_BOUNDARY_VIOLATION`）；hash 不匹配先判为 `PromptIntegrityFailure`，`InvalidProviderOutput` 一律判为 `ProviderOutputRejected_PendingManualAdjudication`（按审查建议：现契约无法区分澄清与无效输出时保持未裁定，不得凭状态给出澄清结论），预算耗尽 / provider 不可用 / Failed 各自独立标签。最终断言由 `BeOneOf` 三标签改为 `Be(ExplicitUnsupportedResult)`。
+
+### R1-02 [P2] 两个固定 ID 被当作「没有伪造能力」的业务判定
+
+根因：`FabricatedCapabilityObserved` 只在评审通过且草稿 ID 恰为既有 maintenance Workflow/HumanTask 时置真；新 ID 的 HumanTask 即便 rationale 与 payload name 明确声称「评分算法已实现、风险阈值 0.5 已生效」也不触发，最终落到被接受的 `SubsetDraftOnlyNoUnsupportedClaim`，而 artifact 只记 kind/id/operation，没有保留语义证据。
+
+修复：伪造判定去 ID 化——任何通过确定性评审的候选一律记 `FabricatedCapabilityClaim` 并使评估失败（`semantic.ReviewPassedDraftCount == 0` 也成为硬断言）；有候选但全部未通过评审记 `ArtifactsRejectedByReview_PendingManualAdjudication`（未裁定，不再自动记为「无unsupported声明」）。评审判定抽出 `AssetUnsupportedIntentOracle.IsReviewPassed`，live 用例与离线回归共用同一口径。artifact 逐候选保留经处理的语义证据：`intentClaim` / `rationaleClaim` / `descriptorNameClaim`（`SanitizeClaim`：控制字符折叠为空格、空白归一、上限 400 字符并标 `…[truncated]`）与 `reviewPassed`，authoring 层新增 `planAssumptions`；`targetsDeployedMaintenanceSurface` 降级为记录的上下文，不再参与裁定。
+
+### 探针与自有回归
+
+| 项 | 结果 |
+| --- | --- |
+| `oracle-probes.patch` 逐字应用（`git apply --check` 通过）修复前 | `ReviewerLiveOracleProbeTests` 1 pass / 3 fail（与审查报告一致，红色基线复现） |
+| 同探针修复后 | 4 pass / 0 fail：`unsupported-kind` 仍通过，`malformed-json`、`wrong-hash`、`new-id-fabrication` 均按预期抛出 |
+| 自有分类器回归 `AssetUnsupportedIntentOracleTests` | 20 条（含 7 组合的「仅意图级 Block 被接受」矩阵与 `SanitizeClaim` 边界） |
+| 自有链路级回归（无网络，真实 review 链） | 3 条：畸形输出、错误 hash 的 Blocked、新 ID 伪造声明且评审通过 |
+| 变异回归（把已修缺陷放回） | R1-01 变异 → 8 红（两条审查探针 + 两条链路 + 四条分类器）；R1-02 变异 → 4 红（分类器 3 + 链路 1）。说明：`new-id-fabrication` 探针在 R1-02 变异下仍绿，因为该变异只改标签、被新增的 `ReviewPassedDraftCount == 0` 硬断言挡住——自有链路级回归才真正锁住该判定 |
+| Asset E2E 全量（本地 PostgreSQL 容器） | 76 passed / 2 skipped / 0 failed（2 条 skip 仍是两条 live 用例默认跳过） |
+
+两处变异均已就地还原；`git diff -- src/` 仍为空，本轮改动全部在测试与文档。
+
+### 对审查 patch 的一处必要偏离（需审查者知悉）
+
+patch 的第二段把 `RemoveAll<IDescriptorAuthoringModelClient>()` + `AddSingleton<..., ReviewerResponseModelClient>()` 无条件写进 `ConfigureUnsupportedIntentServices`。若原样落库，真实 live 评估会永远走录制替身、不再调用 DeepSeek——那会把「live 用例」变成假绿。因此这两行被包进显式接缝：
+
+```csharp
+if (!IsRealProviderEvaluationRequested())   // CREST_ASSET_LIVE_EVAL=1 且未显式要求录制
+{
+    services.RemoveAll<IDescriptorAuthoringModelClient>();
+    services.AddSingleton<IDescriptorAuthoringModelClient, ReviewerResponseModelClient>();
+}
+```
+
+探针不设 live 开关，因此可无网络照常运行；`ReviewerLiveOracleProbeTests.cs` 与 `ReviewerResponseModelClient` 本体逐字保留（断言、mode、artifact 路径不变）。R2 复放直接 `dotnet test --filter FullyQualifiedName~ReviewerLiveOracleProbeTests` 即可，无需再 apply patch；如需在带 live 开关的进程里强制离线复放，设 `CREST_ASSET_LIVE_EVAL_RECORDED_PROVIDER=1`。
+
+### 行为层仍未证实
+
+真实 DeepSeek 在该意图下的行为仍无证据：本轮依旧无 `DEEPSEEK_API_KEY`，live 用例只验证分类与接线，未发起请求。R1 修复只让绿灯可信，不改变「候选缺口/待验证」的行为层结论。
 
 ## 未做的事与边界
 
