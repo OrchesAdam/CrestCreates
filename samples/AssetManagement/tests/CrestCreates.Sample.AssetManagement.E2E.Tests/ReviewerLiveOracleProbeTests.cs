@@ -95,9 +95,18 @@ internal sealed class ReviewerResponseModelClient : IDescriptorAuthoringModelCli
         }
         else response = JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1", promptInputHash = hash,
+            contractVersion = "8a.v1", outcome = "drafts", promptInputHash = hash,
             plan = new { planId = "explicit-unsupported-control", intentText = Intent },
-            items = new[] { new { descriptorKind = "Capability", descriptorId = "unsupported-algorithm", operation = "Create" } }
+            items = new[]
+            {
+                new
+                {
+                    descriptorKind = "Capability",
+                    descriptorId = "unsupported-algorithm",
+                    operation = "Create",
+                    payload = new { id = "unsupported-algorithm", name = "Condition scoring", version = 1 }
+                }
+            }
         });
         return Task.FromResult(new DescriptorAuthoringModelResponse
         {

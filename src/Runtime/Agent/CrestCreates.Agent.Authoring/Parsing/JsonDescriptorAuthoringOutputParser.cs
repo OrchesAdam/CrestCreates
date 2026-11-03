@@ -16,12 +16,34 @@ namespace CrestCreates.Agent.Authoring.Parsing;
 
 public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOutputParser
 {
+    // Stage B reads the projected values with both name-strictness options pinned: no last-value-wins
+    // on a repeated member, and no case-insensitive binding that would let a casing alias through.
+    // WhenWritingNull is kept so the disclosure examples, serialized through this same context, show an
+    // omitted section rather than a null one — a null placeholder would be a forbidden member.
     private static readonly DescriptorAuthoringParserJsonSerializerContext ParserContext =
-        new(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        new(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        {
+            AllowDuplicateProperties = false,
+            PropertyNameCaseInsensitive = false,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
 
     internal static DescriptorAuthoringParserJsonSerializerContext Context => ParserContext;
 
-    private const string ExpectedContractVersion = "7g.v1";
+    internal const string ExpectedContractVersion = "8a.v1";
+
+    private const string OutcomeDrafts = "drafts";
+    private const string OutcomeUnsupported = "unsupported";
+    private const string OutcomeNeedsClarification = "needsClarification";
+
+    private const int MaxOutcomeEntries = 4;
+    private const int MaxTextLength = 400;
+    private const int MaxCollectionEntries = 8;
+    private const int MaxEntryLength = 120;
+    private const int MinQuestionIdLength = 1;
+    private const int MaxQuestionIdLength = 64;
+
+    private const string RootPath = DescriptorAuthoringEnvelopeFacts.RootPath;
 
     public DescriptorAuthoringResult Parse(
         string providerOutputText,
@@ -38,77 +60,213 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             DraftSetId = string.Empty
         };
 
-        // 1. Deserialize JSON
-        DescriptorAuthoringProviderOutputDto? dto;
+        DescriptorAuthoringResult Invalid(string message)
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                message,
+                SeverityLevel.Error));
+            return CreateResult(DescriptorAuthoringStatus.InvalidProviderOutput, emptyPlan, emptyDraftSet, diagnostics);
+        }
+
+        // 1. Raw JSON must be an object document.
+        JsonDocument document;
         try
         {
-            dto = JsonSerializer.Deserialize(providerOutputText, ParserContext.DescriptorAuthoringProviderOutputDto);
+            document = JsonDocument.Parse(providerOutputText);
         }
         catch (JsonException)
         {
+            return Invalid("Failed to deserialize provider output as JSON.");
+        }
+
+        using (document)
+        {
+            // 2-3. Envelope member names: duplicates and unknown/alias members decide first, at every
+            // protocol level and recursing through payload, before any value is interpreted.
+            if (!DescriptorAuthoringEnvelopeFacts.TryRead(document.RootElement, out var envelope, out var envelopeFailure))
+            {
+                return Invalid(envelopeFailure!);
+            }
+
+            var root = document.RootElement;
+
+            // 4. Contract version boundary is single-valued.
+            var contractVersion = ReadString(root, "contractVersion");
+            if (!string.Equals(contractVersion, ExpectedContractVersion, StringComparison.Ordinal))
+            {
+                return Invalid($"Unsupported contract version '{contractVersion ?? "null"}'. Expected '{ExpectedContractVersion}'.");
+            }
+
+            // 5. promptInputHash must be an actual string member.
+            var promptInputHash = ReadString(root, "promptInputHash");
+            if (promptInputHash is null)
+            {
+                return Invalid("Provider output has no usable 'promptInputHash' string member.");
+            }
+
+            // 6. Integrity before semantics.
+            if (!string.Equals(promptInputHash, context.ExpectedPromptInputHash, StringComparison.Ordinal))
+            {
+                diagnostics.Add(CreateDiagnostic(
+                    DescriptorAuthoringDiagnosticCodes.PromptHashMismatch,
+                    $"Prompt input hash mismatch. Expected '{context.ExpectedPromptInputHash}', got '{promptInputHash}'.",
+                    SeverityLevel.Blocker));
+                return CreateResult(DescriptorAuthoringStatus.Blocked, emptyPlan, emptyDraftSet, diagnostics);
+            }
+
+            // 7. The outcome discriminator is required and closed.
+            var outcome = ReadString(root, "outcome");
+            if (outcome is null)
+            {
+                return Invalid("Provider output is missing the required 'outcome' discriminator.");
+            }
+
+            if (outcome is not (OutcomeDrafts or OutcomeUnsupported or OutcomeNeedsClarification))
+            {
+                return Invalid($"Unsupported outcome '{outcome}'. Expected '{OutcomeDrafts}', '{OutcomeUnsupported}', or '{OutcomeNeedsClarification}'.");
+            }
+
+            // 8. Shape: required members present with the declared kind, forbidden members absent as members
+            // at all (null, {}, [] and content are all appearances).
+            if (ValidateShape(outcome, envelope) is { } shapeFailure)
+            {
+                return Invalid(shapeFailure);
+            }
+
+            // 9. Stage B projection of the values.
+            DescriptorAuthoringProviderOutputDto? dto;
+            try
+            {
+                dto = JsonSerializer.Deserialize(providerOutputText, ParserContext.DescriptorAuthoringProviderOutputDto);
+            }
+            catch (JsonException ex)
+            {
+                return Invalid($"Failed to deserialize provider output as JSON: {ex.Message}");
+            }
+
+            if (dto is null)
+            {
+                return Invalid("Provider output deserialized to null.");
+            }
+
+            // 10-13. Bounds, normalization, closed code tables, then the terminal outcome.
+            if (outcome == OutcomeUnsupported)
+            {
+                return BuildUnsupportedResult(dto.Unsupported!, envelope, context, diagnostics);
+            }
+
+            if (outcome == OutcomeNeedsClarification)
+            {
+                return BuildClarificationResult(dto.Clarification!, envelope, context, diagnostics);
+            }
+
+            return ParseDrafts(dto, context, diagnostics);
+        }
+    }
+
+    private static string? ValidateShape(string outcome, EnvelopeMemberInventory envelope)
+    {
+        if (outcome == OutcomeDrafts)
+        {
+            if (!envelope.HasKind(RootPath, "plan", JsonValueKind.Object))
+            {
+                return "Provider output with outcome 'drafts' is missing the required 'plan' object.";
+            }
+
+            if (!envelope.HasKind(RootPath, "items", JsonValueKind.Array))
+            {
+                return "Provider output with outcome 'drafts' is missing the required 'items' array.";
+            }
+
+            // Item-level required members are shape facts too: an absent or null payload is a contract
+            // violation decided here, before any per-item materialization.
+            var itemCount = envelope.ArrayLength($"{RootPath}.items") ?? 0;
+            for (var i = 0; i < itemCount; i++)
+            {
+                if (!envelope.HasKind($"{RootPath}.items[{i}]", "payload", JsonValueKind.Object))
+                {
+                    return $"Provider output item {i} is missing the required 'payload' object.";
+                }
+            }
+
+            if (envelope.Has(RootPath, "unsupported"))
+            {
+                return "Provider output with outcome 'drafts' must not carry the 'unsupported' member.";
+            }
+
+            if (envelope.Has(RootPath, "needsClarification"))
+            {
+                return "Provider output with outcome 'drafts' must not carry the 'needsClarification' member.";
+            }
+
+            return null;
+        }
+
+        var required = outcome == OutcomeUnsupported ? "unsupported" : "needsClarification";
+        if (!envelope.HasKind(RootPath, required, JsonValueKind.Object))
+        {
+            return $"Provider output with outcome '{outcome}' is missing the required '{required}' object.";
+        }
+
+        var entriesMember = outcome == OutcomeUnsupported ? "reasons" : "questions";
+        if (!envelope.HasKind($"{RootPath}.{required}", entriesMember, JsonValueKind.Array))
+        {
+            return $"Provider output with outcome '{outcome}' is missing the required '{required}.{entriesMember}' array.";
+        }
+
+        foreach (var forbidden in new[] { "plan", "items", "unsupported", "needsClarification" })
+        {
+            if (forbidden == required)
+            {
+                continue;
+            }
+
+            if (envelope.Has(RootPath, forbidden))
+            {
+                return $"Provider output with outcome '{outcome}' must not carry the '{forbidden}' member.";
+            }
+        }
+
+        return null;
+    }
+
+    private DescriptorAuthoringResult ParseDrafts(
+        DescriptorAuthoringProviderOutputDto dto,
+        DescriptorAuthoringParseContext context,
+        List<DescriptorAuthoringDiagnostic> diagnostics)
+    {
+        var emptyPlan = new DescriptorAuthoringPlan
+        {
+            PlanId = string.Empty,
+            IntentText = context.IntentText
+        };
+        var emptyDraftSet = new DescriptorDraftSet
+        {
+            DraftSetId = string.Empty
+        };
+
+        DescriptorAuthoringResult Invalid(string message)
+        {
             diagnostics.Add(CreateDiagnostic(
                 DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
-                "Failed to deserialize provider output as JSON.",
+                message,
                 SeverityLevel.Error));
             return CreateResult(DescriptorAuthoringStatus.InvalidProviderOutput, emptyPlan, emptyDraftSet, diagnostics);
         }
 
-        if (dto is null)
-        {
-            diagnostics.Add(CreateDiagnostic(
-                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
-                "Provider output deserialized to null.",
-                SeverityLevel.Error));
-            return CreateResult(DescriptorAuthoringStatus.InvalidProviderOutput, emptyPlan, emptyDraftSet, diagnostics);
-        }
-
-        // 2. Validate contract version
-        if (!string.Equals(dto.ContractVersion, ExpectedContractVersion, StringComparison.Ordinal))
-        {
-            diagnostics.Add(CreateDiagnostic(
-                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
-                $"Unsupported contract version '{dto.ContractVersion ?? "null"}'. Expected '{ExpectedContractVersion}'.",
-                SeverityLevel.Error));
-            return CreateResult(DescriptorAuthoringStatus.InvalidProviderOutput, emptyPlan, emptyDraftSet, diagnostics);
-        }
-
-        // 3. Validate prompt input hash
-        if (!string.Equals(dto.PromptInputHash, context.ExpectedPromptInputHash, StringComparison.Ordinal))
-        {
-            diagnostics.Add(CreateDiagnostic(
-                DescriptorAuthoringDiagnosticCodes.PromptHashMismatch,
-                $"Prompt input hash mismatch. Expected '{context.ExpectedPromptInputHash}', got '{dto.PromptInputHash ?? "null"}'.",
-                SeverityLevel.Blocker));
-            return CreateResult(DescriptorAuthoringStatus.Blocked, emptyPlan, emptyDraftSet, diagnostics);
-        }
-
-        // 4. Validate plan exists
-        if (dto.Plan is null)
-        {
-            diagnostics.Add(CreateDiagnostic(
-                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
-                "Provider output is missing required 'plan' section.",
-                SeverityLevel.Error));
-            return CreateResult(DescriptorAuthoringStatus.InvalidProviderOutput, emptyPlan, emptyDraftSet, diagnostics);
-        }
-
-        // 5. Validate items exist
+        // 10. items carries at least one entry.
         if (dto.Items is null || dto.Items.Count == 0)
         {
-            diagnostics.Add(CreateDiagnostic(
-                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
-                "Provider output contains no items.",
-                SeverityLevel.Error));
-            return CreateResult(DescriptorAuthoringStatus.InvalidProviderOutput, emptyPlan, emptyDraftSet, diagnostics);
+            return Invalid("Provider output contains no items.");
         }
 
-        // 6. Validate each item with atomic semantics: fail all if any item is invalid
+        // 13a. Existing per-item atomic validation, unchanged in semantics.
         var drafts = new List<CrestCreates.DescriptorDraft.Abstractions.DescriptorDraft>();
         foreach (var item in dto.Items)
         {
             if (!TryParseItem(item, context, diagnostics, out var draft))
             {
-                // Atomic failure: return empty drafts with blocked status
                 return CreateResult(DescriptorAuthoringStatus.Blocked, emptyPlan, emptyDraftSet, diagnostics);
             }
 
@@ -118,8 +276,7 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             }
         }
 
-        // 7. Build plan
-        var plannedRefs = dto.Plan.PlannedDescriptorRefs is null
+        var plannedRefs = dto.Plan!.PlannedDescriptorRefs is null
             ? Array.Empty<DescriptorRef>()
             : dto.Plan.PlannedDescriptorRefs
                 .Select(r => new DescriptorRef(r.Namespace ?? string.Empty, r.Id ?? string.Empty, r.Version))
@@ -133,7 +290,6 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             Assumptions = dto.Plan.Assumptions?.ToArray() ?? Array.Empty<string>()
         };
 
-        // 8. Build draft set
         var draftSet = new DescriptorDraftSet
         {
             DraftSetId = plan.PlanId,
@@ -146,6 +302,320 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             draftSet,
             diagnostics);
     }
+
+    private DescriptorAuthoringResult BuildUnsupportedResult(
+        DescriptorAuthoringProviderUnsupportedDto unsupported,
+        EnvelopeMemberInventory envelope,
+        DescriptorAuthoringParseContext context,
+        List<DescriptorAuthoringDiagnostic> diagnostics)
+    {
+        DescriptorAuthoringResult Invalid(string message)
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                message,
+                SeverityLevel.Error));
+            return CreateResult(
+                DescriptorAuthoringStatus.InvalidProviderOutput,
+                new DescriptorAuthoringPlan { PlanId = string.Empty, IntentText = context.IntentText },
+                new DescriptorDraftSet { DraftSetId = string.Empty },
+                diagnostics);
+        }
+
+        var reasons = unsupported.Reasons!;
+        var path = $"{RootPath}.unsupported";
+        var count = envelope.ArrayLength($"{path}.reasons") ?? 0;
+        if (count < 1 || count > MaxOutcomeEntries)
+        {
+            return Invalid($"'{path}.reasons' must hold 1..{MaxOutcomeEntries} entries.");
+        }
+
+        var entries = new List<DescriptorAuthoringUnsupportedReason>(count);
+        var seenEntries = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < reasons.Count; i++)
+        {
+            var reasonPath = $"{path}.reasons[{i}]";
+            var reason = reasons[i];
+            if (envelope.Kind(reasonPath, "code") != JsonValueKind.String
+                || envelope.Kind(reasonPath, "message") != JsonValueKind.String)
+            {
+                return Invalid($"'{reasonPath}' requires string 'code' and 'message' members.");
+            }
+
+            if (envelope.Has(reasonPath, "evidenceRefs")
+                && !envelope.HasKind(reasonPath, "evidenceRefs", JsonValueKind.Array))
+            {
+                return Invalid($"'{reasonPath}.evidenceRefs' must be an array.");
+            }
+
+            if (!DescriptorAuthoringUnsupportedReasonCodes.IsKnown(reason.Code))
+            {
+                return Invalid($"'{reasonPath}.code' is outside the closed code table: '{Normalize(reason.Code)}'.");
+            }
+
+            var message = Normalize(reason.Message);
+            if (message.Length < 1 || message.Length > MaxTextLength)
+            {
+                return Invalid($"'{reasonPath}.message' must hold 1..{MaxTextLength} characters after normalization.");
+            }
+
+            if (ValidateEntryList(reason.EvidenceRefs, envelope, reasonPath, "evidenceRefs", allowEmpty: true, out var evidenceRefs) is { } evidenceFailure)
+            {
+                return Invalid(evidenceFailure);
+            }
+
+            if (!seenEntries.Add($"{reason.Code}•{message}"))
+            {
+                return Invalid($"'{path}.reasons' repeats the same obstacle at '{reasonPath}'.");
+            }
+
+            entries.Add(new DescriptorAuthoringUnsupportedReason
+            {
+                Code = reason.Code!,
+                Message = message,
+                EvidenceRefs = evidenceRefs
+            });
+        }
+
+        var outcome = new DescriptorAuthoringUnsupportedOutcome { Reasons = entries.ToArray() };
+        for (var i = 0; i < entries.Count; i++)
+        {
+            diagnostics.Add(new DescriptorAuthoringDiagnostic
+            {
+                Code = DescriptorAuthoringDiagnosticCodes.IntentUnsupported,
+                Message = entries[i].Message,
+                Severity = SeverityLevel.Warning,
+                Path = $"unsupported.reasons[{i}]"
+            });
+        }
+
+        return new DescriptorAuthoringResult
+        {
+            Status = DescriptorAuthoringStatus.UnsupportedIntent,
+            Plan = new DescriptorAuthoringPlan { PlanId = "plan_intent_unsupported", IntentText = context.IntentText },
+            DraftSet = new DescriptorDraftSet { DraftSetId = "draftset_intent_unsupported" },
+            Unsupported = outcome,
+            Diagnostics = diagnostics.ToArray()
+        };
+    }
+
+    private DescriptorAuthoringResult BuildClarificationResult(
+        DescriptorAuthoringProviderClarificationDto clarification,
+        EnvelopeMemberInventory envelope,
+        DescriptorAuthoringParseContext context,
+        List<DescriptorAuthoringDiagnostic> diagnostics)
+    {
+        DescriptorAuthoringResult Invalid(string message)
+        {
+            diagnostics.Add(CreateDiagnostic(
+                DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                message,
+                SeverityLevel.Error));
+            return CreateResult(
+                DescriptorAuthoringStatus.InvalidProviderOutput,
+                new DescriptorAuthoringPlan { PlanId = string.Empty, IntentText = context.IntentText },
+                new DescriptorDraftSet { DraftSetId = string.Empty },
+                diagnostics);
+        }
+
+        var path = $"{RootPath}.needsClarification";
+        var questions = clarification.Questions!;
+        var count = envelope.ArrayLength($"{path}.questions") ?? 0;
+        if (count < 1 || count > MaxOutcomeEntries)
+        {
+            return Invalid($"'{path}.questions' must hold 1..{MaxOutcomeEntries} entries.");
+        }
+
+        var entries = new List<DescriptorAuthoringClarificationQuestion>(count);
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < questions.Count; i++)
+        {
+            var questionPath = $"{path}.questions[{i}]";
+            var question = questions[i];
+            if (envelope.Kind(questionPath, "id") != JsonValueKind.String
+                || envelope.Kind(questionPath, "reasonCode") != JsonValueKind.String
+                || envelope.Kind(questionPath, "question") != JsonValueKind.String)
+            {
+                return Invalid($"'{questionPath}' requires string 'id', 'reasonCode', and 'question' members.");
+            }
+
+            foreach (var list in new[] { "missingInputs", "candidateValues" })
+            {
+                if (envelope.Has(questionPath, list) && !envelope.HasKind(questionPath, list, JsonValueKind.Array))
+                {
+                    return Invalid($"'{questionPath}.{list}' must be an array.");
+                }
+            }
+
+            var rawId = question.Id ?? string.Empty;
+            if (rawId.Length < MinQuestionIdLength || rawId.Length > MaxQuestionIdLength || !IsIdentifierChar(rawId))
+            {
+                return Invalid($"'{questionPath}.id' must hold 1..{MaxQuestionIdLength} characters of [A-Za-z0-9._-].");
+            }
+
+            if (!seenIds.Add(rawId))
+            {
+                return Invalid($"'{path}.questions' repeats question id '{rawId}'.");
+            }
+
+            if (!DescriptorAuthoringClarificationReasonCodes.IsKnown(question.ReasonCode))
+            {
+                return Invalid($"'{questionPath}.reasonCode' is outside the closed code table: '{Normalize(question.ReasonCode)}'.");
+            }
+
+            var text = Normalize(question.Question);
+            if (text.Length < 1 || text.Length > MaxTextLength)
+            {
+                return Invalid($"'{questionPath}.question' must hold 1..{MaxTextLength} characters after normalization.");
+            }
+
+            if (ValidateEntryList(question.MissingInputs, envelope, questionPath, "missingInputs", allowEmpty: false, out var missingInputs) is { } missingFailure)
+            {
+                return Invalid(missingFailure);
+            }
+
+            if (ValidateEntryList(question.CandidateValues, envelope, questionPath, "candidateValues", allowEmpty: true, out var candidateValues) is { } candidateFailure)
+            {
+                return Invalid(candidateFailure);
+            }
+
+            entries.Add(new DescriptorAuthoringClarificationQuestion
+            {
+                Id = rawId,
+                ReasonCode = Normalize(question.ReasonCode),
+                Question = text,
+                MissingInputs = missingInputs,
+                CandidateValues = candidateValues
+            });
+        }
+
+        var outcome = new DescriptorAuthoringClarificationOutcome { Questions = entries.ToArray() };
+        for (var i = 0; i < entries.Count; i++)
+        {
+            diagnostics.Add(new DescriptorAuthoringDiagnostic
+            {
+                Code = DescriptorAuthoringDiagnosticCodes.IntentNeedsClarification,
+                Message = $"{entries[i].ReasonCode}: {entries[i].Question}",
+                Severity = SeverityLevel.Warning,
+                Path = $"needsClarification.questions[{i}]"
+            });
+        }
+
+        return new DescriptorAuthoringResult
+        {
+            Status = DescriptorAuthoringStatus.NeedsClarification,
+            Plan = new DescriptorAuthoringPlan { PlanId = "plan_needs_clarification", IntentText = context.IntentText },
+            DraftSet = new DescriptorDraftSet { DraftSetId = "draftset_needs_clarification" },
+            Clarification = outcome,
+            Diagnostics = diagnostics.ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Bounds measured on the normalized form: 0..8 or 1..8 entries, each 1..120 characters and
+    /// non-empty after normalization.
+    /// </summary>
+    private static string? ValidateEntryList(
+        List<string>? entries,
+        EnvelopeMemberInventory envelope,
+        string ownerPath,
+        string member,
+        bool allowEmpty,
+        out IReadOnlyList<string> normalized)
+    {
+        normalized = Array.Empty<string>();
+        var present = envelope.Has(ownerPath, member);
+        if (!present)
+        {
+            return allowEmpty ? null : $"'{ownerPath}.{member}' requires 1..{MaxCollectionEntries} entries.";
+        }
+
+        if (entries is null)
+        {
+            return $"'{ownerPath}.{member}' must be an array of strings.";
+        }
+
+        if (entries.Count > MaxCollectionEntries || (!allowEmpty && entries.Count < 1))
+        {
+            return $"'{ownerPath}.{member}' must hold {(allowEmpty ? 0 : 1)}..{MaxCollectionEntries} entries.";
+        }
+
+        var results = new List<string>(entries.Count);
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var value = Normalize(entries[i]);
+            if (value.Length < 1 || value.Length > MaxEntryLength)
+            {
+                return $"'{ownerPath}.{member}[{i}]' must hold 1..{MaxEntryLength} characters after normalization.";
+            }
+
+            results.Add(value);
+        }
+
+        normalized = results.ToArray();
+        return null;
+    }
+
+    /// <summary>
+    /// Control characters (U+0000-U+001F, U+007F) become spaces, whitespace runs collapse to one
+    /// space, and the ends are trimmed. No visible content is truncated or rewritten.
+    /// </summary>
+    internal static string Normalize(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        var builder = new System.Text.StringBuilder(text.Length);
+        var pendingSpace = false;
+        foreach (var character in text)
+        {
+            if (char.IsWhiteSpace(character) || character is < '\u0020' or '\u007F')
+            {
+                if (builder.Length > 0)
+                {
+                    pendingSpace = true;
+                }
+
+                continue;
+            }
+
+            if (pendingSpace)
+            {
+                builder.Append(' ');
+                pendingSpace = false;
+            }
+
+            builder.Append(character);
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool IsIdentifierChar(string value)
+    {
+        foreach (var character in value)
+        {
+            var isAllowed = character is >= 'a' and <= 'z'
+                or >= 'A' and <= 'Z'
+                or >= '0' and <= '9'
+                or '.' or '_' or '-';
+            if (!isAllowed)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string? ReadString(JsonElement target, string name)
+        => target.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    // 13. Existing per-item atomic validation, unchanged in semantics.
 
     private static bool TryParseItem(
         DescriptorAuthoringProviderItemDto item,

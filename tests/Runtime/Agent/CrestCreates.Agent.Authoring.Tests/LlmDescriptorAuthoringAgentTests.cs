@@ -186,7 +186,7 @@ public sealed class LlmDescriptorAuthoringAgentTests
         {
             Prompt = new DescriptorAuthoringPromptOutput
             {
-                ContractVersion = "7g.v1",
+                ContractVersion = "8a.v1",
                 PromptTemplateVersion = "v1",
                 PromptInputHash = TestHash(hashValue),
                 SystemPrompt = "test",
@@ -216,7 +216,7 @@ public sealed class LlmDescriptorAuthoringAgentTests
         {
             Prompt = new DescriptorAuthoringPromptOutput
             {
-                ContractVersion = "7g.v1",
+                ContractVersion = "8a.v1",
                 PromptTemplateVersion = "v1",
                 PromptInputHash = TestHash("nonexistent"),
                 SystemPrompt = "test",
@@ -283,7 +283,7 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.PromptInputEvidence.Should().NotBeNull();
         result.PromptOutputEvidence.Should().NotBeNull();
         result.PromptInputEvidence!.TemplateId.Value.Should().Be("descriptor-authoring");
-        result.PromptInputEvidence.TemplateVersion.Value.Should().Be("descriptor-authoring-prompt-template-v2");
+        result.PromptInputEvidence.TemplateVersion.Value.Should().Be("descriptor-authoring-prompt-template-v3");
         result.PromptInputEvidence.Purpose.Should().Be(AgentPromptPurpose.DescriptorAuthoring);
         result.PromptOutputEvidence!.InputHash.Value.Should().Be(result.PromptInputEvidence.InputHash.Value);
     }
@@ -447,7 +447,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
 
     private static string BuildValidHumanTaskOutputJson(string promptHash) => JsonSerializer.Serialize(new
     {
-        contractVersion = "7g.v1",
+        contractVersion = "8a.v1",
+        outcome = "drafts",
         promptInputHash = promptHash,
         plan = new
         {

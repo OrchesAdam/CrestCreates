@@ -76,7 +76,7 @@ public sealed class PromptInputHashTests
         var context = TestAuthoringContext();
         var input = factory.Create(context);
         input.PromptInputHash.Should().BeNull();
-        input.ContractVersion.Should().Be("7g.v1");
+        input.ContractVersion.Should().Be("8a.v1");
         input.TenantId.Should().Be("test-tenant");
     }
 
@@ -84,7 +84,7 @@ public sealed class PromptInputHashTests
     {
         return new DescriptorAuthoringPromptInput
         {
-            ContractVersion = "7g.v1",
+            ContractVersion = "8a.v1",
             TenantId = "test-tenant",
             IntentText = intent,
             Metadata = new DescriptorAuthoringMetadataContextProjection
@@ -147,7 +147,7 @@ public sealed class PromptInputHashTests
     {
         var input = new DescriptorAuthoringPromptInput
         {
-            ContractVersion = "7g.v1",
+            ContractVersion = "8a.v1",
             TenantId = "test-tenant",
             IntentText = "Add finance review",
             Metadata = new DescriptorAuthoringMetadataContextProjection
@@ -201,7 +201,7 @@ public sealed class PromptInputHashTests
             TemplateId = new AgentPromptTemplateId("test-template"),
             TemplateVersion = new AgentPromptVersion("v1"),
             Purpose = AgentPromptPurpose.DescriptorAuthoring,
-            ContractVersion = new AgentPromptContractVersion("7g.v1"),
+            ContractVersion = new AgentPromptContractVersion("8a.v1"),
             ModelProfileRef = new AgentPromptModelProfileRef("default"),
             ProviderProfileRef = new AgentPromptProviderProfileRef("unknown"),
             Payload = input,

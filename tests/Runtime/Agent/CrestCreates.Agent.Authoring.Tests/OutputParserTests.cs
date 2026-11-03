@@ -166,7 +166,8 @@ public sealed class OutputParserTests
 
         var json = JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash = _validContext.ExpectedPromptInputHash,
             plan = new
             {
@@ -273,7 +274,8 @@ public sealed class OutputParserTests
     {
         var json = JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash = _validContext.ExpectedPromptInputHash,
             items = new[] { new { descriptorKind = "HumanTask", descriptorId = "ht_1", operation = "Create" } }
         });
@@ -288,7 +290,8 @@ public sealed class OutputParserTests
     {
         var json = JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash = _validContext.ExpectedPromptInputHash,
             plan = new { planId = "p1", intentText = "test" },
             items = Array.Empty<object>()
@@ -303,7 +306,8 @@ public sealed class OutputParserTests
 
     private string BuildValidOutputJson(string promptHash) => JsonSerializer.Serialize(new
     {
-        contractVersion = "7g.v1",
+        contractVersion = "8a.v1",
+        outcome = "drafts",
         promptInputHash = promptHash,
         plan = new
         {
@@ -331,7 +335,8 @@ public sealed class OutputParserTests
 
     private string BuildOutputJsonWithItem(string kind, string id, string operation) => JsonSerializer.Serialize(new
     {
-        contractVersion = "7g.v1",
+        contractVersion = "8a.v1",
+        outcome = "drafts",
         promptInputHash = _validContext.ExpectedPromptInputHash,
         plan = new { planId = "p1", intentText = "test", plannedDescriptorRefs = new[] { new { @namespace = kind.ToLower(), id, version = 1 } } },
         items = new object[]
@@ -342,7 +347,8 @@ public sealed class OutputParserTests
 
     private string BuildOutputJsonWithItemAndMemoryRefs(string kind, string id, string operation, string[] memoryRefs) => JsonSerializer.Serialize(new
     {
-        contractVersion = "7g.v1",
+        contractVersion = "8a.v1",
+        outcome = "drafts",
         promptInputHash = _validContext.ExpectedPromptInputHash,
         plan = new { planId = "p1", intentText = "test", plannedDescriptorRefs = new[] { new { @namespace = kind.ToLower(), id, version = 1 } } },
         items = new object[]
@@ -393,7 +399,8 @@ public sealed class OutputParserTests
 
     private string BuildHumanTaskOutputJson(Dictionary<string, object?> payload) => JsonSerializer.Serialize(new
     {
-        contractVersion = "7g.v1",
+        contractVersion = "8a.v1",
+        outcome = "drafts",
         promptInputHash = _validContext.ExpectedPromptInputHash,
         plan = new
         {
@@ -418,7 +425,8 @@ public sealed class OutputParserTests
 
     private string BuildValidWorkflowOutputJson() => JsonSerializer.Serialize(new
     {
-        contractVersion = "7g.v1",
+        contractVersion = "8a.v1",
+        outcome = "drafts",
         promptInputHash = _validContext.ExpectedPromptInputHash,
         plan = new
         {
@@ -445,7 +453,8 @@ public sealed class OutputParserTests
 
     private string BuildOutputJsonWithTwoItems() => JsonSerializer.Serialize(new
     {
-        contractVersion = "7g.v1",
+        contractVersion = "8a.v1",
+        outcome = "drafts",
         promptInputHash = _validContext.ExpectedPromptInputHash,
         plan = new { planId = "p1", intentText = "test", plannedDescriptorRefs = new[] { new { @namespace = "humantask", id = "ht_1", version = 1 }, new { @namespace = "humantask", id = "ht_2", version = 1 } } },
         items = new object[]

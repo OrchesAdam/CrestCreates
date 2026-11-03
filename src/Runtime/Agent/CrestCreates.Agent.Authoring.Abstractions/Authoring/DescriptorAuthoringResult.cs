@@ -12,6 +12,12 @@ public sealed record DescriptorAuthoringResult : ISnapshotable<DescriptorAuthori
     public AgentPromptOutputEvidenceSummary? PromptOutputEvidence { get; init; }
     public IReadOnlyList<DescriptorAuthoringDiagnostic> Diagnostics { get; init; } = Array.Empty<DescriptorAuthoringDiagnostic>();
 
+    /// <summary>Populated only for <see cref="DescriptorAuthoringStatus.UnsupportedIntent"/>; zero drafts in that result.</summary>
+    public DescriptorAuthoringUnsupportedOutcome? Unsupported { get; init; }
+
+    /// <summary>Populated only for <see cref="DescriptorAuthoringStatus.NeedsClarification"/>; zero drafts in that result.</summary>
+    public DescriptorAuthoringClarificationOutcome? Clarification { get; init; }
+
     public DescriptorAuthoringResult Snapshot() => this with
     {
         Plan = Plan.Snapshot(),
@@ -24,6 +30,8 @@ public sealed record DescriptorAuthoringResult : ISnapshotable<DescriptorAuthori
         {
             Diagnostics = PromptOutputEvidence.Diagnostics.ToArray()
         },
-        Diagnostics = Diagnostics.Select(d => d.Snapshot()).ToArray()
+        Diagnostics = Diagnostics.Select(d => d.Snapshot()).ToArray(),
+        Unsupported = Unsupported?.Snapshot(),
+        Clarification = Clarification?.Snapshot()
     };
 }

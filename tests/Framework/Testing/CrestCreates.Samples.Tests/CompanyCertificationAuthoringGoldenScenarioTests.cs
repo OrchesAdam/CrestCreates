@@ -535,7 +535,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     {
         return $$"""
             {
-              "contractVersion": "7g.v1",
+              "contractVersion": "8a.v1",
+              "outcome": "drafts",
               "promptInputHash": "{{promptInputHash}}",
               "plan": {
                 "planId": "plan_company_certification_finance_review",

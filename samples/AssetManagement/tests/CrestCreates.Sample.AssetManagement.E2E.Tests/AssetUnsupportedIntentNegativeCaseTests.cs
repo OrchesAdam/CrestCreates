@@ -311,7 +311,8 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
     private static string BuildConditionScoringCapabilityClaim(string promptInputHash)
         => JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash,
             plan = new
             {
@@ -344,7 +345,8 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
     private static string BuildMaintenanceWorkflowRemovalClaim(string promptInputHash)
         => JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash,
             plan = new
             {
@@ -377,7 +379,8 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
     private static string BuildAuthoritativeMemoryClaim(string promptInputHash)
         => JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash,
             plan = new
             {
@@ -423,7 +426,8 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
     private static string BuildNeedsClarificationResponse(string promptInputHash)
         => JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash,
             plan = new
             {
@@ -441,7 +445,8 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
     private static string BuildEmptyAttemptResponse(string promptInputHash)
         => JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash,
             plan = new
             {

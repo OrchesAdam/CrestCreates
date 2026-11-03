@@ -13,7 +13,7 @@ public sealed class AssetAuthoringDiagnosticClassifierTests
             "Provider output deserialized to null.",
             "Provider output is missing required 'plan' section.",
             "Provider output contains no items.",
-            "Unsupported contract version 'legacy'. Expected '7g.v1'."
+            "Unsupported contract version 'legacy'. Expected '8a.v1'."
         };
 
         knownMessages

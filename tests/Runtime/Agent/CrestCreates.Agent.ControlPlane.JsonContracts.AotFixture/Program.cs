@@ -355,7 +355,7 @@ public static class ControlPlaneJsonContractFixtureRunner
         string optionalSchemaProperties)
     {
         var json = "{" +
-            "\"contractVersion\":\"7g.v1\",\"promptInputHash\":\"aot-authoring-prompt\"," +
+            "\"contractVersion\":\"8a.v1\",\"outcome\":\"drafts\",\"promptInputHash\":\"aot-authoring-prompt\"," +
             "\"plan\":{\"planId\":\"asset-maintenance\",\"intentText\":\"Asset maintenance initial review\",\"plannedDescriptorRefs\":[" +
             "{\"namespace\":\"humantask\",\"id\":\"ht_asset_maintenance_initial_review\",\"version\":1}]}," +
             "\"items\":[{\"descriptorKind\":\"HumanTask\",\"descriptorId\":\"ht_asset_maintenance_initial_review\",\"operation\":\"Create\",\"payload\":{" +
@@ -447,7 +447,7 @@ public static class ControlPlaneJsonContractFixtureRunner
             ? string.Empty
             : $"\"baseVersion\":\"{baseVersion}\",";
         var json = "{" +
-            "\"contractVersion\":\"7g.v1\",\"promptInputHash\":\"aot-authoring-update-base-version\"," +
+            "\"contractVersion\":\"8a.v1\",\"outcome\":\"drafts\",\"promptInputHash\":\"aot-authoring-update-base-version\"," +
             "\"plan\":{\"planId\":\"asset-maintenance-update\",\"intentText\":\"Update the asset workflow\",\"plannedDescriptorRefs\":[" +
             $"{{\"namespace\":\"workflow\",\"id\":\"wf_asset_maintenance\",\"version\":{payloadVersion}}}]}}" +
             "," +
@@ -465,7 +465,7 @@ public static class ControlPlaneJsonContractFixtureRunner
             const string expectedHash = "<prompt-input-hash-from-visible-context>";
             var prompt = new DefaultDescriptorAuthoringPromptBuilder().Build(new DescriptorAuthoringPromptInput
             {
-                ContractVersion = "7g.v1",
+                ContractVersion = "8a.v1",
                 TenantId = "aot-wire-disclosure-tenant",
                 IntentText = "Describe the intended change here.",
                 Metadata = new DescriptorAuthoringMetadataContextProjection(),
@@ -534,8 +534,8 @@ public static class ControlPlaneJsonContractFixtureRunner
                 && workflow.Steps[2].Transitions.Count == 0
                 && workflow.Steps[2].OnError == StepErrorBehavior.Fail;
 
-            var passed = prompt.PromptTemplateVersion == "descriptor-authoring-prompt-template-v2"
-                && prompt.ContractVersion == "7g.v1"
+            var passed = prompt.PromptTemplateVersion == "descriptor-authoring-prompt-template-v3"
+                && prompt.ContractVersion == "8a.v1"
                 && prompt.UserPrompt.Contains("References to existing descriptors must come from Visible Descriptors", StringComparison.Ordinal)
                 && prompt.UserPrompt.Contains("A reference to a descriptor proposed in this same response is allowed", StringComparison.Ordinal)
                 && prompt.UserPrompt.Contains("The parser does not enforce every business requirement", StringComparison.Ordinal)
