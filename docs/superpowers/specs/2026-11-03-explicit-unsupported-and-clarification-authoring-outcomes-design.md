@@ -1,7 +1,7 @@
 # Explicit Unsupported / Needs-Clarification Authoring Outcomes
 
 > Date: 2026-11-03
-> Status: Proposed (rev.2, 修订 R1 四项 P2；待复审)
+> Status: Proposed (rev.3, 修订设计审计 R2-01 并落地三项裁定；待 S0 放行)
 > Issue: #159
 > Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence (merged to master as `91d6574e` on 2026-11-03)
 
@@ -162,15 +162,19 @@ Provider text stays bounded and is never stored into governance artifacts: no dr
 ### 4.4 Envelope facts are read before projection
 
 A nullable-DTO shape check cannot implement §4.1, because deserialization has already destroyed the facts. Verified on
-.NET 10 with `JsonSerializerIsReflectionEnabledByDefault=false` and a source-generated context (probe in the R1 audit
-record; reproduced locally at revision time):
+.NET 10 with `JsonSerializerIsReflectionEnabledByDefault=false` and a source-generated context (R1 audit record, plus a
+7-input × lenient/strict reproduction run during rev.3; JIT mechanical behaviour only — it is not evidence that `8a.v1`
+exists or that anything is NativeAOT-verified):
 
 | Mechanism | Observed fact | Consequence for this contract |
 | --- | --- | --- |
 | `JsonDocument.Parse` | a duplicate member is preserved: `{"outcome":…,"promptInputHash":"WRONG","promptInputHash":"RIGHT",…}` enumerates 5 members with `promptInputHash` twice | the raw stage can see duplicates that the DTO cannot |
 | `JsonDocument.Parse` | `"items":null` enumerates as a member with `ValueKind=Null`, while an absent `items` enumerates as no member at all | presence vs explicit null is distinguishable only here |
 | STJ deserialization, default options | `JsonSerializerOptions.AllowDuplicateProperties` defaults to **`true`**; the duplicate envelope projects to `promptInputHash = "RIGHT"`, `outcome = drafts` | last-value-wins is the inherited behaviour the R1 audit characterized on the shipped `7g.v1` parser; the contract must not inherit it |
-| STJ deserialization, `AllowDuplicateProperties = false` | throws `JsonException: Duplicate property 'promptInputHash' encountered during deserialization of type 'Envelope'` through the source-generated path, no reflection | usable as defense in depth after the raw stage, not as the only guard |
+| STJ deserialization, `AllowDuplicateProperties = false` | throws `JsonException` naming the duplicate property — measured at root (`promptInputHash`, `outcome`) and inside material (`id`) — through the source-generated path, no reflection | real defense in depth, **and it means removing Stage A does not restore last-wins** (see §10.6 (f1)/(f2)/(g)) |
+| `payload` as `JsonElement?` | strict Stage B reports duplicates **outside** `payload` only; the raw `payload` text is handed through verbatim, including `{"id":"FIRST","id":"SECOND"}` and `customField` | only Stage A can see a duplicate *inside* descriptor content — the vocabulary check stops there, the duplication check must not |
+| unknown member | `items[]` element carrying `"extra":"surprise"` deserializes cleanly in both lenient and strict mode (silently dropped) | Stage A is the only place an unknown member is rejected |
+| name casing | with a naming policy configured, binding matched `"Unsupported"` (capital) to the declared `unsupported` member in both configs | case-alias rejection is a Stage A job; the source-generated path cannot be relied on to be ordinal-exact |
 | STJ DTO projection | absent `items` and explicit `"items":null` both project to `null`; an empty `"unsupported":{}` projects to a non-null object with `null` reasons | a null-check-only shape test would accept `outcome=unsupported` + `"items":null` as a valid refusal |
 
 Parsing is therefore two-stage and deterministic, with no reflection, no scanner and no new production extension point:
@@ -181,21 +185,30 @@ Stage B  source-generated DTO deserialization            values: bounds, code ta
          with AllowDuplicateProperties = false
 ```
 
-Rules fixed for Stage A (and they apply at every object level: root, `plan`, each `items` element, `unsupported`, each
-reason, `needsClarification`, each question):
+Rules fixed for Stage A (they apply at every **protocol envelope** object level: root, `plan`,
+`plannedDescriptorRefs[]`, `items[]`, `unsupported`, each reason, `needsClarification`, each question):
 
-1. **Name matching is ordinal-exact** against the declared wire vocabulary (the camelCase names in §4.1/§4.2). No
-   case-insensitive matching, no aliases, no `JsonPropertyNameCaseInsensitive`: `PromptInputHash` and `promptinputhash`
-   are unknown members, not the declared one. The raw check and the DTO mapping use the same table, so they cannot drift.
+1. **Name matching is ordinal-exact** against the declared wire vocabulary (the camelCase names in §4.1/§4.2 and the table
+   below). No case-insensitive matching, no aliases: `PromptInputHash` and `promptinputhash` are unknown members, not the
+   declared one. The measured casing row above is why this rule cannot be delegated to Stage B.
 2. **Duplicate member name at the same level ⇒ `InvalidProviderOutput`** (`Envelope contains duplicate member '…'`),
-   whatever the two values are. This closes the wrong-hash-first / right-hash-second and needsClarification-then-drafts
-   rows of the audit table: an envelope containing two contradictory facts never reaches an outcome branch.
+   whatever the two values are, and the duplicate check **also recurses into `payload` and its sub-objects** — a
+   contradictory descriptor is not admissible even though its inner field names are exempt from the vocabulary table.
+   Attribution note kept deliberately: were Stage A removed, strict Stage B would still reject duplicates outside
+   `payload` (as a deserialization failure), so "an envelope with two hashes is refused" is not, by itself, proof that
+   Stage A ran — the discriminating facts are the ones only Stage A can see (§10.6).
 3. **Member outside the declared vocabulary ⇒ `InvalidProviderOutput`** (`Envelope contains unknown member '…'`),
    so a drifted provider answer cannot silently lose a section. This is a deliberate tightening over `7g.v1`, where
    unknown properties are ignored by deserialization; it is recorded as part of the `8a.v1` migration in §9.
 4. **Required member** must exist with the declared `ValueKind`; **forbidden member** must not exist at all.
 5. Stage B then enforces its own kind/bounds on the projected values. A `JsonException` from Stage B is a contract
    breach and is reported as `InvalidProviderOutput` with the deserialization message, never as a clarification.
+6. The `payload` exemption is exactly three things: its inner field **names** are not checked against the envelope
+   vocabulary, they are not added to any descriptor-content schema here, and materialization keeps its own
+   supported/ignored boundary (`MaterializeHumanTaskPayload` / `MaterializeWorkflowPayload` read only what they support —
+   an unknown payload field is *not* a promise that it survives or takes effect). It is not an exemption for duplicate
+   keys, for the item-level `payload` member itself (must be present and of kind `object`), or for unknown members at the
+   item level.
 
 The declared vocabulary is one table, reused by the raw check and by the DTO mapping (a name listed nowhere is an unknown
 member; a name listed twice in the table is a design bug caught by the §10.1 matrix):
@@ -211,9 +224,9 @@ member; a name listed twice in the table is a design bug caught by the §10.1 ma
 | `needsClarification` | `questions` |
 | `needsClarification.questions[]` | `id`, `reasonCode`, `question`, `missingInputs`, `candidateValues` |
 
-`payload` stays an open `JsonElement` object: its inner keys are descriptor content validated by the existing per-item
-materialization, not envelope members, so the unknown-member rule above stops at the `payload` boundary. The disclosure
-examples must contain no member outside this table.
+`payload` stays an open `JsonElement` object: its inner keys are descriptor content, not envelope members, so the
+**vocabulary** rule stops at the `payload` boundary while the **duplicate-key** rule keeps recursing through it and its
+sub-objects (rule 2, rule 6). The disclosure examples must contain no member outside this table.
 
 ## 5. Contract: .NET surface
 
@@ -242,7 +255,7 @@ DescriptorAuthoringDiagnosticCodes   + IntentUnsupportedValue        = "AUTHORIN
   may treat a redundant annotation as the lock. A type must be registered explicitly only if some consumer serializes it
   **detached** from any registered root; none does today, and none is added by this issue. No `JsonSerializerOptions`
   path that relies on reflection, in either direction.
-- Stage A reads the envelope through `JsonDocument` (trim/AOT-safe, no reflection, no scanner) before any DTO exists, so
+- Stage A reads the envelope through `JsonDocument` before any DTO exists, so — it depends on no reflection and no scanner, and its **native** execution is only claimed after the S3 scenario runs it (this design does not pre-issue a NativeAOT statement)
   the raw facts (§4.4) survive the projection that would otherwise merge them.
 - **Decision point D1**: adding two status members vs. keeping `Blocked` and carrying a sub-code. This spec takes the new
   members: `Blocked` already means "structural/governance rejection of produced artifacts" (see the R1 oracle:
@@ -258,7 +271,8 @@ Stage A (raw envelope, §4.4)
 1 JsonDocument.Parse            -> AUTHORING_INVALID_PROVIDER_OUTPUT ("Failed to deserialize provider output as JSON.")
                                    also: non-object root
 2 member names: duplicate       -> AUTHORING_INVALID_PROVIDER_OUTPUT ("... duplicate member '…'")
-   at any object level          (checked before any value, so contradictory envelopes never reach a branch)
+   at any envelope level, and   (checked before any value, so contradictory envelopes never reach a branch; the recursion
+   recursing through payload)    continues into `payload`, where Stage B cannot see)
 3 member names: unknown/alias   -> AUTHORING_INVALID_PROVIDER_OUTPUT ("... unknown member '…'")
 4 contractVersion member        -> absent/null/non-string/non-8a.v1 -> "Unsupported contract version …"
                                    (message prefix kept: the Asset classifier maps it to ContractVersionMismatch)
@@ -283,8 +297,11 @@ Stage C (outcome build)
 
 Integrity before semantics stays non-negotiable: a wrong-hash answer must never be interpretable as a clarification
 (#133 R1-01) — and, after step 2, neither can an answer that carries a wrong hash *and* a right hash in the same
-envelope. Steps 1–8 read the raw envelope, so presence, nullity and duplication are decided before any value is merged
-by last-wins deserialization. Version boundary is single-valued: `7g.v1` answers now fail as `Unsupported contract
+envelope. **The order is itself part of the contract**: steps 2–3 decide before steps 4/6/7, so an envelope that both
+repeats a member and carries a wrong hash is reported as a duplicate member, and an envelope with one wrong hash and an
+unknown `outcome` is reported as a hash mismatch. If Stage A were absent, strict Stage B would still refuse duplicate
+*envelope* keys — but only as a deserialization failure, never for duplicates inside `payload`, and with no precedence
+guarantee. Those three are the facts only Stage A supplies, and they are what its mutations have to prove (§10.6). Version boundary is single-valued: `7g.v1` answers now fail as `Unsupported contract
 version`, the same observable class the Asset classifier already records as `ContractVersionMismatch`. **D2**: no
 transitional dual acceptance — a second accepted version is the dual-track the repo forbids, and every producer of that
 envelope is inside this repository. **D9 (rev.2)**: the "non-draft outcome cannot carry drafts" invariant is enforced by
@@ -361,6 +378,13 @@ as the main mechanical risk of the version bump).
    | `contractVersion` wrong first, right second | §6 step 2 | `InvalidProviderOutput` |
    | single `promptInputHash` mismatch with an otherwise valid `needsClarification` body | §6 step 6 | `Blocked` + `AUTHORING_PROMPT_HASH_MISMATCH` |
    | unknown member, or alias case (`PromptInputHash`) | §6 step 3 | `InvalidProviderOutput` (`unknown member …`) |
+   | `items[]` element with `"extra": …` (unknown member at the item level) | §6 step 3 | `InvalidProviderOutput` — measured: without Stage A this deserializes cleanly, so the row is a Stage-A-only fact |
+   | `"Unsupported": {…}` alongside a valid `needsClarification` body | §6 step 3 | `InvalidProviderOutput` — measured: the source-generated binding matched the capitalized alias, so casing strictness exists only at Stage A |
+   | `"payload": {"id":"FIRST","id":"SECOND"}` (duplicate inside descriptor content) | §6 step 2, recursing through `payload` | `InvalidProviderOutput` — Stage B hands the raw element through untouched, so only Stage A sees it |
+   | duplicate nested `"target":{"id":…,"id":…}` inside `payload` | §6 step 2 | `InvalidProviderOutput` |
+   | `"payload": null` at an item | §6 step 8 (item required member) | `InvalidProviderOutput` (`missing or invalid payload`) — the exemption covers inner names, not the member itself |
+   | duplicate `outcome` **and** one wrong `promptInputHash` | §6 step 2 before step 6 | `InvalidProviderOutput` (`duplicate member 'outcome'`), **not** `Blocked`/hash mismatch |
+   | one wrong `promptInputHash` **and** an unknown `outcome` | §6 step 6 before step 7 | `Blocked` + `AUTHORING_PROMPT_HASH_MISMATCH`, **not** the unknown-outcome diagnostic |
    | unknown `unsupported.reasons[].code` / unknown `questions[].reasonCode` | §6 step 11 | `InvalidProviderOutput` |
    | `"question": "\t\n"`, `"missingInputs": [" "]` | §6 step 10 (empty after normalization) | `InvalidProviderOutput` |
    | duplicate `question.id`; duplicated identical reason entry | §6 step 12 | `InvalidProviderOutput` |
@@ -383,7 +407,11 @@ as the main mechanical risk of the version bump).
 5. **Native publish/link/run** — scenarios with per-scenario `name:PASS` sentinels:
    - `AgentAuthoringClarificationOutcome` and `AgentAuthoringUnsupportedOutcome` — structured outcome round-trip, status and
      fields read back inside the native process;
-   - `AgentAuthoringOutcomeShapeConflict` — forbidden-member forms (absent / `null` / `{}`) rejected with zero drafts;
+   - `AgentAuthoringOutcomeShapeConflict` — the **appearing** forbidden members (`null`, `{}`, `[]`, content) are rejected
+     with zero drafts; the *absent* form is the green control of the two outcome scenarios above, so "absent" must not be
+     listed as a rejection case;
+   - one native execution of the Stage A vocabulary/duplication rules (an item-level unknown member, and a duplicate
+     envelope key) so the raw-envelope machinery is not proven by JIT behaviour alone;
    - **`AgentAuthoringCodeTableRejection`** — one unknown `unsupported.reasons[].code` and one unknown
      `needsClarification.questions[].reasonCode`, each asserted to yield `InvalidProviderOutput` with zero drafts. This is
      the native execution of the closed-code requirement that Issue acceptance item 8 asks for; a unit row does not
@@ -395,20 +423,33 @@ as the main mechanical risk of the version bump).
    run (the native process asserts the expected `InvalidProviderOutput` and exits 0 with its sentinel); a **gate negative
    control** (wrong expected value, or a fixture-side decoration that skips the code-table/shape check) must exit
    non-zero and print no total sentinel.
-6. **Mutation audit (each must redden only its target)** —
+6. **Mutation audit (each must redden only its target, and it must redden *for the mechanism claimed*)** —
    - (a) bypass the `outcome` discriminator and treat a missing `items` as `drafts`;
    - (b) weaken the forbidden-member rule to a null/empty check — this must redden the `"items": null` and `"plan": {}`
      rows of §10.1, which is exactly the case a null-only implementation cannot distinguish;
-   - (c) move the hash check after the outcome check;
+   - (c) move the hash check after the outcome check — the discriminating input is **one wrong `promptInputHash` plus an
+     unknown `outcome`** (§10.1 last row). The plain "single wrong hash, otherwise valid clarification" row cannot tell the
+     order, because both orders still report the hash mismatch;
    - (d) replace the closed code tables with permissive `Enum`/string parsing;
    - (e) **cut a real closure edge**: remove the wire-root `JsonSerializable` registration from the parser context, or
      drift a `[JsonPropertyName]` on `outcome` / `unsupported` / `code` — the round-trip or the native run must fail;
-   - (f) remove the Stage A raw-envelope check while keeping Stage B — the duplicate-envelope rows of §10.1 must redden
-     (last-wins acceptance returns).
-     Retired on purpose: *removing a subtype's `[JsonSerializable]`* is **not** a lock. Verified with a root-only source
-     generated context under reflection-disabled: metadata for `Item` and for an `unsupported` property type resolves and
-     round-trips from reachability alone, so that mutation can stay green while claiming to prove the closure. Redundant
-     annotations must not become runtime prerequisites, and no production test hook may be added to make one observable.
+   - (f1) remove **only** the Stage A unknown-member / casing rules, keeping presence, duplication and Stage B: the
+     item-level `"extra"` row and the `"Unsupported"` alias row of §10.1 must flip from `InvalidProviderOutput` to an
+     accepted terminal state — a functional change, not a message-routing change (measured: both forms deserialize
+     cleanly once the raw check is gone);
+   - (f2) remove **only** the raw duplicate-member rule: the "duplicate `outcome` + one wrong hash" row of §10.1 must flip
+     from `InvalidProviderOutput` (duplicate member) to `Blocked` + `AUTHORING_PROMPT_HASH_MISMATCH`, which is the
+     precedence Stage A owns;
+   - (g) **joint negative control, explicitly labelled**: remove Stage A *and* relax Stage B to
+     `AllowDuplicateProperties = true`. Only this combination restores last-wins acceptance on duplicate envelopes. It is
+     recorded as a joint control and must never be reported as independent proof that Stage A exists or works.
+     Retired on purpose, two of them: *removing a subtype's `[JsonSerializable]`* is not a lock (reachability already
+     generates that metadata — verified with a root-only context under reflection-disabled), and *"delete Stage A, keep
+     strict Stage B ⇒ duplicates fall back to last-wins"* is also not a lock: strict Stage B throws `JsonException` for
+     duplicate envelope keys (measured at root for `promptInputHash` and `outcome`, and for `id` outside `payload`), so the
+     outcome class stays `InvalidProviderOutput` and only the attribution moves — a change of diagnostic source is not a
+     functional discriminator. Redundant annotations must not become runtime prerequisites, and no production test hook may
+     be added to make one observable.
 7. **Live evaluation (required acceptance step, not optional)** — at least one credentialed run of the B12 unsupported
    intent against the new prompt and `8a.v1`, with the recorded artifact retained outside the repository. B12 counts as
    covered **only** when that run yields `UnsupportedIntent` or `NeedsClarification` with a legal code-table entry,
@@ -423,9 +464,9 @@ as the main mechanical risk of the version bump).
 
 | Slice | Content | Exit condition |
 | --- | --- | --- |
-| S1 | Contract + DTO + Stage A raw-envelope facts (duplicate / unknown / presence / kind) + Stage B strict DTO (`AllowDuplicateProperties = false`) + code tables + normalization and bounds + both JSON contexts + prompt disclosure and template version + §10.1 matrix + migration of every `7g.v1` literal | Authoring unit suite green with the new matrix; mutations (a)(c)(d)(e)(f) each redden their target; §10.6 retired-mutation note respected |
+| S1 | Contract + DTO + Stage A raw-envelope facts (duplicate / unknown / presence / kind) + Stage B strict DTO (`AllowDuplicateProperties = false`) + code tables + normalization and bounds + both JSON contexts + prompt disclosure and template version + §10.1 matrix + migration of every `7g.v1` literal | Authoring unit suite green with all 23 rows of the §10.1 matrix; mutations (a)(c)(d)(e)(f1)(f2) each redden their target **by the mechanism claimed**; (g) recorded as the joint control; both retired mutations in §10.6 stay retired |
 | S2 | Consumers (sample runner/fake agent), Asset real-chain cases incl. the #133 gap-lock flip, oracle/classifier rev, B12 live entry accepts the new statuses **only** under the §10.4/§10.7 criteria | Asset E2E green with PG; oracle still rejects every non-intent outcome, and a `drafts` answer to the unsupported intent stays a rejection; mutation (b) reddens the null/empty forbidden-member rows |
-| S3 | Native fixture scenarios §10.5 (`ClarificationOutcome`, `UnsupportedOutcome`, `OutcomeShapeConflict`, **`CodeTableRejection`**, extended `WireDisclosure`) **plus the harness change** to name-check per-scenario sentinels and run the failure controls separately | `PublishAot` + native run green on linux-x64 for the executed scenarios; each named sentinel present in the green run; each negative control non-zero with no total sentinel |
+| S3 | Native fixture scenarios §10.5 (`ClarificationOutcome`, `UnsupportedOutcome`, `OutcomeShapeConflict`, **`CodeTableRejection`**, one native run of the Stage A vocabulary/duplication rules, extended `WireDisclosure`) **plus the harness change** to name-check per-scenario sentinels and run the failure controls separately | `PublishAot` + native run green on linux-x64 for the executed scenarios; each named sentinel present in the green run; each negative control non-zero with no total sentinel |
 | S4 | Docs and status sync (CapabilityMap, `memory.md`, `AGENTS.md`, §5.1 B12 verdict, #123 evidence matrix, 7g addendum) | Claims written to match executed evidence only; the live item is reported as pending if S5 has not run |
 | S5 | Required live step (§10.7): one credentialed run of the B12 unsupported intent on the new prompt/`8a.v1`, artifact recorded outside the repo, verdict written per §10.4 | Run executed and recorded — covered, or honestly kept as unmet/pending. Absence of a credential keeps this item pending; it cannot be checked off, and the issue is not closed on unit/native evidence alone |
 
@@ -441,9 +482,12 @@ paused), and merging stays with the maintainer.
 - [ ] Duplicate or unknown members are rejected before any value-level check, so a contradictory envelope (two hashes,
       two outcomes) cannot reach an outcome branch (§10.1).
 - [ ] Wire version is single-valued (`8a.v1`); no dual acceptance, no reflection JSON path.
-- [ ] Full unit matrix, Asset real-chain cases, and native publish/link/run scenarios green — including the
-      `AgentAuthoringCodeTableRejection` native scenario and the harness that names each sentinel and runs the failure
-      controls separately; the six named mutations (a)–(f) each redden their target and revert.
+- [ ] Full unit matrix (23 rows), Asset real-chain cases, and native publish/link/run scenarios green — including the
+      `AgentAuthoringCodeTableRejection` native scenario, a native run of the Stage A vocabulary/duplication rules, and the
+      harness that names each sentinel and runs the failure controls separately; mutations (a)(c)(d)(e)(f1)(f2) each redden
+      their target **for the claimed mechanism** and revert, and (g) is reported as the joint control it is.
+- [ ] No mutation is credited on a change of diagnostic source alone: a case that stays in the same outcome class because a
+      lower layer happens to reject the same input proves routing, not the layer (R2-01).
 - [ ] JSON-closure evidence asserts the required contract (roots resolve, names round-trip, reflection disabled), not the
       existence of redundant annotations; the retired subtype-registration mutation is not used as a lock.
 - [ ] `7g.v1` migration complete: no stale `7g.v1` literal in `src` or in production prompt/contract text, **except** the
@@ -471,11 +515,20 @@ paused), and merging stays with the maintainer.
 | D9 | Where the no-drafts-with-non-draft-outcome invariant is enforced | Inside the parser: Stage A raw facts + source-generated Stage B; no public validation hook, no production extension point (§4.4, §6) |
 | D10 | `AgentAuthoringRequest` "answered questions" field | Still deferred; no consumer evidence yet |
 | **D11 (new, rev.2)** | Two-stage raw-envelope parsing vs. presence flags on the DTO | Two-stage: `JsonDocument` facts then the strict source-generated DTO. Flags on the DTO would need an extra parallel structure that can drift from the wire names; `AllowDuplicateProperties = false` alone cannot separate absent from `null` (both verified) |
-| **D12 (new, rev.2)** | Unknown members: ignore (STJ default) or reject | Reject at every object level, ordinal-exact names, no aliases. This tightens `7g.v1` behaviour and is called out as part of the migration (§4.4 rule 1/3) |
-| **D13 (new, rev.2)** | What counts as JSON-closure evidence | Required roots resolve + names round-trip + reflection disabled + native run; redundant subtype annotations are explicitly not a lock, and the mutation targets were retargeted to real closure edges (§10.2, §10.6) — closing R1-02 |
+| **D12** | Unknown members: ignore (STJ default) or reject | **Ruled (R2): accepted** as an explicit `8a.v1` tightening, limited to the declared envelope levels, ordinal-exact, no aliases (§4.4 rules 1/3). Condition attached by the ruling and carried into plan S1: **recorded-answer field inventory first** — a field with real meaning enters the formal design, a descriptive extra leaves the recorded envelope, and no temporary allowlist may be introduced to keep old recordings green |
+| **D13** | What counts as JSON-closure evidence | Required roots resolve + names round-trip + reflection disabled + native run; redundant subtype annotations are explicitly not a lock, and the mutation targets were retargeted to real closure edges (§10.2, §10.6) — closing R1-02 |
+| **D14 (R2 ruling landed)** | Scope of the `payload` exemption | Accepted with boundaries: inner **names** are exempt from the envelope vocabulary; **duplicate keys are not exempt** and Stage A recurses through `payload`; the item-level `payload` member itself is still required with kind `object`; and no claim is made that unknown payload fields survive or take effect (materialization keeps its supported/ignored boundary) (§4.4 rule 6) |
+| **D15 (R2 ruling landed)** | What may be cited as proof that Stage A is load-bearing | Only its exclusive facts: unknown member / casing alias, presence vs `null`, duplicates *inside* `payload`, and the raw-before-hash precedence — mutations (f1)/(f2) plus the §10.1 rows they target. Deleting Stage A while keeping strict Stage B is **not** such proof (measured: it still throws on envelope duplicates), and the (g) combination is labelled a joint control (§10.6) — closing R2-01 |
 
 ## Changelog
 
+- **rev.3 (2026-11-03, 修订设计审计 R2-01 并落地三项裁定)** — the (f) mutation expectation was wrong as written: strict Stage B keeps rejecting
+  envelope duplicates, so removing Stage A cannot restore last-wins. §10.6 now carries (f1) unknown-member/casing, (f2) raw-duplicate
+  precedence and (g) as an explicitly labelled joint control; §4.4 gained the measured rows (payload duplicates pass through Stage B
+  untouched, item-level unknown members deserialize cleanly, the naming policy makes binding case-insensitive) and the payload recursion
+  rule; §10.1 grew to 23 rows with the two precedence combinations; §10.5 fixed the absent-vs-appearing wording and added a native run of
+  the Stage A rules; §12 forbids crediting a change of diagnostic source as a mutation result; D12/D13 were restated as ruled items and
+  D14/D15 record the payload scope and the evidence scope.
 - **rev.2 (2026-11-03, 修订设计审计 R1 四项 P2)** — R1-01: presence/duplicate semantics moved to a raw-envelope stage with
   a verified mechanics table, strict DTO options, ordinal-exact name policy and an expanded decision matrix; R1-02: the
   JSON-closure mutation retargeted to real closure edges and the redundant subtype-registration mutation retired with the
