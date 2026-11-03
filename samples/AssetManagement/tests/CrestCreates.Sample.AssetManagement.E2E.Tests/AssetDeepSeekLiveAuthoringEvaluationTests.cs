@@ -340,7 +340,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
         {
             if (!outputBudget.IsValid)
             {
-                semantic.Result = "InvalidOutputBudget";
+                semantic.Result = AssetUnsupportedIntentOracle.InvalidOutputBudget;
                 semantic.ExceptionStage = "budget";
             }
             else
@@ -401,6 +401,9 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                     promptOutputHash = result.PromptOutputEvidence?.OutputHash?.Value,
                     observedModel = result.PromptOutputEvidence?.ProviderObservation?.ModelName,
                     observedProvider = result.PromptOutputEvidence?.ProviderObservation?.ProviderName,
+                    planAssumptions = result.Plan.Assumptions
+                        .Select(AssetUnsupportedIntentOracle.SanitizeClaim)
+                        .ToArray(),
                     draftCount = result.DraftSet.Drafts.Count
                 };
                 semantic.AuthoringStatus = result.Status.ToString();
@@ -420,13 +423,11 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                     var governanceBlocked = review.GovernanceDecision?.MaxDecision
                         == CrestCreates.Metadata.Abstractions.DescriptorLifecycle
                             .DescriptorLifecycleDecisionKind.Blocked;
-                    var reviewPassed = review.ValidationResult.IsValid
-                        && review.MaterializationResult?.IsMaterialized == true
-                        && !blockingDiagnosticObserved
-                        && !governanceBlocked;
+                    var reviewPassed = AssetUnsupportedIntentOracle.IsReviewPassed(review);
 
-                    // The only way this intent can be "delivered" through the supported subset is
-                    // by rewriting or retiring the deployed maintenance surface itself.
+                    // A descriptor id is not a semantic proxy. The claim text the candidate
+                    // carries is retained (bounded) so an unsupported-capability claim can be
+                    // adjudicated independently of which ids happen to be deployed.
                     var targetsDeployedMaintenanceSurface =
                         draft.DescriptorKind == DescriptorKind.Workflow
                             && draft.DescriptorId == AssetContractIds.MaintenanceWorkflow
@@ -439,7 +440,12 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                         descriptorKind = draft.DescriptorKind.ToString(),
                         descriptorId = draft.DescriptorId,
                         operation = draft.Operation.ToString(),
-                        targetsDeployedMaintenanceSurface
+                        intentClaim = AssetUnsupportedIntentOracle.SanitizeClaim(draft.Intent),
+                        rationaleClaim = AssetUnsupportedIntentOracle.SanitizeClaim(draft.Rationale),
+                        descriptorNameClaim = AssetUnsupportedIntentOracle.SanitizeClaim(
+                            draft.Payload.GetDescriptor().Name),
+                        targetsDeployedMaintenanceSurface,
+                        reviewPassed
                     });
                     artifact.Reviews.Add(new
                     {
@@ -459,8 +465,6 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                     if (reviewPassed)
                     {
                         semantic.ReviewPassedDraftCount++;
-                        if (targetsDeployedMaintenanceSurface)
-                            semantic.FabricatedCapabilityObserved = true;
                         currentInventory = review.MaterializationResult!.ProposedInventory.ToList();
                     }
                 }
@@ -474,18 +478,14 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                     DeployedInventoryIdentities(harness.Services).SequenceEqual(inventoryBefore);
 
                 stage = "classify";
-                semantic.Result = result.Status switch
-                {
-                    DescriptorAuthoringStatus.Blocked => "ExplicitUnsupportedResult",
-                    DescriptorAuthoringStatus.InvalidProviderOutput => IsOutputBudgetExhausted(artifact.HttpResponse)
-                        ? "OutputBudgetExhausted"
-                        : "NeedsClarificationNotExpressible",
-                    DescriptorAuthoringStatus.ProviderUnavailable => "ProviderUnavailable",
-                    DescriptorAuthoringStatus.Failed => "AuthoringFailure",
-                    _ => semantic.FabricatedCapabilityObserved
-                        ? "FabricatedCapability"
-                        : "SubsetDraftOnlyNoUnsupportedClaim"
-                };
+                semantic.Result = AssetUnsupportedIntentOracle.Classify(new AssetUnsupportedIntentObservation(
+                    result.Status,
+                    semantic.DiagnosticCodes,
+                    semantic.DraftCount,
+                    semantic.ReviewPassedDraftCount,
+                    IsOutputBudgetExhausted(artifact.HttpResponse)));
+                semantic.FabricatedCapabilityObserved =
+                    semantic.Result == AssetUnsupportedIntentOracle.FabricatedCapabilityClaim;
             }
 
             artifact.Semantic = semantic;
@@ -503,16 +503,13 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
             WriteArtifact(artifactPath, artifact);
         }
 
-        semantic.Result.Should().BeOneOf(
-            new[]
-            {
-                "ExplicitUnsupportedResult",
-                "NeedsClarificationNotExpressible",
-                "SubsetDraftOnlyNoUnsupportedClaim"
-            },
-            artifactPath);
+        semantic.Result.Should().Be(
+            AssetUnsupportedIntentOracle.AcceptedResult,
+            $"only an intent-level unsupported diagnosis satisfies B12; artifact: {artifactPath}");
         semantic.FabricatedCapabilityObserved.Should().BeFalse(
-            "an unsupported intent may not become an approvable claim over the deployed maintenance surface");
+            "an unsupported intent may not become an approvable capability claim");
+        semantic.ReviewPassedDraftCount.Should().Be(0,
+            "any candidate that clears deterministic review for an unsupported intent is a fabricated claim");
         semantic.SavedDraftCount.Should().Be(0, "the evaluation stops before any artifact is handed to approval");
         semantic.ActivationGateCalls.Should().Be(0, "no unsupported intent may reach the activation gate");
         semantic.ActivationGateSuccesses.Should().Be(0);
@@ -614,11 +611,28 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
         int maxOutputTokens = 4096)
     {
         ConfigureLiveServices(services, authorId, responseObservation, maxOutputTokens);
+        // Recorded-provider seam for the no-network oracle probes. A real provider evaluation
+        // requires CREST_ASSET_LIVE_EVAL=1 (the opt-in gate) and keeps the HTTP provider, so a
+        // probe can never issue a paid request and a real run can never silently reuse a
+        // recorded response. CREST_ASSET_LIVE_EVAL_RECORDED_PROVIDER=1 forces the recorded
+        // provider even with the live gate on, for offline debugging.
+        if (!IsRealProviderEvaluationRequested())
+        {
+            services.RemoveAll<IDescriptorAuthoringModelClient>();
+            services.AddSingleton<IDescriptorAuthoringModelClient, ReviewerResponseModelClient>();
+        }
         services.RemoveAll<IRuntimeActivationGate>();
         services.AddSingleton<AssetActivationGateObserver>();
         services.AddSingleton<IRuntimeActivationGate>(
             sp => sp.GetRequiredService<AssetActivationGateObserver>());
     }
+
+    private static bool IsRealProviderEvaluationRequested()
+        => string.Equals(Environment.GetEnvironmentVariable("CREST_ASSET_LIVE_EVAL"), "1", StringComparison.Ordinal)
+            && !string.Equals(
+                Environment.GetEnvironmentVariable("CREST_ASSET_LIVE_EVAL_RECORDED_PROVIDER"),
+                "1",
+                StringComparison.Ordinal);
 
     private sealed class LiveEvaluationArtifact(string runId, string requestedModel)
     {

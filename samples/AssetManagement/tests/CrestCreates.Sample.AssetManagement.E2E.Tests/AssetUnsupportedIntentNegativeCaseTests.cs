@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CrestCreates.Agent.Authoring;
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Authoring.Abstractions.Model;
@@ -239,6 +240,72 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
         chain.DeployedInventory.Should().Equal(chain.BaselineInventory);
     }
 
+    // ── R1 regressions: fail-closed is necessary but must not be reported as B12 success ──
+
+    [Fact]
+    public async Task MalformedProviderOutput_FailsClosed_ButIsNotVerdictedAsNeedsClarification()
+    {
+        const string tenantId = "b12-r1-malformed-output";
+        await using var chain = await B12Chain.StartAsync(
+            tenantId,
+            MissingPolicyIntent,
+            _ => "{not-json");
+
+        chain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.InvalidProviderOutput);
+        await chain.AssertBoundaryClosedAsync("an unparseable response produces no artifact");
+
+        Verdict(chain.Authoring, reviewPassedDraftCount: 0).Should()
+            .Be(AssetUnsupportedIntentOracle.ProviderOutputRejectedPending);
+        Verdict(chain.Authoring, reviewPassedDraftCount: 0).Should()
+            .NotBe(AssetUnsupportedIntentOracle.AcceptedResult);
+    }
+
+    [Fact]
+    public async Task PromptHashMismatchBlock_FailsClosed_ButIsNotVerdictedAsUnsupportedIntent()
+    {
+        const string tenantId = "b12-r1-wrong-hash";
+        await using var chain = await B12Chain.StartAsync(
+            tenantId,
+            SupportedIntent,
+            _ => AssetApprovedInventoryHandoffAcceptanceTests.CreateAssetCandidateJson(
+                "deliberately-wrong-hash", SupportedIntent));
+
+        chain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.Blocked);
+        chain.Authoring.Diagnostics.Should().ContainSingle().Which
+            .Code.Value.Should().Be(DescriptorAuthoringDiagnosticCodes.PromptHashMismatchValue);
+        await chain.AssertBoundaryClosedAsync("an integrity failure is not a supported-intent verdict");
+
+        Verdict(chain.Authoring, reviewPassedDraftCount: 0).Should()
+            .Be(AssetUnsupportedIntentOracle.PromptIntegrityFailure);
+    }
+
+    [Fact]
+    public async Task ReviewPassingFabricatedClaim_IsRejectedByTheOracle_EvenWithNothingDeployed()
+    {
+        const string tenantId = "b12-r1-new-id-fabrication";
+        await using var chain = await B12Chain.StartAsync(
+            tenantId,
+            NewAlgorithmIntent,
+            BuildFabricatedAlgorithmClaim);
+
+        chain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.Succeeded);
+        var draft = chain.Authoring.DraftSet.Drafts.Should().ContainSingle().Which;
+        var review = await chain.Harness.Services
+            .GetRequiredService<IDescriptorDraftReviewService>()
+            .ReviewAsync(draft, AssetControlPlaneApprovalHarness.BuildDeployedBaseline());
+        AssetUnsupportedIntentOracle.IsReviewPassed(review).Should().BeTrue(
+            "the claim is structurally valid, which is exactly why ids cannot decide the verdict");
+
+        var verdict = Verdict(chain.Authoring, reviewPassedDraftCount: 1);
+        verdict.Should().Be(AssetUnsupportedIntentOracle.FabricatedCapabilityClaim);
+        verdict.Should().NotBe(AssetUnsupportedIntentOracle.AcceptedResult);
+
+        // The absence of deployment is real but insufficient: it must not launder the claim.
+        (await chain.DraftStore.ListAsync(tenantId)).Should().BeEmpty();
+        chain.Gate.CallCount.Should().Be(0);
+        chain.DeployedInventory.Should().Equal(chain.BaselineInventory);
+    }
+
     // ── Recorded provider responses claiming work the platform cannot do ──
 
     private static string BuildConditionScoringCapabilityClaim(string promptInputHash)
@@ -384,6 +451,25 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
             },
             items = Array.Empty<object>()
         });
+
+    private static string BuildFabricatedAlgorithmClaim(string promptInputHash)
+    {
+        var candidate = JsonNode.Parse(AssetApprovedInventoryHandoffAcceptanceTests.CreateAssetCandidateJson(
+            promptInputHash, NewAlgorithmIntent))!;
+        candidate["items"]![0]!["rationale"] =
+            "The new condition-scoring domain algorithm is implemented. Maintenance now decides "
+            + "outcomes automatically without human review, using the company-approved risk threshold of 0.5.";
+        candidate["items"]![0]!["payload"]!["name"] = "Automatic condition-scoring algorithm (implemented)";
+        return candidate.ToJsonString();
+    }
+
+    private static string Verdict(DescriptorAuthoringResult result, int reviewPassedDraftCount)
+        => AssetUnsupportedIntentOracle.Classify(new AssetUnsupportedIntentObservation(
+            result.Status,
+            result.Diagnostics.Select(diagnostic => diagnostic.Code.Value ?? string.Empty).ToArray(),
+            result.DraftSet.Drafts.Count,
+            reviewPassedDraftCount,
+            ProviderOutputBudgetExhausted: false));
 
     private static string Identity(DescriptorKind kind, string ns, string id, int? version)
         => string.Create(
