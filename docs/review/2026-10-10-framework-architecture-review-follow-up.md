@@ -193,6 +193,8 @@ P1 表示下一轮主链可信度工作，尚无生产事故证据，不沿用�
 
 **裁定更新（2026-11-03 终）：静态缺口 → 确定性侧已闭环；行为层经带凭据实跑改判为「不伪造能力、不部署」在四次 16384 完整运行中已证实（另一次 4096 属预算耗尽，单列）；「显式 unsupported / needs-clarification 结果」证实未达成（契约无承载点，属确认缺口，另立有界后续）。**
 
+**交付状态（2026-11-03 收口）：PR #158 已合并为 master `91d6574e`（head `1db29f48`；审查轮 R1 2×P2、R2 2×P2、R3 1×P2 关闭，R4 无新阻塞项），Issue #133 已按最小交付范围关闭。契约缺口另立 [#159](https://github.com/OrchesAdam/CrestCreates/issues/159)（设计 PR [#160](https://github.com/OrchesAdam/CrestCreates/pull/160)，Proposed rev.1，待静态审查裁定 D1–D10），在其落地并给出证据前本行结论不升级。**
+
 | 项 | 内容 |
 | --- | --- |
 | 交付位置 | `samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/AssetUnsupportedIntentNegativeCaseTests.cs`（9 用例）、`AssetUnsupportedIntentOracle.cs` + `AssetUnsupportedIntentOracleTests.cs`（20 判定表用例）、`AssetActivationGateObserver.cs`、`ReviewerLiveOracleProbeTests.cs`（审查探针逐字入库，4 用例）、`AssetUnsupportedIntentProbeIsolationTests.cs`（4 用例）+ `AssetLiveEnvironmentGate.cs`、`AssetDeepSeekLiveAuthoringEvaluationTests.DeepSeek_UnsupportedIntent_YieldsRestrictedResult_AndFabricatesNoCapability`（opt-in）、`AssetLiveCompositionTests.UnsupportedIntentEvalWiring_ReplacesGateWithObserver_WithoutNetwork` |
@@ -217,5 +219,6 @@ P1 表示下一轮主链可信度工作，尚无生产事故证据，不沿用�
 | 1 | [#123](https://github.com/OrchesAdam/CrestCreates/issues/123) NativeAOT 门禁 / [#124](https://github.com/OrchesAdam/CrestCreates/issues/124) UnitOfWork / [#125](https://github.com/OrchesAdam/CrestCreates/issues/125) CAP | 待 #122 合并后启动（受 #121 最多 2 个实施 PR 约束） |
 | 2 | [#126](https://github.com/OrchesAdam/CrestCreates/issues/126) LocalEvent / [#127](https://github.com/OrchesAdam/CrestCreates/issues/127) RabbitMQ / [#128](https://github.com/OrchesAdam/CrestCreates/issues/128) CRUD JSON | 依赖 #123 |
 | 3 | [#129](https://github.com/OrchesAdam/CrestCreates/issues/129) Dynamic API 退出 / [#130](https://github.com/OrchesAdam/CrestCreates/issues/130) ORM 矩阵 / [#131](https://github.com/OrchesAdam/CrestCreates/issues/131) 能力地图 | 依赖前序 |
-| 候选 | [#132](https://github.com/OrchesAdam/CrestCreates/issues/132) Audit retention 设计裁定 | 设计级 |
-| 新增（本项裁定） | [#133](https://github.com/OrchesAdam/CrestCreates/issues/133) B12 unsupported intent negative case | 独立小任务，归 Agent Authoring / Control Plane 负边界 |
+| 候选 | [#132](https://github.com/OrchesAdam/CrestCreates/issues/132) Audit retention 设计裁定 | 已合并（PR #157 → `9909365a`，2026-11-03） |
+| 新增（本项裁定） | [#133](https://github.com/OrchesAdam/CrestCreates/issues/133) B12 unsupported intent negative case | 已合并并关闭（PR #158 → `91d6574e`，2026-11-03；R1–R4 闭环；见 §5.1） |
+| 承接 #133 契约缺口 | [#159](https://github.com/OrchesAdam/CrestCreates/issues/159) 显式 unsupported / needs-clarification 一等终态 | 设计 PR [#160](https://github.com/OrchesAdam/CrestCreates/pull/160)（Proposed rev.1，待静态审查） |
