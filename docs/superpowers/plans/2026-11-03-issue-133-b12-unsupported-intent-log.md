@@ -153,7 +153,7 @@ if (!IsRealProviderEvaluationRequested())   // CREST_ASSET_LIVE_EVAL=1 且未显
 
 探针不设 live 开关，因此可无网络照常运行；`ReviewerLiveOracleProbeTests.cs` 与 `ReviewerResponseModelClient` 本体逐字保留（断言、mode、artifact 路径不变）。R2 复放直接 `dotnet test --filter FullyQualifiedName~ReviewerLiveOracleProbeTests` 即可，无需再 apply patch；如需在带 live 开关的进程里强制离线复放，设 `CREST_ASSET_LIVE_EVAL_RECORDED_PROVIDER=1`。
 
-### 行为层仍未证实
+### 行为层仍未证实（R1 时点；后续带凭据实跑见「真实 provider 行为验证」）
 
 真实 DeepSeek 在该意图下的行为仍无证据：本轮依旧无 `DEEPSEEK_API_KEY`，live 用例只验证分类与接线，未发起请求。R1 修复只让绿灯可信，不改变「候选缺口/待验证」的行为层结论。
 
@@ -222,7 +222,7 @@ if (!IsRealProviderEvaluationRequested())   // CREST_ASSET_LIVE_EVAL=1 且未显
 
 ### 行为层结论（不再是静态推断）
 
-- **「不伪造能力、不部署」成立**：四次真实请求全部 0 草稿、0 评审通过候选、0 保存、gate 0 次、部署目录不变；同一提示链在受支持意图下确实产出可评审草稿（对照运行），说明这不是接线或凭据问题。
+- **「不伪造能力、不部署」在这四次 16384 完整运行（run 2–5）中成立**：四次真实请求全部 0 草稿、0 评审通过候选、0 保存、gate 0 次、部署目录不变；同一提示链在受支持意图下确实产出可评审草稿（对照运行），说明这不是接线或凭据问题。run 1（默认 4096）是预算耗尽，单列，不计作第五次拒绝行为证据。
 - **「显式 unsupported / needs-clarification 结果」未达成**：模型用自然语言拒绝并索要缺失阈值，但 wire 契约没有承载点，其输出折叠为 `AUTHORING_INVALID_PROVIDER_OUTPUT`（`NoItems`），与畸形/空输出一字不差——B12 的显式性缺失由静态推断升级为**已观测的真实行为缺口**。评估据此保持未裁定并失败（R1-01 口径），不把它算作 B12 成功。
 - 因此 `AssetUnsupportedIntentOracle` 的 `ProviderOutputRejected_PendingManualAdjudication` 需要可裁定证据：artifact 新增 `Semantic.OutputShapeCategories`（取自既有 `AssetAuthoringDiagnosticClassifier`：`JsonDeserializationFailed` / `NullOutput` / `MissingPlan` / `NoItems` / `ContractVersionMismatch` / `Other`）。**未**改动 `AssetLiveResponseObservation` 的「只记元数据、不记正文/推理文本」既定边界——那是刻意的证据卫生设计，正文摘录不应由观测层承担。
 
@@ -239,11 +239,54 @@ if (!IsRealProviderEvaluationRequested())   // CREST_ASSET_LIVE_EVAL=1 且未显
 | `CREST_ASSET_LIVE_EVAL=1` 且清除 key，只跑探针 + 隔离回归 | 6 passed / 0 failed（R2 隔离在新字段下仍成立） |
 | 真实 live 用例 | 不支持意图 5 次（1 次默认预算 + 4 次 16384）+ 受支持意图 1 次 |
 
+## R3 审查轮（2026-11-03，PR #158）
+
+报告：`docs/review/2026-11-03-issue-133-pr158-review-round3.md`（head `6e74ab6a`）。R1 修复保持成立；R2-01 关闭；R2-02 的普通探针已关闭，但本轮新增的隔离回归自己重新引入了与 live 用例并行的进程环境窗口。审查者同时给出契约裁定：**一等 unsupported/needs-clarification 值得做，但另立有界后续，本 PR 保持测试与证据范围**。
+
+### R3-01 [P2] 隔离回归会重定向并删除并行 live 入口的 artifact
+
+- 事实：`OfflineOracleRegression_LeavesTheConfiguredLiveArtifactDestinationUntouched` 在运行期间把 `CREST_ASSET_LIVE_EVAL_UNSUPPORTED_ARTIFACT` 改成哨兵路径，`finally` 恢复并删除；该类与公开 live 用例没有共同串行 collection，xUnit 默认按集合并行 ⇒ live 入口可能在窗口内读到哨兵路径，把 artifact 写进去，再被回归的 `finally` 删掉。
+- 红基线（逐字执行审查者 `parallel-isolation-probe.patch`，无凭据、无网络）：**attempt 0 即复现**，`redirected=true`；live 断言消息引用 `crest-issue133-configured-live-destination-*.json`，隔离回归自身因 `File.Exists(configuredDestination)==true` 失败，结束时哨兵文件已不存在（`sentinelStillExists=false`）。证据：`/tmp/crest-pr158-r3-evidence/r3-red-baseline.trx`、`author-red-baseline-result.json`。
+
+### 修复
+
+| 层面 | 做法 |
+| --- | --- |
+| 调度 | 读写这组 live 变量的两个类（`AssetUnsupportedIntentProbeIsolationTests`、`AssetDeepSeekLiveAuthoringEvaluationTests`）并入同一串行 collection `AssetLiveEnvironmentCollection`；xUnit 同一 collection 内不并行 |
+| 捕获时机 | 新增测试侧进程门 `AssetLiveEnvironmentGate`（`SemaphoreSlim(1,1)`，获取超时 2 分钟）：离线回归只在持门期间改写变量并在门内恢复；公开 live 入口把目标路径与输出预算在门内一次捕获为 `AssetLiveUnsupportedEnvironment` 局部值，之后不再重读进程环境。因此直接并发调用（绕过调度器）也只能读到调用者配置或恢复后的配置 |
+| 原 `finally` | 保留：恢复先读取的值、清理自身临时文件 |
+| 范围 | 只改测试代码；`git diff -- src/` 为空，无生产 API、无新框架抽象 |
+
+### 新增常驻回归（两条）
+
+| 用例 | 锁住的性质 | 反证 |
+| --- | --- | --- |
+| `LiveEntryStartingBesideTheOfflineRegression_KeepsTheCallersArtifactDestination` | 哨兵值确实存在期间，live 入口的捕获仍解析调用者配置的路径（覆盖「其他 live 读者」，不止回归退出后的状态）。只跑捕获，不发请求、不创建 artifact，因此带凭据环境也不会产生付费调用 | 去掉捕获处的取门 → 红（observed 值为回归的临时路径），同时审查者原探针重现 `redirected=true` |
+| `EveryClassTouchingTheLiveEvaluationVariables_SharesTheSerialEnvironmentCollection` | 两个类各自且只加入该串行 collection（调度半边不能靠约定） | 移除 `[Collection]` → 红（`Expected collections to contain 1 item(s) ... but found 0`） |
+
+### R3 本地验证
+
+| 检查 | 结果 |
+| --- | --- |
+| Asset E2E 全量（本地 PostgreSQL 容器，默认环境） | **80 passed / 2 skipped / 0 failed**（+2 即本轮两条隔离回归；两条 skip 仍是 live 用例） |
+| 审查者 R3 过滤集（NegativeCase + LiveComposition + OracleTests + Probes + Isolation + Live 类），默认环境且清除 key | **51 passed / 2 default live skips / 0 failed**（审查者上一 head 为 49） |
+| `CREST_ASSET_LIVE_EVAL=1`、清除 key，只跑探针 + 隔离回归 | **8 passed / 0 failed**（上一 head 为 6/6，+2 本轮新增） |
+| 审查者原探针在当前 head | 反例性质：无缺陷时按其构造走「窗口未观察」出口（其断言形态决定它只能在缺陷存在时失败），故由等价的常驻回归承担长期门禁；去掉取门后原探针再次复现重定向 |
+| 变异回归 | M1 去掉 live 捕获取门 → 新并发回归红 + 原探针重现重定向；M2 去掉 `[Collection]` → collection 回归红。两次变异均已还原 |
+| 真实 DeepSeek | 本轮未重跑（不产生新的付费调用）；上一轮六份 metadata 结论不变，「零草稿/零部署」限定为那四次 16384 完整运行 |
+
+### 文档同步
+
+- `memory.md`：删除「行为层仍未证实 / live 未执行 / 缺 `DEEPSEEK_API_KEY`」的过期现状句，B12 条目改为「已带凭据实跑」并把四次完整运行与一次预算耗尽分列。
+- `docs/review/2026-10-10-framework-architecture-review-follow-up.md` §5.1：实跑行按 4 + 1 拆分；「零能力草稿、零部署」限定在四次完整运行；补 R3 审查轮行；更新用例数（9 条确定性负例）与运行证据计数；契约行记录 R3 裁定「另立独立设计与 PR」。
+- 本日志的 R1「行为层仍未证实」小节加时点标注，避免被读成当前状态。
+
 ## 未做的事与边界
 
 - 未新增框架抽象、未建通用评估平台（spec Non-goals）。
 - 未改变 `DescriptorAuthoringStatus`、诊断码集合、wire 契约 `7g.v1`、控制面契约。
 - 未把 live eval 设为无条件 CI 门禁。
+- 未实现一等 unsupported / needs-clarification 结果：R3 裁定它值得做，但作为有界后续（独立设计 + 独立 PR），本 PR 保持测试与证据范围，不改 wire 版本、DTO、JsonContracts roots 与原生 fixture。
 - 未重开 #87/#88，未推导 durable activation 状态。
 - 行为层裁定（截至 2026-11-03 带凭据实跑，见「真实 provider 行为验证」）：「不伪造能力、不部署」已用真实请求证实；「显式 unsupported/needs-clarification 结果」证实**未达成**——模型的拒绝折叠成与畸形输出同形的 `AUTHORING_INVALID_PROVIDER_OUTPUT`。上面 I-05 与 R1/R2 段落里的「仍未证实」是当时状态，保留为历史。
 - Asset 之外的样例（LibraryManagement / SaaSHelpdesk）不套用本负例结论；需要各自链路的 fixture 才能声明。

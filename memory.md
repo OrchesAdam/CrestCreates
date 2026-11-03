@@ -373,7 +373,7 @@ never deleted; never output credentials.
 ## Known gaps
 
 - B12 unsupported-intent negative case（#133，实施分支待合并）：确定性侧已闭环。Asset E2E 真实链路
-  （authoring → 真实评审 → 控制面提交 → 人工批准 → 激活门）新增 6 条用例：超出支持范围的意图按精确
+  （authoring → 真实评审 → 控制面提交 → 人工批准 → 激活门）新增 9 条用例：超出支持范围的意图按精确
   `DescriptorAuthoringStatus` + 精确诊断码断言显式受限结果，「不伪造能力、不部署」用草稿库/评审工件库/
   控制面审计记录/`IRuntimeActivationGate` 调用计数与目录身份集合对基线比对来度量，并配同链路绿色对照
   （人工批准才 Activated、gate 计数 1）证明断言有判别力；绕过 authoring 白名单直接入库的 `Remove` 工件停在
@@ -385,17 +385,22 @@ never deleted; never output credentials.
   descriptor ID 作语义代理——任何通过确定性评审的候选即 `FabricatedCapabilityClaim`，artifact 逐候选保留经
   截断与空白归一的 intent/rationale/name 供独立裁定。审查者的 `ReviewerLiveOracleProbeTests` 已入库为回归
   （修复前 1 pass/3 fail 复现，修复后 4/4）；PR #158 R2 两项 P2 亦已修复：离线探针的录制 provider 改为调用方
-  显式注入（删除按 `CREST_ASSET_LIVE_EVAL` 切换的分支，公开 live 用例只走真实 provider），探针不再改写进程环境
-  变量、mode 改实例级、artifact 改每次独立临时路径，并新增 `CallCount==1` + observed provider/model +
-  HTTP status 0 的「录制输入确实被消费」硬断言与两条常驻隔离回归（审查者 isolation probe 复现 0 pass/1 fail 后
-  由等价更强回归接管）。Asset E2E 全量 78 passed / 2 skipped / 0 failed。行为层已带凭据实跑改判：真实
-  DeepSeek 四次不支持意图全部 HTTP 200 / `NoItems` / 0 草稿 / 0 保存 / gate 0 / 部署不变（受支持意图对照
-  为 `Succeeded`+1 草稿+评审通过），故「不伪造能力、不部署」已证实；「显式 unsupported/needs-clarification」
-  证实未达成（契约无承载点，与离线用例一致），属确认的契约缺口，待独立设计裁定。注意凭据在
-  `~/.bashrc:136`（非交互 shell 被 `.bashrc` 第 5-9 行守卫拦住），且该模型为推理型：默认 4096 输出预算会被
-  reasoning 耗尽并判为 `OutputBudgetExhausted`，跑 B12 live 用例需 `CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS=16384`。行为层仍未证实：opt-in live eval
-  B12 用例已落地但未执行（缺 `DEEPSEEK_API_KEY`）。契约层发现：「needs-clarification」不能与无效输出区分
-  （同为 `InvalidProviderOutput`/`AUTHORING_INVALID_PROVIDER_OUTPUT`），本轮按 Issue 边界未改契约。
+  显式注入（删除按 `CREST_ASSET_LIVE_EVAL` 切换的分支，公开 live 用例只走真实 provider），普通探针不再改写进程
+  环境变量、mode 改实例级、artifact 改每次独立临时路径，并新增 `CallCount==1` + observed provider/model +
+  HTTP status 0 的「录制输入确实被消费」硬断言与常驻隔离回归（审查者 isolation probe 复现 0 pass/1 fail 后
+  由等价更强回归接管）；PR #158 R3 一项 P2 已修复：读写 live 环境变量的隔离类与 live 类并入同一串行
+  collection，并共用进程级 `AssetLiveEnvironmentGate`——离线回归只在持门期间改写变量，公开 live 入口在持门
+  期间一次性捕获目标路径与输出预算后只用局部值，因此并行读者不会把结果写进（并被 `finally` 删掉）回归的
+  临时路径；新增「并发下 live 捕获仍取调用者路径」与「两类共处该串行 collection」两条常驻回归（分别去掉
+  取门／collection 即红，审查者 parallel-isolation probe 亦在当前 head 复现 `redirected=true`）。
+  Asset E2E 全量 80 passed / 2 skipped / 0 failed。行为层已带凭据实跑改判：真实 DeepSeek 四次 16384 预算的
+  不支持意图运行全部 HTTP 200 / `NoItems` / 0 草稿 / 0 保存 / gate 0 / 部署不变（受支持意图对照为
+  `Succeeded`+1 草稿+评审通过），故「不伪造能力、不部署」在这四次完整运行中已观测；另一次默认 4096 预算的
+  运行是 `OutputBudgetExhausted`（reasoning 耗尽），单列为预算事实、不计入第五次拒绝行为证据；「显式
+  unsupported/needs-clarification」证实未达成（契约无承载点，与离线用例一致），属确认的契约缺口，R3 裁定为
+  另立独立设计与 PR（涉及结构化终态、待补充输入、wire 版本/DTO/JsonContracts roots/原生 fixture 同步）。注意
+  凭据在 `~/.bashrc:136`（非交互 shell 被 `.bashrc` 第 5-9 行守卫拦住），且该模型为推理型：跑 B12 live 用例需
+  `CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS=16384`（本模型/场景的实测配置，不推导为通用最低值）。
   证据见 `docs/superpowers/plans/2026-11-03-issue-133-b12-unsupported-intent-log.md`。
 - CAP entry consolidation (#125): merged via PR #140 (single entry
   `AddCrestCapDistributedTransaction`; in-memory fakes/module/dead bridge/participant
