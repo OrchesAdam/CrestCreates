@@ -207,11 +207,43 @@ if (!IsRealProviderEvaluationRequested())   // CREST_ASSET_LIVE_EVAL=1 且未显
 | `CREST_ASSET_LIVE_EVAL=1`、清除 key 与 recorded override，只跑探针 + 隔离回归 | **6 passed / 0 failed**（修复前同一命令为 3 pass / 1 fail） |
 | 真实 DeepSeek 请求 | 仍未执行（无 `DEEPSEEK_API_KEY`），行为层结论不变 |
 
+## 真实 provider 行为验证（2026-11-03，带凭据实跑）
+
+凭据来自 `~/.bashrc:136` 的 `export DEEPSEEK_API_KEY`（非交互 shell 被 `.bashrc` 第 5-9 行守卫提前 return，所以前几轮 `env` 看不到；本轮按维护者指示只取该行、不打印值）。全部为真实 HTTPS 请求，产物落在 `/tmp/crest-issue133-live-*.json`，未入库。
+
+| 运行 | 意图 | 预算 | HTTP | authoring | 输出形态 | 草稿 | 评审通过 | 保存 | gate 调用 | 部署变更 | 裁定 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | B12 不支持 | 4096（默认） | 200 / `length` | `ProviderUnavailable` + `AUTHORING_PROVIDER_UNAVAILABLE` | — | 0 | 0 | 0 | 0 | 无 | `OutputBudgetExhausted` |
+| 2 | B12 不支持 | 16384 | 200 / `stop`，正文 2473 字符 | `InvalidProviderOutput` + `AUTHORING_INVALID_PROVIDER_OUTPUT` | `NoItems` | 0 | 0 | 0 | 0 | 无 | `ProviderOutputRejected_PendingManualAdjudication` |
+| 3 | B12 不支持 | 16384 | 200 / `stop`，正文 1216 字符 | 同上 | `NoItems` | 0 | 0 | 0 | 0 | 无 | 同上 |
+| 4 | B12 不支持 | 16384 | 200 / `stop`，正文 441 字符 | 同上 | `NoItems` | 0 | 0 | 0 | 0 | 无 | 同上 |
+| 5 | B12 不支持 | 16384 | 200 / `stop`，正文 474 字符 | 同上 | `NoItems` | 0 | 0 | 0 | 0 | 无 | 同上 |
+| 对照 | 受支持（单条初审 HumanTask） | 16384 | 200 / `stop` | `Succeeded` | 1 条草稿 | 1 | 1 | 0 | 0 | 无 | `HumanTaskDraftReviewed`（用例通过） |
+
+### 行为层结论（不再是静态推断）
+
+- **「不伪造能力、不部署」成立**：四次真实请求全部 0 草稿、0 评审通过候选、0 保存、gate 0 次、部署目录不变；同一提示链在受支持意图下确实产出可评审草稿（对照运行），说明这不是接线或凭据问题。
+- **「显式 unsupported / needs-clarification 结果」未达成**：模型用自然语言拒绝并索要缺失阈值，但 wire 契约没有承载点，其输出折叠为 `AUTHORING_INVALID_PROVIDER_OUTPUT`（`NoItems`），与畸形/空输出一字不差——B12 的显式性缺失由静态推断升级为**已观测的真实行为缺口**。评估据此保持未裁定并失败（R1-01 口径），不把它算作 B12 成功。
+- 因此 `AssetUnsupportedIntentOracle` 的 `ProviderOutputRejected_PendingManualAdjudication` 需要可裁定证据：artifact 新增 `Semantic.OutputShapeCategories`（取自既有 `AssetAuthoringDiagnosticClassifier`：`JsonDeserializationFailed` / `NullOutput` / `MissingPlan` / `NoItems` / `ContractVersionMismatch` / `Other`）。**未**改动 `AssetLiveResponseObservation` 的「只记元数据、不记正文/推理文本」既定边界——那是刻意的证据卫生设计，正文摘录不应由观测层承担。
+
+### 两条附带事实（不改代码，仅记录）
+
+- `requestedModel = deepseek-v4-flash`，provider 回报 `observedModel = deepseek-flash`；`ProviderObservation` 字段把差异如实记录下来了（既有证据设计生效）。是否修正常量属维护者决定。
+- 该模型为推理型：默认 4096 输出预算会被 reasoning 耗尽（run 1：`ReasoningTokens = 4096`、正文 0 字符 → `OutputBudgetExhausted`）。跑 B12 live 用例建议显式设 `CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS=16384`。
+
+### 本轮复核
+
+| 检查 | 结果 |
+| --- | --- |
+| Asset E2E 全量（本地 PG，默认环境） | 78 passed / 2 skipped / 0 failed（两条 live 用例仍默认跳过） |
+| `CREST_ASSET_LIVE_EVAL=1` 且清除 key，只跑探针 + 隔离回归 | 6 passed / 0 failed（R2 隔离在新字段下仍成立） |
+| 真实 live 用例 | 不支持意图 5 次（1 次默认预算 + 4 次 16384）+ 受支持意图 1 次 |
+
 ## 未做的事与边界
 
 - 未新增框架抽象、未建通用评估平台（spec Non-goals）。
 - 未改变 `DescriptorAuthoringStatus`、诊断码集合、wire 契约 `7g.v1`、控制面契约。
 - 未把 live eval 设为无条件 CI 门禁。
 - 未重开 #87/#88，未推导 durable activation 状态。
-- 行为层（真实模型是否伪造能力）仍未证实：缺凭据，见 I-05。
+- 行为层裁定（截至 2026-11-03 带凭据实跑，见「真实 provider 行为验证」）：「不伪造能力、不部署」已用真实请求证实；「显式 unsupported/needs-clarification 结果」证实**未达成**——模型的拒绝折叠成与畸形输出同形的 `AUTHORING_INVALID_PROVIDER_OUTPUT`。上面 I-05 与 R1/R2 段落里的「仍未证实」是当时状态，保留为历史。
 - Asset 之外的样例（LibraryManagement / SaaSHelpdesk）不套用本负例结论；需要各自链路的 fixture 才能声明。

@@ -191,7 +191,7 @@ P1 表示下一轮主链可信度工作，尚无生产事故证据，不沿用�
 
 ### 5.1 #133 交付后回填（2026-11-03）
 
-**裁定更新：静态缺口 → 确定性侧已闭环；行为层维持「候选缺口/待验证」（缺 live 凭据，未执行）。**
+**裁定更新（2026-11-03 终）：静态缺口 → 确定性侧已闭环；行为层经带凭据实跑改判为「不伪造能力、不部署」已证实，「显式 unsupported / needs-clarification 结果」证实未达成（契约无承载点，属确认缺口）。**
 
 | 项 | 内容 |
 | --- | --- |
@@ -203,7 +203,9 @@ P1 表示下一轮主链可信度工作，尚无生产事故证据，不沿用�
 | R2 审查轮 | PR #158 R2 两项 P2（离线回归探针的运行隔离）已修复：录制 provider 改为调用方显式注入（删除 `CREST_ASSET_LIVE_EVAL` / `CREST_ASSET_LIVE_EVAL_RECORDED_PROVIDER` 分支，公开 live 用例只走真实 provider，内部离线入口自带 client、路径与预算），探针不再改写任何进程环境变量、mode 改实例级、artifact 改每次独立临时路径并在 `finally` 清理；每条离线用例新增硬断言 `CallCount==1` + `observedProvider/Model` + `HTTP status==0`，杜绝「因凭据错误而绿灯」。审查者 `isolation-probe.patch` 在当前 head 复现 0 pass / 1 fail 后由等价（更强）的常驻隔离回归接管（`git apply -R` 移出，因其引用已删除的共享 static mode） |
 | 运行证据 | Asset E2E 全量 78 passed / 2 skipped / 0 failed（2 条 skip 即两条 live eval）；审查者 R2 过滤集默认环境 47 pass / 2 skip / 0 fail；`CREST_ASSET_LIVE_EVAL=1` 下探针 + 隔离回归 6/6 通过（修复前同一命令 3 pass / 1 fail）；变异回归：R2-01 放回 → 6 红，R2-02 放回 → 目标用例红。相邻回归 Authoring 76、ControlPlane 575、DescriptorDraft 132、AssetManagement.Tests 29 全绿。细节见 [Issue #133 实施日志](../superpowers/plans/2026-11-03-issue-133-b12-unsupported-intent-log.md) |
 | 新发现（契约层） | 「显式 unsupported」可用 `Blocked` + 结构级诊断表达；「needs-clarification」不能作为可区分的显式结果表达——合法但无条目的拒绝式输出与空输出同样落在 `InvalidProviderOutput`/`AUTHORING_INVALID_PROVIDER_OUTPUT`。已用 `IntentMissingPolicyInformation_FailsClosed_AndClarificationIsNotDistinguishable` 钉为证据；按 #133 边界本轮不改契约，是否把 needs-clarification 做成一等结果（涉及 wire 版本、提示披露、DTO、JsonContracts root 与 AOT fixture）另待设计裁定 |
-| 仍未证实 | 真实 provider 在超出支持范围意图下是否伪造能力：`DEEPSEEK_API_KEY` 缺失，该用例未执行，仅验证编译、默认跳过与 DI 接线探针。行为结论需维护者带凭据跑一次并回填 artifact 后才能改判 |
+| 行为层实跑（2026-11-03） | 凭据在 `~/.bashrc:136`（非交互 shell 被 `.bashrc` 第 5-9 行守卫提前 return，前几轮因此看不到）。真实 DeepSeek 5 次跑不支持意图（默认预算 1 次 + 16384 四次）：HTTP 200、`finish_reason=stop`，authoring 全为 `InvalidProviderOutput` + `AUTHORING_INVALID_PROVIDER_OUTPUT`，输出形态 `NoItems`，草稿 0、评审通过 0、保存 0、gate 0、部署目录不变；对照运行（受支持意图）`Succeeded` + 1 草稿 + 评审通过，证明不是接线/凭据问题。默认 4096 预算下该推理型模型会被 reasoning 耗尽（`ReasoningTokens=4096`、正文 0 字符 → `OutputBudgetExhausted`），跑 B12 live 用例需显式 16384 |
+| 行为层结论 | 「不伪造能力、不部署」由静态推断升级为**已观测**；「显式 unsupported/needs-clarification 结果」**证实未达成**——模型的拒绝折叠为与畸形输出同形的 `AUTHORING_INVALID_PROVIDER_OUTPUT`，与确定性用例 `IntentMissingPolicyInformation_FailsClosed_AndClarificationIsNotDistinguishable` 完全一致。评估据此保持 pending 并失败（R1-01 口径），不算 B12 成功 |
+| 观测边界 | artifact 新增 `Semantic.OutputShapeCategories`（复用既有 `AssetAuthoringDiagnosticClassifier`）供 pending 人工裁定；未改动 `AssetLiveResponseObservation` 的「只记元数据、不记正文/推理文本」既定设计 |
 | 不得外推 | 不推导 LibraryManagement / SaaSHelpdesk 等其他链路的同类结论；不推导 durable activation（#88 D 类）；不把本组测试视为模型输出质量门禁 |
 
 ## 6. 后续任务对应（更新）
