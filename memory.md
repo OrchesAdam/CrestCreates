@@ -383,8 +383,12 @@ never deleted; never output credentials.
   `AssetUnsupportedIntentOracle`，只有按意图级诊断码归因的 `ExplicitUnsupportedResult` 可接受，畸形输出 /
   hash 不匹配 / provider 不可用 / 预算耗尽 / 候选被评审拒绝各成独立标签且默认失败；伪造判定不再用两个固定
   descriptor ID 作语义代理——任何通过确定性评审的候选即 `FabricatedCapabilityClaim`，artifact 逐候选保留经
-  截断与空白归一的 intent/rationale/name 供独立裁定。审查者的 `ReviewerLiveOracleProbeTests` 已逐字入库为回归
-  （修复前 1 pass/3 fail 复现，修复后 4/4）；Asset E2E 全量 76 passed / 2 skipped / 0 failed。行为层仍未证实：opt-in live eval
+  截断与空白归一的 intent/rationale/name 供独立裁定。审查者的 `ReviewerLiveOracleProbeTests` 已入库为回归
+  （修复前 1 pass/3 fail 复现，修复后 4/4）；PR #158 R2 两项 P2 亦已修复：离线探针的录制 provider 改为调用方
+  显式注入（删除按 `CREST_ASSET_LIVE_EVAL` 切换的分支，公开 live 用例只走真实 provider），探针不再改写进程环境
+  变量、mode 改实例级、artifact 改每次独立临时路径，并新增 `CallCount==1` + observed provider/model +
+  HTTP status 0 的「录制输入确实被消费」硬断言与两条常驻隔离回归（审查者 isolation probe 复现 0 pass/1 fail 后
+  由等价更强回归接管）。Asset E2E 全量 78 passed / 2 skipped / 0 failed；行为层仍需带凭据实跑才能改判。行为层仍未证实：opt-in live eval
   B12 用例已落地但未执行（缺 `DEEPSEEK_API_KEY`）。契约层发现：「needs-clarification」不能与无效输出区分
   （同为 `InvalidProviderOutput`/`AUTHORING_INVALID_PROVIDER_OUTPUT`），本轮按 Issue 边界未改契约。
   证据见 `docs/superpowers/plans/2026-11-03-issue-133-b12-unsupported-intent-log.md`。

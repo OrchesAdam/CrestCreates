@@ -25,6 +25,8 @@
 | `docs/review/2026-10-10-framework-architecture-review-follow-up.md` | 修改 | §5 B12 裁定回填（§5.1） |
 | `memory.md` | 修改 | Known gaps 中 B12 行改为交付状态与证据边界 |
 
+R1/R2 追加（下表为本轮新增，细节见对应审查轮章节）：`AssetUnsupportedIntentOracle.cs`（裁定器）、`AssetUnsupportedIntentOracleTests.cs`（20 条分类器回归）、`ReviewerLiveOracleProbeTests.cs`（审查探针入库为常驻回归）、`AssetUnsupportedIntentProbeIsolationTests.cs`（2 条隔离回归）。
+
 ## 逐条记录
 
 ### I-01 缺口复核：静态结论维持，落点选定（2026-11-03）
@@ -154,6 +156,56 @@ if (!IsRealProviderEvaluationRequested())   // CREST_ASSET_LIVE_EVAL=1 且未显
 ### 行为层仍未证实
 
 真实 DeepSeek 在该意图下的行为仍无证据：本轮依旧无 `DEEPSEEK_API_KEY`，live 用例只验证分类与接线，未发起请求。R1 修复只让绿灯可信，不改变「候选缺口/待验证」的行为层结论。
+
+## R2 审查轮（2026-11-03，PR #158）
+
+审查报告：`docs/review/2026-11-03-issue-133-pr158-review-round2.md`（head `dfa12a50`）；反例归档：`docs/review/probes/issue133-pr158-r2/`。R1 两项经复审关闭；新增两项 P2 均成立，属测试运行隔离缺陷。
+
+### R2-01 [P2] 离线探针被 live 开关切换为真实 provider
+
+根因：`ConfigureUnsupportedIntentServices` 用进程环境（`CREST_ASSET_LIVE_EVAL` / `CREST_ASSET_LIVE_EVAL_RECORDED_PROVIDER`）决定装哪个 client。开 live 开关后，四条无 opt-in attribute 的常驻回归选中真实 `OpenAICompatibleDescriptorAuthoringModelClient`，各自录制的 mode 完全没被消费；三个 should-reject 用例因 `AUTHORING_CREDENTIAL_UNAVAILABLE` 抛断言而「通过」——这正是审查者复现的 3 pass / 1 fail。
+
+修复：录制输入改为**调用方显式注入**，删除全部环境变量分支：
+
+- 共有执行体抽出 `EvaluateUnsupportedIntentAsync(artifactPath, recordedProviderFactory, outputBudget)`；
+- `[AssetLiveEvalFact]` 公开用例只走真实 provider（`recordedProviderFactory = null`，artifact 路径与预算仍由 live 配置读取）；
+- `internal EvaluateUnsupportedIntentOfflineAsync(factory, artifactPath)` 供离线回归使用，显式传 client 与路径，并使用固定离线预算 `OFFLINE_DEFAULT_OUTPUT_BUDGET`；
+- `ConfigureUnsupportedIntentServices` 增加可选 factory 参数：仅当调用方传入时才 `RemoveAll` + 注册录制 client；`IsRealProviderEvaluationRequested()` 与 `CREST_ASSET_LIVE_EVAL_RECORDED_PROVIDER` 整体删除（不再存在可被环境切换的路径）。
+
+新增硬断言（探针自身可证伪）：`client.CallCount == 1`、artifact `observedProvider == "review-recorded"`、`observedModel == "no-network"`、`HttpResponse.HttpStatus == 0`。任一条不成立即说明录制输入没被消费，杜绝「因凭据错误而绿灯」。
+
+### R2-02 [P2] 探针覆盖用户配置的 live artifact 目的地
+
+根因：入库探针在每个 case 里改写进程级 `CREST_ASSET_LIVE_EVAL_UNSUPPORTED_ARTIFACT` 且不恢复，还改共享 static `Mode` 并复用跨进程固定路径 `/tmp/crest-pr158-evidence/{mode}.json`。
+
+修复：探针不再触碰任何环境变量；mode 改为 `ReviewerResponseModelClient` 实例构造参数（static 移除）；输出路径改为每次调用独立的 `Path.GetTempPath()/crest-issue133-oracle-{mode}-{guid}.json`，读取断言后在 `finally` 删除 → 同进程并行与跨进程都不会互相覆盖，也不会改写后续 live 评估的目的地。响应体、四种 mode、should-reject 语义与断言意图保持原样。
+
+隔离回归新增 `AssetUnsupportedIntentProbeIsolationTests`：
+
+| 用例 | 断言 |
+| --- | --- |
+| `OfflineOracleRegression_ConsumesRecordedInputEvenWhenTheLiveSwitchIsOn` | 进程内临时置 `CREST_ASSET_LIVE_EVAL=1`（`finally` 恢复）后，离线用例仍 `CallCount == 1`、observed provider/model 为录制值、HTTP status 0，且伪造声明仍被拒绝 |
+| `OfflineOracleRegression_LeavesTheConfiguredLiveArtifactDestinationUntouched` | 把 `CREST_ASSET_LIVE_EVAL_UNSUPPORTED_ARTIFACT` 设为独立哨兵路径，跑一条原探针用例后：环境变量仍等于哨兵值，且哨兵文件未被写入（`finally` 恢复环境并清理） |
+
+审查者的 `isolation-probe.patch` 已在当前 head 复现红色基线（0 pass / 1 fail，报告一致），随后 `git apply -R` 移出活动测试目录：它引用被删除的共享 static `ReviewerResponseModelClient.Mode`，无法与修复共存；其语义由上表第二条等价（更强）的常驻回归承接——该轮报告亦明确「不要求逐字保留临时环境装配代码」。
+
+### 变异回归（本轮两处）
+
+| 变异 | 结果 |
+| --- | --- |
+| 把 R2-01 放回：`ConfigureUnsupportedIntentServices` 内按 `CREST_ASSET_LIVE_EVAL=1` 丢弃传入的 factory | 开 live 开关跑探针 + 隔离回归 → **6 红 / 0 绿**（原缺陷下是 3 绿 1 红：录制输入未被消费却仍通过） |
+| 把 R2-02 放回：探针在 case 内改写 `CREST_ASSET_LIVE_EVAL_UNSUPPORTED_ARTIFACT` | 隔离回归中「保留用户配置目的地」一条 → **1 红 / 1 绿**（只打红目标用例） |
+
+两处变异均已还原；`git diff -- src/` 全程为空，本轮改动只在测试与文档。
+
+### R2 本地验证
+
+| 检查 | 结果 |
+| --- | --- |
+| Asset E2E 全量（本地 PostgreSQL 容器） | **78 passed / 2 skipped / 0 failed** |
+| 审查者 R2 过滤集（NegativeCase + LiveComposition + OracleTests + Probes + Live 类），默认环境 | **47 passed / 2 default live skips / 0 failed** |
+| `CREST_ASSET_LIVE_EVAL=1`、清除 key 与 recorded override，只跑探针 + 隔离回归 | **6 passed / 0 failed**（修复前同一命令为 3 pass / 1 fail） |
+| 真实 DeepSeek 请求 | 仍未执行（无 `DEEPSEEK_API_KEY`），行为层结论不变 |
 
 ## 未做的事与边界
 
