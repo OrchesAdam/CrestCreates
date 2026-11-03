@@ -372,7 +372,16 @@ never deleted; never output credentials.
 
 ## Known gaps
 
-- B12 unsupported-intent negative case missing (#133, bounded).
+- B12 unsupported-intent negative case（#133，实施分支待合并）：确定性侧已闭环。Asset E2E 真实链路
+  （authoring → 真实评审 → 控制面提交 → 人工批准 → 激活门）新增 6 条用例：超出支持范围的意图按精确
+  `DescriptorAuthoringStatus` + 精确诊断码断言显式受限结果，「不伪造能力、不部署」用草稿库/评审工件库/
+  控制面审计记录/`IRuntimeActivationGate` 调用计数与目录身份集合对基线比对来度量，并配同链路绿色对照
+  （人工批准才 Activated、gate 计数 1）证明断言有判别力；绕过 authoring 白名单直接入库的 `Remove` 工件停在
+  评审边界（`IsActivationEligible=false`、包预览 `Failed`、伪造绑定提交被 `ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND`
+  拒绝）。5 组就地变异各自只打红目标用例后已还原（`git diff -- src/` 为空）。行为层仍未证实：opt-in live eval
+  B12 用例已落地但未执行（缺 `DEEPSEEK_API_KEY`）。契约层发现：「needs-clarification」不能与无效输出区分
+  （同为 `InvalidProviderOutput`/`AUTHORING_INVALID_PROVIDER_OUTPUT`），本轮按 Issue 边界未改契约。
+  证据见 `docs/superpowers/plans/2026-11-03-issue-133-b12-unsupported-intent-log.md`。
 - CAP entry consolidation (#125): merged via PR #140 (single entry
   `AddCrestCapDistributedTransaction`; in-memory fakes/module/dead bridge/participant
   engine archived; two-layer config validation; atomic publish over the #137

@@ -189,6 +189,21 @@ P1 表示下一轮主链可信度工作，尚无生产事故证据，不沿用�
 | 责任归属 | Agent Authoring / Control Plane 负边界覆盖（live eval case set + 确定性边界断言） |
 | 后续任务 | [#133 B12 — Unsupported Intent Negative Case](https://github.com/OrchesAdam/CrestCreates/issues/133)（bounded；不重开 #87） |
 
+### 5.1 #133 交付后回填（2026-11-03）
+
+**裁定更新：静态缺口 → 确定性侧已闭环；行为层维持「候选缺口/待验证」（缺 live 凭据，未执行）。**
+
+| 项 | 内容 |
+| --- | --- |
+| 交付位置 | `samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/AssetUnsupportedIntentNegativeCaseTests.cs`（6 用例）、`AssetActivationGateObserver.cs`、`AssetDeepSeekLiveAuthoringEvaluationTests.DeepSeek_UnsupportedIntent_YieldsRestrictedResult_AndFabricatesNoCapability`（opt-in）、`AssetLiveCompositionTests.UnsupportedIntentEvalWiring_ReplacesGateWithObserver_WithoutNetwork` |
+| 断言口径 | 显式受限结果按精确状态 + 精确诊断码 + Severity 断言（`AUTHORING_UNKNOWN_DESCRIPTOR_KIND` / `AUTHORING_UNSUPPORTED_DRAFT_OPERATION` / `AUTHORING_GOVERNANCE_BOUNDARY_VIOLATION` / `AUTHORING_INVALID_PROVIDER_OUTPUT`）；「不伪造能力、不部署」用测试侧计数度量：草稿库、评审工件库、控制面审计记录、`IRuntimeActivationGate` 调用/成功数、目录身份集合与部署基线比对 |
+| 边界层证据 | 绕过 authoring 白名单直接入库的 `Operation=Remove` 工件：真实评审 `IsActivationEligible=false`（诊断 `UNSUPPORTED_OPERATION`）、包预览 `Failed`、伪造绑定提交 `ACTIVATION_PACKAGE_PREVIEW_NOT_FOUND`、gate 0 次、部署目录不变 |
+| 判别力 | 5 组就地变异（放开 kind 白名单 / 放开 Remove 操作 / 关闭权威记忆检查 / 空 items 视为成功 / `Remove` 改走 Create）各自只打红目标用例（1 fail + 5 pass），变异已还原、`git diff -- src/` 为空 |
+| 运行证据 | Asset E2E 全量 49 passed / 2 skipped / 0 failed（2 条 skip 即两条 live eval）；相邻回归 Authoring 76、ControlPlane 575、DescriptorDraft 132、AssetManagement.Tests 29 全绿。细节见 [Issue #133 实施日志](../superpowers/plans/2026-11-03-issue-133-b12-unsupported-intent-log.md) |
+| 新发现（契约层） | 「显式 unsupported」可用 `Blocked` + 结构级诊断表达；「needs-clarification」不能作为可区分的显式结果表达——合法但无条目的拒绝式输出与空输出同样落在 `InvalidProviderOutput`/`AUTHORING_INVALID_PROVIDER_OUTPUT`。已用 `IntentMissingPolicyInformation_FailsClosed_AndClarificationIsNotDistinguishable` 钉为证据；按 #133 边界本轮不改契约，是否把 needs-clarification 做成一等结果（涉及 wire 版本、提示披露、DTO、JsonContracts root 与 AOT fixture）另待设计裁定 |
+| 仍未证实 | 真实 provider 在超出支持范围意图下是否伪造能力：`DEEPSEEK_API_KEY` 缺失，该用例未执行，仅验证编译、默认跳过与 DI 接线探针。行为结论需维护者带凭据跑一次并回填 artifact 后才能改判 |
+| 不得外推 | 不推导 LibraryManagement / SaaSHelpdesk 等其他链路的同类结论；不推导 durable activation（#88 D 类）；不把本组测试视为模型输出质量门禁 |
+
 ## 6. 后续任务对应（更新）
 
 | 波次 | 工作项 | 状态 |
