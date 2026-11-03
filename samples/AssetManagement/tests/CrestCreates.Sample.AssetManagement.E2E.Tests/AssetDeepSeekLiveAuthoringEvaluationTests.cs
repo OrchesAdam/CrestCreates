@@ -440,6 +440,12 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                 semantic.DiagnosticCodes = result.Diagnostics
                     .Select(d => d.Code.Value ?? string.Empty)
                     .ToArray();
+                // Shape of the rejected provider output, so a pending verdict can be adjudicated
+                // without the observation layer ever retaining response text.
+                semantic.OutputShapeCategories = result.Diagnostics
+                    .Select(diagnostic => AssetAuthoringDiagnosticClassifier.Classify(diagnostic.Message))
+                    .Distinct()
+                    .ToArray();
                 semantic.DraftCount = result.DraftSet.Drafts.Count;
 
                 stage = "review";
@@ -702,6 +708,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
         public string Result { get; set; } = "NotEvaluated";
         public string? AuthoringStatus { get; set; }
         public string[] DiagnosticCodes { get; set; } = [];
+        public string[] OutputShapeCategories { get; set; } = [];
         public int DraftCount { get; set; }
         public int ReviewPassedDraftCount { get; set; }
         public bool TargetsDeployedMaintenanceSurface { get; set; }
