@@ -173,4 +173,4 @@ dotnet build && dotnet test
 - 未新增原生场景、未执行 `PublishAot`，未修改 AotFixture 的场景集合与 harness（S3）。
 - 未跑 Asset 全量 E2E（无本地 PG），未改 `AssetUnsupportedIntentOracle` 的接受标签与 gap-lock 改判（S2）。
 - 未做带凭据 live（S5），未更新 `CapabilityMap.md` / `memory.md` / `AGENTS.md` / `usage-guide.md` 的能力声明（S4）。
-- §10.1 里 `reasons`/`questions` 条目的「必填成员 + Kind」在实现中随终态构建一起判定（状态与诊断码与 §6 step 8 一致），执行顺序上晚于 hash 检查；矩阵靶例不依赖这一先后，故未记为偏差以外的额外事实。
+- 口径差一处：`unsupported`/`needsClarification` 段与其内 `reasons`/`questions` 数组的「必填 + Kind」确实在 §6 step 8（`Row05b` 打在此处）；**条目内部**的 `code`/`message`/`id`/`reasonCode`/`question` 与数组 Kind 在终态构建里判定，状态与诊断码与 §6 相同，只是位置晚于 hash 检查。矩阵靶例不依赖这一先后，设计文字未改。
