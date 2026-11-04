@@ -82,8 +82,8 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
 
         using (document)
         {
-            // 2-3. Envelope member names: duplicates and unknown/alias members decide first, at every
-            // protocol level and recursing through payload, before any value is interpreted.
+            // 2-3. Envelope member names: undecodable names, duplicates and unknown/alias members decide
+            // first, at every protocol level and recursing through payload, before any value is interpreted.
             if (!DescriptorAuthoringEnvelopeFacts.TryRead(document.RootElement, out var envelope, out var envelopeFailure))
             {
                 return Invalid(envelopeFailure!);
@@ -92,14 +92,24 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             var root = document.RootElement;
 
             // 4. Contract version boundary is single-valued.
-            var contractVersion = ReadString(root, "contractVersion");
+            var contractVersion = ReadString(root, "contractVersion", out var versionUndecodable);
+            if (versionUndecodable)
+            {
+                return Invalid(UndecodableValueMessage("contractVersion"));
+            }
+
             if (!string.Equals(contractVersion, ExpectedContractVersion, StringComparison.Ordinal))
             {
                 return Invalid($"Unsupported contract version '{contractVersion ?? "null"}'. Expected '{ExpectedContractVersion}'.");
             }
 
             // 5. promptInputHash must be an actual string member.
-            var promptInputHash = ReadString(root, "promptInputHash");
+            var promptInputHash = ReadString(root, "promptInputHash", out var hashUndecodable);
+            if (hashUndecodable)
+            {
+                return Invalid(UndecodableValueMessage("promptInputHash"));
+            }
+
             if (promptInputHash is null)
             {
                 return Invalid("Provider output has no usable 'promptInputHash' string member.");
@@ -116,7 +126,12 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
             }
 
             // 7. The outcome discriminator is required and closed.
-            var outcome = ReadString(root, "outcome");
+            var outcome = ReadString(root, "outcome", out var outcomeUndecodable);
+            if (outcomeUndecodable)
+            {
+                return Invalid(UndecodableValueMessage("outcome"));
+            }
+
             if (outcome is null)
             {
                 return Invalid("Provider output is missing the required 'outcome' discriminator.");
@@ -610,10 +625,29 @@ public sealed class JsonDescriptorAuthoringOutputParser : IDescriptorAuthoringOu
         return true;
     }
 
-    private static string? ReadString(JsonElement target, string name)
-        => target.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
+    // The three envelope values are read from the raw document, so an unpaired surrogate escape surfaces
+    // here as a decode failure rather than a JsonException. It is reported as its own fact: absent, wrong
+    // kind and undecodable are different reasons, and the version/hash/discriminator order is unchanged.
+    private static string? ReadString(JsonElement target, string name, out bool undecodable)
+    {
+        undecodable = false;
+        if (!target.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var text = DescriptorAuthoringEnvelopeFacts.DecodeStringValue(value);
+        if (text is null)
+        {
+            undecodable = true;
+            return null;
+        }
+
+        return text;
+    }
+
+    private static string UndecodableValueMessage(string name)
+        => $"Provider output member '{name}' cannot be decoded as UTF-16 text.";
 
     // 13. Existing per-item atomic validation, unchanged in semantics.
 

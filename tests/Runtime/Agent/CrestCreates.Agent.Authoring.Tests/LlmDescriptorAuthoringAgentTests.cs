@@ -303,6 +303,23 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.PromptOutputEvidence.ProviderObservation.ModelName.Should().Be("observed-model");
     }
 
+    [Fact]
+    public async Task AuthorAsync_UndecodableRawStringMember_ReturnsInvalidProviderOutputToTheCaller()
+    {
+        // S1-R1-01: JsonDocument defers decoding an unpaired surrogate escape to member access, where it
+        // throws InvalidOperationException. The agent must receive the classified refusal, not an exception.
+        var agent = CreateAgentWithFakeResponse(
+            "{\"contractVersion\":\"\\uD800\",\"promptInputHash\":\"any\",\"outcome\":\"drafts\","
+            + "\"plan\":{\"planId\":\"p\",\"intentText\":\"i\"},\"items\":[]}");
+
+        var result = await agent.AuthorAsync(TestAuthoringContext());
+
+        result.Status.Should().Be(DescriptorAuthoringStatus.InvalidProviderOutput);
+        result.Diagnostics.Should().Contain(d =>
+            d.Code == DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput
+            && d.Message == "Provider output member 'contractVersion' cannot be decoded as UTF-16 text.");
+    }
+
     private static CanonicalHash TestHash(string value) => new()
     {
         Value = value,

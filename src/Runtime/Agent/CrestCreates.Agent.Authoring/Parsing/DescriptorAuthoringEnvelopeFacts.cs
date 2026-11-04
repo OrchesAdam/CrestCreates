@@ -44,8 +44,8 @@ internal static class DescriptorAuthoringEnvelopeFacts
 
     /// <summary>
     /// Reads the raw envelope facts. Returns <c>false</c> with the diagnostic message when the root is
-    /// not an object, a member name repeats at one level (recursing through <c>payload</c>), or a member
-    /// is outside the declared vocabulary for its level.
+    /// not an object, a member name repeats at one level (recursing through <c>payload</c>), a member
+    /// is outside the declared vocabulary for its level, or a member name cannot be decoded as text.
     /// </summary>
     internal static bool TryRead(
         JsonElement root,
@@ -72,6 +72,40 @@ internal static class DescriptorAuthoringEnvelopeFacts
         return true;
     }
 
+    /// <summary>
+    /// Decodes a raw member name, or returns <c>null</c> when it cannot be decoded.
+    /// <see cref="JsonDocument"/> accepts an unpaired surrogate escape and defers the failure to the moment
+    /// the text is decoded, where it throws <see cref="InvalidOperationException"/> rather than a
+    /// <see cref="JsonException"/> — so no name read in this stage may be left unguarded.
+    /// </summary>
+    internal static string? DecodeMemberName(JsonProperty property)
+    {
+        try
+        {
+            return property.Name;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Decodes a raw string value under the same boundary as <see cref="DecodeMemberName"/>.</summary>
+    internal static string? DecodeStringValue(JsonElement value)
+    {
+        try
+        {
+            return value.GetString();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    internal static string UndecodableMemberNameMessage(string path)
+        => $"Envelope contains a member name at {path} that cannot be decoded as UTF-16 text.";
+
     private static bool TryCollectObject(
         JsonElement target,
         string level,
@@ -92,26 +126,33 @@ internal static class DescriptorAuthoringEnvelopeFacts
 
         foreach (var property in target.EnumerateObject())
         {
-            if (!declared.Contains(property.Name, StringComparer.Ordinal))
+            var name = DecodeMemberName(property);
+            if (name is null)
             {
-                failureMessage = $"Envelope contains unknown member '{property.Name}' at {path}.";
+                failureMessage = UndecodableMemberNameMessage(path);
                 return false;
             }
 
-            if (kinds.ContainsKey(property.Name))
+            if (!declared.Contains(name, StringComparer.Ordinal))
             {
-                failureMessage = $"Envelope contains duplicate member '{property.Name}' at {path}.";
+                failureMessage = $"Envelope contains unknown member '{name}' at {path}.";
                 return false;
             }
 
-            kinds[property.Name] = property.Value.ValueKind;
-            var childPath = $"{path}.{property.Name}";
+            if (kinds.ContainsKey(name))
+            {
+                failureMessage = $"Envelope contains duplicate member '{name}' at {path}.";
+                return false;
+            }
+
+            kinds[name] = property.Value.ValueKind;
+            var childPath = $"{path}.{name}";
 
             if (property.Value.ValueKind == JsonValueKind.Array)
             {
                 if (!TryCollectArray(
                         property.Value,
-                        children.Contains(property.Name, StringComparer.Ordinal) ? property.Name : null,
+                        children.Contains(name, StringComparer.Ordinal) ? name : null,
                         childPath,
                         collected,
                         out failureMessage))
@@ -121,9 +162,9 @@ internal static class DescriptorAuthoringEnvelopeFacts
             }
             else if (property.Value.ValueKind == JsonValueKind.Object)
             {
-                if (children.Contains(property.Name, StringComparer.Ordinal))
+                if (children.Contains(name, StringComparer.Ordinal))
                 {
-                    if (!TryCollectObject(property.Value, property.Name, childPath, collected, out failureMessage))
+                    if (!TryCollectObject(property.Value, name, childPath, collected, out failureMessage))
                     {
                         return false;
                     }
@@ -184,14 +225,21 @@ internal static class DescriptorAuthoringEnvelopeFacts
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var property in target.EnumerateObject())
             {
-                if (!seen.Add(property.Name))
+                var name = DecodeMemberName(property);
+                if (name is null)
                 {
-                    failureMessage = $"Envelope contains duplicate member '{property.Name}' at {path}.";
+                    failureMessage = UndecodableMemberNameMessage(path);
+                    return false;
+                }
+
+                if (!seen.Add(name))
+                {
+                    failureMessage = $"Envelope contains duplicate member '{name}' at {path}.";
                     return false;
                 }
 
                 if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array
-                    && !TryCollectOpenContent(property.Value, $"{path}.{property.Name}", out failureMessage))
+                    && !TryCollectOpenContent(property.Value, $"{path}.{name}", out failureMessage))
                 {
                     return false;
                 }
