@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施并按实施审计 R1 补入原始解码边界（见「S1 实施审计 R1 修复记录」），本地全绿，待 S1 复审；S2–S5 未执行）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并本地全绿（含需 PG 的真实 Asset E2E），见「S2 实施日志」，待 S2 复审；S3–S5 未执行）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -228,3 +228,80 @@ dotnet build && dotnet test
 
 - 未新增/执行原生 `PublishAot` 场景与 harness 改造（S3），未跑需 PG 的 Asset 全量 E2E 与 oracle 接受标签改判（S2），未做带凭据 live（S5，本轮未读取任何凭据），未同步 `CapabilityMap.md` / `memory.md` / `AGENTS.md` / `usage-guide.md`（S4）。
 - `payload` 内**值**的未配对转义仍由 step 13 既有 `catch (Exception)` 归类为 `Blocked` + per-item `AUTHORING_INVALID_PROVIDER_OUTPUT` 诊断：本轮只用控制靶例锁定该事实，没有把它升级为 Stage A 原始事实，也没有改写那段既有 catch。
+
+## S2 实施日志（2026-11-04，S1 由 R2 放行后续推）
+
+S1 复审 R2 结论：`e1e8553d` 放行，「可进入 S2。PG、原生门禁与 live 仍按后续切片验收。」本片只动消费者与证据面，**未改任何 `src/` 生产代码**（9 个改动文件全在 `samples/**` 与 `tests/Framework/Testing/**`）。
+
+### I-11 oracle 接受标签（拒绝清单不缩）
+
+`AssetUnsupportedIntentOracle`：
+
+- `AssetUnsupportedIntentObservation` 增 `ExplicitOutcomeEntryCount`，由新增的 `CountExplicitOutcomeEntries(DescriptorAuthoringResult)` 计算：`unsupported` 数「同时有 code 与 message」的 reason，`needsClarification` 数「同时有 id、reasonCode 与 question」的 question。判定用观测到的真实条目数，不接受状态名单独作为证据。
+- 新增标签 `ExplicitClarificationResult`，以及两个 pending 标签 `UnsupportedOutcomeWithoutEntryPending` / `ClarificationOutcomeWithoutEntryPending`；`AcceptedResult` 仍等于 `ExplicitUnsupportedResult`（旧断言含义不变），谓词 `IsAcceptedResult(label)` 只接受两个显式终态标签。
+- `UnsupportedIntent` / `NeedsClarification` 以前落 `_` 分支（→ pending），现在各自成支并要求「自带诊断码 + 条目数 > 0 + 零草稿 + 零评审通过」。
+- 既有条目全部保留：`Blocked`+三个 intent-level 码仍 accepted；`ProviderUnavailable`/`Failed`/`InvalidProviderOutput`/`PromptHashMismatch`/预算耗尽/`FabricatedCapabilityClaim`/`ArtifactsRejectedByReviewPending`/`NoArtifactProducedPending` 的判定与标签字面量未变。
+
+### I-12 诊断分类器
+
+`AssetAuthoringDiagnosticClassifier` 改为**按码优先**：两枚新码各有类别，`AUTHORING_INVALID_PROVIDER_OUTPUT` 内部再按 8a.v1 parser 实际消息族细分；其余一律 `Other` 且不回传消息内容（脱敏语义保留）。同时删掉两处 7g 死映射：`"Provider output is missing required 'plan' section."`（现文本是 `Provider output with outcome 'drafts' is missing the required 'plan' object.`，归入 `OutcomeShapeConflict`）与 `"Provider output deserialized to null."`（Stage A 已保证 object 根，step 9 的 null 分支不可达）。签名从 `Classify(message)` 改为 `Classify(code, message)`，三个调用点全部改用真实 `diagnostic.Code.Value`，不留两套口径。
+
+判别口径升级：测试不再断言手写字符串，而是把 17 种真实信封喂给正式 `JsonDescriptorAuthoringOutputParser`，断言其产出的诊断归类到期望类别（含 `EnvelopeUndecodableMember` 两条，直接绑到 S1 R1 的新消息）。
+
+### I-13 样例 runner 与 fake agent
+
+`CompanyCertificationAuthoringGoldenScenarioRunner.RunUntilDraftSetReviewAsync` 在通用 block **之前**新增两条分支，落 `FinalDecisionSource = "AuthoringUnsupportedIntent"` / `"AuthoringNeedsClarification"`，`BlockReason` 只引用码表条目与 `missingInputs`/`evidenceRefs` 标识（不复制模型文本），`PerDraftReviewResults` 空且不进入 save/review 步骤。`FakeCompanyCertificationAuthoringAgent` 增加 `FakeCompanyCertificationAuthoringOutcome{Drafts, UnsupportedIntent, NeedsClarification}`，默认 `Drafts`（Phase 7f 行为与既有调用不变），显式终态按正式 parser 的形状构造（占位 Plan/DraftSet 身份、零草稿、每条一个 Warning 诊断）。
+
+消费者回归（`CrestCreates.Samples.Tests`）：两条终态各自断言「零草稿 / 零评审 / 零保存（`IDescriptorDraftStore.ListAsync` 空）/ 无最终清单」，另加一条三态可区分性断言（两个新 `FinalDecisionSource` 与不可用答案的 `AllOrBlock` 三者互异，占位 `DraftSetId` 分别钉死）。既有 AllOrBlock 用例补 `FinalDecisionSource.Should().Be("AllOrBlock")`，保证「不可用答案」仍走原路径。
+
+### I-14 Asset 真实链路与 gap-lock 改判
+
+`AssetUnsupportedIntentNegativeCaseTests` 新增 4 条（recorded provider，无网络、无凭据）：
+
+| 用例 | 事实 |
+| --- | --- |
+| `IntentNeedingNewDomainAlgorithm_ExplicitUnsupportedOutcome_IsAttributable_AndDeploysNothing` | `UnsupportedIntent` + `CAPABILITY_UNSUPPORTED` + `evidenceRefs=[visible:workflow:wf_asset_maintenance_review:1]` + 单条 `AUTHORING_INTENT_UNSUPPORTED` 诊断；`AssertBoundaryClosedAsync`；伪造提交仍 `NotFound`；oracle → `ExplicitUnsupportedResult` 且 `IsAcceptedResult` 为真 |
+| `IntentMissingPolicyInformation_ExplicitClarificationOutcome_IsAttributable_AndDeploysNothing` | `NeedsClarification` + question `risk-threshold`/`MISSING_POLICY_INPUT`/`missingInputs=[riskThreshold, policyOwner]` + 单条 `AUTHORING_INTENT_NEEDS_CLARIFICATION`；边界闭合；oracle → `ExplicitClarificationResult` |
+| `ExplicitClarificationOutcome_IsDistinguishableFromAProseRefusal_AndBothStayFailClosed` | 显式澄清 vs 散文拒绝 vs 静默空答三链对照：显式与后两者**状态与诊断码都不同**；散文拒绝与静默仍同码（诚实保留：契约只让「显式请求」可表达，不是所有拒绝都变成澄清）；三条链各自边界闭合；散文链 `IsAcceptedResult` 为假且标签为 `ProviderOutputRejectedPending` |
+| `UnsupportedOutcomeWithAContradictoryDraftsSection_IsRejected_NotAccepted` | `outcome:"unsupported"` 同时带 `items` ⇒ `InvalidProviderOutput`（Stage A 形状冲突），真实链路上 oracle 不接受 |
+
+gap-lock 改判：原 `IntentMissingPolicyInformation_FailsClosed_AndClarificationIsNotDistinguishable` 更名为 `IntentMissingPolicyInformation_WithAProseRefusal_FailsClosed_AndIsNotAClarification`，其载荷 `BuildNeedsClarificationResponse` 更名 `BuildProseRefusalResponse`；该用例继续断言散文拒绝= `InvalidProviderOutput` + 边界闭合，注释改为指向新的显式终态用例（#133 缺口的另一半已由 `8a.v1` 关闭）。`ReviewPassingFabricatedClaim_IsRejectedByTheOracle…` 补断言：伪造 `drafts` 答案在两个接受标签下都不被接受（§10.4「不支持意图得到 drafts 仍是拒绝」）。
+
+边界断言的一处收紧：`AssertBoundaryClosedAsync` 原来无条件要求 `DraftSet.DraftSetId` 为空（7g 时代所有拒绝路径留空占位）。两个新终态按 S1 契约携带占位身份，故改为按状态断言精确字面量（`draftset_intent_unsupported` / `draftset_needs_clarification`，其余仍须空）。这比原断言更强：泄漏真实 draft-set 身份会直接失败，零草稿、零存储、零评审工件、审计空、gate 0、目录不变六项一条未减。
+
+### I-15 判别自证（单守卫变异，物化副本 → 逐条还原）
+
+| 变异 | 改动 | 红例 |
+| --- | --- | --- |
+| M-A | oracle：`UnsupportedIntent` 无条件接受（绕过 `IsExplicitTerminal`） | 2 条：`ExplicitOutcomeWithoutEntryContent_IsNotAccepted(UnsupportedIntent)`、`NothingWithoutAnIntentLevelAttributionIsEverAccepted(UnsupportedIntent)` |
+| M-B | oracle：删 `NeedsClarification` 分支（落 `_`） | 4 条：oracle 两条 + Asset 显式澄清 + 三链可区分性 |
+| M-C | runner：删两条新分支（回落通用 `AllOrBlock`） | 3 条 Samples 消费者用例 |
+| M-D | 分类器：删两枚新码臂 | 3 条：Theory 的 unsupported/clarification 两行 + 专项断言 |
+| M-E | 分类器：删三条信封消息臂 | 4 条 Theory 行（unknown/duplicate/undecodable 名与值） |
+
+每条变异只打红其所属能力的靶例，还原后复跑全套。M-D/M-E 说明分类器类别绑定的是正式 parser 的真实输出，不是手写文本；M-A/M-B 说明「显式终态被接受」依赖条目内容与零候选，而非状态名本身。
+
+一处诚实边界：`CountExplicitOutcomeEntries` 的「同时具备 code 与 message」内容校验，在真实 parser 输出上不可被单独打红（§4.3 边界已保证条目非空），它锁的是**观测层**——由 oracle 单测用构造观测直接覆盖（条目数 0、码不匹配、草稿泄漏、评审通过四种）。不把该防御性检查记作变异证据。
+
+### I-16 执行结果（本片真实计数）
+
+| 命令 | 结果 |
+| --- | --- |
+| Asset 全量 E2E：`ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING='Host=127.0.0.1;Port=5433;…' dotnet test samples/…E2E.Tests` | **123 通过 / 0 失败 / 2 跳过（共 125）**；跳过的是 `CREST_ASSET_LIVE_EVAL` 未开启的两条 live 入口 |
+| 其中需 PG 的类：`--filter "AssetProposalReplay\|AssetLiveProposalRetention\|GoldenScenarioProcess"` | 8 通过 / 0 跳过（本地 `crestcreates-asset-pg-local` 容器，PostgreSQL 16.15） |
+| authoring/oracle/分类器/probe 子集：`--filter "AssetUnsupportedIntent\|AssetAuthoringDiagnosticClassifier\|ReviewerLiveOracleProbe"` | 81 通过（S1 时同一过滤器为 38） |
+| `dotnet test tests/Framework/Testing/CrestCreates.Samples.Tests` | **37/37**（原 34） |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests` | 139/139 |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests` | 575/575 |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Prompting.Tests` | 21/21 |
+| `dotnet test samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.Tests` | 29/29 |
+| `dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests`（带 `DOCKER_HOST` podman 套接字） | 236/238：2 条证据账本用例红。**归因：非本片引入**——在 `e1e8553d` 全新 detached worktree（无任何 S2 改动）复跑同一过滤器同样 2 失败；未注入 `DOCKER_HOST` 时另有 3 条 Testcontainers 失败，注入后转绿 |
+| `dotnet build`（全解决方案） | 0 错误 |
+
+### I-17 S2 未做的事（不冒充）
+
+- 未新增原生场景、未执行 `PublishAot`/link/run，未改 AotFixture 场景集合与 harness（S3）。
+- 未做带凭据 DeepSeek live（S5）：本轮未读取任何凭据、未发模型请求；Asset E2E 里 2 条 live 入口保持 skipped，#159 的该验收项仍 pending。
+- 未同步 `CapabilityMap.md` / `memory.md` / `AGENTS.md` / `usage-guide.md` 的能力声明，也未改 §5.1 B12 裁定文字与 #123 证据矩阵（S4）。
+- 未改任何 `src/` 生产代码、未动 `8a.v1` 契约文字与 §10.1 的 23 行矩阵、§10.5 原生场景清单、§10.6 变异清单。
+- 未开启 `CREST_ASSET_LIVE_EVAL`，未把 live 结果写成已执行；`AssetUnsupportedIntentOracle` 的接受标签扩展只由离线 recorded provider 证据支撑。
