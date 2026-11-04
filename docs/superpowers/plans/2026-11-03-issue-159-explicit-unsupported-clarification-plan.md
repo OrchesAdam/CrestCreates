@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定，本地全绿（含需 PG 的真实 Asset E2E），见「S2 实施日志」与「S2 实施审计 R1 修复记录」，待 S2 复审；S3–S5 未执行）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施：§10.5 原生场景与 harness 两层协议（逐场景点名 + 负控独立运行）落地，`PublishAot`/link/run 在 linux-x64 通过（9/9，含 7 条负控），四条生产变异各只打红名下场景，见「S3 实施日志」；S4–S5 未执行）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -360,3 +360,87 @@ gap-lock 改判：原 `IntentMissingPolicyInformation_FailsClosed_AndClarificati
 - 未发起真实模型请求：覆盖改判只由离线 recorded provider 与 oracle 单测支撑；S5 带凭据 live 仍 pending，本轮未读取任何凭据。
 - 未做 S3 原生场景与 harness 改造、未做 S4 文档与状态同步。`docs/review/2026-10-10-framework-architecture-review-follow-up.md` §5.1 的 B12 裁定文字、`CapabilityMap.md`、`memory.md`、`AGENTS.md` 尚未反映「历史归因 ≠ 新契约覆盖」这一层，按计划归入 S4，且 `docs/review/2026-11-03-issue-133-b12-unsupported-intent-log.md` 里的 #133 当时结论属历史记录，不改写。
 - 未改 `src/` 生产代码、未动 `8a.v1` 契约文字与 §10.1 的 23 行矩阵、§10.5 原生场景清单、§10.6 变异清单。
+
+## S3 实施日志（2026-11-04，S2 由 R2 放行后续推）
+
+### I-24 本片交付
+
+新增 `tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/AgentAuthoringOutcomeNativeAotFixture.cs`，在**已发布并实际执行的 NativeAOT 产物内**运行 §10.5 的场景集合：
+
+| 场景 sentinel | 钉住的契约事实 | 同运行内的对照 |
+| --- | --- | --- |
+| `AgentAuthoringOutcomeRequiredRoots` | `DescriptorAuthoringResult` / 两个终态 outcome / reason / question 五个根全部可解析，且解析链里没有 `DefaultJsonTypeInfoResolver` | — |
+| `AgentAuthoringUnsupportedOutcome` | `UnsupportedIntent` + 两条合法码 + evidenceRefs + `draftset_intent_unsupported`、诊断码 `AUTHORING_INTENT_UNSUPPORTED`/Warning；经 `DescriptorAuthoringJsonSerializerContext` 往返与 `Snapshot()` 后字段仍在；结果 JSON 里 `unsupported/reasons/code/message/evidenceRefs` 逐名可见且不含 `clarification` | 与澄清场景互斥 |
+| `AgentAuthoringClarificationOutcome` | `NeedsClarification` + `risk-threshold`/`MISSING_POLICY_INPUT`/`missingInputs`/空 `candidateValues` + 占位 plan/draftset id；往返与 `Snapshot()` 保形；JSON 含 `clarification/questions/reasonCode/missingInputs/candidateValues` 且不含 `unsupported` | 同上 |
+| `AgentAuthoringOutcomeShapeConflict` | **出现**的禁用成员一律拒绝：`items:null`、`plan:{}`、`items:[]`、带内容的 `plan`、`unsupported:{}`、带内容的 `needsClarification`、澄清下的 `items:null` —— 七条各自断言 `InvalidProviderOutput` + 单条诊断 + 消息点名该成员 + 草稿 0 + 两个终态对象为 null | 缺席形态（前两个场景）作为合法对照，不列为拒绝例 |
+| `AgentAuthoringCodeTableRejection` | 未知 `unsupported.reasons[].code` 与未知 `questions[].reasonCode` 各一条，消息含 “is outside the closed code table”，草稿 0、终态对象 null；词表按 ordinal：同一码小写仍越界 | 同运行内只换码文的合法信封必须落到各自终态 |
+| `AgentAuthoringEnvelopeUnknownMember` | item 层 `"extra"` ⇒ `unknown member 'extra'`、草稿 0；别名 `"Unsupported"` ⇒ `unknown member 'Unsupported'`（Stage B 关大小写敏感后别名不绑定，拒绝只能来自 Stage A） | 同一信封去掉 `extra` 必须在同一运行内真的产出 1 条草稿 |
+| `AgentAuthoringEnvelopeDuplicatePrecedence` | payload 子对象重复 `id` + 单一错 hash ⇒ `duplicate member 'id'`（非 `Blocked`/hash mismatch）；根层重复 `outcome` + 错 hash ⇒ `duplicate member 'outcome'` 且消息不含 hash 码 | 无 Stage A 事实、仅错 hash 的信封仍必须 `Blocked` + `AUTHORING_PROMPT_HASH_MISMATCH` |
+| `AgentAuthoringWireDisclosure`（扩展） | 披露文本断言 `Wire reference (contract 8a.v1):`、`outcome is required and is one of: drafts, unsupported, needsClarification.`、「never repeat a member at one level」、「null-instead-of-omitted」、「omit plan and items entirely (not null, not {})」、两张闭码表原文、散文拒绝禁令；模板版本 v3、`ContractVersion == 8a.v1`；**四条示例逐条走正式 parser**：两条 drafts 示例仍物化为 HumanTask/Workflow（保留 S1 前的逐步字段断言），两条拒绝示例必须真的落到各自终态且零草稿 | 示例与规则同源自证：披露若与 DTO/解析器漂移，原生门禁即红 |
+
+`Program.cs` 改动：`Main` 接参数、`--authoring-gate-control=<name>` 只接受登记名（未知名在跑任何场景前退出 4，防止拼错的负控静默走绿配置）、绿色聚合与总 sentinel 只在全部场景通过时发布。
+
+### I-25 首次执行原生门禁就发现的既有红灯（本片修复，记账在此）
+
+S1 把披露示例从 2 条扩到 4 条，但 AotFixture 的 `AgentAuthoringWireDisclosure` 仍钉 `examples.Length == 2`。`8a8a7409` 起该门禁实际是红的：本次第一次以 JIT 方式执行该产物即得 `FAIL [AgentAuthoringWireDisclosure]: Expected two wire examples, got 4.`，`SerializeDeserialize_RepresentativeToolRoots:FAIL`。S1/S2 的回执都明确写了「未执行原生 PublishAot」，所以这条红灯没进任何一轮全量回归（`dotnet test` 全解决方案会跑到它——本轮之前没人跑到，是因为它只在带 linux-x64 发布门禁的执行里出现；本片把它列为每片收尾必跑）。本片删除了旧的两例钉法，改为四例逐条消费并断言终态，红灯关闭。**这条不是 S3 新引入的缺陷，也不是掩盖：记录原因是「后续切片不得假设前片门禁绿」。**
+
+### I-26 harness 两层协议（同片改，§10.5 要求）
+
+`ControlPlaneJsonContractsAotFixtureTests` 重写为三层，一次 `PublishAot` 由全类共享（`Lazy`）：
+
+1. 绿色运行：exit 0 + **逐个点名** 14 条场景 sentinel（含新增 7 条）必须为 `:PASS`、聚合行 `:PASS`、全输出不含 `:FAIL`、群 sentinel `CONTROL_PLANE_AGENT_AUTHORING_OUTCOME_NATIVEAOT_OK` 与总 sentinel 都在。总 sentinel 不再单独充当证据——它只证明聚合，点名才证明场景真的跑了。
+2. 负控运行：`TheoryData` 钉死 7 对（控制名 ⇒ 唯一应变红的场景名）。每条单独执行同一二进制，要求非零退出、自己那条 `:FAIL`、总 sentinel 与群 sentinel 都不出现，且**点名场景集合里红掉的必须恰好等于那一条**（聚合行按构造必然跟随，已从可比集合里排除）。
+3. 未知控制名：非零、无任何 sentinel、且连 `ReflectionFallback_IsDisabled:PASS` 都不得出现。
+
+一层不变的「正确拒绝」样本（非法输入被原生断言拒绝）留在绿色侧，门禁负控永不与它混在同一次运行判定。
+
+### I-27 判别自证（生产侧变异，物化副本 → 逐条 `cp` 还原 → `cmp` 验字节一致）
+
+| 变异 | 改动（只切一个守卫） | 原生门禁红例 |
+| --- | --- | --- |
+| M1 | 摘掉 Stage A 的「声明名/未知成员」规则，其余 Stage A 步骤与 Stage B 全留 | `AgentAuthoringEnvelopeUnknownMember:FAIL`（其余场景全绿，聚合行跟随）；9 条用例 8 红：绿运行 + 六条与它无关的负控隔离断言 |
+| M2 | 只摘掉 Stage A 的原始重复成员规则 | `AgentAuthoringEnvelopeDuplicatePrecedence:FAIL`，7 红/2 绿 |
+| M3 | presence 规则削弱为「只有字符串值的禁用成员才算出现」（即 §10.6(b) 的 null-only 实现） | `AgentAuthoringOutcomeShapeConflict:FAIL`，7 红/2 绿 |
+| M4 | 两张闭码表 `IsKnown` 恒真（§10.6(d)） | `AgentAuthoringCodeTableRejection:FAIL`，7 红/2 绿 |
+
+四条变异各自只打红它名下那一条场景，证明这四个原生场景不是「只要抛就红」的空门禁；全部还原后 `cmp` 逐字节一致，`git status` 只剩本片的三个测试文件，原生门禁复跑 **9/9 绿**，`Authoring 139/139`、`ControlPlane 575/575` 复跑绿。
+
+### I-28 执行结果（本轮真实计数）
+
+原生门禁（本片主证据）：
+
+| 命令 | 结果 |
+| --- | --- |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests -c Release`（`PublishAot` + `-r linux-x64 --self-contained` → 原生 link → 执行原生产物） | **9 通过 / 0 失败（共 9）**：1 条绿色点名运行 + 7 条负控逐条独立运行 + 1 条未知控制名拒绝 |
+| 绿色运行的原生输出 | 14 条点名场景全部 `:PASS`、无 `:FAIL`、`CONTROL_PLANE_AGENT_AUTHORING_OUTCOME_NATIVEAOT_OK` 与 `CONTROL_PLANE_JSON_CONTRACT_NATIVEAOT_OK` 均出现；`publish.log` 内该 fixture 项目 0 条 IL2026/IL3050 |
+| 逐条负控的原生输出 | 每条恰好 1 条点名场景 `:FAIL`（其余场景仍绿），聚合行跟随，两个 sentinel 均不出现，退出码非零 |
+| I-27 四条生产变异的原生门禁 | 见 I-27 表：各只打红名下场景；还原 `cmp` 逐字节一致后复跑 **9/9 绿** |
+| JIT 侧先行执行（同一片，用于抓既有红灯） | 修复前 `FAIL [AgentAuthoringWireDisclosure]: Expected two wire examples, got 4.`；修复后 7 条新 sentinel 全 `PASS` |
+
+其余回归（同轮）：
+
+| 命令 | 结果 |
+| --- | --- |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests` | 139/139 |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests` | 575/575 |
+| `dotnet test samples/…E2E.Tests`（本地 PG 5433） | **128 通过 / 2 跳过（共 130）**，与 S2 记录逐条一致；2 条跳过仍是未开启 `CREST_ASSET_LIVE_EVAL` 的 live 入口 |
+| `dotnet test tests/Framework/Testing/CrestCreates.Samples.Tests` | 37/37 |
+| `dotnet build`（全解决方案） | 0 错误 |
+
+全解决方案 `dotnet test` 一轮：69 套绿 / 18 套红。18 套红全部是容器/发布并行竞态类，逐套带 `DOCKER_HOST`＋本地容器复跑归因如下（未注入时 Testcontainers 连不上、broker 拒绝连接、多个原生门禁在同一轮里互相抢 `obj/project.assets.json`）：
+
+| 套件 | 带环境复跑 | 归因 |
+| --- | --- | --- |
+| RabbitMQ 集成 37、LocalEvent 集成 116、RabbitMQ AotHost 原生 2 | 全绿 | broker/套接字缺失导致的首轮红 |
+| Agent.Tools AotFixture 1、CapabilityEndpoint AotFixture 13、GeneratedCrud AotFixture 28、AssetManagement AotFixture 3、Procurement AotFixture 9、Ticket AotFixture 6、PostgreSql AotFixture 1 | 全绿 | 同一轮内并行 `publish` 的 NuGet restore 竞态（错误行是 `error : The file '…/obj/project.assets.json' already exists`） |
+| MongoDB 8红/10、Kafka 集成 9红/3、Database.Migrations 2红、PostgreSql.Tests 3红/485 | 同样红 | **基线复现**：在 `d5a73b5f`（本片改动之前）新建 detached worktree 同环境复跑，红例数完全一致 |
+| `CrestCreates.IntegrationTests` 40红/9、`SaaSHelpdesk.Tests` 11红/154 | 同样红 | 根因 `Npgsql 42P01: relation "OpenIddictScopes" does not exist`（该样例 Host 需要的迁移/建表未在本地 PG 落）；IntegrationTests 未在基线 worktree 独立复跑（该 worktree 构建 BuildTasks 时命中 `MSB4062`），故此两条记为「原因已观测、基线复跑未完成」，不写成已证 |
+| DependencyBoundaries 236/238 | 同样红 2 条 | 与 S2 记录的同一基线红例（证据账本），已在 `e1e8553d` 干净 worktree 复现过 |
+
+### I-29 S3 未做的事（不冒充）
+
+- 未做 S4：`CapabilityMap.md`、`memory.md`、`AGENTS.md`、`usage-guide.md` 与 `docs/review/…follow-up.md` §5.1 的 B12 裁定文字仍未反映新终态与原生门禁证据；`docs/review/2026-11-03-issue-133-b12-unsupported-intent-log.md` 的 #133 当时结论作为历史记录不改写。
+- 未做 S5：本轮未读取任何凭据、未发起真实模型请求；两条 live 入口保持 skipped，#159 的该验收项仍 pending。
+- 原生声明只覆盖 I-24 表里**实际执行过的信封样本**与 linux-x64 一个 RID：不打折成「§10.1 全 23 行矩阵原生通过」，也不推导认证、审批、activation 链，其他 RID 未验证。
+- 未改任何 `src/` 生产代码：四条变异全部还原并 `cmp` 验字节一致，`git status` 只剩本片的三个测试文件（fixture 新文件、fixture `Program.cs`、harness 测试）。
+- 未新增第二条判定链：原生场景与 unit/Asset 层共用同一个 `JsonDescriptorAuthoringOutputParser`，fixture 侧负控只改**断言的期望值**，没有为可观测性加生产测试钩子。
