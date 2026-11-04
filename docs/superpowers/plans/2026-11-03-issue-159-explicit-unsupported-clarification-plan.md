@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并本地全绿（含需 PG 的真实 Asset E2E），见「S2 实施日志」，待 S2 复审；S3–S5 未执行）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定，本地全绿（含需 PG 的真实 Asset E2E），见「S2 实施日志」与「S2 实施审计 R1 修复记录」，待 S2 复审；S3–S5 未执行）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -305,3 +305,58 @@ gap-lock 改判：原 `IntentMissingPolicyInformation_FailsClosed_AndClarificati
 - 未同步 `CapabilityMap.md` / `memory.md` / `AGENTS.md` / `usage-guide.md` 的能力声明，也未改 §5.1 B12 裁定文字与 #123 证据矩阵（S4）。
 - 未改任何 `src/` 生产代码、未动 `8a.v1` 契约文字与 §10.1 的 23 行矩阵、§10.5 原生场景清单、§10.6 变异清单。
 - 未开启 `CREST_ASSET_LIVE_EVAL`，未把 live 结果写成已执行；`AssetUnsupportedIntentOracle` 的接受标签扩展只由离线 recorded provider 证据支撑。
+
+## S2 实施审计 R1 修复记录（2026-11-04，S2-R1-01 单项 P2）
+
+审查 head `409fc8cb`，报告 `docs/review/2026-11-04-issue-159-s2-review-round1.md`。S0/S1 放行保持，S2 暂不放行。缺陷性质是新契约覆盖的错误通过，不是部署边界失效。
+
+### I-18 缺陷事实
+
+统一 oracle 仍把历史归因（`Blocked` + `AUTHORING_UNKNOWN_DESCRIPTOR_KIND` / `AUTHORING_UNSUPPORTED_DRAFT_OPERATION` / `AUTHORING_GOVERNANCE_BOUNDARY_VIOLATION`）映射到覆盖接受标签，而 B12 入口只凭该标签调用 `IsAcceptedResult`。审查者用仓库既有 `ReviewerResponseModelClient("unsupported-kind")` 原样重放完整离线入口（正式 agent/parser/review 组合、无网络、无凭据）实测：wire 为 `8a.v1`、`outcome=drafts`、AuthoringStatus `Blocked`、诊断 `AUTHORING_UNKNOWN_DESCRIPTOR_KIND`、**`ExplicitOutcomeEntryCount = 0`**、标签 `ExplicitUnsupportedResult`、**入口不抛（通过）**、草稿/评审通过/保存/gate 调用与成功全 0、目录未变、HTTP 状态 0。
+
+即：这只能证明「框架拒绝了一个不支持的候选」，不能证明「模型使用了显式契约」。§10.4/§10.7 要求覆盖只来自 `UnsupportedIntent` / `NeedsClarification` + 合法码 + 非空条目；零副作用不能替代显式终态。而仓库里既有的绿色 `ReviewerLiveOracleProbeTests` 把这条输入钉成「应通过」，所以全量回归看不见这个缺口。
+
+### I-19 修复：一套 oracle，两层判定
+
+- `AssetUnsupportedIntentOracle` 新增标签 `LegacyIntentLevelBlockAttribution`；`Blocked` + 三个 intent-level 码改为落该标签，仍与「无 intent-level 诊断的 Blocked」以及所有旧拒绝标签区分。
+- `IsAcceptedResult` 只接受 `ExplicitUnsupportedResult` / `ExplicitClarificationResult`；新增 `IsHistoricalAttribution` 让历史归因可被上报与 adjudicate，但永不作为覆盖。仍是同一套 oracle、同一处 `Classify`，未起第二套判定器。
+- 三个旧拒绝码、零副作用事实、散文拒绝与伪造 drafts 负例、`ProviderUnavailable`/`Failed`/`InvalidProviderOutput`/预算/`PromptIntegrityFailure` 各标签全部保留不变（拒绝清单未缩，接受清单按要求缩）。
+- B12 入口断言（`AssetDeepSeekLiveAuthoringEvaluationTests`）删除「或 intent-level block」这句错误放行文字，改为要求显式终态 + 合法码 + 条目数 ≥1 + 零 artifact，并把 `IsHistoricalAttribution` 写进失败消息；artifact 仍只记元数据。
+
+### I-20 更新的旧控制与新增判别用例
+
+| 项 | 变更 |
+| --- | --- |
+| `ReviewerLiveOracleProbeTests` | `unsupported-kind` 行由「应通过」改为 `shouldReject: true`，并加注释说明 §10.4/§10.7 的改判理由；该行原本断言的零副作用与 recorded provider 消费检查一字未动 |
+| `AssetUnsupportedIntentProbeIsolationTests` | 隔离载体对同一路径的期望同步改为 `shouldReject: true`（隔离性质不依赖该入口是否放行，三条用例继续存在） |
+| `AssetB12CoverageEntryTests`（新增 3 条） | 完整离线入口 + recorded provider 的仓库内常驻判别：历史 `drafts`+Capability 候选 → 标签 `LegacyIntentLevelBlockAttribution`、`ExplicitOutcomeEntryCount = 0`、七项零副作用成立、**入口必须抛**；显式 unsupported → `UnsupportedIntent`、条目数 1、入口必须通过、零副作用；显式 needsClarification → `NeedsClarification`、条目数 1、入口必须通过、零副作用。每条都断言 recorded provider 被消费且 `HttpResponse.HttpStatus = 0`（拒绝不得来自凭据/传输/预算） |
+| `AssetUnsupportedIntentOracleTests` | 三个旧码逐条改为断言历史标签且 `IsAcceptedResult` 为假（另加「历史归因 + 候选漏进评审」仍非覆盖）；原 `NothingWithoutAnIntentLevelAttributionIsEverAccepted` 改为 `NothingShortOfAnExplicitTerminalOutcomeWithContentIsEverAccepted`，`Blocked` 行由「接受」改为「不接受」；逐标签可接受性表新增历史标签行（假） |
+| 真实链 #133 用例 | 两条 `…YieldsExplicitUnsupportedResult…` 更名为 `…HistoricalIntentLevelBlock…`，authority-claim 用例同补判定断言：标签为历史归因、`IsHistoricalAttribution` 真、`IsAcceptedResult` 假；三例的零副作用断言与部署目录不变断言保留 |
+
+### I-21 判别自证（单守卫变异，物化 → 逐条 `cp` 还原）
+
+| 变异 | 改动 | 红例 |
+| --- | --- | --- |
+| N-A | 把 `Blocked`+intent-level 码改回 `ExplicitUnsupportedResult`（即原缺陷） | **12 条**：完整入口历史归因用例、三条真实链旧用例、四条 oracle 用例、`ReviewerLiveOracleProbeTests` 的 unsupported-kind 行、两条隔离用例。修复前全量回归对此**零红**（旧控制把它钉成应通过），这正是审查者指出的盲区 |
+| N-B | `UnsupportedIntent` 绕过内容/计数门槛直接接受 | 2 条（该状态的条目缺失用例 + 「除显式终态外一律不接受」Theory 行） |
+| N-C | `NeedsClarification` 同上 | 2 条（对应 NeedsClarification 两行） |
+
+三组红例互不相交，还原后离线组 **86/86** 复跑绿。
+
+### I-22 执行结果（本轮真实计数）
+
+| 命令 | 结果 |
+| --- | --- |
+| Asset 全量 E2E（同一本地 PG，`ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING='Host=127.0.0.1;Port=5433;…'`） | **128 通过 / 0 失败 / 2 跳过（共 130）**，2 条跳过仍是未开启 `CREST_ASSET_LIVE_EVAL` 的 live 入口 |
+| 离线 oracle/分类器/probe/覆盖入口子集 | 86 通过 / 0 失败（S2 交付时为 81） |
+| `CrestCreates.Samples.Tests` | 37/37 |
+| `CrestCreates.Agent.ControlPlane.Tests` | 575/575 |
+| `dotnet build`（全解决方案） | 0 错误 |
+
+`Authoring 139`、`Prompting 21`、Asset 单元 29 本轮未重跑（无 `src/` 改动，S1/S2 既有证据沿用，并在此标注为本轮未独立执行）。
+
+### I-23 本轮仍未做（不冒充）
+
+- 未发起真实模型请求：覆盖改判只由离线 recorded provider 与 oracle 单测支撑；S5 带凭据 live 仍 pending，本轮未读取任何凭据。
+- 未做 S3 原生场景与 harness 改造、未做 S4 文档与状态同步。`docs/review/2026-10-10-framework-architecture-review-follow-up.md` §5.1 的 B12 裁定文字、`CapabilityMap.md`、`memory.md`、`AGENTS.md` 尚未反映「历史归因 ≠ 新契约覆盖」这一层，按计划归入 S4，且 `docs/review/2026-11-03-issue-133-b12-unsupported-intent-log.md` 里的 #133 当时结论属历史记录，不改写。
+- 未改 `src/` 生产代码、未动 `8a.v1` 契约文字与 §10.1 的 23 行矩阵、§10.5 原生场景清单、§10.6 变异清单。
