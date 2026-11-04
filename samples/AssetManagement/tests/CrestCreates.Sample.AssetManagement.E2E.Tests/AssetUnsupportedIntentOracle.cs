@@ -24,12 +24,23 @@ internal sealed record AssetUnsupportedIntentObservation(
     int ExplicitOutcomeEntryCount);
 
 /// <summary>
-/// Attributes the outcome of an unsupported-intent evaluation. The accepted labels are an intent-level
-/// unsupported diagnosis (before `8a.v1` the only shape this could take was a blocked candidate) and, since
-/// `8a.v1`, an explicit clarification request: a parse failure, a contract-version rejection, a prompt-hash
-/// mismatch or an approvable candidate are different facts and must never be reported as B12 success.
-/// Anything the current contract cannot attribute is returned as an explicit pending label so the evaluation
-/// fails loudly and the artifact carries the evidence for manual adjudication.
+/// Attributes the outcome of an unsupported-intent evaluation, in two layers that must not be conflated
+/// (spec §10.4/§10.7, implementation audit S2-R1-01).
+///
+/// **New-contract coverage** — <see cref="IsAcceptedResult"/> — is true only for the two explicit terminal
+/// outcomes of `8a.v1`: a refusal that names the unsupported boundary and a clarification request that names
+/// the missing input, each with its own diagnostic code, at least one entry carrying real content, and no
+/// candidate artifact alongside. That is what a B12 acceptance assertion may rest on.
+///
+/// **Historical attribution** — <see cref="IsHistoricalAttribution"/> — is the pre-`8a.v1` route: the model
+/// proposed a candidate the framework's allowlist rejects, so authoring blocks with an intent-level diagnosis.
+/// The rejection is real and stays labelled (it is the evidence that the boundary held and nothing deployed),
+/// but it proves what *the framework* refused, not that *the model* used the explicit contract. Zero side
+/// effects cannot substitute for the missing terminal outcome, so this label never counts as coverage.
+///
+/// Everything else — a parse failure, a rejected contract version, a prompt-hash mismatch, an approvable
+/// candidate — keeps its own label and is never accepted. Anything the contract cannot attribute is returned
+/// as an explicit pending label so the evaluation fails loudly and the artifact carries the evidence.
 /// </summary>
 internal static class AssetUnsupportedIntentOracle
 {
@@ -40,6 +51,7 @@ internal static class AssetUnsupportedIntentOracle
     public const string ProviderOutputRejectedPending = "ProviderOutputRejected_PendingManualAdjudication";
     public const string PromptIntegrityFailure = "PromptIntegrityFailure";
     public const string BlockedWithoutUnsupportedIntentDiagnoses = "BlockedWithoutUnsupportedIntentDiagnoses";
+    public const string LegacyIntentLevelBlockAttribution = "LegacyIntentLevelBlockAttribution";
     public const string UnsupportedOutcomeWithoutEntryPending = "UnsupportedOutcomeWithoutEntry_PendingManualAdjudication";
     public const string ClarificationOutcomeWithoutEntryPending = "ClarificationOutcomeWithoutEntry_PendingManualAdjudication";
     public const string NoArtifactProducedPending = "NoArtifactProduced_PendingManualAdjudication";
@@ -48,16 +60,23 @@ internal static class AssetUnsupportedIntentOracle
     public const string InvalidOutputBudget = "InvalidOutputBudget";
     public const string AuthoringFailure = "AuthoringFailure";
 
-    /// <summary>
-    /// The label a B12 evaluation passes on when the model refuses the intent explicitly. Kept as the single
-    /// unsupported label so pre-`8a.v1` assertions stay meaningful; <see cref="IsAcceptedResult"/> is the
-    /// predicate that accepts either explicit terminal outcome.
-    /// </summary>
+    /// <summary>The explicit unsupported refusal label; <see cref="IsAcceptedResult"/> is the predicate.</summary>
     public const string AcceptedResult = ExplicitUnsupportedResult;
 
-    /// <summary>Either explicit terminal outcome covers B12; every other label does not.</summary>
+    /// <summary>
+    /// True only for the two explicit terminal outcomes of `8a.v1`. The historical intent-level block is
+    /// deliberately excluded: it carries no structured entry, so it cannot show that the model used the
+    /// explicit contract (§10.7; S2-R1-01).
+    /// </summary>
     public static bool IsAcceptedResult(string label)
         => label is ExplicitUnsupportedResult or ExplicitClarificationResult;
+
+    /// <summary>
+    /// True for the pre-`8a.v1` attribution route. Kept reportable — it is real evidence that the framework
+    /// boundary held and nothing deployed — but never usable as B12 coverage.
+    /// </summary>
+    public static bool IsHistoricalAttribution(string label)
+        => label == LegacyIntentLevelBlockAttribution;
 
     private static readonly IReadOnlyList<string> IntentLevelUnsupportedCodes =
     [
@@ -82,9 +101,11 @@ internal static class AssetUnsupportedIntentOracle
             // InvalidProviderOutput covers malformed JSON, a rejected contract version, a
             // missing plan and an empty item list alike, so it proves nothing about the intent.
             DescriptorAuthoringStatus.InvalidProviderOutput => ProviderOutputRejectedPending,
+            // The historical route: the framework's allowlist rejected a proposed candidate. Attributable,
+            // never coverage — a drafts answer to an unsupported intent is exactly what §10.4 keeps rejecting.
             DescriptorAuthoringStatus.Blocked => observation.DiagnosticCodes
                 .Any(code => IntentLevelUnsupportedCodes.Contains(code))
-                ? ExplicitUnsupportedResult
+                ? LegacyIntentLevelBlockAttribution
                 : BlockedWithoutUnsupportedIntentDiagnoses,
             // An explicit terminal outcome is attributable only with its own diagnostic code, real entry
             // content and no candidate artifact. A status alone is not enough: it can be produced by a

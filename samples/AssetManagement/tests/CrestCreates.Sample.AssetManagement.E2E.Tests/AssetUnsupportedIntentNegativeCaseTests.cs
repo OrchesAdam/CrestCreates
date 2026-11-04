@@ -89,7 +89,7 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
     // ── B12 negative cases: explicit restricted result, no artifact, no deployment ──
 
     [Fact]
-    public async Task IntentNeedingNewDomainAlgorithm_YieldsExplicitUnsupportedResult_AndDeploysNothing()
+    public async Task IntentNeedingNewDomainAlgorithm_HistoricalIntentLevelBlock_DeploysNothingButIsNotCoverage()
     {
         const string tenantId = "b12-intent-needs-new-algorithm";
         await using var chain = await B12Chain.StartAsync(
@@ -105,10 +105,18 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
 
         await chain.AssertBoundaryClosedAsync("a new domain algorithm is outside the authoring allowlist");
         await chain.AssertForgedSubmissionRejectedAsync(AssetContractIds.MaintenanceInitialHumanTask);
+
+        // §10.7 (S2-R1-01): this route is the framework's own allowlist rejecting a drafts candidate. It is
+        // attributable and deploys nothing, but it is historical attribution, not 8a.v1 coverage.
+        var verdict = Verdict(chain.Authoring, reviewPassedDraftCount: 0);
+        verdict.Should().Be(AssetUnsupportedIntentOracle.LegacyIntentLevelBlockAttribution);
+        AssetUnsupportedIntentOracle.IsHistoricalAttribution(verdict).Should().BeTrue();
+        AssetUnsupportedIntentOracle.IsAcceptedResult(verdict).Should().BeFalse(
+            "zero side effects cannot stand in for an explicit terminal outcome");
     }
 
     [Fact]
-    public async Task IntentClaimingLifecycleRemoval_YieldsExplicitUnsupportedResult_AndKeepsDeployedWorkflow()
+    public async Task IntentClaimingLifecycleRemoval_HistoricalIntentLevelBlock_KeepsDeployedWorkflow()
     {
         const string tenantId = "b12-intent-claims-removal";
         await using var chain = await B12Chain.StartAsync(
@@ -123,6 +131,10 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
         diagnostic.Message.Should().Contain("Remove");
 
         await chain.AssertBoundaryClosedAsync("Deprecate/Remove are not supported draft operations");
+
+        var verdict = Verdict(chain.Authoring, reviewPassedDraftCount: 0);
+        verdict.Should().Be(AssetUnsupportedIntentOracle.LegacyIntentLevelBlockAttribution);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(verdict).Should().BeFalse();
 
         var deployedWorkflow = chain.Catalog.Get(AssetContractIds.MaintenanceWorkflow);
         deployedWorkflow.Should().NotBeNull("the rejected intent may not retire the deployed workflow");
@@ -145,6 +157,10 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
         diagnostic.Message.Should().Contain("authoritative");
 
         await chain.AssertBoundaryClosedAsync("authority claims must be made through governance channels");
+
+        var verdict = Verdict(chain.Authoring, reviewPassedDraftCount: 0);
+        verdict.Should().Be(AssetUnsupportedIntentOracle.LegacyIntentLevelBlockAttribution);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(verdict).Should().BeFalse();
     }
 
     [Fact]
@@ -378,6 +394,8 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
             .Be(AssetUnsupportedIntentOracle.ProviderOutputRejectedPending);
         Verdict(chain.Authoring, reviewPassedDraftCount: 0).Should()
             .NotBe(AssetUnsupportedIntentOracle.AcceptedResult);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(
+            Verdict(chain.Authoring, reviewPassedDraftCount: 0)).Should().BeFalse();
     }
 
     [Fact]

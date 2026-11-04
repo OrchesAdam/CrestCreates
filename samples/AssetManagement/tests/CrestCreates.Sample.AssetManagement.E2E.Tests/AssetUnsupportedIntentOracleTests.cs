@@ -11,18 +11,36 @@ namespace CrestCreates.Sample.AssetManagement.E2E.Tests;
 /// </summary>
 public sealed class AssetUnsupportedIntentOracleTests
 {
+    // S2-R1-01: the pre-`8a.v1` route keeps its attribution label and its "nothing deployed" evidence, but it
+    // carries no structured entry, so §10.7 forbids counting it as new-contract coverage.
     [Theory]
-    [InlineData(DescriptorAuthoringStatus.Blocked, new[] { DescriptorAuthoringDiagnosticCodes.UnknownDescriptorKindValue })]
-    [InlineData(DescriptorAuthoringStatus.Blocked, new[] { DescriptorAuthoringDiagnosticCodes.UnsupportedDraftOperationValue })]
-    [InlineData(DescriptorAuthoringStatus.Blocked, new[] { DescriptorAuthoringDiagnosticCodes.GovernanceBoundaryViolationValue })]
-    public void IntentLevelUnsupportedDiagnosis_StaysAcceptedAfterTheExplicitOutcomesLanded(
-        DescriptorAuthoringStatus status,
-        string[] diagnosticCodes)
+    [InlineData(DescriptorAuthoringDiagnosticCodes.UnknownDescriptorKindValue)]
+    [InlineData(DescriptorAuthoringDiagnosticCodes.UnsupportedDraftOperationValue)]
+    [InlineData(DescriptorAuthoringDiagnosticCodes.GovernanceBoundaryViolationValue)]
+    public void IntentLevelBlock_IsHistoricalAttribution_NotNewContractCoverage(string diagnosticCode)
     {
-        var result = AssetUnsupportedIntentOracle.Classify(Observe(status, diagnosticCodes));
+        var result = AssetUnsupportedIntentOracle.Classify(Observe(
+            DescriptorAuthoringStatus.Blocked, [diagnosticCode]));
 
-        result.Should().Be(AssetUnsupportedIntentOracle.AcceptedResult);
-        result.Should().Be(AssetUnsupportedIntentOracle.ExplicitUnsupportedResult);
+        result.Should().Be(AssetUnsupportedIntentOracle.LegacyIntentLevelBlockAttribution);
+        result.Should().NotBe(AssetUnsupportedIntentOracle.ExplicitUnsupportedResult);
+        AssetUnsupportedIntentOracle.IsHistoricalAttribution(result).Should().BeTrue();
+        AssetUnsupportedIntentOracle.IsAcceptedResult(result).Should().BeFalse(
+            "a drafts candidate the framework itself blocked cannot show the model used the 8a.v1 contract");
+    }
+
+    [Fact]
+    public void HistoricalAttribution_WithACandidateLeakingIntoReview_IsStillNotCoverage()
+    {
+        var result = AssetUnsupportedIntentOracle.Classify(new AssetUnsupportedIntentObservation(
+            DescriptorAuthoringStatus.Blocked,
+            [DescriptorAuthoringDiagnosticCodes.UnknownDescriptorKindValue],
+            DraftCount: 1,
+            ReviewPassedDraftCount: 1,
+            ProviderOutputBudgetExhausted: false,
+            ExplicitOutcomeEntryCount: 0));
+
+        AssetUnsupportedIntentOracle.IsAcceptedResult(result).Should().BeFalse();
     }
 
     [Fact]
@@ -139,7 +157,7 @@ public sealed class AssetUnsupportedIntentOracleTests
     [InlineData(DescriptorAuthoringStatus.Blocked, 0, 0)]
     [InlineData(DescriptorAuthoringStatus.UnsupportedIntent, 0, 0)]
     [InlineData(DescriptorAuthoringStatus.NeedsClarification, 0, 0)]
-    public void NothingWithoutAnIntentLevelAttributionIsEverAccepted(
+    public void NothingShortOfAnExplicitTerminalOutcomeWithContentIsEverAccepted(
         DescriptorAuthoringStatus status,
         int draftCount,
         int reviewPassedDraftCount)
@@ -156,10 +174,10 @@ public sealed class AssetUnsupportedIntentOracleTests
 
         var result = AssetUnsupportedIntentOracle.Classify(observation);
 
-        if (status == DescriptorAuthoringStatus.Blocked)
-            result.Should().Be(AssetUnsupportedIntentOracle.AcceptedResult);
-        else
-            result.Should().NotBe(AssetUnsupportedIntentOracle.AcceptedResult);
+        result.Should().NotBe(AssetUnsupportedIntentOracle.AcceptedResult);
+        result.Should().NotBe(AssetUnsupportedIntentOracle.ExplicitClarificationResult);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(result).Should().BeFalse(
+            $"no {status} observation without an explicit terminal outcome and entry content may be accepted");
     }
 
     [Fact]
@@ -247,6 +265,7 @@ public sealed class AssetUnsupportedIntentOracleTests
     [InlineData(AssetUnsupportedIntentOracle.ProviderOutputRejectedPending, false)]
     [InlineData(AssetUnsupportedIntentOracle.PromptIntegrityFailure, false)]
     [InlineData(AssetUnsupportedIntentOracle.BlockedWithoutUnsupportedIntentDiagnoses, false)]
+    [InlineData(AssetUnsupportedIntentOracle.LegacyIntentLevelBlockAttribution, false)]
     [InlineData(AssetUnsupportedIntentOracle.UnsupportedOutcomeWithoutEntryPending, false)]
     [InlineData(AssetUnsupportedIntentOracle.ClarificationOutcomeWithoutEntryPending, false)]
     [InlineData(AssetUnsupportedIntentOracle.NoArtifactProducedPending, false)]

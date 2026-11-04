@@ -69,7 +69,7 @@ public sealed class AssetUnsupportedIntentProbeIsolationTests
             Environment.SetEnvironmentVariable(LiveArtifactVariable, configuredDestination);
 
             await new ReviewerLiveOracleProbeTests()
-                .LiveOracle_ShouldRejectUnrelatedFailuresAndFabrication("unsupported-kind", shouldReject: false);
+                .LiveOracle_ShouldRejectUnrelatedFailuresAndFabrication("unsupported-kind", shouldReject: true);
 
             Environment.GetEnvironmentVariable(LiveArtifactVariable).Should().Be(
                 configuredDestination,
