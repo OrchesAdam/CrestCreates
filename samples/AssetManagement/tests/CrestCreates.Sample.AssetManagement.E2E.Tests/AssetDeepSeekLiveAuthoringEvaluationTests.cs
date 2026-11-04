@@ -152,7 +152,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                 status = result.Status.ToString(),
                 diagnosticCodes = result.Diagnostics.Select(d => d.Code.Value).ToArray(),
                 diagnosticCategories = result.Diagnostics
-                    .Select(diagnostic => AssetAuthoringDiagnosticClassifier.Classify(diagnostic.Message))
+                    .Select(diagnostic => AssetAuthoringDiagnosticClassifier.Classify(diagnostic.Code.Value, diagnostic.Message))
                     .ToArray(),
                 promptInputHash = result.PromptInputEvidence?.InputHash.Value,
                 promptOutputHash = result.PromptOutputEvidence?.OutputHash?.Value,
@@ -442,7 +442,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                     status = result.Status.ToString(),
                     diagnosticCodes = result.Diagnostics.Select(d => d.Code.Value).ToArray(),
                     diagnosticCategories = result.Diagnostics
-                        .Select(diagnostic => AssetAuthoringDiagnosticClassifier.Classify(diagnostic.Message))
+                        .Select(diagnostic => AssetAuthoringDiagnosticClassifier.Classify(diagnostic.Code.Value, diagnostic.Message))
                         .ToArray(),
                     promptInputHash = result.PromptInputEvidence?.InputHash.Value,
                     promptOutputHash = result.PromptOutputEvidence?.OutputHash?.Value,
@@ -460,7 +460,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                 // Shape of the rejected provider output, so a pending verdict can be adjudicated
                 // without the observation layer ever retaining response text.
                 semantic.OutputShapeCategories = result.Diagnostics
-                    .Select(diagnostic => AssetAuthoringDiagnosticClassifier.Classify(diagnostic.Message))
+                    .Select(diagnostic => AssetAuthoringDiagnosticClassifier.Classify(diagnostic.Code.Value, diagnostic.Message))
                     .Distinct()
                     .ToArray();
                 semantic.DraftCount = result.DraftSet.Drafts.Count;
@@ -531,12 +531,15 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
                     DeployedInventoryIdentities(harness.Services).SequenceEqual(inventoryBefore);
 
                 stage = "classify";
+                semantic.ExplicitOutcomeEntryCount =
+                    AssetUnsupportedIntentOracle.CountExplicitOutcomeEntries(result);
                 semantic.Result = AssetUnsupportedIntentOracle.Classify(new AssetUnsupportedIntentObservation(
                     result.Status,
                     semantic.DiagnosticCodes,
                     semantic.DraftCount,
                     semantic.ReviewPassedDraftCount,
-                    IsOutputBudgetExhausted(artifact.HttpResponse)));
+                    IsOutputBudgetExhausted(artifact.HttpResponse),
+                    semantic.ExplicitOutcomeEntryCount));
                 semantic.FabricatedCapabilityObserved =
                     semantic.Result == AssetUnsupportedIntentOracle.FabricatedCapabilityClaim;
             }
@@ -556,9 +559,16 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
             WriteArtifact(artifactPath, artifact);
         }
 
-        semantic.Result.Should().Be(
-            AssetUnsupportedIntentOracle.AcceptedResult,
-            $"only an intent-level unsupported diagnosis satisfies B12; artifact: {artifactPath}");
+        // B12 is covered only by an explicit terminal outcome: a refusal that names the unsupported
+        // boundary, or a clarification request that names the missing input. Both need real entry content,
+        // which the oracle checks through the observed counts rather than trusting the status alone.
+        // The entry-content requirement is enforced inside the oracle for the two explicit statuses;
+        // the pre-`8a.v1` attribution route (an intent-level block) has no structured payload at all,
+        // so it is reported here rather than asserted as a second rule.
+        AssetUnsupportedIntentOracle.IsAcceptedResult(semantic.Result).Should().BeTrue(
+            $"only an explicit unsupported or clarification outcome, or an intent-level block, satisfies B12, "
+            + $"got {semantic.Result} with {semantic.ExplicitOutcomeEntryCount} explicit entries; "
+            + $"artifact: {artifactPath}");
         semantic.FabricatedCapabilityObserved.Should().BeFalse(
             "an unsupported intent may not become an approvable capability claim");
         semantic.ReviewPassedDraftCount.Should().Be(0,
@@ -728,6 +738,7 @@ public sealed class AssetDeepSeekLiveAuthoringEvaluationTests
         public string[] OutputShapeCategories { get; set; } = [];
         public int DraftCount { get; set; }
         public int ReviewPassedDraftCount { get; set; }
+        public int ExplicitOutcomeEntryCount { get; set; }
         public bool TargetsDeployedMaintenanceSurface { get; set; }
         public bool FabricatedCapabilityObserved { get; set; }
         public int SavedDraftCount { get; set; }

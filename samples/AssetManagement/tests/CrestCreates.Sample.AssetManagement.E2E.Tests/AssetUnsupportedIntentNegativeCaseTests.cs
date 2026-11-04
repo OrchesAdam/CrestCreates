@@ -148,13 +148,13 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
     }
 
     [Fact]
-    public async Task IntentMissingPolicyInformation_FailsClosed_AndClarificationIsNotDistinguishable()
+    public async Task IntentMissingPolicyInformation_WithAProseRefusal_FailsClosed_AndIsNotAClarification()
     {
         const string tenantId = "b12-intent-missing-policy";
         await using var chain = await B12Chain.StartAsync(
             tenantId,
             MissingPolicyIntent,
-            BuildNeedsClarificationResponse);
+            BuildProseRefusalResponse);
 
         chain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.InvalidProviderOutput);
         chain.Authoring.Diagnostics.Should().ContainSingle().Which
@@ -162,10 +162,10 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
 
         await chain.AssertBoundaryClosedAsync("a refusal-shaped response may not become an approvable artifact");
 
-        // Evidence for the #133 verdict: the current authoring contract has no distinct
-        // needs-clarification result. A model that asks for the missing policy threshold is
-        // reported with exactly the same status and code as a model that returned nothing,
-        // so callers cannot tell "I need information" from "I produced no usable output".
+        // Retained half of the #133 verdict: a refusal written into a drafts answer is still not a
+        // clarification request, and it stays reported exactly like an answer that produced nothing.
+        // What `8a.v1` adds is the other half — an explicit needsClarification answer is its own
+        // terminal outcome, asserted by ExplicitClarificationOutcome_IsDistinguishableFromAProseRefusal.
         await using var silentChain = await B12Chain.StartAsync(
             "b12-intent-provider-silent",
             MissingPolicyIntent,
@@ -175,6 +175,126 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
         silentChain.Authoring.Diagnostics.Select(d => d.Code.Value)
             .Should().Equal(chain.Authoring.Diagnostics.Select(d => d.Code.Value));
         await silentChain.AssertBoundaryClosedAsync("the indistinguishable case is still fail-closed");
+    }
+
+    // ── `8a.v1` explicit terminal outcomes on the real Asset chain ──
+
+    [Fact]
+    public async Task IntentNeedingNewDomainAlgorithm_ExplicitUnsupportedOutcome_IsAttributable_AndDeploysNothing()
+    {
+        const string tenantId = "b12-explicit-unsupported-outcome";
+        await using var chain = await B12Chain.StartAsync(
+            tenantId,
+            NewAlgorithmIntent,
+            BuildExplicitUnsupportedRefusal);
+
+        chain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.UnsupportedIntent);
+        var reason = chain.Authoring.Unsupported!.Reasons.Should().ContainSingle().Which;
+        reason.Code.Should().Be(DescriptorAuthoringUnsupportedReasonCodes.CapabilityUnsupported);
+        reason.Message.Should().NotBeNullOrWhiteSpace();
+        reason.EvidenceRefs.Should()
+            .Equal($"visible:workflow:{AssetContractIds.MaintenanceWorkflow}:1");
+        chain.Authoring.Diagnostics.Should().ContainSingle().Which
+            .Code.Value.Should().Be(DescriptorAuthoringDiagnosticCodes.IntentUnsupportedValue);
+
+        await chain.AssertBoundaryClosedAsync("an explicit refusal may not produce any artifact");
+        await chain.AssertForgedSubmissionRejectedAsync(AssetContractIds.MaintenanceInitialHumanTask);
+
+        var verdict = Verdict(chain.Authoring, reviewPassedDraftCount: 0);
+        verdict.Should().Be(AssetUnsupportedIntentOracle.ExplicitUnsupportedResult);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(verdict).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IntentMissingPolicyInformation_ExplicitClarificationOutcome_IsAttributable_AndDeploysNothing()
+    {
+        const string tenantId = "b12-explicit-clarification-outcome";
+        await using var chain = await B12Chain.StartAsync(
+            tenantId,
+            MissingPolicyIntent,
+            BuildExplicitClarificationRequest);
+
+        chain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.NeedsClarification);
+        var question = chain.Authoring.Clarification!.Questions.Should().ContainSingle().Which;
+        question.Id.Should().Be("risk-threshold");
+        question.ReasonCode.Should().Be(DescriptorAuthoringClarificationReasonCodes.MissingPolicyInput);
+        question.Question.Should().NotBeNullOrWhiteSpace();
+        question.MissingInputs.Should().Equal("riskThreshold", "policyOwner");
+        chain.Authoring.Diagnostics.Should().ContainSingle().Which
+            .Code.Value.Should().Be(DescriptorAuthoringDiagnosticCodes.IntentNeedsClarificationValue);
+
+        await chain.AssertBoundaryClosedAsync("an explicit clarification request may not produce any artifact");
+
+        var verdict = Verdict(chain.Authoring, reviewPassedDraftCount: 0);
+        verdict.Should().Be(AssetUnsupportedIntentOracle.ExplicitClarificationResult);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(verdict).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExplicitClarificationOutcome_IsDistinguishableFromAProseRefusal_AndBothStayFailClosed()
+    {
+        // The #133 gap was that a model asking for the missing policy threshold reported exactly the
+        // same status and code as one that returned nothing. `8a.v1` closes it: an explicit
+        // needsClarification answer is its own terminal outcome, while a prose refusal written into
+        // a drafts answer stays an invalid provider output.
+        await using var explicitChain = await B12Chain.StartAsync(
+            "b12-clarification-distinguishable-explicit",
+            MissingPolicyIntent,
+            BuildExplicitClarificationRequest);
+        await using var proseChain = await B12Chain.StartAsync(
+            "b12-clarification-distinguishable-prose",
+            MissingPolicyIntent,
+            BuildProseRefusalResponse);
+        await using var silentChain = await B12Chain.StartAsync(
+            "b12-clarification-distinguishable-silent",
+            MissingPolicyIntent,
+            BuildEmptyAttemptResponse);
+
+        explicitChain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.NeedsClarification);
+        proseChain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.InvalidProviderOutput);
+
+        explicitChain.Authoring.Diagnostics.Select(d => d.Code.Value)
+            .Should().NotEqual(proseChain.Authoring.Diagnostics.Select(d => d.Code.Value));
+        explicitChain.Authoring.Diagnostics.Select(d => d.Code.Value)
+            .Should().NotEqual(silentChain.Authoring.Diagnostics.Select(d => d.Code.Value));
+
+        // A prose refusal is still not a clarification, and it stays indistinguishable from saying
+        // nothing at all: the contract makes an explicit request expressible, not every refusal.
+        proseChain.Authoring.Status.Should().Be(silentChain.Authoring.Status);
+        proseChain.Authoring.Diagnostics.Select(d => d.Code.Value)
+            .Should().Equal(silentChain.Authoring.Diagnostics.Select(d => d.Code.Value));
+
+        await explicitChain.AssertBoundaryClosedAsync("the explicit request produced no artifact");
+        await proseChain.AssertBoundaryClosedAsync("the prose refusal produced no artifact");
+        await silentChain.AssertBoundaryClosedAsync("the silent answer produced no artifact");
+
+        var proseVerdict = Verdict(proseChain.Authoring, reviewPassedDraftCount: 0);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(proseVerdict).Should().BeFalse(
+            "a refusal-shaped answer must never be verdicted as an explicit outcome");
+        proseVerdict.Should().Be(AssetUnsupportedIntentOracle.ProviderOutputRejectedPending);
+        AssetUnsupportedIntentOracle
+            .IsAcceptedResult(Verdict(explicitChain.Authoring, reviewPassedDraftCount: 0))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UnsupportedOutcomeWithAContradictoryDraftsSection_IsRejected_NotAccepted()
+    {
+        const string tenantId = "b12-unsupported-with-items";
+        await using var chain = await B12Chain.StartAsync(
+            tenantId,
+            NewAlgorithmIntent,
+            BuildUnsupportedRefusalWithDraftsSection);
+
+        chain.Authoring.Status.Should().Be(DescriptorAuthoringStatus.InvalidProviderOutput);
+        chain.Authoring.Diagnostics.Should().ContainSingle().Which
+            .Code.Value.Should().Be(DescriptorAuthoringDiagnosticCodes.InvalidProviderOutputValue);
+
+        await chain.AssertBoundaryClosedAsync("a contradictory refusal envelope produces no artifact");
+
+        var verdict = Verdict(chain.Authoring, reviewPassedDraftCount: 0);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(verdict).Should().BeFalse();
+        verdict.Should().Be(AssetUnsupportedIntentOracle.ProviderOutputRejectedPending);
     }
 
     // ── Boundary case: an artifact that skips the authoring allowlist ──
@@ -299,6 +419,8 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
         var verdict = Verdict(chain.Authoring, reviewPassedDraftCount: 1);
         verdict.Should().Be(AssetUnsupportedIntentOracle.FabricatedCapabilityClaim);
         verdict.Should().NotBe(AssetUnsupportedIntentOracle.AcceptedResult);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(verdict).Should().BeFalse(
+            "a drafts answer to the unsupported intent stays a rejection under either accepted label");
 
         // The absence of deployment is real but insufficient: it must not launder the claim.
         (await chain.DraftStore.ListAsync(tenantId)).Should().BeEmpty();
@@ -423,7 +545,7 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
             }
         });
 
-    private static string BuildNeedsClarificationResponse(string promptInputHash)
+    private static string BuildProseRefusalResponse(string promptInputHash)
         => JsonSerializer.Serialize(new
         {
             contractVersion = "8a.v1",
@@ -457,6 +579,69 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
             items = Array.Empty<object>()
         });
 
+    private static string BuildExplicitUnsupportedRefusal(string promptInputHash)
+        => JsonSerializer.Serialize(new
+        {
+            contractVersion = "8a.v1",
+            outcome = "unsupported",
+            promptInputHash,
+            unsupported = new
+            {
+                reasons = new object[]
+                {
+                    new
+                    {
+                        code = "CAPABILITY_UNSUPPORTED",
+                        message = "Maintenance outcomes are decided by the deployed human review task; an automatic condition-scoring algorithm is not a capability this surface can author.",
+                        evidenceRefs = new[] { $"visible:workflow:{AssetContractIds.MaintenanceWorkflow}:1" }
+                    }
+                }
+            }
+        });
+
+    private static string BuildExplicitClarificationRequest(string promptInputHash)
+        => JsonSerializer.Serialize(new
+        {
+            contractVersion = "8a.v1",
+            outcome = "needsClarification",
+            promptInputHash,
+            needsClarification = new
+            {
+                questions = new object[]
+                {
+                    new
+                    {
+                        id = "risk-threshold",
+                        reasonCode = "MISSING_POLICY_INPUT",
+                        question = "Which asset risk-score threshold makes auto-approval acceptable, and which policy owns that threshold?",
+                        missingInputs = new[] { "riskThreshold", "policyOwner" },
+                        candidateValues = Array.Empty<string>()
+                    }
+                }
+            }
+        });
+
+    private static string BuildUnsupportedRefusalWithDraftsSection(string promptInputHash)
+        => JsonSerializer.Serialize(new
+        {
+            contractVersion = "8a.v1",
+            outcome = "unsupported",
+            promptInputHash,
+            items = Array.Empty<object>(),
+            unsupported = new
+            {
+                reasons = new object[]
+                {
+                    new
+                    {
+                        code = "CAPABILITY_UNSUPPORTED",
+                        message = "No automatic condition-scoring capability exists on this surface.",
+                        evidenceRefs = new[] { $"visible:workflow:{AssetContractIds.MaintenanceWorkflow}:1" }
+                    }
+                }
+            }
+        });
+
     private static string BuildFabricatedAlgorithmClaim(string promptInputHash)
     {
         var candidate = JsonNode.Parse(AssetApprovedInventoryHandoffAcceptanceTests.CreateAssetCandidateJson(
@@ -474,7 +659,8 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
             result.Diagnostics.Select(diagnostic => diagnostic.Code.Value ?? string.Empty).ToArray(),
             result.DraftSet.Drafts.Count,
             reviewPassedDraftCount,
-            ProviderOutputBudgetExhausted: false));
+            ProviderOutputBudgetExhausted: false,
+            AssetUnsupportedIntentOracle.CountExplicitOutcomeEntries(result)));
 
     private static string Identity(DescriptorKind kind, string ns, string id, int? version)
         => string.Create(
@@ -592,7 +778,14 @@ public sealed class AssetUnsupportedIntentNegativeCaseTests
         {
             Client.CallCount.Should().Be(1, $"the recorded provider must actually be consulted ({because})");
             Authoring.DraftSet.Drafts.Should().BeEmpty(because);
-            Authoring.DraftSet.DraftSetId.Should().BeEmpty(because);
+            Authoring.DraftSet.DraftSetId.Should().Be(
+                Authoring.Status switch
+                {
+                    DescriptorAuthoringStatus.UnsupportedIntent => "draftset_intent_unsupported",
+                    DescriptorAuthoringStatus.NeedsClarification => "draftset_needs_clarification",
+                    _ => string.Empty
+                },
+                $"a {Authoring.Status} result may carry only its placeholder draft-set identity ({because})");
             (await DraftStore.ListAsync(TenantId)).Should().BeEmpty(because);
             (await ReviewArtifacts.ListAsync(TenantId)).Should().BeEmpty(because);
             Auditor.GetAllRecords().Should().BeEmpty(because);
