@@ -1,7 +1,7 @@
 # Explicit Unsupported / Needs-Clarification Authoring Outcomes
 
 > Date: 2026-11-03
-> Status: Proposed (rev.4, 修订设计审计 R3-01 机制事实并落地 R3 两项裁定；待 S0 放行)
+> Status: Proposed (rev.5, 补记 S1 实施审计 R1-01 的原始解码边界机制事实；契约与 23 行矩阵不变)
 > Issue: #159
 > Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence (merged to master as `91d6574e` on 2026-11-03)
 
@@ -179,6 +179,7 @@ from the measured output.
 | unknown member | `items[]` element carrying `"extra":"surprise"` deserializes cleanly in both lenient and strict mode (silently dropped) | Stage A is the only place an unknown member is rejected |
 | name casing | measured with `JsonSerializerDefaults.Web`, which sets `PropertyNameCaseInsensitive = true`: binding matched `"Unsupported"` (capital) to the declared `unsupported` member in **both** duplicate policies. Control with the camelCase naming policy and the DTO unchanged, and only `PropertyNameCaseInsensitive = false` in both option sets: `"Unsupported"` did **not** bind (`absent`), while the correctly named member still bound | the alias comes from a configurable option, not from the naming policy or from source generation. Stage B therefore pins `PropertyNameCaseInsensitive = false` (rule 1); with that option the alias is merely **ignored**, so *rejecting* it stays Stage A's job (§6 step 3) |
 | STJ DTO projection | absent `items` and explicit `"items":null` both project to `null`; an empty `"unsupported":{}` projects to a non-null object with `null` reasons | a null-check-only shape test would accept `outcome=unsupported` + `"items":null` as a valid refusal |
+| raw text decode (added by implementation audit S1 R1-01) | `JsonDocument.Parse` **accepts** an unpaired surrogate escape (`"\uD800"`); the failure happens when the text is decoded — `JsonProperty.Name` or `JsonElement.GetString()` throw `InvalidOperationException` ("Cannot read incomplete UTF-16 JSON text as string with missing low surrogate"), reproduced 5/5 on the S1 head at `contractVersion` / `promptInputHash` / `outcome` values and at root and `payload` member names, and 9/9 as the author's red baseline (JIT mechanical behaviour). A legal pair (`"\uD83D\uDE00"`) decodes normally, and Stage B reports the same class as a catchable `JsonException` | the raw name and value reads in steps 2–5 and 7 are **not** covered by either existing `JsonException` catch, so each needs its own decode boundary (rule 7); `payload` inner values are projected content read at step 13 and stay on the pre-existing per-item materialization boundary |
 
 Parsing is therefore two-stage and deterministic, with no reflection, no scanner and no new production extension point:
 
@@ -219,6 +220,15 @@ Rules fixed for Stage A (they apply at every **protocol envelope** object level:
    keys — Stage A rejects those before any value check (rule 2; strict Stage B would also throw, later and without that
    precedence) — nor for the item-level `payload` member itself (must be present and of kind `object`), nor for unknown
    members at the item level.
+7. **A raw text read that cannot be decoded is reported by the step that performs it** (added by implementation audit
+   S1 R1-01). An undecodable member name cannot be compared with the vocabulary or with the names already seen at that
+   level, so it is a step 2–3 fact — `Envelope contains a member name at {path} that cannot be decoded as UTF-16 text.` —
+   discovered in document order, which keeps rule 1 and rule 2 ahead of it whenever the earlier member is the offending
+   one. An undecodable `contractVersion`, `promptInputHash` or `outcome` value is a step 4/5/7 fact —
+   `Provider output member '…' cannot be decoded as UTF-16 text.` — and neither fact may be invented as a new precedence
+   level: this rule adds a boundary, not an ordering. Both entry points catch only the decode failure
+   (`InvalidOperationException`), never an unrelated execution exception, and the same boundary is what makes the Stage A
+   inventory trustworthy for a later stage.
 
 The declared vocabulary is one table, reused by the raw check and by the DTO mapping (a name listed nowhere is an unknown
 member; a name listed twice in the table is a design bug caught by the §10.1 matrix):
@@ -292,9 +302,14 @@ Stage A (raw envelope, §4.4)
 3 member names: unknown/alias   -> AUTHORING_INVALID_PROVIDER_OUTPUT ("... unknown member '…'")
                                    (Stage B's PropertyNameCaseInsensitive = false leaves an alias unbound and ignored;
                                     this step is what rejects it)
+   member name undecodable      -> AUTHORING_INVALID_PROVIDER_OUTPUT ("Envelope contains a member name at {path}
+                                   that cannot be decoded as UTF-16 text.")   (rule 7; found while steps 2–3 read the
+                                   name, so it shares that step's position and document order)
 4 contractVersion member        -> absent/null/non-string/non-8a.v1 -> "Unsupported contract version …"
                                    (message prefix kept: the Asset classifier maps it to ContractVersionMismatch)
 5 promptInputHash member        -> absent/null/non-string -> AUTHORING_INVALID_PROVIDER_OUTPUT
+   4/5/7 value undecodable      -> AUTHORING_INVALID_PROVIDER_OUTPUT ("Provider output member '…' cannot be decoded
+                                   as UTF-16 text.")   (rule 7: read at its own step, so the step order is unchanged)
 6 promptInputHash value         -> != expected echo -> AUTHORING_PROMPT_HASH_MISMATCH (Blocker), status Blocked
 7 outcome member                -> absent/null/unknown value -> AUTHORING_INVALID_PROVIDER_OUTPUT
 8 shape per outcome             -> required member absent/null/wrong kind, or forbidden member present
@@ -574,6 +589,16 @@ paused), and merging stays with the maintainer.
 | **D16 (new, R3)** | Where name strictness is configured | In the options and in one shared table, not in an emergent behaviour: Stage B pins `PropertyNameCaseInsensitive = false` (so no alias binds anywhere) and Stage A rejects the alias as an unknown member using the same declared vocabulary, ordinal-exact. The rev.3 attribution of the measured alias binding to the naming policy was wrong — it is the Web defaults' case-insensitive option. Mechanical facts stated here are .NET 10 JIT observations from the pinned probe; if another runtime or option set produces different output, it must be pinned by version with its own log, not written as a general .NET claim (§4.4, §5, §6) |
 
 ## Changelog
+
+- **rev.5 (2026-11-04, 补记实施审计 S1 R1-01 的原始解码边界)** — implementation audit R1 found one P2: an unpaired
+  surrogate escape parses, then throws `InvalidOperationException` when a raw member name or value is decoded, which is
+  outside both existing `JsonException` boundaries, so `Parse` and `AuthorAsync` propagated an exception instead of
+  `InvalidProviderOutput`. Landed as a mechanics fact only — §4.4 gained the measured decode row, rule 7 states that the
+  failure is reported by the step that performs the read (steps 2–3 for names, 4/5/7 for values) in document order, and
+  §6 annotates those steps. The wire contract, the closed code tables, the 23 §10.1 rows, the §10.5 native scenarios and
+  the §10.6 mutation list are unchanged, and no new precedence level was invented; `payload` inner values stay on the
+  pre-existing per-item materialization boundary at step 13. Evidence (author red baseline 9/9 → green 139/139, plus the
+  three single-guard mutations M1/M2/M3) is in the plan's S1 R1 record.
 
 - **rev.4 (2026-11-03, 修订设计审计 R3-01 并落地 R3 两项裁定)** — two mechanism facts in the §4.4 table were wrong as
   written and are restated from the verbatim probe replay: strict Stage B throws `JsonException` for duplicate keys

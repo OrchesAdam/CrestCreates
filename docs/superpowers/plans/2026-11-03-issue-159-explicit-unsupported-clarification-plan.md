@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.4；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施并本地全绿，见下方「S1 实施日志」；S2–S5 未执行）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施并按实施审计 R1 补入原始解码边界（见「S1 实施审计 R1 修复记录」），本地全绿，待 S1 复审；S2–S5 未执行）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -10,7 +10,7 @@
 | 切片 | 内容 | 关键文件 | 退出条件 |
 | --- | --- | --- | --- |
 | S0 设计 | 本 spec + 本计划 + Issue #159 + R1/R2/R3 修订 | `docs/superpowers/specs、plans` | 静态审查通过（D1–D16；D12/D14/D15/D16 已裁定或按实测更正，余下待确认） |
-| S1 契约与解析 | wire `8a.v1`、`outcome` 判别式、**Stage A 原始信封事实**（重复成员/未知成员/存在性/Kind，逐对象层，递归进 `payload`）、**Stage B 严格 DTO**（`AllowDuplicateProperties=false` **且** `PropertyNameCaseInsensitive=false`，spec D16）、封闭码表、归一化与边界、`DescriptorAuthoringStatus` + 两成员、结果新增两载荷类型、诊断码两枚、两个 source-generated JSON context 的**必需根**、提示披露与 `PromptTemplateVersion` v3（含「只发声明字段、禁止重复、拒绝时整段省略」）、全部 `7g.v1` 字面量迁移 | `Authoring.Abstractions/Authoring/*`、`Authoring/Parsing/*`（含新增内部 `DescriptorAuthoringEnvelopeFacts.cs`）、`Authoring/Prompting/*`、`Authoring/Json/*`、Authoring/Prompting/ControlPlane/Samples 测试 | **前置**：先对现有录制件做字段清点（有业务意义的新字段进正式设计；无关说明字段移出录制信封；禁止临时 allowlist 迁就旧录制件）。单测矩阵（spec §10.1 全 23 行）绿；变异 **(a)(b)(c)(d)(e)(f1)(f2)** 各按**所宣称机制**打红目标用例——(b) 依 R3 裁定从 S2 前移到本片（presence 是 Stage A 的本职，(f1)/(f2) 不能替代），靶例复用 `items:null`、`plan:{}` 两行 + 字段缺席的合法 control，不新增编号；(f1) 的别名样本必须固定 Stage B 大小写选项且除靶事实外全部数据合法，回证写实际的 `Status + 诊断码 + 草稿数`；(f2) 用「重复 + 单一错 hash」的**结果类别转换**记账；(g) 只作为「同时移除 Stage A 并放宽 Stage B」的联合负控记录，不得当作 Stage A 的独立证据；`ReflectionFallback` 类检查仍成立；已作废变异（删可达子类型注册 / 只删 Stage A 指望后值复活 / 把 payload 内重复当 Stage A 独占可见）不再出现在退出条件里 |
+| S1 契约与解析 | wire `8a.v1`、`outcome` 判别式、**Stage A 原始信封事实**（重复成员/未知成员/存在性/Kind，逐对象层，递归进 `payload`）、**Stage B 严格 DTO**（`AllowDuplicateProperties=false` **且** `PropertyNameCaseInsensitive=false`，spec D16）、封闭码表、归一化与边界、`DescriptorAuthoringStatus` + 两成员、结果新增两载荷类型、诊断码两枚、两个 source-generated JSON context 的**必需根**、提示披露与 `PromptTemplateVersion` v3（含「只发声明字段、禁止重复、拒绝时整段省略」）、全部 `7g.v1` 字面量迁移 | `Authoring.Abstractions/Authoring/*`、`Authoring/Parsing/*`（含新增内部 `DescriptorAuthoringEnvelopeFacts.cs`）、`Authoring/Prompting/*`、`Authoring/Json/*`、Authoring/Prompting/ControlPlane/Samples 测试 | **前置**：先对现有录制件做字段清点（有业务意义的新字段进正式设计；无关说明字段移出录制信封；禁止临时 allowlist 迁就旧录制件）。单测矩阵（spec §10.1 全 23 行）绿；变异 **(a)(b)(c)(d)(e)(f1)(f2)** 各按**所宣称机制**打红目标用例——(b) 依 R3 裁定从 S2 前移到本片（presence 是 Stage A 的本职，(f1)/(f2) 不能替代），靶例复用 `items:null`、`plan:{}` 两行 + 字段缺席的合法 control，不新增编号；(f1) 的别名样本必须固定 Stage B 大小写选项且除靶事实外全部数据合法，回证写实际的 `Status + 诊断码 + 草稿数`；(f2) 用「重复 + 单一错 hash」的**结果类别转换**记账；(g) 只作为「同时移除 Stage A 并放宽 Stage B」的联合负控记录，不得当作 Stage A 的独立证据；`ReflectionFallback` 类检查仍成立；已作废变异（删可达子类型注册 / 只删 Stage A 指望后值复活 / 把 payload 内重复当 Stage A 独占可见）不再出现在退出条件里。**实施审计 R1 追加退出条件**：协议级成员名、`payload` 递归成员名、三个信封值的解码各自必须有异常边界（M1/M2/M3 单守卫变异分别只打红本入口的靶例，presence/词表/Stage B/合法代理项对照在任何变异下保持绿），且正式调用方 `AuthorAsync` 收到分类结果而非异常 |
 | S2 消费者与真实链路 | 样例 runner/fake agent 分支补全；Asset 真实链路：`unsupported` / `needsClarification` 两例（零草稿/零评审/零保存/gate 0/目录不变）+「散文拒绝仍不是澄清」+「不支持意图得到 drafts 仍是拒绝」负例；`AssetUnsupportedIntentOracle` 接受标签扩展（拒绝清单不缩）；`AssetAuthoringDiagnosticClassifier` 归类；B12 live 入口按新终态裁定 | `samples/CrestCreates.Samples.DescriptorControlPlane/Authoring/*`、Asset E2E（master `91d6574e` 起） | 全量 Asset E2E 绿（需本地 PG）；oracle 仍拒绝一切非意图归因结果。本片的 presence 断言是真实链路的零草稿/零保存/零 gate 事实，**不再承担**首次证明原始 presence 规则有效的责任（变异 (b) 已前移 S1） |
 | S3 原生门禁 | AotFixture 新场景 `AgentAuthoringClarificationOutcome` / `AgentAuthoringUnsupportedOutcome` / `AgentAuthoringOutcomeShapeConflict`（拒绝的是**出现**的禁用成员：`null`/`{}`/`[]`/有内容；缺席是合法对照，也是 presence 的既有覆盖，不另开第三场景）/ **`AgentAuthoringCodeTableRejection`**（unknown reason code 与 unknown reasonCode 各一）/ `AgentAuthoringEnvelopeUnknownMember`（合法 drafts 样本仅加 item 层 `extra` ⇒ `InvalidProviderOutput`/unknown member、草稿 0；同次运行内无 `extra` 的 control 仍产出草稿）/ `AgentAuthoringEnvelopeDuplicatePrecedence`（**`payload` 子对象内重复键 + 单一错 hash** ⇒ `InvalidProviderOutput`/duplicate member、草稿 0，且不得退化为 `Blocked`/hash mismatch）；扩展 `AgentAuthoringWireDisclosure`（断言 `8a.v1`）；**同片修改 harness**：逐场景点名 sentinel 校验 + 失败控制独立运行（当前 harness 只发布并跑一次绿色产物、要求 exit 0 + 总 sentinel，不改就可能漏测仍收口） | `.../CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture/Program.cs` + `.../AotFixture.Tests` | `PublishAot` + 原生 run 在 linux-x64 通过；两层分开：正确拒绝场景=绿色（exit 0 + 自身 sentinel），门禁负控=非零且无总 sentinel；码表越界场景与两个 Stage A 场景**各有独立 sentinel 名**并被 harness 点名核对。原生声明只覆盖实际跑过的样本，不外推整张 23 行矩阵，也不推导认证/审批链 |
 | S4 文档与状态 | `usage-guide.md` 契约样例、`CapabilityMap.md` 四维、`memory.md`、`AGENTS.md` 当前平台状态 + AOT 分层、§5.1 B12 改判、#123 证据矩阵新场景行、7g spec 附录、本日志收口 | `docs/**`、`memory.md`、`AGENTS.md` | 声明与证据一一对应；未执行的场景写「未验证」；S5 未执行时该验收项保持 pending 且不关闭 Issue |
@@ -174,3 +174,57 @@ dotnet build && dotnet test
 - 未跑 Asset 全量 E2E（无本地 PG），未改 `AssetUnsupportedIntentOracle` 的接受标签与 gap-lock 改判（S2）。
 - 未做带凭据 live（S5），未更新 `CapabilityMap.md` / `memory.md` / `AGENTS.md` / `usage-guide.md` 的能力声明（S4）。
 - 口径差一处：`unsupported`/`needsClarification` 段与其内 `reasons`/`questions` 数组的「必填 + Kind」确实在 §6 step 8（`Row05b` 打在此处）；**条目内部**的 `code`/`message`/`id`/`reasonCode`/`question` 与数组 Kind 在终态构建里判定，状态与诊断码与 §6 相同，只是位置晚于 hash 检查。矩阵靶例不依赖这一先后，设计文字未改。
+
+## S1 实施审计 R1 修复记录（2026-11-04，S1-R1-01 单项 P2）
+
+审查 head `14bf51fb`，报告 `docs/review/2026-11-04-issue-159-s1-review-round1.md`（审查者工作区副本）。S0 与 D1–D16 放行保持，S1 暂不放行，先补原始字符串解码的异常边界。
+
+### I-06 缺陷事实与红基线
+
+`JsonDocument.Parse` 接受未配对的 surrogate 转义（`"\uD800"`），失败发生在**解码时**：`JsonProperty.Name` 或 `JsonElement.GetString()` 抛 `InvalidOperationException`（`Cannot read incomplete UTF-16 JSON text as string with missing low surrogate`），既不在 step 1 的 `JsonException` catch 里，也不在 step 9 的 catch 里。
+
+红基线在未修改 head `14bf51fb` 上执行（`dotnet test …Authoring.Tests --filter OutputParserRawStringDecodeTests|AuthorAsync_UndecodableRawStringMember`）：**9 失败 / 5 通过（14）**，9 条失败原因全部是上述同一异常，无旁因：
+
+| 入口 | 失败靶例 |
+| --- | --- |
+| step 4 `contractVersion` 值 | `RawDecode_ContractVersionValue_IsClassifiedNotThrown` |
+| step 5 `promptInputHash` 值 | `RawDecode_PromptInputHashValue_IsClassifiedNotThrown` |
+| step 7 `outcome` 值 | `RawDecode_OutcomeValue_IsClassifiedNotThrown` |
+| step 2–3 协议级成员名 | `RawDecode_RootMemberName_…`、`RawDecode_ItemMemberName_…`、`RawDecode_UndecodableNameWithWrongHash_…` |
+| step 2–3 `payload` 递归成员名 | `RawDecode_PayloadMemberName_…`、`RawDecode_NestedPayloadMemberName_…` |
+| 正式调用方 | `AuthorAsync_UndecodableRawStringMember_ReturnsInvalidProviderOutputToTheCaller` |
+
+5 条绿色对照（修复前后都必须保持绿，用来钉住边界归属）：未知成员在文档顺序上早于坏名时仍以未知成员定案（`…KeepsTheVocabularyFactFirst`）；合法代理项对在 `unsupported.message` 与 `payload.name` 正常解码（两条 `LegalSurrogatePair…`）；`payload` 内**值**的同类输入由 step 13 既有 per-item 边界归为 `Blocked` + `AUTHORING_INVALID_PROVIDER_OUTPUT`（`…KeepsTheExistingPerItemBoundary`）；条目 `message` 的同类输入由严格 Stage B 归为反序列化失败（`…IsClassifiedByTheStrictProjection`）。
+
+### I-07 修复（事实，含位置）
+
+- `src/Runtime/Agent/CrestCreates.Agent.Authoring/Parsing/DescriptorAuthoringEnvelopeFacts.cs`：新增 `DecodeMemberName(JsonProperty)` / `DecodeStringValue(JsonElement)`（只捕获 `InvalidOperationException`，只包住解码调用本身，无全局 catch）与 `UndecodableMemberNameMessage(path)`；`TryCollectObject` 与 `TryCollectOpenContent` 的每个成员名先解码再参与词表与重复判断，名字不可解码时报 `Envelope contains a member name at {path} that cannot be decoded as UTF-16 text.`。同一 `foreach` 内保持文档顺序，因此坏名不会抢在更早的未知/重复事实之前。
+- `…/Parsing/JsonDescriptorAuthoringOutputParser.cs`：`ReadString` 改为 `ReadString(target, name, out bool undecodable)`，「缺席 / 非字符串 / 不可解码」三种原因分开；step 4/5/7 各自在原有比较之前先报 `Provider output member '…' cannot be decoded as UTF-16 text.`。步骤顺序、严格 Stage B 两个选项、23 行矩阵与 §10.5/§10.6 集合均未改动——这是一条边界，不是一个新优先级（§12 禁止发明 Stage A 事实的口径保持）。
+- 回归：新增 `tests/…/OutputParserRawStringDecodeTests.cs`（13 条）与 `LlmDescriptorAuthoringAgentTests.AuthorAsync_UndecodableRawStringMember_…`（1 条，证明正式调用方收到分类结果）。
+- 设计同步：spec rev.5 —— §4.4 增解码机制行、新增 rule 7、§6 步骤 2–3/4/5/7 注记、Changelog。契约文字与码表未变。
+
+### I-08 单守卫变异判别（每条 = 红 → 还原绿；源文件先物化到 `/tmp/issue159-s1r1-fixed/`，逐条 `cp` 还原）
+
+| 变异 | 改动 | 红例 | 类别 |
+| --- | --- | --- | --- |
+| M1 | 协议级名字入口 `DecodeMemberName(property)` → `property.Name` | 3 个：Root 名、Item 名、坏名+错 hash | `InvalidProviderOutput` → 抛 `InvalidOperationException`（正式调用方收不到分类结果） |
+| M2 | `payload` 递归名字入口同上 | 2 个：payload 名、payload 嵌套名 | 同上，且 M1 的 3 条保持绿 → 两处名字入口各自被锁 |
+| M3 | `ReadString` 内 `DecodeStringValue(value)` → `value.GetString()` | 4 个：version、hash、outcome、agent 端到端 | 同上，且 5 条名字靶例保持绿 → 值入口独立成立 |
+
+三条变异红例合计 9 = 红基线条数，对照 5 条在任何变异下都不红；还原后复跑全套 **139/139**。
+
+### I-09 执行结果（本轮真实计数）
+
+| 命令 | 结果 |
+| --- | --- |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests` | **139 通过 / 0 失败**（S1 的 125 + 14 条新回归） |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Prompting.Tests` | 21/21 |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests` | 575/575 |
+| `dotnet test tests/Framework/Testing/CrestCreates.Samples.Tests` | 34/34 |
+| `dotnet test samples/…E2E.Tests --filter AssetUnsupportedIntent\|ReviewerLiveOracleProbe\|AssetAuthoringDiagnosticClassifier` | 38/38（离线 oracle 组） |
+| `dotnet build`（全解决方案） | 0 错误，218 个既有警告；无新增 CS8604 |
+
+### I-10 本轮未做（不冒充）
+
+- 未新增/执行原生 `PublishAot` 场景与 harness 改造（S3），未跑需 PG 的 Asset 全量 E2E 与 oracle 接受标签改判（S2），未做带凭据 live（S5，本轮未读取任何凭据），未同步 `CapabilityMap.md` / `memory.md` / `AGENTS.md` / `usage-guide.md`（S4）。
+- `payload` 内**值**的未配对转义仍由 step 13 既有 `catch (Exception)` 归类为 `Blocked` + per-item `AUTHORING_INVALID_PROVIDER_OUTPUT` 诊断：本轮只用控制靶例锁定该事实，没有把它升级为 Stage A 原始事实，也没有改写那段既有 catch。
