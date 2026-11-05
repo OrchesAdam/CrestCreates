@@ -1,6 +1,11 @@
-# CrestCreates platform status — 2026-10-23
+# CrestCreates platform status — 2026-11-05
 
-Baseline: master `9c39e187` (2026-10-27 merge of PR #155: #131 capability map, archiving and
+Verified remote master: `95ae83744b7cfae19a7f8ca7645f1c5d231b8454` (2026-11-05, PR #162 status sync).
+#121 implementation and bounded adjudication items are all delivered; final closure awaits
+this documentation reconciliation being merged. See
+[closure audit](docs/review/2026-11-05-issue-121-closure-audit.md).
+
+Historical baseline: master `9c39e187` (2026-10-27 merge of PR #155: #131 capability map, archiving and
 TenantId guard; parent base was `348c4d3c`, 2026-10-23 sync with freshly fetched origin/master;
 includes PR #150/#152/#151 and #154: #128 CRUD JSON, #129 legacy exit, #130 ORM matrix/soft-delete).
 #130 ORM Provider matrix/soft-delete was delivered via PR #154; S2 at `545f73d4`
@@ -11,8 +16,8 @@ both EF P1 defects and PG matrix P2 are closed. Fresh independent ORM 267/267
 (including all 10 unchanged final probes) and CRUD non-native 25/25 pass.
 PR #154 merged to master at `348c4d3c` on 2026-10-23 under explicit user authorization;
 Issue #130 acceptance/evidence completed and closed as completed. CI unchanged.
-Post-merge AGENTS/cross-Issue evidence synchronization remains a separate follow-up.
-This checkout is now synchronized on master at `348c4d3c`; uncommitted local design/review records
+Post-merge status reconciliation is recorded in the #121 closure audit; earlier entries below are history.
+Historical checkout synchronization was at master `348c4d3c`; uncommitted local design/review records
 were preserved and memory reconciled. Earlier reviews used an isolated exact-head copy;
 earlier entries remain historical evidence.
 CI: all GitHub workflows manually disabled (development-phase
@@ -87,10 +92,12 @@ never deleted; never output credentials.
   gates on 10.0.114 is environment/release maintenance, and the full-solution test environment plus the two unfinished
   baseline reproductions keep their recorded evidence limits. Nothing here claims a green whole-solution `dotnet test`.
 
-## 2026-10-27 — Issue #132 audit retention governance (V1 implemented; merge pending)
+## 2026-10-30 — Issue #132 audit retention governance (V1 merged; completed)
 
 - Branch `feat/issue-132-audit-retention-governance-20261027-180000`, based on master `5f4cfc8f`.
-  Not merged; CI manually disabled; local execution is the gate. Design and implementation plan:
+  Delivered by PR #157, merged as `9909365ab5c05b3e0ce610d264ef3c1b3b4572bb` on 2026-10-30;
+  Issue #132 closed as completed. CI remains manually disabled; local execution is the gate.
+  The implementation details below retain their original evidence scope. Design and implementation plan:
   [design](docs/superpowers/specs/2026-10-27-issue-132-audit-retention-governance-design.md),
   [plan](docs/superpowers/plans/2026-10-27-issue-132-audit-retention-governance-implementation.md).
 - V1 scope: PostgreSQL fixed database, Global retention settings, explicit Host or tenant scope
@@ -178,7 +185,7 @@ never deleted; never output credentials.
   probe (`docs/review/probes/issue132/`) are committed with this branch as baseline
   characterization, not production acceptance.
 
-## 2026-10-23 — Issue #130 ORM matrix / soft delete / tenant / UoW (final review passed; merge pending)
+## Historical 2026-10-23 — Issue #130 pre-merge review (delivered via PR #154 at 348c4d3c)
 
 - Branch `feat/issue-130-provider-matrix-soft-delete-20261022-104210`, PR #154, based on master
   `8c8a71de6a47d7c0eb94e8260e9f94035b22a477`; **final technical review passed**, not merged,
@@ -209,8 +216,8 @@ never deleted; never output credentials.
 
 - Core platform mainlines: Tenant / Setting / Feature / Permission / BackgroundJobs /
   ObjectMapping / Dynamic API (compile-time generated) / Workflow + HumanTask /
-  Audit (write-redact-query). Audit retention V1 (PostgreSQL) is implemented on the #132
-  branch (merge pending); other providers/policies remain deferred.
+  Audit (write-redact-query). Bounded audit retention V1 (PostgreSQL) was delivered by PR #157
+  (`9909365a`, 2026-10-30); other providers/policies remain deferred.
 - Module system: compile-time aggregation only (BuildTasks + generator), closed.
 - Agent governance plane (Authoring -> deterministic review -> Control Plane):
   review artifact store and package/evidence artifact store with InMemory +
@@ -350,7 +357,7 @@ never deleted; never output credentials.
 - Review scores (8.5/10, ~70%) are subjective single-review estimates, not
   production-readiness guarantees; support claims must point to per-item evidence.
 
-## Open work entry (#121 orchestration)
+## #121 delivery record (all implementation items delivered; documentation closure pending)
 
 - Wave 0: #122 baseline calibration (merged via PR #134).
 - Wave 1: #123 native gates / evidence matrix (merged via PR #135); #124 UnitOfWork
@@ -373,7 +380,13 @@ never deleted; never output credentials.
   #131 capability map / long-tail adjudication / TenantId guard merged via PR #155
   (`9c39e187`, 2026-10-27, ten commits, R1–R7 review rounds with 20 findings fixed;
   Issue #131 closed as completed).
-- Candidate: #132 audit retention design. New: #133 B12 unsupported-intent negative case.
+- #132 bounded design adjudication and PostgreSQL V1 delivered via PR #157 (`9909365a`);
+  #133 B12 negative evidence delivered via PR #158 (`91d6574e`), followed by #159 explicit
+  outcomes via PR #160 (`1bf4a7e7`) and post-merge status PR #162 (`95ae8374`).
+- Supplemental #146 LocalEvent hardening delivered via PR #148 (`0c6e574a`), status PR #149.
+- All #122–#132, #137 and #146 Issues are closed as completed. #133/#159 are also completed.
+  #121 remains open until this status reconciliation is merged; no runtime work remains in its
+  original scope. The audit records remaining evidence limits without turning them into new blockers.
 - At most 2 implementation PRs in flight; verify at current head before merge.
 
 ## #131 capability map, long-tail adjudication and TenantId guard (2026-10-23)
@@ -442,7 +455,11 @@ never deleted; never output credentials.
 
 ## Known gaps
 
-- B12 unsupported-intent negative case（#133，实施分支待合并）：确定性侧已闭环。Asset E2E 真实链路
+- B12 current status: #133 merged via PR #158 (`91d6574e`), completed; #159 merged via
+  PR #160 (`1bf4a7e7`), completed. Explicit unsupported is covered only for the executed live
+  sample; live clarification, other model/intent combinations and repeatability remain unverified.
+  The following #133 implementation narrative is historical, superseded by the #159 entry above.
+  B12 unsupported-intent negative case（#133 历史记录）：确定性侧已闭环。Asset E2E 真实链路
   （authoring → 真实评审 → 控制面提交 → 人工批准 → 激活门）新增 9 条用例：超出支持范围的意图按精确
   `DescriptorAuthoringStatus` + 精确诊断码断言显式受限结果，「不伪造能力、不部署」用草稿库/评审工件库/
   控制面审计记录/`IRuntimeActivationGate` 调用计数与目录身份集合对基线比对来度量，并配同链路绿色对照
@@ -480,7 +497,8 @@ never deleted; never output credentials.
   lease/borrower contract with scan-recovery delivery; PG+RabbitMQ integration evidence);
   compensation concurrency / process-crash recovery not pledged;
   ORM support matrix and soft-delete semantics (#130) are delivered via PR #154 with
-  per-combination evidence limits; placeholders and long-tail modules (#131) remain.
+  per-combination evidence limits; #131 capability-map/long-tail adjudication is delivered via
+  PR #155 (`9c39e187`), with experimental and deferred capabilities explicitly bounded.
   #128 CRUD JSON and #129 legacy exit are delivered; their ORM SDK /
   real-database query composition evidence remains separately bounded.
 
