@@ -418,7 +418,7 @@ TestBase
 - Dynamic API AoT：generated path 是正式主链。
 - Audit Logging：统一写入、脱敏、查询已闭环。旧 cleanup（`AuditLogCleanupAppService`、裸
   `DeleteOlderThanAsync`、日期清理 DTO）已随 #132 归档，不再属于正式链。
-- 审计保留治理 V1（#132，实施分支待合并）：唯一主链 = Accountability 契约
+- 审计保留治理 V1（#132，PR #157 已于 2026-10-30 合并，merge `9909365a`，Issue completed）：唯一主链 = Accountability 契约
   （`Retention`：scope/policy/run/batch/hold/`IAuditRetentionStore`/精确 receipt 读取）+
   `AuditRetentionExecutor` 内核（持久 policy 绑定、批预算、终态 run 拒绝新批、取消终态、
   commit Unknown → receipt 对账、receipt-only 批量事实、mirror 首败优先聚合、显式幂等
