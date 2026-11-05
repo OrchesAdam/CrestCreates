@@ -1,8 +1,11 @@
-# CrestCreates platform status — 2026-11-03
+# CrestCreates platform status — 2026-11-05
 
-Baseline: master `91d6574e` (2026-11-03 merge of PR #158: #133 B12 unsupported-intent negative
-case; head `1db29f48`, review rounds R1–R4 closed, production code untouched). Previous baseline
-`9909365a` (2026-11-03 merge of PR #157: #132 audit retention governance V1). Before that,
+Baseline: master `95ae8374` (2026-11-05 merge of PR #162: #159 post-merge status synchronization).
+Previous baseline `1bf4a7e7` (2026-11-05 merge of PR #160: #159 explicit unsupported / needs-clarification
+authoring outcomes on wire `8a.v1`; review head `fc28a95d`, slices S0–S5 accepted, Issue #159 closed as
+completed). Before that, `91d6574e` (2026-11-03 merge of PR #158: #133 B12 unsupported-intent negative
+case; head `1db29f48`, review rounds R1–R4 closed, production code untouched) and `9909365a`
+(2026-11-03 merge of PR #157: #132 audit retention governance V1). Before that,
 master `9c39e187` (2026-10-27 merge of PR #155: #131 capability map, archiving and
 TenantId guard; parent base was `348c4d3c`, 2026-10-23 sync with freshly fetched origin/master;
 includes PR #150/#152/#151 and #154: #128 CRUD JSON, #129 legacy exit, #130 ORM matrix/soft-delete).
@@ -14,7 +17,8 @@ both EF P1 defects and PG matrix P2 are closed. Fresh independent ORM 267/267
 (including all 10 unchanged final probes) and CRUD non-native 25/25 pass.
 PR #154 merged to master at `348c4d3c` on 2026-10-23 under explicit user authorization;
 Issue #130 acceptance/evidence completed and closed as completed. CI unchanged.
-Post-merge AGENTS/cross-Issue evidence synchronization remains a separate follow-up.
+Post-merge AGENTS/cross-Issue evidence synchronization is recorded per merge (the #132/#133 sync landed with
+PR #161; the #159 sync landed with PR #162).
 This checkout is now synchronized on master at `348c4d3c`; uncommitted local design/review records
 were preserved and memory reconciled. Earlier reviews used an isolated exact-head copy;
 earlier entries remain historical evidence.
@@ -22,6 +26,73 @@ CI: all GitHub workflows manually disabled (development-phase
 local-first verification; Testcontainers suites runnable locally via podman socket).
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
+
+## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S5 accepted; merged as 1bf4a7e7; issue closed completed)
+
+- Branch `docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`, PR #160 — **merged 2026-11-05
+  as `1bf4a7e7`** (review head `fc28a95d`, review rounds S0–S5 all released, final review found no remaining finding);
+  Issue #159 closed as **completed**. CI stayed manually disabled throughout; every gate was a local execution. Design
+  [rev.9](docs/superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)
+  and slice log [plan](docs/superpowers/plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md).
+  S0 released at design R4 (D1–D16 confirmed), S1 at implementation R2, S2 at R2, S3 at R3, S4 at R2, S5 at R1.
+- Contract `8a.v1` replaces `7g.v1` outright (no compatibility window): a required `outcome`
+  discriminator (`drafts` | `unsupported` | `needsClarification`), mutually exclusive sections judged by
+  **member presence, not truthiness** (`null`, `{}`, `[]` and populated content are equally appearances),
+  two closed code tables (`CAPABILITY_UNSUPPORTED`/`OPERATION_UNSUPPORTED`/`GOVERNANCE_BOUNDARY`;
+  `MISSING_POLICY_INPUT`/`AMBIGUOUS_TARGET`/`CONFLICTING_REQUIREMENTS`/`MISSING_REFERENCE_SELECTION`),
+  deterministic bounds (1..4 entries, 1..400 text, 0..8 / 1..8 refs of 1..120, question id
+  `[A-Za-z0-9._-]{1,64}` unique) and two new terminal statuses with their structured payloads, placeholder
+  plan/draft-set identities and warning diagnostics. `PromptTemplateVersion` is
+  `descriptor-authoring-prompt-template-v3`; the disclosure states the strictness the parser enforces and
+  serializes all four examples through the same parser context.
+- Parsing became two stages: Stage A reads raw envelope facts (undecodable names/values, duplicates at every
+  object level including recursion into `payload`, unknown and case-alias members, presence, value kinds)
+  before Stage B projects through a strict source-generated DTO
+  (`AllowDuplicateProperties=false` **and** `PropertyNameCaseInsensitive=false`). Order decides attribution:
+  a duplicate plus one wrong hash is `InvalidProviderOutput`, not `Blocked`; one wrong hash with no Stage A
+  fact stays `Blocked` + `AUTHORING_PROMPT_HASH_MISMATCH`.
+- Consumers: sample golden-scenario runner and fake agent gained the two explicit branches
+  (`FinalDecisionSource` = `AuthoringUnsupportedIntent` / `AuthoringNeedsClarification`, empty inventory,
+  no review entered); the Asset oracle now separates **new-contract coverage** from **historical
+  attribution** — `Blocked` + intent-level codes label `LegacyIntentLevelBlockAttribution` and are never
+  coverage, while acceptance requires an explicit terminal with legal code, non-empty entries and zero
+  drafts/review-passed/saves/gate calls.
+- Evidence (local): Authoring unit 139/139 covering the full §10.1 23-row matrix; Asset E2E with local PG
+  128 passed / 2 skipped (the two skipped are the opt-in live entries); Samples.Tests 37/37;
+  ControlPlane 575/575. Native gate `PublishAot` + link + run (linux-x64) 11/11 with per-scenario named
+  sentinels, nine separately executed negative controls (each reddening only its own scenario and withholding
+  both sentinels) and an unknown-control-name refusal; production guard mutations M1–M4 each reddened only
+  their named scenario, and the two counterfactuals (drop the read-back status comparison; drop only the
+  status injection write) each produced the expected 9 pass / 2 fail.
+- Support declaration: the two explicit terminals and the executed envelope facts are
+  **NativeAOT-verified (linux-x64, acceptance entry = user-directory official SDK 10.0.114 with implicit
+  ILCompiler 10.0.14)** for the samples that actually ran. Not extrapolated to the full 23-row matrix, other
+  RIDs, or authentication/approval/activation chains. The other seven native gates (CapabilityEndpoint,
+  GeneratedCrud, AssetManagement, Procurement, Ticket, PostgreSql, RabbitMQ AotHost) are still recorded under
+  the pre-upgrade toolchain and have not been re-run on 10.0.114. Default `/usr/bin/dotnet` remains 10.0.113
+  and still hits `error NU1903` (GHSA-p3jp-9v83-76w9, fixed by 10.0.14); upgrading the system RPM is an
+  environment maintenance item, and any task/CI reusing these gates must select 10.0.114 explicitly instead of
+  relying on a bare `dotnet`.
+- Result shapes are not one-to-one with `outcome`: `drafts` + `Succeeded`/`SucceededWithDiagnostics` binds
+  `DraftSetId = Plan.PlanId` with at least one draft, while `drafts` + `Blocked` (prompt hash mismatch, or any item
+  failing atomic per-item validation) returns the empty plan and empty draft set with **zero drafts and empty-string
+  identities** — not the terminal placeholders. The usage guide states both rows separately and keeps the
+  atomic-rejection sentence so `drafts` is never read as a draft guarantee.
+- **S5 executed (single authorized run, 2026-11-05)**: the existing B12 live entry ran once against the real provider
+  with `CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS=16384` — HTTP 200, `FinishReason=stop`, 555 completion + 261 reasoning
+  tokens, budget accepted (so neither budget exhaustion nor provider failure), requested `deepseek-v4-flash` /
+  observed `deepseek` + `deepseek-flash`. The answer parsed to `UnsupportedIntent` with three reason entries and the
+  three per-entry `AUTHORING_INTENT_UNSUPPORTED` warnings, and the Asset oracle labelled it `ExplicitUnsupportedResult`
+  with zero drafts / zero review-passed / zero saves / zero gate calls, unchanged deployed inventory and no fabricated
+  capability. **B12 therefore counts as covered by `8a.v1`** — for that one run, that one intent class and that one
+  model profile. Boundaries that must not be smoothed away: no repeatability or probability claim from a single run,
+  `NeedsClarification` has **no** live observation (the authorized scope was the unsupported entry only), the live run
+  executed on the JIT host and adds no native coverage, credentials were never printed or committed and the artifact
+  (`/tmp`, metadata only — character and token counts, no response or reasoning text) stays outside the repository.
+- Post-merge: the three leftovers were ruled non-blocking and stay separate follow-ups — `NeedsClarification` has no
+  live observation (quality evaluation later), the system RPM SDK upgrade plus re-verification of the other seven native
+  gates on 10.0.114 is environment/release maintenance, and the full-solution test environment plus the two unfinished
+  baseline reproductions keep their recorded evidence limits. Nothing here claims a green whole-solution `dotnet test`.
 
 ## 2026-10-27 — Issue #132 audit retention governance (V1 implemented; merged 2026-11-03)
 
@@ -153,7 +224,10 @@ never deleted; never output credentials.
   review artifact store and package/evidence artifact store with InMemory +
   PostgreSQL providers (additive migrations); activation request/review/gate
   present but in-memory (`InMemoryRuntimeActivationGate`,
-  `InMemoryDescriptorActivationAuditor`).
+  `InMemoryDescriptorActivationAuditor`). Authoring wire contract is `8a.v1` (#159, merged as `1bf4a7e7`):
+  required `outcome` discriminator plus two explicit terminal statuses (`UnsupportedIntent`,
+  `NeedsClarification`) with closed code tables and presence-only forbidden members; historical
+  `Blocked` + intent-level attribution is never counted as coverage of that contract.
 - JsonContracts build-time toolchain: `src/Tooling/CrestCreates.JsonContracts.BuildTasks`
   (+ `.BuildTasks.Core`, `.Tool`) generates deterministic JSON contract roots consumed
   by the official STJ source generator; no runtime reflection/scanner fallback.
@@ -309,8 +383,9 @@ never deleted; never output credentials.
   Issue #131 closed as completed).
 - Merged 2026-11-03: #132 audit retention governance V1 via PR #157 (`9909365a`); #133 B12
   unsupported-intent negative case via PR #158 (`91d6574e`, head `1db29f48`, R1–R4 closed;
-  Issue #133 closed as completed). Follow-up opened: #159 explicit unsupported / needs-clarification
-  authoring outcomes (design PR #160 at `63fb3952`, Proposed rev.1, awaiting static audit D1–D10).
+  Issue #133 closed as completed). Follow-up opened at the time: #159 explicit unsupported /
+  needs-clarification authoring outcomes (design PR #160 at `63fb3952`, then Proposed rev.1) — it landed
+  on 2026-11-05 as `1bf4a7e7` with wire `8a.v1`; see the #159 entry at the top of this file.
 - At most 2 implementation PRs in flight; verify at current head before merge.
 
 ## #131 capability map, long-tail adjudication and TenantId guard (2026-10-23)
@@ -406,8 +481,10 @@ never deleted; never output credentials.
   `Succeeded`+1 草稿+评审通过），故「不伪造能力、不部署」在这四次完整运行中已观测；另一次默认 4096 预算的
   运行是 `OutputBudgetExhausted`（reasoning 耗尽），单列为预算事实、不计入第五次拒绝行为证据；「显式
   unsupported/needs-clarification」证实未达成（契约无承载点，与离线用例一致），属确认的契约缺口，R3 裁定为
-  另立独立设计与 PR（涉及结构化终态、待补充输入、wire 版本/DTO/JsonContracts roots/原生 fixture 同步）：
-  已登记 **#159**，设计稿见 PR **#160**（`docs/superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md`，Proposed rev.1，待静态审查裁定 D1–D10）。注意
+  另立独立设计与 PR（涉及结构化终态、待补充输入、wire 版本/DTO/JsonContracts roots/原生 fixture 同步），
+  当时登记为 **#159**（设计稿 PR **#160**，Proposed rev.1）。**该缺口的后续状态见本文件顶部 2026-11-05 的 #159 条目**：
+  `8a.v1` 已承载两个显式终态、通过单元与原生门禁并完成单次带凭据 live；本条上方记录的 #133 事实与当时裁定属历史证据，
+  不改写，也不作为当前契约能力的背书。注意
   凭据在 `~/.bashrc:136`（非交互 shell 被 `.bashrc` 第 5-9 行守卫拦住），且该模型为推理型：跑 B12 live 用例需
   `CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS=16384`（本模型/场景的实测配置，不推导为通用最低值）。
   证据见 `docs/superpowers/plans/2026-11-03-issue-133-b12-unsupported-intent-log.md`。

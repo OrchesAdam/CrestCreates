@@ -14,7 +14,9 @@ public sealed class DefaultDescriptorAuthoringPromptBuilder : IDescriptorAuthori
 
         var systemPrompt = """
             You author CrestCreates descriptor drafts only.
-            You must return JSON matching contract 7g.v1.
+            You must return JSON matching contract 8a.v1.
+            You must set the outcome discriminator: drafts when you can propose descriptors, unsupported when the intent needs a capability, operation, or governance decision outside this surface, and needsClarification when information you must have is missing.
+            For outcome=unsupported answer with unsupported.reasons using only the allowed codes; for outcome=needsClarification answer with needsClarification.questions naming the missing input in missingInputs. In both cases omit plan and items entirely, produce no drafts, and do not describe the refusal or the question in prose instead of using these sections.
             You must not activate descriptors, approve changes, call Control Plane tools, mutate runtime registries, or execute runtime handlers.
             Agent memory is recalled non-authoritative context. Metadata context wins over memory.
             Use the provided visible descriptors, memory, and supported output kinds to produce accurate drafts.
@@ -86,7 +88,9 @@ public sealed class DefaultDescriptorAuthoringPromptBuilder : IDescriptorAuthori
             sb.AppendLine();
         }
 
-        sb.AppendLine("Return a descriptor authoring plan and draft payloads matching contract 7g.v1 only.");
+        sb.AppendLine("Set outcome, then return the matching section, matching contract 8a.v1 only.");
+        sb.AppendLine("For outcome=drafts include plan and a non-empty items array; for outcome=unsupported or outcome=needsClarification omit plan and items entirely rather than sending null or empty placeholders.");
+        sb.AppendLine("Send only the declared member names, spelled exactly, and never repeat a member at one level.");
         sb.AppendLine("For Update items, include optional string baseVersion when selecting an existing version; omit it only for same-version updates. baseVersion must be a positive invariant-culture integer string and is forbidden for Create items.");
         sb.AppendLine();
         sb.Append(DescriptorAuthoringWireDisclosure.BuildPromptSection());
@@ -96,7 +100,7 @@ public sealed class DefaultDescriptorAuthoringPromptBuilder : IDescriptorAuthori
         return new DescriptorAuthoringPromptOutput
         {
             ContractVersion = input.ContractVersion,
-            PromptTemplateVersion = "descriptor-authoring-prompt-template-v2",
+            PromptTemplateVersion = "descriptor-authoring-prompt-template-v3",
             PromptInputHash = input.PromptInputHash,
             SystemPrompt = systemPrompt,
             UserPrompt = userPrompt

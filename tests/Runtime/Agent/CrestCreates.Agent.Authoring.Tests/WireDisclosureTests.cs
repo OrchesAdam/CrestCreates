@@ -32,7 +32,7 @@ public sealed class WireDisclosureTests
             ExpectedPromptInputHash = "<prompt-input-hash-from-visible-context>"
         };
 
-        examples.Should().HaveCount(2);
+        examples.Should().HaveCount(4);
 
         var humanTaskResult = parser.Parse(examples[0], context);
         humanTaskResult.Status.Should().Be(DescriptorAuthoringStatus.Succeeded);
@@ -78,23 +78,63 @@ public sealed class WireDisclosureTests
         subWorkflowTarget.SubWorkflow.Version.Should().Be(1);
         workflow.Steps[2].Transitions.Should().BeEmpty();
         workflow.Steps[2].OnError.Should().Be(StepErrorBehavior.Fail);
+
+        // The refusal and clarification examples are parsed by the same real parser, so the disclosed
+        // shape and the enforced shape cannot drift apart.
+        var unsupportedResult = parser.Parse(examples[2], context);
+        unsupportedResult.Status.Should().Be(DescriptorAuthoringStatus.UnsupportedIntent);
+        unsupportedResult.DraftSet.Drafts.Should().BeEmpty();
+        var unsupportedReason = unsupportedResult.Unsupported!.Reasons.Should().ContainSingle().Which;
+        unsupportedReason.Code.Should().Be(DescriptorAuthoringUnsupportedReasonCodes.CapabilityUnsupported);
+        unsupportedReason.Message.Should().Be(
+            "Condition-scoring that skips human review needs a new domain algorithm and a governance change.");
+        unsupportedReason.EvidenceRefs.Should().Equal("visible:wf_asset_maintenance_review:1");
+        unsupportedResult.Diagnostics.Should().ContainSingle(d =>
+            d.Code == DescriptorAuthoringDiagnosticCodes.IntentUnsupported
+            && d.Severity == SeverityLevel.Warning);
+
+        var clarificationResult = parser.Parse(examples[3], context);
+        clarificationResult.Status.Should().Be(DescriptorAuthoringStatus.NeedsClarification);
+        clarificationResult.DraftSet.Drafts.Should().BeEmpty();
+        var clarificationQuestion = clarificationResult.Clarification!.Questions.Should().ContainSingle().Which;
+        clarificationQuestion.Id.Should().Be("risk-threshold");
+        clarificationQuestion.ReasonCode.Should().Be(DescriptorAuthoringClarificationReasonCodes.MissingPolicyInput);
+        clarificationQuestion.Question.Should().Be("Which risk threshold decides the automatic maintenance outcome?");
+        clarificationQuestion.MissingInputs.Should().Equal("riskThreshold");
+        clarificationQuestion.CandidateValues.Should().BeEmpty();
+        clarificationResult.Diagnostics.Should().ContainSingle(d =>
+            d.Code == DescriptorAuthoringDiagnosticCodes.IntentNeedsClarification
+            && d.Severity == SeverityLevel.Warning);
+
+        // An omitted section must stay omitted in the example: a null placeholder is a forbidden member.
+        examples[2].Should().NotContain("\"plan\":null").And.NotContain("\"items\":null");
+        examples[3].Should().NotContain("\"plan\":null").And.NotContain("\"items\":null");
     }
 
     [Fact]
-    public void DefaultPrompt_StatesReferenceAndFallbackBoundaries_AndOptionsUseV2()
+    public void DefaultPrompt_StatesReferenceAndFallbackBoundaries_AndOptionsUseV3()
     {
         var output = new DefaultDescriptorAuthoringPromptBuilder().Build(CreateInput());
 
-        output.ContractVersion.Should().Be("7g.v1");
-        output.PromptTemplateVersion.Should().Be("descriptor-authoring-prompt-template-v2");
-        output.SystemPrompt.Should().Contain("contract 7g.v1");
+        output.ContractVersion.Should().Be("8a.v1");
+        output.PromptTemplateVersion.Should().Be("descriptor-authoring-prompt-template-v3");
+        output.SystemPrompt.Should().Contain("contract 8a.v1");
+        output.SystemPrompt.Should().Contain("outcome discriminator");
+        output.SystemPrompt.Should().Contain("omit plan and items entirely");
+        output.UserPrompt.Should().Contain("outcome is required and is one of: drafts, unsupported, needsClarification.");
+        output.UserPrompt.Should().Contain("never repeat a member at one level");
+        output.UserPrompt.Should().Contain("null-instead-of-omitted member is rejected");
+        output.UserPrompt.Should().Contain("CAPABILITY_UNSUPPORTED, OPERATION_UNSUPPORTED, GOVERNANCE_BOUNDARY");
+        output.UserPrompt.Should().Contain("MISSING_POLICY_INPUT, AMBIGUOUS_TARGET, CONFLICTING_REQUIREMENTS, MISSING_REFERENCE_SELECTION");
+        output.UserPrompt.Should().Contain("its inner field names are not part of the envelope vocabulary, but a repeated name inside a payload is still rejected");
         output.UserPrompt.Should().Contain("References to existing descriptors must come from Visible Descriptors or Visible Descriptor Refs.");
         output.UserPrompt.Should().Contain("A reference to a descriptor proposed in this same response is allowed");
         output.UserPrompt.Should().Contain("IDs in the examples below are placeholders");
         output.UserPrompt.Should().Contain("The parser does not enforce every business requirement");
         output.UserPrompt.Should().Contain("does not support state");
         LlmDescriptorAuthoringAgentOptions.DefaultPromptTemplateVersion.Value
-            .Should().Be("descriptor-authoring-prompt-template-v2");
+            .Should().Be("descriptor-authoring-prompt-template-v3");
+        LlmDescriptorAuthoringAgentOptions.DefaultPromptContractVersion.Value.Should().Be("8a.v1");
     }
 
     private static string[] ExtractJsonExamples(string prompt)
@@ -105,7 +145,7 @@ public sealed class WireDisclosureTests
 
     private static DescriptorAuthoringPromptInput CreateInput() => new()
     {
-        ContractVersion = "7g.v1",
+        ContractVersion = "8a.v1",
         TenantId = "wire-disclosure-tenant",
         IntentText = "Describe the intended change here.",
         Metadata = new DescriptorAuthoringMetadataContextProjection(),
