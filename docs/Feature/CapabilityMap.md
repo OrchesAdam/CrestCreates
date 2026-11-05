@@ -376,7 +376,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 
 ## 8. #159 显式 unsupported / needs-clarification 终态（交付记录）
 
-日期：2026-11-05。设计：[设计 rev.7](../superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)、
+日期：2026-11-05。设计：[设计 rev.8](../superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)、
 计划：[实施计划与切片日志](../superpowers/plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md)。
 本节只记录交付事实与支持声明，不重评 §2/§4 的定位与导航结论，不复制 ORM Provider 矩阵，也不改变 §5 对 fixture 项目的单列口径。
 
@@ -385,7 +385,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | `CrestCreates.Agent.Authoring.Abstractions` | 抽象契约（`outcome` 判别式、`UnsupportedIntent`/`NeedsClarification` 两终态与载荷类型、两张闭码表、两枚诊断码、契约侧 JSON 根） | 已交付指定边界（`8a.v1`） | JIT：`CrestCreates.Agent.Authoring.Tests` 139/139（§10.1 全 23 行矩阵）；NativeAOT linux-x64：`AgentAuthoringUnsupportedOutcome` / `AgentAuthoringClarificationOutcome` 结构化往返（含读回状态） | 保留；新增终态必须同时进入词表、码表与 JSON 根闭包，不得留兼容旁路 |
 | `CrestCreates.Agent.Authoring` | 执行实现（Stage A 原始信封事实 + Stage B 严格 source-generated 投影 + 归一化/边界 + 提示披露 `descriptor-authoring-prompt-template-v3`） | 已交付指定边界（`8a.v1`） | JIT：同上 139/139；变异 (a)(b)(c)(d)(e)(f1)(f2) 各按所宣称机制打红；NativeAOT linux-x64：`AgentAuthoringOutcomeShapeConflict`、`AgentAuthoringCodeTableRejection`、`AgentAuthoringEnvelopeUnknownMember`、`AgentAuthoringEnvelopeDuplicatePrecedence`、`AgentAuthoringWireDisclosure`（四条披露示例逐条过正式 parser）；`AgentAuthoringOutcomeRequiredRoots` + `ReflectionFallback_IsDisabled` | 保留；Stage A 只拥有信封事实，禁止把 payload 内层字段名纳入词表；解码失败由执行读取的那一步报告，不新增优先级层 |
 | `CrestCreates.Agent.Authoring.Http` | Provider 适配（OpenAI-compatible 客户端） | 已交付指定边界（本片只迁移录制件与版本字面量） | JIT：`Authoring.Tests` 内 provider/录制件用例；原生：本切片未新增该项目的场景 | 保留；本片不据此项目推导原生 HTTP 认证/租户链 |
-| Asset 样例真实链路（`samples/AssetManagement/**/E2E.Tests`） | 消费者与治理证据（oracle 两层判定：新契约覆盖 vs 历史归因） | 已交付指定边界 | JIT + 本地 PG：Asset 全量 E2E **128 通过 / 2 跳过（共 130）**，跳过项为未开启 `CREST_ASSET_LIVE_EVAL` 的 live 入口；`AssetB12CoverageEntryTests` 常驻判别历史归因不得计为覆盖 | 保留；`Blocked` + intent-level 码永远是历史归因，不是 `8a.v1` 覆盖；散文拒绝与「不支持意图得到 drafts」仍为拒绝 |
+| Asset 样例真实链路（`samples/AssetManagement/**/E2E.Tests`） | 消费者与治理证据（oracle 两层判定：新契约覆盖 vs 历史归因） | 已交付指定边界 | JIT + 本地 PG：Asset 全量 E2E **128 通过 / 2 跳过（共 130）**，跳过项为未开启 `CREST_ASSET_LIVE_EVAL` 的 live 入口；`AssetB12CoverageEntryTests` 常驻判别历史归因不得计为覆盖。带凭据 live（S5，单次、获准范围）：B12 不支持意图 → `UnsupportedIntent` + 3 条合法条目，oracle 判 `ExplicitUnsupportedResult`，零草稿/零评审/零保存/零 gate、部署清单不变、未伪造能力 | 保留；`Blocked` + intent-level 码永远是历史归因，不是 `8a.v1` 覆盖；散文拒绝与「不支持意图得到 drafts」仍为拒绝；live 覆盖只到实际跑过的那一个意图类与那一次运行 |
 | 样例 golden scenario（`samples/CrestCreates.Samples.DescriptorControlPlane`） | 消费者（runner/fake agent 三分支） | 已交付指定边界 | JIT：`CrestCreates.Samples.Tests` 37/37（显式终态零保存/零评审 + `FinalDecisionSource` 三向唯一） | 保留；显式终态不得进入草稿集合审查 |
 
 支持声明：`8a.v1` 两个显式终态与四类信封事实在**已执行样本范围**内为 **NativeAOT-verified（linux-x64，验收入口为用户目录官方 SDK 10.0.114 + 隐式 ILCompiler 10.0.14）**。该声明：
@@ -394,6 +394,12 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 - 不推导认证、审批、activation、durable activation 链，也不推导 Windows/macOS 等其他 RID；
 - 不覆盖其余七个原生门禁（CapabilityEndpoint、GeneratedCrud、AssetManagement、Procurement、Ticket、PostgreSql、RabbitMQ AotHost）——它们仍按 [#123 证据矩阵](../review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md) 的旧工具链记录列账，尚未在 10.0.114 下复验；
 - 默认 `/usr/bin/dotnet` 仍为 10.0.113，`dotnet build` 在该入口下仍会命中 `error NU1903`（GHSA-p3jp-9v83-76w9，修复版 10.0.14）。系统包升级属环境维护项，本节不宣称全环境已迁移；任何任务/CI 复用该门禁时必须显式选择 10.0.114，避免裸 `dotnet` 静默回退旧 host。
-- **带凭据真实模型答题（S5）未执行**，Issue #159 的该验收项保持 pending，不以单元或原生证据替代收口。
+- **带凭据真实模型答题（S5）已按获准范围执行一次**：B12 不支持意图 → 真实 provider 答 `unsupported`（HTTP 200、
+  `FinishReason=stop`、16384 预算被接受，非预算/provider 旁因），解析为 `UnsupportedIntent` + 3 条合法条目 + 逐条
+  `AUTHORING_INTENT_UNSUPPORTED`，oracle 判 `ExplicitUnsupportedResult`，零草稿/零评审通过/零保存/零 gate、部署清单
+  不变、未伪造能力 —— 该意图类在此路径上按 `8a.v1` 计为覆盖。边界同样明确：**单次运行**不支撑可重复性或概率声明；
+  仅覆盖单一意图类与单一模型画像（请求 `deepseek-v4-flash`，观测 provider `deepseek`、model `deepseek-flash`）；
+  `NeedsClarification` 的 live **未执行**，其证据仍只有单元/真实链路/原生三层；live 运行在 JIT 宿主内，不新增原生覆盖；
+  凭据未打印/入库，工件留在 `/tmp` 且只含元数据（字符数与 token 数，无响应或推理正文）。
 
 纪律：新增 outcome、码表项或终态载荷时，必须同批更新词表/码表/JSON 根闭包、§10.1 矩阵行、原生场景与 sentinel 点名、`memory.md` 与 `AGENTS.md` 的对应声明，并补对应变异判别；不得以「状态名出现」替代「内容 + 零副作用」的覆盖判据，也不得从本节推导其他项目或组合的支持状态。

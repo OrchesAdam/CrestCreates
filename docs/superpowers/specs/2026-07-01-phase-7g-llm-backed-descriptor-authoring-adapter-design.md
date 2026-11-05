@@ -770,7 +770,7 @@ evidence — a `7g.v1` answer is now refused as `InvalidProviderOutput`, and the
 `Blocked` + intent-level diagnostic route is attribution only, never coverage of `8a.v1`.
 
 Current contract and evidence:
-[design rev.7](2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md),
+[design rev.8](2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md),
 [implementation slice log](../plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md),
 capability record `docs/Feature/CapabilityMap.md` §8, native scenario row in
 `docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md`.

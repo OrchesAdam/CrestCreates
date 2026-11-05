@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.7；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，S3 已实施并由 R3 放行（R1 补读回状态断言、R2 把「注入落地」与「目标拒绝」分成两套判据；原生门禁 linux-x64 11/11）。S4 已完成文档与状态同步——`usage-guide.md`、`CapabilityMap.md` §8、`memory.md`、`AGENTS.md`、§5.2 B12 改判、#123 证据矩阵新行与 7g spec 附录指针，见「S4 实施日志」。实施审计 S4 R1 发现 1 项 P2（指南把 `Blocked` 与成功态一起写成「草稿 ≥1」）与 1 项 P3（7g 附录把历史写成「缺少 `items` 时推断 drafts」），两项均已修订，见「S4 实施审计 R1 修复记录」，S4 待复审；**S5 带凭据 live 仍 pending（已获准单次执行，尚未运行），Issue #159 不据此关闭**）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.8；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，S3 已实施并由 R3 放行（R1 补读回状态断言、R2 把「注入落地」与「目标拒绝」分成两套判据；原生门禁 linux-x64 11/11）。S4 已完成文档与状态同步——`usage-guide.md`、`CapabilityMap.md` §8、`memory.md`、`AGENTS.md`、§5.2 B12 改判、#123 证据矩阵新行与 7g spec 附录指针，见「S4 实施日志」。实施审计 S4 R1 发现 1 项 P2（指南把 `Blocked` 与成功态一起写成「草稿 ≥1」）与 1 项 P3（7g 附录把历史写成「缺少 `items` 时推断 drafts」），两项均已修订，见「S4 实施审计 R1 修复记录」，S4 已交付、按 R1 修订两项文档表述并由 R2 放行。S5 按已获准的单次范围执行完毕：真实 provider 对 B12 不支持意图答 `unsupported`，解析为 `UnsupportedIntent`（3 条合法条目 + 逐条 `AUTHORING_INTENT_UNSUPPORTED`），oracle 判 `ExplicitUnsupportedResult`，零草稿/零评审通过/零保存/零 gate、部署清单不变、未伪造能力，**B12 达成本契约覆盖**；边界为单次运行、单一意图类与模型画像，`NeedsClarification` 的 live 未执行。PR #160 与 Issue #159 保持 open 待复审裁定，不据此合并或关闭）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -610,4 +610,50 @@ Issue #159 因此保持 open，不以单元/原生证据替代收口。
 | `src/` 与 `tests/` 差异 | `src/` 未改；`tests/` 仅两处断言强化（上表），无生产行为改动；原生门禁本轮未重发（fixture 未变，证据仍为 S3 的 11/11） |
 
 未做：仍未执行 S5（未读取凭据、未发模型请求）；未把其余七个原生门禁改写为 10.0.114 证据；未关闭 Issue #159 或合并 PR #160。
+
+## S5 实施日志（2026-11-05，S4 由 R2 放行后续推；单次带凭据 live）
+
+范围与授权（维护者 2026-11-05 裁定，无需再申请）：**现有 B12 live 入口一次**、输出预算 **16384**、凭据不打印/入库、工件仅 `/tmp` 元数据、**不自动重试**、结果如实记录不重分类。本片 **零 `src/`、零 `tests/` 改动**，只记录执行事实并同步状态面。
+
+### I-49 执行入口与前置
+
+| 项 | 事实 |
+| --- | --- |
+| 入口 | `samples/AssetManagement/tests/…E2E.Tests` → `AssetDeepSeekLiveAuthoringEvaluationTests.DeepSeek_UnsupportedIntent_YieldsRestrictedResult_AndFabricatesNoCapability`（唯一匹配，`--list-tests` 先确认只选中 1 条，避免多余计费请求） |
+| 环境 | `CREST_ASSET_LIVE_EVAL=1`、`CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS=16384`、`CREST_ASSET_LIVE_EVAL_UNSUPPORTED_ARTIFACT=/tmp/crest-159-s5-unsupported-20261105.json`；凭据自 `~/.bashrc` 定向 `grep + eval` 载入（非交互 shell 被 `.bashrc` 早退守卫拦住），全程未打印值 |
+| PG | 复用既有本地容器 `crestcreates-asset-pg-local`（127.0.0.1:5433，`postgres:16-alpine`），连接串由容器 env 组装、未回显；`pg_isready` 先行确认 |
+| SDK 入口 | `~/.dotnet/dotnet` = **10.0.114**；`--no-build`（预编译 0 错误，34s）后单条命令一次执行 |
+| 结果 | `RUN_EXIT=0`，**1 通过 / 0 失败 / 0 跳过**，持续 4s；**未重试、未再发第二次请求** |
+
+### I-50 工件元数据与 §10.7 判据逐条对齐
+
+工件仅含元数据（`RunId 6d7de39eba4f4600b0f740af21d582d9`），无响应/推理正文；正文只以字符数与 token 数出现。
+
+| §10.7 判据 | 观测值 |
+| --- | --- |
+| 真实请求发生 | HTTP **200**、`ChoicesCount=1`、`FinishReason=stop`、`PromptTokens=2386`、`CompletionTokens=555`、`ReasoningTokens=261`、content 1192 字符 / reasoning 1348 字符；`OutputBudget = 16384`、`isValid=true`、`OUTPUT_BUDGET_ACCEPTED`（非预算耗尽、非 provider 失败） |
+| provider / model 身份 | requestedModel `deepseek-v4-flash`、observedProvider `deepseek`、observedModel `deepseek-flash` |
+| 显式终态 | `Authoring.status = UnsupportedIntent`，`Semantic.Result = ExplicitUnsupportedResult`（oracle 的新契约覆盖标签，非历史归因） |
+| 合法码表条目 + 非空条目 | `ExplicitOutcomeEntryCount = 3`；逐条诊断码 `AUTHORING_INTENT_UNSUPPORTED` ×3、逐条分类 `ExplicitUnsupportedIntent` ×3——与 spec §6「`unsupported → UnsupportedIntent + one Warning diagnostic per reason`」一致。闭码表合法性由 oracle 的接受判据内部校验（工件不落 wire 正文） |
+| 零草稿 / 零评审通过 / 零保存 / 零 gate / 部署清单不变 | `DraftCount=0`、`ReviewPassedDraftCount=0`、`SavedDraftCount=0`、`ActivationGateCalls=0`、`ActivationGateSuccesses=0`、`DeployedInventoryUnchanged=true`、`Drafts=[]`、`Reviews=[]` |
+| 未伪造能力 | `FabricatedCapabilityObserved=false`、`TargetsDeployedMaintenanceSurface=false` |
+| 上下文 | focusRef `workflow/wf_asset_maintenance_review v1`，4 个已部署 descriptor 引用，context 诊断码为空；意图为「用未给出的风险阈值自动判定并跳过人工评审」 |
+| 异常 | `ExceptionStage=null`、`ExceptionType=null` |
+
+裁定：**B12 的「不支持意图 → 显式受限终态、不伪造能力、不部署」在真实模型 + 真实评审 + 控制面链路上达成 `8a.v1` 覆盖**，spec §12 的两项 live 验收项按上述证据勾选。
+
+### I-51 边界（不得由这一条外推）
+
+- **单次运行**：只证明这一次答题的形态，不作可重复性/稳定性/概率声明；#133 的四次历史运行是另一批证据（当时契约无承载点，故记为历史归因）。
+- **单一意图类 + 单一模型画像**：`deepseek-v4-flash` / `deepseek-flash` 的 B12 不支持意图；不推导其他 provider、model、温度、租户或其他不支持意图。
+- **`NeedsClarification` 未在真实模型上观测**：本次授权范围只有 B12 unsupported 入口。澄清终态的契约与解析、评审、原生场景证据仍在，live 层为**未执行**，不得写成「两终态均已 live 覆盖」。
+- **live 不新增原生覆盖**：本次运行在 JIT 测试宿主内；原生 11/11 证据仍属 S3，且工具链边界（默认 `/usr/bin/dotnet` 仍旧、其余七个门禁未复验）不变。
+- **凭据与正文**：密钥未打印、未入库；工件留在 `/tmp`，仓库内只有聚合元数据。
+
+### I-52 S5 之后仍然不做的事
+
+- 不合并 PR #160、不关闭 Issue #159 —— 交维护者复审后裁定。
+- 不补跑第二次 live（无重试授权），不把 `NeedsClarification` 的 live 缺口粉饰掉。
+- 不改 `src/`、不改测试；不重发原生门禁。
+
 

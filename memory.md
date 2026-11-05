@@ -20,11 +20,11 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
-## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S3 released; S4 delivered, awaiting R1 re-review; PR #160 open)
+## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S4 released; S5 live executed; PR #160 open awaiting adjudication)
 
 - Branch `docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`, PR #160 — open,
   not merged; CI manually disabled; local execution is the gate. Design
-  [rev.7](docs/superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)
+  [rev.8](docs/superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)
   and slice log [plan](docs/superpowers/plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md).
   S0 released at design R4 (D1–D16 confirmed), S1 at implementation R2, S2 at R2, S3 at R3.
 - Contract `8a.v1` replaces `7g.v1` outright (no compatibility window): a required `outcome`
@@ -70,12 +70,19 @@ never deleted; never output credentials.
   failing atomic per-item validation) returns the empty plan and empty draft set with **zero drafts and empty-string
   identities** — not the terminal placeholders. The usage guide states both rows separately and keeps the
   atomic-rejection sentence so `drafts` is never read as a draft guarantee.
-- **Still pending**: S5 — one credentialed DeepSeek run of the B12 unsupported intent against `8a.v1`, pre-authorized
-  by the maintainer for a single execution (existing B12 entry, 16384 output-token budget, credentials never printed
-  or committed, `/tmp` metadata only, no automatic retry, verdict recorded either way without reclassification).
-  S4 documentation/status synchronization is delivered (this entry plus capability map, AGENTS.md, usage guide,
-  §5.2 B12 re-adjudication and the #123 evidence matrix rows) and awaits re-review after R1. Issue #159 stays open
-  and is not closed on unit/native evidence.
+- **S5 executed (single authorized run, 2026-11-05)**: the existing B12 live entry ran once against the real provider
+  with `CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS=16384` — HTTP 200, `FinishReason=stop`, 555 completion + 261 reasoning
+  tokens, budget accepted (so neither budget exhaustion nor provider failure), requested `deepseek-v4-flash` /
+  observed `deepseek` + `deepseek-flash`. The answer parsed to `UnsupportedIntent` with three reason entries and the
+  three per-entry `AUTHORING_INTENT_UNSUPPORTED` warnings, and the Asset oracle labelled it `ExplicitUnsupportedResult`
+  with zero drafts / zero review-passed / zero saves / zero gate calls, unchanged deployed inventory and no fabricated
+  capability. **B12 therefore counts as covered by `8a.v1`** — for that one run, that one intent class and that one
+  model profile. Boundaries that must not be smoothed away: no repeatability or probability claim from a single run,
+  `NeedsClarification` has **no** live observation (the authorized scope was the unsupported entry only), the live run
+  executed on the JIT host and adds no native coverage, credentials were never printed or committed and the artifact
+  (`/tmp`, metadata only — character and token counts, no response or reasoning text) stays outside the repository.
+- Nothing in this slice is auto-merged: PR #160 and Issue #159 stay open for the maintainer's adjudication now that
+  S0–S5 are all delivered.
 
 ## 2026-10-27 — Issue #132 audit retention governance (V1 implemented; merge pending)
 

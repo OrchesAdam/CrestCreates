@@ -400,9 +400,13 @@ TestBase
   投影的单条主链，`7g.v1` 不留兼容窗。消费者侧 Asset oracle 采两层判定：**历史归因（`Blocked` + intent-level
   码）不计为新契约覆盖**。证据：单元 139/139（§10.1 全 23 行）、Asset E2E 需 PG 128 通过/2 跳过、样例
   golden scenario 37/37、原生门禁 linux-x64 11/11（逐场景点名 + 9 条独立负控 + 未知控制名拒绝）。
-  待办：S5 带凭据真实模型答题（已获准单次执行：现有 B12 入口、16384 输出预算、凭据不打印/入库、仅 `/tmp`
-  元数据、不自动重试、结果不论正反照原样记录）——**S5 未执行前 Issue #159 保持 open，不以单元/原生证据替代收口**。
-  S4 文档与状态同步已交付（本节即其一部分），按实施审计 R1 修订两项文档表述后待复审。
+  S5 单次带凭据 live 已执行（按已获准范围：现有 B12 入口一次、16384 输出预算、凭据不打印/入库、仅 `/tmp`
+  元数据、不自动重试）：真实 provider 答 `unsupported`（HTTP 200 / `FinishReason=stop` / 预算被接受，故非预算或
+  provider 旁因），解析为 `UnsupportedIntent` + 3 条合法条目 + 逐条 `AUTHORING_INTENT_UNSUPPORTED`，Asset oracle
+  判 `ExplicitUnsupportedResult`，零草稿/零评审通过/零保存/零 gate、部署清单不变、未伪造能力 ——
+  **B12 按 `8a.v1` 计为覆盖**。边界：单次运行不作可重复性声明、单一意图类与单一模型画像，
+  `NeedsClarification` 的 live **未执行**（不得写成两终态均已 live 覆盖），且 live 在 JIT 宿主内跑、不新增原生覆盖。
+  S0–S5 均已交付，Issue #159 与 PR #160 仍 open，等维护者复审裁定，不自动合并或关闭。
   支持声明边界见上文 AOT 分层与本文件「Authoring 线契约是 `8a.v1`」条。
 
 - 能力地图与 TenantId 架构守卫（#131，PR #155 合并于 `9c39e187`）：`docs/Feature/CapabilityMap.md` 为项目/能力导航唯一入口，7 个无消费者项目 + 通用 Draft 实验 + 死契约归档至 `99_RecycleBin/issue-131-capability-map/`；`TenantIdentityArchitectureTests` 以 evaluated MSBuild 输入（缓存仅在依赖可证明完整时启用）扫描 active src/sample 项目，0 违规 0 覆盖失败。有限模式守卫，不是通用安全分析器。

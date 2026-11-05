@@ -1,7 +1,7 @@
 # Explicit Unsupported / Needs-Clarification Authoring Outcomes
 
 > Date: 2026-11-03
-> Status: Implemented on PR #160 (rev.7, S0–S3 已由实施审计放行；S4 已交付并按 R1 修订两项文档发现、待复审；§12 已按执行证据勾选，S5 带凭据 live 已获准单次执行、尚未运行，契约与 23 行矩阵不变)
+> Status: Implemented on PR #160 (rev.8, S0–S4 已由实施审计放行；S5 单次带凭据 live 已执行并按 §10.7 判定 B12 达成覆盖，`NeedsClarification` 的 live 未执行；§12 验收项全部勾选，契约与 23 行矩阵不变。PR 与 Issue 待维护者复审裁定)
 > Issue: #159
 > Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence (merged to master as `91d6574e` on 2026-11-03)
 
@@ -561,11 +561,15 @@ paused), and merging stays with the maintainer.
       old-version rejection fixtures, which must keep the literal to prove the boundary — they are exempt by name in the
       grep check, and the check must not be satisfied by string concatenation or by deleting the negative case.
       Historical review/plan/spec records keep their text.
-- [ ] One credentialed live run executed and recorded (S5). Covered only under the §10.4/§10.7 criteria; if credentials
+- [x] One credentialed live run executed and recorded (S5). Covered only under the §10.4/§10.7 criteria; if credentials
       were unavailable the item stays pending and the issue is not closed on unit/native evidence alone.
-- [ ] Support statements updated to match executed evidence; live verdict recorded either way without reclassification.
-      *(S4 已同步支持声明并按执行证据标注边界；本项仍留空，因为它同时要求记录 live 裁定结果，而那属 S5——
-      不勾选优先于勾选后附说明，避免把「声明已同步」误读为「整项已完成」。)*
+      *(2026-11-05 单次执行：B12 不支持意图 → `UnsupportedIntent` + `ExplicitUnsupportedResult`，3 条合法条目、
+      零草稿/零评审通过/零保存/零 gate、部署清单不变、未伪造能力；HTTP 200 且预算 16384 被接受，故非预算或
+      provider 旁因。工件在 `/tmp`，凭据未打印/入库，未重试。边界：单次运行、单一意图类与模型画像，
+      `NeedsClarification` 未做 live；见计划 S5 日志 I-49–I-52。)*
+- [x] Support statements updated to match executed evidence; live verdict recorded either way without reclassification.
+      *(声明已随 S4 同步并按执行证据标注边界；S5 的 live 裁定已照原样记录——覆盖只写实际跑过的 unsupported 终态，
+      澄清终态的 live 缺口明写为未执行，不重分类、不外推。)*
 - [x] No new framework abstraction, no evaluation platform, no persisted artifact, no review/approval/activation change,
       no production test hook.
 
@@ -592,6 +596,16 @@ paused), and merging stays with the maintainer.
 
 ## Changelog
 
+- **rev.8 (2026-11-05, S5 单次带凭据 live)** — the required live step ran once, as authorized: the existing B12
+  unsupported-intent entry, 16384 output budget, artifact outside the repository, no retry, credentials never printed.
+  The real provider answered `unsupported` (`HttpStatus=200`, `FinishReason=stop`, 555 completion + 261 reasoning
+  tokens, budget accepted), the parser produced `UnsupportedIntent` with three reason entries and the three per-entry
+  `AUTHORING_INTENT_UNSUPPORTED` warnings §6 specifies, and the Asset oracle labelled it `ExplicitUnsupportedResult`
+  with zero drafts, zero review-passed, zero saves, zero gate calls, unchanged deployed inventory and no fabricated
+  capability. §12's two live items are therefore checked, and the coverage claim is written to that single sample only:
+  one run, one intent class, one model profile (`deepseek-v4-flash` requested / `deepseek-flash` observed) — no
+  repeatability claim, and `NeedsClarification` has **no** live observation because the authorized scope was the
+  unsupported entry. No contract, matrix, code-table, parser, prompt or governance change; `src/` and `tests/` untouched.
 - **rev.7 (2026-11-05, S4 实施审计 R1)** — two documentation findings, no contract, matrix, mechanism or status-member
   change. P2: the usage guide stated "at least one draft" for the whole `drafts` family, which is false for `Blocked` —
   the parser returns the empty plan and empty draft set (`PlanId = ""`, `DraftSetId = ""`) with zero drafts both when the
