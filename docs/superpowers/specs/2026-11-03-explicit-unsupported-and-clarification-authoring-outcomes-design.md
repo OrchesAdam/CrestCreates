@@ -1,7 +1,7 @@
 # Explicit Unsupported / Needs-Clarification Authoring Outcomes
 
 > Date: 2026-11-03
-> Status: Proposed (rev.5, 补记 S1 实施审计 R1-01 的原始解码边界机制事实；契约与 23 行矩阵不变)
+> Status: Implemented on PR #160 (rev.6, S0–S4 已放行/交付；§12 已按执行证据勾选，S5 带凭据 live 仍 pending，契约与 23 行矩阵不变)
 > Issue: #159
 > Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence (merged to master as `91d6574e` on 2026-11-03)
 
@@ -536,35 +536,37 @@ paused), and merging stays with the maintainer.
 
 ## 12. Acceptance criteria
 
-- [ ] `DescriptorAuthoringResult` distinguishes `UnsupportedIntent` and `NeedsClarification` from `InvalidProviderOutput`
+- [x] `DescriptorAuthoringResult` distinguishes `UnsupportedIntent` and `NeedsClarification` from `InvalidProviderOutput`
       without reading diagnostic text.
-- [ ] Both new outcomes are structurally incapable of producing a draft: forbidden members are rejected **as members**,
+- [x] Both new outcomes are structurally incapable of producing a draft: forbidden members are rejected **as members**,
       covering `null`, `{}`, `[]` and content, decided on the raw envelope before projection (§4.1/§4.4/§6).
-- [ ] Duplicate or unknown members are rejected before any value-level check, so a contradictory envelope (two hashes,
+- [x] Duplicate or unknown members are rejected before any value-level check, so a contradictory envelope (two hashes,
       two outcomes) cannot reach an outcome branch (§10.1).
-- [ ] Stage B deserialization options are pinned (`AllowDuplicateProperties = false`, `PropertyNameCaseInsensitive = false`)
+- [x] Stage B deserialization options are pinned (`AllowDuplicateProperties = false`, `PropertyNameCaseInsensitive = false`)
       and the shared ordinal-exact vocabulary table is the only name matching anywhere in the chain (§4.4 rule 1, D16).
-- [ ] Wire version is single-valued (`8a.v1`); no dual acceptance, no reflection JSON path.
-- [ ] Full unit matrix (23 rows), Asset real-chain cases, and native publish/link/run scenarios green — including the
+- [x] Wire version is single-valued (`8a.v1`); no dual acceptance, no reflection JSON path.
+- [x] Full unit matrix (23 rows), Asset real-chain cases, and native publish/link/run scenarios green — including the
       `AgentAuthoringCodeTableRejection` native scenario, the two named Stage A scenarios
       (`AgentAuthoringEnvelopeUnknownMember` with its legal control, `AgentAuthoringEnvelopeDuplicatePrecedence`), and the
       harness that names each sentinel and runs the failure controls separately; mutations (a)(b)(c)(d)(e)(f1)(f2) each
       redden their target **for the claimed mechanism** and revert, and (g) is reported as the joint control it is.
-- [ ] No mutation is credited on a change of diagnostic source alone: a case that stays in the same outcome class because a
+- [x] No mutation is credited on a change of diagnostic source alone: a case that stays in the same outcome class because a
       lower layer happens to reject the same input proves routing, not the layer (R2-01). Rev.4 applies the same rule to
       the other direction — a Stage A fact must not be claimed as exclusive when strict Stage B throws on the same input
       (duplicate keys inside `payload` are governed by precedence, not by unique visibility), and a casing alias is
       attributed to the `PropertyNameCaseInsensitive` option, not to the naming policy (R3-01).
-- [ ] JSON-closure evidence asserts the required contract (roots resolve, names round-trip, reflection disabled), not the
+- [x] JSON-closure evidence asserts the required contract (roots resolve, names round-trip, reflection disabled), not the
       existence of redundant annotations; the retired subtype-registration mutation is not used as a lock.
-- [ ] `7g.v1` migration complete: no stale `7g.v1` literal in `src` or in production prompt/contract text, **except** the
+- [x] `7g.v1` migration complete: no stale `7g.v1` literal in `src` or in production prompt/contract text, **except** the
       old-version rejection fixtures, which must keep the literal to prove the boundary — they are exempt by name in the
       grep check, and the check must not be satisfied by string concatenation or by deleting the negative case.
       Historical review/plan/spec records keep their text.
 - [ ] One credentialed live run executed and recorded (S5). Covered only under the §10.4/§10.7 criteria; if credentials
       were unavailable the item stays pending and the issue is not closed on unit/native evidence alone.
 - [ ] Support statements updated to match executed evidence; live verdict recorded either way without reclassification.
-- [ ] No new framework abstraction, no evaluation platform, no persisted artifact, no review/approval/activation change,
+      *(S4 已同步支持声明并按执行证据标注边界；本项仍留空，因为它同时要求记录 live 裁定结果，而那属 S5——
+      不勾选优先于勾选后附说明，避免把「声明已同步」误读为「整项已完成」。)*
+- [x] No new framework abstraction, no evaluation platform, no persisted artifact, no review/approval/activation change,
       no production test hook.
 
 ## 13. Decisions and audit mapping
@@ -590,6 +592,18 @@ paused), and merging stays with the maintainer.
 
 ## Changelog
 
+- **rev.6 (2026-11-05, S4 文档与状态同步)** — no contract, matrix or mechanism change. Records what S1–S3 executed:
+  §12 items are checked against recorded results (unit 139/139 with the full 23-row matrix, Asset E2E with local
+  PostgreSQL 128 passed / 2 skipped, Samples.Tests 37/37, native gate 11/11 on linux-x64 with per-scenario named
+  sentinels, nine separately executed negative controls and an unknown-control-name refusal, mutations (a)–(f2) and
+  the S3 counterfactuals), while the credentialed-live item stays unchecked and the issue stays open. The S3 native
+  claim is written with its boundaries in `docs/Feature/CapabilityMap.md` §8, `memory.md`, `AGENTS.md` (AOT layering),
+  the #123 evidence matrix (including the toolchain-version boundary: acceptance entry = user-directory SDK 10.0.114
+  with implicit ILCompiler 10.0.14, default `/usr/bin/dotnet` still 10.0.113, the other seven native gates not
+  re-verified) and the B12 re-adjudication in `docs/review/2026-10-10-framework-architecture-review-follow-up.md`
+  §5.2, which restates the historical `Blocked` + intent-level route as attribution that is never coverage.
+  The Phase 7g spec gained a superseded-contract appendix pointer; its body and every historical review record keep
+  their original text.
 - **rev.5 (2026-11-04, 补记实施审计 S1 R1-01 的原始解码边界)** — implementation audit R1 found one P2: an unpaired
   surrogate escape parses, then throws `InvalidOperationException` when a raw member name or value is decoded, which is
   outside both existing `JsonException` boundaries, so `Parse` and `AuthorAsync` propagated an exception instead of

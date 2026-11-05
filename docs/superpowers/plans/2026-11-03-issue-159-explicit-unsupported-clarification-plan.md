@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，待 S3 复审；S4–S5 未执行）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，S3 已实施并由 R3 放行（R1 补读回状态断言、R2 把「注入落地」与「目标拒绝」分成两套判据；原生门禁 linux-x64 11/11）。S4 已完成文档与状态同步——`usage-guide.md`、`CapabilityMap.md` §8、`memory.md`、`AGENTS.md`、§5.2 B12 改判、#123 证据矩阵新行与 7g spec 附录指针，见「S4 实施日志」；**S5 带凭据 live 仍 pending，Issue #159 不据此关闭**）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -520,3 +520,50 @@ S1 把披露示例从 2 条扩到 4 条，但 AotFixture 的 `AgentAuthoringWire
 - 未做系统级 SDK 包升级（无 sudo 口令），仓库默认 `dotnet` 路径仍会撞 NU1903；这是留给维护者的构建阻断，不属于本片源码引入。
 - 原生声明仍只覆盖 I-24 表中实际执行过的信封样本与 linux-x64 一个 RID，不推导 §10.1 全 23 行、其他 RID、认证/审批/activation 链。
 - `src/` 仍一行未改：CF-1/CF-2 只动 fixture 测试文件，均 `cmp` 还原。
+## S4 实施日志（2026-11-05，S3 由 R3 放行后续推）
+
+范围：把 S1–S3 的已执行事实同步到「唯一导航面 + 状态记录 + 工程指令 + 契约指南 + 裁定回填 + 证据矩阵」六个面，并把 `7g.v1` 历史文档标为已被取代而不改写。**本片零 `src/` 改动、零测试改动**；退出条件按切片表逐条自证：声明与证据一一对应、未执行项写「未验证/pending」、S5 未执行故 Issue 不关闭。
+
+### I-40 同步落点与内容口径
+
+| 文件 | 改了什么 | 刻意不做什么 |
+| --- | --- | --- |
+| `docs/Feature/AgentControlPlane/usage-guide.md` | §18 头部加 `8a.v1`（#159）契约说明；§18.2 的 `switch` 补两个终态分支及其载荷/占位/零草稿；§18.5 重写为「Stage A 信封事实 → Stage B 严格投影」两段表 + 三终态载荷表 + 边界 + 拒绝类诊断码原表；新增两个终态的最小 wire 样例（与披露示例同源）；§18.9 约束表补 6 行（`outcome` 必需、presence 非 truthiness、码表封闭 Ordinal、显式终态零草稿、**历史归因≠新契约覆盖**、`contractVersion` 参与哈希）；§17.2/17.3 补 fake agent 三分支与 runner 的两个新 `FinalDecisionSource`；§18.8 把「注册 20 个类型」改为按根列举（实为 27 个 `[JsonSerializable]` 根）；§19.1/19.2/19.4 的 prompt 字面量改用生产常量（`descriptor-authoring` / `descriptor-authoring-prompt-template-v3` / `8a.v1`） | 不动工具 DTO/审查报告等与本片无关的章节；不删 `7g.v1` 历史叙述（只保留一句「不再被接受」的说明行） |
+| `docs/Feature/CapabilityMap.md` | 新增 §8「#159 交付记录」四维表（Abstractions / Authoring / Authoring.Http / Asset 真实链路 / 样例 golden scenario），每条执行证据只写实际跑过的套件与场景；支持声明逐条列出四条不外推边界（23 行矩阵、RID、认证/审批/activation、其余七个门禁）+ SDK 入口边界 + S5 pending；纪律段写「新增终态=词表+码表+根闭包+原生场景同批变更」；§6 交叉链接指向 #123 矩阵新行 | **不动 §4 项目索引的「导航（本轮未重评，不背书）」行**——重评属 #131 式裁定，本片只另立交付记录（沿用 §7 #132 的先例） |
+| `memory.md` | 顶部新增 2026-11-05 #159 条目（分支/PR、契约、两阶段解析、消费者、证据、支持声明、仍待办）；「Delivered capabilities」的 Agent 治理面条目补 `8a.v1` 与历史归因口径；Known gaps 的 #133 条目在原文明示「后续状态见顶部 #159 条目，本条为历史证据」 | 不改写 #133 条目正文的当时裁定与实跑记录 |
+| `AGENTS.md` | AOT 能力分层块新增「Agent Authoring 显式终态契约 8a.v1」逐项声明（场景清单、两层负控、验收入口 SDK 10.0.114/ILCompiler 10.0.14、七个门禁未复验、默认 `/usr/bin/dotnet` 仍 10.0.113 且命中 NU1903）；平台能力段新增 `8a.v1` 契约条（presence/码表/两阶段/历史归因不计覆盖）；当前平台状态段新增 #159 条目；「最后更新」改 2026-11-05 | 不把任何声明写成整项目/整链背书；不引入新的抽象或流程 |
+| `docs/review/2026-10-10-framework-architecture-review-follow-up.md` | 新增 §5.2「#159 交付后改判」：契约缺口已由 `8a.v1` 承载；§5.1 的 `Blocked`+intent-level 路线重述为**历史归因、永不计覆盖**（含 `ReviewerLiveOracleProbeTests` 改判）；「澄清不可判别」缺口如何被 `outcome` + 条目边界关闭；现有证据与仍未达成（S5 pending、工具链边界）；§6 任务表加 #159 行 | §5.1 各行原文一字不改，保留 #133 当时的历史证据身份 |
+| `docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md` | §2.1 更新「Control Plane JSON 契约」行为逐场景点名清单；新增「Agent Authoring `8a.v1` 显式终态」行（11/11、逐场景 sentinel、两层负控与 `CONTROL_SETUP_LANDED` 见证、M1–M4 与 CF-1/CF-2 判别回证、覆盖限制）；§三 追加**工具链版本边界**条（验收入口 10.0.114、默认 host 仍旧、七个门禁未复验、CI/任务须显式选择以免裸 `dotnet` 静默回退） | 不把升级前门禁的证据改写为 10.0.114 证据；不宣称全环境迁移完成 |
+| `docs/superpowers/specs/2026-07-01-phase-7g-…-design.md` | 文末新增「Appendix — superseded wire contract」：列出被 `8a.v1` 取代的四项事实（判别式、两终态、presence、两阶段），并声明正文为历史、`7g.v1` 答题现被判 `InvalidProviderOutput`、历史 `Blocked`+intent-level 路线只是归因；头部 Status 加「历史批准；wire 已被取代」标注 | 不重写正文任何一节（含 `baseVersion` 附录），历史可追溯优先于整洁 |
+
+### I-41 声明与证据的一一对应自查
+
+- `7g.v1` 残留：`grep -rn "7g\.v1" src --include=*.cs` = **0 命中**；`samples/**` 仅 1 处、`tests/**` 仅 1 文件，均为**旧版本拒绝负例**（`AssetAuthoringDiagnosticClassifierTests` 的 `ContractVersionMismatch` 行、`OutputParserEnvelopeMatrixTests` 的版本行），属验收清单明示豁免的负例字面量；文档侧残留全部位于历史记录文件（`docs/review/2026-09-*`、`docs/superpowers/plans/2026-07-*`、7g spec 正文与本计划），按裁定保持原文。
+- 数字口径：本日志与 `memory.md`/`AGENTS.md`/地图/指南里出现的每个计数（139/139、575/575、37/37、128 通过/2 跳过共 130、11/11、9 条负控、M1–M4、CF-1/CF-2、27 个根、7 个未复验门禁）都取自 S1–S3 已记录的执行结果，不新造数字；未跑的写「未验证/未复验/pending」。
+- 能力地图门禁复跑：`dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --filter CapabilityMap` → **7/7 绿**（§4 索引区未动，故覆盖校验不受本片影响）。
+
+### I-42 spec §12 验收清单状态（本片只做勾选与注明，不改契约文字）
+
+已按证据勾选 10 项：契约区分、presence 四种出现形态、重复/未知先于值检查、Stage B 选项钉死、版本单值、单元矩阵 + 真实链路 + 原生场景与 harness、变异判别按机制、JSON 闭包断言必需根、`7g.v1` 迁移、无新增抽象/评测平台/持久化工件/测试钩子。
+
+**保持未勾 2 项，都因 S5**：
+
+- 「One credentialed live run executed and recorded (S5)」——本轮仍未读取凭据、未发模型请求。
+- 「Support statements updated to match executed evidence; **live verdict recorded either way** without reclassification」——前半句已随本片完成，但该项同时要求记录 live 裁定结果；按「未执行不得当作已完成」的口径整项留空，并在项下注明原因，而不是勾选后附说明。
+
+Issue #159 因此保持 open，不以单元/原生证据替代收口。
+
+### I-43 S4 执行结果（真实计数）
+
+| 命令 | 结果 |
+| --- | --- |
+| `dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --filter CapabilityMap`（SDK 10.0.114 入口） | 7 通过 / 0 失败 |
+| 文档改动后 `dotnet build`（全解决方案，SDK 10.0.114） | **0 错误 / NU1903 命中 0**（BUILD_EXIT=0，2 条既有 BuildTasks 警告） |
+| `src/` 与 `tests/` 差异 | 本片**未改任何代码文件**，仅 `docs/**`、`memory.md`、`AGENTS.md` |
+
+### I-44 S4 未做的事（不冒充）
+
+- 未做 S5：不带凭据、不跑真实模型，B12 的覆盖判定保持 pending；Issue #159 与 PR #160 均不关闭、不合并。
+- 未重评 §4 项目索引的导航行，未新增任何能力地图条目以外的背书；未修改 `CapabilityMapCoverageArchitectureTests` 的索引区内容。
+- 未升级系统 RPM 工具链，未把其余七个原生门禁改写成 10.0.114 证据。
+- 未改写 #133/7g 等历史文档的事实与裁定原文；本片只在它们旁边加「已被取代/后续状态」指针。

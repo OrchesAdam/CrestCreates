@@ -209,6 +209,18 @@ P1 表示下一轮主链可信度工作，尚无生产事故证据，不沿用�
 | 观测边界 | artifact 新增 `Semantic.OutputShapeCategories`（复用既有 `AssetAuthoringDiagnosticClassifier`）供 pending 人工裁定；未改动 `AssetLiveResponseObservation` 的「只记元数据、不记正文/推理文本」既定设计 |
 | 不得外推 | 不推导 LibraryManagement / SaaSHelpdesk 等其他链路的同类结论；不推导 durable activation（#88 D 类）；不把本组测试视为模型输出质量门禁 |
 
+### 5.2 #159 交付后改判（2026-11-05）
+
+**裁定更新：§5.1 记为「证实未达成」的契约缺口已由 #159 在契约层承载；B12 的覆盖判定同时收紧为「显式终态才算覆盖，历史归因不算」。S5 带凭据真实模型答题仍未执行，故 B12 的行为层覆盖保持 pending，不因契约已可用而升格。**
+
+| 项 | 内容 |
+| --- | --- |
+| 契约承载 | wire `8a.v1`：必需 `outcome` 判别式 + `DescriptorAuthoringStatus.UnsupportedIntent` / `NeedsClarification` 两个终态，各带结构化载荷（`CAPABILITY_UNSUPPORTED`/`OPERATION_UNSUPPORTED`/`GOVERNANCE_BOUNDARY`；`MISSING_POLICY_INPUT`/`AMBIGUOUS_TARGET`/`CONFLICTING_REQUIREMENTS`/`MISSING_REFERENCE_SELECTION`）、presence 判定与零草稿不变式；诊断码 `AUTHORING_INTENT_UNSUPPORTED` / `AUTHORING_INTENT_NEEDS_CLARIFICATION`。设计/切片：[spec rev.5](../superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)、[plan](../superpowers/plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md)，PR #160（open 未合并） |
+| §5.1 的「历史归因」重述 | §5.1 交付期把 `Blocked` + intent-level 诊断码（`AUTHORING_UNKNOWN_DESCRIPTOR_KIND` 等）当作「显式受限结果」接受，并由 `ReviewerLiveOracleProbeTests` 钉成应通过。#159 S2 R1 裁定这只能证明**框架拒绝了一个不支持的候选**，不能证明**模型使用了显式契约**：oracle 现把该路径改判为 `LegacyIntentLevelBlockAttribution`（可上报、永不计覆盖），`IsAcceptedResult` 只接受两个显式终态 + 合法码 + 非空条目 + 零草稿/零评审通过/零保存/零 gate；同一探针的 `unsupported-kind` 行改为 `shouldReject: true`。§5.1 各行保留原文，作为 #133 当时的历史证据，不改写 |
+| 「澄清不可判别」缺口关闭方式 | 原用例 `IntentMissingPolicyInformation_FailsClosed_AndClarificationIsNotDistinguishable` 的事实（合法但无条目的拒绝与空输出同形）现由 `outcome` 判别式 + 条目边界承载：缺 `outcome`、`items: []` 无节段、散文拒绝仍归 `InvalidProviderOutput`，只有 `needsClarification` 节段带合法 `reasonCode` 与非空 `question`/`missingInputs` 才落 `NeedsClarification` |
+| 现有证据（截至本回填） | 契约与解析：Authoring 单元 139/139（§10.1 全 23 行 + 变异 (a)(b)(c)(d)(e)(f1)(f2) 判别）。真实链路：Asset E2E 需本地 PG **128 通过 / 2 跳过（共 130）**，含显式终态两例的零草稿/零保存/零 gate/目录不变与两条历史归因改判。原生：#123 矩阵「Agent Authoring `8a.v1`」行，linux-x64 11/11（逐场景点名 + 9 条独立负控 + 未知控制名拒绝），验收入口为 SDK 10.0.114 / ILCompiler 10.0.14 |
+| 仍未达成（不得当作已完成） | **S5 带凭据运行未执行**：本轮未读取凭据、未向真实模型发起 `8a.v1` + 新提示的 B12 意图答题。因此 B12 的「模型实际使用显式终态」仍属未观测；Issue #159 保持 open，该验收项 pending，不以单元/原生证据替代收口。工具链侧同样保留边界：默认 `/usr/bin/dotnet` 仍旧、其余七个原生门禁未在 10.0.114 复验 |
+
 ## 6. 后续任务对应（更新）
 
 | 波次 | 工作项 | 状态 |
@@ -219,3 +231,4 @@ P1 表示下一轮主链可信度工作，尚无生产事故证据，不沿用�
 | 3 | [#129](https://github.com/OrchesAdam/CrestCreates/issues/129) Dynamic API 退出 / [#130](https://github.com/OrchesAdam/CrestCreates/issues/130) ORM 矩阵 / [#131](https://github.com/OrchesAdam/CrestCreates/issues/131) 能力地图 | 依赖前序 |
 | 候选 | [#132](https://github.com/OrchesAdam/CrestCreates/issues/132) Audit retention 设计裁定 | 设计级 |
 | 新增（本项裁定） | [#133](https://github.com/OrchesAdam/CrestCreates/issues/133) B12 unsupported intent negative case | 独立小任务，归 Agent Authoring / Control Plane 负边界 |
+| 新增（#133 R3 裁定的后续） | [#159](https://github.com/OrchesAdam/CrestCreates/issues/159) 显式 unsupported / needs-clarification 终态（`8a.v1`） | S0–S3 已放行，PR #160 open；S4 文档同步进行中，S5 带凭据 live pending |

@@ -1901,7 +1901,7 @@ Agent 仅消费 `AgentAuthoringContext`（含 Request、MetadataContextPack、Me
 确定性假 Agent，用于 golden scenario 测试：
 
 ```csharp
-// DI 注册
+// DI 注册（默认产出草稿）
 services.AddSingleton<IDescriptorAuthoringAgent, FakeCompanyCertificationAuthoringAgent>();
 
 // 使用
@@ -1911,12 +1911,22 @@ var result = await agent.AuthorAsync(authoringContext, ct);
 // result.DraftSet.Drafts 包含 2 个 draft：
 // 1. HumanTask: ht_finance_review_company_certification
 // 2. Workflow update: wf_company_certification + step_finance_review
+
+// 需要演练显式终态时，用第二个构造参数切换（#159 S2）：
+var refusing = new FakeCompanyCertificationAuthoringAgent(
+    FakeCompanyCertificationAuthoringOutcome.UnsupportedIntent);
+// → Status=UnsupportedIntent，Unsupported.Reasons 1 条，DraftSet.Drafts 为空
+
+var asking = new FakeCompanyCertificationAuthoringAgent(
+    FakeCompanyCertificationAuthoringOutcome.NeedsClarification);
+// → Status=NeedsClarification，Clarification.Questions 1 条，DraftSet.Drafts 为空
 ```
 
 **约束**：
-- 无构造函数依赖 — 不注入任何服务
+- 无构造函数依赖 — 不注入任何服务（结局枚举是构造参数，不是服务依赖）
 - 仅消费 `AgentAuthoringContext.Request.TenantId` 和 `Request.IntentText`
-- 输出确定性 — 相同输入 → 相同 draft set
+- 输出确定性 — 相同输入 + 相同结局参数 → 相同结果
+- 三个分支都不产出草稿集合之外的副作用：显式终态零草稿、零保存、零评审通过
 - 不使用 raw memory stores（IAgentMemoryStore 等）
 - 不访问 runtime handlers 或 activation gate
 
@@ -1935,7 +1945,12 @@ var reviewResult = await runner.RunUntilDraftSetReviewAsync(
 
 // reviewResult.IsBlocked — 是否被 block
 // reviewResult.FinalProposedInventory — 最终提议清单
-// reviewResult.FinalDecisionSource — 决策来源
+// reviewResult.FinalDecisionSource — 决策来源：
+//   "FinalProposedInventory"  走完审查并基于 inventory diff 出终局
+//   "AllOrBlock"              草稿集合或终局拓扑被整组阻断
+//   "AuthoringUnsupportedIntent" / "AuthoringNeedsClarification"
+//                             显式终态：不进入草稿集合审查，清单为空，
+//                             BlockReason 只复述 code / reasonCode 与 evidenceRefs / missingInputs
 // reviewResult.FinalImpact / FinalCompat — 基于 inventory diff 的最终影响/兼容性
 // reviewResult.FinalGovernance — 最终治理决策
 
@@ -2074,6 +2089,8 @@ var freshRunner = freshHost.GetRequiredService<CompanyCertificationGoldenScenari
 ## 18. LLM-backed Descriptor Authoring Adapter 使用 (Phase 7g)
 
 > **Phase 7g (#48)** 实现了 LLM-backed Descriptor Authoring Adapter——将 Phase 7f 的 sample-level authoring 合约产品化为框架级项目，并引入 LLM 提供者适配层。LLM agent 只产出 draft，不激活、不审批、不变异注册表。
+>
+> **契约 `8a.v1`（#159）** 在该适配层上把「不支持」与「需要澄清」升为可判别的正式终态：信封必须带 `outcome` 判别式，三个终态互斥且各自的节段只能以「成员是否出现」判定。本节以下所有样例均为 `8a.v1`；`7g.v1` 不再被解析器接受，旧 spec 只作历史记录保留。
 
 ### 18.1 DI 注册
 
@@ -2132,8 +2149,21 @@ switch (result.Status)
         // 治理边界拒绝（prompt hash mismatch、authority claim、unsupported operation 等）
         break;
 
+    case DescriptorAuthoringStatus.UnsupportedIntent:
+        // 显式拒绝：意图需要受支持面之外的能力/操作/治理决定
+        // result.Unsupported.Reasons — 1..4 条，code 取自闭集，message 非空
+        // result.DraftSet.Drafts 恒为空；Plan.PlanId / DraftSet.DraftSetId 为固定占位值
+        break;
+
+    case DescriptorAuthoringStatus.NeedsClarification:
+        // 显式提问：缺少答题所需信息
+        // result.Clarification.Questions — 1..4 条，id 唯一、reasonCode 取自闭集、missingInputs ≥1
+        // result.DraftSet.Drafts 恒为空；答题动作属应用侧，框架不代答
+        break;
+
     case DescriptorAuthoringStatus.InvalidProviderOutput:
-        // LLM 输出无法解析（JSON 格式错误、contract version 不匹配）
+        // LLM 输出不是合法 8a.v1 信封（JSON 无法解码、契约版本不符、
+        // 未知/重复/大小写别名成员、终态节段出现、码表越界、边界超限）
         break;
 
     case DescriptorAuthoringStatus.ProviderUnavailable:
@@ -2175,9 +2205,29 @@ var recordedClient = new RecordedDescriptorAuthoringModelClient(fixtures);
 // 当 hash 匹配时返回 fixture；不匹配时返回 FailureKind=Unknown
 ```
 
-### 18.5 Parser 严格验证
+### 18.5 Parser 严格验证（`8a.v1` 两阶段）
 
-Parser 拒绝以下情况并返回 `Blocked`：
+解析器先读**原始信封事实**（Stage A），再做**严格 source-generated 投影**（Stage B），顺序决定归因：
+
+| 阶段 | 判定的事实 | 失败时的终态 |
+|------|-----------|-------------|
+| Stage A | 成员名能否解码为 UTF-16、同层重复成员、声明词表外的成员与大小写别名、`contractVersion` / `promptInputHash` / `outcome` 三个值的解码 | `InvalidProviderOutput` |
+| Stage A（续） | `contractVersion` 必须是 `8a.v1`；`outcome` 必须是 `drafts` / `unsupported` / `needsClarification`；`promptInputHash` 比对 | 版本/判别式错 ⇒ `InvalidProviderOutput`；单值错 hash 且其余合法 ⇒ `Blocked` + `AUTHORING_PROMPT_HASH_MISMATCH` |
+| Stage A（形状） | 必需成员以声明 Kind 出现；**禁用成员只要出现就拒绝**——`null`、`{}`、`[]` 与有内容同等；item 的 `payload` 缺失或为 null 亦在此判定 | `InvalidProviderOutput` |
+| Stage B | 严格 DTO（`AllowDuplicateProperties=false`、`PropertyNameCaseInsensitive=false`）投影值；`payload` 内层字段名不参与信封词表，但重复仍由 Stage A 递归捕获 | `InvalidProviderOutput` |
+| 终态构建 | 条目数与边界、归一化后非空、两张闭码表、question id 字符集与唯一性 | `InvalidProviderOutput` |
+
+三个终态各带自己的证据，且互斥：
+
+| `outcome` | `Status` | 载荷 | 固定占位 |
+|-----------|----------|------|---------|
+| `drafts` | `Succeeded` / `SucceededWithDiagnostics` / `Blocked` | `Plan` + `DraftSet.Drafts`（≥1 条） | — |
+| `unsupported` | `UnsupportedIntent` | `Unsupported.Reasons`：`code` ∈ {`CAPABILITY_UNSUPPORTED`, `OPERATION_UNSUPPORTED`, `GOVERNANCE_BOUNDARY`}，`message` 非空，`evidenceRefs` 0..8 | `PlanId=plan_intent_unsupported`、`DraftSetId=draftset_intent_unsupported`，草稿恒 0 |
+| `needsClarification` | `NeedsClarification` | `Clarification.Questions`：`reasonCode` ∈ {`MISSING_POLICY_INPUT`, `AMBIGUOUS_TARGET`, `CONFLICTING_REQUIREMENTS`, `MISSING_REFERENCE_SELECTION`}，`id` 唯一且属 `[A-Za-z0-9._-]{1,64}`，`question` 非空，`missingInputs` 1..8、`candidateValues` 0..8 | `PlanId=plan_needs_clarification`、`DraftSetId=draftset_needs_clarification`，草稿恒 0 |
+
+边界（超限即 `InvalidProviderOutput`，判定在归一化后的形态上）：两个终态各 1..4 条；文本 1..400 字符；引用列表 0..8 条、每条 1..120 字符；`missingInputs` 至少 1 条。码表按 Ordinal 比较，大小写不同的同码同样越界。
+
+拒绝类诊断码（`Blocked`）不变：
 
 | 情况 | 诊断码 |
 |------|--------|
@@ -2186,9 +2236,47 @@ Parser 拒绝以下情况并返回 `Blocked`：
 | 不支持的 DraftOperation | `AUTHORING_UNSUPPORTED_DRAFT_OPERATION` |
 | LLM 尝试激活/审批/变异 | `AUTHORING_GOVERNANCE_BOUNDARY_VIOLATION` |
 | LLM 声称记忆权威 | `AUTHORING_MEMORY_AUTHORITY_CLAIM_REJECTED` |
-| WorkflowStep 缺失 target | `AUTHORING_INVALID_PROVIDER_OUTPUT` |
-| WorkflowStep 未知 target kind | `AUTHORING_INVALID_PROVIDER_OUTPUT` |
-| WorkflowStep target 空 id | `AUTHORING_INVALID_PROVIDER_OUTPUT` |
+| WorkflowStep 缺失 target / 未知 target kind / target 空 id | `AUTHORING_INVALID_PROVIDER_OUTPUT` |
+
+两个显式终态的最小 wire 样例（与提示披露里的示例同源，由同一 parser 消费）：
+
+```json
+{
+  "contractVersion": "8a.v1",
+  "promptInputHash": "<prompt-input-hash-from-visible-context>",
+  "outcome": "unsupported",
+  "unsupported": {
+    "reasons": [
+      {
+        "code": "CAPABILITY_UNSUPPORTED",
+        "message": "Condition-scoring that skips human review needs a new domain algorithm.",
+        "evidenceRefs": ["visible:wf_asset_maintenance_review:1"]
+      }
+    ]
+  }
+}
+```
+
+```json
+{
+  "contractVersion": "8a.v1",
+  "promptInputHash": "<prompt-input-hash-from-visible-context>",
+  "outcome": "needsClarification",
+  "needsClarification": {
+    "questions": [
+      {
+        "id": "risk-threshold",
+        "reasonCode": "MISSING_POLICY_INPUT",
+        "question": "Which risk threshold decides the automatic maintenance outcome?",
+        "missingInputs": ["riskThreshold"],
+        "candidateValues": []
+      }
+    ]
+  }
+}
+```
+
+两个样例都**整段省略** `plan` 与 `items`——写成 `"items": null` 或 `"plan": {}` 会被判为 `InvalidProviderOutput`，而不是「空的草稿节段」。
 
 ### 18.6 Prompt Input Hash
 
@@ -2237,7 +2325,10 @@ Provider 行为：
 ```csharp
 using CrestCreates.Agent.Authoring.Abstractions.Json;
 
-// Abstractions JSON context（注册 20 个类型 + CanonicalHash + DescriptorDraft）
+// Abstractions JSON context — 契约侧根：DescriptorAuthoringResult 及其 Plan/DraftSet/Diagnostic，
+// 两个显式终态载荷 DescriptorAuthoringUnsupportedOutcome(+Reason) /
+// DescriptorAuthoringClarificationOutcome(+Question)，加上 CanonicalHash、DescriptorDraft、
+// prompt/model/evidence 投影（共 27 个 [JsonSerializable] 根）
 var options = new JsonSerializerOptions
 {
     TypeInfoResolver = JsonTypeInfoResolver.Combine(
@@ -2258,10 +2349,15 @@ var options = new JsonSerializerOptions
 | 约束 | 说明 |
 |------|------|
 | **LLM 只产出 draft** | 不激活、不审批、不变异注册表、不绕过 Control Plane 审查 |
+| **`outcome` 是必需判别式** | 缺失或在词表外 ⇒ `InvalidProviderOutput`；不会因 `items` 缺失就被当作 `drafts` |
+| **presence，不是 truthiness** | 禁用成员以「是否出现」判定；`null` / `{}` / `[]` / 有内容同等被拒。终态节段则必须出现且为对象 |
+| **两张码表封闭** | `unsupported.reasons[].code` 与 `questions[].reasonCode` 只认声明值，Ordinal 比较；任何其它值 ⇒ `InvalidProviderOutput` |
+| **显式终态零草稿** | `UnsupportedIntent` / `NeedsClarification` 的 `DraftSet.Drafts` 恒为空，Plan/DraftSet 身份为固定占位值；答题与后续动作属应用侧 |
+| **历史归因 ≠ 新契约覆盖** | `Blocked` + `AUTHORING_UNKNOWN_DESCRIPTOR_KIND` 这类 intent-level 拒绝只证明框架拒了一个候选，不证明模型使用了显式终态；消费者不得把它计入 `8a.v1` 覆盖（#159 S2 裁定，Asset oracle 两层判定） |
 | **Parser 拒绝缺失 target** | 不静默 fallback 到 "unknown" 引用 |
 | **PromptHashMismatch → Blocked** | Governance boundary rejection，非普通 JSON 错误 |
-| **Source-generated JSON** | Parser 和 OpenAI client 均使用 JsonSerializerContext |
-| **Canonical hash prompt hash** | 排序后写入，顺序无关 |
+| **Source-generated JSON** | Parser 和 OpenAI client 均使用 JsonSerializerContext；两个终态的必需根同样必须在闭包内（原生门禁检查根可解析且反射兜底关闭） |
+| **Canonical hash prompt hash** | 排序后写入，顺序无关；`contractVersion` 参与哈希，版本升级会改变所有派生哈希 |
 | **ProviderProfile.Timeout 生效** | Linked CTS，区分 caller cancellation 和 provider timeout |
 | **ParseContext 无硬编码** | TenantId、AuthorId、AuthorKind、CreatedAt 全部来自注入 |
 | **ModelProfile 可配置** | 不硬编码 "unknown" |
@@ -2293,10 +2389,10 @@ services.Configure<AgentPromptingOptions>(options =>
     {
         new()
         {
-            TemplateId = new AgentPromptTemplateId("descriptor-authoring-default"),
-            Version = new AgentPromptVersion("v1"),
+            TemplateId = LlmDescriptorAuthoringAgentOptions.DefaultPromptTemplateId,   // "descriptor-authoring"
+            Version = LlmDescriptorAuthoringAgentOptions.DefaultPromptTemplateVersion, // "descriptor-authoring-prompt-template-v3"
             Purpose = AgentPromptPurpose.DescriptorAuthoring,
-            ContractVersion = new AgentPromptContractVersion("7g.v1"),
+            ContractVersion = LlmDescriptorAuthoringAgentOptions.DefaultPromptContractVersion, // "8a.v1"
             Metadata = new Dictionary<string, string>
             {
                 ["Description"] = "Default descriptor authoring prompt template"
@@ -2315,9 +2411,9 @@ var evidenceFactory = services.GetRequiredService<IAgentPromptEvidenceFactory>()
 
 // 创建 input evidence（包含 prompt input hash）
 var inputEvidence = evidenceFactory.CreateInputEvidence(
-    templateId: new AgentPromptTemplateId("descriptor-authoring-default"),
-    templateVersion: new AgentPromptVersion("v1"),
-    contractVersion: new AgentPromptContractVersion("7g.v1"),
+    templateId: LlmDescriptorAuthoringAgentOptions.DefaultPromptTemplateId,
+    templateVersion: LlmDescriptorAuthoringAgentOptions.DefaultPromptTemplateVersion,
+    contractVersion: LlmDescriptorAuthoringAgentOptions.DefaultPromptContractVersion,
     payload: promptInput,  // DescriptorAuthoringPromptInput
     purpose: AgentPromptPurpose.DescriptorAuthoring);
 
@@ -2377,8 +2473,8 @@ var registry = services.GetRequiredService<InMemoryAgentPromptTemplateRegistry>(
 
 // 查找 template
 var template = registry.Find(
-    new AgentPromptTemplateId("descriptor-authoring-default"),
-    new AgentPromptVersion("v1"));
+    LlmDescriptorAuthoringAgentOptions.DefaultPromptTemplateId,
+    LlmDescriptorAuthoringAgentOptions.DefaultPromptTemplateVersion);
 
 // 列出所有 templates
 var allTemplates = registry.List();
