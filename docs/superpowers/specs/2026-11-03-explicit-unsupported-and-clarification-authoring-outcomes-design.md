@@ -1,7 +1,7 @@
 # Explicit Unsupported / Needs-Clarification Authoring Outcomes
 
 > Date: 2026-11-03
-> Status: Implemented on PR #160 (rev.8, S0–S4 已由实施审计放行；S5 单次带凭据 live 已执行并按 §10.7 判定 B12 达成覆盖，`NeedsClarification` 的 live 未执行；§12 验收项全部勾选，契约与 23 行矩阵不变。PR 与 Issue 待维护者复审裁定)
+> Status: Implemented and **merged** (rev.9 — PR #160 → master `1bf4a7e7` on 2026-11-05, review head `fc28a95d`; Issue #159 closed as completed). S0–S4 由实施审计放行、S5 由 R1 放行并判定 B12 达成覆盖；§12 验收项按执行证据全部勾选，契约与 23 行矩阵未再变动。遗留项（`NeedsClarification` 的 live、系统 SDK 升级与七个门禁复验、全方案环境与未完成基线核验的证据限制）按裁定独立跟进，不阻断关闭
 > Issue: #159
 > Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence (merged to master as `91d6574e` on 2026-11-03)
 
@@ -596,6 +596,13 @@ paused), and merging stays with the maintainer.
 
 ## Changelog
 
+- **rev.9 (2026-11-05, 合并与状态收口)** — post-merge status synchronization only: PR #160 merged into master as
+  `1bf4a7e7` at review head `fc28a95d` after the final review closed the last documentation finding, and Issue #159 is
+  closed as completed. No contract, code-table, matrix, mechanism, prompt or governance text changed in this revision;
+  the acceptance items stay exactly as recorded against executed evidence, and the three ruled-non-blocking leftovers
+  (no live observation for `NeedsClarification`, the system SDK upgrade plus the seven un-reverified native gates, and
+  the full-solution test environment with two unfinished baseline reproductions) stay written as unmet rather than
+  folded into the coverage claim.
 - **rev.8 (2026-11-05, S5 单次带凭据 live)** — the required live step ran once, as authorized: the existing B12
   unsupported-intent entry, 16384 output budget, artifact outside the repository, no retry, credentials never printed.
   The real provider answered `unsupported` (`HttpStatus=200`, `FinishReason=stop`, 555 completion + 261 reasoning

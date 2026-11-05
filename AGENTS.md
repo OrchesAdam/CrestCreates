@@ -102,7 +102,7 @@ CrestCreates Core:
         sink 去重/receipt 导出幂等/receipt 恢复/缺能力九场景 + 总 sentinel，三类 fixture-only
         负控非零且无总 sentinel；真实身份/权限/Setting/generated HTTP 由 JIT P08 覆盖，不推导
         原生认证/Settings/Quartz，也不推导其他 ORM Provider/RID
-    Agent Authoring 显式终态契约 8a.v1（#159，PR #160 未合并）:
+    Agent Authoring 显式终态契约 8a.v1（#159，PR #160 已合并于 master `1bf4a7e7`）:
         ControlPlane JsonContracts AotFixture 原生 publish/link/run（linux-x64）：两个显式终态结构化往返
         （含读回 Status）、presence 七形态、两张闭码表、Stage A 词表与「重复 + 单一错 hash」优先级、
         四条披露示例逐条过正式 parser、必需 JSON 根可解析 + 反射兜底关闭；逐场景 sentinel 点名，
@@ -394,7 +394,7 @@ TestBase
 
 以 `memory.md` 为最新状态记录。当前关键共识：
 
-- Authoring 显式 unsupported / needs-clarification 终态（#159，PR #160 open 未合并）：wire 升为 `8a.v1`，
+- Authoring 显式 unsupported / needs-clarification 终态（#159，已合并：PR #160 → master `1bf4a7e7`，Issue completed 关闭）：wire 升为 `8a.v1`，
   `outcome` 判别式 + `UnsupportedIntent` / `NeedsClarification` 两个正式终态（结构化载荷、闭码表、presence
   判定、固定占位 plan/draftset、零草稿）。解析收口为 Stage A 原始信封事实 + Stage B 严格 source-generated
   投影的单条主链，`7g.v1` 不留兼容窗。消费者侧 Asset oracle 采两层判定：**历史归因（`Blocked` + intent-level
@@ -406,7 +406,9 @@ TestBase
   判 `ExplicitUnsupportedResult`，零草稿/零评审通过/零保存/零 gate、部署清单不变、未伪造能力 ——
   **B12 按 `8a.v1` 计为覆盖**。边界：单次运行不作可重复性声明、单一意图类与单一模型画像，
   `NeedsClarification` 的 live **未执行**（不得写成两终态均已 live 覆盖），且 live 在 JIT 宿主内跑、不新增原生覆盖。
-  S0–S5 均已交付，Issue #159 与 PR #160 仍 open，等维护者复审裁定，不自动合并或关闭。
+  S0–S5 全部验收后，PR #160 于 2026-11-05 以 merge commit `1bf4a7e7` 合并（审查 head `fc28a95d`），Issue #159 以 completed 关闭。
+  遗留三项独立跟进、不阻断该关闭：`NeedsClarification` 的真实模型 live（后续质量评测）、系统 RPM SDK 升级与其余七个原生门禁在
+  10.0.114 下复验（环境与发布维护）、全方案测试环境与两组未完成基线核验保持原有证据限制。
   支持声明边界见上文 AOT 分层与本文件「Authoring 线契约是 `8a.v1`」条。
 
 - 能力地图与 TenantId 架构守卫（#131，PR #155 合并于 `9c39e187`）：`docs/Feature/CapabilityMap.md` 为项目/能力导航唯一入口，7 个无消费者项目 + 通用 Draft 实验 + 死契约归档至 `99_RecycleBin/issue-131-capability-map/`；`TenantIdentityArchitectureTests` 以 evaluated MSBuild 输入（缓存仅在依赖可证明完整时启用）扫描 active src/sample 项目，0 违规 0 覆盖失败。有限模式守卫，不是通用安全分析器。
