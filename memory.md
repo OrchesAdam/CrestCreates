@@ -20,13 +20,14 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
-## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S4 released; S5 live executed; PR #160 open awaiting adjudication)
+## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S5 accepted; merged as 1bf4a7e7; issue closed completed)
 
-- Branch `docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`, PR #160 — open,
-  not merged; CI manually disabled; local execution is the gate. Design
-  [rev.8](docs/superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)
+- Branch `docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`, PR #160 — **merged 2026-11-05
+  as `1bf4a7e7`** (review head `fc28a95d`, review rounds S0–S5 all released, final review found no remaining finding);
+  Issue #159 closed as **completed**. CI stayed manually disabled throughout; every gate was a local execution. Design
+  [rev.9](docs/superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)
   and slice log [plan](docs/superpowers/plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md).
-  S0 released at design R4 (D1–D16 confirmed), S1 at implementation R2, S2 at R2, S3 at R3.
+  S0 released at design R4 (D1–D16 confirmed), S1 at implementation R2, S2 at R2, S3 at R3, S4 at R2, S5 at R1.
 - Contract `8a.v1` replaces `7g.v1` outright (no compatibility window): a required `outcome`
   discriminator (`drafts` | `unsupported` | `needsClarification`), mutually exclusive sections judged by
   **member presence, not truthiness** (`null`, `{}`, `[]` and populated content are equally appearances),
@@ -81,8 +82,10 @@ never deleted; never output credentials.
   `NeedsClarification` has **no** live observation (the authorized scope was the unsupported entry only), the live run
   executed on the JIT host and adds no native coverage, credentials were never printed or committed and the artifact
   (`/tmp`, metadata only — character and token counts, no response or reasoning text) stays outside the repository.
-- Nothing in this slice is auto-merged: PR #160 and Issue #159 stay open for the maintainer's adjudication now that
-  S0–S5 are all delivered.
+- Post-merge: the three leftovers were ruled non-blocking and stay separate follow-ups — `NeedsClarification` has no
+  live observation (quality evaluation later), the system RPM SDK upgrade plus re-verification of the other seven native
+  gates on 10.0.114 is environment/release maintenance, and the full-solution test environment plus the two unfinished
+  baseline reproductions keep their recorded evidence limits. Nothing here claims a green whole-solution `dotnet test`.
 
 ## 2026-10-27 — Issue #132 audit retention governance (V1 implemented; merge pending)
 
@@ -213,7 +216,7 @@ never deleted; never output credentials.
   review artifact store and package/evidence artifact store with InMemory +
   PostgreSQL providers (additive migrations); activation request/review/gate
   present but in-memory (`InMemoryRuntimeActivationGate`,
-  `InMemoryDescriptorActivationAuditor`). Authoring wire contract is `8a.v1` (#159 S1–S3, PR #160 open):
+  `InMemoryDescriptorActivationAuditor`). Authoring wire contract is `8a.v1` (#159, merged as `1bf4a7e7`):
   required `outcome` discriminator plus two explicit terminal statuses (`UnsupportedIntent`,
   `NeedsClarification`) with closed code tables and presence-only forbidden members; historical
   `Blocked` + intent-level attribution is never counted as coverage of that contract.

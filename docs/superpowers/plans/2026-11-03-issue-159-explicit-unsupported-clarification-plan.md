@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.8；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，S3 已实施并由 R3 放行（R1 补读回状态断言、R2 把「注入落地」与「目标拒绝」分成两套判据；原生门禁 linux-x64 11/11）。S4 已完成文档与状态同步——`usage-guide.md`、`CapabilityMap.md` §8、`memory.md`、`AGENTS.md`、§5.2 B12 改判、#123 证据矩阵新行与 7g spec 附录指针，见「S4 实施日志」。实施审计 S4 R1 发现 1 项 P2（指南把 `Blocked` 与成功态一起写成「草稿 ≥1」）与 1 项 P3（7g 附录把历史写成「缺少 `items` 时推断 drafts」），两项均已修订，见「S4 实施审计 R1 修复记录」，S4 已交付、按 R1 修订两项文档表述并由 R2 放行。S5 按已获准的单次范围执行完毕：真实 provider 对 B12 不支持意图答 `unsupported`，解析为 `UnsupportedIntent`（3 条合法条目 + 逐条 `AUTHORING_INTENT_UNSUPPORTED`），oracle 判 `ExplicitUnsupportedResult`，零草稿/零评审通过/零保存/零 gate、部署清单不变、未伪造能力，**B12 达成本契约覆盖**；边界为单次运行、单一意图类与模型画像，`NeedsClarification` 的 live 未执行。PR #160 与 Issue #159 保持 open 待复审裁定，不据此合并或关闭）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.9；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，S3 已实施并由 R3 放行（R1 补读回状态断言、R2 把「注入落地」与「目标拒绝」分成两套判据；原生门禁 linux-x64 11/11）。S4 已完成文档与状态同步——`usage-guide.md`、`CapabilityMap.md` §8、`memory.md`、`AGENTS.md`、§5.2 B12 改判、#123 证据矩阵新行与 7g spec 附录指针，见「S4 实施日志」。实施审计 S4 R1 发现 1 项 P2（指南把 `Blocked` 与成功态一起写成「草稿 ≥1」）与 1 项 P3（7g 附录把历史写成「缺少 `items` 时推断 drafts」），两项均已修订，见「S4 实施审计 R1 修复记录」，S4 已交付、按 R1 修订两项文档表述并由 R2 放行。S5 按已获准的单次范围执行完毕：真实 provider 对 B12 不支持意图答 `unsupported`，解析为 `UnsupportedIntent`（3 条合法条目 + 逐条 `AUTHORING_INTENT_UNSUPPORTED`），oracle 判 `ExplicitUnsupportedResult`，零草稿/零评审通过/零保存/零 gate、部署清单不变、未伪造能力，**B12 达成本契约覆盖**；边界为单次运行、单一意图类与模型画像，`NeedsClarification` 的 live 未执行。最终审查通过（P3 已关闭、无剩余发现）后，**PR #160 于 2026-11-05 以 merge commit `1bf4a7e7` 合并到 master**（审查 head `fc28a95d`），Issue #159 以 **completed** 关闭；遗留三项按裁定独立跟进，见「合并后状态收口」）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -664,6 +664,39 @@ Issue #159 因此保持 open，不以单元/原生证据替代收口。
 - oracle 的职责是另一层：`AssetUnsupportedIntentOracle.cs:113-119` 按终态分派，`:129-133` `IsExplicitTerminal` 要求终态自带诊断码 + 条目数 > 0 + 零草稿 + 零评审通过，`:140-150` `CountExplicitOutcomeEntries` 只把 code 与 message 均非空白的条目计入 —— 它不比对码表，也不该比对（重复校验会把同一事实写成两个真相来源）。
 - 修法：仅更正 I-50 该行的归因文字并补上三处行号；**零代码改动、不重跑 live、不新增重复校验**，与 S5 的覆盖裁定与边界不变。
 - 其余状态面（`AGENTS.md`、`memory.md`、`CapabilityMap.md` §8、follow-up §5.2、设计 spec rev.8）经 sweep 未出现同一误归因，无需连带修改。
+
+## 合并后状态收口（2026-11-05）
+
+维护者最终裁定：合并 PR #160（head `fc28a95d`），合并成功后以 completed 关闭 #159；合并前先更新仍停留在 S2 的 PR 标题/正文（用维护者准备的最终正文，含 `Closes #159.`），不再做代码复审。
+
+### I-54 执行结果
+
+| 项 | 事实 |
+| --- | --- |
+| 合并前核对 | PR `state=OPEN`、`isDraft=false`、`headRefOid=fc28a95d…`（与授权 sha 一致）、`mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`，base `master`；52 文件 / 24 提交 |
+| 标题与正文 | 标题改为 `feat: explicit unsupported / needs-clarification authoring outcomes (8a.v1) (#159 S0–S5)`；正文逐字使用维护者准备的 `pr-body.md`（仓库外审查目录，未修改该文件） |
+| 合并方式 | 仓库历史一致的 merge commit（`allow_merge_commit=true`；`delete_branch_on_merge=false`，故未删分支）。合并结果 **`1bf4a7e7`**，master `91d6574e..1bf4a7e7`，`mergedAt=2026-11-05T03:53:07Z` |
+| Issue 状态 | 正文的 `Closes #159.` 在合并同刻自动关闭，实测 `state=CLOSED`、`stateReason=COMPLETED`（无需手工补关）；另在 issue 上发关闭说明，记 merge commit、交付范围、验收摘要与三条非阻断遗留项 |
+
+### I-55 状态面同步（本片唯一改动内容）
+
+合并后仓库内的状态文字仍停在「PR open / Issue open」，逐处改为已合并事实，其余文字（契约描述、证据计数、边界、历史日志）不动：
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `AGENTS.md` | AOT 能力分层块该条标题从「PR #160 未合并」改为「已合并于 master `1bf4a7e7`」；当前平台状态条目头尾同改，并写入三条独立遗留项 |
+| `memory.md` | 顶部 #159 条目标题与首条 bullet 改为 merged/closed（含审查 head、S4 由 R2、S5 由 R1 放行的完整放行链）；「不自动合并」条改为合并后遗留项归属；「Delivered capabilities」的 `8a.v1` 行指针同改 |
+| `docs/review/2026-10-10-framework-architecture-review-follow-up.md` | §5.2 契约承载行的「PR #160（open 未合并）」改为已合并 + Issue completed；§6 任务行状态改为已合并并列出遗留项 |
+| 设计 spec | 状态行升 **rev.9**：写明合并 commit 与关闭裁定；Changelog 新增 rev.9 条目，明确本修订只同步状态、不动契约/码表/矩阵/机制文字，遗留项仍写作未达成 |
+| 本计划 | 头部状态行改为合并事实；新增本节；切片日志内各条「本片未做的事 / 不合并、不关闭」保持原文（它们是切片时点的记录，不追改） |
+| 指针 | 设计版本号引用同步到 rev.9（本计划、`memory.md`、`CapabilityMap.md` §8、follow-up、7g spec 附录） |
+
+### I-56 同步片未做的事
+
+- 不改任何 `src/`、`tests/` 代码；不重跑单元/集成/原生门禁，也不重发带凭据 live。
+- 不把三条遗留项改写成已完成，不为「全方案 `dotnet test` 全绿」补任何声明。
+- 不删除已合并分支，不动审查者目录下的复审报告与探针文件。
+
 
 
 
