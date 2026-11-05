@@ -36,21 +36,23 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
     ];
 
     /// <summary>
-    /// Each control asserts the opposite of one contract rule, so exactly the scenario owning that rule
-    /// may redden. A control that reddens a second scenario, or none, proves nothing about the rule it
-    /// names, which is why the pairs are pinned here rather than derived from the output.
+    /// Each control reddens exactly the scenario owning the rule it names, so the pairs are pinned here
+    /// rather than derived from the output. The last column marks the two families: an expectation flip
+    /// only has to refuse to go green, while an input tampering must first witness that its injection
+    /// landed — a control that never reached its injection point proves nothing and must fail the test
+    /// instead of being read as the target scenario rejecting the tampered input.
     /// </summary>
-    public static TheoryData<string, string> GateNegativeControls => new()
+    public static TheoryData<string, string, bool> GateNegativeControls => new()
     {
-        { "unsupported-outcome-dropped", "AgentAuthoringUnsupportedOutcome" },
-        { "clarification-outcome-dropped", "AgentAuthoringClarificationOutcome" },
-        { "unsupported-roundtrip-status-poisoned", "AgentAuthoringUnsupportedOutcome" },
-        { "clarification-roundtrip-status-poisoned", "AgentAuthoringClarificationOutcome" },
-        { "outcome-shape-accepted", "AgentAuthoringOutcomeShapeConflict" },
-        { "code-table-accepted", "AgentAuthoringCodeTableRejection" },
-        { "unknown-member-accepted", "AgentAuthoringEnvelopeUnknownMember" },
-        { "duplicate-precedence-blocked", "AgentAuthoringEnvelopeDuplicatePrecedence" },
-        { "wire-disclosure-outcome-accepted", "AgentAuthoringWireDisclosure" },
+        { "unsupported-outcome-dropped", "AgentAuthoringUnsupportedOutcome", false },
+        { "clarification-outcome-dropped", "AgentAuthoringClarificationOutcome", false },
+        { "unsupported-roundtrip-status-poisoned", "AgentAuthoringUnsupportedOutcome", true },
+        { "clarification-roundtrip-status-poisoned", "AgentAuthoringClarificationOutcome", true },
+        { "outcome-shape-accepted", "AgentAuthoringOutcomeShapeConflict", false },
+        { "code-table-accepted", "AgentAuthoringCodeTableRejection", false },
+        { "unknown-member-accepted", "AgentAuthoringEnvelopeUnknownMember", false },
+        { "duplicate-precedence-blocked", "AgentAuthoringEnvelopeDuplicatePrecedence", false },
+        { "wire-disclosure-outcome-accepted", "AgentAuthoringWireDisclosure", false },
     };
 
     private static readonly Lazy<Task<PublishedFixture>> Published = new(PublishFixtureAsync);
@@ -82,6 +84,9 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
 
         execution.Output.Should().Contain($"{AggregateSentinel}:PASS", execution.Output);
         execution.Output.Should().NotContain(":FAIL", execution.Output);
+        // No control is armed in the green run, so no injection witness and no setup failure may appear.
+        execution.Output.Should().NotContain("CONTROL_SETUP_LANDED", execution.Output);
+        execution.Output.Should().NotContain("SETUP-FAIL", execution.Output);
         execution.Output.Should().Contain("CONTROL_PLANE_LOCALIZED_MESSAGE_NATIVEAOT_OK");
         execution.Output.Should().Contain("ActivationReviewCallbackBoundary:PASS");
         execution.Output.Should().Contain("CONTROL_PLANE_REVIEW_HASH_INPUT_NATIVEAOT_OK");
@@ -98,7 +103,8 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
     [MemberData(nameof(GateNegativeControls))]
     public async Task GateNegativeControl_fails_only_its_own_scenario_and_withholds_the_total_sentinel(
         string control,
-        string expectedFailedScenario)
+        string expectedFailedScenario,
+        bool requiresLandedInjection)
     {
         RequireLinuxX64();
         var fixture = await Published.Value;
@@ -113,6 +119,13 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
 
         execution.ExitCode.Should().NotBe(0,
             $"the {control} control asserts a contract rule that holds, so the gate must fail");
+        execution.Output.Should().NotContain($"{expectedFailedScenario}:SETUP-FAIL", execution.Output);
+        execution.Output.Should().NotContain(":SETUP-FAIL", execution.Output);
+        if (requiresLandedInjection)
+        {
+            execution.Output.Should().Contain($"CONTROL_SETUP_LANDED {expectedFailedScenario}", execution.Output);
+        }
+
         execution.Output.Should().Contain($"{expectedFailedScenario}:FAIL", execution.Output);
         execution.Output.Should().NotContain(TotalSentinel);
         execution.Output.Should().NotContain("CONTROL_PLANE_AGENT_AUTHORING_OUTCOME_NATIVEAOT_OK");

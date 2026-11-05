@@ -100,6 +100,14 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
             Console.WriteLine($"{name}:{(passed ? "PASS" : "FAIL")}");
             return passed;
         }
+        catch (GateControlSetupException ex)
+        {
+            // A control that could not reach its injection point has proved nothing about the rule it
+            // names, so it must not surface as the target scenario's expected rejection.
+            Console.Error.WriteLine($"SETUP-FAIL [{name}]: {ex.Message}");
+            Console.WriteLine($"{name}:SETUP-FAIL");
+            return false;
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"FAIL [{name}]: {ex.Message}");
@@ -112,7 +120,7 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
     {
         var result = Parse(EnvelopeUnsupported);
         var restored = control == UnsupportedStatusControl
-            ? RoundTripWithStatus(result, DescriptorAuthoringStatus.Succeeded)
+            ? RoundTripWithStatus("AgentAuthoringUnsupportedOutcome", result, DescriptorAuthoringStatus.Succeeded)
             : RoundTrip(result);
         var json = JsonSerializer.Serialize(
             result, typeof(DescriptorAuthoringResult), DescriptorAuthoringJsonSerializerContext.Default);
@@ -164,7 +172,7 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
     {
         var result = Parse(EnvelopeClarification);
         var restored = control == ClarificationStatusControl
-            ? RoundTripWithStatus(result, DescriptorAuthoringStatus.Succeeded)
+            ? RoundTripWithStatus("AgentAuthoringClarificationOutcome", result, DescriptorAuthoringStatus.Succeeded)
             : RoundTrip(result);
         var json = JsonSerializer.Serialize(
             result, typeof(DescriptorAuthoringResult), DescriptorAuthoringJsonSerializerContext.Default);
@@ -504,28 +512,43 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
 
     /// <summary>
     /// Gate negative control only: the same source-generated round-trip whose wire status has been
-    /// rewritten, so the read-back object carries a status the parser never returned. The helper fails
-    /// outright if the rewrite did not land, which keeps a silently inert control from reading as green.
+    /// rewritten, so the read-back object carries a status the parser never returned. Every setup step
+    /// that could keep that from happening raises <see cref="GateControlSetupException"/>, and a landed
+    /// tamper is attested, so the harness can tell "the injection reached the assertions that then
+    /// refused it" apart from "the injection never happened".
     /// </summary>
     private static DescriptorAuthoringResult RoundTripWithStatus(
+        string scenario,
         DescriptorAuthoringResult result,
         DescriptorAuthoringStatus poisonedStatus)
     {
+        if (result.Status == poisonedStatus)
+            throw new GateControlSetupException(
+                $"the {scenario} control asked for status {poisonedStatus}, which the parsed result already carries");
+
         var context = DescriptorAuthoringJsonSerializerContext.Default;
-        var envelope = JsonNode.Parse(JsonSerializer.Serialize(result, typeof(DescriptorAuthoringResult), context))!.AsObject();
+        var envelope = JsonNode.Parse(
+            JsonSerializer.Serialize(result, typeof(DescriptorAuthoringResult), context))!.AsObject();
         if (envelope["status"] is null)
-            throw new InvalidOperationException("The serialized authoring result carries no status member to poison.");
+            throw new GateControlSetupException(
+                $"the serialized authoring result read by {scenario} carries no status member to tamper");
 
         envelope["status"] = (int)poisonedStatus;
         var poisoned = (DescriptorAuthoringResult?)JsonSerializer.Deserialize(
                 envelope.ToJsonString(), typeof(DescriptorAuthoringResult), context)
-            ?? throw new InvalidOperationException("Poisoned authoring result round-trip returned null.");
+            ?? throw new GateControlSetupException($"the tampered {scenario} envelope deserialized to null");
         if (poisoned.Status != poisonedStatus)
-            throw new InvalidOperationException(
-                $"The status poison did not reach the read-back object (observed {poisoned.Status}).");
+            throw new GateControlSetupException(
+                $"the status tamper did not reach the object {scenario} reads back (observed {poisoned.Status})");
 
+        // The witness the harness requires: the tampered object really arrived at the target assertions,
+        // so a broken setup can never be mistaken for those assertions refusing it.
+        Console.WriteLine($"CONTROL_SETUP_LANDED {scenario} status={result.Status}->{poisoned.Status}");
         return poisoned;
     }
+
+    /// <summary>Raised when a gate negative control cannot reach its own injection point.</summary>
+    internal sealed class GateControlSetupException(string message) : Exception(message);
 
     private const string Intent =
         "Make Asset maintenance skip the human review stage using a condition-scoring algorithm.";
