@@ -232,6 +232,6 @@ P1 表示下一轮主链可信度工作，尚无生产事故证据，不沿用�
 | 1 | [#123](https://github.com/OrchesAdam/CrestCreates/issues/123) NativeAOT 门禁 / [#124](https://github.com/OrchesAdam/CrestCreates/issues/124) UnitOfWork / [#125](https://github.com/OrchesAdam/CrestCreates/issues/125) CAP | 待 #122 合并后启动（受 #121 最多 2 个实施 PR 约束） |
 | 2 | [#126](https://github.com/OrchesAdam/CrestCreates/issues/126) LocalEvent / [#127](https://github.com/OrchesAdam/CrestCreates/issues/127) RabbitMQ / [#128](https://github.com/OrchesAdam/CrestCreates/issues/128) CRUD JSON | 依赖 #123 |
 | 3 | [#129](https://github.com/OrchesAdam/CrestCreates/issues/129) Dynamic API 退出 / [#130](https://github.com/OrchesAdam/CrestCreates/issues/130) ORM 矩阵 / [#131](https://github.com/OrchesAdam/CrestCreates/issues/131) 能力地图 | 依赖前序 |
-| 候选 | [#132](https://github.com/OrchesAdam/CrestCreates/issues/132) Audit retention 设计裁定 | 已合并（PR #157 → `9909365a`，2026-11-03） |
+| 候选 | [#132](https://github.com/OrchesAdam/CrestCreates/issues/132) Audit retention 设计裁定 | 已合并（PR #157 → `9909365a`，2026-10-30） |
 | 新增（本项裁定） | [#133](https://github.com/OrchesAdam/CrestCreates/issues/133) B12 unsupported intent negative case | 已合并并关闭（PR #158 → `91d6574e`，2026-11-03；R1–R4 闭环；见 §5.1） |
 | 新增（#133 R3 裁定的后续） | [#159](https://github.com/OrchesAdam/CrestCreates/issues/159) 显式 unsupported / needs-clarification 终态（`8a.v1`） | **已合并**（PR #160 → master `1bf4a7e7`，2026-11-05），Issue #159 以 completed 关闭；S0–S5 全部验收。遗留独立跟进：`NeedsClarification` 的 live、系统 SDK 升级与七个门禁新 SDK 复验、全方案环境与未完成基线核验的证据限制 |
