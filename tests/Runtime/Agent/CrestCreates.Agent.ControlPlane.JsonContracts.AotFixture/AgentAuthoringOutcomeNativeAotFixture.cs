@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Authoring.Abstractions.Json;
@@ -36,11 +37,15 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
     private const string DisclosureControl = "wire-disclosure-outcome-accepted";
     private const string UnsupportedDroppedControl = "unsupported-outcome-dropped";
     private const string ClarificationDroppedControl = "clarification-outcome-dropped";
+    private const string UnsupportedStatusControl = "unsupported-roundtrip-status-poisoned";
+    private const string ClarificationStatusControl = "clarification-roundtrip-status-poisoned";
 
     internal static readonly string[] ControlNames =
     [
         UnsupportedDroppedControl,
         ClarificationDroppedControl,
+        UnsupportedStatusControl,
+        ClarificationStatusControl,
         ShapeAcceptedControl,
         CodeTableAcceptedControl,
         UnknownMemberControl,
@@ -106,7 +111,9 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
     private static bool UnsupportedOutcome(string? control)
     {
         var result = Parse(EnvelopeUnsupported);
-        var restored = RoundTrip(result);
+        var restored = control == UnsupportedStatusControl
+            ? RoundTripWithStatus(result, DescriptorAuthoringStatus.Succeeded)
+            : RoundTrip(result);
         var json = JsonSerializer.Serialize(
             result, typeof(DescriptorAuthoringResult), DescriptorAuthoringJsonSerializerContext.Default);
 
@@ -128,10 +135,12 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
                 && diagnostic.Severity == SeverityLevel.Warning);
 
         // The control asserts that the source-generated metadata dropped the structured outcome, which
-        // real code contradicts: the round-trip has to keep both reasons and their refs.
+        // real code contradicts: the round-trip has to keep the terminal status itself, both reasons and
+        // their refs. Reading a refusal back as `Succeeded` is the failure this scenario exists to catch.
         var roundTrip = control == UnsupportedDroppedControl
             ? restored.Unsupported is null
-            : restored.Unsupported is not null
+            : restored.Status == DescriptorAuthoringStatus.UnsupportedIntent
+                && restored.Unsupported is not null
                 && restored.Unsupported.Reasons.Count == 2
                 && restored.Unsupported.Reasons[0].Code == "CAPABILITY_UNSUPPORTED"
                 && restored.Unsupported.Reasons[0].Message == UnsupportedReason
@@ -154,7 +163,9 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
     private static bool ClarificationOutcome(string? control)
     {
         var result = Parse(EnvelopeClarification);
-        var restored = RoundTrip(result);
+        var restored = control == ClarificationStatusControl
+            ? RoundTripWithStatus(result, DescriptorAuthoringStatus.Succeeded)
+            : RoundTrip(result);
         var json = JsonSerializer.Serialize(
             result, typeof(DescriptorAuthoringResult), DescriptorAuthoringJsonSerializerContext.Default);
 
@@ -174,9 +185,12 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
             && result.Diagnostics[0].Code == DescriptorAuthoringDiagnosticCodes.IntentNeedsClarification
             && result.Diagnostics[0].Severity == SeverityLevel.Warning;
 
+        // Same discipline as the refusal scenario: the read-back has to carry the clarification status,
+        // not merely a clarification-shaped payload.
         var roundTrip = control == ClarificationDroppedControl
             ? restored.Clarification is null
-            : restored.Clarification is not null
+            : restored.Status == DescriptorAuthoringStatus.NeedsClarification
+                && restored.Clarification is not null
                 && restored.Clarification.Questions.Count == 1
                 && restored.Clarification.Questions[0].Id == "risk-threshold"
                 && restored.Clarification.Questions[0].ReasonCode == "MISSING_POLICY_INPUT"
@@ -486,6 +500,31 @@ internal static class AgentAuthoringOutcomeNativeAotFixture
         return (DescriptorAuthoringResult?)JsonSerializer.Deserialize(
                 json, typeof(DescriptorAuthoringResult), context)
             ?? throw new InvalidOperationException("Authoring result round-trip returned null.");
+    }
+
+    /// <summary>
+    /// Gate negative control only: the same source-generated round-trip whose wire status has been
+    /// rewritten, so the read-back object carries a status the parser never returned. The helper fails
+    /// outright if the rewrite did not land, which keeps a silently inert control from reading as green.
+    /// </summary>
+    private static DescriptorAuthoringResult RoundTripWithStatus(
+        DescriptorAuthoringResult result,
+        DescriptorAuthoringStatus poisonedStatus)
+    {
+        var context = DescriptorAuthoringJsonSerializerContext.Default;
+        var envelope = JsonNode.Parse(JsonSerializer.Serialize(result, typeof(DescriptorAuthoringResult), context))!.AsObject();
+        if (envelope["status"] is null)
+            throw new InvalidOperationException("The serialized authoring result carries no status member to poison.");
+
+        envelope["status"] = (int)poisonedStatus;
+        var poisoned = (DescriptorAuthoringResult?)JsonSerializer.Deserialize(
+                envelope.ToJsonString(), typeof(DescriptorAuthoringResult), context)
+            ?? throw new InvalidOperationException("Poisoned authoring result round-trip returned null.");
+        if (poisoned.Status != poisonedStatus)
+            throw new InvalidOperationException(
+                $"The status poison did not reach the read-back object (observed {poisoned.Status}).");
+
+        return poisoned;
     }
 
     private const string Intent =

@@ -44,6 +44,8 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
     {
         { "unsupported-outcome-dropped", "AgentAuthoringUnsupportedOutcome" },
         { "clarification-outcome-dropped", "AgentAuthoringClarificationOutcome" },
+        { "unsupported-roundtrip-status-poisoned", "AgentAuthoringUnsupportedOutcome" },
+        { "clarification-roundtrip-status-poisoned", "AgentAuthoringClarificationOutcome" },
         { "outcome-shape-accepted", "AgentAuthoringOutcomeShapeConflict" },
         { "code-table-accepted", "AgentAuthoringCodeTableRejection" },
         { "unknown-member-accepted", "AgentAuthoringEnvelopeUnknownMember" },
