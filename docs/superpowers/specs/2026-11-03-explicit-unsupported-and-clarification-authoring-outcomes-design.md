@@ -1,7 +1,7 @@
 # Explicit Unsupported / Needs-Clarification Authoring Outcomes
 
 > Date: 2026-11-03
-> Status: Implemented on PR #160 (rev.6, S0–S4 已放行/交付；§12 已按执行证据勾选，S5 带凭据 live 仍 pending，契约与 23 行矩阵不变)
+> Status: Implemented on PR #160 (rev.7, S0–S3 已由实施审计放行；S4 已交付并按 R1 修订两项文档发现、待复审；§12 已按执行证据勾选，S5 带凭据 live 已获准单次执行、尚未运行，契约与 23 行矩阵不变)
 > Issue: #159
 > Builds on: Phase 7g LLM-backed descriptor authoring adapter (`7g.v1`), the 2026-09-20 additive `baseVersion` input, #133 / PR #158 B12 evidence (merged to master as `91d6574e` on 2026-11-03)
 
@@ -592,6 +592,18 @@ paused), and merging stays with the maintainer.
 
 ## Changelog
 
+- **rev.7 (2026-11-05, S4 实施审计 R1)** — two documentation findings, no contract, matrix, mechanism or status-member
+  change. P2: the usage guide stated "at least one draft" for the whole `drafts` family, which is false for `Blocked` —
+  the parser returns the empty plan and empty draft set (`PlanId = ""`, `DraftSetId = ""`) with zero drafts both when the
+  prompt hash mismatches and when any item fails atomic validation, while only the success path binds
+  `DraftSetId = plan.PlanId` with `items` ≥1. The guide now separates the accepted-payload row from the rejection row and
+  keeps the atomic-rejection sentence so `drafts` is not read as a draft guarantee. The empty identities the guide now
+  states had no test anchor, so two existing `Blocked` cases assert them and the success case asserts
+  `DraftSetId = Plan.PlanId`; giving `Blocked` placeholder-style identities instead reddens exactly those two cases
+  (mutation M5: 2 failed / 137 passed, reverted — the `src/` diff stays empty). P3: the new Phase 7g appendix claimed
+  the old contract inferred drafts from the absence of `items`; the shipped `7g.v1` parser refused a missing or empty
+  `items` array as `InvalidProviderOutput`, and what `7g.v1` actually lacked was an explicit `outcome` discriminator. The
+  appendix is corrected to that wording; the Phase 7g body above it and all other historical records stay untouched.
 - **rev.6 (2026-11-05, S4 文档与状态同步)** — no contract, matrix or mechanism change. Records what S1–S3 executed:
   §12 items are checked against recorded results (unit 139/139 with the full 23-row matrix, Asset E2E with local
   PostgreSQL 128 passed / 2 skipped, Samples.Tests 37/37, native gate 11/11 on linux-x64 with per-scenario named

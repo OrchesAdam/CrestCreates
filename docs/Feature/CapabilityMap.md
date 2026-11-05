@@ -376,7 +376,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 
 ## 8. #159 显式 unsupported / needs-clarification 终态（交付记录）
 
-日期：2026-11-05。设计：[设计 rev.5](../superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)、
+日期：2026-11-05。设计：[设计 rev.7](../superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)、
 计划：[实施计划与切片日志](../superpowers/plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md)。
 本节只记录交付事实与支持声明，不重评 §2/§4 的定位与导航结论，不复制 ORM Provider 矩阵，也不改变 §5 对 fixture 项目的单列口径。
 

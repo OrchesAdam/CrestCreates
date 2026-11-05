@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，S3 已实施并由 R3 放行（R1 补读回状态断言、R2 把「注入落地」与「目标拒绝」分成两套判据；原生门禁 linux-x64 11/11）。S4 已完成文档与状态同步——`usage-guide.md`、`CapabilityMap.md` §8、`memory.md`、`AGENTS.md`、§5.2 B12 改判、#123 证据矩阵新行与 7g spec 附录指针，见「S4 实施日志」；**S5 带凭据 live 仍 pending，Issue #159 不据此关闭**）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.7；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，S3 已实施并由 R3 放行（R1 补读回状态断言、R2 把「注入落地」与「目标拒绝」分成两套判据；原生门禁 linux-x64 11/11）。S4 已完成文档与状态同步——`usage-guide.md`、`CapabilityMap.md` §8、`memory.md`、`AGENTS.md`、§5.2 B12 改判、#123 证据矩阵新行与 7g spec 附录指针，见「S4 实施日志」。实施审计 S4 R1 发现 1 项 P2（指南把 `Blocked` 与成功态一起写成「草稿 ≥1」）与 1 项 P3（7g 附录把历史写成「缺少 `items` 时推断 drafts」），两项均已修订，见「S4 实施审计 R1 修复记录」，S4 待复审；**S5 带凭据 live 仍 pending（已获准单次执行，尚未运行），Issue #159 不据此关闭**）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -567,3 +567,47 @@ Issue #159 因此保持 open，不以单元/原生证据替代收口。
 - 未重评 §4 项目索引的导航行，未新增任何能力地图条目以外的背书；未修改 `CapabilityMapCoverageArchitectureTests` 的索引区内容。
 - 未升级系统 RPM 工具链，未把其余七个原生门禁改写成 10.0.114 证据。
 - 未改写 #133/7g 等历史文档的事实与裁定原文；本片只在它们旁边加「已被取代/后续状态」指针。
+
+## S4 实施审计 R1 修复记录（2026-11-05）
+
+审查者发现 **1 项 P2 + 1 项 P3**，S0–S3 放行保持；两项都是我在 S4 里写下的表述失准，不是代码缺陷（`src/` 差异为 0 行）。裁定：P2 按「成功载荷与拒绝结果分开描述、保留原子拒绝语义」修；P3 只改本次新增附录的历史说明，7g 正文原样保留。
+
+### I-45 P2：指南把 `Blocked` 混进「草稿 ≥1」
+
+事实核对（`src/Runtime/Agent/CrestCreates.Agent.Authoring/Parsing/JsonDescriptorAuthoringOutputParser.cs`，逐行读回）：
+
+| 形状 | 代码位置 | 身份与草稿数 |
+| --- | --- | --- |
+| `drafts` 成功 | :273-276 要求 `items` ≥1；:283-292 `TryParseItem` 返回 true 必产出非 null draft；:302 `PlanId = dto.Plan.PlanId ?? plan-<hash 前 16>`；:310 `DraftSetId = plan.PlanId` | 草稿 **≥1**，`DraftSetId == Plan.PlanId` |
+| `drafts` 拒绝（hash） | :118-126 → `CreateResult(Blocked, emptyPlan, emptyDraftSet, …)` | 草稿 0，`PlanId = ""`、`DraftSetId = ""` |
+| `drafts` 拒绝（任一 item） | :283-286 同一出口形状 | 草稿 0，同上 |
+| `unsupported` / `needsClarification` | :410-411 / :522-523 | 草稿 0，固定占位身份 `plan_intent_unsupported`/`draftset_intent_unsupported`、`plan_needs_clarification`/`draftset_needs_clarification` |
+
+修法：
+- `docs/Feature/AgentControlPlane/usage-guide.md` §18.5 载荷表把 `drafts` 拆成「成功」与「`Blocked`」两行，表前一句改为「三种 `outcome` 的形状互斥，但 **`outcome` 与 `Status` 不是一一对应**」，表后保留原子拒绝段落并写明「`Status` 是 drafts 系」≠「一定拿到草稿」；空串身份明确「不是占位值」，与两终态的占位身份区分。
+- §18.2 的 `switch`：成功分支注上「Drafts ≥1 且 `DraftSetId == Plan.PlanId`」，`Blocked` 分支补「草稿 0 + 空串身份、不返回部分草稿」。
+- `AGENTS.md` 平台能力 `8a.v1` 条补同一句形状区分（工程指令面不得留错）。
+- 判别锚点（本片的 `tests/` 改动，非生产行为改动）：`OutputParserTests.UnknownDescriptorKind_Returns_Blocked` 加 `PlanId`/`DraftSetId` 空串 + 草稿空断言；`OutputParserEnvelopeMatrixTests.Row11_…_IsBlocked` 加同一组空串断言；`OutputParserTests.ValidHumanTaskItem_Returns_Succeeded` 加 `DraftSetId == Plan.PlanId`。此前只有 `Drafts.Should().BeEmpty()`，指南新写的「空串身份」在测试里没有对应断言。
+
+### I-46 P3：7g spec 新附录把历史写错
+
+- 原写「`7g.v1`: an envelope whose drafts were inferred from the absence of `items`」。核对被取代的 parser（`git show 8a8a7409^:…/Parsing/JsonDescriptorAuthoringOutputParser.cs` 步骤 5）：`items` 缺失或为空是 **`InvalidProviderOutput` + "Provider output contains no items."**，不是 drafts 的推断来源。
+- 改为：`7g.v1` **没有显式 `outcome` 判别器**，草稿信封是唯一被接受的形状，`items` 缺失/为空按输入形状错误拒绝——不支持的意图除了报一个输入形状错误之外没有别的可说。
+- 7g 正文（含 `baseVersion` 附录）与其余历史文档一字未改；附录底部设计指针标签随 rev 号更新（rev.5 → rev.7），本计划、`memory.md`、`CapabilityMap.md` §8、§5.2 的同一指针同步。
+
+### I-47 自查中另发现的一处状态自相矛盾（非审查者发现，如实记）
+
+`memory.md` 顶部 #159 条目是 S4 落的，但其「Still pending」仍写「S4 文档/状态同步待办」——同一条目内自相矛盾。已改为「S4 已交付、按 R1 修订后待复审」，并把 S5 写成维护者已获准的单次范围（现有 B12 入口、16384 预算、凭据不打印/入库、仅 `/tmp` 元数据、不自动重试、结果照原样记录）。`AGENTS.md` 当前平台状态与 follow-up §6 任务表的状态文字同步为「S4 已交付待复审、S5 pending（已获准单次执行）」。
+
+### I-48 R1 执行结果（真实计数，SDK 10.0.114 入口）
+
+| 命令 | 结果 |
+| --- | --- |
+| `dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests --filter CapabilityMap` | 7 通过 / 0 失败 |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests`（含 I-45 三处新断言） | **139 通过 / 0 失败** |
+| 变异 M5：把 `Blocked` 的两条出口改为携带 `plan_blocked`/`draftset_blocked` 身份（即指南被写错的那种读法） | 恰 **2 条目标用例打红**（`Row11_SingleHashMismatch_WithValidClarificationBody_IsBlocked`、`UnknownDescriptorKind_Returns_Blocked`），其余 137 通过 |
+| 还原后复跑 | 139 通过 / 0 失败，`git diff -- src/` = **0 行** |
+| `src/` 与 `tests/` 差异 | `src/` 未改；`tests/` 仅两处断言强化（上表），无生产行为改动；原生门禁本轮未重发（fixture 未变，证据仍为 S3 的 11/11） |
+
+未做：仍未执行 S5（未读取凭据、未发模型请求）；未把其余七个原生门禁改写为 10.0.114 证据；未关闭 Issue #159 或合并 PR #160。
+

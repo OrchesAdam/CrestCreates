@@ -310,7 +310,7 @@ BuildTasks 编译前链：
 - 认证授权不要引入新的真相来源，不要复制 token / claims / permission 逻辑，优先复用现有身份、权限、租户上下文主链。
 - Agent Control Plane 是治理面，不是运行时执行面。它可以审查、预览、提交激活请求，但不能绕过授权、批准自身变更、直接执行 runtime handler 或突变 runtime registry。
 - Agent 治理面主链是 Authoring → deterministic review → Control Plane：authoring 只产出候选草稿；正式契约在 `src/Runtime/Agent/CrestCreates.Agent.Authoring*`、`CrestCreates.Agent.ControlPlane*` 与 `Metadata/Draft/CrestCreates.DescriptorDraft*`。review artifact 与 package/evidence artifact 持久化只提供完整性与证据绑定，不构成批准；activation request/gate 当前为内存实现，不等于 durable activation。
-- Authoring 线契约是 `8a.v1`（#159）：`outcome` 是必需判别式，`drafts` / `unsupported` / `needsClarification` 三终态互斥，禁用成员按**是否出现**判定（`null`/`{}`/`[]`/有内容同等被拒），两张码表封闭且 Ordinal 比较。解析固定为两阶段：Stage A 读原始信封事实（解码失败、逐层重复、未知/别名成员、presence、Kind），Stage B 用严格 source-generated DTO 投影值——顺序决定归因，不得调换。新增终态必须是「词表 + 码表 + JSON 根闭包 + 原生场景」同批变更，不允许只加状态名。**`Blocked` + intent-level 诊断码是历史归因，永远不计为 `8a.v1` 覆盖**；覆盖只接受显式终态 + 合法码 + 非空条目 + 零草稿/零评审通过/零保存/零 gate 调用，且「不支持意图得到 drafts」仍是拒绝。
+- Authoring 线契约是 `8a.v1`（#159）：`outcome` 是必需判别式，`drafts` / `unsupported` / `needsClarification` 三终态互斥，禁用成员按**是否出现**判定（`null`/`{}`/`[]`/有内容同等被拒），两张码表封闭且 Ordinal 比较。`outcome` 与 `Status` 不一一对应：只有成功态（`Succeeded`/`SucceededWithDiagnostics`）绑定 `DraftSetId = Plan.PlanId` 且草稿 ≥1；`Blocked`（hash 不匹配或任一 item 原子校验失败）零草稿、`PlanId`/`DraftSetId` 为空串，两个显式终态才是固定占位身份。解析固定为两阶段：Stage A 读原始信封事实（解码失败、逐层重复、未知/别名成员、presence、Kind），Stage B 用严格 source-generated DTO 投影值——顺序决定归因，不得调换。新增终态必须是「词表 + 码表 + JSON 根闭包 + 原生场景」同批变更，不允许只加状态名。**`Blocked` + intent-level 诊断码是历史归因，永远不计为 `8a.v1` 覆盖**；覆盖只接受显式终态 + 合法码 + 非空条目 + 零草稿/零评审通过/零保存/零 gate 调用，且「不支持意图得到 drafts」仍是拒绝。
 - 能力地图与长尾裁定（#131）：`docs/Feature/CapabilityMap.md` 是「项目存在」与「能力交付」的唯一导航面。每条记录四维分开写：定位 / 功能状态 / 执行证据 / 处理结论。新增生产 csproj 必须同时在地图项目索引登记并附准入理由（为什么既有项目不能承载、层次与依赖边界、消费者或静态聚合目的、唯一装配入口、验证方式、支持级别、责任、未交付时的退出条件），由 `CapabilityMapCoverageArchitectureTests` 强制；缺记录即门禁失败。归档项落 `99_RecycleBin/<issue-slug>/` 并保留原相对路径与 README，由 `ArchivedProjectRegressionArchitectureTests` 禁止回流。实验能力（FileManagement 本地/内存元数据、PluginSystem 动态 DLL 装载）不得被宣传为已交付平台能力；PluginSystem 动态装载执行面属 JIT-only，功能执行未验证。地图不复制 ORM 支持表，ORM 组合证据唯一来源仍是 `docs/Feature/OrmProviderSupportMatrix.md`。
 - TenantId 是租户上下文唯一主键（#131）：`ICurrentTenant.Id` 为权威；`ITenantInfo.Name` / `Tenant.Name` / `TenantName` 只能用于展示、日志、DTO 与名称检索。名称可以进入解析入口，但必须经既有 tenant repository/provider 查询得到实体、保留入口既有 active/lifecycle 校验，再以实体 Id 进入上下文、claim、授权/隔离与缓存/连接分区；禁止 `TenantId = tenant.Name`、`ChangeAsync(name)`、名称写入 `tenantid`/`tenant_id` claim、名称进入过滤表达式或缓存前缀；查不到 Id 时不得退回名称或 host。守卫位于 `tests/Boundary/CrestCreates.DependencyBoundaries.Tests/TenantIdentityArchitectureTests`：按项目真实引用闭包分析、名称源按成员身份绑定、身份出口由端口表加参数名网覆盖、有限值流加同项目与第一方跨项目 helper 内联、权威来源结构断言锁定主链；敏感节点绑定失败出 TI900，不静默跳过。它是仓库级有限模式守卫，不是通用安全数据流分析器；生成器模板字符串不算已绑定符号，实际生成端点仍由各自 fixture 断言。Resolver 接受 `X-Tenant-Id: <名称>` 是合法兼容入口，不视为违规，也不得为它新增第二套身份真相来源。
 - JsonContracts 工具链（`src/Tooling/CrestCreates.JsonContracts.BuildTasks`、`.BuildTasks.Core`、`.Tool`）：构建期生成确定性 JSON contract roots，由官方 STJ Source Generator 消费；禁止 runtime reflection / scanner fallback。属构建期 Tooling，不是运行时组件。
@@ -400,8 +400,10 @@ TestBase
   投影的单条主链，`7g.v1` 不留兼容窗。消费者侧 Asset oracle 采两层判定：**历史归因（`Blocked` + intent-level
   码）不计为新契约覆盖**。证据：单元 139/139（§10.1 全 23 行）、Asset E2E 需 PG 128 通过/2 跳过、样例
   golden scenario 37/37、原生门禁 linux-x64 11/11（逐场景点名 + 9 条独立负控 + 未知控制名拒绝）。
-  待办：S4 文档/状态同步（本条即其一部分）与 S5 带凭据真实模型答题——**S5 未执行前 Issue #159 保持 open，
-  不以单元/原生证据替代收口**。支持声明边界见上文 AOT 分层与本文件「Authoring 线契约是 `8a.v1`」条。
+  待办：S5 带凭据真实模型答题（已获准单次执行：现有 B12 入口、16384 输出预算、凭据不打印/入库、仅 `/tmp`
+  元数据、不自动重试、结果不论正反照原样记录）——**S5 未执行前 Issue #159 保持 open，不以单元/原生证据替代收口**。
+  S4 文档与状态同步已交付（本节即其一部分），按实施审计 R1 修订两项文档表述后待复审。
+  支持声明边界见上文 AOT 分层与本文件「Authoring 线契约是 `8a.v1`」条。
 
 - 能力地图与 TenantId 架构守卫（#131，PR #155 合并于 `9c39e187`）：`docs/Feature/CapabilityMap.md` 为项目/能力导航唯一入口，7 个无消费者项目 + 通用 Draft 实验 + 死契约归档至 `99_RecycleBin/issue-131-capability-map/`；`TenantIdentityArchitectureTests` 以 evaluated MSBuild 输入（缓存仅在依赖可证明完整时启用）扫描 active src/sample 项目，0 违规 0 覆盖失败。有限模式守卫，不是通用安全分析器。
 - Tenant Management：主链已基本闭环。

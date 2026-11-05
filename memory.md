@@ -20,11 +20,11 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
-## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S3 released; PR #160 open)
+## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S3 released; S4 delivered, awaiting R1 re-review; PR #160 open)
 
 - Branch `docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`, PR #160 — open,
   not merged; CI manually disabled; local execution is the gate. Design
-  [rev.5](docs/superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)
+  [rev.7](docs/superpowers/specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)
   and slice log [plan](docs/superpowers/plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md).
   S0 released at design R4 (D1–D16 confirmed), S1 at implementation R2, S2 at R2, S3 at R3.
 - Contract `8a.v1` replaces `7g.v1` outright (no compatibility window): a required `outcome`
@@ -65,9 +65,17 @@ never deleted; never output credentials.
   and still hits `error NU1903` (GHSA-p3jp-9v83-76w9, fixed by 10.0.14); upgrading the system RPM is an
   environment maintenance item, and any task/CI reusing these gates must select 10.0.114 explicitly instead of
   relying on a bare `dotnet`.
-- **Still pending**: S4 documentation/status synchronization (this entry plus capability map, AGENTS.md,
-  usage guide, §5.1 B12 verdict and the #123 evidence matrix rows) and S5 — one credentialed DeepSeek run of
-  the B12 unsupported intent against `8a.v1`. Issue #159 stays open and is not closed on unit/native evidence.
+- Result shapes are not one-to-one with `outcome`: `drafts` + `Succeeded`/`SucceededWithDiagnostics` binds
+  `DraftSetId = Plan.PlanId` with at least one draft, while `drafts` + `Blocked` (prompt hash mismatch, or any item
+  failing atomic per-item validation) returns the empty plan and empty draft set with **zero drafts and empty-string
+  identities** — not the terminal placeholders. The usage guide states both rows separately and keeps the
+  atomic-rejection sentence so `drafts` is never read as a draft guarantee.
+- **Still pending**: S5 — one credentialed DeepSeek run of the B12 unsupported intent against `8a.v1`, pre-authorized
+  by the maintainer for a single execution (existing B12 entry, 16384 output-token budget, credentials never printed
+  or committed, `/tmp` metadata only, no automatic retry, verdict recorded either way without reclassification).
+  S4 documentation/status synchronization is delivered (this entry plus capability map, AGENTS.md, usage guide,
+  §5.2 B12 re-adjudication and the #123 evidence matrix rows) and awaits re-review after R1. Issue #159 stays open
+  and is not closed on unit/native evidence.
 
 ## 2026-10-27 — Issue #132 audit retention governance (V1 implemented; merge pending)
 

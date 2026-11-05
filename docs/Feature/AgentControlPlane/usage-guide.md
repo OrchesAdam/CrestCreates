@@ -2141,12 +2141,13 @@ switch (result.Status)
     case DescriptorAuthoringStatus.Succeeded:
     case DescriptorAuthoringStatus.SucceededWithDiagnostics:
         // result.Plan — DescriptorAuthoringPlan (PlanId, IntentText, PlannedDescriptorRefs, Assumptions)
-        // result.DraftSet — DescriptorDraftSet (Drafts 列表)
+        // result.DraftSet — DescriptorDraftSet（Drafts **≥1 条**，DraftSetId == Plan.PlanId）
         // result.Diagnostics — 可能有非阻塞诊断
         break;
 
     case DescriptorAuthoringStatus.Blocked:
         // 治理边界拒绝（prompt hash mismatch、authority claim、unsupported operation 等）
+        // 草稿 0：Plan.PlanId 与 DraftSet.DraftSetId 为空串，DraftSet.Drafts 为空——整体拒绝，无部分草稿
         break;
 
     case DescriptorAuthoringStatus.UnsupportedIntent:
@@ -2217,13 +2218,16 @@ var recordedClient = new RecordedDescriptorAuthoringModelClient(fixtures);
 | Stage B | 严格 DTO（`AllowDuplicateProperties=false`、`PropertyNameCaseInsensitive=false`）投影值；`payload` 内层字段名不参与信封词表，但重复仍由 Stage A 递归捕获 | `InvalidProviderOutput` |
 | 终态构建 | 条目数与边界、归一化后非空、两张闭码表、question id 字符集与唯一性 | `InvalidProviderOutput` |
 
-三个终态各带自己的证据，且互斥：
+三种 `outcome` 的形状互斥，但 **`outcome` 与 `Status` 不是一一对应**：`drafts` 一封信封既可能是成功载荷，也可能是整体拒绝，两行载荷形状不同——
 
 | `outcome` | `Status` | 载荷 | 固定占位 |
 |-----------|----------|------|---------|
-| `drafts` | `Succeeded` / `SucceededWithDiagnostics` / `Blocked` | `Plan` + `DraftSet.Drafts`（≥1 条） | — |
+| `drafts` | `Succeeded` / `SucceededWithDiagnostics` | `Plan`（`PlanId` 取自信封或 fallback 到 prompt hash 前 16 字符）+ `DraftSet.Drafts`，**≥1 条**且 `DraftSetId == PlanId` | — |
+| `drafts` | `Blocked` | **草稿 0**：任一 item 校验失败或 hash 不匹配时，返回空 `Plan`（`PlanId = ""`）与空 `DraftSet`（`DraftSetId = ""`）+ 结构化诊断码 | 无占位身份——空串不是占位值，不得当作草稿集合标识 |
 | `unsupported` | `UnsupportedIntent` | `Unsupported.Reasons`：`code` ∈ {`CAPABILITY_UNSUPPORTED`, `OPERATION_UNSUPPORTED`, `GOVERNANCE_BOUNDARY`}，`message` 非空，`evidenceRefs` 0..8 | `PlanId=plan_intent_unsupported`、`DraftSetId=draftset_intent_unsupported`，草稿恒 0 |
 | `needsClarification` | `NeedsClarification` | `Clarification.Questions`：`reasonCode` ∈ {`MISSING_POLICY_INPUT`, `AMBIGUOUS_TARGET`, `CONFLICTING_REQUIREMENTS`, `MISSING_REFERENCE_SELECTION`}，`id` 唯一且属 `[A-Za-z0-9._-]{1,64}`，`question` 非空，`missingInputs` 1..8、`candidateValues` 0..8 | `PlanId=plan_needs_clarification`、`DraftSetId=draftset_needs_clarification`，草稿恒 0 |
+
+`drafts` 的原子拒绝语义保持不变：信封里只要有任何一条 item 校验失败，整个结果就是 `Blocked` 且**不返回部分草稿**——所以「`Status` 是 drafts 系」不等于「一定拿到草稿」，判定草稿数量必须看 `Status` 属于成功态还是 `Blocked`。
 
 边界（超限即 `InvalidProviderOutput`，判定在归一化后的形态上）：两个终态各 1..4 条；文本 1..400 字符；引用列表 0..8 条、每条 1..120 字符；`missingInputs` 至少 1 条。码表按 Ordinal 比较，大小写不同的同码同样越界。
 

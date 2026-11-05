@@ -232,6 +232,8 @@ public sealed class OutputParserEnvelopeMatrixTests
         result.Status.Should().Be(DescriptorAuthoringStatus.Blocked,
             "integrity is checked before semantics, so a wrong hash is never read as a clarification");
         result.DraftSet.Drafts.Should().BeEmpty();
+        result.Plan.PlanId.Should().BeEmpty();
+        result.DraftSet.DraftSetId.Should().BeEmpty();
         result.Clarification.Should().BeNull();
         result.Diagnostics.Should().ContainSingle(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.PromptHashMismatch

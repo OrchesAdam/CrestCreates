@@ -748,9 +748,11 @@ rewriting parsed drafts in sample code. See the 2026-09-15 authoring update plan
 
 ## Appendix — superseded wire contract (2026-11-05)
 
-The wire contract described in this document (`7g.v1`: an envelope whose drafts were inferred from the
-absence of `items`) **is no longer the accepted contract**. Issue #159 replaced it with `8a.v1`, which makes
-the terminal outcome explicit rather than inferable:
+The wire contract described in this document (`7g.v1`) **is no longer the accepted contract**. It had **no explicit
+outcome discriminator**: a draft envelope was the only accepted answer shape, and the parser rejected a missing or
+empty `items` array as `InvalidProviderOutput` ("Provider output contains no items.") instead of mapping it to any
+terminal outcome — so an unsupported intent had nothing to say except an input-shape error. Issue #159 replaced the
+contract with `8a.v1`, which makes the terminal outcome explicit rather than inferable:
 
 - a required `outcome` discriminator — `drafts` | `unsupported` | `needsClarification`;
 - two new terminal statuses `DescriptorAuthoringStatus.UnsupportedIntent` and
@@ -768,7 +770,7 @@ evidence — a `7g.v1` answer is now refused as `InvalidProviderOutput`, and the
 `Blocked` + intent-level diagnostic route is attribution only, never coverage of `8a.v1`.
 
 Current contract and evidence:
-[design rev.5](2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md),
+[design rev.7](2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md),
 [implementation slice log](../plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md),
 capability record `docs/Feature/CapabilityMap.md` §8, native scenario row in
 `docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md`.

@@ -74,6 +74,9 @@ public sealed class OutputParserTests
         var result = _parser.Parse(json, _validContext);
 
         result.Status.Should().Be(DescriptorAuthoringStatus.Blocked);
+        result.Plan.PlanId.Should().BeEmpty("a Blocked result carries no plan identity; the empty string is not the explicit terminals' placeholder value");
+        result.DraftSet.DraftSetId.Should().BeEmpty();
+        result.DraftSet.Drafts.Should().BeEmpty("atomic rejection returns no partial drafts");
         result.Diagnostics.Should().Contain(d =>
             d.Code == DescriptorAuthoringDiagnosticCodes.UnknownDescriptorKind);
     }
@@ -123,6 +126,7 @@ public sealed class OutputParserTests
 
         result.Status.Should().Be(DescriptorAuthoringStatus.Succeeded);
         result.DraftSet.Drafts.Should().HaveCount(1);
+        result.DraftSet.DraftSetId.Should().Be(result.Plan.PlanId);
         result.Plan.PlannedDescriptorRefs.Should().HaveCount(1);
     }
 
