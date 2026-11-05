@@ -634,7 +634,7 @@ Issue #159 因此保持 open，不以单元/原生证据替代收口。
 | 真实请求发生 | HTTP **200**、`ChoicesCount=1`、`FinishReason=stop`、`PromptTokens=2386`、`CompletionTokens=555`、`ReasoningTokens=261`、content 1192 字符 / reasoning 1348 字符；`OutputBudget = 16384`、`isValid=true`、`OUTPUT_BUDGET_ACCEPTED`（非预算耗尽、非 provider 失败） |
 | provider / model 身份 | requestedModel `deepseek-v4-flash`、observedProvider `deepseek`、observedModel `deepseek-flash` |
 | 显式终态 | `Authoring.status = UnsupportedIntent`，`Semantic.Result = ExplicitUnsupportedResult`（oracle 的新契约覆盖标签，非历史归因） |
-| 合法码表条目 + 非空条目 | `ExplicitOutcomeEntryCount = 3`；逐条诊断码 `AUTHORING_INTENT_UNSUPPORTED` ×3、逐条分类 `ExplicitUnsupportedIntent` ×3——与 spec §6「`unsupported → UnsupportedIntent + one Warning diagnostic per reason`」一致。闭码表合法性由 oracle 的接受判据内部校验（工件不落 wire 正文） |
+| 合法码表条目 + 非空条目 | `ExplicitOutcomeEntryCount = 3`；逐条诊断码 `AUTHORING_INTENT_UNSUPPORTED` ×3、逐条分类 `ExplicitUnsupportedIntent` ×3——与 spec §6「`unsupported → UnsupportedIntent + one Warning diagnostic per reason`」一致。**闭码表合法性由正式 parser 校验**：`JsonDescriptorAuthoringOutputParser.cs:366` 对每条 reason 调 `DescriptorAuthoringUnsupportedReasonCodes.IsKnown(reason.Code)`（澄清终态在 :476 同形），越界即 `InvalidProviderOutput`；oracle 一侧检查的是终态身份、其自带诊断码、非空条目数与零产物（`AssetUnsupportedIntentOracle.cs:113-119` 的状态分派 + `:129-133` `IsExplicitTerminal` + `:140-150` `CountExplicitOutcomeEntries` 要求 code 与 message 均非空白），不重复校验 wire 码表。工件不落 wire 正文，因此本轮的码表合法性来自「结果能解析出 3 条条目并落 `UnsupportedIntent`」这一事实 |
 | 零草稿 / 零评审通过 / 零保存 / 零 gate / 部署清单不变 | `DraftCount=0`、`ReviewPassedDraftCount=0`、`SavedDraftCount=0`、`ActivationGateCalls=0`、`ActivationGateSuccesses=0`、`DeployedInventoryUnchanged=true`、`Drafts=[]`、`Reviews=[]` |
 | 未伪造能力 | `FabricatedCapabilityObserved=false`、`TargetsDeployedMaintenanceSurface=false` |
 | 上下文 | focusRef `workflow/wf_asset_maintenance_review v1`，4 个已部署 descriptor 引用，context 诊断码为空；意图为「用未给出的风险阈值自动判定并跳过人工评审」 |
@@ -655,5 +655,15 @@ Issue #159 因此保持 open，不以单元/原生证据替代收口。
 - 不合并 PR #160、不关闭 Issue #159 —— 交维护者复审后裁定。
 - 不补跑第二次 live（无重试授权），不把 `NeedsClarification` 的 live 缺口粉饰掉。
 - 不改 `src/`、不改测试；不重发原生门禁。
+
+## S5 实施审计 R1 修复记录（2026-11-05）
+
+维护者放行 S5（B12 显式 unsupported 覆盖成立），同时记 **1 项非阻断 P3**：I-50 把闭码表的校验归给了 oracle。
+
+- 代码事实：wire 码表由**正式 parser** 校验 —— `JsonDescriptorAuthoringOutputParser.cs:366` 逐条 `DescriptorAuthoringUnsupportedReasonCodes.IsKnown(reason.Code)`，澄清终态同形于 `:476`（`DescriptorAuthoringClarificationReasonCodes.IsKnown(question.ReasonCode)`），越界即 `InvalidProviderOutput`。
+- oracle 的职责是另一层：`AssetUnsupportedIntentOracle.cs:113-119` 按终态分派，`:129-133` `IsExplicitTerminal` 要求终态自带诊断码 + 条目数 > 0 + 零草稿 + 零评审通过，`:140-150` `CountExplicitOutcomeEntries` 只把 code 与 message 均非空白的条目计入 —— 它不比对码表，也不该比对（重复校验会把同一事实写成两个真相来源）。
+- 修法：仅更正 I-50 该行的归因文字并补上三处行号；**零代码改动、不重跑 live、不新增重复校验**，与 S5 的覆盖裁定与边界不变。
+- 其余状态面（`AGENTS.md`、`memory.md`、`CapabilityMap.md` §8、follow-up §5.2、设计 spec rev.8）经 sweep 未出现同一误归因，无需连带修改。
+
 
 
