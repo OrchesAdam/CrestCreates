@@ -1,11 +1,16 @@
 # CrestCreates platform status — 2026-11-05
 
-Verified remote master: `95ae83744b7cfae19a7f8ca7645f1c5d231b8454` (2026-11-05, PR #162 status sync).
+Verified remote master: `64aeb1bd2fa3dab23c410c1b672ebb4034797cc4` (2026-11-05, PR #161 status sync).
 #121 implementation and bounded adjudication items are all delivered; final closure awaits
 this documentation reconciliation being merged. See
 [closure audit](docs/review/2026-11-05-issue-121-closure-audit.md).
-
-Historical baseline: master `9c39e187` (2026-10-27 merge of PR #155: #131 capability map, archiving and
+Historical baseline: master `95ae8374` (2026-11-05 merge of PR #162: #159 post-merge status synchronization).
+Previous baseline `1bf4a7e7` (2026-11-05 merge of PR #160: #159 explicit unsupported / needs-clarification
+authoring outcomes on wire `8a.v1`; review head `fc28a95d`, slices S0–S5 accepted, Issue #159 closed as
+completed). Before that, `91d6574e` (2026-11-03 merge of PR #158: #133 B12 unsupported-intent negative
+case; head `1db29f48`, review rounds R1–R4 closed, production code untouched) and `9909365a`
+(2026-10-30 merge of PR #157: #132 audit retention governance V1). Before that,
+master `9c39e187` (2026-10-27 merge of PR #155: #131 capability map, archiving and
 TenantId guard; parent base was `348c4d3c`, 2026-10-23 sync with freshly fetched origin/master;
 includes PR #150/#152/#151 and #154: #128 CRUD JSON, #129 legacy exit, #130 ORM matrix/soft-delete).
 #130 ORM Provider matrix/soft-delete was delivered via PR #154; S2 at `545f73d4`
@@ -16,7 +21,8 @@ both EF P1 defects and PG matrix P2 are closed. Fresh independent ORM 267/267
 (including all 10 unchanged final probes) and CRUD non-native 25/25 pass.
 PR #154 merged to master at `348c4d3c` on 2026-10-23 under explicit user authorization;
 Issue #130 acceptance/evidence completed and closed as completed. CI unchanged.
-Post-merge status reconciliation is recorded in the #121 closure audit; earlier entries below are history.
+Post-merge AGENTS/cross-Issue evidence synchronization is recorded per merge (the #132/#133 sync landed with
+PR #161; the #159 sync landed with PR #162).
 Historical checkout synchronization was at master `348c4d3c`; uncommitted local design/review records
 were preserved and memory reconciled. Earlier reviews used an isolated exact-head copy;
 earlier entries remain historical evidence.
@@ -92,12 +98,11 @@ never deleted; never output credentials.
   gates on 10.0.114 is environment/release maintenance, and the full-solution test environment plus the two unfinished
   baseline reproductions keep their recorded evidence limits. Nothing here claims a green whole-solution `dotnet test`.
 
-## 2026-10-30 — Issue #132 audit retention governance (V1 merged; completed)
+## 2026-10-27 — Issue #132 audit retention governance (V1 implemented; merged 2026-10-30)
 
 - Branch `feat/issue-132-audit-retention-governance-20261027-180000`, based on master `5f4cfc8f`.
-  Delivered by PR #157, merged as `9909365ab5c05b3e0ce610d264ef3c1b3b4572bb` on 2026-10-30;
-  Issue #132 closed as completed. CI remains manually disabled; local execution is the gate.
-  The implementation details below retain their original evidence scope. Design and implementation plan:
+  Merged via PR #157 to master as `9909365a` on 2026-10-30; CI stays manually disabled; local
+  execution is the gate. Design and implementation plan:
   [design](docs/superpowers/specs/2026-10-27-issue-132-audit-retention-governance-design.md),
   [plan](docs/superpowers/plans/2026-10-27-issue-132-audit-retention-governance-implementation.md).
 - V1 scope: PostgreSQL fixed database, Global retention settings, explicit Host or tenant scope
@@ -380,13 +385,15 @@ never deleted; never output credentials.
   #131 capability map / long-tail adjudication / TenantId guard merged via PR #155
   (`9c39e187`, 2026-10-27, ten commits, R1–R7 review rounds with 20 findings fixed;
   Issue #131 closed as completed).
-- #132 bounded design adjudication and PostgreSQL V1 delivered via PR #157 (`9909365a`);
-  #133 B12 negative evidence delivered via PR #158 (`91d6574e`), followed by #159 explicit
-  outcomes via PR #160 (`1bf4a7e7`) and post-merge status PR #162 (`95ae8374`).
+- Delivered: #132 audit retention governance V1 via PR #157 (`9909365a`, 2026-10-30); #133 B12
+  unsupported-intent negative case via PR #158 (`91d6574e`, head `1db29f48`, R1–R4 closed;
+  Issue #133 closed as completed). Follow-up opened at the time: #159 explicit unsupported /
+  needs-clarification authoring outcomes (design PR #160 at `63fb3952`, then Proposed rev.1) — it landed
+  on 2026-11-05 as `1bf4a7e7` with wire `8a.v1`; see the #159 entry at the top of this file.
 - Supplemental #146 LocalEvent hardening delivered via PR #148 (`0c6e574a`), status PR #149.
-- All #122–#132, #137 and #146 Issues are closed as completed. #133/#159 are also completed.
-  #121 remains open until this status reconciliation is merged; no runtime work remains in its
-  original scope. The audit records remaining evidence limits without turning them into new blockers.
+- All #122–#132, #137 and #146 Issues are closed as completed; #133/#159 are also completed.
+  #121 remains open until this status reconciliation is merged. No runtime work remains in its
+  original scope; evidence limits do not become new blockers.
 - At most 2 implementation PRs in flight; verify at current head before merge.
 
 ## #131 capability map, long-tail adjudication and TenantId guard (2026-10-23)
@@ -455,11 +462,8 @@ never deleted; never output credentials.
 
 ## Known gaps
 
-- B12 current status: #133 merged via PR #158 (`91d6574e`), completed; #159 merged via
-  PR #160 (`1bf4a7e7`), completed. Explicit unsupported is covered only for the executed live
-  sample; live clarification, other model/intent combinations and repeatability remain unverified.
-  The following #133 implementation narrative is historical, superseded by the #159 entry above.
-  B12 unsupported-intent negative case（#133 历史记录）：确定性侧已闭环。Asset E2E 真实链路
+- B12 unsupported-intent negative case（#133 已合并：PR #158 → `91d6574e`，2026-11-03，Issue #133
+  已关闭；**剩余契约缺口由 #159 承接**）：确定性侧已闭环。Asset E2E 真实链路
   （authoring → 真实评审 → 控制面提交 → 人工批准 → 激活门）新增 9 条用例：超出支持范围的意图按精确
   `DescriptorAuthoringStatus` + 精确诊断码断言显式受限结果，「不伪造能力、不部署」用草稿库/评审工件库/
   控制面审计记录/`IRuntimeActivationGate` 调用计数与目录身份集合对基线比对来度量，并配同链路绿色对照
@@ -485,9 +489,10 @@ never deleted; never output credentials.
   `Succeeded`+1 草稿+评审通过），故「不伪造能力、不部署」在这四次完整运行中已观测；另一次默认 4096 预算的
   运行是 `OutputBudgetExhausted`（reasoning 耗尽），单列为预算事实、不计入第五次拒绝行为证据；「显式
   unsupported/needs-clarification」证实未达成（契约无承载点，与离线用例一致），属确认的契约缺口，R3 裁定为
-  另立独立设计与 PR（涉及结构化终态、待补充输入、wire 版本/DTO/JsonContracts roots/原生 fixture 同步）。
-  **该缺口的后续状态见本文件顶部 2026-11-05 的 #159 条目**：`8a.v1` 已承载两个显式终态并通过单元与原生门禁；
-  本条上方记录的 #133 事实与当时裁定属历史证据，不改写，也不作为当前契约能力的背书。注意
+  另立独立设计与 PR（涉及结构化终态、待补充输入、wire 版本/DTO/JsonContracts roots/原生 fixture 同步），
+  当时登记为 **#159**（设计稿 PR **#160**，Proposed rev.1）。**该缺口的后续状态见本文件顶部 2026-11-05 的 #159 条目**：
+  `8a.v1` 已承载两个显式终态、通过单元与原生门禁并完成单次带凭据 live；本条上方记录的 #133 事实与当时裁定属历史证据，
+  不改写，也不作为当前契约能力的背书。注意
   凭据在 `~/.bashrc:136`（非交互 shell 被 `.bashrc` 第 5-9 行守卫拦住），且该模型为推理型：跑 B12 live 用例需
   `CREST_ASSET_LIVE_EVAL_MAX_OUTPUT_TOKENS=16384`（本模型/场景的实测配置，不推导为通用最低值）。
   证据见 `docs/superpowers/plans/2026-11-03-issue-133-b12-unsupported-intent-log.md`。

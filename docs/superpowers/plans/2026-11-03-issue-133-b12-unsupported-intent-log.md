@@ -290,3 +290,13 @@ if (!IsRealProviderEvaluationRequested())   // CREST_ASSET_LIVE_EVAL=1 且未显
 - 未重开 #87/#88，未推导 durable activation 状态。
 - 行为层裁定（截至 2026-11-03 带凭据实跑，见「真实 provider 行为验证」）：「不伪造能力、不部署」已用真实请求证实；「显式 unsupported/needs-clarification 结果」证实**未达成**——模型的拒绝折叠成与畸形输出同形的 `AUTHORING_INVALID_PROVIDER_OUTPUT`。上面 I-05 与 R1/R2 段落里的「仍未证实」是当时状态，保留为历史。
 - Asset 之外的样例（LibraryManagement / SaaSHelpdesk）不套用本负例结论；需要各自链路的 fixture 才能声明。
+
+## R4 与收口（2026-11-03）
+
+- R4 独立复核（`docs/review/2026-11-03-issue-133-pr158-review-round4.md`，head `1db29f48`）：R3-01 关闭，未发现新的可操作阻塞项；独立计数 51 pass / 2 default live skips、并行重放 1/1（用户 artifact 保留、零 HTTP）、live 开关下离线回归 8/8，源码完整性 3,997 blobs 与 head 一致。R4 把上一轮「找到错误才失败」的复现脚本改为要求不变量成立（同一时序、同样等待真实临时窗口，作者方法与调度时序未被修改），因此本轮绿灯不是靠脚本出口判定。
+- 合并：PR #158 → master `91d6574e`（merge commit，2026-11-03，维护者显式授权）。Issue #133 以收口说明关闭（含三项有界工作落点、#122 三类裁定结论、完成信号与边界遵守、本地证据计数）。
+- 契约缺口承接：#159（设计 PR #160，`63fb3952`，基于合并前的 master `9909365a`，Proposed rev.1）。#133 的裁定不因此立项而升级：在 #159 落地并给出证据前，「显式 unsupported / needs-clarification」仍记为确认缺口。
+  （2026-11-05 注：该条件已满足——#159 以 PR #160 合并进 master `1bf4a7e7`，wire 升为 `8a.v1` 并完成单次带凭据 live；改判与边界见 `docs/review/2026-10-10-framework-architecture-review-follow-up.md` §5.2 与 `docs/superpowers/plans/2026-11-03-issue-159-explicit-unsupported-clarification-plan.md`。本日志上述当时裁定保留原文，不追改。）
+- 状态同步（独立文档 PR）：`AGENTS.md` 当前平台状态新增 #133 条目并把 #132 改为已合并（`9909365a`）；`memory.md` 基线改到 `91d6574e`、Known gaps 的 B12 条目标为「已合并 + 缺口由 #159 承接」、波次行与 §5.1/§6 表格同步；#123 原生执行门禁矩阵无需新行（本 Issue 未建原生门禁）。
+  （2026-11-05 落地注：该文档 PR 为 **#161**，因 #159/#160 与其 post-merge 同步片 #162 改过同一批文件而冲突，按「保留 #133 收口事实 + 采纳 master 已有的 #159 现状」解冲；`memory.md` 基线最终记到 master `95ae8374`（#162 合并点）而非拟稿时的 `91d6574e`，#133/#132 的合并与关闭事实、§5.1/§6 行与 AGENTS #133 条目均按原意落地，其中指向 #159 的当时状态文字（Proposed rev.1 待静态审查）改写成「已落地于 `1bf4a7e7` + 见 §5.2」，避免把历史立项写成当前缺口。）
+- 未做：未把离线回归改成生产扩展点；未合并或改动 #160 的设计结论；未重跑 NativeAOT / 全解决方案，也不据此作任何支持声明。

@@ -1,6 +1,6 @@
 # Issue #121 关闭核对 — 2026-11-05
 
-核对仓库：`OrchesAdam/CrestCreates`。远端 master：`95ae83744b7cfae19a7f8ca7645f1c5d231b8454`（PR #162）。
+核对仓库：`OrchesAdam/CrestCreates`。远端 master：`64aeb1bd2fa3dab23c410c1b672ebb4034797cc4`（PR #161）。
 本地共享 checkout 为 `348c4d3c`，存在用户已有修改；本轮使用 GitHub connector 读取远端事实，
 未用旧 checkout 或未跟踪审查文件证明当前交付，未覆盖本地工作树。
 
@@ -10,9 +10,11 @@
 `merged=true`、合并 SHA 和完成证据。B12 后续 #133/#159 也已合并完成。
 没有发现本轮范围内仍待实现的运行主链任务。
 
-**尚未满足的唯一关闭门是状态文档与 master 对齐。** 核对前远端 memory 仍把 #132 写成
-待合并、#133 写成待合并、#131 写成待做，AGENTS 也把 #132 写成待合并；原生矩阵的 #159
-行仍写 S5 pending。本次文档变更修订这些状态并保留历史证据，不扩大支持声明。
+**尚未满足的唯一关闭门是状态文档与 master 对齐。** 初次读取远端时，memory/AGENTS 仍有 #132/#133 待合并等旧状态；核查期间 PR #161
+合并，已同步其中一部分，本分支随后基于该合并重整，保留其新增内容。
+剩余 memory 的 Delivered capabilities 仍写 #132 待合并、Known gaps 仍写 #131 待做，
+原生矩阵 #159 行仍写 S5 pending，且 #161 把 #132 的合并日期误写成 2026-11-03
+（GitHub PR 元数据为 2026-10-30）。本次只修订这些状态并补齐总控交付记录，不扩大支持声明。
 本报告所在 PR 合并后，按本轮用户授权回填 #121 清单并以 completed 关闭；合并前保持开放。
 仓库 memory 的 “GitHub PR flow, never auto-merge” 与 #121 的“不授权自动合并”继续适用。
 
@@ -40,7 +42,7 @@
 | [#159](https://github.com/OrchesAdam/CrestCreates/issues/159) | [#160](https://github.com/OrchesAdam/CrestCreates/pull/160) | `1bf4a7e7` | 8a.v1 两显式终态、139 单测、Asset 128+2 skip、native 11/11、单次 live |
 
 状态同步：#146 → PR #149（`de50b337`）；#128 → PR #151（`8c8a71de`）；
-#131 → PR #156（`5f4cfc8f`）；#159 → PR #162（`95ae8374`）。
+#131 → PR #156（`5f4cfc8f`）；#133/#132 → PR #161（`64aeb1bd`）；#159 → PR #162（`95ae8374`）。
 #132 超出本总控“有界设计裁定即可”的最低交付，已交付的 V1 范围不应被扩大为完整治理系统。
 
 ## 证据边界与明确保留项
@@ -62,7 +64,7 @@
 
 ## 本轮核查方式
 
-读取 #121 正文/评论、15 个相关 Issue 及完成评论、对应 19 个交付/同步 PR 元数据，
+读取 #121 正文/评论、15 个相关 Issue 及完成评论、对应 20 个交付/同步 PR 元数据，
 并读取远端 master 的 memory、AGENTS、能力地图、ORM 矩阵、#123 矩阵与审查 follow-up。
 纯文档状态修订：检查 diff/空白、逐项匹配 Issue completed 和 PR merged/SHA、
 确认只修改状态与补充核对记录；未运行 dotnet build/test/native publish，未启用 CI，
