@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施并按实施审计 R1 补上原生往返的读回状态断言与两条常驻状态负控（反例证明这两条比较就是判别点），`PublishAot`/link/run 在 linux-x64 通过（11/11，含 9 条负控），见「S3 实施日志」与「S3 实施审计 R1 修复记录」，待 S3 复审；S4–S5 未执行）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施；R1 补上原生往返的读回状态断言，R2 再把「注入落地」与「目标拒绝」分成两套判据（设置失败走独立 SETUP-FAIL 通道，输入篡改类必须先出落地见证），并在 SDK 10.0.114 / ILCompiler 10.0.14 下重发门禁 **11/11**，同时解掉全量 build 的 NU1903 阻断（系统 rpm 侧仍待维护者升级），见「S3 实施日志」与 R1/R2 修复记录，待 S3 复审；S4–S5 未执行）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -471,3 +471,52 @@ S1 把披露示例从 2 条扩到 4 条，但 AotFixture 的 `AgentAuthoringWire
 ### I-33 本轮另观测（不属于本片，未处理）
 
 `dotnet build` 全解决方案本轮出现 1 条错误：`tests/Integrations/CrestCreates.Mcp.Memory.AotFixture` 报 `error NU1903: 包 "Microsoft.DotNet.ILCompiler" 10.0.13 具有已知的 高 严重性漏洞（GHSA-p3jp-9v83-76w9）`，同包在 `ControlPlane.JsonContracts.AotFixture` 里仍是警告级。同一项目在锁定当前状态单独构建即可复现，与本片的源码改动无关——它是 NuGet 漏洞库刷新后把既有版本钉升成错误（本片 S3 交付时的全量 `dotnet build` 为 0 错误，此后未动过任何包）。处置需要改包版本或调 audit 策略，属维护者裁定，本轮不擅自变更依赖。
+## S3 实施审计 R2 修复记录（2026-11-05，S3-R2-01 单项 P2 + 工具链裁定）
+
+审查 head `d8040bd1`，报告 `docs/review/2026-11-05-issue-159-s3-review-round2.md`。原 S3-R1-01 关闭，S0/S1/S2 放行保持；S3 仍暂不放行，新增 S3-R2-01。
+
+### I-34 缺陷事实
+
+`RoundTripWithStatus` 在改写没落地时抛 `InvalidOperationException`，而这个异常被 `RunScenario` 的通用 catch 打成目标场景的 `场景:FAIL`——正好满足 harness 对负控的全部判据（非零、目标场景 FAIL、两个 sentinel 缺席）。您给的单行变异（只删 `envelope["status"] = (int)poisonedStatus;`，保留两条正确状态比较与 helper 自检）在真实 publish/link/run 下得到 `AgentAuthoringUnsupportedOutcome:FAIL` + `FAIL [...]: The status poison did not reach the read-back object`，整套仍 **11/11**。即：设置阶段失败冒充了目标断言的拒绝，负控什么都没证明。缺陷在判定语义，不在读回状态比较——后者上一轮已补且保留。
+
+### I-35 修复：注入落地要有见证，设置失败走独立通道
+
+1. 新增 `GateControlSetupException`；注入器的每一步前置/自检都改抛该类型：请求的状态与原值相同（等于没篡改）、序列化产物里没有 `status` 成员可改、改写后读回对象状态未变。
+2. `RunScenario` 先单独捕获它，打印 **`${name}:SETUP-FAIL`**（不含 `:FAIL` 子串，因此不可能冒充目标场景的预期 FAIL），仍返回 false 让进程非零、sentinel 缺席。
+3. 注入真正落地后才打印见证行 `CONTROL_SETUP_LANDED <场景> status=<原值>-><篡改值>`，harness 据此区分两族负控的成功判据。
+4. 按裁定一保持**一张登记表、一个 harness**：`GateNegativeControls` 增第三列 `requiresLandedInjection`，两条 roundtrip-status 负控为真，其余七条期望翻转类为假。所有负控一律要求输出不含 `:SETUP-FAIL`；输入篡改类还必须先出现落地见证，再出现目标场景 `:FAIL`。绿色运行额外断言既无见证也无 SETUP-FAIL（它不该武装任何注入）。仅改名字或分数组不算修好，改的是判据。
+
+### I-36 判别自证（全部为真实原生 publish/link/run，SDK 10.0.114）
+
+| 配置 | harness 结果 | 原生输出关键行 |
+| --- | --- | --- |
+| 提交原样 | **11 通过 / 0 失败（共 11）** | 两条状态负控各自 `CONTROL_SETUP_LANDED …status=UnsupportedIntent->Succeeded` / `…NeedsClarification->Succeeded` 之后才 `AgentAuthoring*Outcome:FAIL`；绿色运行 14 条点名场景全 PASS、无 FAIL、无见证、无 SETUP-FAIL |
+| CF-1 您要求的失效注入反例：只删 `envelope["status"] = (int)poisonedStatus;` | **9 通过 / 2 失败**，失败恰是两条 roundtrip-status 负控 | `AgentAuthoringUnsupportedOutcome:SETUP-FAIL` + `SETUP-FAIL […]: the status tamper did not reach the object AgentAuthoringUnsupportedOutcome reads back (observed UnsupportedIntent)`，且**没有** `CONTROL_SETUP_LANDED`；harness 因「缺见证 / 出现 SETUP-FAIL」判红，不再把它当成目标拒绝 |
+| CF-2 只删两条 `restored.Status` 比较（R1 反例复跑） | **9 通过 / 2 失败**，仍是那两条负控红 | 注入照常落地，但场景不再比状态，于是被篡改的产物报 PASS → 负控的「必须非零」断言红。R1 的判别点保持 |
+| 还原 | 快照 `cmp` 逐字节一致后复跑 **11/11 绿** | `Authoring 139/139`、`ControlPlane 575/575` |
+
+### I-37 工具链 NU1903 处置（裁定二）
+
+- 采用同 feature-band 的 **SDK 10.0.114**：`dotnet-install.sh --version 10.0.114 --install-dir ~/.dotnet`。系统 rpm 侧 Fedora 仓库当前只到 `dotnet-sdk-10.0-10.0.113-1.fc45`（另有 11.0.100~rc），且本机 `sudo` 需要密码，故未做系统级替换——`/usr/bin/dotnet` 仍是 10.0.113，**该构建阻断在这条路径上仍然存在**，需要您在系统包里升 `dotnet-sdk-10.0` / `dotnet-sdk-aot-10.0` 到 10.0.114 对应版本。
+- 确认 pack 已到修复版：新 SDK 下 `dotnet restore tests/Integrations/CrestCreates.Mcp.Memory.AotFixture` 解析出 **`Microsoft.DotNet.ILCompiler/10.0.14`**，`~/.dotnet/shared/Microsoft.NETCore.App/10.0.14`；官方 10.0.14 安全公告（2026-10-25）列出的 SDK 正是 10.0.114/10.0.403，受影响范围 `>=10.0.0 <10.0.14`。
+- **未关闭审计、未加 NoWarn、未降 NU1903 严重级**：仓库内没有任何 `NuGetAudit` / `WarningsNotAsErrors` / `NoWarn NU1903` 覆盖（本轮 grep 确认），MCP fixture 原有 `TreatWarningsAsErrors=true` 保持。
+- 重发并执行相关原生门禁（见 I-38）。
+
+### I-38 执行结果（补丁工具链后的真实计数）
+
+| 命令（`DOTNET_ROOT=~/.dotnet`，`dotnet` 10.0.114） | 结果 |
+| --- | --- |
+| `dotnet build`（全解决方案） | **0 错误，NU1903 命中 0**（此前 1 条 error NU1903） |
+| `dotnet test tests/Integrations/CrestCreates.Mcp.Memory.AotFixture.Tests` | 1/1（publish/link/run） |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Tools.AotFixture.Tests` | 1/1 |
+| `dotnet test …CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture.Tests` | **11/11**（1 绿色点名运行 + 9 负控逐条独立运行 + 1 未知控制名拒绝） |
+| `dotnet test tests/Runtime/Agent/CrestCreates.Agent.Authoring.Tests` / `…ControlPlane.Tests` | 139/139 / 575/575 |
+
+其余原生门禁（CapabilityEndpoint、GeneratedCrud、AssetManagement、Procurement、Ticket、PostgreSql、RabbitMQ AotHost）本轮未在 10.0.114 下重发，其既有证据仍是 10.0.113 产出的原生执行结果；本轮把它们记为「工具链未升级后复跑」，不写成 10.0.114 证据。
+
+### I-39 本轮仍未做（不冒充）
+
+- 未做 S4 文档/状态同步，未做 S5 带凭据 live：本轮仍未读取任何凭据、未发模型请求。
+- 未做系统级 SDK 包升级（无 sudo 口令），仓库默认 `dotnet` 路径仍会撞 NU1903；这是留给维护者的构建阻断，不属于本片源码引入。
+- 原生声明仍只覆盖 I-24 表中实际执行过的信封样本与 linux-x64 一个 RID，不推导 §10.1 全 23 行、其他 RID、认证/审批/activation 链。
+- `src/` 仍一行未改：CF-1/CF-2 只动 fixture 测试文件，均 `cmp` 还原。
