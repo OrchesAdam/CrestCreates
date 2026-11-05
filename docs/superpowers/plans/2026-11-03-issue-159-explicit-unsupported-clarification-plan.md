@@ -1,6 +1,6 @@
 # Issue #159 实施计划 — 显式 unsupported / needs-clarification 终态
 
-- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施：§10.5 原生场景与 harness 两层协议（逐场景点名 + 负控独立运行）落地，`PublishAot`/link/run 在 linux-x64 通过（9/9，含 7 条负控），四条生产变异各只打红名下场景，见「S3 实施日志」；S4–S5 未执行）
+- 设计：[2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md](../specs/2026-11-03-explicit-unsupported-and-clarification-authoring-outcomes-design.md)（rev.5；设计审计 R1–R4 全部关闭，**S0 已于 R4 放行、D1–D16 逐条确认**。S1 已实施、按实施审计 R1 补齐解码边界并于 R2 放行。S2 已实施并按实施审计 R1 把「历史归因」与「新契约覆盖」拆成两层判定、由 R2 放行。S3 已实施并按实施审计 R1 补上原生往返的读回状态断言与两条常驻状态负控（反例证明这两条比较就是判别点），`PublishAot`/link/run 在 linux-x64 通过（11/11，含 9 条负控），见「S3 实施日志」与「S3 实施审计 R1 修复记录」，待 S3 复审；S4–S5 未执行）
 - 基线：`master` = `91d6574e`（PR #158 合并点，其父为 `9909365a` = PR #157）。#133 已合并并关闭，Asset B12 负例、`AssetUnsupportedIntentOracle`、`AssetAuthoringDiagnosticClassifier`、`ReviewerLiveOracleProbeTests` 均已在 master 上，S2 可直接在这些文件上继续，不需要等另一条分支。
 - 分支：`docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`（设计与日志；实现切片在同分支续推，或按维护者裁定另开 `feat/issue-159-*`）。
 - 验证口径：CI 暂停，推送前本地全绿；支持声明只写已执行证据。
@@ -444,3 +444,30 @@ S1 把披露示例从 2 条扩到 4 条，但 AotFixture 的 `AgentAuthoringWire
 - 原生声明只覆盖 I-24 表里**实际执行过的信封样本**与 linux-x64 一个 RID：不打折成「§10.1 全 23 行矩阵原生通过」，也不推导认证、审批、activation 链，其他 RID 未验证。
 - 未改任何 `src/` 生产代码：四条变异全部还原并 `cmp` 验字节一致，`git status` 只剩本片的三个测试文件（fixture 新文件、fixture `Program.cs`、harness 测试）。
 - 未新增第二条判定链：原生场景与 unit/Asset 层共用同一个 `JsonDescriptorAuthoringOutputParser`，fixture 侧负控只改**断言的期望值**，没有为可观测性加生产测试钩子。
+## S3 实施审计 R1 修复记录（2026-11-05，S3-R1-01 单项 P2）
+
+审查 head `a9c79e59`，报告 `docs/review/2026-11-05-issue-159-s3-review-round1.md`。S0/S1/S2 放行保持；S3 暂不放行。审查独立复验了提交原样的原生门禁 **9/9 绿**，缺口在验收断言的覆盖面，不在门禁是否真的执行。
+
+### I-30 缺陷事实
+
+`AgentAuthoringUnsupportedOutcome` / `AgentAuthoringClarificationOutcome` 的 `terminal` 判断钉的是**序列化前**的 `result.Status`；`roundTrip` 分支只比读回对象的结构化内容与零草稿，没有比 `restored.Status`。因此「往返把拒绝/澄清读成 `Succeeded`」这种状态误读可以照常报 PASS——正好漏掉 #159 用状态区分终态的核心契约。审查在隔离 fixture 里只把序列化 JSON 的 `status:6/7` 改成 `status:0` 走同一官方 source-generated Deserialize，重新 PublishAot/link/run 后两个场景仍 PASS、总 sentinel 仍出现、整套 9/9 仍绿；补两条读回状态比较后同一篡改即 exit 2、两场景 FAIL。
+
+### I-31 修复
+
+1. 两个 roundTrip 正向分支各自把 `restored.Status == UnsupportedIntent` / `== NeedsClarification` 提到比较链首位，结构化字段、互斥（`Clarification is null` / `Unsupported is null`）、零草稿与 `Snapshot()` 断言原样保留。
+2. 判别回证不写成一次性手工实验，而是落成两条**常驻门禁负控**（`ControlNames` + harness `TheoryData` 各登记）：
+   - `unsupported-roundtrip-status-poisoned`、`clarification-roundtrip-status-poisoned` 走 `RoundTripWithStatus(result, Succeeded)`：同一 source-generated 序列化产物上只改 `status` 节点，再用同一 context 反序列化；helper 自身要求「改写必须真的落到读回对象」，落不到就直接抛——这样一条静默失效的负控不可能被读成绿。场景仍断言**正确**的读回终态，所以真实代码必然让它红，符合「正确拒绝=绿、门禁负控=非零且无 sentinel」两层不混的既有协议。
+
+### I-32 判别自证（只改测试侧一处）
+
+| 实验 | 改动 | 原生结果 |
+| --- | --- | --- |
+| 修复后原样 | 两条读回状态比较 + 两条状态负控在册 | `PublishAot` + link + run：**11 通过 / 0 失败（共 11）**＝1 绿色点名运行 + 9 条负控逐条独立运行 + 1 未知控制名拒绝；两条状态负控各自只红名下场景（`run-unsupported-roundtrip-status-poisoned.log` → 仅 `AgentAuthoringUnsupportedOutcome:FAIL`；`run-clarification-roundtrip-status-poisoned.log` → 仅 `AgentAuthoringClarificationOutcome:FAIL`），聚合行跟随，群/总 sentinel 均不出现 |
+| 反例（counterfactual） | 只删掉新加的两条 `restored.Status` 比较，其余一字不动 | **9 通过 / 2 失败**，失败的恰是两条状态负控：被篡改的原生产物重新变成 exit 0 且照常打出 sentinel，于是「负控必须非零」的断言红。即这两条比较正是该状态误读的唯一判别点，去掉即复现审查指出的绿灯 |
+| 还原 | 与反例前快照 `cmp` 逐字节一致后复跑 | **11/11 绿**；`Authoring 139/139`、`ControlPlane 575/575` |
+
+`src/` 仍一行未改；本片改动只在 fixture 场景文件与 harness 测试文件。
+
+### I-33 本轮另观测（不属于本片，未处理）
+
+`dotnet build` 全解决方案本轮出现 1 条错误：`tests/Integrations/CrestCreates.Mcp.Memory.AotFixture` 报 `error NU1903: 包 "Microsoft.DotNet.ILCompiler" 10.0.13 具有已知的 高 严重性漏洞（GHSA-p3jp-9v83-76w9）`，同包在 `ControlPlane.JsonContracts.AotFixture` 里仍是警告级。同一项目在锁定当前状态单独构建即可复现，与本片的源码改动无关——它是 NuGet 漏洞库刷新后把既有版本钉升成错误（本片 S3 交付时的全量 `dotnet build` 为 0 错误，此后未动过任何包）。处置需要改包版本或调 audit 策略，属维护者裁定，本轮不擅自变更依赖。
