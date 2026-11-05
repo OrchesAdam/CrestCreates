@@ -102,6 +102,16 @@ CrestCreates Core:
         sink 去重/receipt 导出幂等/receipt 恢复/缺能力九场景 + 总 sentinel，三类 fixture-only
         负控非零且无总 sentinel；真实身份/权限/Setting/generated HTTP 由 JIT P08 覆盖，不推导
         原生认证/Settings/Quartz，也不推导其他 ORM Provider/RID
+    Agent Authoring 显式终态契约 8a.v1（#159，PR #160 未合并）:
+        ControlPlane JsonContracts AotFixture 原生 publish/link/run（linux-x64）：两个显式终态结构化往返
+        （含读回 Status）、presence 七形态、两张闭码表、Stage A 词表与「重复 + 单一错 hash」优先级、
+        四条披露示例逐条过正式 parser、必需 JSON 根可解析 + 反射兜底关闭；逐场景 sentinel 点名，
+        9 条负控各自独立执行且非零无 sentinel，未知控制名在任何场景前退出
+        验收入口 = 用户目录官方 SDK 10.0.114 + 隐式 ILCompiler 10.0.14；声明只覆盖实际跑过的样本，
+        不外推 §10.1 全 23 行矩阵、其他 RID 或认证/审批/activation 链；其余七个原生门禁
+        （CapabilityEndpoint/GeneratedCrud/AssetManagement/Procurement/Ticket/PostgreSql/RabbitMQ AotHost）
+        仍按升级前工具链列账、未在 10.0.114 复验；默认 /usr/bin/dotnet 仍为 10.0.113 并命中
+        error NU1903（GHSA-p3jp-9v83-76w9，修复版 10.0.14），复用该门禁的任务/CI 必须显式选 10.0.114
 
 EF Core 和部分 Integrations:
     AOT capability separately declared
@@ -300,6 +310,7 @@ BuildTasks 编译前链：
 - 认证授权不要引入新的真相来源，不要复制 token / claims / permission 逻辑，优先复用现有身份、权限、租户上下文主链。
 - Agent Control Plane 是治理面，不是运行时执行面。它可以审查、预览、提交激活请求，但不能绕过授权、批准自身变更、直接执行 runtime handler 或突变 runtime registry。
 - Agent 治理面主链是 Authoring → deterministic review → Control Plane：authoring 只产出候选草稿；正式契约在 `src/Runtime/Agent/CrestCreates.Agent.Authoring*`、`CrestCreates.Agent.ControlPlane*` 与 `Metadata/Draft/CrestCreates.DescriptorDraft*`。review artifact 与 package/evidence artifact 持久化只提供完整性与证据绑定，不构成批准；activation request/gate 当前为内存实现，不等于 durable activation。
+- Authoring 线契约是 `8a.v1`（#159）：`outcome` 是必需判别式，`drafts` / `unsupported` / `needsClarification` 三终态互斥，禁用成员按**是否出现**判定（`null`/`{}`/`[]`/有内容同等被拒），两张码表封闭且 Ordinal 比较。`outcome` 与 `Status` 不一一对应：只有成功态（`Succeeded`/`SucceededWithDiagnostics`）绑定 `DraftSetId = Plan.PlanId` 且草稿 ≥1；`Blocked`（hash 不匹配或任一 item 原子校验失败）零草稿、`PlanId`/`DraftSetId` 为空串，两个显式终态才是固定占位身份。解析固定为两阶段：Stage A 读原始信封事实（解码失败、逐层重复、未知/别名成员、presence、Kind），Stage B 用严格 source-generated DTO 投影值——顺序决定归因，不得调换。新增终态必须是「词表 + 码表 + JSON 根闭包 + 原生场景」同批变更，不允许只加状态名。**`Blocked` + intent-level 诊断码是历史归因，永远不计为 `8a.v1` 覆盖**；覆盖只接受显式终态 + 合法码 + 非空条目 + 零草稿/零评审通过/零保存/零 gate 调用，且「不支持意图得到 drafts」仍是拒绝。
 - 能力地图与长尾裁定（#131）：`docs/Feature/CapabilityMap.md` 是「项目存在」与「能力交付」的唯一导航面。每条记录四维分开写：定位 / 功能状态 / 执行证据 / 处理结论。新增生产 csproj 必须同时在地图项目索引登记并附准入理由（为什么既有项目不能承载、层次与依赖边界、消费者或静态聚合目的、唯一装配入口、验证方式、支持级别、责任、未交付时的退出条件），由 `CapabilityMapCoverageArchitectureTests` 强制；缺记录即门禁失败。归档项落 `99_RecycleBin/<issue-slug>/` 并保留原相对路径与 README，由 `ArchivedProjectRegressionArchitectureTests` 禁止回流。实验能力（FileManagement 本地/内存元数据、PluginSystem 动态 DLL 装载）不得被宣传为已交付平台能力；PluginSystem 动态装载执行面属 JIT-only，功能执行未验证。地图不复制 ORM 支持表，ORM 组合证据唯一来源仍是 `docs/Feature/OrmProviderSupportMatrix.md`。
 - TenantId 是租户上下文唯一主键（#131）：`ICurrentTenant.Id` 为权威；`ITenantInfo.Name` / `Tenant.Name` / `TenantName` 只能用于展示、日志、DTO 与名称检索。名称可以进入解析入口，但必须经既有 tenant repository/provider 查询得到实体、保留入口既有 active/lifecycle 校验，再以实体 Id 进入上下文、claim、授权/隔离与缓存/连接分区；禁止 `TenantId = tenant.Name`、`ChangeAsync(name)`、名称写入 `tenantid`/`tenant_id` claim、名称进入过滤表达式或缓存前缀；查不到 Id 时不得退回名称或 host。守卫位于 `tests/Boundary/CrestCreates.DependencyBoundaries.Tests/TenantIdentityArchitectureTests`：按项目真实引用闭包分析、名称源按成员身份绑定、身份出口由端口表加参数名网覆盖、有限值流加同项目与第一方跨项目 helper 内联、权威来源结构断言锁定主链；敏感节点绑定失败出 TI900，不静默跳过。它是仓库级有限模式守卫，不是通用安全数据流分析器；生成器模板字符串不算已绑定符号，实际生成端点仍由各自 fixture 断言。Resolver 接受 `X-Tenant-Id: <名称>` 是合法兼容入口，不视为违规，也不得为它新增第二套身份真相来源。
 - JsonContracts 工具链（`src/Tooling/CrestCreates.JsonContracts.BuildTasks`、`.BuildTasks.Core`、`.Tool`）：构建期生成确定性 JSON contract roots，由官方 STJ Source Generator 消费；禁止 runtime reflection / scanner fallback。属构建期 Tooling，不是运行时组件。
@@ -383,6 +394,21 @@ TestBase
 
 以 `memory.md` 为最新状态记录。当前关键共识：
 
+- Authoring 显式 unsupported / needs-clarification 终态（#159，PR #160 open 未合并）：wire 升为 `8a.v1`，
+  `outcome` 判别式 + `UnsupportedIntent` / `NeedsClarification` 两个正式终态（结构化载荷、闭码表、presence
+  判定、固定占位 plan/draftset、零草稿）。解析收口为 Stage A 原始信封事实 + Stage B 严格 source-generated
+  投影的单条主链，`7g.v1` 不留兼容窗。消费者侧 Asset oracle 采两层判定：**历史归因（`Blocked` + intent-level
+  码）不计为新契约覆盖**。证据：单元 139/139（§10.1 全 23 行）、Asset E2E 需 PG 128 通过/2 跳过、样例
+  golden scenario 37/37、原生门禁 linux-x64 11/11（逐场景点名 + 9 条独立负控 + 未知控制名拒绝）。
+  S5 单次带凭据 live 已执行（按已获准范围：现有 B12 入口一次、16384 输出预算、凭据不打印/入库、仅 `/tmp`
+  元数据、不自动重试）：真实 provider 答 `unsupported`（HTTP 200 / `FinishReason=stop` / 预算被接受，故非预算或
+  provider 旁因），解析为 `UnsupportedIntent` + 3 条合法条目 + 逐条 `AUTHORING_INTENT_UNSUPPORTED`，Asset oracle
+  判 `ExplicitUnsupportedResult`，零草稿/零评审通过/零保存/零 gate、部署清单不变、未伪造能力 ——
+  **B12 按 `8a.v1` 计为覆盖**。边界：单次运行不作可重复性声明、单一意图类与单一模型画像，
+  `NeedsClarification` 的 live **未执行**（不得写成两终态均已 live 覆盖），且 live 在 JIT 宿主内跑、不新增原生覆盖。
+  S0–S5 均已交付，Issue #159 与 PR #160 仍 open，等维护者复审裁定，不自动合并或关闭。
+  支持声明边界见上文 AOT 分层与本文件「Authoring 线契约是 `8a.v1`」条。
+
 - 能力地图与 TenantId 架构守卫（#131，PR #155 合并于 `9c39e187`）：`docs/Feature/CapabilityMap.md` 为项目/能力导航唯一入口，7 个无消费者项目 + 通用 Draft 实验 + 死契约归档至 `99_RecycleBin/issue-131-capability-map/`；`TenantIdentityArchitectureTests` 以 evaluated MSBuild 输入（缓存仅在依赖可证明完整时启用）扫描 active src/sample 项目，0 违规 0 覆盖失败。有限模式守卫，不是通用安全分析器。
 - Tenant Management：主链已基本闭环。
 - Setting Management：正式平台能力。
@@ -441,4 +467,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-10-27
+**最后更新**: 2026-11-05

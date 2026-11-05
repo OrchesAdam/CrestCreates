@@ -109,7 +109,8 @@ public sealed class UpdateBaseVersionParserTests
 
         return JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash = _context.ExpectedPromptInputHash,
             plan = new
             {

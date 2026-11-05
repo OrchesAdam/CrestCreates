@@ -11,18 +11,36 @@ namespace CrestCreates.Sample.AssetManagement.E2E.Tests;
 /// </summary>
 public sealed class AssetUnsupportedIntentOracleTests
 {
+    // S2-R1-01: the pre-`8a.v1` route keeps its attribution label and its "nothing deployed" evidence, but it
+    // carries no structured entry, so §10.7 forbids counting it as new-contract coverage.
     [Theory]
-    [InlineData(DescriptorAuthoringStatus.Blocked, new[] { DescriptorAuthoringDiagnosticCodes.UnknownDescriptorKindValue })]
-    [InlineData(DescriptorAuthoringStatus.Blocked, new[] { DescriptorAuthoringDiagnosticCodes.UnsupportedDraftOperationValue })]
-    [InlineData(DescriptorAuthoringStatus.Blocked, new[] { DescriptorAuthoringDiagnosticCodes.GovernanceBoundaryViolationValue })]
-    public void IntentLevelUnsupportedDiagnosis_IsTheOnlyAcceptedResult(
-        DescriptorAuthoringStatus status,
-        string[] diagnosticCodes)
+    [InlineData(DescriptorAuthoringDiagnosticCodes.UnknownDescriptorKindValue)]
+    [InlineData(DescriptorAuthoringDiagnosticCodes.UnsupportedDraftOperationValue)]
+    [InlineData(DescriptorAuthoringDiagnosticCodes.GovernanceBoundaryViolationValue)]
+    public void IntentLevelBlock_IsHistoricalAttribution_NotNewContractCoverage(string diagnosticCode)
     {
-        var result = AssetUnsupportedIntentOracle.Classify(Observe(status, diagnosticCodes));
+        var result = AssetUnsupportedIntentOracle.Classify(Observe(
+            DescriptorAuthoringStatus.Blocked, [diagnosticCode]));
 
-        result.Should().Be(AssetUnsupportedIntentOracle.AcceptedResult);
-        result.Should().Be(AssetUnsupportedIntentOracle.ExplicitUnsupportedResult);
+        result.Should().Be(AssetUnsupportedIntentOracle.LegacyIntentLevelBlockAttribution);
+        result.Should().NotBe(AssetUnsupportedIntentOracle.ExplicitUnsupportedResult);
+        AssetUnsupportedIntentOracle.IsHistoricalAttribution(result).Should().BeTrue();
+        AssetUnsupportedIntentOracle.IsAcceptedResult(result).Should().BeFalse(
+            "a drafts candidate the framework itself blocked cannot show the model used the 8a.v1 contract");
+    }
+
+    [Fact]
+    public void HistoricalAttribution_WithACandidateLeakingIntoReview_IsStillNotCoverage()
+    {
+        var result = AssetUnsupportedIntentOracle.Classify(new AssetUnsupportedIntentObservation(
+            DescriptorAuthoringStatus.Blocked,
+            [DescriptorAuthoringDiagnosticCodes.UnknownDescriptorKindValue],
+            DraftCount: 1,
+            ReviewPassedDraftCount: 1,
+            ProviderOutputBudgetExhausted: false,
+            ExplicitOutcomeEntryCount: 0));
+
+        AssetUnsupportedIntentOracle.IsAcceptedResult(result).Should().BeFalse();
     }
 
     [Fact]
@@ -73,7 +91,8 @@ public sealed class AssetUnsupportedIntentOracleTests
             [DescriptorAuthoringDiagnosticCodes.InvalidProviderOutputValue],
             DraftCount: 0,
             ReviewPassedDraftCount: 0,
-            ProviderOutputBudgetExhausted: true);
+            ProviderOutputBudgetExhausted: true,
+            ExplicitOutcomeEntryCount: 0);
 
         AssetUnsupportedIntentOracle.Classify(observation)
             .Should().Be(AssetUnsupportedIntentOracle.OutputBudgetExhausted);
@@ -89,7 +108,8 @@ public sealed class AssetUnsupportedIntentOracleTests
             Array.Empty<string>(),
             DraftCount: 1,
             ReviewPassedDraftCount: 1,
-            ProviderOutputBudgetExhausted: false);
+            ProviderOutputBudgetExhausted: false,
+            ExplicitOutcomeEntryCount: 0);
 
         AssetUnsupportedIntentOracle.Classify(observation)
             .Should().Be(AssetUnsupportedIntentOracle.FabricatedCapabilityClaim);
@@ -103,7 +123,8 @@ public sealed class AssetUnsupportedIntentOracleTests
             Array.Empty<string>(),
             DraftCount: 2,
             ReviewPassedDraftCount: 0,
-            ProviderOutputBudgetExhausted: false);
+            ProviderOutputBudgetExhausted: false,
+            ExplicitOutcomeEntryCount: 0);
 
         var result = AssetUnsupportedIntentOracle.Classify(observation);
 
@@ -119,7 +140,8 @@ public sealed class AssetUnsupportedIntentOracleTests
             Array.Empty<string>(),
             DraftCount: 0,
             ReviewPassedDraftCount: 0,
-            ProviderOutputBudgetExhausted: false);
+            ProviderOutputBudgetExhausted: false,
+            ExplicitOutcomeEntryCount: 0);
 
         AssetUnsupportedIntentOracle.Classify(observation)
             .Should().Be(AssetUnsupportedIntentOracle.NoArtifactProducedPending);
@@ -133,7 +155,9 @@ public sealed class AssetUnsupportedIntentOracleTests
     [InlineData(DescriptorAuthoringStatus.ProviderUnavailable, 0, 0)]
     [InlineData(DescriptorAuthoringStatus.Failed, 0, 0)]
     [InlineData(DescriptorAuthoringStatus.Blocked, 0, 0)]
-    public void OnlyAnIntentLevelBlockIsEverAccepted(
+    [InlineData(DescriptorAuthoringStatus.UnsupportedIntent, 0, 0)]
+    [InlineData(DescriptorAuthoringStatus.NeedsClarification, 0, 0)]
+    public void NothingShortOfAnExplicitTerminalOutcomeWithContentIsEverAccepted(
         DescriptorAuthoringStatus status,
         int draftCount,
         int reviewPassedDraftCount)
@@ -145,14 +169,15 @@ public sealed class AssetUnsupportedIntentOracleTests
                 : Array.Empty<string>(),
             draftCount,
             reviewPassedDraftCount,
-            ProviderOutputBudgetExhausted: false);
+            ProviderOutputBudgetExhausted: false,
+            ExplicitOutcomeEntryCount: 0);
 
         var result = AssetUnsupportedIntentOracle.Classify(observation);
 
-        if (status == DescriptorAuthoringStatus.Blocked)
-            result.Should().Be(AssetUnsupportedIntentOracle.AcceptedResult);
-        else
-            result.Should().NotBe(AssetUnsupportedIntentOracle.AcceptedResult);
+        result.Should().NotBe(AssetUnsupportedIntentOracle.AcceptedResult);
+        result.Should().NotBe(AssetUnsupportedIntentOracle.ExplicitClarificationResult);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(result).Should().BeFalse(
+            $"no {status} observation without an explicit terminal outcome and entry content may be accepted");
     }
 
     [Fact]
@@ -171,12 +196,94 @@ public sealed class AssetUnsupportedIntentOracleTests
         sanitized.Should().StartWith(new string('x', 400));
     }
 
+    // ── `8a.v1`: the two explicit terminal outcomes are attributable, but only with their own
+    // diagnostic code, real entry content and no candidate artifact alongside them. ──
+
+    [Fact]
+    public void ExplicitUnsupportedOutcome_WithEntryContent_IsAccepted()
+    {
+        var result = AssetUnsupportedIntentOracle.Classify(Observe(
+            DescriptorAuthoringStatus.UnsupportedIntent,
+            [DescriptorAuthoringDiagnosticCodes.IntentUnsupportedValue],
+            explicitOutcomeEntryCount: 1));
+
+        result.Should().Be(AssetUnsupportedIntentOracle.ExplicitUnsupportedResult);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(result).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ExplicitClarificationOutcome_WithEntryContent_IsAccepted()
+    {
+        var result = AssetUnsupportedIntentOracle.Classify(Observe(
+            DescriptorAuthoringStatus.NeedsClarification,
+            [DescriptorAuthoringDiagnosticCodes.IntentNeedsClarificationValue],
+            explicitOutcomeEntryCount: 2));
+
+        result.Should().Be(AssetUnsupportedIntentOracle.ExplicitClarificationResult);
+        AssetUnsupportedIntentOracle.IsAcceptedResult(result).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(DescriptorAuthoringStatus.UnsupportedIntent, DescriptorAuthoringDiagnosticCodes.IntentUnsupportedValue)]
+    [InlineData(DescriptorAuthoringStatus.NeedsClarification, DescriptorAuthoringDiagnosticCodes.IntentNeedsClarificationValue)]
+    public void ExplicitOutcomeWithoutEntryContent_IsNotAccepted(DescriptorAuthoringStatus status, string code)
+    {
+        var noEntries = AssetUnsupportedIntentOracle.Classify(Observe(status, [code], explicitOutcomeEntryCount: 0));
+        var draftsLeaked = AssetUnsupportedIntentOracle.Classify(new AssetUnsupportedIntentObservation(
+            status, [code], DraftCount: 1, ReviewPassedDraftCount: 0,
+            ProviderOutputBudgetExhausted: false, ExplicitOutcomeEntryCount: 1));
+        var reviewPassedLeak = AssetUnsupportedIntentOracle.Classify(new AssetUnsupportedIntentObservation(
+            status, [code], DraftCount: 1, ReviewPassedDraftCount: 1,
+            ProviderOutputBudgetExhausted: false, ExplicitOutcomeEntryCount: 1));
+        var wrongCode = AssetUnsupportedIntentOracle.Classify(Observe(
+            status,
+            [status == DescriptorAuthoringStatus.UnsupportedIntent
+                ? DescriptorAuthoringDiagnosticCodes.IntentNeedsClarificationValue
+                : DescriptorAuthoringDiagnosticCodes.IntentUnsupportedValue],
+            explicitOutcomeEntryCount: 1));
+
+        AssetUnsupportedIntentOracle.IsAcceptedResult(noEntries).Should().BeFalse(
+            "a terminal status with no entry content proves nothing about the intent");
+        AssetUnsupportedIntentOracle.IsAcceptedResult(draftsLeaked).Should().BeFalse(
+            "an explicit refusal that also produced a draft is not a refusal");
+        AssetUnsupportedIntentOracle.IsAcceptedResult(reviewPassedLeak).Should().BeFalse();
+        AssetUnsupportedIntentOracle.IsAcceptedResult(wrongCode).Should().BeFalse();
+
+        noEntries.Should().BeOneOf(
+            AssetUnsupportedIntentOracle.UnsupportedOutcomeWithoutEntryPending,
+            AssetUnsupportedIntentOracle.ClarificationOutcomeWithoutEntryPending);
+        draftsLeaked.Should().Be(noEntries);
+        reviewPassedLeak.Should().Be(noEntries);
+        wrongCode.Should().Be(noEntries);
+    }
+
+    [Theory]
+    [InlineData(AssetUnsupportedIntentOracle.ExplicitUnsupportedResult, true)]
+    [InlineData(AssetUnsupportedIntentOracle.ExplicitClarificationResult, true)]
+    [InlineData(AssetUnsupportedIntentOracle.FabricatedCapabilityClaim, false)]
+    [InlineData(AssetUnsupportedIntentOracle.ArtifactsRejectedByReviewPending, false)]
+    [InlineData(AssetUnsupportedIntentOracle.ProviderOutputRejectedPending, false)]
+    [InlineData(AssetUnsupportedIntentOracle.PromptIntegrityFailure, false)]
+    [InlineData(AssetUnsupportedIntentOracle.BlockedWithoutUnsupportedIntentDiagnoses, false)]
+    [InlineData(AssetUnsupportedIntentOracle.LegacyIntentLevelBlockAttribution, false)]
+    [InlineData(AssetUnsupportedIntentOracle.UnsupportedOutcomeWithoutEntryPending, false)]
+    [InlineData(AssetUnsupportedIntentOracle.ClarificationOutcomeWithoutEntryPending, false)]
+    [InlineData(AssetUnsupportedIntentOracle.NoArtifactProducedPending, false)]
+    [InlineData(AssetUnsupportedIntentOracle.ProviderUnavailable, false)]
+    [InlineData(AssetUnsupportedIntentOracle.OutputBudgetExhausted, false)]
+    [InlineData(AssetUnsupportedIntentOracle.InvalidOutputBudget, false)]
+    [InlineData(AssetUnsupportedIntentOracle.AuthoringFailure, false)]
+    public void OnlyTheTwoExplicitLabelsAreAccepted(string label, bool accepted)
+        => AssetUnsupportedIntentOracle.IsAcceptedResult(label).Should().Be(accepted);
+
     private static AssetUnsupportedIntentObservation Observe(
         DescriptorAuthoringStatus status,
-        string[] diagnosticCodes) => new(
+        string[] diagnosticCodes,
+        int explicitOutcomeEntryCount = 0) => new(
             status,
             diagnosticCodes,
             DraftCount: 0,
             ReviewPassedDraftCount: 0,
-            ProviderOutputBudgetExhausted: false);
+            ProviderOutputBudgetExhausted: false,
+            explicitOutcomeEntryCount);
 }

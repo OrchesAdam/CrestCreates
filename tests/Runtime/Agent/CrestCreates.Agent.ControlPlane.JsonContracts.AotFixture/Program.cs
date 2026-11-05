@@ -50,8 +50,19 @@ public static class ControlPlaneJsonContractFixtureRunner
         CanonicalShapeVersion = "schema-contract-hash-v1"
     };
 
-    public static int Main()
+    public static int Main(string[] args)
     {
+        var authoringGateControl = args
+            .FirstOrDefault(argument => argument.StartsWith("--authoring-gate-control=", StringComparison.Ordinal))?
+            .Split('=', 2)[1];
+        if (authoringGateControl is not null
+            && !AgentAuthoringOutcomeNativeAotFixture.ControlNames.Contains(authoringGateControl, StringComparer.Ordinal))
+        {
+            Console.Error.WriteLine(
+                $"FAIL: unknown authoring gate control '{authoringGateControl}'. A mistyped control must not run green.");
+            return 4;
+        }
+
         try
         {
             var context = AgentControlPlaneToolJsonSerializerContext.Default;
@@ -137,7 +148,8 @@ public static class ControlPlaneJsonContractFixtureRunner
             allPassed &= RunReviewHashInputRoundTrip();
             allPassed &= RunAgentAuthoringOptionalReferences();
             allPassed &= RunAgentAuthoringUpdateBaseVersion();
-            allPassed &= RunAgentAuthoringWireDisclosure();
+            allPassed &= AgentAuthoringOutcomeNativeAotFixture.RunRequiredRootsResolve();
+            allPassed &= AgentAuthoringOutcomeNativeAotFixture.Run(authoringGateControl);
             allPassed &= ProjectionScopeNativeAotFixture.Run();
             allPassed &= ReviewReportInputNativeAotFixture.Run();
 
@@ -355,7 +367,7 @@ public static class ControlPlaneJsonContractFixtureRunner
         string optionalSchemaProperties)
     {
         var json = "{" +
-            "\"contractVersion\":\"7g.v1\",\"promptInputHash\":\"aot-authoring-prompt\"," +
+            "\"contractVersion\":\"8a.v1\",\"outcome\":\"drafts\",\"promptInputHash\":\"aot-authoring-prompt\"," +
             "\"plan\":{\"planId\":\"asset-maintenance\",\"intentText\":\"Asset maintenance initial review\",\"plannedDescriptorRefs\":[" +
             "{\"namespace\":\"humantask\",\"id\":\"ht_asset_maintenance_initial_review\",\"version\":1}]}," +
             "\"items\":[{\"descriptorKind\":\"HumanTask\",\"descriptorId\":\"ht_asset_maintenance_initial_review\",\"operation\":\"Create\",\"payload\":{" +
@@ -447,7 +459,7 @@ public static class ControlPlaneJsonContractFixtureRunner
             ? string.Empty
             : $"\"baseVersion\":\"{baseVersion}\",";
         var json = "{" +
-            "\"contractVersion\":\"7g.v1\",\"promptInputHash\":\"aot-authoring-update-base-version\"," +
+            "\"contractVersion\":\"8a.v1\",\"outcome\":\"drafts\",\"promptInputHash\":\"aot-authoring-update-base-version\"," +
             "\"plan\":{\"planId\":\"asset-maintenance-update\",\"intentText\":\"Update the asset workflow\",\"plannedDescriptorRefs\":[" +
             $"{{\"namespace\":\"workflow\",\"id\":\"wf_asset_maintenance\",\"version\":{payloadVersion}}}]}}" +
             "," +
@@ -456,100 +468,6 @@ public static class ControlPlaneJsonContractFixtureRunner
             "\"payload\":{\"id\":\"wf_asset_maintenance\",\"name\":\"Asset maintenance workflow\",\"version\":" +
             payloadVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}]}";
         return parser.Parse(json, context);
-    }
-
-    private static bool RunAgentAuthoringWireDisclosure()
-    {
-        try
-        {
-            const string expectedHash = "<prompt-input-hash-from-visible-context>";
-            var prompt = new DefaultDescriptorAuthoringPromptBuilder().Build(new DescriptorAuthoringPromptInput
-            {
-                ContractVersion = "7g.v1",
-                TenantId = "aot-wire-disclosure-tenant",
-                IntentText = "Describe the intended change here.",
-                Metadata = new DescriptorAuthoringMetadataContextProjection(),
-                Memory = new DescriptorAuthoringMemoryProjection { IsAuthoritative = false },
-                PromptInputHash = FixtureHash with { Value = expectedHash }
-            });
-
-            var examples = prompt.UserPrompt
-                .Split("```json", StringSplitOptions.RemoveEmptyEntries)
-                .Skip(1)
-                .Select(block => block[..block.IndexOf("```", StringComparison.Ordinal)].Trim())
-                .ToArray();
-            if (examples.Length != 2)
-                throw new InvalidOperationException($"Expected two wire examples, got {examples.Length}.");
-
-            var parser = new JsonDescriptorAuthoringOutputParser();
-            var context = new DescriptorAuthoringParseContext
-            {
-                TenantId = "aot-wire-disclosure-tenant",
-                AuthorId = "aot-wire-disclosure-agent",
-                AuthorKind = DescriptorDraftAuthorKind.Agent,
-                CreatedAt = DateTimeOffset.UnixEpoch,
-                IntentText = "Describe the intended change here.",
-                ExpectedPromptInputHash = expectedHash
-            };
-
-            var humanTaskResult = parser.Parse(examples[0], context);
-            var humanTask = humanTaskResult.Status == DescriptorAuthoringStatus.Succeeded
-                && humanTaskResult.DraftSet.Drafts.Count == 1
-                ? humanTaskResult.DraftSet.Drafts[0].Payload.GetDescriptor() as HumanTaskDescriptor
-                : null;
-            var humanTaskPassed = humanTask is not null
-                && humanTask.Id == "<human-task-id>"
-                && humanTask.Name == "<human-task-name>"
-                && humanTask.Version == 1
-                && humanTask.Interaction.Id == "<interaction-id>"
-                && humanTask.Permissions == "<permission-name>"
-                && humanTask.InputSchema is null
-                && humanTask.OutputSchema is null
-                && humanTask.Outcomes.Count == 2
-                && humanTask.Outcomes[0].Condition == CompletionCondition.Approve
-                && humanTask.Outcomes[1].Condition == CompletionCondition.Reject;
-
-            var workflowResult = parser.Parse(examples[1], context);
-            var workflow = workflowResult.Status == DescriptorAuthoringStatus.Succeeded
-                && workflowResult.DraftSet.Drafts.Count == 1
-                ? workflowResult.DraftSet.Drafts[0].Payload.GetDescriptor() as WorkflowDescriptor
-                : null;
-            var workflowPassed = workflow is not null
-                && workflow.Id == "<workflow-id>"
-                && workflow.Version == 1
-                && workflow.Steps.Count == 3
-                && workflow.Steps[0].Target is HumanTaskTarget humanTaskTarget
-                && humanTaskTarget.HumanTask.Id == "<human-task-id>"
-                && humanTaskTarget.HumanTask.Version == 1
-                && workflow.Steps[0].Transitions.SequenceEqual(["step-capability"])
-                && workflow.Steps[0].OnError == StepErrorBehavior.Fail
-                && workflow.Steps[1].Target is CapabilityTarget capabilityTarget
-                && capabilityTarget.Capability.Id == "<capability-id>"
-                && capabilityTarget.Capability.Version == 2
-                && workflow.Steps[1].Transitions.SequenceEqual(["step-sub-workflow"])
-                && workflow.Steps[1].OnError == StepErrorBehavior.Fail
-                && workflow.Steps[2].Target is SubWorkflowTarget subWorkflowTarget
-                && subWorkflowTarget.SubWorkflow.Id == "<sub-workflow-id>"
-                && subWorkflowTarget.SubWorkflow.Version == 1
-                && workflow.Steps[2].Transitions.Count == 0
-                && workflow.Steps[2].OnError == StepErrorBehavior.Fail;
-
-            var passed = prompt.PromptTemplateVersion == "descriptor-authoring-prompt-template-v2"
-                && prompt.ContractVersion == "7g.v1"
-                && prompt.UserPrompt.Contains("References to existing descriptors must come from Visible Descriptors", StringComparison.Ordinal)
-                && prompt.UserPrompt.Contains("A reference to a descriptor proposed in this same response is allowed", StringComparison.Ordinal)
-                && prompt.UserPrompt.Contains("The parser does not enforce every business requirement", StringComparison.Ordinal)
-                && humanTaskPassed
-                && workflowPassed;
-            Console.WriteLine($"AgentAuthoringWireDisclosure:{(passed ? "PASS" : "FAIL")}");
-            return passed;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"FAIL [AgentAuthoringWireDisclosure]: {ex.Message}");
-            Console.WriteLine("AgentAuthoringWireDisclosure:FAIL");
-            return false;
-        }
     }
 
     private static AgentDraftPayloadPatchDto IdentityPatch(AgentDraftPayloadDto dto, string mergedName)

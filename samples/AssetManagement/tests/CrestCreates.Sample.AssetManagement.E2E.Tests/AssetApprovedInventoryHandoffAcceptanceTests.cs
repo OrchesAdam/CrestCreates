@@ -282,7 +282,8 @@ public sealed class AssetApprovedInventoryHandoffAcceptanceTests
     internal static string CreateAssetCandidateJson(string promptHash, string intent)
         => JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash = promptHash,
             plan = new
             {
@@ -322,7 +323,8 @@ public sealed class AssetApprovedInventoryHandoffAcceptanceTests
     private static string CreateWorkflowUpdateJson(string promptHash, string intent)
         => JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash = promptHash,
             plan = new
             {

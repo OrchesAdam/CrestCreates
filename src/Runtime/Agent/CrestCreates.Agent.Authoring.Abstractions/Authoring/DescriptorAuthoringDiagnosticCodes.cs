@@ -39,4 +39,29 @@ public static class DescriptorAuthoringDiagnosticCodes
 
     public const string ProviderUnavailableValue = "AUTHORING_PROVIDER_UNAVAILABLE";
     public static DiagnosticCode ProviderUnavailable { get; } = new(ProviderUnavailableValue);
+
+    public const string IntentUnsupportedValue = "AUTHORING_INTENT_UNSUPPORTED";
+    public static DiagnosticCode IntentUnsupported { get; } = new(IntentUnsupportedValue);
+
+    public const string IntentNeedsClarificationValue = "AUTHORING_INTENT_NEEDS_CLARIFICATION";
+    public static DiagnosticCode IntentNeedsClarification { get; } = new(IntentNeedsClarificationValue);
+
+    /// <summary>The closed authoring diagnostic-code table.</summary>
+    public static IReadOnlyList<string> AllValues { get; } =
+    [
+        ProviderTimeoutValue,
+        ProviderRateLimitedValue,
+        ProviderUnauthorizedValue,
+        CredentialUnavailableValue,
+        CredentialRejectedValue,
+        InvalidProviderOutputValue,
+        PromptHashMismatchValue,
+        UnknownDescriptorKindValue,
+        UnsupportedDraftOperationValue,
+        GovernanceBoundaryViolationValue,
+        MemoryAuthorityClaimRejectedValue,
+        ProviderUnavailableValue,
+        IntentUnsupportedValue,
+        IntentNeedsClarificationValue
+    ];
 }

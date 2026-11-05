@@ -89,6 +89,36 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
         // ── Step 2: Author drafts ──
         var authoringResult = await authoringAgent.AuthorAsync(context, ct);
 
+        // An explicit refusal or an explicit clarification request is a terminal authoring outcome.
+        // It is reported apart from the generic block so a caller can tell "the surface cannot author
+        // this intent" and "the answer needs information" from an unusable response, and it never
+        // reaches the save or review steps below: there is no candidate to govern.
+        if (authoringResult.Status == DescriptorAuthoringStatus.UnsupportedIntent)
+        {
+            return new CompanyCertificationDraftSetReviewResult
+            {
+                DraftSet = authoringResult.DraftSet,
+                PerDraftReviewResults = Array.Empty<DescriptorDraftReviewResult>(),
+                FinalProposedInventory = Array.Empty<IDescriptor>(),
+                IsBlocked = true,
+                FinalDecisionSource = "AuthoringUnsupportedIntent",
+                BlockReason = DescribeUnsupportedIntent(authoringResult.Unsupported),
+            };
+        }
+
+        if (authoringResult.Status == DescriptorAuthoringStatus.NeedsClarification)
+        {
+            return new CompanyCertificationDraftSetReviewResult
+            {
+                DraftSet = authoringResult.DraftSet,
+                PerDraftReviewResults = Array.Empty<DescriptorDraftReviewResult>(),
+                FinalProposedInventory = Array.Empty<IDescriptor>(),
+                IsBlocked = true,
+                FinalDecisionSource = "AuthoringNeedsClarification",
+                BlockReason = DescribeNeedsClarification(authoringResult.Clarification),
+            };
+        }
+
         // Block on non-success authoring status — do not persist or review drafts
         if (authoringResult.Status != DescriptorAuthoringStatus.Succeeded &&
             authoringResult.Status != DescriptorAuthoringStatus.SucceededWithDiagnostics)
@@ -272,6 +302,34 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioRunner
             FinalImpact = finalImpact,
             FinalCompat = finalCompat,
         };
+    }
+
+    private static string DescribeUnsupportedIntent(DescriptorAuthoringUnsupportedOutcome? unsupported)
+    {
+        if (unsupported is null || unsupported.Reasons.Count == 0)
+        {
+            return "Authoring refused the intent without an unsupported reason entry.";
+        }
+
+        return "Authoring refused the intent: "
+            + string.Join(
+                "; ",
+                unsupported.Reasons.Select(reason =>
+                    $"[{reason.Code}] evidence: {string.Join(",", reason.EvidenceRefs)}"));
+    }
+
+    private static string DescribeNeedsClarification(DescriptorAuthoringClarificationOutcome? clarification)
+    {
+        if (clarification is null || clarification.Questions.Count == 0)
+        {
+            return "Authoring requested clarification without a question entry.";
+        }
+
+        return "Authoring needs clarification: "
+            + string.Join(
+                "; ",
+                clarification.Questions.Select(question =>
+                    $"[{question.ReasonCode}] {question.Id} missing: {string.Join(",", question.MissingInputs)}"));
     }
 
     private async Task<AgentAuthoringContext> BuildAuthoringContext(

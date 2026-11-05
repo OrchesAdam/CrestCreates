@@ -14,7 +14,11 @@ namespace CrestCreates.Sample.AssetManagement.E2E.Tests;
 public sealed class ReviewerLiveOracleProbeTests
 {
     [Theory]
-    [InlineData("unsupported-kind", false)]
+    // `8a.v1` coverage requires an explicit terminal outcome (§10.4/§10.7, S2-R1-01). The unsupported-kind
+    // control answers with a drafts candidate that the framework's own allowlist blocks: the boundary holds
+    // and nothing deploys, which is exactly what the recorded zero side effects below still prove, but it is
+    // historical attribution, not new-contract coverage, so the entry must now reject it.
+    [InlineData("unsupported-kind", true)]
     [InlineData("malformed-json", true)]
     [InlineData("wrong-hash", true)]
     [InlineData("new-id-fabrication", true)]
@@ -45,7 +49,7 @@ public sealed class ReviewerLiveOracleProbeTests
             else
             {
                 exception.Should().BeNull(
-                    $"an explicit unsupported-kind control must pass; observed: {artifact["Semantic"]}");
+                    $"an explicit `8a.v1` terminal outcome must pass the coverage assertion; observed: {artifact["Semantic"]}");
             }
         }
         finally
@@ -95,9 +99,18 @@ internal sealed class ReviewerResponseModelClient : IDescriptorAuthoringModelCli
         }
         else response = JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1", promptInputHash = hash,
+            contractVersion = "8a.v1", outcome = "drafts", promptInputHash = hash,
             plan = new { planId = "explicit-unsupported-control", intentText = Intent },
-            items = new[] { new { descriptorKind = "Capability", descriptorId = "unsupported-algorithm", operation = "Create" } }
+            items = new[]
+            {
+                new
+                {
+                    descriptorKind = "Capability",
+                    descriptorId = "unsupported-algorithm",
+                    operation = "Create",
+                    payload = new { id = "unsupported-algorithm", name = "Condition scoring", version = 1 }
+                }
+            }
         });
         return Task.FromResult(new DescriptorAuthoringModelResponse
         {

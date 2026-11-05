@@ -1,5 +1,6 @@
 using CrestCreates.Agent.Authoring.Abstractions.Authoring;
 using CrestCreates.Agent.Memory.Abstractions;
+using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.HumanTask.Abstractions;
@@ -22,10 +23,21 @@ public sealed class FakeCompanyCertificationAuthoringAgent : IDescriptorAuthorin
     private const string DraftIdPrefix = "draft_company_certification";
     private const string CorrelationId = "phase7f-fake-authoring-correlation";
 
+    private readonly FakeCompanyCertificationAuthoringOutcome _outcome;
+
+    public FakeCompanyCertificationAuthoringAgent(
+        FakeCompanyCertificationAuthoringOutcome outcome = FakeCompanyCertificationAuthoringOutcome.Drafts)
+        => _outcome = outcome;
+
     public Task<CrestCreates.Agent.Authoring.Abstractions.Authoring.DescriptorAuthoringResult> AuthorAsync(
         AgentAuthoringContext context,
         CancellationToken cancellationToken = default)
     {
+        if (_outcome != FakeCompanyCertificationAuthoringOutcome.Drafts)
+        {
+            return Task.FromResult(BuildExplicitTerminalOutcome(context, _outcome));
+        }
+
         var tenantId = context.Request.TenantId;
         var createdAt = DateTimeOffset.UnixEpoch;
 
@@ -170,4 +182,96 @@ public sealed class FakeCompanyCertificationAuthoringAgent : IDescriptorAuthorin
 
         return Task.FromResult(result);
     }
+
+    /// <summary>
+    /// A refusal or a clarification request as the formal parser produces them: placeholder plan and
+    /// draft-set identity, zero drafts, one warning diagnostic per structured entry. Mirroring that shape
+    /// here is what lets the sample chain be exercised without a provider.
+    /// </summary>
+    private static DescriptorAuthoringResult BuildExplicitTerminalOutcome(
+        AgentAuthoringContext context,
+        FakeCompanyCertificationAuthoringOutcome outcome)
+    {
+        var intentText = context.Request.IntentText;
+
+        if (outcome == FakeCompanyCertificationAuthoringOutcome.NeedsClarification)
+        {
+            var question = new DescriptorAuthoringClarificationQuestion
+            {
+                Id = "second-level-reviewer-group",
+                ReasonCode = DescriptorAuthoringClarificationReasonCodes.MissingPolicyInput,
+                Question = "Which reviewer group owns the second-level finance review?",
+                MissingInputs = ["reviewerGroup"],
+                CandidateValues = Array.Empty<string>()
+            };
+
+            return new DescriptorAuthoringResult
+            {
+                Status = DescriptorAuthoringStatus.NeedsClarification,
+                Plan = new DescriptorAuthoringPlan
+                {
+                    PlanId = "plan_needs_clarification",
+                    IntentText = intentText
+                },
+                DraftSet = new DescriptorDraftSet { DraftSetId = "draftset_needs_clarification" },
+                Clarification = new DescriptorAuthoringClarificationOutcome
+                {
+                    Questions = [question]
+                },
+                Diagnostics =
+                [
+                    new DescriptorAuthoringDiagnostic
+                    {
+                        Code = DescriptorAuthoringDiagnosticCodes.IntentNeedsClarification,
+                        Message = "Which reviewer group owns the second-level finance review?",
+                        Severity = SeverityLevel.Warning,
+                        Path = "needsClarification.questions[0]"
+                    }
+                ]
+            };
+        }
+
+        var reason = new DescriptorAuthoringUnsupportedReason
+        {
+            Code = DescriptorAuthoringUnsupportedReasonCodes.CapabilityUnsupported,
+            Message = "The company certification surface has no automatic finance-scoring capability to author.",
+            EvidenceRefs = ["visible:workflow:company-certification-approval"]
+        };
+
+        return new DescriptorAuthoringResult
+        {
+            Status = DescriptorAuthoringStatus.UnsupportedIntent,
+            Plan = new DescriptorAuthoringPlan
+            {
+                PlanId = "plan_intent_unsupported",
+                IntentText = intentText
+            },
+            DraftSet = new DescriptorDraftSet { DraftSetId = "draftset_intent_unsupported" },
+            Unsupported = new DescriptorAuthoringUnsupportedOutcome
+            {
+                Reasons = [reason]
+            },
+            Diagnostics =
+            [
+                new DescriptorAuthoringDiagnostic
+                {
+                    Code = DescriptorAuthoringDiagnosticCodes.IntentUnsupported,
+                    Message = "The company certification surface has no automatic finance-scoring capability to author.",
+                    Severity = SeverityLevel.Warning,
+                    Path = "unsupported.reasons[0]"
+                }
+            ]
+        };
+    }
+}
+
+/// <summary>
+/// Which explicit terminal authoring outcome the fake agent returns. <see cref="Drafts"/> is the
+/// Phase 7f golden-scenario behaviour and stays the default.
+/// </summary>
+public enum FakeCompanyCertificationAuthoringOutcome
+{
+    Drafts,
+    UnsupportedIntent,
+    NeedsClarification
 }

@@ -38,7 +38,7 @@ public sealed class PromptingRegistryTests
             TemplateId = new AgentPromptTemplateId("test-template"),
             Version = new AgentPromptVersion("v1"),
             Purpose = AgentPromptPurpose.DescriptorAuthoring,
-            ContractVersion = new AgentPromptContractVersion("7g.v1"),
+            ContractVersion = new AgentPromptContractVersion("8a.v1"),
             Metadata = new Dictionary<string, string> { ["key1"] = "value1" }
         };
         var registry = new InMemoryAgentPromptTemplateRegistry([original]);
@@ -62,7 +62,7 @@ public sealed class PromptingRegistryTests
             TemplateId = new AgentPromptTemplateId("test-template"),
             Version = new AgentPromptVersion("v1"),
             Purpose = AgentPromptPurpose.DescriptorAuthoring,
-            ContractVersion = new AgentPromptContractVersion("7g.v1"),
+            ContractVersion = new AgentPromptContractVersion("8a.v1"),
             Metadata = new Dictionary<string, string> { ["key1"] = "value1" }
         };
         var registry = new InMemoryAgentPromptTemplateRegistry([original]);
