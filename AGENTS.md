@@ -418,7 +418,7 @@ TestBase
 - Dynamic API AoT：generated path 是正式主链。
 - Audit Logging：统一写入、脱敏、查询已闭环。旧 cleanup（`AuditLogCleanupAppService`、裸
   `DeleteOlderThanAsync`、日期清理 DTO）已随 #132 归档，不再属于正式链。
-- 审计保留治理 V1（#132，实施分支待合并）：唯一主链 = Accountability 契约
+- 审计保留治理 V1（#132，PR #157 合并于 `9909365a`）：唯一主链 = Accountability 契约
   （`Retention`：scope/policy/run/batch/hold/`IAuditRetentionStore`/精确 receipt 读取）+
   `AuditRetentionExecutor` 内核（持久 policy 绑定、批预算、终态 run 拒绝新批、取消终态、
   commit Unknown → receipt 对账、receipt-only 批量事实、mirror 首败优先聚合、显式幂等
@@ -434,6 +434,7 @@ TestBase
   恢复绑定校验、receipt-only 事实、镜像首败优先与显式导出、确认提交后 receipt 读故障不降级）；
   真实身份/权限/Setting/HTTP 组合由 JIT P08 覆盖，不推导原生认证链；原生负控是 fixture 内
   store 装饰器变异，不等价于真实 SQL/事务变异。证据与 P01–P09 映射见实施计划与 `memory.md`。
+- B12 不支持意图负边界（#133，PR #158 合并于 `91d6574e`）：Asset E2E 真实链路（authoring → 确定性评审 → 控制面提交 → 人工批准 → 激活门）落地 9 条确定性负例 + 1 条 opt-in live eval 用例；「不伪造能力、不部署」以测试侧计数器度量（草稿库、评审工件库、控制面审计记录、`IRuntimeActivationGate` 调用/成功数、目录身份对部署基线比对），并配同链路绿色对照（人工批准才 `Activated`）证明判别力；live 与离线回归读写同一组 live 环境变量时共用串行 collection + 进程级捕获门。行为层已带凭据实跑改判：四次 16384 完整运行零草稿/零部署为已观测，一次默认 4096 属 `OutputBudgetExhausted` 单列，不充当第五次拒绝证据。契约层当时确认为缺口：「needs-clarification」不能与畸形/空输出区分（同为 `AUTHORING_INVALID_PROVIDER_OUTPUT`），本 Issue 按边界未改契约；该缺口由 #159 承接并已落地（PR #160 → master `1bf4a7e7`，wire `8a.v1`，见本文件「Authoring 线契约是 `8a.v1`」与当前平台状态的 #159 条目），本条记录保持 #133 当时的范围与裁定身份，不追改为当前契约背书。生产代码零改动；未新增原生执行门禁 ⇒ #123 证据矩阵无新行；不外推到 LibraryManagement/SaaSHelpdesk、其他模型或 RID。
 - CRUD 主链（#128 已实施并合并，PR #150，merge commit `196b6f66`）：formal 链 = 真实 `[GenerateCrudService]` 声明 + BuildTasks 前置物化 + JsonContracts root 闭合 + ExplicitHost typed HTTP 投影 + typed query adapter + 生成 JSON context + 唯一 UoW（`[UnitOfWorkMo]` 织入后经生成服务 `ServiceProvider` 成员接入内核）；旧 bundle/Controller/Legacy 路径已随 #129/PR #152 归档退出（merge commit `2f4c5402`），正式链不保留双轨。证据与支持声明见本文件「平台能力」与 `docs/superpowers/plans/2026-10-14-issue-128-issues-log.md`。
 - 权限系统：授予、撤销、缓存、租户边界、SuperAdmin、AOP 已收口。
 - 后台作业：ISchedulerService + Quartz + 重试策略 + 租户上下文。
