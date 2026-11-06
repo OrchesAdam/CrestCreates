@@ -24,12 +24,7 @@ public class PermissionGrantManager : IPermissionGrantManager
     public async Task GrantAsync(PermissionGrantInfo grant, CancellationToken cancellationToken = default)
     {
         var normalizedGrant = NormalizeGrant(grant);
-
-        var validationResult = await _tenantPermissionScopeValidator.ValidateAsync(normalizedGrant, cancellationToken);
-        if (!validationResult.IsAllowed)
-        {
-            throw new InvalidOperationException($"权限授予被拒绝: {validationResult.FailureReason}");
-        }
+        await EnsureScopeAllowedAsync(normalizedGrant, "授予", cancellationToken);
 
         var existingGrant = await _permissionGrantRepository.FindAsync(
             normalizedGrant.PermissionName,
@@ -58,6 +53,7 @@ public class PermissionGrantManager : IPermissionGrantManager
     public async Task RevokeAsync(PermissionGrantInfo grant, CancellationToken cancellationToken = default)
     {
         var normalizedGrant = NormalizeGrant(grant);
+        await EnsureScopeAllowedAsync(normalizedGrant, "撤销", cancellationToken);
 
         var existingGrant = await _permissionGrantRepository.FindAsync(
             normalizedGrant.PermissionName,
@@ -128,6 +124,18 @@ public class PermissionGrantManager : IPermissionGrantManager
         return permissions
             .OrderBy(permissionName => permissionName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private async Task EnsureScopeAllowedAsync(
+        PermissionGrantInfo grant,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        var validationResult = await _tenantPermissionScopeValidator.ValidateAsync(grant, cancellationToken);
+        if (!validationResult.IsAllowed)
+        {
+            throw new InvalidOperationException($"权限{operation}被拒绝: {validationResult.FailureReason}");
+        }
     }
 
     private static PermissionGrantInfo NormalizeGrant(PermissionGrantInfo grant)

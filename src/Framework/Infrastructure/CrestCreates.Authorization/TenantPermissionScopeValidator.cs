@@ -33,9 +33,27 @@ public class TenantPermissionScopeValidator
         PermissionGrantInfo grant,
         CancellationToken cancellationToken = default)
     {
+        var currentTenantId = _currentTenant.Id;
+
         if (grant.Scope == PermissionGrantScope.Global)
         {
-            return Task.FromResult(TenantPermissionScopeValidationResult.Allowed());
+            if (_currentUser.IsSuperAdmin)
+            {
+                _logger.LogDebug("超级管理员管理全局权限被允许: {Permission}", grant.PermissionName);
+                return Task.FromResult(TenantPermissionScopeValidationResult.Allowed(isSuperAdminOverride: true));
+            }
+
+            if (string.IsNullOrEmpty(currentTenantId))
+            {
+                return Task.FromResult(TenantPermissionScopeValidationResult.Allowed());
+            }
+
+            _logger.LogWarning(
+                "租户上下文尝试管理全局权限: 权限 {Permission}，当前租户 {CurrentTenantId}",
+                grant.PermissionName,
+                currentTenantId);
+
+            return Task.FromResult(TenantPermissionScopeValidationResult.Denied("租户上下文不能管理全局权限"));
         }
 
         if (_currentUser.IsSuperAdmin)
@@ -49,10 +67,11 @@ public class TenantPermissionScopeValidator
             return Task.FromResult(TenantPermissionScopeValidationResult.Denied("Tenant-scoped permission requires TenantId"));
         }
 
-        var currentTenantId = _currentTenant.Id;
         if (string.IsNullOrEmpty(currentTenantId))
         {
-            return Task.FromResult(TenantPermissionScopeValidationResult.Denied("当前请求没有租户上下文"));
+            // Host management: the management permission gate is enforced by the calling application
+            // service; the scope validator only rejects tenant-to-tenant escalation.
+            return Task.FromResult(TenantPermissionScopeValidationResult.Allowed());
         }
 
         if (!string.Equals(currentTenantId, grant.TenantId, StringComparison.OrdinalIgnoreCase))
