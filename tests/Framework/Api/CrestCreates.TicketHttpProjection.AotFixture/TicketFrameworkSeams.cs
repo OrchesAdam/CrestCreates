@@ -1,7 +1,11 @@
 using System.Security.Claims;
+using System.Text.Encodings.Web;
 using CrestCreates.Authorization;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Shared.DataFilter;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.TicketHttpProjection.AotFixture;
 
@@ -50,6 +54,33 @@ public sealed class FixtureCurrentUser : ICurrentUser
     public string[] FindClaimValues(string claimType) => Array.Empty<string>();
     public bool IsInRole(string roleName) => false;
     public bool IsInOrganization(Guid orgId) => false;
+}
+
+/// <summary>
+/// HTTP identity seam: generated endpoints that inherit capability permissions carry ASP.NET
+/// authorization metadata, so the host must run the authentication/authorization middleware a real
+/// host runs. The fixture has no credential store, so every request is authenticated as the same
+/// identity <see cref="FixtureCurrentUser"/> reports.
+/// </summary>
+public sealed class TicketFixtureAuthenticationHandler(
+    IOptionsMonitor<AuthenticationSchemeOptions> options,
+    ILoggerFactory logger,
+    UrlEncoder encoder)
+    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+{
+    public const string SchemeName = "ticket-fixture";
+    public const string UserId = "22222222-2222-2222-2222-222222222222";
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        var identity = new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, UserId),
+            new Claim(ClaimTypes.Name, "ticket-native-fixture"),
+        ], SchemeName);
+        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
+        return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
 }
 
 /// <summary>Identity data-permission filter: the fixture has no data-scope store.</summary>

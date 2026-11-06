@@ -17,6 +17,9 @@ var app = builder.Build();
 
 app.Services.GetRequiredService<TicketMemoryStore>().SeedActiveSlaPolicy();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 // The generated per-assembly activation also contributes the source-generated JSON configurator;
 // the map-time contract verification therefore sees the generated context on the final chain.
 app.MapCrestCapabilityEndpoints();

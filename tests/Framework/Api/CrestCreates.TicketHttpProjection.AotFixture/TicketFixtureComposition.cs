@@ -9,6 +9,7 @@ using CrestCreates.DynamicApi;
 using CrestCreates.Metadata.Abstractions.Bootstrap;
 using CrestCreates.Metadata.Abstractions.DescriptorBinding;
 using CrestCreates.Validation.Modules;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SaaSHelpdesk.Application.Contracts.Interfaces;
@@ -62,6 +63,13 @@ public static class TicketFixtureComposition
         }
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
             options.SerializerOptions.TypeInfoResolverChain.Add(TicketFailureJsonContext.Default));
+
+        // Generated endpoints that inherit capability permissions carry endpoint authorization
+        // metadata; a host must provide the authentication/authorization middleware pair.
+        services.AddAuthorization();
+        services.AddAuthentication(TicketFixtureAuthenticationHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, TicketFixtureAuthenticationHandler>(
+                TicketFixtureAuthenticationHandler.SchemeName, _ => { });
 
         services.AddSingleton<IPermissionChecker, FixturePermissionChecker>();
         services.AddSingleton<ICurrentUser, FixtureCurrentUser>();

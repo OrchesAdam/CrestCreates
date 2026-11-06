@@ -15,6 +15,7 @@ using CrestCreates.GeneratedCrud.AotFixture.Domain;
 using CrestCreates.Metadata.Abstractions.Bootstrap;
 using CrestCreates.Metadata.Abstractions.DescriptorBinding;
 using FluentAssertions;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -137,6 +138,10 @@ public class CrudR1DualFeatureTests
         builder.Services.AddSingleton<MemoryGadgetRepository>();
         builder.Services.AddSingleton<ICrestRepositoryBase<Gadget, Guid>>(
             serviceProvider => serviceProvider.GetRequiredService<MemoryGadgetRepository>());
+        builder.Services.AddAuthorization();
+        builder.Services.AddAuthentication(FixtureAuthenticationHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, FixtureAuthenticationHandler>(
+                FixtureAuthenticationHandler.SchemeName, _ => { });
         builder.Services.AddSingleton<IPermissionChecker, FixturePermissionChecker>();
         builder.Services.AddSingleton<ICurrentUser, FixtureCurrentUser>();
         builder.Services.AddSingleton<IDataPermissionFilter, IdentityDataPermissionFilter>();
@@ -158,6 +163,8 @@ public class CrudR1DualFeatureTests
         builder.Services.AddSingleton<MemoryUnitOfWorkObserver>();
 
         var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.MapCrestCapabilityEndpoints();
         return app;
     }

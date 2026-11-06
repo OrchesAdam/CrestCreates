@@ -14,10 +14,14 @@ using CrestCreates.Metadata.Abstractions.Bootstrap;
 using CrestCreates.Metadata.Abstractions.DescriptorBinding;
 using CrestCreates.Metadata.Bootstrap;
 using CrestCreates.Metadata.DescriptorCapability;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -76,7 +80,18 @@ builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
 // Add logging (required by pipeline middleware)
 builder.Services.AddLogging();
 
+// The Widget CRUD contribution inherits capability permissions, so its endpoints carry endpoint
+// authorization metadata; the host must run the standard middleware pair. This host has no
+// credential store, so every request is the same authenticated probe identity.
+builder.Services.AddAuthorization();
+builder.Services.AddAuthentication(E2eProbeAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, E2eProbeAuthenticationHandler>(
+        E2eProbeAuthenticationHandler.SchemeName, _ => { });
+
 var app = builder.Build();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 // The generated Greeting contribution owns its source-generated JSON context; install it before the
 // map-time JSON verification examines the final resolver chain.
@@ -125,6 +140,24 @@ public sealed class TestMarkerMiddleware : ICapabilityPipelineMiddleware
     {
         LastInvocationSeen = false;
         LastInvocationSource = null;
+    }
+}
+
+public sealed class E2eProbeAuthenticationHandler(
+    IOptionsMonitor<AuthenticationSchemeOptions> options,
+    ILoggerFactory logger,
+    UrlEncoder encoder)
+    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+{
+    public const string SchemeName = "compatibility-e2e-probe";
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        var identity = new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, "compatibility-e2e-probe-user")],
+            SchemeName);
+        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
+        return Task.FromResult(AuthenticateResult.Success(ticket));
     }
 }
 

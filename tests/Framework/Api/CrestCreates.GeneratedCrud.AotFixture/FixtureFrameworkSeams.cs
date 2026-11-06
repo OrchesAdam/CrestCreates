@@ -1,6 +1,10 @@
 using System.Security.Claims;
+using System.Text.Encodings.Web;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Shared.DataFilter;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CrestCreates.GeneratedCrud.AotFixture;
 
@@ -59,6 +63,33 @@ public sealed class FixtureCurrentUser : ICurrentUser
     public bool IsInRole(string roleName) => false;
 
     public bool IsInOrganization(Guid orgId) => false;
+}
+
+/// <summary>
+/// HTTP identity seam: generated CRUD endpoints inherit capability permissions and therefore carry
+/// ASP.NET authorization metadata. A real host runs authentication + authorization middleware; this
+/// fixture has no credential store, so every request is the same authenticated identity
+/// <see cref="FixtureCurrentUser"/> reports.
+/// </summary>
+public sealed class FixtureAuthenticationHandler(
+    IOptionsMonitor<AuthenticationSchemeOptions> options,
+    ILoggerFactory logger,
+    UrlEncoder encoder)
+    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+{
+    public const string SchemeName = "crud-fixture";
+    public const string UserId = "11111111-1111-1111-1111-111111111111";
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        var identity = new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, UserId),
+            new Claim(ClaimTypes.Name, "crud-fixture"),
+        ], SchemeName);
+        var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
+        return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
 }
 
 /// <summary>
