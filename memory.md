@@ -31,6 +31,37 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
+## 2026-11-06 — Giant implementation split (LocalDeadLetterReplayExecutor)
+
+Second-round review mid-term item 8 (staged split of giant implementations), first slice.
+Branch `refactor/giant-implementations-staged-20261106`, based on merged master `cf7a8e96`
+(PR #164). Public API/DI registration unchanged; this is a behavior-preserving move refactor.
+
+- **Result**: `LocalDeadLetterReplayExecutor` 583 → 62 lines of orchestration; the former
+  ~410-line `ExecuteAsync` is now five internal collaborators in the same assembly:
+  `LocalDeadLetterReplayPreflight` (fresh-state read, status/budget/identity validation, frozen
+  codec decode; budget-exhausted archive), `LocalDeadLetterReplayExecution` (scope, context
+  activation, admission, whole-batch preparation, MarkRetrying, handler execution, release),
+  `LocalDeadLetterReplaySettlement` (terminal state writes and independent
+  execution/state-write/release facts), `LocalDeadLetterStateWriter` (bounded scoped writes) and
+  `LocalDeadLetterReplayFacts` (release-problem aggregation, frame-cleanup extraction,
+  cancellation annotations).
+- **Frame invariant discovered during the split**: `LocalEventContextBridge.Activate` (tenant +
+  audit-context push) and `ContextFrame.DisposeAndCapture` are AsyncLocal writes that must run in
+  the same async frame as the handler execution. Moving activation into an awaited collaborator
+  silently lost the restored tenant/correlation; the baseline test
+  `Replay_must_execute_under_the_recorded_tenant_not_the_callers_tenant` caught it (handler saw
+  the caller's correlation). The execution phase therefore owns the whole attempt frame
+  (resolve → activate → admit → prepare → MarkRetrying → execute → release); preflight and
+  settlement remain separate because they perform no ambient writes.
+- **Evidence (executed locally, sequential)**: LocalEvent integration **116/116** with
+  `DOCKER_HOST=unix:///run/user/1000/podman/podman.sock` (the two PostgreSQL upgrade tests need
+  the socket; without it they fail on Docker discovery, not on assertions); LocalEvent NativeAOT
+  gate **1/1** (1 m 7 s, 11-scenario fixture). The first split iteration failed the tenant test
+  before the frame fix; no test was edited.
+- **Remaining slices of the same review item**: `RabbitMqConsumer` (~694 lines), UnitOfWork
+  kernel (~1206), CRUD emitter (~1564). Each needs its own branch/verification; not started.
+
 ## 2026-11-05 — Round-2 overall architecture review fixes (branch `fix/architecture-review-round2-20261105`)
 
 Source: `docs/review/2026-11-05-framework-overall-architecture-review-round2.md` (reviewer artifact in the
