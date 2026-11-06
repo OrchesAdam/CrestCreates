@@ -1,189 +1,19 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using CrestCreates.Agent.Abstractions;
-using CrestCreates.Agent.Tools;
-using CrestCreates.Authorization.Abstractions;
-using CrestCreates.Accountability.Bootstrap;
-using CrestCreates.Accountability.Abstractions.Sinks;
-using CrestCreates.Accountability.InMemory;
-using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
-using CrestCreates.AuditLogging.Interceptors;
 using CrestCreates.AuditLogging.Middlewares;
-using CrestCreates.Capability;
-using CrestCreates.Capability.Abstractions;
-using CrestCreates.Capability.Middleware;
 using CrestCreates.DynamicApi;
-using CrestCreates.Generated.HttpProjection;
-using CrestCreates.EventBus.Abstractions;
-using CrestCreates.Form;
-using CrestCreates.Form.Abstractions;
-using CrestCreates.HumanTask;
-using CrestCreates.HumanTask.Abstractions;
-using CrestCreates.Metadata;
-using CrestCreates.Metadata.Abstractions;
-using CrestCreates.Metadata.Abstractions.DescriptorCapability;
-using CrestCreates.Metadata.DescriptorCapability;
-using CrestCreates.Metadata.Registry;
-using CrestCreates.Metadata.Bootstrap;
-using CrestCreates.Mcp;
-using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.MultiTenancy;
 using CrestCreates.OpenApi;
-using CrestCreates.Runtime.Persistence;
-using CrestCreates.Runtime.Persistence.Abstractions.State;
-using CrestCreates.Runtime.Persistence.InMemory;
-using CrestCreates.Runtime.Delivery;
-using CrestCreates.Sample.Procurement.Application;
-using CrestCreates.Sample.Procurement.Application.Handlers;
-using CrestCreates.Sample.Procurement.Contracts;
-using CrestCreates.Sample.Procurement.Contracts.Json;
-using CrestCreates.Sample.Procurement.Host.Json;
-using CrestCreates.Sample.Procurement.Host.Projections;
 using CrestCreates.Sample.Procurement.Host;
-using CrestCreates.Schema;
-using CrestCreates.Schema.Abstractions;
-using CrestCreates.Workflow;
-using CrestCreates.Workflow.Abstractions;
-using Microsoft.AspNetCore.Authentication;
 
 var goldenScenario = args.Contains("--golden-scenario", StringComparer.Ordinal);
 var builder = WebApplication.CreateBuilder(args);
 if (goldenScenario)
     builder.WebHost.UseUrls("http://127.0.0.1:0");
 
-var store = new InMemoryProcurementRequestStore();
-var schemaRegistry = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
-schemaRegistry.Build([new ProcurementDescriptorProvider<SchemaDescriptor>(ProcurementDescriptorCatalog.Schemas)]);
-var capabilityRegistry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
-var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
-humanTaskRegistry.Build([new ProcurementDescriptorProvider<HumanTaskDescriptor>([ProcurementDescriptorCatalog.ApprovalHumanTask])]);
-var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
-workflowRegistry.Build([new ProcurementDescriptorProvider<WorkflowDescriptor>([ProcurementDescriptorCatalog.ApprovalWorkflow])]);
-var formRegistry = new FormRegistry(new RegistryValidationEngine<FormDescriptor>([]));
-formRegistry.Build([new ProcurementDescriptorProvider<FormDescriptor>([ProcurementDescriptorCatalog.ApprovalForm])]);
-
-// Host policy choices precede the framework defaults; AddCapabilityRuntime's TryAdd keeps them.
-builder.Services.AddSingleton<ICapabilityInputValidationPolicy, ProcurementInputValidationPolicy>();
-builder.Services.AddCapabilityRuntime();
-builder.Services.AddDescriptorStableHash();
-builder.Services.AddMultiTenancy();
-builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
-builder.Services.AddRuntimePersistence();
-builder.Services.AddSingleton<IRuntimeStateContractContributor, ProcurementRuntimeStateContractContributor>();
-builder.Services.AddCrestCreatesInMemoryRuntimePersistence();
-builder.Services.AddRuntimeDelivery();
-builder.Services.AddTransient<AccountabilityHttpTerminalObserverMiddleware>();
-builder.Services.AddTransient<AccountabilityHttpOperationScopeMiddleware>();
-builder.Services.AddSingleton<InMemoryAuditSink>();
-builder.Services.AddSingleton<IAuditSink>(sp => sp.GetRequiredService<InMemoryAuditSink>());
-builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
-builder.Services.AddProcurementCapabilityHandlers();
-builder.Services.AddSingleton<InMemoryProcurementRequestStore>(store);
-builder.Services.AddScoped<ProcurementApplicationService>();
-builder.Services.AddCrestCapabilityEndpoints();
-builder.Services.AddCrestCompatibilityProjection();
-builder.Services.AddGeneratedAppServiceHttp();
-builder.Services.AddCrestOpenApi();
-builder.Services.AddScoped<ProcurementAppService>();
-builder.Services.AddScoped<ProcurementApprovalTaskService>();
-builder.Services.AddScoped<IProcurementApprovalOrchestrator>(sp =>
-    sp.GetRequiredService<ProcurementApprovalTaskService>());
-builder.Services.AddSingleton<ProcurementDecisionReconciliationStore>();
-
-builder.Services.AddSingleton<ISchemaRegistry>(schemaRegistry);
-builder.Services.AddSingleton<ICapabilityRegistry>(capabilityRegistry);
-builder.Services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
-builder.Services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
-builder.Services.AddSingleton<IFormRegistry>(formRegistry);
-builder.Services.AddFormKernel();
-builder.Services.AddHumanTaskRuntime();
-builder.Services.AddHumanTaskCompletionObligation(
-    ProcurementContractIds.ApprovalHumanTask,
-    1,
-    ProcurementHumanTaskDecisionHandler.ConsumerIdValue);
-builder.Services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, ProcurementHumanTaskDecisionHandler>(ProcurementHumanTaskDecisionHandler.ConsumerIdValue);
-builder.Services.AddWorkflowEngine();
-builder.Services.AddScoped<ProcurementLocalEventBus>();
-builder.Services.AddScoped<ILocalEventBus>(sp =>
-    sp.GetRequiredService<ProcurementLocalEventBus>());
-
-builder.Services.AddSingleton<ICapabilityHandlerRegistry, ProcurementHandlerRegistry>();
-builder.Services.AddSingleton<IDescriptorLookup>(new ProcurementDescriptorLookup(
-    ProcurementDescriptorCatalog.Schemas.Cast<IDescriptor>()
-        .Concat(ProcurementDescriptorCatalog.NativeCapabilities)
-        .Append(ProcurementDescriptorCatalog.ApprovalForm)
-        .Append(ProcurementDescriptorCatalog.ApprovalHumanTask)
-        .Append(ProcurementDescriptorCatalog.ApprovalWorkflow)));
-builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddAuthentication(SampleAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, SampleAuthenticationHandler>(
-        SampleAuthenticationHandler.SchemeName,
-        _ => { });
-builder.Services.AddScoped<SampleExecutionIdentity>();
-builder.Services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<SampleExecutionIdentity>());
-builder.Services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<SampleExecutionIdentity>());
-builder.Services.AddScoped<IAgentExecutionContextAccessor>(sp => sp.GetRequiredService<SampleExecutionIdentity>());
-builder.Services.AddScoped<IPermissionChecker, SamplePermissionChecker>();
-
-builder.Services.AddCrestMcpToolProjection(options =>
-{
-    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    options.SerializerOptions.TypeInfoResolver = ProcurementJsonContext.Default;
-});
-builder.Services.AddSingleton<DevelopmentInMemoryAgentToolInvocationGate>();
-builder.Services.AddSingleton<IAgentToolInvocationGate>(sp =>
-    sp.GetRequiredService<DevelopmentInMemoryAgentToolInvocationGate>());
-builder.Services.AddSingleton<IAgentToolInvocationLeaseAbandoner>(sp =>
-    sp.GetRequiredService<DevelopmentInMemoryAgentToolInvocationGate>());
-builder.Services.AddSingleton<SampleAgentToolApprovalGate>();
-builder.Services.AddSingleton<IAgentToolApprovalGate>(sp =>
-    sp.GetRequiredService<SampleAgentToolApprovalGate>());
-builder.Services.AddSingleton<SampleAgentToolBudgetGate>();
-builder.Services.AddSingleton<IAgentToolBudgetGate>(sp =>
-    sp.GetRequiredService<SampleAgentToolBudgetGate>());
-builder.Services.AddSingleton<DevelopmentInMemoryAgentToolGovernanceAuditor>();
-builder.Services.AddSingleton<IAgentToolGovernanceAuditor>(sp =>
-    sp.GetRequiredService<DevelopmentInMemoryAgentToolGovernanceAuditor>());
-builder.Services.AddCrestAgentTools(options =>
-{
-    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    options.SerializerOptions.TypeInfoResolver = ProcurementJsonContext.Default;
-});
-
-builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
-{
-    // #129 S2.3: keep the generated projection context first (it owns the compatibility wire
-    // roots); the host's own source-generated resolver stays ahead of the reflection default.
-    var chain = options.SerializerOptions.TypeInfoResolverChain;
-    var insertionIndex = chain.Count;
-    for (var index = 0; index < chain.Count; index++)
-    {
-        if (chain[index] is System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver resolver
-            && resolver.GetType() == typeof(System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)
-            && resolver.Modifiers.Count == 0)
-        {
-            insertionIndex = index;
-            break;
-        }
-    }
-
-    chain.Insert(insertionIndex, new ProcurementCombinedJsonResolver());
-    options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow;
-});
+// The host module owns composition; this entry point keeps arguments, activation and the pipeline.
+var host = new ProcurementHostModule(goldenScenario);
+host.OnConfigureServices(builder.Services);
 
 var app = builder.Build();
-
-// #129 S2.3: compose the host's capability registry from its static catalogs plus exactly the
-// generated contributions this host activated. MapCrestCapabilityEndpoints verifies this frozen
-// registry against every contribution; omitting a contribution makes mapping fail closed.
-capabilityRegistry.Build(
-    DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>()
-        .Append(new ProcurementDescriptorProvider<CapabilityDescriptor>(ProcurementDescriptorCatalog.NativeCapabilities))
-        .Append(new ProcurementDescriptorProvider<CapabilityDescriptor>(
-            app.Services.GetServices<CapabilityEndpointContribution>()
-                .SelectMany(contribution => contribution.CapabilityDescriptors)
-                .ToList())));
+await host.OnApplicationInitializationAsync(app);
 
 app.UseAccountabilityHttpTerminalObserver();
 app.UseAuthentication();
@@ -206,18 +36,5 @@ if (goldenScenario)
 
 await app.RunAsync();
 return 0;
-
-public sealed class ProcurementHandlerRegistry : ICapabilityHandlerRegistry
-{
-    public IReadOnlyDictionary<string, Type> GetHandlerMappings() => new Dictionary<string, Type>
-    {
-        ["procurement.submit-request"] = typeof(SubmitProcurementRequestHandler),
-        ["procurement.approve-request"] = typeof(ApproveProcurementRequestHandler),
-        ["procurement.reject-request"] = typeof(RejectProcurementRequestHandler),
-        ["procurement.request.apply-approval"] = typeof(ApplyApprovalDecisionHandler),
-        ["procurement.request.apply-rejection"] = typeof(ApplyRejectionDecisionHandler),
-        ["procurement.get-request"] = typeof(GetProcurementRequestHandler),
-    };
-}
 
 public partial class Program;

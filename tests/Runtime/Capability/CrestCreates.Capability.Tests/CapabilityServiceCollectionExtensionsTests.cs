@@ -1,5 +1,8 @@
 using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Capability.Middleware;
+using CrestCreates.Metadata;
+using CrestCreates.Schema.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -118,6 +121,35 @@ public class CapabilityServiceCollectionExtensionsTests
 
         var modules = sp.GetServices<ICapabilityHandlerModule>().ToList();
         modules.Should().ContainSingle(m => m.Id == "legacy-capability-pipeline");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void HostValidationPolicyReplacesTheDefaultRegardlessOfRegistrationOrder(bool registerBeforeRuntime)
+    {
+        var services = new ServiceCollection();
+        if (registerBeforeRuntime)
+        {
+            services.AddCapabilityInputValidationPolicy<RejectAllPolicy>();
+            services.AddCapabilityRuntime();
+        }
+        else
+        {
+            services.AddCapabilityRuntime();
+            services.AddCapabilityInputValidationPolicy<RejectAllPolicy>();
+        }
+
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<ICapabilityInputValidationPolicy>()
+            .Should().BeOfType<RejectAllPolicy>();
+    }
+
+    private sealed class RejectAllPolicy : ICapabilityInputValidationPolicy
+    {
+        public bool RejectUnknownProperties(CapabilityDescriptor capability, SchemaDescriptor inputSchema)
+            => true;
     }
 
     private sealed class TestModule : ICapabilityHandlerModule

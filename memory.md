@@ -206,11 +206,12 @@ script directly with the same environment; this is a local PATH detail, not a fr
 
 ### Explicitly not done (open items)
 
-- **Giant implementation split** (review mid-term 8): `LocalDeadLetterReplayExecutor`, `RabbitMqConsumer`
-  and the UoW kernel were split into staged collaborators (PR #165, PR #166 and the UoW split branch);
-  the CRUD emitter (~1564 lines) remains.
-- **Sample Program.cs composition** beyond `Replace` (review mid-term 9): the two Hosts remain ~247/225 lines;
-  sinking policy/registry wiring into a contributor is a design task, not a mechanical edit.
+- **Giant implementation split** (review mid-term 8): all four implementations are split — LocalEvent replay
+  (PR #165) and RabbitMQ consumer (PR #166) await merge approval; UoW kernel (PR #167 → `05dc7a55`) and
+  CRUD emitter (PR #168 → `3ca5248c`) are merged.
+- **Sample Program.cs composition** (review mid-term 9): closed 2026-11-06 — both Hosts enter through
+  40-line entry points, composition lives in `*HostModule : ModuleBase`, and the generic policy /
+  capability-registry / HTTP-JSON pieces are framework helpers. See the 2026-11-06 entry.
 - **Residual red baselines are unchanged and still documented**: full integration 30 red (#129 §14.6 / userinfo),
   SaaS 11 red, Asset E2E 19 need the runtime connection string, 2 boundary evidence-ledger gates need the
   accumulated artifacts.
@@ -1196,3 +1197,26 @@ Source: round-2 review item 8. Public APIs unchanged; no test file was modified.
   gate), CompatibilityProjection E2E 20/20 (local, `~/.dotnet/dotnet` 10.0.114 + podman socket).
 - UoW split PR #167 merged as `05dc7a55` (2026-11-06). All four giant implementations named by the review
   are now split; PR #165/#166 still await explicit merge approval.
+
+## 2026-11-06 — Sample host composition (round-2 mid-term 9)
+
+- Both golden hosts now enter through 40-line `Program.cs` files (declaration + activation + Map);
+  composition lives in `AssetHostModule` / `ProcurementHostModule` (`ModuleBase` contributors) instead of
+  top-level statements. Host-specific policy/catalog/persistence/identity choices stay in the host; the
+  generic pieces became framework helpers:
+  - `AddCapabilityInputValidationPolicy<TPolicy>()` (CrestCreates.Capability) — the host policy replaces
+    the permissive default regardless of registration order. `TPolicy` carries
+    `DynamicallyAccessedMembers(PublicConstructors)`; without it NativeAOT trimmed the policy constructor
+    and the Asset gate failed at runtime.
+  - `CapabilityRegistryComposition.BuildFromHostCatalog(...)` (CrestCreates.DynamicApi) — builds the
+    authoritative capability registry from the static provider bag + host catalog + activated
+    contributions; an already-built registry is verified and a missing host capability fails closed.
+  - `AddCrestHttpJsonResolver(...)` (CrestCreates.DynamicApi) — inserts the host's combined resolver before
+    the untouched reflection resolver (or appends it) and rejects unmapped members.
+- `Program.cs` line counts: Asset 249 → 40, Procurement 223 → 40. No business/handler/HTTP behavior change;
+  the `Services.Replace` policy registration and handler service locator were already closed in the round-2
+  fix commit `39c2de9b`.
+- Evidence (local, `~/.dotnet/dotnet` 10.0.114 + podman): Capability 180/180, DynamicApi 145/145, Asset unit
+  29/29, Procurement unit 29/29, Procurement E2E golden process 1/1, Asset E2E 128 passed / 2 live-skip
+  (local PG `crestcreates-asset-pg-local`), Asset NativeAOT 3/3, Procurement NativeAOT 9/9. GitHub
+  workflows remain manually disabled; this is execution evidence, not a CI run.

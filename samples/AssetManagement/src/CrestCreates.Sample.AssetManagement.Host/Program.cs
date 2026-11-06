@@ -1,55 +1,7 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using CrestCreates.Accountability.Abstractions.Sinks;
-using CrestCreates.Accountability.Bootstrap;
-using CrestCreates.Accountability.InMemory;
-using CrestCreates.Agent.Abstractions;
-using CrestCreates.Agent.Tools;
-using CrestCreates.Authorization;
-using CrestCreates.Authorization.Abstractions;
-using CrestCreates.AuditLogging.Abstractions.MethodAccountability;
-using CrestCreates.AuditLogging.Interceptors;
 using CrestCreates.AuditLogging.Middlewares;
-using CrestCreates.Capability;
-using CrestCreates.Capability.Abstractions;
-using CrestCreates.Capability.Middleware;
 using CrestCreates.DynamicApi;
-using CrestCreates.Generated.HttpProjection;
-using CrestCreates.EventBus.Abstractions;
-using CrestCreates.Form;
-using CrestCreates.Form.Abstractions;
-using CrestCreates.HumanTask;
-using CrestCreates.HumanTask.Abstractions;
-using CrestCreates.Infrastructure.Permission;
-using CrestCreates.Metadata;
-using CrestCreates.Metadata.Abstractions;
-using CrestCreates.Metadata.Abstractions.Runtime;
-using CrestCreates.Metadata.Abstractions.DescriptorCapability;
-using CrestCreates.Metadata.Bootstrap;
-using CrestCreates.Metadata.DescriptorCapability;
-using CrestCreates.Metadata.Registry;
-using CrestCreates.Mcp;
-using CrestCreates.MultiTenancy;
-using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.OpenApi;
-using CrestCreates.Runtime.Delivery;
-using CrestCreates.Runtime.Persistence;
-using CrestCreates.Runtime.Persistence.Abstractions.State;
-using CrestCreates.Runtime.Persistence.PostgreSql;
-using CrestCreates.Domain.Shared.Permissions;
-using CrestCreates.Sample.AssetManagement.Application;
-using CrestCreates.Sample.AssetManagement.Host.Projections;
-using CrestCreates.Sample.AssetManagement.Application.Handlers;
-using CrestCreates.Sample.AssetManagement.Contracts;
-using CrestCreates.Sample.AssetManagement.Contracts.Json;
 using CrestCreates.Sample.AssetManagement.Host;
-using CrestCreates.Sample.AssetManagement.Host.Json;
-using CrestCreates.Sample.AssetManagement.Persistence;
-using CrestCreates.Schema;
-using CrestCreates.Schema.Abstractions;
-using CrestCreates.Workflow;
-using CrestCreates.Workflow.Abstractions;
-using Microsoft.AspNetCore.Authentication;
 
 var goldenScenario = args.Contains("--golden-scenario", StringComparer.Ordinal);
 var candidateProfile = args.Contains("--golden-scenario-profile=asset-v2-candidate", StringComparer.Ordinal);
@@ -60,147 +12,13 @@ var builder = WebApplication.CreateBuilder(args);
 if (goldenScenario)
     builder.WebHost.UseUrls("http://127.0.0.1:0");
 
-var databasePath = builder.Configuration["AssetManagement:DatabasePath"]
-    ?? Path.Combine(Path.GetTempPath(), $"crestcreates-assets-{Environment.ProcessId}-{Guid.NewGuid():N}.db");
-builder.Configuration["AssetManagement:DatabasePath"] = databasePath;
-var assetStore = new SqliteAssetStore($"Data Source={databasePath}");
-var runtimeConnectionString = builder.Configuration["AssetManagement:RuntimeConnectionString"]
-    ?? Environment.GetEnvironmentVariable("ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING");
-if (string.IsNullOrWhiteSpace(runtimeConnectionString))
-    throw new InvalidOperationException("AssetManagement:RuntimeConnectionString is required; the golden application has no in-memory Runtime fallback.");
-var runtimeSchema = builder.Configuration["AssetManagement:RuntimeSchema"]
-    ?? Environment.GetEnvironmentVariable("ASSET_MANAGEMENT_RUNTIME_SCHEMA")
-    ?? "crest_asset_runtime";
-var schemaRegistry = new SchemaRegistry(new RegistryValidationEngine<SchemaDescriptor>([]));
-schemaRegistry.Build([new AssetDescriptorProvider<SchemaDescriptor>(AssetDescriptorCatalog.Schemas)]);
-var capabilityRegistry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>([]));
-var humanTaskRegistry = new HumanTaskRegistry(new RegistryValidationEngine<HumanTaskDescriptor>([]));
-humanTaskRegistry.Build([new AssetDescriptorProvider<HumanTaskDescriptor>(candidateGoldenScenario
-    ? [AssetDescriptorCatalog.MaintenanceHumanTask, AssetDescriptorCatalog.MaintenanceInitialHumanTask]
-    : [AssetDescriptorCatalog.MaintenanceHumanTask])]);
-var workflowRegistry = new WorkflowRegistry(new RegistryValidationEngine<WorkflowDescriptor>([]));
-workflowRegistry.Build([new AssetDescriptorProvider<WorkflowDescriptor>(candidateGoldenScenario
-    ? [AssetDescriptorCatalog.MaintenanceWorkflow, AssetCandidateDescriptorCatalog.MaintenanceWorkflow]
-    : [AssetDescriptorCatalog.MaintenanceWorkflow])]);
-var formRegistry = new FormRegistry(new RegistryValidationEngine<FormDescriptor>([]));
-formRegistry.Build([new AssetDescriptorProvider<FormDescriptor>([AssetDescriptorCatalog.MaintenanceForm])]);
-
-// Host policy choices precede the framework defaults; AddCapabilityRuntime's TryAdd keeps them.
-builder.Services.AddSingleton<ICapabilityInputValidationPolicy, AssetInputValidationPolicy>();
-builder.Services.AddCapabilityRuntime();
-builder.Services.AddDescriptorStableHash();
-builder.Services.AddMultiTenancy();
-builder.Services.AddInMemoryTenantProvider();
-builder.Services.AddDataFilterServices();
-builder.Services.AddCrestAuthorization();
-builder.Services.AddAccountability(options => options.RequireAtLeastOneSink = true);
-builder.Services.AddRuntimePersistence();
-builder.Services.AddSingleton<IRuntimeStateContractContributor, AssetRuntimeStateContractContributor>();
-builder.Services.AddCrestCreatesPostgreSqlRuntimePersistence(new PostgreSqlRuntimePersistenceOptions
-{
-    ConnectionString = runtimeConnectionString,
-    Schema = runtimeSchema,
-    ApplyMigrations = true
-});
-builder.Services.AddRuntimeDelivery(options =>
-{
-    if (goldenScenario)
-        options.PollingInterval = TimeSpan.FromMilliseconds(100);
-});
-builder.Services.AddTransient<AccountabilityHttpTerminalObserverMiddleware>();
-builder.Services.AddTransient<AccountabilityHttpOperationScopeMiddleware>();
-builder.Services.AddSingleton<InMemoryAuditSink>();
-builder.Services.AddSingleton<IAuditSink>(sp => sp.GetRequiredService<InMemoryAuditSink>());
-builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
-builder.Services.AddSingleton<ICapabilityHandlerModule>(new AssetCapabilityModule());
-builder.Services.AddSingleton<IAssetStore>(assetStore);
-builder.Services.AddSingleton<CrestCreates.Domain.Repositories.Permission.IPermissionGrantRepository, AssetPermissionGrantRepository>();
-builder.Services.AddScoped<AssetApplicationService>();
-builder.Services.AddScoped<AssetCompatibilityProjection>();
-builder.Services.AddCrestCapabilityEndpoints();
-builder.Services.AddCrestCompatibilityProjection();
-builder.Services.AddGeneratedAppServiceHttp();
-builder.Services.AddCrestOpenApi();
-builder.Services.AddSingleton<ISchemaRegistry>(schemaRegistry);
-builder.Services.AddSingleton<ICapabilityRegistry>(capabilityRegistry);
-builder.Services.AddSingleton<IHumanTaskRegistry>(humanTaskRegistry);
-builder.Services.AddSingleton<IWorkflowRegistry>(workflowRegistry);
-builder.Services.AddSingleton<IFormRegistry>(formRegistry);
-builder.Services.AddFormKernel();
-builder.Services.AddHumanTaskRuntime();
-builder.Services.AddSingleton<AssetMaintenanceTaskContractResolver>();
-builder.Services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
-builder.Services.AddHumanTaskCompletionObligation(AssetContractIds.MaintenanceInitialHumanTask, 1, AssetContractIds.MaintenanceDecisionConsumer);
-builder.Services.AddOutboxRequiredConsumer<HumanTaskCompletedEvent, AssetMaintenanceDecisionConsumer>(AssetContractIds.MaintenanceDecisionConsumer);
-builder.Services.AddWorkflowEngine();
-builder.Services.AddScoped<IAssetMaintenanceWorkflowStarter, AssetMaintenanceWorkflowService>();
-builder.Services.AddScoped<AssetMaintenanceWorkflowService>();
-builder.Services.AddScoped<ILocalEventBus, AssetLocalEventBus>();
-builder.Services.AddSingleton<IDescriptorLookup>(new AssetDescriptorLookup(
-    AssetDescriptorCatalog.Schemas.Cast<IDescriptor>()
-        .Concat(AssetDescriptorCatalog.Capabilities)
-        .Append(AssetDescriptorCatalog.MaintenanceForm)
-        .Append(AssetDescriptorCatalog.MaintenanceHumanTask)
-        .Append(AssetDescriptorCatalog.MaintenanceWorkflow)
-        .Concat(candidateGoldenScenario
-            ? new IDescriptor[] { AssetDescriptorCatalog.MaintenanceInitialHumanTask, AssetCandidateDescriptorCatalog.MaintenanceWorkflow }
-            : Array.Empty<IDescriptor>())));
-builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddAuthentication(AssetAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, AssetAuthenticationHandler>(AssetAuthenticationHandler.SchemeName, _ => { });
-builder.Services.AddScoped<AssetExecutionIdentity>();
-builder.Services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<AssetExecutionIdentity>());
-builder.Services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<AssetExecutionIdentity>());
-builder.Services.AddScoped<IAgentExecutionContextAccessor>(sp => sp.GetRequiredService<AssetExecutionIdentity>());
-builder.Services.AddCrestMcpToolProjection(options =>
-{
-    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    options.SerializerOptions.TypeInfoResolver = AssetJsonContext.Default;
-});
-builder.Services.AddCrestAgentTools(options =>
-{
-    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    options.SerializerOptions.TypeInfoResolver = AssetJsonContext.Default;
-});
-builder.Services.AddSingleton<AssetAgentToolApprovalGate>();
-builder.Services.AddSingleton<IAgentToolApprovalGate>(sp => sp.GetRequiredService<AssetAgentToolApprovalGate>());
-builder.Services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
-{
-    // #129 S2.3: keep the generated projection context first (it owns the compatibility wire
-    // roots); the host's own source-generated resolver stays ahead of the reflection default.
-    var chain = options.SerializerOptions.TypeInfoResolverChain;
-    var insertionIndex = chain.Count;
-    for (var index = 0; index < chain.Count; index++)
-    {
-        if (chain[index] is System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver resolver
-            && resolver.GetType() == typeof(System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver)
-            && resolver.Modifiers.Count == 0)
-        {
-            insertionIndex = index;
-            break;
-        }
-    }
-
-    chain.Insert(insertionIndex, new AssetCombinedJsonResolver());
-    options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow;
-});
+// The host module owns composition; this entry point keeps arguments, activation and the pipeline.
+var host = new AssetHostModule(builder.Configuration, goldenScenario, candidateGoldenScenario);
+host.OnConfigureServices(builder.Services);
 
 var app = builder.Build();
+await host.OnApplicationInitializationAsync(app);
 
-// #129 S2.3: compose the host's capability registry from its static catalogs plus exactly the
-// generated contributions this host activated. MapCrestCapabilityEndpoints verifies this frozen
-// registry against every contribution; omitting a contribution makes mapping fail closed.
-capabilityRegistry.Build(
-    DescriptorProviderRegistry.GetProviders<CapabilityDescriptor>()
-        .Append(new AssetDescriptorProvider<CapabilityDescriptor>(AssetDescriptorCatalog.Capabilities))
-        .Append(new AssetDescriptorProvider<CapabilityDescriptor>(
-            app.Services.GetServices<CapabilityEndpointContribution>()
-                .SelectMany(contribution => contribution.CapabilityDescriptors)
-                .ToList())));
-
-await SeedAssetPermissionsAsync(app.Services);
-await assetStore.InitializeAsync();
 app.UseAccountabilityHttpTerminalObserver();
 app.UseAuthentication();
 app.UseAccountabilityHttpOperationScope();
@@ -218,32 +36,5 @@ if (goldenScenario)
 
 await app.RunAsync();
 return 0;
-
-static async Task SeedAssetPermissionsAsync(IServiceProvider services)
-{
-    using var scope = services.CreateScope();
-    var manager = scope.ServiceProvider.GetRequiredService<IPermissionGrantManager>();
-    var userPermissions = new[] { AssetPermissions.Assets.Read, AssetPermissions.Assets.Search };
-    var managerPermissions = userPermissions.Concat(new[]
-    {
-        AssetPermissions.Assets.Register,
-        AssetPermissions.Assets.Update,
-        AssetPermissions.Assets.Assign,
-        AssetPermissions.Assets.Return,
-        AssetPermissions.Assets.Transfer,
-        AssetPermissions.Assets.RequestMaintenance,
-        AssetPermissions.Assets.CompleteMaintenance
-    });
-    foreach (var permission in userPermissions)
-        await manager.GrantAsync(new PermissionGrantInfo { PermissionName = permission, ProviderType = PermissionGrantProviderType.Role, ProviderKey = "asset-user", Scope = PermissionGrantScope.Global });
-    foreach (var permission in managerPermissions)
-        await manager.GrantAsync(new PermissionGrantInfo { PermissionName = permission, ProviderType = PermissionGrantProviderType.Role, ProviderKey = "asset-manager", Scope = PermissionGrantScope.Global });
-}
-
-public sealed class AssetAgentToolApprovalGate : IAgentToolApprovalGate
-{
-    public ValueTask<AgentToolApprovalResult> EvaluateAndClaimAsync(AgentToolApprovalRequest request, CancellationToken cancellationToken = default)
-        => ValueTask.FromResult(new AgentToolApprovalResult { Decision = AgentToolApprovalDecision.NotRequired, ClaimState = AgentToolApprovalEvidenceClaimState.NotApplicable, ReasonCode = "read_only" });
-}
 
 public partial class Program;
