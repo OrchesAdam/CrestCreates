@@ -43,10 +43,10 @@ namespace CrestCreates.Data.EFCore.DbContexts
             _dbSet.Update(entity);
         }
 
-        public async Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+        public Task<TEntity> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             _dbSet.Update(entity);
-            return entity;
+            return Task.FromResult(entity);
         }
 
         public void UpdateRange(IEnumerable<TEntity> entities)
@@ -54,11 +54,11 @@ namespace CrestCreates.Data.EFCore.DbContexts
             _dbSet.UpdateRange(entities);
         }
 
-        public async Task<int> UpdateRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
+        public Task<int> UpdateRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
             var enumerable = entities.ToList();
             _dbSet.UpdateRange(enumerable);
-            return enumerable.Count;
+            return Task.FromResult(enumerable.Count);
         }
 
         public void Remove(TEntity entity)
@@ -66,9 +66,10 @@ namespace CrestCreates.Data.EFCore.DbContexts
             _dbSet.Remove(entity);
         }
 
-        public async Task RemoveAsync(TEntity entity, CancellationToken cancellationToken = default)
+        public Task RemoveAsync(TEntity entity, CancellationToken cancellationToken = default)
         {
             _dbSet.Remove(entity);
+            return Task.CompletedTask;
         }
 
         public void RemoveRange(IEnumerable<TEntity> entities)
@@ -76,10 +77,10 @@ namespace CrestCreates.Data.EFCore.DbContexts
             _dbSet.RemoveRange(entities);
         }
 
-        public async Task<int> RemoveRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
+        public Task<int> RemoveRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
             _dbSet.RemoveRange(entities);
-            return entities.Count();
+            return Task.FromResult(entities.Count());
         }
 
         public async Task<int> RemoveRangeAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)

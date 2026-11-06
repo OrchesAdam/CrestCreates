@@ -31,6 +31,135 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
+## 2026-11-05 — Round-2 overall architecture review fixes (branch `fix/architecture-review-round2-20261105`)
+
+Source: `docs/review/2026-11-05-framework-overall-architecture-review-round2.md` (reviewer artifact in the
+main workspace, not committed here). Baseline of this work: `c4e71e9f` (after PR #163). All numbers below were
+produced locally with `~/.dotnet/dotnet` 10.0.114 + podman (`DOCKER_HOST=unix:///run/user/1000/podman/podman.sock`).
+GitHub workflows stay manually disabled, so this is execution evidence, not a CI run.
+
+### Delivered
+
+- **I-18 closed (root cause was mis-diagnosed, not the runner).** `HostMigrationAndSeedRunner` already creates
+  tables per registered context; the real defect was LibraryManagement's migrate-and-seed closure: it registers
+  `AddOpenIddictServer` (which registers `HostOpenIddictDataSeeder`) without `AddCrestCreatesEfCorePostgreSql()`
+  or `typeof(OpenIddictDbContext)`. SaaSHelpdesk and the platform composition have both, which is why only
+  LibraryManagement failed on a fresh database (`42P01 "OpenIddictScopes"`). Fixed on the sample side, mirroring
+  the established pattern. The integration fixture no longer creates/DROPs schema itself (it was papering over
+  the broken closure) and no longer re-registers the unit-of-work assembly the module already declares — that
+  duplicate made `UnitOfWorkProviderBindingRegistry` refuse at first resolution (HTTP 500 `Duplicate unit-of-work
+  binding for provider 'EfCore'`, the #129 R01 class). `/swagger/v1/swagger.json` expectation corrected to the
+  real `MapOpenApi()` route `/openapi/v1.json` (path/operation assertions unchanged).
+- **CI evidence chain.** `ci.yml` / `full-validation.yml` now run the GeneratedCrud and TicketHttpProjection
+  NativeAOT gates (JIT halves in the fast step, `Category=NativeAotGate` in the gate section) and run the whole
+  integration project except the classes that depend on the framework platform HTTP surface deferred by
+  #129 rev.2 §14.6 plus the userinfo short-name assertion. The stale "OpenIddictScopes missing" comment is
+  replaced by the real attribution; nothing was turned green by editing expectations or skipping.
+- **AOP closure (review P2-4).** New `IServiceProviderAccessor` contract in `CrestCreates.Aop.Abstractions`;
+  `MethodContextExtensions` resolves the provider by contract (the `GetProperty("ServiceProvider"|"Services"|
+  "HttpContextAccessor")` reflection chain is gone); `UnitOfWorkMoAttribute` refuses deterministically instead of
+  running the woven body unmanaged. Implementers: `CrestAppServiceBase`, the generated CRUD service
+  (`CrudArtifactEmitter`), and the two SaaS services that previously had no accessor at all
+  (`AgentAppService`, `CustomerPortalAppService` — their `[UnitOfWorkMo]` used to be inert).
+- **Dead public surface archived** to `99_RecycleBin/architecture-review-round2-20261105/` with original paths and
+  README: `CrudServiceBase`, `ICrudService`, `CrudControllerBase`, `BaseMoAttribute`, `WorkflowEventConsumer`,
+  `IWorkflowEventConsumer` (the last is the "Future …" empty consumer). `ICrudAppService` stays — it is live.
+- **Small debt.** CS1998 message sites removed by dropping `async` at 6 sites (`EfCoreDataBaseSet` ×4,
+  `TenantPermissionScopeValidator` ×2); dead `CloneWithoutId` / `ToSummary` emission removed from
+  `EntitySourceGenerator`; the two whole-block commented FreeSql/Rougamo remnants deleted; the 8 blanket
+  `#pragma warning disable` in canonical-hash / draft-contract writers narrowed to `CS8669` (probed: removing it
+  entirely produced only CS8669 in the consumer, so the blanket suppression was hiding exactly that).
+- **New guards (with negative controls).** `OpenIddictSeedClosureArchitectureTests` (host enabling OpenIddict
+  seeding must declare `OpenIddictDbContext` in its closure; code lines only, prose exempt) and
+  `DynamicApiCompileTimeOnlyArchitectureTests` (no reflection discovery/execution in the formal DynamicApi path).
+  Each was proven to bite with a temporary non-production artifact, then re-run green; the closure guard's
+  coverage control also caught a real resolver defect (project directory `CrestCreates.Web` contains a dot, so
+  deriving the csproj name from the directory silently skipped the platform host).
+- **Docs.** `AGENTS.md`: "active CI" → "CI 门禁已接线（workflows 手工禁用，证据以本地/历史执行为准）";
+  LocalEvent native count 五场景 → 11 场景 (both places); UoW bullet now states the `IServiceProviderAccessor`
+  contract and fail-closed behaviour; `memory.md` evidence-boundary wording corrected the same way.
+
+### Follow-up delivered after the first push (same branch)
+
+- **Procurement handler service locator (review P2-7).** All six handlers now declare `[CapabilityName]` +
+  `ICapabilityHandler<TInput,TResult>`; `ProcurementApplicationService` / `IProcurementApprovalOrchestrator`
+  arrive by constructor injection and tenant/user/invocation-source come from
+  `ICapabilityExecutionContextAccessor`. `ProcurementCapabilityModule` (hand `new` + service locator) is
+  archived to the round-2 recycle folder; the Host activates the generated module through
+  `AddProcurementCapabilityHandlers()` (`GeneratedCapabilityHandlerModule.Instance` +
+  `GeneratedHandlerRegistry.RegisterServices`). `AddProcurementCapabilityHandlers` is a two-line activation
+  helper in the sample Application project, not a framework special case.
+- **`PermissionMo` fail-closed (newly surfaced; security semantics).** No checker → deterministic
+  `InvalidOperationException` (naming `IPermissionChecker`), never "skip the check and run the body";
+  `CheckAsync` denial/exception propagates instead of being swallowed into `LogError`. Service resolution now
+  prefers the `IServiceProviderAccessor` contract and keeps the Rougamo pinned scope only as a fallback for
+  framework-owned targets. Covered by three new woven acceptance tests (missing checker / denied / granted).
+- **`Services.Replace` removed from samples.** `ICapabilityInputValidationPolicy` in Procurement and
+  AssetManagement is registered before `AddCapabilityRuntime()` (the framework default is `TryAdd`,
+  so the host choice wins without last-writer-wins replacement). The SaaSHelpdesk EF module's
+  `ITenantInitializationStore` `Replace` was the only registration for its custom-DbContext path (the
+  framework `TryAdd` lives in `AddCrestCreatesEfCoreDbContext`, which that module does not call) — it is now
+  a plain `AddScoped`, same effective service, no fake override semantics.
+- **FreeSql/SqlSugar repository duplication (review P1-5 residual) — declared, not extracted.**
+  `docs/Feature/OrmProviderSupportMatrix.md` §5 now records the decision (independent implementations),
+  the rationale (SDK/query/soft-delete/tenant-filter semantics differ; a shared layer would move the only
+  evidence-bearing path out of the matrix), the maintenance constraint (both change together, `Issue130*`
+  suites are the behavioural baseline) and the revisit trigger (>~1500 lines / third SDK provider / a defect
+  repeated twice on both sides). The review explicitly permits this option.
+- **Core 专属 NativeAOT 门禁（review P3 / mid-term 10）.**
+  `tests/Core/CrestCreates.Core.AotHost` (console, `PublishAot=true`,
+  `JsonSerializerIsReflectionEnabledByDefault=false`) exercises semantic identity construction /
+  implicit conversion / default rejection, severity + diagnostic ordering, source-generated JSON
+  round-trip and converter rejections (unknown severity, empty/null diagnostic), and
+  `UnitOfWorkCancellationSnapshot` merge/Attach/ContainsToken. `tests/Core/CrestCreates.Core.AotHost.Tests`
+  publishes with `CrestCreatesPublishMode=aot` (`linux-x64`), links and runs the native ELF, asserts six
+  per-scenario sentinels + `CRESTCREATES_CORE_SAMPLE_OK`, and a missing-argument negative control
+  (exit 2, no sentinel). Wired into `ci.yml` and `full-validation.yml` native gate sections and both
+  solutions. Core unit tests grew to 40 with five snapshot tests in
+  `CrestCreates.Core.Abstractions.Tests`. AGENTS.md Core AOT line updated from
+  "组合 Host 覆盖" to this dedicated evidence, with its scope stated.
+- **`CapabilityEndpointJsonRuntime` — kept, not archived.** It is `[Obsolete]` and has no production consumer,
+  but it is an explicitly documented backward-compatibility budget
+  (`docs/Feature/CapabilityExposure/arch-design.md:945`), unlike the un-owned `CrudControllerBase` surface.
+  Archiving it would be an unrequested public-API removal; it stays as an isolated, marked compatibility
+  surface. Removal is a next-major decision.
+
+### Evidence (executed this round)
+
+| Suite / gate | Result |
+| --- | --- |
+| GeneratedCrud native gate (`Category=NativeAotGate`) | 3/3, 1 m 36 s |
+| Ticket formal HTTP native gate | 5/5, 2 m 40 s |
+| Procurement NativeAOT fixture (after generated handler activation) | 9/9, 1 m 56 s; native publish/link/run emitted `CRESTCREATES_PROCUREMENT_HTTP_OK` + `CRESTCREATES_PROCUREMENT_SAMPLE_OK` + `CRESTCREATES_ACCOUNTABILITY_OK` |
+| Core native gate (new) | 2/2 (17 s): native ELF (2.5 MB stripped) ran six scenarios + total sentinel; no-argument negative control exit 2 without sentinel |
+| Core unit tests | 40/40 (five new snapshot tests) |
+| GeneratedCrud JIT fixture | 25/25 (Q01 now asserts refusal + zero persistence) |
+| Ticket JIT fixture | 1/1 |
+| OrmProviders (full, after PermissionMo fail-closed + 3 new tests) | 271/271 |
+| CodeGenerator | 461/461 (first run 460/461; the single red was the typed-adapter harness closure missing `CrestCreates.Aop.Abstractions`, CS0234 — its class passes 4/4 after adding the reference) |
+| Integration suite, CI-wired subset | 19/19 |
+| Integration suite, full | 19 pass / 30 fail — all 30 are #129 §14.6 (framework platform HTTP surface 404) or the userinfo short-name mapping; unchanged, documented |
+| SaaSHelpdesk | 154/165 — the 11 red are the documented pre-existing set (10 × `POST /api/user` 404 + 1 × `ITenantProvider`) |
+| Golden samples / Procurement / Asset unit / Asset E2E | 37/37 · 29/29 + 1/1 (unit + E2E re-run after handler/host changes) · 29/29 · 109/130 (19 need `ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING`) |
+| Sample builds after `Services.Replace` removal | Procurement Host, AssetManagement Host, SaaSHelpdesk.EntityFrameworkCore all succeed |
+| Dependency boundaries | 237 pass; 3 passed with `DOCKER_HOST` set; 2 evidence-ledger gates need the accumulated `tests/artifacts` producer order (gitignored) |
+
+Native-gate toolchain note: `run-nativeaot-golden-scenario.sh` invokes bare `dotnet`; when the test is started
+as `~/.dotnet/dotnet test` without `~/.dotnet` first on `PATH`, the child resolves `/usr/bin/dotnet` (10.0.113)
+while the SDK is 10.0.114 and `csc` fails to launch (`Microsoft.NETCore.App 10.0.14` missing under
+`/usr/lib64/dotnet`). Run the fixture with `PATH="$HOME/.dotnet:$PATH" DOTNET_ROOT="$HOME/.dotnet"`, or run the
+script directly with the same environment; this is a local PATH detail, not a framework or gate defect.
+
+### Explicitly not done (open items)
+
+- **Giant implementation split** (review mid-term 8): `LocalDeadLetterReplayExecutor` (~410 lines),
+  `RabbitMqConsumer` (~694), UoW kernel (~1206), CRUD emitter (~1564) — staged extraction not started.
+- **Sample Program.cs composition** beyond `Replace` (review mid-term 9): the two Hosts remain ~247/225 lines;
+  sinking policy/registry wiring into a contributor is a design task, not a mechanical edit.
+- **Residual red baselines are unchanged and still documented**: full integration 30 red (#129 §14.6 / userinfo),
+  SaaS 11 red, Asset E2E 19 need the runtime connection string, 2 boundary evidence-ledger gates need the
+  accumulated artifacts.
+
 ## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S5 accepted; merged as 1bf4a7e7; issue closed completed)
 
 - Branch `docs/issue-159-explicit-unsupported-clarification-contract-20261103-134406`, PR #160 — **merged 2026-11-05
@@ -305,14 +434,16 @@ never deleted; never output credentials.
 
 ## Evidence boundaries
 
-- Active CI native publish+link+run gates: PG AotHost sentinels
+- Native publish+link+run gates wired into `ci.yml`/`full-validation.yml` (all workflows remain
+  manually disabled since 2026-10-12, so every number below is local/historical execution evidence,
+  not a live CI run): PG AotHost sentinels
   (incl. `CRESTCREATES_WORKFLOW_CONDITION_AOT_OK`), Memory JSON contracts,
   ControlPlane JsonContracts, Asset/Procurement Golden App fixtures, and the
   CapabilityEndpoint native HTTP request gate (loopback requests, success/400/404
   negative cases, process reaping, evidence artifact `aot-native-evidence-<sha>`;
   merged via PR #135); MCP/Agent.Tools main fixtures run their existing
-  publish-and-run tests in active CI; LocalEvent typed dispatch/replay native gate
-  (five scenarios + sentinel `CRESTCREATES_LOCALEVENT_TYPED_REPLAY_NATIVE_OK`, linux-x64,
+  publish-and-run gate steps (wired in CI, executed locally while workflows stay disabled); LocalEvent typed dispatch/replay native gate
+  (eleven scenarios + sentinel `CRESTCREATES_LOCALEVENT_TYPED_REPLAY_NATIVE_OK`, linux-x64,
   in-memory DLQ store only, evidence `local-event-typed-replay.json`; gate step prepared
   in `ci.yml`/`full-validation.yml`, workflows remain manually disabled; merged via
   PR #142). RabbitMQ static bindings trim + native gates (true per-mode publish: trim runs a trimmed JIT

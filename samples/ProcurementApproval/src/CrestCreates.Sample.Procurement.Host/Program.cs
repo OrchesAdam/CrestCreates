@@ -45,7 +45,6 @@ using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var goldenScenario = args.Contains("--golden-scenario", StringComparer.Ordinal);
 var builder = WebApplication.CreateBuilder(args);
@@ -63,6 +62,8 @@ workflowRegistry.Build([new ProcurementDescriptorProvider<WorkflowDescriptor>([P
 var formRegistry = new FormRegistry(new RegistryValidationEngine<FormDescriptor>([]));
 formRegistry.Build([new ProcurementDescriptorProvider<FormDescriptor>([ProcurementDescriptorCatalog.ApprovalForm])]);
 
+// Host policy choices precede the framework defaults; AddCapabilityRuntime's TryAdd keeps them.
+builder.Services.AddSingleton<ICapabilityInputValidationPolicy, ProcurementInputValidationPolicy>();
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddDescriptorStableHash();
 builder.Services.AddMultiTenancy();
@@ -76,10 +77,7 @@ builder.Services.AddTransient<AccountabilityHttpOperationScopeMiddleware>();
 builder.Services.AddSingleton<InMemoryAuditSink>();
 builder.Services.AddSingleton<IAuditSink>(sp => sp.GetRequiredService<InMemoryAuditSink>());
 builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
-builder.Services.Replace(ServiceDescriptor.Singleton<
-    ICapabilityInputValidationPolicy,
-    ProcurementInputValidationPolicy>());
-builder.Services.AddSingleton<ICapabilityHandlerModule>(new ProcurementCapabilityModule());
+builder.Services.AddProcurementCapabilityHandlers();
 builder.Services.AddSingleton<InMemoryProcurementRequestStore>(store);
 builder.Services.AddScoped<ProcurementApplicationService>();
 builder.Services.AddCrestCapabilityEndpoints();

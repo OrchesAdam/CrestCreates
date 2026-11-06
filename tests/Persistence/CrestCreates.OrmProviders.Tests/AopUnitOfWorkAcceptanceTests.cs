@@ -4,6 +4,7 @@ using System.Data.Common;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Abstractions;
 using CrestCreates.Aop.Interceptors;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
@@ -126,6 +127,33 @@ public class AopUnitOfWorkAcceptanceTests : IDisposable
         interceptor.CompletedWithoutCancellation.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task Woven_Target_Without_The_Accessor_Contract_Fails_Closed()
+    {
+        var (provider, _, recorder) = BuildProvider(waitForCancellation: false);
+
+        using var scope = provider.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<UnboundProbeService>();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        var act = async () => await service.InsertProbeAsync("unbound-probe");
+
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.And.Message.Should().Contain(nameof(IUnitOfWorkManager),
+            "the diagnostic must name the kernel service that could not be bound");
+        thrown.And.Message.Should().Contain(nameof(IServiceProviderAccessor),
+            "the diagnostic must name the intercept contract the target is missing");
+
+        service.BodyRan.Should().BeFalse("the business body must not run unmanaged");
+        recorder.AmbientSeenDuringBody.Should().BeFalse();
+        manager.CurrentOrNull.Should().BeNull();
+
+        using var verifyScope = provider.CreateScope();
+        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<UowAopDbContext>();
+        (await verifyContext.Probes.AnyAsync()).Should().BeFalse(
+            "the refused write must not reach the database");
+    }
+
     private (ServiceProvider Provider, WaitingCommandInterceptor Interceptor, ActivationRecorder Recorder) BuildProvider(
         bool waitForCancellation)
     {
@@ -143,6 +171,7 @@ public class AopUnitOfWorkAcceptanceTests : IDisposable
         services.AddSingleton<IDomainEventPublisher>(new NoOpDomainEventPublisher());
         services.AddSingleton(recorder);
         services.AddScoped<WovenProbeService>();
+        services.AddScoped<UnboundProbeService>();
         services.AddUnitOfWork();
         services.AddEfCoreUnitOfWork();
 
@@ -160,8 +189,33 @@ public class AopUnitOfWorkAcceptanceTests : IDisposable
         public bool AmbientSeenDuringBody { get; set; }
     }
 
+    /// <summary>
+    /// 负控：被 [UnitOfWorkMo] 织入但**不实现** IServiceProviderAccessor 的目标。
+    /// 拦截器必须确定性拒绝，而不是退回旧的「无事务静默放行」。
+    /// </summary>
+    public sealed class UnboundProbeService
+    {
+        private readonly EfCoreRepository<UowAopEntity, Guid> _repository;
+
+        public UnboundProbeService(EfCoreRepository<UowAopEntity, Guid> repository)
+        {
+            _repository = repository;
+        }
+
+        public bool BodyRan { get; private set; }
+
+        [UnitOfWorkMo]
+        public async Task<Guid> InsertProbeAsync(string name)
+        {
+            var entity = new UowAopEntity(Guid.NewGuid(), name);
+            await _repository.InsertAsync(entity);
+            BodyRan = true;
+            return entity.Id;
+        }
+    }
+
     /// <summary>被 [UnitOfWorkMo] 织入的探针服务（测试程序集由 Rougamo 织入）。</summary>
-    public sealed class WovenProbeService
+    public sealed class WovenProbeService : IServiceProviderAccessor
     {
         private readonly EfCoreRepository<UowAopEntity, Guid> _repository;
         private readonly IUnitOfWorkManager _manager;

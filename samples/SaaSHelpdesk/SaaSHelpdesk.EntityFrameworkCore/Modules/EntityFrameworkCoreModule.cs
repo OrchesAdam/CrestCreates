@@ -78,7 +78,7 @@ public class EntityFrameworkCoreModule : ModuleBase
             return new HelpdeskDbContext(options);
         });
         services.TryAddScoped<ITenantSchemaMigrator, EfCoreTenantSchemaMigrator>();
-        services.Replace(ServiceDescriptor.Scoped<ITenantInitializationStore, EfCoreTenantInitializationStore>());
+        services.AddScoped<ITenantInitializationStore, EfCoreTenantInitializationStore>();
 
         // Source-generated JSON metadata for OpenAPI schema generation (AoT/trimming compatibility)
         services.AddSingleton<IOpenApiJsonTypeInfoContributor, JsonTypeInfoContributor<DictionaryJsonContext>>();

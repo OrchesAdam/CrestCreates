@@ -71,52 +71,5 @@ namespace CrestCreates.Data.FreeSql.Extensions
 
             return services;
         }
-
-        /// <summary>
-        /// 添加 FreeSql 多库支持（FreeSql.Cloud）
-        /// </summary>
-        /// <typeparam name="TDbKey">数据库键类型（如 DbEnum 或 string）</typeparam>
-        /// <param name="services">服务集合</param>
-        /// <param name="cloudBuilder">FreeSqlCloud 构建器</param>
-        /// <param name="repositoryAssemblies">仓储所在程序集</param>
-        /// <remarks>
-        /// 用于多库场景，参考：https://freesql.net/guide/unitofwork-manager.html#扩展-多库场景
-        /// 
-        /// 示例:
-        /// <code>
-        /// public enum DbEnum { db1, db2, db3 }
-        /// 
-        /// services.AddFreeSqlCloud&lt;DbEnum&gt;(cloud =>
-        /// {
-        ///     cloud.Register(DbEnum.db1, () => new FreeSqlBuilder().UseConnectionString(DataType.SqlServer, connStr1).Build());
-        ///     cloud.Register(DbEnum.db2, () => new FreeSqlBuilder().UseConnectionString(DataType.MySql, connStr2).Build());
-        /// });
-        /// </code>
-        /// </remarks>
-        /*
-        public static IServiceCollection AddFreeSqlCloud<TDbKey>(
-            this IServiceCollection services,
-            Action<FreeSqlCloud<TDbKey>> cloudBuilder,
-            params Assembly[] repositoryAssemblies)
-        {
-            // 创建 FreeSqlCloud 实例
-            var cloud = new FreeSqlCloud<TDbKey>();
-            cloudBuilder?.Invoke(cloud);
-
-            // 注册为单例
-            services.AddSingleton(cloud);
-
-            // 注册仓储
-            if (repositoryAssemblies != null && repositoryAssemblies.Length > 0)
-            {
-                services.AddFreeRepository(null, repositoryAssemblies);
-            }
-
-            // 注册 UnitOfWorkManagerCloud（需要自定义实现）
-            // services.AddScoped<UnitOfWorkManagerCloud>();
-
-            return services;
-        }
-        */
     }
 }

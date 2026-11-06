@@ -367,7 +367,8 @@ public static class CrudArtifactEmitter
         var builder = StartDocument(model);
         OpenNamespace(builder, model.ImplementationNamespace, ServiceImplementationUsings);
         Line(builder, Indent + "[CrestService]");
-        Line(builder, Indent + "public partial class " + service + " : " + contract);
+        Line(builder, Indent + "public partial class " + service + " : " + contract
+            + ", global::CrestCreates.Aop.Abstractions.IServiceProviderAccessor");
         Line(builder, Indent + "{");
 
         Line(builder, NestedIndent + "protected readonly " + repository + " Repository;");
@@ -375,10 +376,8 @@ public static class CrudArtifactEmitter
         Line(builder, NestedIndent + "protected readonly ICurrentUser CurrentUser;");
         Line(builder, NestedIndent + "protected readonly IDataPermissionFilter DataPermissionFilter;");
         Line(builder, string.Empty);
-        // The framework's AOP bridge (MethodContextExtensions.GetServiceProvider) resolves services
-        // through the target's public ServiceProvider member; without it the woven [UnitOfWorkMo] /
-        // [CacheMo] / [PermissionMo] frames find no kernel service and silently skip. CrestAppServiceBase
-        // exposes the same member, so this keeps the generated service on the same convention.
+        // IServiceProviderAccessor is the intercept contract: without it the woven [UnitOfWorkMo] frame
+        // cannot bind the kernel and fails closed instead of running the write unmanaged.
         Line(builder, NestedIndent + "public global::System.IServiceProvider ServiceProvider { get; }");
         Line(builder, string.Empty);
         Line(builder, NestedIndent + "public " + service + "(");

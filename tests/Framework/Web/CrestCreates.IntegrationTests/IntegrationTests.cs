@@ -203,7 +203,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         var getDeletedResponse = await client.GetAsync($"/api/book/{createdBook.Data.Id}");
         getDeletedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
 
-        var swaggerResponse = await client.GetAsync("/swagger/v1/swagger.json");
+        var swaggerResponse = await client.GetAsync("/openapi/v1.json");
         swaggerResponse.StatusCode.Should().Be(
             HttpStatusCode.OK,
             await swaggerResponse.Content.ReadAsStringAsync());
