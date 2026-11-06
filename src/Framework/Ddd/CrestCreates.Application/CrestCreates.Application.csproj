@@ -18,7 +18,9 @@
     <ProjectReference Include="../../Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="../../Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="../../../Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj" />
+    <ProjectReference Include="../../../Runtime/Audit/CrestCreates.Accountability.Abstractions/CrestCreates.Accountability.Abstractions.csproj" />
     <ProjectReference Include="../../Infrastructure/CrestCreates.Security.Abstractions/CrestCreates.Security.Abstractions.csproj" />
+    <ProjectReference Include="../../Modules/CrestCreates.Scheduling.Abstractions/CrestCreates.Scheduling.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -6,7 +6,7 @@ namespace CrestCreates.Agent.Authoring.Tests.Fixtures;
 /// <summary>
 /// Static fixture that provides the recorded provider output JSON
 /// for the company certification HumanTask + Workflow scenario.
-/// The JSON matches the parser's expected format (contractVersion "7g.v1",
+/// The JSON matches the parser's expected format (contractVersion "8a.v1",
 /// promptInputHash, plan, items with HumanTask and Workflow payloads).
 /// </summary>
 public static class CompanyCertificationLlmFixture
@@ -22,7 +22,8 @@ public static class CompanyCertificationLlmFixture
 
         // Use raw string literal for clean JSON
         sb.AppendLine("{");
-        sb.AppendLine("  \"contractVersion\": \"7g.v1\",");
+        sb.AppendLine("  \"contractVersion\": \"8a.v1\",");
+        sb.AppendLine("  \"outcome\": \"drafts\",");
         sb.Append("  \"promptInputHash\": \"");
         sb.Append(promptInputHash);
         sb.AppendLine("\",");

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -126,9 +127,24 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             }
         }
 
-        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            return _dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                return await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException exception)
+            {
+                throw TranslateConcurrencyException(exception);
+            }
+        }
+
+        private static CrestConcurrencyException TranslateConcurrencyException(DbUpdateConcurrencyException exception)
+        {
+            var entry = exception.Entries.FirstOrDefault();
+            var entityType = entry?.Entity.GetType().Name ?? "Entity";
+            var entityId = entry?.Properties.FirstOrDefault(property => property.Metadata.Name == "Id")?.CurrentValue;
+            return new CrestConcurrencyException(entityType, entityId);
         }
 
         public async Task<int> SaveChangesWithEventsAsync(CancellationToken cancellationToken = default)

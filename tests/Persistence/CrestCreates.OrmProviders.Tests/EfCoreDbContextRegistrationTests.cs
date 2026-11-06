@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
@@ -22,6 +23,7 @@ using Xunit;
 
 namespace CrestCreates.OrmProviders.Tests;
 
+[Collection("ModelFilterRegistry")]
 public class EfCoreDbContextRegistrationTests
 {
     [Fact]
@@ -126,6 +128,7 @@ public class EfCoreDbContextRegistrationTests
     [Fact]
     public async Task CrestCreatesDbContext_OnModelCreating_Should_ApplyGeneratedTenantFilters_WhenRegistryHasRegistrations()
     {
+        var originalRegistrations = TenantFilterRegistryStore.GetApplyAllDelegates().ToArray();
         TenantFilterRegistryStore.Clear();
 
         try
@@ -149,23 +152,41 @@ public class EfCoreDbContextRegistrationTests
         }
         finally
         {
-            TenantFilterRegistryStore.Clear();
+            RestoreRegistrations(originalRegistrations);
         }
     }
 
     [Fact]
     public void CrestCreatesDbContext_OnModelCreating_Should_NotThrow_WhenNoTenantFilterRegistrationsExist()
     {
+        var originalRegistrations = TenantFilterRegistryStore.GetApplyAllDelegates().ToArray();
         TenantFilterRegistryStore.Clear();
 
-        var context = new CrestCreatesDbContext(
-            new DbContextOptionsBuilder<CrestCreatesDbContext>().Options,
-            new FakeCurrentTenant("tenant-1"));
-        var modelBuilder = new ModelBuilder(new ConventionSet());
+        try
+        {
+            var context = new CrestCreatesDbContext(
+                new DbContextOptionsBuilder<CrestCreatesDbContext>().Options,
+                new FakeCurrentTenant("tenant-1"));
+            var modelBuilder = new ModelBuilder(new ConventionSet());
 
-        Assert.False(TenantFilterRegistryStore.HasRegistrations);
-        InvokeOnModelCreating(context, modelBuilder);
-        Assert.Empty(modelBuilder.Model.FindEntityType(typeof(Role))?.GetDeclaredQueryFilters());
+            Assert.False(TenantFilterRegistryStore.HasRegistrations);
+            InvokeOnModelCreating(context, modelBuilder);
+            Assert.Empty(modelBuilder.Model.FindEntityType(typeof(Role))?.GetDeclaredQueryFilters());
+        }
+        finally
+        {
+            RestoreRegistrations(originalRegistrations);
+        }
+    }
+
+    private static void RestoreRegistrations(
+        IReadOnlyCollection<TenantFilterRegistryStore.ApplyAllDelegate> registrations)
+    {
+        TenantFilterRegistryStore.Clear();
+        foreach (var registration in registrations)
+        {
+            TenantFilterRegistryStore.Register(registration);
+        }
     }
 
     [Fact]

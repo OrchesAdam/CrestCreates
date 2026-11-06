@@ -186,7 +186,7 @@ public sealed class LlmDescriptorAuthoringAgentTests
         {
             Prompt = new DescriptorAuthoringPromptOutput
             {
-                ContractVersion = "7g.v1",
+                ContractVersion = "8a.v1",
                 PromptTemplateVersion = "v1",
                 PromptInputHash = TestHash(hashValue),
                 SystemPrompt = "test",
@@ -216,7 +216,7 @@ public sealed class LlmDescriptorAuthoringAgentTests
         {
             Prompt = new DescriptorAuthoringPromptOutput
             {
-                ContractVersion = "7g.v1",
+                ContractVersion = "8a.v1",
                 PromptTemplateVersion = "v1",
                 PromptInputHash = TestHash("nonexistent"),
                 SystemPrompt = "test",
@@ -283,7 +283,7 @@ public sealed class LlmDescriptorAuthoringAgentTests
         result.PromptInputEvidence.Should().NotBeNull();
         result.PromptOutputEvidence.Should().NotBeNull();
         result.PromptInputEvidence!.TemplateId.Value.Should().Be("descriptor-authoring");
-        result.PromptInputEvidence.TemplateVersion.Value.Should().Be("descriptor-authoring-prompt-template-v2");
+        result.PromptInputEvidence.TemplateVersion.Value.Should().Be("descriptor-authoring-prompt-template-v3");
         result.PromptInputEvidence.Purpose.Should().Be(AgentPromptPurpose.DescriptorAuthoring);
         result.PromptOutputEvidence!.InputHash.Value.Should().Be(result.PromptInputEvidence.InputHash.Value);
     }
@@ -301,6 +301,23 @@ public sealed class LlmDescriptorAuthoringAgentTests
         var result = await agent.AuthorAsync(TestAuthoringContext());
         result.PromptOutputEvidence!.ProviderObservation!.ProviderName.Should().Be("observed-provider");
         result.PromptOutputEvidence.ProviderObservation.ModelName.Should().Be("observed-model");
+    }
+
+    [Fact]
+    public async Task AuthorAsync_UndecodableRawStringMember_ReturnsInvalidProviderOutputToTheCaller()
+    {
+        // S1-R1-01: JsonDocument defers decoding an unpaired surrogate escape to member access, where it
+        // throws InvalidOperationException. The agent must receive the classified refusal, not an exception.
+        var agent = CreateAgentWithFakeResponse(
+            "{\"contractVersion\":\"\\uD800\",\"promptInputHash\":\"any\",\"outcome\":\"drafts\","
+            + "\"plan\":{\"planId\":\"p\",\"intentText\":\"i\"},\"items\":[]}");
+
+        var result = await agent.AuthorAsync(TestAuthoringContext());
+
+        result.Status.Should().Be(DescriptorAuthoringStatus.InvalidProviderOutput);
+        result.Diagnostics.Should().Contain(d =>
+            d.Code == DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput
+            && d.Message == "Provider output member 'contractVersion' cannot be decoded as UTF-16 text.");
     }
 
     private static CanonicalHash TestHash(string value) => new()
@@ -447,7 +464,8 @@ public sealed class LlmDescriptorAuthoringAgentTests
 
     private static string BuildValidHumanTaskOutputJson(string promptHash) => JsonSerializer.Serialize(new
     {
-        contractVersion = "7g.v1",
+        contractVersion = "8a.v1",
+        outcome = "drafts",
         promptInputHash = promptHash,
         plan = new
         {

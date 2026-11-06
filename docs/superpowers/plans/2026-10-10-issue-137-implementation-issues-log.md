@@ -92,3 +92,15 @@
 | # | 类别 | 说明 | 处置 |
 | --- | --- | --- | --- |
 | I-23 | 契约文档（R3） | `IUnitOfWorkTransactionIdentity.IsCompleted` 语义文档同步为「owner 终态或已释放，或事务关联终结后为 true」；lease live validity 不依赖驱动清理成功 | 已更新；公开参与契约仍无生命周期操作 |
+
+## I-18 收口（2026-11-05，整体架构审查第二轮修复）
+
+原诊断（「`HostMigrationAndSeedRunner` 依赖 `EnsureCreatedAsync` 仅第一次生效」）**已过时**：runner 自 `MigrateOrEnsureCreatedAsync` 起就按注册的类型列表逐个 `IRelationalDatabaseCreator.CreateTablesAsync` 并把「表已存在」当幂等成功（`src/Persistence/CrestCreates.Data.EFCore/HostMigrationAndSeedRunner.cs:89-119`）。
+
+真实根因是**宿主声明的 migrate-and-seed 闭包不完整**：`AddOpenIddictServer` 会注册 `HostOpenIddictDataSeeder`（`OpenIddictServiceCollectionExtensions.cs:100`），而 LibraryManagement 既未注册 `OpenIddictDbContext`（未调用 `AddCrestCreatesEfCorePostgreSql()`），也未把它列入闭包（`samples/LibraryManagement/LibraryManagement.EntityFrameworkCore/Modules/EntityFrameworkCoreModule.cs` 只列 `LibraryDbContext`）；SaaSHelpdesk 与平台默认组合两者齐备，因此从未暴露。干净库上宿主启动期 seeding 直接命中 Npgsql `42P01 "OpenIddictScopes" does not exist`。
+
+| # | 类别 | 说明 | 处置 |
+| --- | --- | --- | --- |
+| I-24 | 主链装配（样例侧） | LibraryManagement 的持久化闭包补齐：`AddCrestCreatesEfCorePostgreSql()` + `typeof(OpenIddictDbContext)` 入列，与 SaaSHelpdesk/平台同源；fixture 删除自带 `EnsureCreatedAsync` 与 DROP/重建 OpenIddict 表的旁路（否则闭包回归会被测试设施掩盖）；同时删除 fixture 重复的 `AddUnitOfWork`/`AddEfCoreUnitOfWork` 装配——模块 `OnConfigureServices` 经 `RegisterModules`（`builder.ConfigureServices`，Build 之前）已生效，重复绑定使 `UnitOfWorkProviderBindingRegistry` 在首次解析时确定性拒绝，表现为 HTTP 500 `Duplicate unit-of-work binding for provider 'EfCore'`（与 #129 R01 同类）；`/swagger/v1/swagger.json` 期望改为框架真实映射 `MapOpenApi()` 的 `/openapi/v1.json`（断言的 paths/操作集合不变） | 本地 `~/.dotnet/dotnet` 10.0.114 + podman：修复前该套件**宿主启动即失败**，`--filter` 仅 UoW 类可跑；修复后全量 49 例可执行，19 通过 / 30 失败；CI 已接入的 19 例子集 **19/19 通过** |
+| I-25 | 残余红例归因 | 30 条残余失败**全部**落在 #129 rev.2 §14.6 明确排除的范围：Setting / Feature / AuditLog 查询 / Tenant / User 的**框架平台 HTTP 面**随 legacy DynamicApi 退出后未在正式链重建（`/api/setting/*`、`/api/feature*`、`/api/tenant` 等 404）；另 `LoginAndRefresh_…` 断言 `/connect/userinfo` 返回 OIDC 短名 `name`/`email`，而 `UserinfoAsync` 逐字回显 JWT 声明（长 claim URI + `preferred_username`），该短名映射从未交付。二者均**不改期望、不 skip、不删除**（§14.6 禁止以此凑绿），交由独立 HTTP 设计任务与声明目标映射决策承接 | `ci.yml`/`full-validation.yml` 的过滤已从「只跑 UoW 类」放开为「除上述 FQN 外全跑」，注释写明真实归因与 §14.6 出处 |
+| I-26 | 回归守卫 | 新增 `tests/Boundary/CrestCreates.DependencyBoundaries.Tests/OpenIddictSeedClosureArchitectureTests.cs`：凡启用 OpenIddict seeding 入口（`AddOpenIddictServer(` 或平台 `AddCrestWeb(`）的宿主根，必须在同一根内声明 `typeof(OpenIddictDbContext)`；只匹配可编译行（文档注释里的 API 提及不算使用）。判别力：临时放入 `samples/GuardProbeHost/Program.cs`（仅 `builder.AddCrestWeb();`、无闭包声明）→ 守卫报出该宿主并失败，移除后 2/2 通过；该控制同时暴露并修掉了首版解析器用目录名推 csproj 名（`CrestCreates.Web` 含点）导致平台宿主被漏扫的空转缺陷 | 2/2 通过；覆盖对照测试在扫描不再命中任一已知宿主时直接失败，不接受空过 |

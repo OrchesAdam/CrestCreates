@@ -445,7 +445,8 @@ public sealed class AssetHumanApprovalActivationHandoffAcceptanceTests
         };
         var json = JsonSerializer.Serialize(new
         {
-            contractVersion = "7g.v1",
+            contractVersion = "8a.v1",
+            outcome = "drafts",
             promptInputHash = context.ExpectedPromptInputHash,
             plan = new
             {

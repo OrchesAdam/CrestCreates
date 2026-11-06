@@ -9,6 +9,7 @@ using Xunit;
 
 namespace CrestCreates.OrmProviders.Tests;
 
+[Collection("ModelFilterRegistry")]
 public class ConcurrencyTokenConfigurationTests
 {
     [Fact]

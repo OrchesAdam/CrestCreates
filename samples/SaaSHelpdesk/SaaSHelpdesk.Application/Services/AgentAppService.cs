@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Abstractions;
 using CrestCreates.Aop.Interceptors;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
@@ -18,7 +19,7 @@ namespace SaaSHelpdesk.Application.Services;
     RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
     RoutePrefix = "api/agent",
     CapabilityIdPrefix = "compat.appservice.agent")]
-public class AgentAppService : IAgentAppService
+public class AgentAppService : IAgentAppService, IServiceProviderAccessor
 {
     private readonly ICrestRepositoryBase<CrestCreates.Domain.Permission.User, Guid> _userRepository;
     private readonly ICrestRepositoryBase<CrestCreates.Domain.Permission.Role, Guid> _roleRepository;
@@ -31,14 +32,19 @@ public class AgentAppService : IAgentAppService
         ICrestRepositoryBase<CrestCreates.Domain.Permission.Role, Guid> roleRepository,
         ICrestRepositoryBase<CrestCreates.Domain.Permission.UserRole, Guid> userRoleRepository,
         IPasswordHasher passwordHasher,
-        ICurrentTenant currentTenant)
+        ICurrentTenant currentTenant,
+        IServiceProvider serviceProvider)
     {
         _userRepository = userRepository;
         _roleRepository = roleRepository;
         _userRoleRepository = userRoleRepository;
         _passwordHasher = passwordHasher;
         _currentTenant = currentTenant;
+        ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     }
+
+    /// <summary>Intercept contract for the woven <c>[UnitOfWorkMo]</c> members below.</summary>
+    public IServiceProvider ServiceProvider { get; }
 
     [UnitOfWorkMo]
     public async Task<IdentityUserDto> CreateAsync(CreateAgentDto input, CancellationToken cancellationToken = default)

@@ -4,12 +4,16 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 namespace CrestCreates.CodeGenerator.TenantFilterGenerator
 {
+    /// <summary>
+    /// Generates strongly typed model filters for tenant and soft-delete entities declared in the
+    /// current compilation. Each generated filter is guarded by the target context model so multiple
+    /// DbContexts in one process can register filters without applying unknown entity types.
+    /// </summary>
     [Generator]
     public class TenantFilterSourceGenerator : IIncrementalGenerator
     {
@@ -17,29 +21,63 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
 
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            var attributedTenantEntities = context.SyntaxProvider
+            var attributedTargets = context.SyntaxProvider
                 .CreateSyntaxProvider(
-                    predicate: static (node, _) => IsMultiTenantCandidate(node),
-                    transform: static (ctx, _) => GetMultiTenantClass(ctx))
+                    predicate: static (node, _) => IsEntityCandidate(node),
+                    transform: static (ctx, _) => GetAttributedTarget(ctx))
                 .Where(static x => x is not null)
                 .Collect();
 
-            var dbContextTenantEntities = context.SyntaxProvider
+            var dbContextTargets = context.SyntaxProvider
                 .CreateSyntaxProvider(
                     predicate: static (node, _) => IsDbContextCandidate(node),
-                    transform: static (ctx, _) => GetDbContextTenantEntities(ctx))
+                    transform: static (ctx, _) => GetDbContextTargets(ctx))
+                .Where(static x => !x.IsDefaultOrEmpty)
                 .Collect();
 
             var hasRegistryStore = context.CompilationProvider
                 .Select(static (compilation, _) =>
                     compilation.GetTypeByMetadataName(TenantFilterRegistryStoreFullName) is not null);
 
-            var combined = attributedTenantEntities.Combine(dbContextTenantEntities).Combine(hasRegistryStore);
+            var combined = attributedTargets.Combine(dbContextTargets).Combine(hasRegistryStore);
 
             context.RegisterSourceOutput(combined, ExecuteGeneration);
         }
 
-        private static bool IsMultiTenantCandidate(SyntaxNode node)
+        private sealed record EntityFilterTarget(
+            string FullName,
+            string Name,
+            string TenantKind,
+            bool IsSoftDelete)
+        {
+            public bool IsTenant => TenantKind != TenantKinds.None;
+        }
+
+        private static class TenantKinds
+        {
+            public const string None = "";
+            public const string Required = "Required";
+            public const string OptionalDataFilter = "OptionalDataFilter";
+            public const string OptionalEfCompatibility = "OptionalEfCompatibility";
+
+            public static string Precedence(string current, string candidate)
+            {
+                return Rank(candidate) > Rank(current) ? candidate : current;
+            }
+
+            private static int Rank(string kind)
+            {
+                return kind switch
+                {
+                    Required => 3,
+                    OptionalDataFilter => 2,
+                    OptionalEfCompatibility => 1,
+                    _ => 0
+                };
+            }
+        }
+
+        private static bool IsEntityCandidate(SyntaxNode node)
         {
             return node is ClassDeclarationSyntax classDeclaration && classDeclaration.AttributeLists.Count > 0;
         }
@@ -62,34 +100,38 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
             return false;
         }
 
-        private static INamedTypeSymbol? GetMultiTenantClass(GeneratorSyntaxContext context)
+        private static EntityFilterTarget? GetAttributedTarget(GeneratorSyntaxContext context)
         {
             var classDeclaration = (ClassDeclarationSyntax)context.Node;
-            var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
-
-            if (symbol == null) return null;
-
-            bool hasEntityAttr = symbol.GetAttributes().Any(attr =>
-                attr.AttributeClass?.Name == "EntityAttribute" || attr.AttributeClass?.Name == "Entity");
-
-            if (!hasEntityAttr) return null;
-
-            if (!IsTenantEntity(symbol)) return null;
-
-            return symbol;
-        }
-
-        private static ImmutableArray<INamedTypeSymbol> GetDbContextTenantEntities(GeneratorSyntaxContext context)
-        {
-            var classDeclaration = (ClassDeclarationSyntax)context.Node;
-            var symbol = context.SemanticModel.GetDeclaredSymbol(classDeclaration) as INamedTypeSymbol;
-
-            if (symbol == null || !IsDbContext(symbol))
+            if (context.SemanticModel.GetDeclaredSymbol(classDeclaration) is not INamedTypeSymbol symbol)
             {
-                return ImmutableArray<INamedTypeSymbol>.Empty;
+                return null;
             }
 
-            var builder = ImmutableArray.CreateBuilder<INamedTypeSymbol>();
+            var hasEntityAttribute = symbol.GetAttributes().Any(attr =>
+                attr.AttributeClass?.Name == "EntityAttribute" || attr.AttributeClass?.Name == "Entity");
+            if (!hasEntityAttribute)
+            {
+                return null;
+            }
+
+            var tenantKind = GetTenantKind(symbol);
+            var isSoftDelete = IsSoftDeleteEntity(symbol);
+            return tenantKind != TenantKinds.None || isSoftDelete
+                ? CreateTarget(symbol, tenantKind, isSoftDelete)
+                : null;
+        }
+
+        private static ImmutableArray<EntityFilterTarget> GetDbContextTargets(GeneratorSyntaxContext context)
+        {
+            var classDeclaration = (ClassDeclarationSyntax)context.Node;
+            if (context.SemanticModel.GetDeclaredSymbol(classDeclaration) is not INamedTypeSymbol symbol ||
+                !IsDbContext(symbol))
+            {
+                return ImmutableArray<EntityFilterTarget>.Empty;
+            }
+
+            var builder = ImmutableArray.CreateBuilder<EntityFilterTarget>();
             foreach (var member in symbol.GetMembers().OfType<IPropertySymbol>())
             {
                 if (member.Type is not INamedTypeSymbol namedType ||
@@ -101,13 +143,24 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
                     continue;
                 }
 
-                if (IsTenantEntity(entityType))
+                var tenantKind = GetTenantKind(entityType);
+                var isSoftDelete = IsSoftDeleteEntity(entityType);
+                if (tenantKind != TenantKinds.None || isSoftDelete)
                 {
-                    builder.Add(entityType);
+                    builder.Add(CreateTarget(entityType, tenantKind, isSoftDelete));
                 }
             }
 
             return builder.ToImmutable();
+        }
+
+        private static EntityFilterTarget CreateTarget(INamedTypeSymbol symbol, string tenantKind, bool isSoftDelete)
+        {
+            return new EntityFilterTarget(
+                symbol.ToDisplayString(),
+                symbol.Name,
+                tenantKind,
+                isSoftDelete);
         }
 
         private static bool IsDbContext(INamedTypeSymbol symbol)
@@ -127,102 +180,224 @@ namespace CrestCreates.CodeGenerator.TenantFilterGenerator
             return false;
         }
 
-        private static bool IsTenantEntity(INamedTypeSymbol symbol)
+        private static string GetTenantKind(INamedTypeSymbol symbol)
         {
+            var kind = TenantKinds.None;
             foreach (var iface in symbol.AllInterfaces)
             {
                 var fullName = iface.ToDisplayString();
-                if (fullName == "CrestCreates.Data.EFCore.MultiTenancy.IMultiTenant" ||
-                    fullName == "CrestCreates.DataFilter.Entities.IMultiTenant" ||
-                    fullName == "CrestCreates.Domain.Shared.Entities.Auditing.IMustHaveTenant" ||
-                    iface.Name == "IMultiTenant" ||
+                if (fullName == "CrestCreates.Domain.Shared.Entities.Auditing.IMustHaveTenant" ||
                     iface.Name == "IMustHaveTenant")
                 {
-                    return true;
+                    return TenantKinds.Required;
+                }
+
+                if (fullName == "CrestCreates.DataFilter.Entities.IMultiTenant")
+                {
+                    kind = TenantKinds.Precedence(kind, TenantKinds.OptionalDataFilter);
+                }
+                else if (fullName == "CrestCreates.Data.EFCore.MultiTenancy.IMultiTenant")
+                {
+                    kind = TenantKinds.Precedence(kind, TenantKinds.OptionalEfCompatibility);
+                }
+                else if (iface.Name == "IMultiTenant")
+                {
+                    kind = TenantKinds.Precedence(kind, TenantKinds.OptionalEfCompatibility);
                 }
             }
 
-            return false;
+            return kind;
         }
 
-        private void ExecuteGeneration(SourceProductionContext context, ((ImmutableArray<INamedTypeSymbol?> AttributedEntities, ImmutableArray<ImmutableArray<INamedTypeSymbol>> DbContextEntities) EntityInput, bool HasRegistryStore) input)
+        private static bool IsSoftDeleteEntity(INamedTypeSymbol symbol)
         {
-            var ((attributedEntities, dbContextEntities), hasRegistryStore) = input;
+            return symbol.AllInterfaces.Any(iface =>
+                iface.ToDisplayString() == "CrestCreates.Domain.Shared.Entities.Auditing.ISoftDelete" ||
+                iface.Name == "ISoftDelete");
+        }
 
-            if (!hasRegistryStore) return;
+        private void ExecuteGeneration(
+            SourceProductionContext context,
+            ((ImmutableArray<EntityFilterTarget?> AttributedTargets, ImmutableArray<ImmutableArray<EntityFilterTarget>> DbContextTargets) Entities, bool HasRegistryStore) input)
+        {
+            var ((attributedTargets, dbContextTargets), hasRegistryStore) = input;
 
-            var processed = new HashSet<string>();
-            var entityList = new List<INamedTypeSymbol>();
-
-            foreach (var entity in attributedEntities)
+            if (!hasRegistryStore)
             {
-                if (entity == null) continue;
-                var fullName = entity.ToDisplayString();
-                if (processed.Contains(fullName)) continue;
-                processed.Add(fullName);
-                entityList.Add(entity);
+                return;
             }
 
-            foreach (var entities in dbContextEntities)
+            var targets = new Dictionary<string, EntityFilterTarget>(StringComparer.Ordinal);
+            foreach (var target in attributedTargets)
             {
-                foreach (var entity in entities)
+                Merge(targets, target);
+            }
+
+            foreach (var contextTargets in dbContextTargets)
+            {
+                foreach (var target in contextTargets)
                 {
-                    var fullName = entity.ToDisplayString();
-                    if (processed.Contains(fullName)) continue;
-                    processed.Add(fullName);
-                    entityList.Add(entity);
+                    Merge(targets, target);
                 }
             }
 
-            if (entityList.Count == 0) return;
+            var tenantTargets = targets.Values
+                .Where(target => target.IsTenant)
+                .OrderBy(target => target.FullName, StringComparer.Ordinal)
+                .ToList();
+            var softDeleteTargets = targets.Values
+                .Where(target => target.IsSoftDelete)
+                .OrderBy(target => target.FullName, StringComparer.Ordinal)
+                .ToList();
 
-            var sb = new StringBuilder();
-            sb.AppendLine("// <auto-generated/>");
-            sb.AppendLine("using System;");
-            sb.AppendLine("using Microsoft.EntityFrameworkCore;");
-            sb.AppendLine("using CrestCreates.MultiTenancy.Abstract;");
-            sb.AppendLine("using CrestCreates.Data.EFCore.MultiTenancy;");
-            sb.AppendLine();
-            sb.AppendLine("namespace CrestCreates.Data.EFCore.MultiTenancy");
-            sb.AppendLine("{");
-            sb.AppendLine("    internal static class GeneratedTenantFilterRegistration");
-            sb.AppendLine("    {");
-
-            sb.AppendLine("        private static void ApplyAll(ModelBuilder modelBuilder, ICurrentTenant currentTenant)");
-            sb.AppendLine("        {");
-
-            foreach (var entity in entityList)
+            if (tenantTargets.Count == 0 && softDeleteTargets.Count == 0)
             {
-                sb.AppendLine($"            Configure{entity.Name}Filter(modelBuilder, currentTenant);");
+                return;
             }
 
-            sb.AppendLine("        }");
-            sb.AppendLine();
+            var builder = new StringBuilder();
+            builder.AppendLine("// <auto-generated/>");
+            builder.AppendLine("using System;");
+            builder.AppendLine("using Microsoft.EntityFrameworkCore;");
+            builder.AppendLine("using CrestCreates.MultiTenancy.Abstract;");
+            builder.AppendLine("using CrestCreates.Data.EFCore.MultiTenancy;");
+            builder.AppendLine();
+            builder.AppendLine("namespace CrestCreates.Data.EFCore.MultiTenancy");
+            builder.AppendLine("{");
+            builder.AppendLine("    internal static class GeneratedTenantFilterRegistration");
+            builder.AppendLine("    {");
 
-            foreach (var entity in entityList)
+            if (tenantTargets.Count > 0)
             {
-                var entityName = entity.Name;
-                var entityFullName = entity.ToDisplayString();
-                sb.AppendLine($"        private static void Configure{entityName}Filter(ModelBuilder modelBuilder, ICurrentTenant currentTenant)");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            modelBuilder.Entity<{entityFullName}>().HasQueryFilter(e =>");
-                sb.AppendLine("                currentTenant.Id == null || e.TenantId == currentTenant.Id);");
-                sb.AppendLine($"            modelBuilder.Entity<{entityFullName}>().HasIndex(e => e.TenantId)");
-                sb.AppendLine($"                .HasDatabaseName(\"IX_{entityName}_TenantId\");");
-                sb.AppendLine("        }");
-                sb.AppendLine();
+                builder.AppendLine("        private static void ApplyAll(ModelBuilder modelBuilder, ICurrentTenant currentTenant)");
+                builder.AppendLine("        {");
+                foreach (var target in tenantTargets)
+                {
+                    builder.AppendLine($"            Configure{MethodSuffix(target)}Filter(modelBuilder, currentTenant);");
+                }
+                builder.AppendLine("        }");
+                builder.AppendLine();
+
+                foreach (var target in tenantTargets)
+                {
+                    AppendTenantFilter(builder, target);
+                }
             }
 
-            sb.AppendLine("        [System.Runtime.CompilerServices.ModuleInitializer]");
-            sb.AppendLine("        internal static void Register()");
-            sb.AppendLine("        {");
-            sb.AppendLine("            TenantFilterRegistryStore.Register(ApplyAll);");
-            sb.AppendLine("        }");
+            if (softDeleteTargets.Count > 0)
+            {
+                builder.AppendLine("        private static void ApplySoftDeleteAll(ModelBuilder modelBuilder)");
+                builder.AppendLine("        {");
+                foreach (var target in softDeleteTargets)
+                {
+                    builder.AppendLine($"            Configure{MethodSuffix(target)}SoftDeleteFilter(modelBuilder);");
+                }
+                builder.AppendLine("        }");
+                builder.AppendLine();
 
-            sb.AppendLine("    }");
-            sb.AppendLine("}");
+                foreach (var target in softDeleteTargets)
+                {
+                    AppendSoftDeleteFilter(builder, target);
+                }
+            }
 
-            context.AddSource("TenantFilter.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+            builder.AppendLine("        [System.Runtime.CompilerServices.ModuleInitializer]");
+            builder.AppendLine("        internal static void Register()");
+            builder.AppendLine("        {");
+            if (tenantTargets.Count > 0)
+            {
+                builder.AppendLine("            TenantFilterRegistryStore.Register(ApplyAll);");
+            }
+            if (softDeleteTargets.Count > 0)
+            {
+                builder.AppendLine("            SoftDeleteFilterRegistryStore.Register(ApplySoftDeleteAll);");
+            }
+            builder.AppendLine("        }");
+
+            builder.AppendLine("    }");
+            builder.AppendLine("}");
+
+            context.AddSource("TenantFilter.g.cs", SourceText.From(builder.ToString(), Encoding.UTF8));
+        }
+
+        private static string MethodSuffix(EntityFilterTarget target)
+        {
+            var builder = new StringBuilder(target.FullName.Length);
+            foreach (var character in target.FullName)
+            {
+                if ((character >= 'a' && character <= 'z') ||
+                    (character >= 'A' && character <= 'Z') ||
+                    (character >= '0' && character <= '9'))
+                {
+                    builder.Append(character);
+                }
+                else
+                {
+                    // Escape every structural character so namespace separators, underscores and
+                    // other symbols cannot collapse into the same generated identifier.
+                    builder.Append('_').Append(((int)character).ToString("X4"));
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        private static void Merge(
+            Dictionary<string, EntityFilterTarget> targets,
+            EntityFilterTarget? target)
+        {
+            if (target is null)
+            {
+                return;
+            }
+
+            if (targets.TryGetValue(target.FullName, out var existing))
+            {
+                targets[target.FullName] = existing with
+                {
+                    TenantKind = TenantKinds.Precedence(existing.TenantKind, target.TenantKind),
+                    IsSoftDelete = existing.IsSoftDelete || target.IsSoftDelete
+                };
+                return;
+            }
+
+            targets[target.FullName] = target;
+        }
+
+        private static void AppendTenantFilter(StringBuilder builder, EntityFilterTarget target)
+        {
+            var filter = target.TenantKind switch
+            {
+                TenantKinds.Required =>
+                    "currentTenant.Id != null && e.TenantId == currentTenant.Id",
+                TenantKinds.OptionalDataFilter =>
+                    "((currentTenant.Id != null && (e.TenantId == currentTenant.Id || e.TenantId == null)) || (currentTenant.Id == null && e.TenantId == null))",
+                _ =>
+                    "currentTenant.Id == null || e.TenantId == currentTenant.Id"
+            };
+            if (target.IsSoftDelete)
+            {
+                filter = "(" + filter + ") && !e.IsDeleted";
+            }
+
+            builder.AppendLine($"        private static void Configure{MethodSuffix(target)}Filter(ModelBuilder modelBuilder, ICurrentTenant currentTenant)");
+            builder.AppendLine("        {");
+            builder.AppendLine($"            if (modelBuilder.Model.FindEntityType(typeof(global::{target.FullName})) is null) return;");
+            builder.AppendLine($"            modelBuilder.Entity<global::{target.FullName}>().HasQueryFilter(e => {filter});");
+            builder.AppendLine($"            modelBuilder.Entity<global::{target.FullName}>().HasIndex(e => e.TenantId)");
+            builder.AppendLine($"                .HasDatabaseName(\"IX_{MethodSuffix(target)}_TenantId\");");
+            builder.AppendLine("        }");
+            builder.AppendLine();
+        }
+
+        private static void AppendSoftDeleteFilter(StringBuilder builder, EntityFilterTarget target)
+        {
+            builder.AppendLine($"        private static void Configure{MethodSuffix(target)}SoftDeleteFilter(ModelBuilder modelBuilder)");
+            builder.AppendLine("        {");
+            builder.AppendLine($"            if (modelBuilder.Model.FindEntityType(typeof(global::{target.FullName})) is null) return;");
+            builder.AppendLine($"            modelBuilder.Entity<global::{target.FullName}>().HasQueryFilter(e => !e.IsDeleted);");
+            builder.AppendLine("        }");
+            builder.AppendLine();
         }
     }
 }

@@ -7,6 +7,11 @@ using CrestCreates.Application.Contracts.DTOs.Common;
 
 namespace CrestCreates.Application.Contracts.Query;
 
+/// <summary>
+/// Generic filter-to-expression builder. Not the NativeAOT main chain — formal CRUD runs the
+/// generated typed query adapter (#128); this reflection path is the JIT/trimming track and exits
+/// when no live caller remains. New main-chain work adds typed adapter coverage instead of extending it.
+/// </summary>
 public static class QueryExecutor<T>
 {
     [UnconditionalSuppressMessage("AotAnalysis", "IL2026:RequiresUnreferencedCode",

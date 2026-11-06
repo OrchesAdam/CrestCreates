@@ -65,66 +65,6 @@ namespace CrestCreates.Data.FreeSql.Attributes
         protected static IServiceProvider? ServiceProvider => _serviceProvider.Value;
     }
 
-    #region Rougamo 实现版本（需要安装 Rougamo.Fody）
-
-    /*
-    /// <summary>
-    /// 事务特性（Rougamo AOP 实现）
-    /// </summary>
-    /// <remarks>
-    /// 使用前需要：
-    /// 1. dotnet add package Rougamo.Fody
-    /// 2. 在 Startup.cs 的 Configure 方法中添加：
-    ///    app.Use(async (context, next) => {
-    ///        TransactionalAttribute.SetServiceProvider(context.RequestServices);
-    ///        await next();
-    ///    });
-    /// </remarks>
-    [AttributeUsage(AttributeTargets.Method)]
-    public class TransactionalAttribute : Rougamo.MoAttribute
-    {
-        public Propagation Propagation { get; set; } = Propagation.Required;
-        public IsolationLevel IsolationLevel { get => m_IsolationLevel.Value; set => m_IsolationLevel = value; }
-        IsolationLevel? m_IsolationLevel;
-
-        static AsyncLocal<IServiceProvider> m_ServiceProvider = new AsyncLocal<IServiceProvider>();
-        public static void SetServiceProvider(IServiceProvider serviceProvider) => m_ServiceProvider.Value = serviceProvider;
-
-        IUnitOfWork _uow;
-
-        public override void OnEntry(Rougamo.Context.MethodContext context)
-        {
-            var uowManager = m_ServiceProvider.Value.GetService<UnitOfWork.FreeSqlUnitOfWorkManager>();
-            _uow = uowManager.Begin(this.Propagation, this.m_IsolationLevel);
-        }
-
-        public override void OnExit(Rougamo.Context.MethodContext context)
-        {
-            if (typeof(Task).IsAssignableFrom(context.RealReturnType) && context.ReturnValue != null && context.ReturnValue is Task)
-                ((Task)context.ReturnValue).ContinueWith(t => _OnExit(context));
-            else 
-                _OnExit(context);
-        }
-
-        void _OnExit(Rougamo.Context.MethodContext context)
-        {
-            try
-            {
-                if (context.Exception == null) 
-                    _uow.Commit();
-                else 
-                    _uow.Rollback();
-            }
-            finally
-            {
-                _uow.Dispose();
-            }
-        }
-    }
-    */
-
-    #endregion
-
     #region 手动事务辅助类（不使用 AOP 时的替代方案）
 
     /// <summary>

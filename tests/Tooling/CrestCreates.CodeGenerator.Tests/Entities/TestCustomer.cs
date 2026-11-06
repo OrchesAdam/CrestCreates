@@ -9,7 +9,7 @@ namespace CrestCreates.CodeGenerator.Tests.Entities
     [Entity(
         GenerateRepository = true,
         GenerateAuditing = true,
-        OrmProvider = "SqlSugar",
+        OrmProvider = "EfCore",
         TableName = "TestCustomers"
     )]
     public class TestCustomer : FullyAuditedAggregateRoot<int>

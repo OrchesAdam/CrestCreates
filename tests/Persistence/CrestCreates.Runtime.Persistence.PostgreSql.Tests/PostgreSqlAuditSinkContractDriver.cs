@@ -22,7 +22,8 @@ internal sealed class PostgreSqlAuditSinkContractDriver : IAuditSinkContractDriv
     {
         using var connection = _dataSource.OpenConnection();
         using var command = new NpgsqlCommand(
-            $"delete from {_options.SchemaQuotedTable("runtime_audit_envelopes")} where sink_id=@sink;", connection);
+            $"delete from {_options.SchemaQuotedTable("runtime_audit_envelopes")} where sink_id=@sink;"
+            + $"delete from {_options.SchemaQuotedTable("runtime_audit_retention_ledger")} where sink_id=@sink;", connection);
         command.Parameters.AddWithValue("sink", "postgresql-runtime-audit");
         command.ExecuteNonQuery();
         return new PostgreSqlAuditSink(_dataSource, _options);

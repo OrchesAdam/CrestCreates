@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Abstractions;
 using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Contracts.Interfaces;
@@ -18,7 +19,7 @@ using CrestCreates.Domain.Shared.Permissions;
 
 namespace CrestCreates.Application.Services;
 
-public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpdateDto> : ICrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpdateDto>
+public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpdateDto> : ICrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpdateDto>, IServiceProviderAccessor
     where TEntity : class, IEntity<TKey>
     where TKey : IEquatable<TKey>
 {
@@ -28,6 +29,10 @@ public abstract class CrestAppServiceBase<TEntity, TKey, TDto, TCreateDto, TUpda
     protected readonly IDataPermissionFilter DataPermissionFilter;
     protected readonly IPermissionChecker PermissionChecker;
 
+    /// <summary>
+    /// Intercept contract: woven <c>[UnitOfWorkMo]</c>/<c>[CacheMo]</c>/<c>[PermissionMo]</c> frames
+    /// resolve the kernel through this member (<see cref="IServiceProviderAccessor"/>), not by reflection.
+    /// </summary>
     public IServiceProvider? ServiceProvider { get; }
 
     protected IEntityPermissions? EntityPermissions { get; set; }

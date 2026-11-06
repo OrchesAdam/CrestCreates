@@ -17,19 +17,10 @@ namespace CrestCreates.Data.FreeSql.Extensions
         /// </summary>
         /// <param name="services">服务集合</param>
         /// <param name="freeSqlBuilder">FreeSql 构建器</param>
-        /// <param name="repositoryAssemblies">仓储所在程序集</param>
+        /// <param name="repositoryAssembly">保留源兼容；不再扫描该程序集</param>
         /// <remarks>
-        /// 官方推荐的注册方式：
-        /// 1. IFreeSql 从 UnitOfWorkManager.Orm 获取，自动跟随事务切换
-        /// 2. 使用 AddFreeRepository 自动注册仓储
-        /// 
-        /// 示例:
-        /// <code>
-        /// services.AddFreeSqlWithUow(fsql =>
-        /// {
-        ///     fsql.UseConnectionString(DataType.SqlServer, connectionString);
-        /// }, typeof(Startup).Assembly);
-        /// </code>
+        /// IFreeSql 从 UnitOfWorkManager.Orm 获取并自动跟随事务切换。仓储通过闭包泛型显式
+        /// DI 注册；不再使用 AddFreeRepository 运行时扫描。
         /// </remarks>
         public static IServiceCollection AddFreeSqlWithUow(
             this IServiceCollection services,
@@ -41,12 +32,6 @@ namespace CrestCreates.Data.FreeSql.Extensions
             var freeSql = freeSqlBuilder1.Build();
             freeSqlBuilder?.Invoke(freeSql);
 
-            // 2. 注册 FreeSql 仓储（官方推荐）
-            if (repositoryAssembly != null)
-            {
-                services.AddFreeRepository(null, repositoryAssembly);
-            }
-
             // 3. 注册 UnitOfWorkManager
             services.AddScoped<FreeSqlUnitOfWorkManager>(sp => 
                 new FreeSqlUnitOfWorkManager(freeSql));
@@ -57,17 +42,7 @@ namespace CrestCreates.Data.FreeSql.Extensions
                 sp.GetRequiredService<FreeSqlUnitOfWorkManager>().Orm);
 
             // 5. 注册 FreeSql 工作单元与其 Provider 绑定
-            services.AddScoped<FreeSqlUnitOfWork>();
-            // ambient 上下文跟随未接入：requiresNew 明确诊断（交 #130 评估扩展）。
-            services.AddUnitOfWorkProvider(
-                OrmProvider.FreeSql,
-                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>(),
-                supportsRequiresNew: false,
-                capabilities: new UnitOfWorkProviderCapabilities
-                {
-                    PromptTerminationOnAbandon = true,
-                    DiscardUncommittedOnAbandon = true
-                });
+            services.AddFreeSqlUnitOfWorkCore();
 
             return services;
         }
@@ -83,12 +58,6 @@ namespace CrestCreates.Data.FreeSql.Extensions
             if (freeSql == null)
                 throw new ArgumentNullException(nameof(freeSql));
 
-            // 注册 FreeSql 仓储
-            if (repositoryAssembly != null)
-            {
-                services.AddFreeRepository(null, repositoryAssembly);
-            }
-
             // 注册 UnitOfWorkManager
             services.AddScoped<FreeSqlUnitOfWorkManager>(sp => 
                 new FreeSqlUnitOfWorkManager(freeSql));
@@ -98,66 +67,9 @@ namespace CrestCreates.Data.FreeSql.Extensions
                 sp.GetRequiredService<FreeSqlUnitOfWorkManager>().Orm);
 
             // 注册 FreeSql 工作单元与其 Provider 绑定
-            services.AddScoped<FreeSqlUnitOfWork>();
-            // ambient 上下文跟随未接入：requiresNew 明确诊断（交 #130 评估扩展）。
-            services.AddUnitOfWorkProvider(
-                OrmProvider.FreeSql,
-                static sp => sp.GetRequiredService<FreeSqlUnitOfWork>(),
-                supportsRequiresNew: false,
-                capabilities: new UnitOfWorkProviderCapabilities
-                {
-                    PromptTerminationOnAbandon = true,
-                    DiscardUncommittedOnAbandon = true
-                });
+            services.AddFreeSqlUnitOfWorkCore();
 
             return services;
         }
-
-        /// <summary>
-        /// 添加 FreeSql 多库支持（FreeSql.Cloud）
-        /// </summary>
-        /// <typeparam name="TDbKey">数据库键类型（如 DbEnum 或 string）</typeparam>
-        /// <param name="services">服务集合</param>
-        /// <param name="cloudBuilder">FreeSqlCloud 构建器</param>
-        /// <param name="repositoryAssemblies">仓储所在程序集</param>
-        /// <remarks>
-        /// 用于多库场景，参考：https://freesql.net/guide/unitofwork-manager.html#扩展-多库场景
-        /// 
-        /// 示例:
-        /// <code>
-        /// public enum DbEnum { db1, db2, db3 }
-        /// 
-        /// services.AddFreeSqlCloud&lt;DbEnum&gt;(cloud =>
-        /// {
-        ///     cloud.Register(DbEnum.db1, () => new FreeSqlBuilder().UseConnectionString(DataType.SqlServer, connStr1).Build());
-        ///     cloud.Register(DbEnum.db2, () => new FreeSqlBuilder().UseConnectionString(DataType.MySql, connStr2).Build());
-        /// });
-        /// </code>
-        /// </remarks>
-        /*
-        public static IServiceCollection AddFreeSqlCloud<TDbKey>(
-            this IServiceCollection services,
-            Action<FreeSqlCloud<TDbKey>> cloudBuilder,
-            params Assembly[] repositoryAssemblies)
-        {
-            // 创建 FreeSqlCloud 实例
-            var cloud = new FreeSqlCloud<TDbKey>();
-            cloudBuilder?.Invoke(cloud);
-
-            // 注册为单例
-            services.AddSingleton(cloud);
-
-            // 注册仓储
-            if (repositoryAssemblies != null && repositoryAssemblies.Length > 0)
-            {
-                services.AddFreeRepository(null, repositoryAssemblies);
-            }
-
-            // 注册 UnitOfWorkManagerCloud（需要自定义实现）
-            // services.AddScoped<UnitOfWorkManagerCloud>();
-
-            return services;
-        }
-        */
     }
 }

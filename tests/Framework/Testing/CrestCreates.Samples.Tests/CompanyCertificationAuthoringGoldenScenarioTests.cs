@@ -331,6 +331,87 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
         result.BlockReason.Should().NotBeNullOrEmpty();
         result.FinalProposedInventory.Should().BeEmpty(
             "blocked sets must not produce a final inventory");
+        result.FinalDecisionSource.Should().Be("AllOrBlock");
+    }
+
+    [Fact]
+    public async Task RunUntilDraftSetReview_ExplicitUnsupportedIntent_BlocksWithoutSavingOrReviewing()
+    {
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
+        var draftStore = host.Provider.GetRequiredService<IDescriptorDraftStore>();
+        var runner = new CompanyCertificationAuthoringGoldenScenarioRunner(
+            host.Provider,
+            new FakeCompanyCertificationAuthoringAgent(
+                FakeCompanyCertificationAuthoringOutcome.UnsupportedIntent));
+
+        var result = await runner.RunUntilDraftSetReviewAsync(Phase7fIntent);
+
+        result.IsBlocked.Should().BeTrue(result.BlockReason);
+        result.FinalDecisionSource.Should().Be("AuthoringUnsupportedIntent");
+        result.BlockReason.Should().Contain("[CAPABILITY_UNSUPPORTED]");
+        result.DraftSet.Drafts.Should().BeEmpty("a refusal carries no candidate");
+        result.PerDraftReviewResults.Should().BeEmpty("a refusal never enters review");
+        result.FinalProposedInventory.Should().BeEmpty();
+        (await draftStore.ListAsync("tenant-company-certification")).Should().BeEmpty(
+            "a refusal must not be persisted on the way to approval");
+    }
+
+    [Fact]
+    public async Task RunUntilDraftSetReview_NeedsClarification_BlocksOnItsOwnDecisionSource()
+    {
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
+        var draftStore = host.Provider.GetRequiredService<IDescriptorDraftStore>();
+        var runner = new CompanyCertificationAuthoringGoldenScenarioRunner(
+            host.Provider,
+            new FakeCompanyCertificationAuthoringAgent(
+                FakeCompanyCertificationAuthoringOutcome.NeedsClarification));
+
+        var result = await runner.RunUntilDraftSetReviewAsync(Phase7fIntent);
+
+        result.IsBlocked.Should().BeTrue(result.BlockReason);
+        result.FinalDecisionSource.Should().Be("AuthoringNeedsClarification");
+        result.BlockReason.Should().Contain("[MISSING_POLICY_INPUT] second-level-reviewer-group");
+        result.DraftSet.Drafts.Should().BeEmpty();
+        result.PerDraftReviewResults.Should().BeEmpty();
+        (await draftStore.ListAsync("tenant-company-certification")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunUntilDraftSetReview_KeepsTheThreeBlockReasonsDistinguishable()
+    {
+        // The sample chain must be able to tell "the surface cannot author this", "the answer needs
+        // information" and "the answer was unusable" apart — that is the point of the two new statuses.
+        using var host = CompanyCertificationGoldenScenarioHost.CreateInMemory();
+
+        var unsupported = await new CompanyCertificationAuthoringGoldenScenarioRunner(
+            host.Provider,
+            new FakeCompanyCertificationAuthoringAgent(
+                FakeCompanyCertificationAuthoringOutcome.UnsupportedIntent))
+            .RunUntilDraftSetReviewAsync(Phase7fIntent);
+        var clarification = await new CompanyCertificationAuthoringGoldenScenarioRunner(
+            host.Provider,
+            new FakeCompanyCertificationAuthoringAgent(
+                FakeCompanyCertificationAuthoringOutcome.NeedsClarification))
+            .RunUntilDraftSetReviewAsync(Phase7fIntent);
+        var unusable = await new CompanyCertificationAuthoringGoldenScenarioRunner(
+            host.Provider,
+            new UnusableAnswerAuthoringAgent())
+            .RunUntilDraftSetReviewAsync(Phase7fIntent);
+
+        unsupported.FinalDecisionSource.Should().Be("AuthoringUnsupportedIntent");
+        clarification.FinalDecisionSource.Should().Be("AuthoringNeedsClarification");
+        unusable.FinalDecisionSource.Should().Be("AllOrBlock");
+
+        new[] { unsupported, clarification, unusable }
+            .Select(result => result.FinalDecisionSource)
+            .Should()
+            .OnlyHaveUniqueItems();
+
+        unsupported.BlockReason.Should().NotBe(clarification.BlockReason);
+        unsupported.DraftSet.DraftSetId.Should().Be("draftset_intent_unsupported");
+        clarification.DraftSet.DraftSetId.Should().Be("draftset_needs_clarification");
+        unusable.DraftSet.DraftSetId.Should().BeEmpty(
+            "an unusable answer has no terminal identity to name");
     }
 
     [Fact]
@@ -535,7 +616,8 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
     {
         return $$"""
             {
-              "contractVersion": "7g.v1",
+              "contractVersion": "8a.v1",
+              "outcome": "drafts",
               "promptInputHash": "{{promptInputHash}}",
               "plan": {
                 "planId": "plan_company_certification_finance_review",
@@ -746,4 +828,27 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
         CanonicalShapeVersion = "phase7f-test-v1",
         Value = value
     };
+
+    /// <summary>An authoring agent whose answer the contract cannot use at all.</summary>
+    private sealed class UnusableAnswerAuthoringAgent : IDescriptorAuthoringAgent
+    {
+        public Task<DescriptorAuthoringResult> AuthorAsync(
+            AgentAuthoringContext context,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new DescriptorAuthoringResult
+            {
+                Status = DescriptorAuthoringStatus.InvalidProviderOutput,
+                Plan = new DescriptorAuthoringPlan { PlanId = string.Empty, IntentText = context.Request.IntentText },
+                DraftSet = new DescriptorDraftSet { DraftSetId = string.Empty },
+                Diagnostics =
+                [
+                    new DescriptorAuthoringDiagnostic
+                    {
+                        Code = DescriptorAuthoringDiagnosticCodes.InvalidProviderOutput,
+                        Message = "Provider output is missing the required 'outcome' discriminator.",
+                        Severity = SeverityLevel.Error
+                    }
+                ]
+            });
+    }
 }

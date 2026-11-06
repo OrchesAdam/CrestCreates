@@ -1,0 +1,139 @@
+{
+  "issue": 130,
+  "slice": "S5",
+  "date": "2026-10-23",
+  "implementation_head": "162bdbee",
+  "branch": "feat/issue-130-provider-matrix-soft-delete-20261022-104210",
+  "pr": 154,
+  "status": "Final technical review passed on 2ea73e0d; PR not merged; CI paused; merge awaits maintainer",
+  "matrix": "docs/Feature/OrmProviderSupportMatrix.md",
+  "memory_updated": true,
+  "versions": {
+    "ef_core": "10.0.7",
+    "npgsql_ef": "10.0.1",
+    "freesql": "3.5.308",
+    "sqlsugar": "5.1.4.214",
+    "postgres": "16-alpine"
+  },
+  "final_suites": {
+    "orm_providers": {
+      "total": 267,
+      "passed": 267,
+      "failed": 0
+    },
+    "code_generator": {
+      "total": 461,
+      "passed": 461,
+      "failed": 0,
+      "duration": "31m11s"
+    },
+    "generated_crud_native": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "duration": "1m44s"
+    },
+    "postgres_uow": {
+      "total": 4,
+      "passed": 4,
+      "failed": 0
+    },
+    "dependency_boundaries": {
+      "total": 178,
+      "passed": 176,
+      "failed": 2,
+      "failed_scope": "existing ControlPlane evidence-ledger guards for #69, unrelated"
+    },
+    "generated_crud_non_native": {
+      "total": 25,
+      "passed": 25,
+      "failed": 0,
+      "note": "project total 28 = 25 non-native + 3 NativeAOT"
+    }
+  },
+  "review_history": [
+    "S2 R1/R2 closed",
+    "S3 R1/R2/R3 closed",
+    "S4 R1 closed"
+  ],
+  "retired_weak_hooks": [
+    "FreeSql ConfigureMultiTenantFilter",
+    "FreeSql ConfigureSoftDelete",
+    "SqlSugar ConfigureMultiTenantFilter"
+  ],
+  "migration_summary": [
+    "soft delete is logical for ISoftDelete; non-soft entities stay physical",
+    "stamped batch/predicate delete rejected; use DeleteAsync(id, expectedStamp)",
+    "SDK GetQueryable throws NotSupportedException",
+    "SDK required-tenant host reads fail closed; optional host sees shared null rows; shared rows are host-owned",
+    "EF required host filters return no rows; EF-specific optional marker retains host=all compatibility",
+    "non-EF/unknown generated repositories and CRUD fail with CCCREPO001/002",
+    "SqlSugar client is scoped; FreeSql extension stops repository scanning",
+    "creation audit is authoritative; retire weak tenant/soft-delete configuration hooks",
+    "EF tenant batch update/delete is rejected before tracking/write; use per-entity operations"
+  ],
+  "not_verified": [
+    "SQLServer/MySQL and other databases",
+    "PostgreSQL SDK soft-delete/tenant/audit/cancellation details",
+    "ORM trim/NativeAOT",
+    "in-flight SQL cancellation",
+    "cross-process concurrency",
+    "EF-specific optional host tightening"
+  ],
+  "diff": {
+    "files": 74,
+    "insertions": 8976,
+    "deletions": 336
+  },
+  "ci": "paused",
+  "merged": false,
+  "matrix_scope": {
+    "pg_generated_query": "supported (Q01 query/filter/sort/page)",
+    "pg_generated_write_uow": "unverified (SQLite only)",
+    "pg_raw_context_uow": "supported (existing 4/4 requiresNew/isolation, not two-repository or generated CRUD)",
+    "ef_two_repository_abandon_complete_pg": "unverified",
+    "pg_sdk_soft_delete_tenant_audit_cancellation": "unverified"
+  },
+  "review_rounds": [
+    {
+      "round": "S5-R1",
+      "reviewed_head": "73d4775e57f584db2b256aa8b13ed666aff3a8a4",
+      "fix_head": "162bdbee",
+      "report": "docs/review/2026-10-23-issue-130-final-review-round1.md",
+      "findings": [
+        {
+          "id": "S5-R1-1",
+          "severity": "P1",
+          "status": "fixed",
+          "summary": "EF tenant UpdateRange and symmetric DeleteRange reject before tracking/write in both repository entries; no-stamp tenant rows stay unchanged"
+        },
+        {
+          "id": "S5-R1-2",
+          "severity": "P1",
+          "status": "fixed",
+          "summary": "EfCoreRepositoryBase.GetQueryable starts from the generated-filtered native query; ordinary reads keep optional tenant and live-row filters"
+        },
+        {
+          "id": "S5-R1-3",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "matrix splits PG generated query, PG generated write/UoW, and raw-context UoW evidence; PG write and two-repository abandon/complete marked unverified"
+        }
+      ],
+      "probes": {
+        "review_s5": "10/10 after fix",
+        "orm_full": "267/267",
+        "generated_crud_total": "28 = 25 non-native + 3 native"
+      }
+    }
+  ],
+  "final_head": "2ea73e0d",
+  "final_review": {
+    "round": "R2",
+    "reviewed_head": "2ea73e0da27c268720198b8225124f157b0c90c2",
+    "independent_orm": "267/267",
+    "independent_crud_non_native": "25/25",
+    "q01": "5/5",
+    "conclusion": "final technical review passed; PG support declarations narrowed to actual evidence; no new blockers"
+  }
+}

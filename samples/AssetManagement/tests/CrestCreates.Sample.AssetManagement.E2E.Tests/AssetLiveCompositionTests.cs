@@ -24,6 +24,23 @@ public sealed class AssetLiveCompositionTests
         responseObservation.Snapshot().HttpStatus.Should().Be(0);
     }
 
+    [Fact]
+    public async Task UnsupportedIntentEvalWiring_ReplacesGateWithObserver_WithoutNetwork()
+    {
+        var responseObservation = new AssetLiveResponseObservation();
+        await using var harness = await AssetControlPlaneApprovalHarness.CreateAsync(
+            "asset-b12-composition-tenant",
+            "asset-b12-composition-author",
+            services => AssetDeepSeekLiveAuthoringEvaluationTests.ConfigureUnsupportedIntentServices(
+                services,
+                "asset-b12-composition-author",
+                responseObservation));
+
+        harness.Services.GetRequiredService<IDescriptorAuthoringAgent>().Should().NotBeNull();
+        harness.Services.GetRequiredService<AssetActivationGateObserver>().CallCount.Should().Be(0);
+        responseObservation.Snapshot().HttpStatus.Should().Be(0);
+    }
+
     [Theory]
     [InlineData(null, true, 4096, "DEFAULT_OUTPUT_BUDGET")]
     [InlineData("", true, 4096, "DEFAULT_OUTPUT_BUDGET")]

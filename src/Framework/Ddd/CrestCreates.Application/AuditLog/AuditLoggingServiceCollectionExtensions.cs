@@ -15,7 +15,7 @@ public static class AuditLoggingServiceCollectionExtensions
     public static IServiceCollection AddAuditLogging(this IServiceCollection services)
     {
         services.TryAddScoped<IAuditLogAppService, AuditLogAppService>();
-        services.TryAddScoped<IAuditLogCleanupAppService, AuditLogCleanupAppService>();
+        services.AddAuditRetentionApplication();
         return services;
     }
 }

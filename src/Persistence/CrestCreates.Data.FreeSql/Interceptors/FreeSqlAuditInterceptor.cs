@@ -141,22 +141,9 @@ namespace CrestCreates.Data.FreeSql.Interceptors
         /// </summary>
         public static void ConfigureMultiTenantFilter(this IFreeSql freeSql, ICurrentTenant currentTenant)
         {
-            if (currentTenant == null || string.IsNullOrEmpty(currentTenant.Id))
-            {
-                return;
-            }
-
-            var tenantId = currentTenant.Id;
-
-            // IMultiTenant: 可选租户ID，查询自身租户或无租户的数据
-            freeSql.GlobalFilter.Apply<IMultiTenant>(
-                "MultiTenant",
-                entity => entity.TenantId == null || entity.TenantId == tenantId);
-
-            // IMustHaveTenant: 必须有租户ID，只查询当前租户的数据
-            freeSql.GlobalFilter.Apply<IMustHaveTenant>(
-                "MustHaveTenant",
-                entity => entity.TenantId == tenantId);
+            throw new NotSupportedException(
+                "FreeSql tenant filtering is resolved per operation by FreeSqlRepository. " +
+                "Configuring a global filter here would capture a stale tenant; register the repository with ICurrentTenant instead.");
         }
 
         /// <summary>
@@ -164,20 +151,9 @@ namespace CrestCreates.Data.FreeSql.Interceptors
         /// </summary>
         public static void ConfigureSoftDelete(this IFreeSql freeSql)
         {
-            // 配置删除行为
-            freeSql.Aop.CurdBefore += (sender, e) =>
-            {
-                if (e.CurdType == global::FreeSql.Aop.CurdType.Delete && e.EntityType != null)
-                {
-                    // 检查实体是否实现了软删除接口
-                    if (typeof(ISoftDelete).IsAssignableFrom(e.EntityType))
-                    {
-                        // todo 将删除操作转换为更新操作
-                        // 注意：这需要在具体的仓储实现中处理
-                        // 这里仅作标记
-                    }
-                }
-            };
+            throw new NotSupportedException(
+                "FreeSql soft delete is executed as a conditional UPDATE by the repository command. " +
+                "This hook is retired and must not be used as a silent no-op configuration.");
         }
     }
 }

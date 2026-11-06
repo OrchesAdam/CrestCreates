@@ -13,7 +13,6 @@
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Aop/CrestCreates.Aop.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching.Abstractions/CrestCreates.Caching.Abstractions.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching/CrestCreates.Caching.csproj" />
-    <Project Path="../src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
     <Project Path="../src/Core/CrestCreates.Core.Abstractions/CrestCreates.Core.Abstractions.csproj" />
     <Project Path="../src/Core/CrestCreates.Core/CrestCreates.Core.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Logging/CrestCreates.Logging.csproj" />
@@ -51,21 +50,17 @@
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Memory.Llm/CrestCreates.Agent.Memory.Llm.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Prompting.Abstractions/CrestCreates.Agent.Prompting.Abstractions.csproj" />
     <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Prompting/CrestCreates.Agent.Prompting.csproj" />
-    <Project Path="../src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj" />
     <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging.Abstractions/CrestCreates.AuditLogging.Abstractions.csproj" />
     <Project Path="../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
     <Project Path="../src/Runtime/Capability/CrestCreates.Capability.Abstractions/CrestCreates.Capability.Abstractions.csproj" />
     <Project Path="../src/Runtime/Capability/CrestCreates.Capability/CrestCreates.Capability.csproj" />
     <Project Path="../src/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP/CrestCreates.DistributedTransaction.CAP.csproj" />
     <Project Path="../src/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction/CrestCreates.DistributedTransaction.csproj" />
-    <Project Path="../src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj" />
-    <Project Path="../src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.DeadLetter.EFCore/CrestCreates.EventBus.DeadLetter.EFCore.csproj" />
-    <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Local.Channel/CrestCreates.EventBus.Local.Channel.csproj" />
     <Project Path="../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
@@ -102,7 +97,6 @@
     <Project Path="../tests/Runtime/Capability/CrestCreates.Capability.Tests/CrestCreates.Capability.Tests.csproj" />
     <Project Path="../tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests/CrestCreates.DescriptorDraft.Tests.csproj" />
     <Project Path="../tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.Tests/CrestCreates.DistributedTransaction.Tests.csproj" />
-    <Project Path="../tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj" />
     <Project Path="../tests/Runtime/Eventing/CrestCreates.Event.Tests/CrestCreates.Event.Tests.csproj" />
     <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.Kafka.Tests.Integration/CrestCreates.EventBus.Kafka.Tests.Integration.csproj" />
     <Project Path="../tests/Runtime/Eventing/CrestCreates.EventBus.Kafka.Tests/CrestCreates.EventBus.Kafka.Tests.csproj" />

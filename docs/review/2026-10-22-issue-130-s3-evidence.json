@@ -1,0 +1,187 @@
+{
+  "issue": 130,
+  "slice": "S3",
+  "date": "2026-10-22",
+  "head": "40940559692aa612e25c132837cf45e75e80b6f9",
+  "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
+  "sdk": "10.0.112",
+  "scope": "Tenant isolation, persisted ownership, identity adapter, provider assembly and cancellation-source preservation on independent-file SQLite.",
+  "suites": {
+    "orm_providers": {
+      "command": "dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests",
+      "total": 255,
+      "passed": 255,
+      "failed": 0,
+      "skipped": 0,
+      "outcome": "all S1/S2/S3 and R1/R2/R3 tests and probes pass; 36 review probes are green"
+    },
+    "code_generator_full": {
+      "command": "dotnet test tests/Tooling/CrestCreates.CodeGenerator.Tests",
+      "total": 458,
+      "passed": 455,
+      "failed": 3,
+      "duration": "31m34s",
+      "outcome": "only the three agreed CCCREPO G red baselines fail; tenant-filter layering caused no unrelated regression"
+    },
+    "dependency_boundaries": {
+      "command": "DOCKER_HOST=... dotnet test tests/Boundary/CrestCreates.DependencyBoundaries.Tests",
+      "total": 178,
+      "passed": 176,
+      "failed": 2,
+      "failed_scope": "existing ControlPlane reference-data evidence-ledger guards for #69, unrelated to #130; includes the new Data.Core/EFCore/SqlSugar references"
+    }
+  },
+  "former_red_now_green": [
+    "T_EfCore_forged_detached_update_must_not_change_another_tenants_row",
+    "T_FreeSql_forged_detached_update_must_not_change_another_tenants_row",
+    "T_FreeSql_cross_tenant_id_delete_must_not_remove_the_row",
+    "T_FreeSql_filter_must_resolve_the_current_tenant_per_operation",
+    "T_SqlSugar_forged_detached_update_must_not_change_another_tenants_row",
+    "T_SqlSugar_cross_tenant_id_delete_must_not_remove_the_row",
+    "T_SqlSugar_filter_must_resolve_the_current_tenant_per_operation",
+    "U03_SqlSugar_module_must_not_register_a_process_wide_client",
+    "U03_SqlSugar_module_must_register_the_client_interface_used_by_repositories",
+    "U07_FreeSql_repository_honors_a_pre_cancelled_token",
+    "U07_SqlSugar_repository_honors_a_pre_cancelled_token"
+  ],
+  "new_s3_tests": {
+    "tenant_isolation": [
+      "T_FreeSql_optional_tenant_reads_shared_rows_and_switches_per_operation",
+      "T_SqlSugar_optional_tenant_reads_shared_rows_and_switches_per_operation",
+      "T_FreeSql_required_tenant_host_reads_fail_closed",
+      "T_SqlSugar_required_tenant_host_reads_fail_closed",
+      "T_FreeSql_insert_fills_required_tenant_and_rejects_foreign_tenant",
+      "T_SqlSugar_insert_fills_required_tenant_and_rejects_foreign_tenant",
+      "T_FreeSql_range_delete_only_touches_the_current_tenant",
+      "T_SqlSugar_range_delete_only_touches_the_current_tenant",
+      "T_EfCore_generated_filters_enforce_required_and_optional_host_semantics"
+    ],
+    "assembly_uow_cancellation": [
+      "U03_SqlSugar_extension_registers_scoped_client_and_interface_alias",
+      "U01_SqlSugar_extension_two_repositories_share_uow_and_abandon_hides_writes",
+      "U01_SqlSugar_extension_two_repositories_share_uow_and_complete_persists_writes",
+      "U07_SqlSugar_cancellation_does_not_poison_the_connection"
+    ]
+  },
+  "implementation": {
+    "sdk_tenant": "FreeSql/SqlSugar repositories resolve ICurrentTenant per operation for reads and writes; required tenant host fails closed; optional tenants read own + shared null rows; persisted tenant ownership is checked before writes; range deletes are tenant-scoped; tenant UpdateRange is rejected; write ownership is separate from read visibility (shared null rows are host-owned)",
+    "ef_tenant_filters": "generated required and DataFilter-optional expressions enforce host fail-closed/shared-only semantics; EF-specific optional keeps the documented host=all compatibility; production DbContext applies filters in host via HostCurrentTenant; persisted ownership uses AsNoTracking snapshots",
+    "assembly": "SqlSugar scoped client + ISqlSugarClient alias + UoW core shared by module/extension; FreeSql UoW core shared by module/extensions; single ICurrentUserProvider adapter with fallback; FreeSql repository scanning removed",
+    "cancellation": "combined tokens are passed to every SqlSugar SDK command including the tenant ownership preflight; cancellation before command launch writes zero rows",
+    "audit": "creation audit is assigned from the scoped identity provider (caller values overwritten); updates ignore creation columns in FreeSql/SqlSugar and preserve DB values in EF"
+  },
+  "migration": [
+    "SDK required-tenant host reads now throw; use an explicit governance context",
+    "SDK optional-tenant host reads only shared null rows",
+    "EF required-tenant host queries return no rows; DataFilter optional host reads only shared rows",
+    "EF-specific optional marker keeps host=all until a consumer list and migration are accepted",
+    "FreeSql extension no longer scans repository assemblies; register closed generics explicitly",
+    "SqlSugar client is scoped; repositories and UoW share the same instance",
+    "tenant-scoped UpdateRange is rejected; update entities one by one"
+  ],
+  "not_verified": [
+    "EF-specific host tightening",
+    "PostgreSQL/other databases",
+    "ORM trim/NativeAOT",
+    "in-flight cancellation",
+    "cross-process concurrency"
+  ],
+  "native_gate_note": "No AOT-verified formal runtime was modified in S3; ORM packages remain unverified for trim/NativeAOT.",
+  "tests_note": "all suites were run serially per the maintainer instruction; R1/R2 probes are committed verbatim",
+  "review_rounds": [
+    {
+      "round": "S3-R1",
+      "reviewed_head": "8c8b24fe6869116b99aafe15ae015725a2f6de49",
+      "fix_head": "1025368ee63c0ae36878f70f261f29f808d9fd4e",
+      "report": "docs/review/2026-10-23-issue-130-s3-review-round1.md",
+      "response": "docs/review/2026-10-23-issue-130-s3-review-round1-response.md",
+      "findings": [
+        {
+          "id": "S3-R1-1",
+          "severity": "P1",
+          "status": "fixed",
+          "summary": "EF ownership preflight reads an AsNoTracking persisted snapshot"
+        },
+        {
+          "id": "S3-R1-2",
+          "severity": "P1",
+          "status": "fixed",
+          "summary": "SDK write ownership excludes shared null rows for ordinary tenants; host maintains shared rows"
+        },
+        {
+          "id": "S3-R1-3",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "provider repositories write creation/modification/deletion audit through the scoped user provider"
+        },
+        {
+          "id": "S3-R1-4",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "repository entries combine caller and managed execution tokens before SQL"
+        }
+      ],
+      "probes": {
+        "review_s3": {
+          "before": "8 passed / 14 failed / 22",
+          "after": "22 passed / 0 failed / 22"
+        },
+        "ef_ownership": "6/6",
+        "shared_row_writes": "12/12",
+        "formal_audit": "2/2 + 2/2 regressions",
+        "managed_cancellation": "2/2"
+      }
+    },
+    {
+      "round": "S3-R2",
+      "reviewed_head": "7b06a5fb8cd0fb77205b6353f962cd1cc4c75b70",
+      "fix_head": "733bea452d0bd7c27b88d3536158a5cb52aee9d4",
+      "report": "docs/review/2026-10-23-issue-130-s3-review-round2.md",
+      "response": "docs/review/2026-10-23-issue-130-s3-review-round2-response.md",
+      "findings": [
+        {
+          "id": "S3-R2-1",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "creation audit is authoritative; caller creation fields are ignored on update for FreeSql/SqlSugar and EF"
+        },
+        {
+          "id": "S3-R2-2",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "SqlSugar SDK commands receive the combined cancellation token; SQL-before cancellation writes zero rows"
+        }
+      ],
+      "probes": {
+        "review_s3_r2": {
+          "before": "3 passed / 5 failed / 8",
+          "after": "8 passed / 0 failed / 8"
+        },
+        "review_s3_r1": "22/22",
+        "ef_audit_regression": "1/1"
+      }
+    },
+    {
+      "round": "S3-R3",
+      "reviewed_head": "f6adf610f44a78c593fd7f87e402b12f0532d375",
+      "fix_head": "40940559692aa612e25c132837cf45e75e80b6f9",
+      "report": "docs/review/2026-10-23-issue-130-s3-review-round3.md",
+      "response": "docs/review/2026-10-23-issue-130-s3-review-round3-response.md",
+      "findings": [
+        {
+          "id": "S3-R3-1",
+          "severity": "P2",
+          "status": "fixed",
+          "summary": "SqlSugar tenant ownership preflight receives the combined token and uses FirstAsync(token); four call sites updated"
+        }
+      ],
+      "probes": {
+        "review_s3_r3": {
+          "before": "5 passed / 1 failed / 6",
+          "after": "6 passed / 0 failed / 6"
+        },
+        "all_review_probes": "36/36"
+      }
+    }
+  ]
+}

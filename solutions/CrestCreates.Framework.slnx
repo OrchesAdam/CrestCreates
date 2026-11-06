@@ -28,7 +28,6 @@
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching.Abstractions/CrestCreates.Caching.Abstractions.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Caching/CrestCreates.Caching.csproj" />
-    <Project Path="../src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
     <Project Path="../src/Framework/Infrastructure/CrestCreates.Localization/CrestCreates.Localization.csproj" />

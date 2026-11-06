@@ -1,22 +1,27 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Sample.Procurement.Contracts;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Sample.Procurement.Application.Handlers;
 
-public sealed class ApplyRejectionDecisionHandler : ICapabilityContextAwareHandlerInvoker
+[CapabilityName(ProcurementContractIds.ApplyRejectionDecisionCapability)]
+public sealed class ApplyRejectionDecisionHandler
+    : ProcurementCapabilityHandler, ICapabilityHandler<RejectProcurementRequestInput, ProcurementRequestResult>
 {
-    public Task<object?> InvokeAsync(object? input, CancellationToken ct)
-        => throw new InvalidOperationException("Capability execution context is required.");
+    private readonly ProcurementApplicationService _service;
 
-    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    public ApplyRejectionDecisionHandler(
+        ProcurementApplicationService service,
+        ICapabilityExecutionContextAccessor execution)
+        : base(execution)
     {
-        ApplyApprovalDecisionHandler.RequireHumanTaskSource(context);
-        var service = context.ServiceProvider.GetRequiredService<ProcurementApplicationService>();
-        object result = service.ApplyRejectionDecision(
-            (RejectProcurementRequestInput)context.Input!,
-            context.TenantId ?? string.Empty,
-            context.UserId ?? string.Empty);
-        return Task.FromResult<object?>(result);
+        _service = service ?? throw new ArgumentNullException(nameof(service));
+    }
+
+    public Task<ProcurementRequestResult> ExecuteAsync(
+        RejectProcurementRequestInput input, CancellationToken ct)
+    {
+        RequireHumanTaskSource();
+        return Task.FromResult(_service.ApplyRejectionDecision(input, TenantId, UserId));
     }
 }

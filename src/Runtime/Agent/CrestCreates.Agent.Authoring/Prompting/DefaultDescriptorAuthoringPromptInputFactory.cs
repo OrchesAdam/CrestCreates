@@ -18,7 +18,7 @@ public sealed class DefaultDescriptorAuthoringPromptInputFactory : IDescriptorAu
 
         return new DescriptorAuthoringPromptInput
         {
-            ContractVersion = "7g.v1",
+            ContractVersion = "8a.v1",
             TenantId = context.Request.TenantId,
             IntentText = context.Request.IntentText,
             Metadata = metadata,

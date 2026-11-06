@@ -1,5 +1,9 @@
 # CrestCreates vs ABP Framework 全面对比分析
 
+> ⚠️ **历史审查文档（2026-05 生成），不作为当前支持证书。** 其中的整包 AOT 判断、按文件数/模块数评分，以及对 `PluginSystem` 的「生产就绪」结论均已失实。
+> 当前项目定位、功能状态与执行证据以 [能力地图](../Feature/CapabilityMap.md) 为唯一导航入口：`PluginSystem` 现为 **限界保留的 opt-in 实验项目，动态装载执行面 JIT-only、功能执行未验证**（地图 D-12）；ORM Provider 支持逐项见 [ORM Provider 支持矩阵](../Feature/OrmProviderSupportMatrix.md)（#130）；NativeAOT 声明见 [#123 证据矩阵](2026-10-10-issue-123-native-execution-gates-evidence-matrix.md)。
+> 保留本文的历史来源身份；引用本文时以上述地图与矩阵为准。
+
 > **生成时间**: 2026-05  
 > **方法**: 基于 `framework/src/` 全部 46 个项目的逐模块源码阅读 + `framework/test/` 24 个测试项目覆盖度分析  
 > **评分基准**: ABP Framework 最新版本作为参照，每个功能点从架构设计、功能完整度、AoT 兼容性、生态系统四个维度综合打分
@@ -500,7 +504,9 @@ Audit (0) → Logging (100)
 
 ### 13.2 插件系统 — ⭐ 8.0/10
 
-`PluginSystem` 模块：`plugin.json` 清单驱动、`AssemblyLoadContext` 隔离、生命周期状态机、运行时启用/禁用。生产就绪但 AoT 不兼容。
+`PluginSystem` 模块：`plugin.json` 清单驱动、`AssemblyLoadContext` 隔离、生命周期状态机、运行时启用/禁用。
+
+> **2026-10-23 纠正（#131）**：原文「生产就绪」失实，现撤回。该项是独立 opt-in **实验**实现：动态装载执行面依赖运行时 `AssemblyLoadContext` + `Type.GetType`/`GetTypes` + `ActivatorUtilities`，属 **JIT-only**；本轮核对未检出任何生产消费者或专用测试，装载/初始化/失败/释放生命周期没有已验收证据，故功能状态记为 **experimental、功能执行未验证**，manifest 的 STJ context 不外推为装载路径 AOT 可用。当前定位、限界与升级条件见 [能力地图 D-12](../Feature/CapabilityMap.md)；下一次功能扩展前必须具备真实消费 Host 与生命周期证据，否则不得扩展。
 
 ### 13.3 分布式事务（Saga / CAP） — ⭐ 6.0/10
 
@@ -551,7 +557,7 @@ Audit (0) → Logging (100)
 | 24 | 代码生成 | ⭐ 9.5 | ✅✅ 大幅超越 | **最大优势** |
 | 25 | 编译期映射 | ⭐ 9.0 | ✅✅ ABP 无 | 替代 AutoMapper |
 | 26 | 分布式事务 | ⭐ 6.0 | ⚠️ ABP 无 | 架构好，实现原型 |
-| 27 | 插件系统 | ⭐ 8.0 | ✅ ABP 无 | ALC 隔离，生产就绪 |
+| 27 | 插件系统 | ⭐ 8.0（历史评分，已失效） | ✅ ABP 无 | ALC 隔离；**实验项，JIT-only，功能执行未验证**（见能力地图 D-12，原文「生产就绪」已于 2026-10-23 撤回） |
 | 28 | Blazor UI | ❌ 0.0 | ❌ 缺失 | — |
 | 29 | SignalR | ❌ 0.0 | ❌ 缺失 | — |
 | 30 | 文本模板 | ❌ 0.0 | ❌ 缺失 | — |

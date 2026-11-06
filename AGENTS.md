@@ -80,23 +80,41 @@ Handler 不应承担治理判断，不应拼字符串协议，不应使用 servi
 
 ```text
 CrestCreates Core:
-    NativeAOT-first（独立证据矩阵待明确；当前经组合 Host 原生执行覆盖）
+    NativeAOT-first；专属 tests/Core/CrestCreates.Core.AotHost 原生 publish/link/run（linux-x64，
+    语义身份类型/严重度排序/诊断码 JSON 往返与拒绝/取消快照合并与 Attach 六场景 + 总 sentinel +
+    缺参负控，reflection-free）。只覆盖这些 Core 契约，不推导 Framework/Runtime/其他 RID
 
 第一方 Runtime（逐项声明，不整体背书）:
     Workflow / HumanTask / Outbox / Memory / AgentTool:
         经 PG AotHost、主 Agent.Tools fixture 与 Golden App fixture 原生 publish/link/run 覆盖
     HTTP (CapabilityEndpoint):
-        active CI 原生 publish/link/run，含 loopback 请求断言（成功/负例/进程回收），
+        CI 门禁已接线（全部 workflow 当前处于手工禁用状态，证据以本地/历史执行计账），
+        原生 publish/link/run，含 loopback 请求断言（成功/负例/进程回收），
         仅 linux-x64；认证/权限/租户/bootstrap 全链不在该 fixture 覆盖内
     MCP:
         主 MCP fixture 与 Mcp.Memory fixture 均有原生 run 门禁（linux-x64）
     LocalEvent typed dispatch / dead-letter replay:
-        独立 AotHost fixture 原生 publish/link/run（五场景 + sentinel，linux-x64；
+        独立 AotHost fixture 原生 publish/link/run（11 场景 + sentinel，linux-x64；
         仅内存 DLQ store、单进程 hosted）；不推导 EF DLQ / Mediator / RabbitMQ 状态
     RabbitMQ 静态订阅与 canonical 事件契约 (publisher/consumer/retry/DLQ):
         独立 AotHost fixture（trim 与 NativeAOT 双门）publish/link/run（六场景 + sentinel，
         linux-x64；broker 由 harness 预置 vhost）；不推导 EF DLQ / Outbox / Kafka / CAP /
         认证权限租户链路
+    Audit retention V1 (PostgreSQL fixed database):
+        PG AotHost publish/link/run（linux-x64）：过期/边界/跨租户/hold/批次预算/purge 后
+        sink 去重/receipt 导出幂等/receipt 恢复/缺能力九场景 + 总 sentinel，三类 fixture-only
+        负控非零且无总 sentinel；真实身份/权限/Setting/generated HTTP 由 JIT P08 覆盖，不推导
+        原生认证/Settings/Quartz，也不推导其他 ORM Provider/RID
+    Agent Authoring 显式终态契约 8a.v1（#159，PR #160 已合并于 master `1bf4a7e7`）:
+        ControlPlane JsonContracts AotFixture 原生 publish/link/run（linux-x64）：两个显式终态结构化往返
+        （含读回 Status）、presence 七形态、两张闭码表、Stage A 词表与「重复 + 单一错 hash」优先级、
+        四条披露示例逐条过正式 parser、必需 JSON 根可解析 + 反射兜底关闭；逐场景 sentinel 点名，
+        9 条负控各自独立执行且非零无 sentinel，未知控制名在任何场景前退出
+        验收入口 = 用户目录官方 SDK 10.0.114 + 隐式 ILCompiler 10.0.14；声明只覆盖实际跑过的样本，
+        不外推 §10.1 全 23 行矩阵、其他 RID 或认证/审批/activation 链；其余七个原生门禁
+        （CapabilityEndpoint/GeneratedCrud/AssetManagement/Procurement/Ticket/PostgreSql/RabbitMQ AotHost）
+        仍按升级前工具链列账、未在 10.0.114 复验；默认 /usr/bin/dotnet 仍为 10.0.113 并命中
+        error NU1903（GHSA-p3jp-9v83-76w9，修复版 10.0.14），复用该门禁的任务/CI 必须显式选 10.0.114
 
 EF Core 和部分 Integrations:
     AOT capability separately declared
@@ -176,17 +194,17 @@ CrestCreates/
 │   │   ├── Modules/             # 平台/业务模块
 │   │   └── Testing/             # 测试基础设施
 │   ├── Metadata/                # Metadata.Abstractions, Metadata, ContextPack, Schema, Snapshot
-│   ├── Metadata/Draft/          # DescriptorDraft, Draft
+│   ├── Metadata/Draft/          # DescriptorDraft（通用 Draft 已随 #131 归档）
 │   ├── Runtime/                 # Capability, Workflow, HumanTask, Agent, Eventing, Audit 等
 │   ├── Persistence/             # Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB, Runtime.Persistence.PostgreSql 等
 │   ├── Platform/                # Web, Platform, Platform.AspNetCore, Platform.All
 │   ├── Tooling/                 # CodeGenerator, Metadata.Analyzers, BuildTasks, JsonContracts
-│   └── Integrations/            # PluginSystem, ExternalApi, LegacyDatabase
+│   └── Integrations/            # PluginSystem（实验）、MCP、CAP；ExternalApi/LegacyDatabase 已随 #131 归档
 ├── tests/                       # 按 src 分层镜像组织
 ├── samples/                     # LibraryManagement, SaaSHelpdesk
 ├── docs/
 │   ├── design/
-│   ├── Feature/
+│   ├── Feature/                 # 含 CapabilityMap.md：项目定位、消费者、边界、证据与处理结论的唯一导航入口（#131）
 │   ├── review/
 │   └── superpowers/             # specs/ 和 plans/
 ├── solutions/                   # 分层 .slnx
@@ -224,7 +242,7 @@ Persistence: Data.EFCore, Data.FreeSql, Data.SqlSugar, MongoDB
   ↑
 Platform: Web, Platform.AspNetCore, Platform.All
 Tooling: CodeGenerator, BuildTasks
-Integrations: PluginSystem, ExternalApi, LegacyDatabase
+Integrations: PluginSystem（实验）, MCP, CAP（ExternalApi/LegacyDatabase 已随 #131 归档）
 ```
 
 依赖边界由 `tests/Boundary/CrestCreates.DependencyBoundaries.Tests` 强制：
@@ -295,8 +313,11 @@ BuildTasks 编译前链：
 - 认证授权不要引入新的真相来源，不要复制 token / claims / permission 逻辑，优先复用现有身份、权限、租户上下文主链。
 - Agent Control Plane 是治理面，不是运行时执行面。它可以审查、预览、提交激活请求，但不能绕过授权、批准自身变更、直接执行 runtime handler 或突变 runtime registry。
 - Agent 治理面主链是 Authoring → deterministic review → Control Plane：authoring 只产出候选草稿；正式契约在 `src/Runtime/Agent/CrestCreates.Agent.Authoring*`、`CrestCreates.Agent.ControlPlane*` 与 `Metadata/Draft/CrestCreates.DescriptorDraft*`。review artifact 与 package/evidence artifact 持久化只提供完整性与证据绑定，不构成批准；activation request/gate 当前为内存实现，不等于 durable activation。
+- Authoring 线契约是 `8a.v1`（#159）：`outcome` 是必需判别式，`drafts` / `unsupported` / `needsClarification` 三终态互斥，禁用成员按**是否出现**判定（`null`/`{}`/`[]`/有内容同等被拒），两张码表封闭且 Ordinal 比较。`outcome` 与 `Status` 不一一对应：只有成功态（`Succeeded`/`SucceededWithDiagnostics`）绑定 `DraftSetId = Plan.PlanId` 且草稿 ≥1；`Blocked`（hash 不匹配或任一 item 原子校验失败）零草稿、`PlanId`/`DraftSetId` 为空串，两个显式终态才是固定占位身份。解析固定为两阶段：Stage A 读原始信封事实（解码失败、逐层重复、未知/别名成员、presence、Kind），Stage B 用严格 source-generated DTO 投影值——顺序决定归因，不得调换。新增终态必须是「词表 + 码表 + JSON 根闭包 + 原生场景」同批变更，不允许只加状态名。**`Blocked` + intent-level 诊断码是历史归因，永远不计为 `8a.v1` 覆盖**；覆盖只接受显式终态 + 合法码 + 非空条目 + 零草稿/零评审通过/零保存/零 gate 调用，且「不支持意图得到 drafts」仍是拒绝。
+- 能力地图与长尾裁定（#131）：`docs/Feature/CapabilityMap.md` 是「项目存在」与「能力交付」的唯一导航面。每条记录四维分开写：定位 / 功能状态 / 执行证据 / 处理结论。新增生产 csproj 必须同时在地图项目索引登记并附准入理由（为什么既有项目不能承载、层次与依赖边界、消费者或静态聚合目的、唯一装配入口、验证方式、支持级别、责任、未交付时的退出条件），由 `CapabilityMapCoverageArchitectureTests` 强制；缺记录即门禁失败。归档项落 `99_RecycleBin/<issue-slug>/` 并保留原相对路径与 README，由 `ArchivedProjectRegressionArchitectureTests` 禁止回流。实验能力（FileManagement 本地/内存元数据、PluginSystem 动态 DLL 装载）不得被宣传为已交付平台能力；PluginSystem 动态装载执行面属 JIT-only，功能执行未验证。地图不复制 ORM 支持表，ORM 组合证据唯一来源仍是 `docs/Feature/OrmProviderSupportMatrix.md`。
+- TenantId 是租户上下文唯一主键（#131）：`ICurrentTenant.Id` 为权威；`ITenantInfo.Name` / `Tenant.Name` / `TenantName` 只能用于展示、日志、DTO 与名称检索。名称可以进入解析入口，但必须经既有 tenant repository/provider 查询得到实体、保留入口既有 active/lifecycle 校验，再以实体 Id 进入上下文、claim、授权/隔离与缓存/连接分区；禁止 `TenantId = tenant.Name`、`ChangeAsync(name)`、名称写入 `tenantid`/`tenant_id` claim、名称进入过滤表达式或缓存前缀；查不到 Id 时不得退回名称或 host。守卫位于 `tests/Boundary/CrestCreates.DependencyBoundaries.Tests/TenantIdentityArchitectureTests`：按项目真实引用闭包分析、名称源按成员身份绑定、身份出口由端口表加参数名网覆盖、有限值流加同项目与第一方跨项目 helper 内联、权威来源结构断言锁定主链；敏感节点绑定失败出 TI900，不静默跳过。它是仓库级有限模式守卫，不是通用安全数据流分析器；生成器模板字符串不算已绑定符号，实际生成端点仍由各自 fixture 断言。Resolver 接受 `X-Tenant-Id: <名称>` 是合法兼容入口，不视为违规，也不得为它新增第二套身份真相来源。
 - JsonContracts 工具链（`src/Tooling/CrestCreates.JsonContracts.BuildTasks`、`.BuildTasks.Core`、`.Tool`）：构建期生成确定性 JSON contract roots，由官方 STJ Source Generator 消费；禁止 runtime reflection / scanner fallback。属构建期 Tooling，不是运行时组件。
-- 正式 CRUD JSON 编译契约（#128）：`[GenerateCrudService(typeof(Entity))]` 声明 → CRUD precompile（普通 Compile 输入）→ JsonContracts root 闭合 → 官方 STJ，同一 CoreCompile；`AddGeneratedCrud()` ExplicitHost 激活（每程序集贡献 + handler module + per-Host JSON configurator），`MapCrestCapabilityEndpoints` 在端点注册前做一次能力注册表权威汇总，必需 identities/JSON root 缺失即 fail-closed（反射 resolver 不作数）；typed query adapter 静态执行（按原生探针矩阵，decimal 过滤为 operator-free 形态）、typed 无 fallback 结果契约、失败路径错误 DTO（ProblemDetails）在闭包内。支持声明：**正式 CRUD + JSON 主链 NativeAOT-verified（linux-x64）**——fixture publish/link/run 15 场景 + 表达式树构造探针 + 两变异反例 + 分场景/总 sentinel；EF/其他 ORM 的查询翻译与 UoW 组合、Windows/macOS 等其他 RID **未验证**（逐项声明，不整体背书）。
+- 正式 CRUD JSON 编译契约（#128，PR #150 已合并）：`[GenerateCrudService(typeof(Entity))]` 声明 → CRUD precompile（普通 Compile 输入）→ JsonContracts root 闭合 → 官方 STJ，同一 CoreCompile；`AddGeneratedCrud()` ExplicitHost 激活（每程序集贡献 + handler module + per-Host JSON configurator），`MapCrestCapabilityEndpoints` 在端点注册前做一次能力注册表权威汇总，必需 identities/JSON root 缺失即 fail-closed（反射 resolver 不作数）；typed query adapter 静态执行（按原生探针矩阵，decimal 过滤为 operator-free 形态）、typed 无 fallback 结果契约、失败路径错误 DTO（ProblemDetails）在闭包内。支持声明：**正式 CRUD + JSON 主链 NativeAOT-verified（linux-x64）**——fixture publish/link/run 15 场景 + 表达式树构造探针 + 两变异反例 + 分场景/总 sentinel；EF/其他 ORM 的查询翻译与 UoW 组合、Windows/macOS 等其他 RID **未验证**（逐项声明，不整体背书）。
 - Ticket 正式 AppService HTTP 投影（#129 S5，PR #152 已合并，merge commit `2f4c5402`）：`tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture` 使用真实 `TicketAppService`/DTO/validator 与正式生成 bundle，仅替换内存 Ticket/SLA 持久化叶子与 fixture identity/permission/failure presenter；支持声明 **Ticket 正式 HTTP 主链 NativeAOT-verified（linux-x64）**——publish/link/run，15 场景（create/get/all/by-customer/update stamp/assign+active SLA/resolve/close/delete If-Match/unknown 404/invalid body zero-business/permission 403/business failure/metadata rejection）+ 总 sentinel；五个原生控制（绿色 + wrong-expectation + wrong-validation-status + late-validation + decoy-metadata），失败控制 exit 1 无 sentinel；零业务由业务入口/UoW/仓储写计数器独立断言，metadata 负例锁定 Ticket owner/11 identities/目标 root。不推导 EF/PostgreSQL、真实认证/租户、整个 SaaSHelpdesk 或 Library HTTP；Library 完整 HTTP 仍未验证，其他 RID 未验证。
 - `src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql`：承载 runtime state、Control Plane reference data、review/package artifact 持久化与 additive migrations，并提供原生 AotHost 证据。目录位置在 Persistence 依赖层，实际职责跨运行时与控制面持久化；引用仍受依赖边界测试约束。
 
@@ -376,17 +397,53 @@ TestBase
 
 以 `memory.md` 为最新状态记录。当前关键共识：
 
+- Authoring 显式 unsupported / needs-clarification 终态（#159，已合并：PR #160 → master `1bf4a7e7`，Issue completed 关闭）：wire 升为 `8a.v1`，
+  `outcome` 判别式 + `UnsupportedIntent` / `NeedsClarification` 两个正式终态（结构化载荷、闭码表、presence
+  判定、固定占位 plan/draftset、零草稿）。解析收口为 Stage A 原始信封事实 + Stage B 严格 source-generated
+  投影的单条主链，`7g.v1` 不留兼容窗。消费者侧 Asset oracle 采两层判定：**历史归因（`Blocked` + intent-level
+  码）不计为新契约覆盖**。证据：单元 139/139（§10.1 全 23 行）、Asset E2E 需 PG 128 通过/2 跳过、样例
+  golden scenario 37/37、原生门禁 linux-x64 11/11（逐场景点名 + 9 条独立负控 + 未知控制名拒绝）。
+  S5 单次带凭据 live 已执行（按已获准范围：现有 B12 入口一次、16384 输出预算、凭据不打印/入库、仅 `/tmp`
+  元数据、不自动重试）：真实 provider 答 `unsupported`（HTTP 200 / `FinishReason=stop` / 预算被接受，故非预算或
+  provider 旁因），解析为 `UnsupportedIntent` + 3 条合法条目 + 逐条 `AUTHORING_INTENT_UNSUPPORTED`，Asset oracle
+  判 `ExplicitUnsupportedResult`，零草稿/零评审通过/零保存/零 gate、部署清单不变、未伪造能力 ——
+  **B12 按 `8a.v1` 计为覆盖**。边界：单次运行不作可重复性声明、单一意图类与单一模型画像，
+  `NeedsClarification` 的 live **未执行**（不得写成两终态均已 live 覆盖），且 live 在 JIT 宿主内跑、不新增原生覆盖。
+  S0–S5 全部验收后，PR #160 于 2026-11-05 以 merge commit `1bf4a7e7` 合并（审查 head `fc28a95d`），Issue #159 以 completed 关闭。
+  遗留三项独立跟进、不阻断该关闭：`NeedsClarification` 的真实模型 live（后续质量评测）、系统 RPM SDK 升级与其余七个原生门禁在
+  10.0.114 下复验（环境与发布维护）、全方案测试环境与两组未完成基线核验保持原有证据限制。
+  支持声明边界见上文 AOT 分层与本文件「Authoring 线契约是 `8a.v1`」条。
+
+- 能力地图与 TenantId 架构守卫（#131，PR #155 合并于 `9c39e187`）：`docs/Feature/CapabilityMap.md` 为项目/能力导航唯一入口，7 个无消费者项目 + 通用 Draft 实验 + 死契约归档至 `99_RecycleBin/issue-131-capability-map/`；`TenantIdentityArchitectureTests` 以 evaluated MSBuild 输入（缓存仅在依赖可证明完整时启用）扫描 active src/sample 项目，0 违规 0 覆盖失败。有限模式守卫，不是通用安全分析器。
 - Tenant Management：主链已基本闭环。
 - Setting Management：正式平台能力。
 - Feature Management：正式平台能力。
 - Dynamic API AoT：generated path 是正式主链。
-- Audit Logging：统一写入、脱敏、查询已闭环；清理 / governance 仍需最终确认。
-- CRUD 主链（#128 已实施，PR #150 复审通过、待合并）：formal 链 = 真实 `[GenerateCrudService]` 声明 + BuildTasks 前置物化 + JsonContracts root 闭合 + ExplicitHost typed HTTP 投影 + typed query adapter + 生成 JSON context + 唯一 UoW（`[UnitOfWorkMo]` 织入后经生成服务 `ServiceProvider` 成员接入内核）；旧 bundle 路径只服务未迁移消费者（待归档）。证据与支持声明见本文件「平台能力」与 `docs/superpowers/plans/2026-10-14-issue-128-issues-log.md`。
+- Audit Logging：统一写入、脱敏、查询已闭环。旧 cleanup（`AuditLogCleanupAppService`、裸
+  `DeleteOlderThanAsync`、日期清理 DTO）已随 #132 归档，不再属于正式链。
+- 审计保留治理 V1（#132，PR #157 合并于 `9909365a`）：唯一主链 = Accountability 契约
+  （`Retention`：scope/policy/run/batch/hold/`IAuditRetentionStore`/精确 receipt 读取）+
+  `AuditRetentionExecutor` 内核（持久 policy 绑定、批预算、终态 run 拒绝新批、取消终态、
+  commit Unknown → receipt 对账、receipt-only 批量事实、mirror 首败优先聚合、显式幂等
+  receipt 导出）+ Application 统一 admission（身份、`AuditLogging.Retention.*` 权限、Global
+  Setting、当前租户，host 名称经 `ITenantProvider` 解析为权威 Id）+ PostgreSQL V016/V017 原子
+  协议（ledger 为去重权威、正文+ledger+receipt 同事务、anti-resurrection FK、hold version/
+  receipt、typed backfill/quarantine）+ generated HTTP（`AddCrestAuditRetentionHttp()`，
+  `/api/audit-retention/*`，含 `POST batches/export`）与 typed job 共用 admission，默认关闭。
+  V1 限界：仅 PostgreSQL 固定库、Global 期限、单条 hold，延期其他 Provider/RID、按租户策略、
+  批量/法务 hold、archive/WORM、元数据 GC、自动调度（当前 scheduler 不建立认证主体）。
+  支持声明：正式 PostgreSQL retention 场景为 **NativeAOT-verified（linux-x64，仅已执行场景）**；
+  PR #157 审查轮 R1 的 2 个 P1/2 个 P2 与 R2 的 2 个 P2 已修复并补入回归（终态拒绝新批、
+  恢复绑定校验、receipt-only 事实、镜像首败优先与显式导出、确认提交后 receipt 读故障不降级）；
+  真实身份/权限/Setting/HTTP 组合由 JIT P08 覆盖，不推导原生认证链；原生负控是 fixture 内
+  store 装饰器变异，不等价于真实 SQL/事务变异。证据与 P01–P09 映射见实施计划与 `memory.md`。
+- B12 不支持意图负边界（#133，PR #158 合并于 `91d6574e`）：Asset E2E 真实链路（authoring → 确定性评审 → 控制面提交 → 人工批准 → 激活门）落地 9 条确定性负例 + 1 条 opt-in live eval 用例；「不伪造能力、不部署」以测试侧计数器度量（草稿库、评审工件库、控制面审计记录、`IRuntimeActivationGate` 调用/成功数、目录身份对部署基线比对），并配同链路绿色对照（人工批准才 `Activated`）证明判别力；live 与离线回归读写同一组 live 环境变量时共用串行 collection + 进程级捕获门。行为层已带凭据实跑改判：四次 16384 完整运行零草稿/零部署为已观测，一次默认 4096 属 `OutputBudgetExhausted` 单列，不充当第五次拒绝证据。契约层当时确认为缺口：「needs-clarification」不能与畸形/空输出区分（同为 `AUTHORING_INVALID_PROVIDER_OUTPUT`），本 Issue 按边界未改契约；该缺口由 #159 承接并已落地（PR #160 → master `1bf4a7e7`，wire `8a.v1`，见本文件「Authoring 线契约是 `8a.v1`」与当前平台状态的 #159 条目），本条记录保持 #133 当时的范围与裁定身份，不追改为当前契约背书。生产代码零改动；未新增原生执行门禁 ⇒ #123 证据矩阵无新行；不外推到 LibraryManagement/SaaSHelpdesk、其他模型或 RID。
+- CRUD 主链（#128 已实施并合并，PR #150，merge commit `196b6f66`）：formal 链 = 真实 `[GenerateCrudService]` 声明 + BuildTasks 前置物化 + JsonContracts root 闭合 + ExplicitHost typed HTTP 投影 + typed query adapter + 生成 JSON context + 唯一 UoW（`[UnitOfWorkMo]` 织入后经 `IServiceProviderAccessor` 契约取得生成服务的 `ServiceProvider` 并接入内核）；旧 bundle/Controller/Legacy 路径已随 #129/PR #152 归档退出（merge commit `2f4c5402`），正式链不保留双轨。证据与支持声明见本文件「平台能力」与 `docs/superpowers/plans/2026-10-14-issue-128-issues-log.md`。
 - 权限系统：授予、撤销、缓存、租户边界、SuperAdmin、AOP 已收口。
 - 后台作业：ISchedulerService + Quartz + 重试策略 + 租户上下文。
-- UnitOfWork：唯一装配（`AddUnitOfWork` + Provider 包 typed `AddUnitOfWorkProvider` binding + 能力声明，无反射/程序集扫描）；唯一执行内核（`UnitOfWorkOptions`、`BeginScope + StartAsync` 调用方帧激活协议、四维结果：参与状态/事务结果/通知结果/释放；join 完成=参与者成功、rollback-only 拒绝部分提交；提交确认即记录 Committed、Unknown 不被回滚改写、提交后通知失败不回滚且保留已提交事实）；受管链 ambient 路由（descendant-or-self 可见性 + 租户/声明/连接先校验后路由）与未完成退出「终结 + 丢弃未 flush 跟踪写入」；操作层 token 组合（正式仓储/Provider 组合传入 CT ⊕ 受管执行 token，AOP/生成端点 deadline 覆盖）；Provider 能力（隔离级别实测矩阵、及时终止、丢弃）执行业务前 fail closed；requiresNew 经子 DI scope 隔离，不支持的 Provider 确定性诊断；旧双轨与死契约已归档（99_RecycleBin）。状态：#137 已合并（PR #139：切片 1-5 + 三轮审查修复；CAP 参与 lease 契约见交接文档）。
+- UnitOfWork：唯一装配（`AddUnitOfWork` + Provider 包 typed `AddUnitOfWorkProvider` binding + 能力声明，无反射/程序集扫描）；唯一执行内核（`UnitOfWorkOptions`、`BeginScope + StartAsync` 调用方帧激活协议、四维结果：参与状态/事务结果/通知结果/释放；join 完成=参与者成功、rollback-only 拒绝部分提交；提交确认即记录 Committed、Unknown 不被回滚改写、提交后通知失败不回滚且保留已提交事实）；受管链 ambient 路由（descendant-or-self 可见性 + 租户/声明/连接先校验后路由）与未完成退出「终结 + 丢弃未 flush 跟踪写入」；操作层 token 组合（正式仓储/Provider 组合传入 CT ⊕ 受管执行 token，AOP/生成端点 deadline 覆盖）；AOP 解析契约收口（`[UnitOfWorkMo]` 织入目标必须实现 `IServiceProviderAccessor`，拦截器按契约而非反射取服务提供者；取不到 `IUnitOfWorkManager` 时确定性拒绝并零业务执行，不再退回「无事务静默放行」）；Provider 能力（隔离级别实测矩阵、及时终止、丢弃）执行业务前 fail closed；requiresNew 经子 DI scope 隔离，不支持的 Provider 确定性诊断；旧双轨与死契约已归档（99_RecycleBin）。状态：#137 已合并（PR #139：切片 1-5 + 三轮审查修复；CAP 参与 lease 契约见交接文档）。
 - CAP 分布式事务集成（#125）：唯一装配入口 `AddCrestCapDistributedTransaction`（两层配置校验：注册期输入早期诊断 + 启动期对最终 `CapOptions` 的 `IValidateOptions`/`ValidateOnStart` 权威校验；装配自检：executor registry/声明必需集合/持久化仓库）；原子发布消费 #137 lease/borrower 契约——受管窗口内消息行与业务数据同库同事务写入、由 CAP 存储扫描恢复投递（**名义扫描等待、非时限**；窗口内 `PublishDelayAsync` 确定性拒绝）；全部拒绝路径（未 Start/非事务/终态/未受管原生事务/存储身份不匹配等）先于写入、零副作用）；内存假实现与模块入口已归档（`99_RecycleBin/issue-125-cap-consolidation`）。支持声明按组合：EF Core + Npgsql ↔ CAP PostgreSql（**单一固定数据库**；PG+RabbitMQ 为第一组证据）；SqlServer 存储/Kafka 传输/trim/NativeAOT **未验证**；补偿并发与 `Executing` 崩溃恢复不承诺；「禁用重试」（`FailedRetryCount=0`）在扫描投递模式下不可用。状态：#125 已合并（PR #140，五轮审查闭环；本地证据：CAP 单元 41/41、集成 38/38）。
-- LocalEvent 强类型分发与死信重放（#126）：唯一强类型分发索引（`ILocalEventDispatchRegistry`/`LocalEventBinding`/`LocalEventInvoker`，冻结期合并校验；未声明事件确定性失败 `UnknownLocalEventException`，无 fallback）；每程序集生成注册（`AddLocalEvents()`，CCCLE001-005；显式跨程序集激活契约，无扫描兜底）；Replayable codec 经 JsonContracts 工具链静态绑定（`[LocalEvent(Replayable=true)]` 发现；CJC015/016/017 闭包诊断含多态 discriminator 唯一性与 STJ 可恢复集合校验）；共用重放核心（`LocalDeadLetterReplayExecutor`：每次 attempt 重读当前持久化状态、预检先于状态迁移、预算取消息持久值、协作取消恢复 Pending）；EF `LocalReplayKey` additive 列；旧死契约已归档（`99_RecycleBin/issue-126-local-event-typed-dispatch`）。不承诺：重放并发互斥、崩溃遗留 Retrying 恢复、per-handler checkpoint。状态：#126 已合并（PR #142，八轮审查闭环；本地证据：JSON 工具链 126/126、LocalEvent 集成 47/47、NativeAOT 五场景 + sentinel）。
+- LocalEvent 强类型分发与死信重放（#126）：唯一强类型分发索引（`ILocalEventDispatchRegistry`/`LocalEventBinding`/`LocalEventInvoker`，冻结期合并校验；未声明事件确定性失败 `UnknownLocalEventException`，无 fallback）；每程序集生成注册（`AddLocalEvents()`，CCCLE001-005；显式跨程序集激活契约，无扫描兜底）；Replayable codec 经 JsonContracts 工具链静态绑定（`[LocalEvent(Replayable=true)]` 发现；CJC015/016/017 闭包诊断含多态 discriminator 唯一性与 STJ 可恢复集合校验）；共用重放核心（`LocalDeadLetterReplayExecutor`：每次 attempt 重读当前持久化状态、预检先于状态迁移、预算取消息持久值、协作取消恢复 Pending）；EF `LocalReplayKey` additive 列；旧死契约已归档（`99_RecycleBin/issue-126-local-event-typed-dispatch`）。不承诺：重放并发互斥、崩溃遗留 Retrying 恢复、per-handler checkpoint。状态：#126 已合并（PR #142，八轮审查闭环；本地证据：JSON 工具链 126/126、LocalEvent 集成 47/47、NativeAOT 11 场景 + sentinel）。
 - RabbitMQ 静态订阅与事件契约（#127）：唯一权威仍是 `GeneratedEventDescriptor`/`IEventRegistry`，RabbitMQ 只持有冻结的传输绑定（发布索引按具体 Type、wire 索引按 `(EventId, EventVersion)`、legacy alias 表、每队列消费计划）；`[CrestEvent]` 生成每程序集 descriptor provider + `AddEventDescriptors()`（CCCEV001-003），Integration 事件经 JsonContracts 工具链生成静态 codec（per-Host `EventJsonCodecRegistration` 贡献，无进程全局表；camelCase wire 策略，CJC018-020）；`[RabbitMqSubscribe]` 生成闭合 typed invoker（CCCRMQ001-005）；冻结全部先于 broker I/O，`AddRabbitMqEventBus` 唯一入口（module/旧 context 重载转发，context 重载 = 同一冻结内的 typed codec 适配器）；envelope additive 增 `EventId`/`EventVersion`（EventType = canonical Name）；SDK confirm 为核心（移除自制账本，channel lease 精确释放）；重试/DLQ 结算状态机（延迟生效、MessageId/CorrelationId 保留、`x-retry-count` 宽容解析、重投 confirm 后才 Ack）；专属消费 channel + settlement 串行门 + 有界停机；恢复窗口连接所有权归 SDK（等待恢复、不替换；取消保持取消语义；看护按 SDK 恢复阶段判断——恢复中不停宿主、稳定后持续关闭短宽限判终态）、重投确认失败受控重入队（不耗业务预算）、delivery 整批 Handler 预解析、codec 贡献逐项校验（同源冲突与顺序无关）、LocalEvent 默认路径共存（共享 IEventValidator 不被内核占用）。旧反射桥/占位测试已归档（`99_RecycleBin/issue-127-rabbitmq-static-bindings`）。不承诺：competing consumers 跨进程语义、quorum DLX 无损、per-handler checkpoint、重放并发互斥、崩溃窗口去重。状态：#127 已合并（PR #145，2026-10-14；R1 6×P1+1×P2 与 R2 1×P1+2×P2 两轮审查闭环，审查探针 11 个入库回归；本地证据：单元 58/58、集成 37/37、生成器全量 365/365、JsonContracts 131/131、Event 41/41、LocalEvent 47/47、CAP 41/41、trim + NativeAOT 双门禁按真实模式通过）。
 - ObjectMapping：SourceGenerator，支持多种转换、自定义转换器和导航路径。
 - Metadata / Descriptor 治理链路：Topology、Impact、Compatibility、Package、Stable Hash、Canonical Hash profile、Agent Control Plane 等属于严肃治理面，不应把复杂性下放给普通 Runtime Handler。
@@ -407,6 +464,7 @@ TestBase
 参考位置：
 
 - 平台状态记录：`memory.md`
+- 能力地图（项目定位/消费者/边界/证据/结论）：`docs/Feature/CapabilityMap.md`
 - 设计规格：`docs/superpowers/specs/`
 - 工作计划：`docs/superpowers/plans/`
 - 示例项目：`samples/LibraryManagement/`、`samples/SaaSHelpdesk/`
@@ -415,4 +473,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-10-22
+**最后更新**: 2026-11-06

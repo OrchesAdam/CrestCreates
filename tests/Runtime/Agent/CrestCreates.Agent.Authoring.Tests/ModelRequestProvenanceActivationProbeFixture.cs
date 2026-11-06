@@ -486,7 +486,7 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
 
         return new DescriptorAuthoringPromptInput
         {
-            ContractVersion = "7g.v1",
+            ContractVersion = "8a.v1",
             TenantId = ProbeTenant,
             IntentText = ProbeIntent,
             Metadata = metadataProjection,
@@ -547,7 +547,7 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
                         ArtifactKind = "Descriptor",
                         Scope = "Metadata",
                         Purpose = "Contract",
-                        ContractVersion = "7g.v1",
+                        ContractVersion = "8a.v1",
                         CanonicalShapeVersion = "descriptor-contract-v1"
                     },
                     DefinitionHash = new CanonicalHash
@@ -558,7 +558,7 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
                         ArtifactKind = "Descriptor",
                         Scope = "Metadata",
                         Purpose = "Definition",
-                        ContractVersion = "7g.v1",
+                        ContractVersion = "8a.v1",
                         CanonicalShapeVersion = "descriptor-definition-v1"
                     }
                 }
@@ -618,7 +618,7 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
                             ArtifactKind = "Descriptor",
                             Scope = "Metadata",
                             Purpose = "Contract",
-                            ContractVersion = "7g.v1",
+                            ContractVersion = "8a.v1",
                             CanonicalShapeVersion = "descriptor-contract-v1"
                         },
                         DefinitionHash = new CanonicalHash
@@ -629,7 +629,7 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
                             ArtifactKind = "Descriptor",
                             Scope = "Metadata",
                             Purpose = "Definition",
-                            ContractVersion = "7g.v1",
+                            ContractVersion = "8a.v1",
                             CanonicalShapeVersion = "descriptor-definition-v1"
                         }
                     }
@@ -707,7 +707,8 @@ public sealed class ModelRequestProvenanceActivationProbeFixture
 
             var responseJson = JsonSerializer.Serialize(new
             {
-                contractVersion = "7g.v1",
+                contractVersion = "8a.v1",
+                outcome = "drafts",
                 promptInputHash = hashValue,
                 plan = new
                 {

@@ -1,0 +1,991 @@
+{
+  "issue": 131,
+  "recorded_date": "2026-10-23",
+  "baseline_sha": "8c8a71de6a47d7c0eb94e8260e9f94035b22a477",
+  "stage": "functional-design-only",
+  "method": "Static explicit ProjectReference resolution, production C# file inventory excluding bin/obj, solution XML path resolution; references are not proof of execution. No MSBuild conditional evaluation or external package consumer discovery. Additional symbol/content review is documented in the design.",
+  "test_execution": "No build, managed test, trim or native execution performed in this design turn.",
+  "projects": [
+    {
+      "project": "src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj",
+      "source_file_count": 1,
+      "sources": [
+        {
+          "path": "src/Integrations/CrestCreates.Integration.ExternalApi/AssemblyMarker.cs",
+          "sha256": "55fb84f1c8c3e22a0583e09580f0e6984353655a691eab9812b249df4ec0517c"
+        }
+      ],
+      "direct_project_consumers": [],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Integrations.slnx"
+      ]
+    },
+    {
+      "project": "src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj",
+      "source_file_count": 1,
+      "sources": [
+        {
+          "path": "src/Integrations/CrestCreates.Integration.LegacyDatabase/AssemblyMarker.cs",
+          "sha256": "f14e307b6f6c932d7d9124bc4c14011b21c5d9385b5cf17c2754e5e699847ae3"
+        }
+      ],
+      "direct_project_consumers": [],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Integrations.slnx"
+      ]
+    },
+    {
+      "project": "src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj",
+      "source_file_count": 4,
+      "sources": [
+        {
+          "path": "src/Metadata/Draft/CrestCreates.Draft.Abstractions/DraftQuery.cs",
+          "sha256": "7af148d8aa851134d49d411e3bf00350504833f16d2b5d3f96e7ad42c921dbc4"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.Draft.Abstractions/DraftRecord.cs",
+          "sha256": "81b22319fd2a1cb9e437163c162c8854edaaa45e4976bec8f5aaa9b897c757b2"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.Draft.Abstractions/DraftStatus.cs",
+          "sha256": "226f988d06d39df9857f89473ae2e3c638fcbd7e3f4e5478917f2c1901c87350"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.Draft.Abstractions/IDraftStore.cs",
+          "sha256": "a5857541041a00c76ce5d99baa3d963397298190d2c3b4e9c27e842ac5308272"
+        }
+      ],
+      "direct_project_consumers": [
+        "src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj",
+        "src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj",
+        "tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Metadata.slnx",
+        "solutions/CrestCreates.Platform.slnx",
+        "solutions/CrestCreates.Runtime.slnx"
+      ]
+    },
+    {
+      "project": "src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj",
+      "source_file_count": 2,
+      "sources": [
+        {
+          "path": "src/Metadata/Draft/CrestCreates.Draft/InMemoryDraftStore.cs",
+          "sha256": "6aa736c06ce4d528595c6122c0ff3c73a8d93853071aaea7de70060327f552fd"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.Draft/TenantIsolatedDraftStore.cs",
+          "sha256": "605f7679e7e710676bf5096f0a39688a53fcaa54de116f31cccd4d09fc62fbc3"
+        }
+      ],
+      "direct_project_consumers": [
+        "tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj",
+        "tests/Runtime/Workflow/CrestCreates.Workflow.Tests/CrestCreates.Workflow.Tests.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Metadata.slnx",
+        "solutions/CrestCreates.Platform.slnx",
+        "solutions/CrestCreates.Runtime.slnx"
+      ]
+    },
+    {
+      "project": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CrestCreates.DescriptorDraft.Abstractions.csproj",
+      "source_file_count": 23,
+      "sources": [
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CanonicalHashing/DescriptorDraftReviewCanonicalShapeVersions.cs",
+          "sha256": "e4e3f20f11e24046cc06872e0a4128ffeaf3b0f7360f6b0ea5caea44c885da99"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CanonicalHashing/DescriptorDraftReviewHashInput.cs",
+          "sha256": "5521de44dc326d24ff1116f446759a854d237136291cd077b4182e3346462dc0"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CanonicalHashing/DescriptorDraftReviewHashInputJsonSerializerContext.cs",
+          "sha256": "b932e5fe47aeb1c57eebcc1429bb7070489143781cc96996efd7d3cff8dfc722"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CanonicalHashing/IDescriptorDraftReviewHashService.cs",
+          "sha256": "cd702750e65de2e79e55d7177ae1962fefa3282b71efb7890c44df313269f170"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CanonicalHashing/ReviewDiagnosticProjection.cs",
+          "sha256": "d0afca21b7806cc0125a023c5b8ddcabf55365dfd64870ccf94666e68d4e5c82"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CanonicalHashing/ReviewResultIntegrityProjection.cs",
+          "sha256": "e4377cf7693f5f79fbe15044132f82dbd84fc7d50c971df0ea7fd2b0f44d8570"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/CanonicalHashing/ReviewResultSourceBindingProjection.cs",
+          "sha256": "eb135eb4cba76bc014041b1217218ac65f952643cd32e013da9fe10857653a21"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraft.cs",
+          "sha256": "2e1b58b019c1049e8cdf4ff6c1b38d95e58fc58deaf92e43cafaed9a5f038be4"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftAuthorKind.cs",
+          "sha256": "3461525199820dde6b4a37d4f0465d89528bb2caea195891c3a26adf95e0031c"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftDiagnostic.cs",
+          "sha256": "037bdee1381942c3af26fbc6d97b27cff441e8a23985fd5d1853671943e308f5"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftMaterializationResult.cs",
+          "sha256": "7275e058da03f7980e5fce99ef463b82d4e5c8b5c9d41ee17a05715be1a114d3"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftOperation.cs",
+          "sha256": "426d54a0c910dcbe14f017890a3d2c52d151ca5a9b185cc2ea7c934f69f07959"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftPayload.cs",
+          "sha256": "4bfbcbe7eb412e287511f6811f11f8f25d440949693fd1cec9bb1c2d17b900df"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftReviewResult.cs",
+          "sha256": "c3c5b8f3b1d9fac764ee119eb42dfefb4e1a814ed3db3bae209785e3e4386180"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftStatus.cs",
+          "sha256": "e869bf11d5ab09285caaa62c2ad998b1b1d9e953244bb6ff8e886f1642ab2d34"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftStoreSemantics.cs",
+          "sha256": "34d708c9602fd611953413835fc5fcd2832b3d6c83efb48019d47dd189bf4fc6"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorDraftValidationResult.cs",
+          "sha256": "7edb39d68d83f58ab788335be6590939b82f9ab57d0d68525550afb04a60cf83"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DescriptorPackagePreview.cs",
+          "sha256": "5e85c44571f64c8656d3f62cfad42217357194c94641601db3197ddd594c34a5"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/DraftQuery.cs",
+          "sha256": "2ea2cbd79d223c82fc6d2d7e691bd64c6957ebe4c5dc71bc553c9880c136e422"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/IDescriptorDraftMaterializer.cs",
+          "sha256": "6a889cdb05a3302b1cc2413dfe4eebcc3f0ebfd322e27aeb5cdda5f861712845"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/IDescriptorDraftReviewService.cs",
+          "sha256": "a0b6bcae06f36d4e3a0fdb217770b64a166ec16bd81cbcdd25e95ead28f91fef"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/IDescriptorDraftStore.cs",
+          "sha256": "9e8086ba8d32a6b0b1190737bedff432d5669a701ce19975376c0b6b2a4b0a7d"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft.Abstractions/IDescriptorDraftValidator.cs",
+          "sha256": "3e306f0be9cb9ea38811e4ea419b20330549f5920793674beb6225d886b9ffaf"
+        }
+      ],
+      "direct_project_consumers": [
+        "samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/CrestCreates.Sample.AssetManagement.E2E.Tests.csproj",
+        "samples/CrestCreates.Samples.DescriptorControlPlane/CrestCreates.Samples.DescriptorControlPlane.csproj",
+        "src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj",
+        "src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj",
+        "src/Runtime/Agent/CrestCreates.Agent.Authoring.Abstractions/CrestCreates.Agent.Authoring.Abstractions.csproj",
+        "src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj",
+        "src/Runtime/Agent/CrestCreates.Agent.ControlPlane.Abstractions/CrestCreates.Agent.ControlPlane.Abstractions.csproj",
+        "src/Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj",
+        "tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests/CrestCreates.DescriptorDraft.Tests.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/CrestCreates.Runtime.Persistence.PostgreSql.Tests.csproj",
+        "tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj",
+        "tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests/CrestCreates.Agent.DraftContracts.Tests.csproj",
+        "tests/Shared/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing.csproj",
+        "tests/Tooling/CrestCreates.Agent.DraftContractGenerator.Tests/CrestCreates.Agent.DraftContractGenerator.Tests.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Metadata.slnx",
+        "solutions/CrestCreates.Platform.slnx",
+        "solutions/CrestCreates.Runtime.slnx"
+      ]
+    },
+    {
+      "project": "src/Metadata/Draft/CrestCreates.DescriptorDraft/CrestCreates.DescriptorDraft.csproj",
+      "source_file_count": 16,
+      "sources": [
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/CanonicalHashing/DefaultDescriptorDraftReviewHashService.cs",
+          "sha256": "84ddec8b0cd0f1f2bc9ab87c068079eb475147612ec570c8e6ab64f90daddf73"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/CanonicalHashing/ReviewResultIntegrityCanonicalHashWriter.cs",
+          "sha256": "cab7db16d32f4a988320382947d0f6d1d9403d529056a7f93388016610417707"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/CanonicalHashing/ReviewResultSourceBindingCanonicalHashWriter.cs",
+          "sha256": "407ee1ab8c2c6b18cfa89aa68a5f05b8748666d8e4e7a5f38b80d06cf2c3e25c"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/CapabilityDescriptorDraftPayload.cs",
+          "sha256": "67582076ad5b54eaf4acf93e30cd3fe1773fcebbc3175c66451a78ab3e3a9f91"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/DefaultDescriptorDraftMaterializer.cs",
+          "sha256": "0c5134cfad3a22e8181bb8ba6a4b2ff6653b42e9cd0d96bb17e78f2daa5fe87b"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/DefaultDescriptorDraftReviewService.cs",
+          "sha256": "7d0b042b25f8ca9e3cefa7f8441b82f04fa20d85cc8e693c856c8ddb487d14f5"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/DefaultDescriptorDraftValidator.cs",
+          "sha256": "15218a9f22099fda266fee09df15e8b5c532f8e775dcc5ec8a897bfdddc98146"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/DescriptorDraftPayloadSupport.cs",
+          "sha256": "dfbcf94552f88d268fe105ac8c0e470bbd5c21738b436c9adef21987733c8f0d"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/DescriptorDraftServiceCollectionExtensions.cs",
+          "sha256": "85312c0761ec6eee5cd769fc93bbc0592d97fbd8161e6dee4aa0b13592bff4de"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/DescriptorDraftSnapshotHelper.cs",
+          "sha256": "16d81e31cf275ec0ee65c47b414c951e76f8e75bc0c69820a3e35f47c036fbd4"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/EventDescriptorDraftPayload.cs",
+          "sha256": "ce234c69a5077c0d6de6e59013261f8e3b76613ee9074d1a514e95de0a7134d4"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/FormDescriptorDraftPayload.cs",
+          "sha256": "7245b610f359ff0da7f122bae6337a3847a06855608412c4ef789dc76da15bda"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/HumanTaskDescriptorDraftPayload.cs",
+          "sha256": "e398fde02c8b069a2f9fb869ef574f499123af396d868772bc33d9e55c8f0c12"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/InMemoryDescriptorDraftStore.cs",
+          "sha256": "e7b34793cd9cce5533a6af294b6d36974aa73bec7fe635e4bc43461e7386c306"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/SchemaDescriptorDraftPayload.cs",
+          "sha256": "1735b80ee248bc2e5d1b948ac95e16cace58c10767d319ea68af92f66b2068b1"
+        },
+        {
+          "path": "src/Metadata/Draft/CrestCreates.DescriptorDraft/WorkflowDescriptorDraftPayload.cs",
+          "sha256": "9e14806fa821a354c4a10c2692ee07a137caffa173247a1ead38072f130636b5"
+        }
+      ],
+      "direct_project_consumers": [
+        "samples/AssetManagement/tests/CrestCreates.Sample.AssetManagement.E2E.Tests/CrestCreates.Sample.AssetManagement.E2E.Tests.csproj",
+        "samples/CrestCreates.Samples.DescriptorControlPlane/CrestCreates.Samples.DescriptorControlPlane.csproj",
+        "src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj",
+        "src/Runtime/Agent/CrestCreates.Agent.Authoring/CrestCreates.Agent.Authoring.csproj",
+        "src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj",
+        "src/Runtime/Agent/CrestCreates.Agent.DraftContracts/CrestCreates.Agent.DraftContracts.csproj",
+        "tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests/CrestCreates.DescriptorDraft.Tests.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/CrestCreates.Runtime.Persistence.PostgreSql.Tests.csproj",
+        "tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj",
+        "tests/Runtime/Agent/CrestCreates.Agent.DraftContracts.Tests/CrestCreates.Agent.DraftContracts.Tests.csproj",
+        "tests/Tooling/CrestCreates.Agent.DraftContractGenerator.Tests/CrestCreates.Agent.DraftContractGenerator.Tests.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Metadata.slnx",
+        "solutions/CrestCreates.Platform.slnx",
+        "solutions/CrestCreates.Runtime.slnx"
+      ]
+    },
+    {
+      "project": "src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj",
+      "source_file_count": 3,
+      "sources": [
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Configuration/Modules/ConfigurationModule.cs",
+          "sha256": "7fa49626ef9a1e2ce1e7404811414fff07db2b3ee5a8e99848b4e64ee08442c6"
+        },
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Configuration/Services/ConfigurationService.cs",
+          "sha256": "860aa6f1c6636fe824a7b569b4397d96500b49456bd2383e0b5d13219c30cd95"
+        },
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Configuration/Services/IConfigurationService.cs",
+          "sha256": "f5d3a4680e6e68c43b6814a6d459bfe8d4d824de568569c3c85886e72641715d"
+        }
+      ],
+      "direct_project_consumers": [],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Framework.slnx",
+        "solutions/CrestCreates.Metadata.slnx",
+        "solutions/CrestCreates.Platform.slnx",
+        "solutions/CrestCreates.Runtime.slnx"
+      ]
+    },
+    {
+      "project": "src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj",
+      "source_file_count": 1,
+      "sources": [
+        {
+          "path": "src/Runtime/Agent/CrestCreates.Agent.Runtime/AssemblyMarker.cs",
+          "sha256": "d32b4e10a1d5ef594ae3a295accbd0052806ab6c11028e749b689fe521632e2c"
+        }
+      ],
+      "direct_project_consumers": [],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Platform.slnx",
+        "solutions/CrestCreates.Runtime.slnx"
+      ]
+    },
+    {
+      "project": "src/Framework/Infrastructure/CrestCreates.Localization/CrestCreates.Localization.csproj",
+      "source_file_count": 6,
+      "sources": [
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Localization/Abstractions/ILocalizationContext.cs",
+          "sha256": "780e218e6ef7b7433b4cb1d84de04ba9e6d15b2060c673d1502a0ddd6c330324"
+        },
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Localization/Abstractions/ILocalizationResourceContributor.cs",
+          "sha256": "f749801bda87ee99a92f40335fa76d635eca8d7682406aa04538986c451e6d43"
+        },
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Localization/Abstractions/LocalizationResource.cs",
+          "sha256": "5975c5ca781fc81c06ccf32187604ea4a525ebac6553216b6a7ea61add0bbbc4"
+        },
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Localization/Modules/LocalizationModule.cs",
+          "sha256": "2ca7d328ade68cbd1b68728b8179d0340e7aa200b496e770e8a4d2b198b7ea13"
+        },
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Localization/Services/ILocalizationService.cs",
+          "sha256": "126c6703547586ffa8f348777025b5912b97794cd21df2b84d14849533ae60cd"
+        },
+        {
+          "path": "src/Framework/Infrastructure/CrestCreates.Localization/Services/LocalizationService.cs",
+          "sha256": "e2e5acfb589a4f85b7248c50a8c880fd238060b6519300ea17e6121472521533"
+        }
+      ],
+      "direct_project_consumers": [
+        "src/Framework/Infrastructure/CrestCreates.Validation/CrestCreates.Validation.csproj",
+        "src/Framework/Web/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj",
+        "src/Runtime/Agent/CrestCreates.Agent.ControlPlane/CrestCreates.Agent.ControlPlane.csproj",
+        "tests/Framework/Infrastructure/CrestCreates.Localization.Tests/CrestCreates.Localization.Tests.csproj",
+        "tests/Framework/Web/CrestCreates.Web.Tests/CrestCreates.Web.Tests.csproj",
+        "tests/Runtime/Agent/CrestCreates.Agent.ControlPlane.Tests/CrestCreates.Agent.ControlPlane.Tests.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Framework.slnx",
+        "solutions/CrestCreates.Platform.slnx"
+      ]
+    },
+    {
+      "project": "src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj",
+      "source_file_count": 8,
+      "sources": [
+        {
+          "path": "src/Framework/Api/CrestCreates.OpenApi/CrestOpenApiExtensions.cs",
+          "sha256": "066b4d23991f7fcfd053b3d6914c050a08eaef2a3ba30ec5e76c27c0b5f20493"
+        },
+        {
+          "path": "src/Framework/Api/CrestCreates.OpenApi/CrestOpenApiOptions.cs",
+          "sha256": "e04faaac8ea296411bab9037e64bbc5ac41bacafa92dc59d5b869067c2f151ab"
+        },
+        {
+          "path": "src/Framework/Api/CrestCreates.OpenApi/DynamicApiOpenApiDocumentTransformer.cs",
+          "sha256": "e3484bef5a43a06c55445269aaf19bccad4101d6f59148d54699d5dc2bcf1ede"
+        },
+        {
+          "path": "src/Framework/Api/CrestCreates.OpenApi/DynamicApiOpenApiOperationTransformer.cs",
+          "sha256": "24d4fcb86d0326c9e61186556fb26088ee8cc734162d9be757c2921c299a42a0"
+        },
+        {
+          "path": "src/Framework/Api/CrestCreates.OpenApi/DynamicApiOpenApiSchemaTransformer.cs",
+          "sha256": "105dc38d7d3b1cd9e90bd6c9ec982d0c62a15d814ecebf1d242e3dd81833b843"
+        },
+        {
+          "path": "src/Framework/Api/CrestCreates.OpenApi/IOpenApiJsonTypeInfoContributor.cs",
+          "sha256": "03d79ca85c53d74c1df502c3142dc0cd9af0af07a45109644a0d986f209e2289"
+        },
+        {
+          "path": "src/Framework/Api/CrestCreates.OpenApi/Modules/OpenApiModule.cs",
+          "sha256": "69ff4eeae8a02340adee6cf5d6c9c87d2d5240190f41483fc34926e4b746109e"
+        },
+        {
+          "path": "src/Framework/Api/CrestCreates.OpenApi/OpenApiJsonTypeInfoPostConfigureOptions.cs",
+          "sha256": "90b6c56e9a6a6b2c59456268f1867784e2430c4eac7ec98a2971089cff155974"
+        }
+      ],
+      "direct_project_consumers": [
+        "samples/AssetManagement/src/CrestCreates.Sample.AssetManagement.Host/CrestCreates.Sample.AssetManagement.Host.csproj",
+        "samples/LibraryManagement/LibraryManagement.Web/LibraryManagement.Web.csproj",
+        "samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/CrestCreates.Sample.Procurement.Host.csproj",
+        "samples/SaaSHelpdesk/SaaSHelpdesk.EntityFrameworkCore/SaaSHelpdesk.EntityFrameworkCore.csproj",
+        "samples/SaaSHelpdesk/SaaSHelpdesk.Web/SaaSHelpdesk.Web.csproj",
+        "src/Framework/Web/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj",
+        "src/Platform/CrestCreates.Web/CrestCreates.Web.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Framework.slnx",
+        "solutions/CrestCreates.Platform.slnx"
+      ]
+    },
+    {
+      "project": "src/Framework/Modules/CrestCreates.FileManagement/CrestCreates.FileManagement.csproj",
+      "source_file_count": 26,
+      "sources": [
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Configuration/AzureBlobStorageOptions.cs",
+          "sha256": "57f15df24459a99e4a981c32d1314a0198891981fc5ffe090d26e3c6a6067c93"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Configuration/FileManagementOptions.cs",
+          "sha256": "aac1540868efe6b9b2db0618a0cf92707e46ad45029fb5ce24db5ba25c6b8c97"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Configuration/FileUrlOptions.cs",
+          "sha256": "f49133f21ff00fb4edb15f576e25f275d78f45ab12f99858139975d10e47024c"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Configuration/FileValidationOptions.cs",
+          "sha256": "c3dfa6a3cfb90d218f4e8286cb78132bf17e36631315cf2a7cb431cdae3224ed"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Configuration/LocalFileSystemOptions.cs",
+          "sha256": "cd1a4a03a6e9796c505d30e8bb939f0f93aafb3e324022c766f317d4268ffb55"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Configuration/S3StorageOptions.cs",
+          "sha256": "6c431d5bb4cfdf255afb23aac13d7b1746375ae978392b627ae04200f19817c2"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Configuration/StorageProviderType.cs",
+          "sha256": "99df4fbab5036414e3612b948fe0a692cc64a2c7100e6e181decec2d7eb8c5a1"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Models/FileAccessMode.cs",
+          "sha256": "f4f70fd8a6c69506c0fc57dbaee40fe9a7a6b105eefcf9a22b133a1826b62f83"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Models/FileEntity.cs",
+          "sha256": "6c9ca0e18b877937395b5bd4c651173f3b38cea4e0b3b7cc157ae2dbd9013cf5"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Models/FileInformation.cs",
+          "sha256": "af4f494b12f9b4a946aa97ae6a6ac021592c545f0599e8b45b23f3054e179809"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Models/FileKey.cs",
+          "sha256": "a5936a792fe1cf8d48fae8055a2c40cf797c69bc6ba3d0aa294ca40c404f691d"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Models/FileMetadata.cs",
+          "sha256": "dc68e9a6338251c56fd894175ff0b471c49359ce7bf75922d11f6eb77ffeb414"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Models/IStorageMetadata.cs",
+          "sha256": "a63502889ee763a874a0c8f416f60d4aa858fb07198b776bd689dd2bb71d00c2"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Models/LocalStorageMetadata.cs",
+          "sha256": "20c1de5d0b2662fe2266449cad6172740008936854d5d6fa00306681a991677d"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Modules/FileManagementModule.cs",
+          "sha256": "114e970aa1d72b8238c494e0ab7cff0f442fbf8731cfbcb6387da9c98a6f1148"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Providers/AzureBlobStorageProvider.cs",
+          "sha256": "d70b6265bd86f916f4a409414df449b2f6415cf3c33846e193babe1bd5eeb7c7"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Providers/ICloudStorageProvider.cs",
+          "sha256": "893084e0b195bcda032fbd0793d1d1194c05100c264be44a9ecbd664b46040ac"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Providers/IFileStorageProvider.cs",
+          "sha256": "2cf0dcf73a22e1e7ea23e5156687ab89402d86a5cc5860f58a58e10d78f39dec"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Providers/LocalFileSystemProvider.cs",
+          "sha256": "ecbc8df3e246d554f6d4fef009cf8d9abdba75a04004961241c56dc17a8f7ac9"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Providers/S3StorageProvider.cs",
+          "sha256": "caac529ad16d156a84050855174953cc1c56e94ffe2d5f0c686e32e9f4f528df"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Repositories/IFileRepository.cs",
+          "sha256": "2f2a3f6d06a965583f1308fcf15a7ee489194181bcb713c5d40f982d8ba44e05"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Repositories/InMemoryFileRepository.cs",
+          "sha256": "dd0fb65f8114f226d81657d707ca54206c6dcd476654772e13ba9eb5198874f3"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Services/FileManagementService.cs",
+          "sha256": "23aecac4c5a64fb6de97f00050813c2386a69bed40c350c30d5e71a23704c08f"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Services/FileUrlService.cs",
+          "sha256": "fd3073eeaced6ebac704f8b8a1dbc0d6a39653c9ebd58341b1810f402ac2970b"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Services/IFileManagementService.cs",
+          "sha256": "0c46df469bd9c3b74f133963ece1c8f5d5260b12013907a7dd612e688ab42ac4"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.FileManagement/Services/IFileUrlService.cs",
+          "sha256": "567e63dc1bd7d19a7409dc636e96ae14dc05495d5116c2b8ed35f0fca8e6177f"
+        }
+      ],
+      "direct_project_consumers": [
+        "tests/Framework/Modules/CrestCreates.FileManagement.Tests/CrestCreates.FileManagement.Tests.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Framework.slnx",
+        "solutions/CrestCreates.Platform.slnx"
+      ]
+    },
+    {
+      "project": "src/Framework/Modules/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj",
+      "source_file_count": 33,
+      "sources": [
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionAction.cs",
+          "sha256": "203684247aceb88d1b4b911e5a2917f968f02da70bc607e4a94833c32a8adef5"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionFieldMapping.cs",
+          "sha256": "589ccb40224035de7f04974c12df157ed9f301b1ec48fce76d504aadcdd1cbb4"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionFilter.cs",
+          "sha256": "daa573b6c2e29ef0eaf77301972084326ce26aab63089fcdaeaca1c2e0c39bce"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionFilterOperator.cs",
+          "sha256": "ade79f9ee8e68cb579e1c9c89bbe581ba76fb2ddbb5364d5bccae9829677256d"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionFilterRule.cs",
+          "sha256": "02e851967f31b74e3ad91da392f2522082097ee09183749b876180d5d0955338"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionRuleSemantics.cs",
+          "sha256": "8f20e0a42b7616d8cced239e713a4563049ef2a3dc6f4d6b108dd8b06e1d8e8a"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionScope.cs",
+          "sha256": "8671a096bf013fad70a4aa5f018cdb2741ff2fbc42d72104f752aeae944354be"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionScopeKind.cs",
+          "sha256": "22991c0fb372d0db37f4ba60cbfb9710b3663d788a58d90e65dc6e3348c11c26"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionScopeRequest.cs",
+          "sha256": "b2ae0506c09376636ffc82d7e190f93d933917817d4fcf3dbc03e6605d3de2c2"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/DataPermissionScopeRule.cs",
+          "sha256": "ca818ddb44411da137173426093cfafa78b4cb0d4edd7c274c168f8a36c677eb"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/IDataPermissionFilterBuilder.cs",
+          "sha256": "a9aa767bf1549267d3048113c5893f076d15694943bfa9464dbff9f1eaaccdfc"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/IDataPermissionRuntime.cs",
+          "sha256": "80bfd6a17120bc0421eef3fa5ce49502cc3f163f9b77196bda4cc5137a02462c"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/IDataPermissionScopeProvider.cs",
+          "sha256": "cae86893a3765a21b345e048525a9f530b227bb07b85572b71dda27257de7dde"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/IDataPermissionScopeRuleStore.cs",
+          "sha256": "4ca6ba17a3e8d0a49cee7bf8fe3c395c905ba6385ef310a37d59685986cb7421"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/IOrganizationContextAccessor.cs",
+          "sha256": "48e32a91432688df8c92cb7df1ae471db318861954d9afc18bd74a554b5f5703"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/IOrganizationHierarchyService.cs",
+          "sha256": "aff7734b1e145e693e261a1c9e45d05e70f1f1e1e449f33510884827536eca7e"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/IOrganizationIdentityService.cs",
+          "sha256": "e2fdd631a9594a31577eeae77981ae03a2e308c9aa80a89346c9e299c5d69eec"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/IOrganizationStore.cs",
+          "sha256": "1814b8494d5ed98349683de6e4ed11cac7ab9b2b6d037afd869056c9eafd2e38"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationContext.cs",
+          "sha256": "c6cb42063c0fc411d846fd8f20a44a9ad1a43e2fc0e48c8a1cdbd83a541bcd34"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationException.cs",
+          "sha256": "474f1b69e5cdcecbddce254f1ad664cc7cdc6f884b09f418bacb47154ca782cb"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationHierarchyException.cs",
+          "sha256": "6fb5e72f970386870034aebe978d39be79c3bdb757fd78ed97ee9021af4da463"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationHierarchyFreshnessException.cs",
+          "sha256": "3eccd54daa894ced0f3c7d8bdb183a724ef726daf19e930f439b0c71ecd09b93"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationHierarchyFreshnessFailureKind.cs",
+          "sha256": "effd1bee7138380694e66e1a17a58d99722aad6341d6ed8f22d02438ff134273"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationScopeGenerationRead.cs",
+          "sha256": "dafd783106841f54de7b813ddd5e1cea8a1f3cd83aeb3c884162032278e1065d"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationScopeGenerationStatus.cs",
+          "sha256": "e1be52de41cdc93808a83479fc7921f504b2431ce94aa8ff0f5925ee93fa8221"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationScopeIdentity.cs",
+          "sha256": "9a3c23797ec85b876f1ba68a6f1ca4e336a657bb80be4c197974a9d118740c1f"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationScopeKind.cs",
+          "sha256": "511e7dfcd386d2f6ec8b3664a40cf5b52a8f6767272b60adacc852527821a393"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationScopedKey.cs",
+          "sha256": "9a841323ad09ea60b1ccb6bc973b7bad78b1ceb38535a84e905fbc47d6339bcb"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationStoreSemantics.cs",
+          "sha256": "5e7b4253dcb1cf23368fcabd734df58eed7d8b68a493f45c02716aa1f51ad53d"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/OrganizationUnit.cs",
+          "sha256": "3e199b91d6e9bcd7317f3ce5b8f605f889f187a2329c0da09ede92ec8b6e4372"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/Position.cs",
+          "sha256": "c6f2c81c917553c1c9592c00a5d8423a50ef5197904d57704ce59c98b96b580f"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/UserOrganizationMembership.cs",
+          "sha256": "12230f54d73c497eba3e6709503feea5c204e58492c2f4536988d10366a09b6e"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization.Abstractions/UserOrganizationRoleAssignment.cs",
+          "sha256": "0dc1bfa0adbd86186089691ccdbea5c14a27da45e30b0ee8412c70a997706e95"
+        }
+      ],
+      "direct_project_consumers": [
+        "src/Framework/Modules/CrestCreates.Organization/CrestCreates.Organization.csproj",
+        "src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/CrestCreates.Runtime.Persistence.PostgreSql.Tests.csproj",
+        "tests/Shared/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing/CrestCreates.ControlPlane.ReferenceData.Persistence.Testing.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Framework.slnx",
+        "solutions/CrestCreates.Platform.slnx"
+      ]
+    },
+    {
+      "project": "src/Framework/Modules/CrestCreates.Organization/CrestCreates.Organization.csproj",
+      "source_file_count": 19,
+      "sources": [
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/DefaultDataPermissionFilterBuilder.cs",
+          "sha256": "bf78194124594503eff6d41fe44c6b6decf7732168dff7218efae3a53c98ef9b"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/DefaultDataPermissionRuntime.cs",
+          "sha256": "499d9eaa34fb8a2000bc9397b051a060aa20e56db564b78040ee9a612c027550"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/DefaultDataPermissionScopeProvider.cs",
+          "sha256": "3729556c9c0517bb560b50871116486aa2709044f5c06ab2680d877864798ca2"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/DefaultOrganizationHierarchyService.cs",
+          "sha256": "6c8b6f8cced6ea800e89f1f8f7e8bb3952d4e5a9ba5e26c5d19f8cc408953389"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/DefaultOrganizationIdentityService.cs",
+          "sha256": "3a5d2d7719bf0d7cc786e716b62a7ea295ee557746328be1dc04eacfdefa77a2"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/CachedOrganizationHierarchyService.cs",
+          "sha256": "dae9e0a8172608234965195bedaef894f72c323f0a08e9df72549080b69ea523"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/OrganizationHierarchyCacheOptions.cs",
+          "sha256": "58ce0f3773fa3afd2ee9adf51e85f9cac6f2cea8879ee0a78ae1e9dc99d2e034"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/OrganizationHierarchyCacheOwner.cs",
+          "sha256": "d036a99ef6b5639d0c3642e476573c9da04f93c9ab7e109279abca380672a0c9"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/OrganizationHierarchyFlight.cs",
+          "sha256": "6d2ef6c0e9d3aefc522f98f2039be2f184c6b4b7ec278a28adc5e5c5ff3e26fd"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/OrganizationHierarchySafetyState.cs",
+          "sha256": "c13df35b64132bfca52c5b4712dc8df247d9ab3dca2f2d8011b5e0c46946c42f"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/OrganizationHierarchyScopeState.cs",
+          "sha256": "95265150ce56f2ccfa4041b81877e38657c58c44ea96a50ce163ef94cce101d7"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/OrganizationHierarchySnapshot.cs",
+          "sha256": "0dbb6bad4a70353db9e059f2a6d5fdd857bbca1ae62021ec0f3462f3c5b42299"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/OrganizationHierarchySnapshotBuilder.cs",
+          "sha256": "221d62904dc63b18a18af5667bed62cbca6fd0390a80c383c5ea83cfc9376396"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/Hierarchy/OrganizationHierarchySnapshotCache.cs",
+          "sha256": "0b0bcb6f50f7f1b54b14d597be909853ace03b0690c993179fd25f2b9daaacb2"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/InMemoryDataPermissionScopeRuleStore.cs",
+          "sha256": "fe6d25c2b746af4cfc423633bfe0b40dc2e383e8db6679feb5be27757495111c"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/InMemoryOrganizationStore.cs",
+          "sha256": "63fac5e19199442f59334107585cd163ad90bbf1bb0f35670712a619a5832bf6"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/NullOrganizationContextAccessor.cs",
+          "sha256": "ece1058f68eb849f676bb3757b7ed6539bb65721aa0953f2a6c98374be327d9d"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/OrganizationScopeState.cs",
+          "sha256": "afc971d99b4e6cac774909cd1883706b79d1234cb43d5f5fb37fe6c9b72f76ae"
+        },
+        {
+          "path": "src/Framework/Modules/CrestCreates.Organization/OrganizationServiceCollectionExtensions.cs",
+          "sha256": "6192bb5718357a26d352a2f526fc2a94ad212b8a5ca0d7c47abfeb1d0743d884"
+        }
+      ],
+      "direct_project_consumers": [
+        "tests/Boundary/CrestCreates.DependencyBoundaries.Tests/CrestCreates.DependencyBoundaries.Tests.csproj",
+        "tests/Framework/Modules/CrestCreates.Organization.Tests/CrestCreates.Organization.Tests.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker/CrestCreates.Runtime.Persistence.PostgreSql.CrashWorker.csproj",
+        "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.Tests/CrestCreates.Runtime.Persistence.PostgreSql.Tests.csproj"
+      ],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Framework.slnx",
+        "solutions/CrestCreates.Platform.slnx"
+      ]
+    },
+    {
+      "project": "src/Integrations/CrestCreates.PluginSystem/CrestCreates.PluginSystem.csproj",
+      "source_file_count": 6,
+      "sources": [
+        {
+          "path": "src/Integrations/CrestCreates.PluginSystem/Abstractions/IPluginModule.cs",
+          "sha256": "5b77af3839536dcd60458fbacff4bdd38ead8baf5a4457a8e3e7bf3c46c47f75"
+        },
+        {
+          "path": "src/Integrations/CrestCreates.PluginSystem/Models/PluginManifest.cs",
+          "sha256": "15570640c88d86d1d7108fecde9615cbc2d409820ae45a0b111b3e095968a7d8"
+        },
+        {
+          "path": "src/Integrations/CrestCreates.PluginSystem/Modules/PluginSystemModule.cs",
+          "sha256": "ccf68ac437dcedb03e7dea98d055fc9b72eabca5e7556e08181f96ea24aed4ee"
+        },
+        {
+          "path": "src/Integrations/CrestCreates.PluginSystem/Serialization/PluginManifestJsonContext.cs",
+          "sha256": "74b9de8731dcf250c73e3e5376026ec063f621acfea8cfa9b882a2476d29ef86"
+        },
+        {
+          "path": "src/Integrations/CrestCreates.PluginSystem/Services/IPluginManager.cs",
+          "sha256": "bfc6f76e3a053b41b6a4430d76a1d59c16a3ee1dc0b99542444b52ff52c284a7"
+        },
+        {
+          "path": "src/Integrations/CrestCreates.PluginSystem/Services/PluginManager.cs",
+          "sha256": "df9bfeb181bb301adfbb73d807dc49f20ebc382fdc2bfb1228ea44562e06ab4c"
+        }
+      ],
+      "direct_project_consumers": [],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Integrations.slnx"
+      ]
+    },
+    {
+      "project": "src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj",
+      "source_file_count": 4,
+      "sources": [
+        {
+          "path": "src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventRetryService.cs",
+          "sha256": "7caa9d2b4a086d47c37ed87a5590e709b50ddec3d54c5c83efe882ff5d9728e9"
+        },
+        {
+          "path": "src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventStoreJsonSerializer.cs",
+          "sha256": "32fc408d83bd4591fe594fa9d46b757e2253b5707fb9572c59c0f1f3f686e4af"
+        },
+        {
+          "path": "src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventStoreModule.cs",
+          "sha256": "43412bfb245e06830cbdbef5a65b92a8f045888ed2d235aadf8f37773b4a257c"
+        },
+        {
+          "path": "src/Runtime/Eventing/CrestCreates.EventBus.EventStore/InMemoryEventRetryStore.cs",
+          "sha256": "9ebf3182651cfbb9ba023769649ac11dd313332d4bba965aa0889bacf8732efe"
+        }
+      ],
+      "direct_project_consumers": [],
+      "solutions": [
+        "CrestCreates.slnx",
+        "solutions/CrestCreates.All.slnx",
+        "solutions/CrestCreates.Platform.slnx",
+        "solutions/CrestCreates.Runtime.slnx"
+      ]
+    }
+  ],
+  "design_validation": {
+    "status": "passed",
+    "kind": "static-document-and-inventory-checks-only",
+    "local_document_links_checked": 16,
+    "production_projects_checked": 15,
+    "source_hashes_checked": 153,
+    "runtime_tests_run": false
+  },
+  "post_130_master_comparison": {
+    "ref": "origin/master (local tracking ref, no network refresh)",
+    "sha": "348c4d3c35b8682e6b47b6c2dd6058b046c1113a",
+    "scope_project_files_changed": 0,
+    "scope_source_hashes_changed": 0,
+    "scope_direct_project_reference_changes": 0,
+    "solution_membership_changes": 0,
+    "changed_paths": [
+      "docs/Feature/OrmProviderSupportMatrix.md",
+      "docs/review/2026-10-22-issue-130-baseline-evidence.json",
+      "docs/review/2026-10-22-issue-130-s1-baseline-evidence.json",
+      "docs/review/2026-10-22-issue-130-s1-baseline.md",
+      "docs/review/2026-10-22-issue-130-s2-baseline-evidence.json",
+      "docs/review/2026-10-22-issue-130-s2-baseline.md",
+      "docs/review/2026-10-22-issue-130-s2-r2-fix-evidence.json",
+      "docs/review/2026-10-22-issue-130-s2-review-round1-response.md",
+      "docs/review/2026-10-22-issue-130-s2-review-round2-response.md",
+      "docs/review/2026-10-22-issue-130-s3-evidence.json",
+      "docs/review/2026-10-22-issue-130-s3-tenant-assembly.md",
+      "docs/review/2026-10-23-issue-130-s3-review-round1-response.md",
+      "docs/review/2026-10-23-issue-130-s3-review-round2-response.md",
+      "docs/review/2026-10-23-issue-130-s3-review-round3-response.md",
+      "docs/review/2026-10-23-issue-130-s4-compile-entry-crud.md",
+      "docs/review/2026-10-23-issue-130-s4-evidence.json",
+      "docs/review/2026-10-23-issue-130-s4-review-round1-response.md",
+      "docs/review/2026-10-23-issue-130-s5-evidence.json",
+      "docs/superpowers/plans/2026-10-22-issue-130-provider-matrix-soft-delete-implementation.md",
+      "docs/superpowers/specs/2026-10-22-issue-130-provider-matrix-soft-delete-design.md",
+      "memory.md",
+      "src/Persistence/CrestCreates.Data.Core/CrestCreates.Data.Core.csproj",
+      "src/Persistence/CrestCreates.Data.Core/CurrentUserProviderAdapter.cs",
+      "src/Persistence/CrestCreates.Data.EFCore/CrestCreates.Data.EFCore.csproj",
+      "src/Persistence/CrestCreates.Data.EFCore/DbContexts/CrestCreatesDbContext.cs",
+      "src/Persistence/CrestCreates.Data.EFCore/Interceptors/AuditInterceptor.cs",
+      "src/Persistence/CrestCreates.Data.EFCore/MultiTenancy/HostCurrentTenant.cs",
+      "src/Persistence/CrestCreates.Data.EFCore/MultiTenancy/SoftDeleteFilterConfiguration.cs",
+      "src/Persistence/CrestCreates.Data.EFCore/MultiTenancy/SoftDeleteFilterRegistryStore.cs",
+      "src/Persistence/CrestCreates.Data.EFCore/Repositories/EfCoreRepository.cs",
+      "src/Persistence/CrestCreates.Data.EFCore/Repositories/EfCoreRepositoryBase.cs",
+      "src/Persistence/CrestCreates.Data.EFCore/UnitOfWork/EfCoreUnitOfWork.cs",
+      "src/Persistence/CrestCreates.Data.FreeSql/Extensions/FreeSqlServiceCollectionExtensions.cs",
+      "src/Persistence/CrestCreates.Data.FreeSql/Extensions/FreeSqlUnitOfWorkRegistration.cs",
+      "src/Persistence/CrestCreates.Data.FreeSql/Interceptors/FreeSqlAuditInterceptor.cs",
+      "src/Persistence/CrestCreates.Data.FreeSql/Modules/FreeSqlOrmModule.cs",
+      "src/Persistence/CrestCreates.Data.FreeSql/Repositories/FreeSqlRepository.cs",
+      "src/Persistence/CrestCreates.Data.FreeSql/Repositories/FreeSqlSoftDeleteOperation.cs",
+      "src/Persistence/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj",
+      "src/Persistence/CrestCreates.Data.SqlSugar/Extensions/SqlSugarServiceCollectionExtensions.cs",
+      "src/Persistence/CrestCreates.Data.SqlSugar/Interceptors/SqlSugarAuditInterceptor.cs",
+      "src/Persistence/CrestCreates.Data.SqlSugar/Modules/SqlSugarOrmModule.cs",
+      "src/Persistence/CrestCreates.Data.SqlSugar/Repositories/SqlSugarRepository.cs",
+      "src/Persistence/CrestCreates.Data.SqlSugar/Repositories/SqlSugarSoftDeleteFilterRegistration.cs",
+      "src/Persistence/CrestCreates.Data.SqlSugar/Repositories/SqlSugarSoftDeleteOperation.cs",
+      "src/Tooling/CrestCreates.CodeGenerator/EntityGenerator/EntitySourceGenerator.cs",
+      "src/Tooling/CrestCreates.CodeGenerator/RepositoryGenerator/RepositoryGeneratorDiagnosticCodes.cs",
+      "src/Tooling/CrestCreates.CodeGenerator/RepositoryGenerator/RepositoryGeneratorDiagnostics.cs",
+      "src/Tooling/CrestCreates.CodeGenerator/RepositoryGenerator/RepositorySourceGenerator.cs",
+      "src/Tooling/CrestCreates.CodeGenerator/TenantFilterGenerator/TenantFilterSourceGenerator.cs",
+      "tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Domain/Widget.cs",
+      "tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests/CrestCreates.GeneratedCrud.AotFixture.Tests.csproj",
+      "tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests/GeneratedCrudEfCoreRelationalTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/ConcurrencyTokenConfigurationTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/EfCoreDbContextRegistrationTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/EfCoreRepositoryTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/Issue130DeleteContractBaselineTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/Issue130MappedColumnTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/Issue130ProviderBed.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/Issue130S3AssemblyTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/Issue130Shared.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/Issue130TenantAuditUowBaselineTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/Issue130TenantIsolationTests.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/ReviewS2Probes.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/ReviewS2R2MappingProbes.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/ReviewS3Probes.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/ReviewS3R2Probes.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/ReviewS3R3Probes.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/Issue130/ReviewS5Probes.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/ModelFilterRegistryCollection.cs",
+      "tests/Persistence/CrestCreates.OrmProviders.Tests/MultiTenancyInterceptorTests.cs",
+      "tests/Tooling/CrestCreates.CodeGenerator.Tests/Entities/TestCustomer.cs",
+      "tests/Tooling/CrestCreates.CodeGenerator.Tests/Entities/TestOrder.cs",
+      "tests/Tooling/CrestCreates.CodeGenerator.Tests/RepositoryGenerator/Issue130ProviderDiagnosticsBaselineTests.cs",
+      "tests/Tooling/CrestCreates.CodeGenerator.Tests/RepositoryGenerator/Issue130ProviderDiagnosticsMsBuildTests.cs",
+      "tests/Tooling/CrestCreates.CodeGenerator.Tests/TenantFilterGenerator/ReviewS2GeneratorProbes.cs",
+      "tests/Tooling/CrestCreates.CodeGenerator.Tests/TenantFilterGenerator/ReviewS2R2GeneratorProbes.cs",
+      "tests/Tooling/CrestCreates.CodeGenerator.Tests/TenantFilterGenerator/TenantFilterSourceGeneratorTests.cs"
+    ],
+    "reviewed_paths": [
+      "src/Persistence/CrestCreates.Data.EFCore/MultiTenancy/HostCurrentTenant.cs",
+      "src/Tooling/CrestCreates.CodeGenerator/TenantFilterGenerator/TenantFilterSourceGenerator.cs",
+      "src/Persistence/CrestCreates.Data.Core/CurrentUserProviderAdapter.cs",
+      "docs/Feature/OrmProviderSupportMatrix.md"
+    ],
+    "runtime_execution": "not run; Git objects read only"
+  }
+}

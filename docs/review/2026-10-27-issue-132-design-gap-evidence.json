@@ -1,0 +1,111 @@
+{
+  "source_commit": "5f4cfc8f37d6ef0e996598eb08ae0922b8b60a34",
+  "sdk": "10.0.113",
+  "execution": "JIT; real EF SQLite cleanup; mutable tenant and fixed settings fixture leaves; no HTTP/auth/PG/native execution",
+  "snapshot": "/tmp/crest-issue132-xlhudfuv",
+  "source_sha256": {
+    "src/Framework/Ddd/CrestCreates.Application/AuditLog/AuditLogCleanupAppService.cs": "ec4fccec6e6039f45ac14c81fe07db7cfa79b68a9771f6886a1a64df8042c018",
+    "src/Framework/Ddd/CrestCreates.Domain/Repositories/IAuditLogRepository.cs": "4ffcebcbe2474762a2a18d15f2021183bb08e1e5d02938139fd8c394dd50330f",
+    "src/Framework/Ddd/CrestCreates.Domain/AuditLog/AuditLog.cs": "5211b389576fa8b8e9e7c38bdac5283be05eefbb7d49db1ae5a629678fb60996",
+    "src/Persistence/CrestCreates.Data.EFCore/Repositories/EfCoreAuditLogRepository.cs": "5a8a8f0a882ea1cb834899601e4cfaa2a6e72c150bcedd38e9dd82c465680563",
+    "src/Persistence/CrestCreates.Data.EFCore/Repositories/EfCoreRepositoryBase.cs": "1cd876b3a8f36a25dc14cbbee45666f760729d8027efa52b84eacecd4c9ebd21",
+    "src/Persistence/CrestCreates.Data.EFCore/DbContexts/EfCoreDbContextAdapter.cs": "140a636b1c2fe9be996bad98aec5d10481cf32a22143bea4d2a8250793ab20b4",
+    "src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/PostgreSqlAuditSink.cs": "b913a459b69d662258fab90b8ca4071a4c7d63f869d4ff61f567d54c157726ac",
+    "src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/PostgreSqlRuntimeMigrationRunner.cs": "ac4f6530bc74835b141aa6b8899bec7c783fd7c9bf3b03dd8bd499a12fee0ff6"
+  },
+  "probe_sha256": {
+    "Program.cs": "d2649e2d4d7ef9513483c575de6f6ae65b78489f9eb5cebcdf2bfeab51e3152f",
+    "AuditRetentionGapProbe.csproj": "14dcd121cbf42c83c06f9fba515e8792e8cb2ae9076834f93549e8fe4d8e166a",
+    "run.py": "b983dd34d6ae907a3e25b6c5d40f2062dd1599907a8082d5796ca42f0043eccc"
+  },
+  "cases": [
+    {
+      "id": "C01_expired_recent_exact_cutoff",
+      "classification": "existing-behavior",
+      "observation": {
+        "DeletedCount": 1,
+        "remaining": [
+          "boundary",
+          "recent"
+        ]
+      }
+    },
+    {
+      "id": "C02_tenant_does_not_delete_other_scope",
+      "classification": "existing-behavior",
+      "observation": {
+        "DeletedCount": 1,
+        "remaining": [
+          "b",
+          "host"
+        ]
+      }
+    },
+    {
+      "id": "C03_null_host_implicitly_deletes_all_tenants",
+      "classification": "gap-reproduced",
+      "observation": {
+        "DeletedCount": 3,
+        "explicitAllTenantAuthorization": false
+      }
+    },
+    {
+      "id": "C04_protection_marker_is_ignored",
+      "classification": "gap-reproduced",
+      "observation": {
+        "DeletedCount": 1,
+        "nativeHoldContract": false,
+        "marker": "fixture-only ExtraProperties protection hint"
+      }
+    },
+    {
+      "id": "C05_future_cutoff_deletes_recent_record",
+      "classification": "gap-reproduced",
+      "observation": {
+        "DeletedCount": 1
+      }
+    },
+    {
+      "id": "C06_negative_retention_is_accepted",
+      "classification": "gap-reproduced",
+      "observation": {
+        "DeletedCount": 1
+      }
+    },
+    {
+      "id": "C07_unbounded_batch",
+      "classification": "gap-reproduced",
+      "observation": {
+        "DeletedCount": 1101,
+        "requestedBatchLimit": null
+      }
+    },
+    {
+      "id": "C08_cleanup_evidence_marker_is_deleted",
+      "classification": "gap-reproduced",
+      "observation": {
+        "DeletedCount": 1,
+        "marker": "fixture-only cleanup evidence hint; no existing receipt store"
+      }
+    },
+    {
+      "id": "C09_precancel_leaves_rows",
+      "classification": "existing-behavior",
+      "observation": {
+        "remaining": [
+          "old"
+        ]
+      }
+    },
+    {
+      "id": "C10_count_delete_race_overreports",
+      "classification": "gap-reproduced",
+      "observation": {
+        "DeletedCount": 1,
+        "competingDeletes": 1,
+        "cleanupCommandActualDeletes": 0
+      }
+    }
+  ],
+  "sentinel": "CRESTCREATES_ISSUE132_GAPS_REPRODUCED"
+}

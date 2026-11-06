@@ -1,20 +1,23 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Sample.Procurement.Contracts;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Sample.Procurement.Application.Handlers;
 
-public sealed class GetProcurementRequestHandler : ICapabilityContextAwareHandlerInvoker
+[CapabilityName(ProcurementContractIds.GetCapability)]
+public sealed class GetProcurementRequestHandler
+    : ProcurementCapabilityHandler, ICapabilityHandler<GetProcurementRequestInput, ProcurementRequestResult>
 {
-    public Task<object?> InvokeAsync(object? input, CancellationToken ct)
-        => throw new InvalidOperationException("Capability execution context is required.");
+    private readonly ProcurementApplicationService _service;
 
-    public Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    public GetProcurementRequestHandler(
+        ProcurementApplicationService service,
+        ICapabilityExecutionContextAccessor execution)
+        : base(execution)
     {
-        var service = context.ServiceProvider.GetRequiredService<ProcurementApplicationService>();
-        object result = service.Get(
-            (GetProcurementRequestInput)context.Input!,
-            context.TenantId ?? string.Empty);
-        return Task.FromResult<object?>(result);
+        _service = service ?? throw new ArgumentNullException(nameof(service));
     }
+
+    public Task<ProcurementRequestResult> ExecuteAsync(GetProcurementRequestInput input, CancellationToken ct)
+        => Task.FromResult(_service.Get(input, TenantId));
 }

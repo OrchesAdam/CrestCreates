@@ -112,6 +112,12 @@ jobs:
           # the NativeAOT gate section below; keep this step JIT-fast.
           dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --no-build --filter "Category!=NativeAotGate"
           dotnet test tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests --no-build
+          # #128 formal CRUD: JIT-side composition/HTTP/UoW/relational cases; the
+          # native publish/link/run gate runs in the NativeAOT section below.
+          dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests --no-build --filter "Category!=NativeAotGate"
+          # #129 S5 formal Ticket HTTP projection cases against the real AppService
+          # bundle; the native publish/link/run gate runs below.
+          dotnet test tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture.Tests --no-build --filter "Category!=NativeAotGate"
 
       - name: Test — Framework / Web
         run: dotnet test tests/Framework/Web/CrestCreates.Web.Tests --no-build
@@ -119,13 +125,20 @@ jobs:
       - name: Test — Persistence / ORM providers (UnitOfWork kernel, chain, capabilities, AOP weave, CAP lease)
         run: dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests --no-build
 
-      # The UnitOfWork PostgreSQL acceptance class is self-contained (own
-      # Testcontainers database). The legacy LibraryManagement integration
-      # suite is not CI-wired yet: its host bootstrap fails on a fresh database
-      # (OpenIddictScopes missing — pre-existing, tracked as I-18 in the #137
-      # issue log); relax the filter once its seeding is fixed.
-      - name: Test — UnitOfWork PostgreSQL acceptance (Testcontainers)
-        run: dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build --filter "FullyQualifiedName~UnitOfWorkPostgresIntegrationTests"
+      # I-18 (OpenIddictScopes missing on a fresh database) is fixed: LibraryManagement's
+      # persistence module now declares OpenIddictDbContext in the same migrate-and-seed
+      # closure that registers HostOpenIddictDataSeeder, so host bootstrap succeeds and the
+      # suite runs. The remaining exclusions are all the framework platform HTTP surface
+      # (Setting / Feature / AuditLog query / Tenant / User) that retired with the legacy
+      # DynamicApi chain and was explicitly deferred to an independent HTTP design task by
+      # #129 rev.2 §14.6 — those routes answer 404 until that surface is re-published
+      # through the formal projection; do not paper over them by editing expectations.
+      # LoginAndRefresh additionally asserts OIDC short-name claim keys (name/email) that
+      # /connect/userinfo has never emitted. Everything else in this project runs here.
+      - name: Test — Integration suite (auth / tenant / permission / audit / UoW, Testcontainers)
+        run: |
+          dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build \
+            --filter "FullyQualifiedName!~AuditLogIntegrationTests&FullyQualifiedName!~FeatureManagementIntegrationTests&FullyQualifiedName!~SettingManagementIntegrationTests&FullyQualifiedName!~TenantManagementFullChainIntegrationTests&FullyQualifiedName!~IntegrationTests.LoginAndRefresh_WithSeededAdmin_ReturnsTokensAndCurrentUser&FullyQualifiedName!~IntegrationTests.PermissionGrant_AfterGrantingBookSearch_UserCanAccessDynamicApi&FullyQualifiedName!~IntegrationTests.TenantBoundary_WithMismatchedTenantHeader_ReturnsForbidden"
 
       - name: Test — Framework / Modules
         run: |
@@ -177,7 +190,6 @@ jobs:
       - name: Test — Metadata / Draft
         run: |
           dotnet test tests/Metadata/Draft/CrestCreates.DescriptorDraft.Tests --no-build
-          dotnet test tests/Metadata/Draft/CrestCreates.Draft.Tests --no-build
 
       # ── Runtime ──
       - name: Test — Runtime / Capability
@@ -281,6 +293,15 @@ jobs:
       # below with an always() condition.
       - name: Test — CapabilityEndpoint native HTTP gate (NativeAOT publish/link/run)
         run: dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --no-build --filter "Category=NativeAotGate"
+
+      - name: Test — Core native gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Core/CrestCreates.Core.AotHost.Tests --no-build --filter "Category=NativeAotGate"
+
+      - name: Test — GeneratedCrud native HTTP gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests --no-build --filter "Category=NativeAotGate"
+
+      - name: Test — Ticket formal HTTP projection native gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture.Tests --no-build --filter "Category=NativeAotGate"
 
       - name: Test — MCP native pipeline gate (NativeAOT publish/link/run)
         run: dotnet test tests/Integrations/CrestCreates.Mcp.AotFixture.Tests --no-build

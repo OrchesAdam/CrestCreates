@@ -1,26 +1,31 @@
 using CrestCreates.Capability.Abstractions;
+using CrestCreates.Sample.Procurement.Contracts;
 using CrestCreates.Sample.Procurement.Contracts.Dtos;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Sample.Procurement.Application.Handlers;
 
-public sealed class ApproveProcurementRequestHandler : ICapabilityContextAwareHandlerInvoker
+[CapabilityName(ProcurementContractIds.ApproveCapability)]
+public sealed class ApproveProcurementRequestHandler
+    : ProcurementCapabilityHandler, ICapabilityHandler<ApproveProcurementRequestInput, ProcurementRequestResult>
 {
-    public Task<object?> InvokeAsync(object? input, CancellationToken ct)
-        => throw new InvalidOperationException("Capability execution context is required.");
+    private readonly ProcurementApplicationService _service;
+    private readonly IProcurementApprovalOrchestrator _approval;
 
-    public async Task<object?> InvokeAsync(CapabilityExecutionContext context, CancellationToken ct)
+    public ApproveProcurementRequestHandler(
+        ProcurementApplicationService service,
+        IProcurementApprovalOrchestrator approval,
+        ICapabilityExecutionContextAccessor execution)
+        : base(execution)
     {
-        var input = (ApproveProcurementRequestInput)context.Input!;
-        var approval = context.ServiceProvider.GetRequiredService<IProcurementApprovalOrchestrator>();
-        await approval.CompleteDecisionAsync(
-            input.RequestId,
-            "Approve",
-            input.Comment,
-            ct).ConfigureAwait(false);
-        var service = context.ServiceProvider.GetRequiredService<ProcurementApplicationService>();
-        return service.Get(
-            new GetProcurementRequestInput { RequestId = input.RequestId },
-            context.TenantId ?? string.Empty);
+        _service = service ?? throw new ArgumentNullException(nameof(service));
+        _approval = approval ?? throw new ArgumentNullException(nameof(approval));
+    }
+
+    public async Task<ProcurementRequestResult> ExecuteAsync(
+        ApproveProcurementRequestInput input, CancellationToken ct)
+    {
+        await _approval.CompleteDecisionAsync(input.RequestId, "Approve", input.Comment, ct)
+            .ConfigureAwait(false);
+        return _service.Get(new GetProcurementRequestInput { RequestId = input.RequestId }, TenantId);
     }
 }

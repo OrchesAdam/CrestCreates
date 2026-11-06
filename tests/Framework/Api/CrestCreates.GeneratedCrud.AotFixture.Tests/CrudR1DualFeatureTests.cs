@@ -6,6 +6,7 @@ using CrestCreates.Accountability.Bootstrap;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Middleware;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.Domain.Shared.DTOs;
@@ -139,6 +140,22 @@ public class CrudR1DualFeatureTests
         builder.Services.AddSingleton<IPermissionChecker, FixturePermissionChecker>();
         builder.Services.AddSingleton<ICurrentUser, FixtureCurrentUser>();
         builder.Services.AddSingleton<IDataPermissionFilter, IdentityDataPermissionFilter>();
+
+        // Mirrors the real fixture composition: the generated write methods carry [UnitOfWorkMo] and
+        // the interceptor fails closed without the kernel, so a host without this block is incomplete.
+        builder.Services.AddUnitOfWork(OrmProvider.EfCore);
+        builder.Services.AddUnitOfWorkProvider(
+            OrmProvider.EfCore,
+            static serviceProvider => serviceProvider.GetRequiredService<MemoryWidgetUnitOfWork>(),
+            supportsRequiresNew: false,
+            capabilities: new UnitOfWorkProviderCapabilities
+            {
+                SupportsTransactions = true,
+                PromptTerminationOnAbandon = true,
+                DiscardUncommittedOnAbandon = true,
+            });
+        builder.Services.AddScoped<MemoryWidgetUnitOfWork>();
+        builder.Services.AddSingleton<MemoryUnitOfWorkObserver>();
 
         var app = builder.Build();
         app.MapCrestCapabilityEndpoints();

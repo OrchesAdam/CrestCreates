@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CrestCreates.Data.Abstractions\CrestCreates.Data.Abstractions.csproj" />
+    <ProjectReference Include="..\CrestCreates.Data.Core\CrestCreates.Data.Core.csproj" />
     <ProjectReference Include="../../Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
     <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
     <ProjectReference Include="../../Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />

@@ -4,6 +4,7 @@ using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.DataFilter.Entities;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Data.Abstractions;
+using CrestCreates.Data.SqlSugar.Repositories;
 
 namespace CrestCreates.Data.SqlSugar.Interceptors
 {
@@ -121,6 +122,8 @@ namespace CrestCreates.Data.SqlSugar.Interceptors
                     }
                 }
             };
+
+            ConfigureSoftDeleteFilter(client);
         }
 
         /// <summary>
@@ -128,8 +131,7 @@ namespace CrestCreates.Data.SqlSugar.Interceptors
         /// </summary>
         public static void ConfigureSoftDeleteFilter(this SqlSugarClient client)
         {
-            // 全局软删除过滤器
-            client.QueryFilter.Add(new TableFilterItem<ISoftDelete>(it => it.IsDeleted == false));
+            SqlSugarSoftDeleteFilterRegistration.EnsureRegistered(client, typeof(ISoftDelete));
         }
 
         /// <summary>
@@ -137,18 +139,9 @@ namespace CrestCreates.Data.SqlSugar.Interceptors
         /// </summary>
         public static void ConfigureMultiTenantFilter(this SqlSugarClient client, ICurrentTenant currentTenant)
         {
-            if (currentTenant == null || string.IsNullOrEmpty(currentTenant.Id))
-            {
-                return;
-            }
-
-            var tenantId = currentTenant.Id;
-
-            // 多租户过滤器 - IMultiTenant (nullable TenantId)
-            client.QueryFilter.Add(new TableFilterItem<IMultiTenant>(it => it.TenantId == null || it.TenantId == tenantId));
-
-            // 多租户过滤器 - IMustHaveTenant (required TenantId)
-            client.QueryFilter.Add(new TableFilterItem<IMustHaveTenant>(it => it.TenantId == tenantId));
+            throw new NotSupportedException(
+                "SqlSugar tenant filtering is resolved per operation by SqlSugarRepository. " +
+                "Configuring a global filter here would capture a stale tenant; register the repository with ICurrentTenant instead.");
         }
     }
 }

@@ -487,3 +487,70 @@ governance checkpoint.
 
 Architecture details:
 `docs/Feature/Accountability/arch-design.md`.
+
+---
+
+## 12. Audit Retention (V1)
+
+Retention is opt-in. Compose the kernel, one explicit provider and (optionally)
+the generated HTTP surface after the provider migration is applied:
+
+```csharp
+services.AddAuditRetention();                 // executor + composition validator
+services.AddPostgreSqlAuditRetention();       // one explicit store (PostgreSQL V1)
+services.AddCrestAuditRetentionHttp();        // /api/audit-retention/*
+```
+
+The PostgreSQL store requires the `CrestCreates.Runtime.Persistence.PostgreSql`
+V016/V017 migrations (ledger, scope locks, runs, batch receipts, holds, anti-
+resurrection FK and the typed backfill).
+
+Settings (Global only):
+
+- `AuditLogging.Retention.Enabled` — default `false`; execution stays off until
+  an operator enables it;
+- `AuditLogging.RetentionDays` — default `90`;
+- `AuditLogging.Retention.BatchSize` — default `500`;
+- `AuditLogging.Retention.MaxBatchesPerRun` — default `20`;
+- `AuditLogging.Retention.MaxRunSeconds` — default `60`.
+
+Permissions: `AuditLogging.Retention.Preview`, `.Execute`, `.ReadRuns`,
+`.ManageHolds`, `.Export`.
+
+HTTP and jobs share the same admission: tenant callers may only target their
+own authoritative id; host callers either omit the tenant (host partition) or
+pass a tenant name/id that `ITenantProvider` resolves to an active tenant entity
+id. Jobs use a stable request id derived from the job id and schedule time, so a
+retry returns the persisted run instead of spending new batches.
+
+Operational notes:
+
+- a hold blocks purge until released; release requires the current version and
+  emits a receipt;
+- preview is read-only and bounded; it never deletes and never runs a table-wide
+  count;
+- a failed receipt rolls the whole batch back; the previous committed batch
+  remains authoritative;
+- a run that already reached a terminal state (`completed`, `budget-reached`,
+  `cancelled`, `failed`) rejects any further batch; retry only resumes a
+  `running` run or returns the persisted result;
+- when a batch receipt was committed but the response was lost,
+  `commitKnowledge = unknown` and the persisted counters/receipt remain the
+  authority — do not read that as "nothing deleted"; once the locked
+  finalization confirms the commit, the result reports `committed` even if the
+  receipt needed for the mirror is temporarily unreadable, and the gap surfaces
+  only as `mirrorStatus = failed` / `AUDIT_RETENTION_RECEIPT_UNAVAILABLE`;
+- a retry that recovers a run after a create fault still enforces the same-key
+  binding: a different policy hash or reason code fails with
+  `RETENTION_REQUEST_CONFLICT` and deletes nothing;
+- batch facts are derived from the immutable receipt, so normal commit, replay,
+  recovery and export produce the same audit body;
+- the run's `mirrorStatus`/`mirrorCode` report the first failed mirror across
+  batches (a later successful batch cannot hide it); retry with
+  `POST /api/audit-retention/batches/export` (`AuditLogging.Retention.Export`)
+  to replay one committed batch's receipt envelope idempotently without
+  spending a batch;
+- after purge, re-writing the same audit identity returns `Duplicate` (or
+  `Conflict` for a different integrity) and never restores the body;
+- automatic recurring execution is not registered in V1 because the scheduler
+  adapter does not establish an authenticated principal.

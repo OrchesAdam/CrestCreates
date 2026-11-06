@@ -1,0 +1,63 @@
+{
+  "issue": 130,
+  "slice": "S2",
+  "review_round": "R2",
+  "date": "2026-10-22",
+  "reviewed_head": "b466457204ad43612f10de907ff08886f55b9b5f",
+  "fix_head": "9071e99a",
+  "docs_head": "5c06c927",
+  "findings": [
+    {
+      "id": "R2-1",
+      "status": "fixed",
+      "fix": "FreeSql uses strong typed interface expressions translated to quoted mapped columns; SqlSugar quotes mapped identifiers through InstanceFactory.GetSqlBuilderWithContext(...).GetTranslationColumnName(...) for live/id/stamp and stamped updates",
+      "evidence": [
+        "ReviewS2R2MappingProbes 4/4",
+        "Issue130MappedColumnTests 10/10 (ordinary + reserved word)"
+      ]
+    },
+    {
+      "id": "R2-2",
+      "status": "fixed",
+      "fix": "generated method/call/index identity uses injective encoding: ASCII alphanumerics kept, every other character encoded as _XXXX",
+      "evidence": [
+        "ReviewS2R2GeneratorProbes 2/2",
+        "explicit A.B.Row vs A_B.Row method-name assertions"
+      ]
+    }
+  ],
+  "probes": {
+    "r2_mapping_before": "2 passed / 2 failed / 4",
+    "r2_mapping_after": "4 passed / 0 failed / 4",
+    "r2_generator_before": "1 passed / 1 failed / 2",
+    "r2_generator_after": "2 passed / 0 failed / 2",
+    "r1_orm_still_green": "5/5",
+    "r1_generator_still_green": "2/2"
+  },
+  "suites": {
+    "orm_providers": {
+      "total": 203,
+      "passed": 193,
+      "failed": 10,
+      "failed_scope": "unchanged S3 T/U red baselines"
+    },
+    "generator_targeted": {
+      "total": 13,
+      "passed": 13,
+      "failed": 0
+    },
+    "code_generator_full": {
+      "total": 458,
+      "passed": 455,
+      "failed": 3,
+      "failed_scope": "agreed CCCREPO G red baselines",
+      "duration": "31m19s"
+    }
+  },
+  "not_verified": [
+    "PostgreSQL/other databases",
+    "trim/NativeAOT",
+    "in-flight cancellation"
+  ],
+  "s3_started": false
+}

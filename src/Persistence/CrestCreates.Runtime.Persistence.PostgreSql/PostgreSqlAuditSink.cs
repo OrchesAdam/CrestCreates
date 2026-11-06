@@ -1,4 +1,5 @@
 using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Retention;
 using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;
 using CrestCreates.Runtime.Persistence.Abstractions.Errors;
@@ -11,12 +12,14 @@ public sealed class PostgreSqlAuditSink : IAuditSink
     private readonly NpgsqlDataSource _dataSource;
     private readonly PostgreSqlRuntimePersistenceOptions _options;
     private readonly string _table;
+    private readonly string _ledger;
 
     public PostgreSqlAuditSink(NpgsqlDataSource dataSource, PostgreSqlRuntimePersistenceOptions options)
     {
         _dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _table = PostgreSqlRuntimeStoreSupport.Table(options, "runtime_audit_envelopes");
+        _ledger = PostgreSqlRuntimeStoreSupport.Table(options, "runtime_audit_retention_ledger");
     }
 
     public string Id => "postgresql-runtime-audit";
@@ -25,13 +28,28 @@ public sealed class PostgreSqlAuditSink : IAuditSink
     {
         ArgumentNullException.ThrowIfNull(envelope);
         var integrity = envelope.Integrity ?? throw new InvalidOperationException("AuditEnvelope integrity is required.");
+        if (envelope.TenantId is not null && string.IsNullOrWhiteSpace(envelope.TenantId))
+            throw new InvalidOperationException("AuditEnvelope tenant identity is not a valid retention scope.");
+        if (envelope.OccurredAt == default)
+            throw new InvalidOperationException("AuditEnvelope OccurredAt is required for retention projection.");
+
+        var scopeKind = envelope.TenantId is null ? "host" : "tenant";
+        var tenantId = envelope.TenantId ?? string.Empty;
+        var protection = AuditRetentionSemanticNames.IsGovernanceTarget(envelope.Target?.Kind)
+            ? "governance"
+            : "none";
         try
         {
             await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             DateTimeOffset? acceptedAt;
             await using (var command = new NpgsqlCommand(
-                $"insert into {_table} (sink_id, audit_id, integrity_json, envelope_json) values (@sink, @audit, @integrity, @envelope) on conflict (sink_id, audit_id) do nothing returning accepted_at;",
+                $"""
+                 insert into {_ledger} (sink_id, audit_id, integrity_json, first_accepted_at, scope_kind, tenant_id, occurred_at, body_state, protection)
+                 values (@sink, @audit, @integrity, clock_timestamp(), @scope, @tenant, @occurred, 'BodyPresent', @protection)
+                 on conflict (sink_id, audit_id) do nothing
+                 returning first_accepted_at;
+                 """,
                 connection,
                 transaction)
             {
@@ -41,21 +59,30 @@ public sealed class PostgreSqlAuditSink : IAuditSink
                 command.Parameters.AddWithValue("sink", Id);
                 command.Parameters.AddWithValue("audit", envelope.AuditId);
                 PostgreSqlRuntimeStoreSupport.AddJson(command, "integrity", PostgreSqlRuntimeStoreSupport.Serialize(integrity, PostgreSqlRuntimeJsonSerializerContext.Default.CanonicalHash));
-                PostgreSqlRuntimeStoreSupport.AddJson(command, "envelope", PostgreSqlRuntimeStoreSupport.Serialize(envelope, PostgreSqlRuntimeJsonSerializerContext.Default.AuditEnvelope));
-                var accepted = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-                acceptedAt = accepted switch
-                {
-                    DateTimeOffset timestamp => timestamp,
-                    DateTime timestamp => new DateTimeOffset(
-                        timestamp.Kind == DateTimeKind.Unspecified
-                            ? DateTime.SpecifyKind(timestamp, DateTimeKind.Utc)
-                            : timestamp.ToUniversalTime()),
-                    _ => null
-                };
+                command.Parameters.AddWithValue("scope", scopeKind);
+                command.Parameters.AddWithValue("tenant", tenantId);
+                command.Parameters.AddWithValue("occurred", envelope.OccurredAt);
+                command.Parameters.AddWithValue("protection", protection);
+                acceptedAt = await ReadAcceptedAtAsync(command, cancellationToken).ConfigureAwait(false);
             }
 
             if (acceptedAt is not null)
             {
+                await using (var command = new NpgsqlCommand(
+                    $"insert into {_table} (sink_id, audit_id, integrity_json, envelope_json, body_state) values (@sink, @audit, @integrity, @envelope, 'BodyPresent');",
+                    connection,
+                    transaction)
+                {
+                    CommandTimeout = _options.CommandTimeoutSeconds
+                })
+                {
+                    command.Parameters.AddWithValue("sink", Id);
+                    command.Parameters.AddWithValue("audit", envelope.AuditId);
+                    PostgreSqlRuntimeStoreSupport.AddJson(command, "integrity", PostgreSqlRuntimeStoreSupport.Serialize(integrity, PostgreSqlRuntimeJsonSerializerContext.Default.CanonicalHash));
+                    PostgreSqlRuntimeStoreSupport.AddJson(command, "envelope", PostgreSqlRuntimeStoreSupport.Serialize(envelope, PostgreSqlRuntimeJsonSerializerContext.Default.AuditEnvelope));
+                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                }
+
                 await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
                 return new AuditSinkWriteResult
                 {
@@ -70,7 +97,7 @@ public sealed class PostgreSqlAuditSink : IAuditSink
             CanonicalHash existing;
             DateTimeOffset firstAcceptedAt;
             await using (var command = new NpgsqlCommand(
-                $"select integrity_json::text, accepted_at from {_table} where sink_id=@sink and audit_id=@audit;",
+                $"select integrity_json::text, first_accepted_at from {_ledger} where sink_id=@sink and audit_id=@audit;",
                 connection,
                 transaction)
             {
@@ -106,5 +133,19 @@ public sealed class PostgreSqlAuditSink : IAuditSink
         {
             throw new RuntimePersistenceUnavailableException("PostgreSQL Audit sink is unavailable.");
         }
+    }
+
+    private static async Task<DateTimeOffset?> ReadAcceptedAtAsync(NpgsqlCommand command, CancellationToken cancellationToken)
+    {
+        var accepted = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return accepted switch
+        {
+            DateTimeOffset timestamp => timestamp,
+            DateTime timestamp => new DateTimeOffset(
+                timestamp.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(timestamp, DateTimeKind.Utc)
+                    : timestamp.ToUniversalTime()),
+            _ => null
+        };
     }
 }

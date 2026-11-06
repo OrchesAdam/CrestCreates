@@ -10,6 +10,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using CrestCreates.CodeGenerator.CrudServiceGenerator;
 using CrestCreates.CodeGenerator.ObjectMappingGenerator;
+using CrestCreates.CodeGenerator.RepositoryGenerator;
 
 namespace CrestCreates.CodeGenerator.EntityGenerator
 {
@@ -263,6 +264,12 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             var idType = GetEntityIdType(entityClass);
             var namespaceName = entityClass.ContainingNamespace.ToDisplayString();
             var ormProvider = GetAttributeProperty(entityClass, "OrmProvider", "EfCore");
+            var providerDiagnostic = RepositoryGeneratorDiagnostics.Create(entityClass, ormProvider);
+            if (providerDiagnostic is not null)
+            {
+                context.ReportDiagnostic(providerDiagnostic);
+                return;
+            }
 
             if (ormProvider == "EfCore")
             {
@@ -1261,26 +1268,6 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
             sourceCode += "    /// </summary>\n";
             sourceCode += "    public static class " + entityName + "Extensions\n";
             sourceCode += "    {\n";
-            sourceCode += "        /// <summary>\n";
-            sourceCode += "        /// 转换为摘要信息\n";
-            sourceCode += "        /// </summary>\n";
-            sourceCode += "        public static string ToSummary(this " + entityName + " entity)\n";
-            sourceCode += "        {\n";
-            sourceCode += "            if (entity == null) return string.Empty;\n";
-            sourceCode += "            return \"" + entityName + " - \" + entity.GetType().Name;\n";
-            sourceCode += "        }\n";
-            sourceCode += "\n";
-            sourceCode += "        /// <summary>\n";
-            sourceCode += "        /// 克隆实体（不包含ID）\n";
-            sourceCode += "        /// </summary>\n";
-            sourceCode += "        public static " + entityName + " CloneWithoutId(this " + entityName + " entity)\n";
-            sourceCode += "        {\n";
-            sourceCode += "            if (entity == null) return null!;\n";
-            sourceCode += "            \n";
-            sourceCode += "            // 这里可以根据实际需要实现深拷贝逻辑\n";
-            sourceCode += "            throw new NotImplementedException(\"Clone method needs to be implemented manually\");\n";
-            sourceCode += "        }\n";
-            sourceCode += "\n";
             sourceCode += IsAudited(entityClass) ? GenerateAuditExtensions(entityName) : string.Empty;
             sourceCode += "    }\n";
             sourceCode += "}";
