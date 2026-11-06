@@ -206,9 +206,9 @@ script directly with the same environment; this is a local PATH detail, not a fr
 
 ### Explicitly not done (open items)
 
-- **Giant implementation split** (review mid-term 8): all four implementations are split — LocalEvent replay
-  (PR #165) and RabbitMQ consumer (PR #166) await merge approval; UoW kernel (PR #167 → `05dc7a55`) and
-  CRUD emitter (PR #168 → `3ca5248c`) are merged.
+- **Giant implementation split** (review mid-term 8): all four implementations are split and merged —
+  LocalEvent replay (PR #165 → `652703a6`), RabbitMQ consumer (PR #166 → `8036301a`), UoW kernel
+  (PR #167 → `05dc7a55`) and CRUD emitter (PR #168 → `3ca5248c`).
 - **Sample Program.cs composition** (review mid-term 9): closed 2026-11-06 — both Hosts enter through
   40-line entry points, composition lives in `*HostModule : ModuleBase`, and the generic policy /
   capability-registry / HTTP-JSON pieces are framework helpers. See the 2026-11-06 entry.
@@ -1197,8 +1197,8 @@ Source: round-2 review item 8. Public APIs unchanged; no test file was modified.
   artifact order and bundle assembly are unchanged (the writer primitives were copied verbatim). Evidence:
   CodeGenerator 461/461, JsonContracts.BuildTasks 162/162, GeneratedCrud fixture 28/28 (incl. NativeAOT
   gate), CompatibilityProjection E2E 20/20 (local, `~/.dotnet/dotnet` 10.0.114 + podman socket).
-- UoW split PR #167 merged as `05dc7a55` (2026-11-06). All four giant implementations named by the review
-  are now split; PR #165/#166 still await explicit merge approval.
+- Merge closeout (2026-11-06): PR #165 → `652703a6`, PR #166 → `8036301a`, PR #167 → `05dc7a55`,
+  PR #168 → `3ca5248c`. All four giant implementations named by the review are split and merged.
 
 ## 2026-11-06 — Sample host composition (round-2 mid-term 9)
 
@@ -1222,3 +1222,17 @@ Source: round-2 review item 8. Public APIs unchanged; no test file was modified.
   29/29, Procurement unit 29/29, Procurement E2E golden process 1/1, Asset E2E 128 passed / 2 live-skip
   (local PG `crestcreates-asset-pg-local`), Asset NativeAOT 3/3, Procurement NativeAOT 9/9. GitHub
   workflows remain manually disabled; this is execution evidence, not a CI run.
+
+## 2026-11-06 — PR merge closeout (round-2 mid-term 8/9 + stale docs PR)
+
+- PR #166 (RabbitMQ consumer split) merged as `8036301a`; the only conflict against master was `memory.md`
+  (kept master's LocalEvent section and the branch's RabbitMQ section).
+- PR #169 (sample host composition) merged as `77fccdb7`.
+- PR #153 (docs: record #129/PR #152 merge status) merged as `3710a59d`. The two-week-old branch conflicted
+  in `AGENTS.md`/`memory.md`; resolution kept master's current content (AGENTS `最后更新` stays 2026-11-06)
+  and absorbed the branch's S5 corrections: native gate 3/3 → 5/5, the #129 merge record, and the evidence
+  README binding note.
+- No open PRs remain. Post-merge verification on `3710a59d` (local, `~/.dotnet/dotnet` 10.0.114): full
+  `CrestCreates.slnx` build 0 errors / 433 warnings (59s); server-side and sample unit suites sequential —
+  Capability 180/180, DynamicApi 145/145, RabbitMQ 58/58, Asset sample 29/29, Procurement sample 29/29.
+  GitHub workflows remain manually disabled; this is execution evidence, not a CI run.
