@@ -4,7 +4,7 @@
 
 - Issue：[#129](https://github.com/OrchesAdam/CrestCreates/issues/129)，总控 #121，前置 #128。
 - 已核对 GitHub：PR #150 已合并；当前远端 master 为 **196b6f66048ef32d644eeb856d00d58ae9d34965**。本设计依据该提交源码，不依据本会话较旧的本地 master。
-- 状态：**S1 已提交 PR #152（head `602d6e40`），事实稿已复核；S1 退出门禁尚未通过，S2 未获放行**。rev.2 根据 S1 事实修订，§14 为新增的明确决策与补证要求。下文新增名称均是拟定契约，不声称今天已经存在；合并权限、暂停 CI 的安排不变。
+- 状态（历史）：**S1 已提交 PR #152（head `602d6e40`），事实稿已复核；S1 退出门禁尚未通过，S2 未获放行**。rev.2 根据 S1 事实修订，§14 为新增的明确决策与补证要求。下文新增名称在撰写时均是拟定契约。实现结果：S1–S5 已完成，PR #152 于 2026-10-22 以 merge commit `2f4c5402` 合并，#129 已关闭；CI 保持暂停。
 - 方案：保留 Ticket 的领域模型、手写 AppService、既有业务接口；将 HTTP 声明转为**有明确契约范围的编译期投影 → 普通 Compile 产物 → JsonContracts → 官方 STJ → 本 Host 显式贡献 → 既有 Capability 管线**。
 - 复用 #128 的前置生成设施、ownership、强类型 body/result、Host activation、精确版本校验与 JSON 来源校验；不再为 Ticket 发出 legacy provider，也不复制 Dispatcher/UoW/权限/租户系统。
 - 完成 Controller 退出，归档无消费者的反射辅助代码和旧 CRUD bundle；仍有真实消费者的 legacy Minimal API 必须物理隔离、显式装配、限定支持与退出清单，不能作为正式入口失败时的 fallback。

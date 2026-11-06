@@ -1,6 +1,6 @@
 # #129 实施计划与设计交接
 
-状态：S1–S5 已完成并通过各轮审查（S3 head `1cca837c`；S4 head `51fc3b67`；S5 代码 head `5e3878b2`，[S5 最终复审](https://github.com/OrchesAdam/CrestCreates/pull/152#pullrequestreview-5608279047)）。#129 实现审查与最终交接于 2026-10-22 放行；CI 保持暂停。设计基线 `196b6f66048ef32d644eeb856d00d58ae9d34965`；规范见 `docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md`。
+状态：S1–S5 已完成并通过各轮审查（S3 head `1cca837c`；S4 head `51fc3b67`；S5 代码 head `5e3878b2`，[S5 最终复审](https://github.com/OrchesAdam/CrestCreates/pull/152#pullrequestreview-5608279047)）。#129 实现审查与最终交接于 2026-10-22 放行；PR #152 已于 2026-10-22 以 merge commit `2f4c54024d8e2e9c5b8aecad1a399669dadb28a6` 合入 master（base `196b6f66`，分支 head `13ad93ef`），#129 同日关闭。CI 保持暂停。设计基线 `196b6f66048ef32d644eeb856d00d58ae9d34965`；规范见 `docs/superpowers/specs/2026-10-17-issue-129-generated-http-controller-exit-design.md`。
 
 rev.2 全文已发布并回读核对：[最新设计](https://github.com/OrchesAdam/CrestCreates/issues/129#issuecomment-6230158783)。
 
