@@ -13,6 +13,8 @@ using CrestCreates.Data.EFCore.DataSeed;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Data.EFCore.UnitOfWork;
 using CrestCreates.Data.EFCore.Settings;
+using CrestCreates.AspNetCore.Authentication.OpenIddict;
+using CrestCreates.Data.EFCore.PostgreSql.Configuration;
 using LibraryManagement.Application.Modules;
 using LibraryManagement.Domain.Repositories;
 using LibraryManagement.EntityFrameworkCore.Repositories;
@@ -37,6 +39,11 @@ public class EntityFrameworkCoreModule : ModuleBase
                                    ?? configuration.GetConnectionString("Default");
             options.UseNpgsql(connectionString);
         });
+
+        // PostgreSQL framework services (OpenIddictDbContext + Npgsql options contributor).
+        // AddOpenIddictServer registers HostOpenIddictDataSeeder, so the OpenIddict schema
+        // must be part of this host's migrate-and-seed closure or seeding fails on a fresh database.
+        services.AddCrestCreatesEfCorePostgreSql();
 
         services.AddUnitOfWork(OrmProvider.EfCore);
         services.AddEfCoreUnitOfWork();
@@ -67,6 +74,7 @@ public class EntityFrameworkCoreModule : ModuleBase
         services.AddSingleton<IEnumerable<Type>>(_ => new List<Type>
         {
             typeof(LibraryDbContext),
+            typeof(OpenIddictDbContext)
         });
         services.AddSingleton<HostMigrationAndSeedRunner>();
 

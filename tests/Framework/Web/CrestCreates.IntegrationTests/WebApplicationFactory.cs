@@ -34,6 +34,7 @@ using CrestCreates.EventBus.Local;
 using CrestCreates.Security.Abstractions;
 using CrestCreates.Security.Modules;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using LibraryManagement.EntityFrameworkCore;
 using LibraryManagement.Domain.Repositories;
 using LibraryManagement.EntityFrameworkCore.Repositories;
@@ -42,8 +43,6 @@ using LibraryManagement.Application.Services;
 using Npgsql;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -94,29 +93,6 @@ public sealed class LibraryManagementWebApplicationFactory
         command.ExecuteNonQuery();
     }
 
-    private static async Task EnsureOpenIddictSchemaAsync(OpenIddictDbContext dbContext)
-    {
-        var connection = dbContext.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open)
-        {
-            await connection.OpenAsync();
-        }
-
-        using var command = connection.CreateCommand();
-        // Recreate the OpenIddict schema on every seed run so stale/manual schemas
-        // from previous test runs cannot survive package/model upgrades.
-        command.CommandText = """
-            DROP TABLE IF EXISTS "OpenIddictTokens" CASCADE;
-            DROP TABLE IF EXISTS "OpenIddictAuthorizations" CASCADE;
-            DROP TABLE IF EXISTS "OpenIddictScopes" CASCADE;
-            DROP TABLE IF EXISTS "OpenIddictApplications" CASCADE;
-            """;
-        await command.ExecuteNonQueryAsync();
-
-        var databaseCreator = dbContext.Database.GetService<IRelationalDatabaseCreator>();
-        await databaseCreator.CreateTablesAsync();
-    }
-
     public async Task EnsureSeedCompleteAsync()
     {
         if (_seedCompleted)
@@ -135,12 +111,14 @@ public sealed class LibraryManagementWebApplicationFactory
             var scopeFactory = Services.GetRequiredService<IServiceScopeFactory>();
             using var scope = scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
-            var openIddictDbContext = scope.ServiceProvider.GetRequiredService<OpenIddictDbContext>();
             var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
             var applicationManager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
 
-            await dbContext.Database.EnsureCreatedAsync();
-            await EnsureOpenIddictSchemaAsync(openIddictDbContext);
+            // Resolving Services started the host, which ran the formal migrate-and-seed
+            // closure (HostMigrationAndSeedRunner): both LibraryDbContext and
+            // OpenIddictDbContext schemas plus the registered IDataSeeders. The fixture must
+            // not create or recreate schema itself, otherwise a broken host closure could
+            // still be papered over here.
 
             await EnsureOpenIddictClientAsync(applicationManager);
 
@@ -287,7 +265,7 @@ public sealed class LibraryManagementWebApplicationFactory
 
         builder.ConfigureTestServices(services =>
         {
-            // Module system resolves IServiceCollection post-build for OnConfigureServices
+            // RegisterModules wires module OnConfigureServices into builder.ConfigureServices (pre-build).
             services.AddSingleton<IServiceCollection>(services);
 
             // Data filter state — enables tenant-filter on queries (normal startup registers
@@ -340,13 +318,15 @@ public sealed class LibraryManagementWebApplicationFactory
                 options.UseNpgsql(_sharedConnection);
             });
 
-            // Repository registrations normally provided by EntityFrameworkCoreModule.OnConfigureServices()
-            // (Module OnConfigureServices runs post-build, so test factory must register them inline)
+            // Repository registrations: EntityFrameworkCoreModule already registers these; the
+            // inline copies resolve against the shared test connection.
             services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
             services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
 
-            services.AddUnitOfWork(OrmProvider.EfCore);
-            services.AddEfCoreUnitOfWork();
+            // The unit-of-work assembly comes from EntityFrameworkCoreModule.OnConfigureServices
+            // (RegisterModules runs builder.ConfigureServices, i.e. before the provider is built).
+            // Re-adding it here produced a second 'EfCore' binding, which the binding registry
+            // refuses at first resolution (HTTP 500), exactly as ruled in #129 R01.
 
             // Sample-specific repositories
             services.AddScoped<IBookRepository, BookRepository>();
@@ -363,8 +343,8 @@ public sealed class LibraryManagementWebApplicationFactory
             services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
             services.AddSettingManagementEfCore();
 
-            // Application services — normally registered by ApplicationModule.OnConfigureServices()
-            // (module OnConfigureServices runs post-build, so test factory must register them inline)
+            // Application services — ApplicationModule already registers these; the inline copies
+            // keep the test host's registration set explicit.
             services.AddScoped<IBookAppService, BookAppService>();
             services.AddScoped<ICategoryAppService, CategoryAppService>();
             services.AddScoped<IMemberAppService, MemberAppService>();

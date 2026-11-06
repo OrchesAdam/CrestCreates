@@ -44,9 +44,8 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
             var uowManager = context.GetService<IUnitOfWorkManager>();
             if (uowManager == null)
             {
-                var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
-                logger?.LogWarning("IUnitOfWorkManager 未注册，跳过工作单元");
-                return default;
+                // An unmanaged write that looks successful is worse than a deterministic refusal.
+                throw new InvalidOperationException(DescribeUnboundTarget(context));
             }
 
             var options = new UnitOfWorkOptions { IsTransactional = _requiresTransaction };
@@ -132,6 +131,19 @@ public class UnitOfWorkMoAttribute : AsyncMoAttribute
             var logger = context.GetService<ILogger<UnitOfWorkMoAttribute>>();
             logger?.LogError(exception, "工作单元回滚失败");
         }
+    }
+
+    private static string DescribeUnboundTarget(MethodContext context)
+    {
+        var targetType = context.Target?.GetType().FullName ?? "(static target)";
+        var method = context.Method?.DeclaringType?.Name is { } declaring
+            ? $"{declaring}.{context.Method.Name}"
+            : "(unknown method)";
+
+        return $"[{nameof(UnitOfWorkMoAttribute)}] 织入成员 {method} 未解析到 {nameof(IUnitOfWorkManager)}，"
+            + "工作单元不会被静默跳过。可能原因："
+            + $"(1) 目标 {targetType} 未实现 {nameof(IServiceProviderAccessor)}，拦截链无法取得作用域服务提供者；"
+            + "(2) 该服务提供者所在作用域未注册工作单元内核（AddUnitOfWork + Provider 的 AddUnitOfWorkProvider）。";
     }
 
     private static CancellationToken ResolveCallerToken(MethodContext context)

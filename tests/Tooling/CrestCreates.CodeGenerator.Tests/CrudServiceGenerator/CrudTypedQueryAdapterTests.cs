@@ -150,8 +150,10 @@ public class CrudTypedQueryAdapterTests
         // The capability descriptor contract exposes SchemaDescriptor members.
         "CrestCreates.Schema.Abstractions",
         "CrestCreates.Validation",
-        // Reusable[Aop.Interceptors.UnitOfWorkMo] needs its attribute assembly.
+        // [UnitOfWorkMo] needs its attribute assembly; the generated service also implements the
+        // IServiceProviderAccessor intercept contract carried by the AOP abstractions assembly.
         "CrestCreates.Aop",
+        "CrestCreates.Aop.Abstractions",
         "Microsoft.AspNetCore.Http",
         "Microsoft.AspNetCore.Routing",
         "Microsoft.AspNetCore.Mvc.Core",

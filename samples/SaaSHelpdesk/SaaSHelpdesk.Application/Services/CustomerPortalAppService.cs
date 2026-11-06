@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Aop.Abstractions;
 using CrestCreates.Aop.Interceptors;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
@@ -21,7 +22,7 @@ namespace SaaSHelpdesk.Application.Services;
     RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
     RoutePrefix = "api/customer-portal",
     CapabilityIdPrefix = "compat.appservice.customer-portal")]
-public class CustomerPortalAppService : ICustomerPortalAppService
+public class CustomerPortalAppService : ICustomerPortalAppService, IServiceProviderAccessor
 {
     private readonly ICrestRepositoryBase<Ticket, Guid> _ticketRepository;
     private readonly ICrestRepositoryBase<Customer, Guid> _customerRepository;
@@ -30,12 +31,17 @@ public class CustomerPortalAppService : ICustomerPortalAppService
     public CustomerPortalAppService(
         ICrestRepositoryBase<Ticket, Guid> ticketRepository,
         ICrestRepositoryBase<Customer, Guid> customerRepository,
-        IHttpContextAccessor httpContextAccessor)
+        IHttpContextAccessor httpContextAccessor,
+        IServiceProvider serviceProvider)
     {
         _ticketRepository = ticketRepository;
         _customerRepository = customerRepository;
         _httpContextAccessor = httpContextAccessor;
+        ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     }
+
+    /// <summary>Intercept contract for the woven <c>[UnitOfWorkMo]</c> members below.</summary>
+    public IServiceProvider ServiceProvider { get; }
 
     private Guid GetCurrentCustomerId()
     {

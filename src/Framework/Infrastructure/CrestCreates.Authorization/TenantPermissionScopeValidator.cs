@@ -29,30 +29,30 @@ public class TenantPermissionScopeValidator
         _logger = logger;
     }
 
-    public async Task<TenantPermissionScopeValidationResult> ValidateAsync(
+    public Task<TenantPermissionScopeValidationResult> ValidateAsync(
         PermissionGrantInfo grant,
         CancellationToken cancellationToken = default)
     {
         if (grant.Scope == PermissionGrantScope.Global)
         {
-            return TenantPermissionScopeValidationResult.Allowed();
+            return Task.FromResult(TenantPermissionScopeValidationResult.Allowed());
         }
 
         if (_currentUser.IsSuperAdmin)
         {
             _logger.LogDebug("超级管理员跨租户权限访问被允许: {Permission}", grant.PermissionName);
-            return TenantPermissionScopeValidationResult.Allowed(isSuperAdminOverride: true);
+            return Task.FromResult(TenantPermissionScopeValidationResult.Allowed(isSuperAdminOverride: true));
         }
 
         if (string.IsNullOrEmpty(grant.TenantId))
         {
-            return TenantPermissionScopeValidationResult.Denied("Tenant-scoped permission requires TenantId");
+            return Task.FromResult(TenantPermissionScopeValidationResult.Denied("Tenant-scoped permission requires TenantId"));
         }
 
         var currentTenantId = _currentTenant.Id;
         if (string.IsNullOrEmpty(currentTenantId))
         {
-            return TenantPermissionScopeValidationResult.Denied("当前请求没有租户上下文");
+            return Task.FromResult(TenantPermissionScopeValidationResult.Denied("当前请求没有租户上下文"));
         }
 
         if (!string.Equals(currentTenantId, grant.TenantId, StringComparison.OrdinalIgnoreCase))
@@ -63,29 +63,29 @@ public class TenantPermissionScopeValidator
                 grant.TenantId,
                 currentTenantId);
 
-            return TenantPermissionScopeValidationResult.Denied(
-                $"权限 '{grant.PermissionName}' 不属于当前租户");
+            return Task.FromResult(TenantPermissionScopeValidationResult.Denied(
+                $"权限 '{grant.PermissionName}' 不属于当前租户"));
         }
 
-        return TenantPermissionScopeValidationResult.Allowed();
+        return Task.FromResult(TenantPermissionScopeValidationResult.Allowed());
     }
 
-    public async Task<bool> CanGrantPermissionToTenantAsync(
+    public Task<bool> CanGrantPermissionToTenantAsync(
         string targetTenantId,
         CancellationToken cancellationToken = default)
     {
         if (_currentUser.IsSuperAdmin)
         {
-            return true;
+            return Task.FromResult(true);
         }
 
         var currentTenantId = _currentTenant.Id;
         if (string.IsNullOrEmpty(currentTenantId))
         {
-            return false;
+            return Task.FromResult(false);
         }
 
-        return string.Equals(currentTenantId, targetTenantId, StringComparison.OrdinalIgnoreCase);
+        return Task.FromResult(string.Equals(currentTenantId, targetTenantId, StringComparison.OrdinalIgnoreCase));
     }
 }
 

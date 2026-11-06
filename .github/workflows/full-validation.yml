@@ -64,6 +64,8 @@ jobs:
           # the native-aot-gates job below; keep this step JIT-fast.
           dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --no-build --filter "Category!=NativeAotGate"
           dotnet test tests/Framework/Api/CrestCreates.CompatibilityProjection.E2E.Tests --no-build
+          dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests --no-build --filter "Category!=NativeAotGate"
+          dotnet test tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture.Tests --no-build --filter "Category!=NativeAotGate"
 
       - name: Test — Framework / Web
         run: |
@@ -73,14 +75,13 @@ jobs:
         run: |
           dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests --no-build
 
-      # The UnitOfWork PostgreSQL acceptance class is self-contained (own
-      # Testcontainers database). The legacy LibraryManagement integration
-      # suite is not CI-wired yet: its host bootstrap fails on a fresh database
-      # (OpenIddictScopes missing — pre-existing, tracked as I-18 in the #137
-      # issue log); relax the filter once its seeding is fixed.
-      - name: Test — UnitOfWork PostgreSQL acceptance (Testcontainers)
+      # See ci.yml: I-18 seeding closure is fixed; the exclusions below are the framework
+      # platform HTTP surface deferred by #129 rev.2 §14.6 (404 until re-published through
+      # the formal projection) plus the userinfo short-name claim assertion.
+      - name: Test — Integration suite (auth / tenant / permission / audit / UoW, Testcontainers)
         run: |
-          dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build --filter "FullyQualifiedName~UnitOfWorkPostgresIntegrationTests"
+          dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build \
+            --filter "FullyQualifiedName!~AuditLogIntegrationTests&FullyQualifiedName!~FeatureManagementIntegrationTests&FullyQualifiedName!~SettingManagementIntegrationTests&FullyQualifiedName!~TenantManagementFullChainIntegrationTests&FullyQualifiedName!~IntegrationTests.LoginAndRefresh_WithSeededAdmin_ReturnsTokensAndCurrentUser&FullyQualifiedName!~IntegrationTests.PermissionGrant_AfterGrantingBookSearch_UserCanAccessDynamicApi&FullyQualifiedName!~IntegrationTests.TenantBoundary_WithMismatchedTenantHeader_ReturnsForbidden"
 
       - name: Test — Framework / Modules
         run: |
@@ -215,6 +216,12 @@ jobs:
 
       - name: Test — CapabilityEndpoint native HTTP gate (NativeAOT publish/link/run)
         run: dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --filter "Category=NativeAotGate"
+
+      - name: Test — GeneratedCrud native HTTP gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests --filter "Category=NativeAotGate"
+
+      - name: Test — Ticket formal HTTP projection native gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture.Tests --filter "Category=NativeAotGate"
 
       - name: Test — MCP native pipeline gate (NativeAOT publish/link/run)
         run: dotnet test tests/Integrations/CrestCreates.Mcp.AotFixture.Tests

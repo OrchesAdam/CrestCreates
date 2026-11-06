@@ -260,7 +260,7 @@ public sealed class GeneratedCrudEfCoreRelationalTests : IDisposable
         var service = scope.ServiceProvider.GetRequiredService<WidgetAppService>();
 
         _failingInterceptor.Arm();
-        await Assert.ThrowsAnyAsync<InvalidOperationException>(() => service.CreateAsync(new CreateWidgetDto
+        var refusal = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new CreateWidgetDto
         {
             Name = "without-uow",
             Price = 12.5m,
@@ -268,11 +268,15 @@ public sealed class GeneratedCrudEfCoreRelationalTests : IDisposable
             Status = WidgetStatus.Draft
         }));
 
+        // Fail-closed contract: a woven write without the kernel is refused by name, not run unmanaged.
+        Assert.Contains("UnitOfWorkMoAttribute", refusal.Message);
+        Assert.Contains("IUnitOfWorkManager", refusal.Message);
+
         Assert.False(dataContext.ObservedTransaction,
             "without the unit-of-work assembly the repository must not observe a transaction");
         await using var verifyScope = provider.CreateAsyncScope();
         var verify = verifyScope.ServiceProvider.GetRequiredService<WidgetDbContext>();
-        Assert.Contains(await verify.Widgets.ToListAsync(), widget => widget.Name == "without-uow");
+        Assert.DoesNotContain(await verify.Widgets.ToListAsync(), widget => widget.Name == "without-uow");
     }
 
     private static async Task SeedAsync(WidgetDbContext context)
