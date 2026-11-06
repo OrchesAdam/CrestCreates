@@ -1130,5 +1130,15 @@ Source: round-2 review item 8. Public APIs unchanged; no test file was modified.
   (AsyncLocal activation invariant); diagnostic keys, exception types, state transitions and outcome
   semantics are unchanged. Evidence: OrmProviders 271/271, `UnitOfWorkPostgresIntegrationTests` 4/4,
   Data.Abstractions NativeAOT gate 1/1 (all local, `~/.dotnet/dotnet` 10.0.114 + podman socket).
-- Remaining: CRUD emitter (~1564 lines) split; PR #165/#166 await explicit merge approval, and the UoW split
-  PR is pending.
+- CRUD emitter (branch `refactor/crud-emitter-split-20261106`): `CrudArtifactEmitter.cs` 1563 → 134 lines.
+  The public facade keeps `Emit`, `EmitBundleArtifacts`, `EmitBundle`, `DeclaredTypeFullNames`,
+  `EmitHostActivation` and `AssemblyActivationOwnerKey` unchanged; per-artifact-family internal emitters
+  (`CrudDtoEmitter`, `CrudPermissionEmitter`, `CrudMappingEmitter`, `CrudServiceContractEmitter`,
+  `CrudServiceImplementationEmitter`, `CrudTypedQueryAdapterEmitter`, `CrudCapabilityEmitter`,
+  `CrudHostActivationEmitter`) plus `CrudArtifactWriter` now own the text. Unused private constants/helpers
+  (`JsonRoot*`, `BindingMethodName`, `ResultMapperName`, `InputBindingModel`) were removed. Emitted bytes,
+  artifact order and bundle assembly are unchanged (the writer primitives were copied verbatim). Evidence:
+  CodeGenerator 461/461, JsonContracts.BuildTasks 162/162, GeneratedCrud fixture 28/28 (incl. NativeAOT
+  gate), CompatibilityProjection E2E 20/20 (local, `~/.dotnet/dotnet` 10.0.114 + podman socket).
+- UoW split PR #167 merged as `05dc7a55` (2026-11-06). All four giant implementations named by the review
+  are now split; PR #165/#166 still await explicit merge approval.
