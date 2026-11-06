@@ -152,8 +152,9 @@ script directly with the same environment; this is a local PATH detail, not a fr
 
 ### Explicitly not done (open items)
 
-- **Giant implementation split** (review mid-term 8): `LocalDeadLetterReplayExecutor` (~410 lines),
-  `RabbitMqConsumer` (~694), UoW kernel (~1206), CRUD emitter (~1564) — staged extraction not started.
+- **Giant implementation split** (review mid-term 8): `LocalDeadLetterReplayExecutor`, `RabbitMqConsumer`
+  and the UoW kernel were split into staged collaborators (PR #165, PR #166 and the UoW split branch);
+  the CRUD emitter (~1564 lines) remains.
 - **Sample Program.cs composition** beyond `Replace` (review mid-term 9): the two Hosts remain ~247/225 lines;
   sinking policy/registry wiring into a contributor is a design task, not a mechanical edit.
 - **Residual red baselines are unchanged and still documented**: full integration 30 red (#129 §14.6 / userinfo),
@@ -1103,3 +1104,31 @@ PR #152 head `dbb1e2cb4d7293254a91845171b525a5c4a0dc0d`（代码5e3878b2，后�
 - Preserved #131 design/plan/inventory byte-for-byte and retained both sides of memory history.
   Backup archive and SHA-256 manifest are in the same backup directory. No source code edits,
   test/build execution, new commit, push or CI change in this synchronization turn.
+
+## 2026-11-06 — Giant implementation split, staged (review mid-term 8)
+
+Source: round-2 review item 8. Public APIs unchanged; no test file was modified.
+
+- `LocalDeadLetterReplayExecutor` (branch `refactor/giant-implementations-staged-20261106`, PR #165):
+  split into preflight / execution / settlement / state-writer / facts collaborators. The execution phase
+  owns the whole attempt frame (scope, ambient activation, admission, prepare, MarkRetrying, execute,
+  release, settlement) so AsyncLocal activation is not lost to an awaited collaborator. Evidence:
+  LocalEvent integration 116/116, LocalEvent NativeAOT gate 1/1.
+- `RabbitMqConsumer` (branch `refactor/rabbitmq-consumer-split-20261106`, PR #166): 694 → 318 lines;
+  topology, delivery processor, delivery settlement and failure settlement collaborators. Public surface and
+  reflection-observed private members (`_consumerChannel`, `_settlementGate`, nested `DeliveryContext`) kept
+  so existing regression tests stay meaningful. Evidence: unit 58/58, integration 37/37 (podman RabbitMQ),
+  RabbitMQ NativeAOT gate 2/2.
+- UoW kernel (branch `refactor/unitofwork-kernel-split-20261106`): `UnitOfWorkManager.cs` 1206 → 244 lines.
+  Extracted `UnitOfWorkScopePreflight` (options / join compatibility / provider / isolation capability /
+  tenant snapshot), `UnitOfWorkScopeBootstrapper` (synchronous root and requiresNew owner creation),
+  `UnitOfWorkScope` (state carrier, caller-frame activation, provider transaction start, cancellation
+  snapshot), `UnitOfWorkScopeSettlement` (complete / rollback / termination classification),
+  `UnitOfWorkScopeNotification` (post-commit notify), `UnitOfWorkScopeRelease` (termination + cleanup on
+  dispose), `UnitOfWorkExecutionTokenPolicy` (deadline / linked-token composition) and
+  `UnitOfWorkDiagnostics` (Exception.Data attachment). Creation stays synchronous in the caller frame
+  (AsyncLocal activation invariant); diagnostic keys, exception types, state transitions and outcome
+  semantics are unchanged. Evidence: OrmProviders 271/271, `UnitOfWorkPostgresIntegrationTests` 4/4,
+  Data.Abstractions NativeAOT gate 1/1 (all local, `~/.dotnet/dotnet` 10.0.114 + podman socket).
+- Remaining: CRUD emitter (~1564 lines) split; PR #165/#166 await explicit merge approval, and the UoW split
+  PR is pending.
