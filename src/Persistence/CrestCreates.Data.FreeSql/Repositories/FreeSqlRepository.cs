@@ -613,7 +613,8 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 }
                 else
                 {
-                    await _orm.Delete<TEntity>().Where(e => e.Id.Equals(entity.Id)).ExecuteAffrowsAsync(cancellationToken);
+                    await WithTenant(_orm.Delete<TEntity>().Where(e => e.Id.Equals(entity.Id)))
+                        .ExecuteAffrowsAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Deleted entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
             }
