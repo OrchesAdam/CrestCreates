@@ -79,38 +79,75 @@ GitHub workflows stay manually disabled, so this is execution evidence, not a CI
   LocalEvent native count 五场景 → 11 场景 (both places); UoW bullet now states the `IServiceProviderAccessor`
   contract and fail-closed behaviour; `memory.md` evidence-boundary wording corrected the same way.
 
+### Follow-up delivered after the first push (same branch)
+
+- **Procurement handler service locator (review P2-7).** All six handlers now declare `[CapabilityName]` +
+  `ICapabilityHandler<TInput,TResult>`; `ProcurementApplicationService` / `IProcurementApprovalOrchestrator`
+  arrive by constructor injection and tenant/user/invocation-source come from
+  `ICapabilityExecutionContextAccessor`. `ProcurementCapabilityModule` (hand `new` + service locator) is
+  archived to the round-2 recycle folder; the Host activates the generated module through
+  `AddProcurementCapabilityHandlers()` (`GeneratedCapabilityHandlerModule.Instance` +
+  `GeneratedHandlerRegistry.RegisterServices`). `AddProcurementCapabilityHandlers` is a two-line activation
+  helper in the sample Application project, not a framework special case.
+- **`PermissionMo` fail-closed (newly surfaced; security semantics).** No checker → deterministic
+  `InvalidOperationException` (naming `IPermissionChecker`), never "skip the check and run the body";
+  `CheckAsync` denial/exception propagates instead of being swallowed into `LogError`. Service resolution now
+  prefers the `IServiceProviderAccessor` contract and keeps the Rougamo pinned scope only as a fallback for
+  framework-owned targets. Covered by three new woven acceptance tests (missing checker / denied / granted).
+- **`Services.Replace` removed from samples.** `ICapabilityInputValidationPolicy` in Procurement and
+  AssetManagement is registered before `AddCapabilityRuntime()` (the framework default is `TryAdd`,
+  so the host choice wins without last-writer-wins replacement). The SaaSHelpdesk EF module's
+  `ITenantInitializationStore` `Replace` was the only registration for its custom-DbContext path (the
+  framework `TryAdd` lives in `AddCrestCreatesEfCoreDbContext`, which that module does not call) — it is now
+  a plain `AddScoped`, same effective service, no fake override semantics.
+- **FreeSql/SqlSugar repository duplication (review P1-5 residual) — declared, not extracted.**
+  `docs/Feature/OrmProviderSupportMatrix.md` §5 now records the decision (independent implementations),
+  the rationale (SDK/query/soft-delete/tenant-filter semantics differ; a shared layer would move the only
+  evidence-bearing path out of the matrix), the maintenance constraint (both change together, `Issue130*`
+  suites are the behavioural baseline) and the revisit trigger (>~1500 lines / third SDK provider / a defect
+  repeated twice on both sides). The review explicitly permits this option.
+- **`CapabilityEndpointJsonRuntime` — kept, not archived.** It is `[Obsolete]` and has no production consumer,
+  but it is an explicitly documented backward-compatibility budget
+  (`docs/Feature/CapabilityExposure/arch-design.md:945`), unlike the un-owned `CrudControllerBase` surface.
+  Archiving it would be an unrequested public-API removal; it stays as an isolated, marked compatibility
+  surface. Removal is a next-major decision.
+
 ### Evidence (executed this round)
 
 | Suite / gate | Result |
 | --- | --- |
 | GeneratedCrud native gate (`Category=NativeAotGate`) | 3/3, 1 m 36 s |
 | Ticket formal HTTP native gate | 5/5, 2 m 40 s |
+| Procurement NativeAOT fixture (after generated handler activation) | 9/9, 1 m 56 s; native publish/link/run emitted `CRESTCREATES_PROCUREMENT_HTTP_OK` + `CRESTCREATES_PROCUREMENT_SAMPLE_OK` + `CRESTCREATES_ACCOUNTABILITY_OK` |
 | GeneratedCrud JIT fixture | 25/25 (Q01 now asserts refusal + zero persistence) |
 | Ticket JIT fixture | 1/1 |
-| OrmProviders (UoW kernel + AOP weave) | 268/268 (includes the new fail-closed negative) |
+| OrmProviders (full, after PermissionMo fail-closed + 3 new tests) | 271/271 |
 | CodeGenerator | 461/461 (first run 460/461; the single red was the typed-adapter harness closure missing `CrestCreates.Aop.Abstractions`, CS0234 — its class passes 4/4 after adding the reference) |
 | Integration suite, CI-wired subset | 19/19 |
 | Integration suite, full | 19 pass / 30 fail — all 30 are #129 §14.6 (framework platform HTTP surface 404) or the userinfo short-name mapping; unchanged, documented |
 | SaaSHelpdesk | 154/165 — the 11 red are the documented pre-existing set (10 × `POST /api/user` 404 + 1 × `ITenantProvider`) |
-| Golden samples / Procurement / Asset unit / Asset E2E | 37/37 · 29/29 + 1/1 · 29/29 · 109/130 (19 need `ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING`) |
+| Golden samples / Procurement / Asset unit / Asset E2E | 37/37 · 29/29 + 1/1 (unit + E2E re-run after handler/host changes) · 29/29 · 109/130 (19 need `ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING`) |
+| Sample builds after `Services.Replace` removal | Procurement Host, AssetManagement Host, SaaSHelpdesk.EntityFrameworkCore all succeed |
 | Dependency boundaries | 237 pass; 3 passed with `DOCKER_HOST` set; 2 evidence-ledger gates need the accumulated `tests/artifacts` producer order (gitignored) |
+
+Native-gate toolchain note: `run-nativeaot-golden-scenario.sh` invokes bare `dotnet`; when the test is started
+as `~/.dotnet/dotnet test` without `~/.dotnet` first on `PATH`, the child resolves `/usr/bin/dotnet` (10.0.113)
+while the SDK is 10.0.114 and `csc` fails to launch (`Microsoft.NETCore.App 10.0.14` missing under
+`/usr/lib64/dotnet`). Run the fixture with `PATH="$HOME/.dotnet:$PATH" DOTNET_ROOT="$HOME/.dotnet"`, or run the
+script directly with the same environment; this is a local PATH detail, not a framework or gate defect.
 
 ### Explicitly not done (open items)
 
-- **Procurement handler service locator** (review P2-7): the six handlers still resolve
-  `ProcurementApplicationService` / `IProcurementApprovalOrchestrator` from `context.ServiceProvider`, and
-  `ProcurementCapabilityModule` constructs them with `new`. Converting them to `[CapabilityName]` +
-  `ICapabilityHandler<TInput,TResult>` (ctor injection, generated activation) changes how the golden sample
-  composes its capabilities and requires re-running the Procurement native gate — deferred, not silently skipped.
-- **FreeSql/SqlSugar repository duplication** (review P1-5 residual): extract-vs-declare is the maintainer's call.
-- **Sample `Services.Replace` leftovers** (`ICapabilityInputValidationPolicy`, `ITenantInitializationStore`):
-  needs a host-selection contributor (issue-118 shape), not a last-writer-wins override.
-- **Newly surfaced, not in the review:** `PermissionMoAttribute` fails open twice — it logs and returns when
-  `IPermissionChecker`/the pinned scope provider is unavailable, and it swallows every exception from
-  `permissionChecker.CheckAsync` into `LogError`. Changing that is a security-semantics decision (and the
-  Rougamo pinned DI bridge it depends on is not registered anywhere in `src/`), so it is reported rather than
-  changed under a UoW fix. Also `CapabilityEndpointJsonRuntime` is `[Obsolete]` and kept alive only by its own
-  test class — dead public face candidate for the next archival round.
+- **Core dedicated AotHost + Core unit tests** (review P3 / mid-term 10): still 1 test project with 23 tests and
+  no dedicated native fixture; AGENTS.md already states the combined-Host coverage honestly. New project work,
+  not started.
+- **Giant implementation split** (review mid-term 8): `LocalDeadLetterReplayExecutor` (~410 lines),
+  `RabbitMqConsumer` (~694), UoW kernel (~1206), CRUD emitter (~1564) — staged extraction not started.
+- **Sample Program.cs composition** beyond `Replace` (review mid-term 9): the two Hosts remain ~247/225 lines;
+  sinking policy/registry wiring into a contributor is a design task, not a mechanical edit.
+- **Residual red baselines are unchanged and still documented**: full integration 30 red (#129 §14.6 / userinfo),
+  SaaS 11 red, Asset E2E 19 need the runtime connection string, 2 boundary evidence-ledger gates need the
+  accumulated artifacts.
 
 ## 2026-11-05 — Issue #159 explicit unsupported / needs-clarification authoring outcomes (S0–S5 accepted; merged as 1bf4a7e7; issue closed completed)
 

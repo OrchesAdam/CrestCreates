@@ -50,7 +50,6 @@ using CrestCreates.Schema.Abstractions;
 using CrestCreates.Workflow;
 using CrestCreates.Workflow.Abstractions;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var goldenScenario = args.Contains("--golden-scenario", StringComparer.Ordinal);
 var candidateProfile = args.Contains("--golden-scenario-profile=asset-v2-candidate", StringComparer.Ordinal);
@@ -86,6 +85,8 @@ workflowRegistry.Build([new AssetDescriptorProvider<WorkflowDescriptor>(candidat
 var formRegistry = new FormRegistry(new RegistryValidationEngine<FormDescriptor>([]));
 formRegistry.Build([new AssetDescriptorProvider<FormDescriptor>([AssetDescriptorCatalog.MaintenanceForm])]);
 
+// Host policy choices precede the framework defaults; AddCapabilityRuntime's TryAdd keeps them.
+builder.Services.AddSingleton<ICapabilityInputValidationPolicy, AssetInputValidationPolicy>();
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddDescriptorStableHash();
 builder.Services.AddMultiTenancy();
@@ -111,7 +112,6 @@ builder.Services.AddTransient<AccountabilityHttpOperationScopeMiddleware>();
 builder.Services.AddSingleton<InMemoryAuditSink>();
 builder.Services.AddSingleton<IAuditSink>(sp => sp.GetRequiredService<InMemoryAuditSink>());
 builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAccountabilityRuntime>();
-builder.Services.Replace(ServiceDescriptor.Singleton<ICapabilityInputValidationPolicy, AssetInputValidationPolicy>());
 builder.Services.AddSingleton<ICapabilityHandlerModule>(new AssetCapabilityModule());
 builder.Services.AddSingleton<IAssetStore>(assetStore);
 builder.Services.AddSingleton<CrestCreates.Domain.Repositories.Permission.IPermissionGrantRepository, AssetPermissionGrantRepository>();

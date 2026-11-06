@@ -99,3 +99,13 @@
 - in-flight SQL 取消、跨进程并发、per-handler checkpoint。
 - EF 专用 optional marker 的 host 收紧。
 - 本矩阵不因 SQLite 通过推导其他数据库或其他执行模式。
+
+## 5. 仓储实现演进策略（2026-11-05 决定）
+
+第二轮整体架构审查（P1-5）要求对 FreeSql/SqlSugar 仓储的同构复制做二选一治理（抽取共享实现，或显式声明独立演进）。本矩阵选择**显式声明**：
+
+- **决定**：`FreeSqlRepository` 与 `SqlSugarRepository`（当前 976 / 1068 行）保留为**各自独立实现**，不抽取共享基类；这是有意决策，不是待办。
+- **理由**：两者的差异不是模板重复，而是 SDK 语义差异——查询构造（FreeSql `ISelect`/表达式解析 vs SqlSugar `ISugarQueryable`）、软删除条件 UPDATE、审计字段/stamp 写入、租户过滤与 `GetQueryable` 拒绝策略都由各 SDK 的 API 和限制决定。抽取共享层需要新增一层 provider 抽象，反而会把唯一有执行证据的路径移出矩阵已覆盖范围，且没有第二个消费者证明这层抽象稳定。
+- **维护约束**：行为契约（删除重载语义、无 stamp 幂等、租户读写归属、审计字段、取消、批次删除拒绝）变更时，两仓储必须在同一变更中同步修改，并由既有 `Issue130*` 套件（本矩阵 §2）作为行为基线；不得只改一侧。
+- **退出条件（何时重新评估）**：任一仓储超过约 1500 行、新增第三个 SDK Provider、或同一缺陷在两份实现中重复出现两次，则改为抽取共享执行内核；届时必须先补齐与现有证据等价的回归套件。
+- **边界**：本决策不改变任何 supported/unsupported 判定，也不推导 trim/NativeAOT 或非 SQLite 证据。
