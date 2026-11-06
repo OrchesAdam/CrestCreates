@@ -79,7 +79,7 @@ builder.Services.AddScoped<IAuditedMethodAccountabilityRuntime, AuditedMethodAcc
 builder.Services.Replace(ServiceDescriptor.Singleton<
     ICapabilityInputValidationPolicy,
     ProcurementInputValidationPolicy>());
-builder.Services.AddSingleton<ICapabilityHandlerModule>(new ProcurementCapabilityModule());
+builder.Services.AddProcurementCapabilityHandlers();
 builder.Services.AddSingleton<InMemoryProcurementRequestStore>(store);
 builder.Services.AddScoped<ProcurementApplicationService>();
 builder.Services.AddCrestCapabilityEndpoints();
