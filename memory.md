@@ -31,6 +31,30 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
+## 2026-11-06 — Giant implementation split (RabbitMqConsumer)
+
+Second slice of round-2 review mid-term item 8. Branch `refactor/rabbitmq-consumer-split-20261106`,
+based on master `cf7a8e96`; independent of the replay slice (PR #165). Public API and the
+reflection-observed private members (`_registry`, `_consumerChannel`, `BeginDelivery`,
+`ProcessDeliveryAsync`, nested `DeliveryContext`, `SuperviseConsumerChannelAsync`) are unchanged,
+so the existing regression harnesses stay meaningful.
+
+- **Result**: `RabbitMqConsumer` 694 → 318 lines (channel lifecycle, supervision, drain and
+  delivery dispatch). New internal collaborators: `RabbitMqConsumerTopology` (DLX/queue/bind/QoS/
+  consume declarations under the shared settlement gate), `RabbitMqDeliveryProcessor` (envelope/
+  wire/payload resolution and whole-batch handler execution; no broker I/O), 
+  `RabbitMqDeliverySettlement` (ack/reject/requeue behind the same gate; the channel is read
+  through an accessor), and `RabbitMqFailureSettlement` (retry-header budget, delayed republish,
+  requeue on publish failure, ack only after a confirmed republish).
+- **Deliberately kept on the consumer**: delivery drain accounting and the channel supervisor are
+  lifecycle-bound and directly exercised through reflection by the existing regressions.
+- **Evidence (executed locally, sequential)**: unit **58/58** (includes the reflection-based retry
+  recovery and supervisor regressions); integration **37/37** (2 m 21 s) against the pre-provisioned
+  `crestcreates-test-rabbitmq` podman container; RabbitMQ NativeAOT gate **2/2** (2 m 37 s,
+  broker-backed fixture). No test was edited.
+- **Remaining slices of the same review item**: UnitOfWork kernel (~1206 lines), CRUD emitter
+  (~1564 lines).
+
 ## 2026-11-05 — Round-2 overall architecture review fixes (branch `fix/architecture-review-round2-20261105`)
 
 Source: `docs/review/2026-11-05-framework-overall-architecture-review-round2.md` (reviewer artifact in the
