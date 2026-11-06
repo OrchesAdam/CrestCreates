@@ -132,6 +132,7 @@ internal sealed class ProcurementHostModule : ModuleBase
                 .Append(ProcurementDescriptorCatalog.ApprovalWorkflow)));
         services.AddSingleton<ISchemaValidator, SchemaValidator>();
         services.AddHttpContextAccessor();
+        services.AddAuthorization();
         services.AddAuthentication(SampleAuthenticationHandler.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, SampleAuthenticationHandler>(
                 SampleAuthenticationHandler.SchemeName,

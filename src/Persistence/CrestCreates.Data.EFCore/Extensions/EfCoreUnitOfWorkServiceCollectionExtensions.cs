@@ -55,7 +55,7 @@ namespace CrestCreates.Data.EFCore.Extensions
         }
 
         /// <summary>
-        /// 按实际数据库/驱动声明受支持的隔离级别（SQLite/PG 为实测矩阵；未知提供者按透传声明）。
+        /// 按实际数据库/驱动声明受支持的隔离级别（SQLite/PG 为实测矩阵；未知提供者不声明）。
         /// </summary>
         private static IReadOnlyCollection<IsolationLevel> ResolveEfIsolationLevels(IServiceProvider serviceProvider)
         {
@@ -77,13 +77,9 @@ namespace CrestCreates.Data.EFCore.Extensions
                 };
             }
 
-            return new[]
-            {
-                IsolationLevel.ReadUncommitted,
-                IsolationLevel.ReadCommitted,
-                IsolationLevel.RepeatableRead,
-                IsolationLevel.Serializable
-            };
+            // Unknown EF provider: no executed evidence, so declare nothing. Explicit isolation
+            // requests fail closed before business code instead of advertising every level.
+            return Array.Empty<IsolationLevel>();
         }
     }
 }

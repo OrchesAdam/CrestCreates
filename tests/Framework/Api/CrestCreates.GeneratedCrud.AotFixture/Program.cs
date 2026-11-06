@@ -11,6 +11,7 @@ using CrestCreates.GeneratedCrud.AotFixture;
 using CrestCreates.GeneratedCrud.AotFixture.Domain;
 using CrestCreates.Metadata.Abstractions.Bootstrap;
 using CrestCreates.Metadata.Abstractions.DescriptorBinding;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -68,6 +69,13 @@ builder.Services.AddGeneratedCrud();
 builder.Services.AddSingleton<MemoryWidgetRepository>();
 builder.Services.AddSingleton<ICrestRepositoryBase<Widget, Guid>>(
     serviceProvider => serviceProvider.GetRequiredService<MemoryWidgetRepository>());
+// The generated CRUD endpoints inherit capability permissions and carry endpoint authorization
+// metadata, so the host provides the same authentication/authorization middleware a real host has.
+builder.Services.AddAuthorization();
+builder.Services.AddAuthentication(FixtureAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, FixtureAuthenticationHandler>(
+        FixtureAuthenticationHandler.SchemeName, _ => { });
+
 builder.Services.AddSingleton<IPermissionChecker, FixturePermissionChecker>();
 builder.Services.AddSingleton<ICurrentUser, FixtureCurrentUser>();
 builder.Services.AddSingleton<IDataPermissionFilter, IdentityDataPermissionFilter>();
@@ -111,6 +119,9 @@ app.Use(async (context, next) =>
 
     await next(context);
 });
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 // §7.2: no manual capability/endpoint registry build here — MapCrestCapabilityEndpoints performs the
 // single authoritative aggregation (static providers + this host's ExplicitHost contributions) before

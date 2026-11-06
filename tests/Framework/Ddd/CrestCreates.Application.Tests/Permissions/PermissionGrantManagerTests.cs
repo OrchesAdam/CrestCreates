@@ -127,4 +127,122 @@ public class PermissionGrantManagerTests
 
         result.Should().Equal("Books.Edit", "Books.View");
     }
+
+    [Fact]
+    public async Task RevokeAsync_CrossTenant_IsRejectedBeforeRepositoryAccess()
+    {
+        var (manager, repository) = CreateManager(currentTenantId: "tenant-a", isSuperAdmin: false);
+        var input = TenantGrant("tenant-b");
+
+        var action = async () => await manager.RevokeAsync(input);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*权限撤销被拒绝*");
+        repository.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RevokeAsync_GlobalScopeInTenantContext_IsRejectedBeforeRepositoryAccess()
+    {
+        var (manager, repository) = CreateManager(currentTenantId: "tenant-a", isSuperAdmin: false);
+        var input = new PermissionGrantInfo
+        {
+            PermissionName = "Books.View",
+            ProviderType = PermissionGrantProviderType.User,
+            ProviderKey = "user-1",
+            Scope = PermissionGrantScope.Global
+        };
+
+        var action = async () => await manager.RevokeAsync(input);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*权限撤销被拒绝*");
+        repository.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RevokeAsync_WhenGrantDoesNotExist_IsIdempotentAndDoesNotDelete()
+    {
+        var (manager, repository) = CreateManager(currentTenantId: null, isSuperAdmin: false);
+        repository
+            .Setup(repository => repository.FindAsync(
+                It.IsAny<string>(),
+                It.IsAny<PermissionGrantProviderType>(),
+                It.IsAny<string>(),
+                It.IsAny<PermissionGrantScope>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PermissionGrant?)null);
+
+        await manager.RevokeAsync(TenantGrant("tenant-a"));
+        await manager.RevokeAsync(TenantGrant("tenant-a"));
+
+        repository.Verify(
+            repository => repository.DeleteAsync(It.IsAny<PermissionGrant>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RevokeAsync_WhenGrantExists_DeletesOnceAndSecondRevokeIsIdempotent()
+    {
+        var (manager, repository) = CreateManager(currentTenantId: null, isSuperAdmin: false);
+        var grant = new PermissionGrant(
+            Guid.NewGuid(),
+            "Books.View",
+            PermissionGrantProviderType.User,
+            "user-1",
+            PermissionGrantScope.Tenant,
+            "tenant-a");
+        var remaining = new List<PermissionGrant> { grant };
+
+        repository
+            .Setup(repository => repository.FindAsync(
+                It.IsAny<string>(),
+                It.IsAny<PermissionGrantProviderType>(),
+                It.IsAny<string>(),
+                It.IsAny<PermissionGrantScope>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => remaining.FirstOrDefault());
+        repository
+            .Setup(repository => repository.DeleteAsync(It.IsAny<PermissionGrant>(), It.IsAny<CancellationToken>()))
+            .Callback<PermissionGrant, CancellationToken>((deleted, _) => remaining.Remove(deleted))
+            .Returns(Task.CompletedTask);
+
+        await manager.RevokeAsync(TenantGrant("tenant-a"));
+        await manager.RevokeAsync(TenantGrant("tenant-a"));
+
+        repository.Verify(
+            repository => repository.DeleteAsync(It.IsAny<PermissionGrant>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    private static (PermissionGrantManager Manager, Mock<IPermissionGrantRepository> Repository) CreateManager(
+        string? currentTenantId,
+        bool isSuperAdmin)
+    {
+        var repository = new Mock<IPermissionGrantRepository>();
+        var currentTenant = new Mock<ICurrentTenant>();
+        currentTenant.SetupGet(tenant => tenant.Id).Returns(currentTenantId);
+        var currentUser = new Mock<ICurrentUser>();
+        currentUser.SetupGet(user => user.IsSuperAdmin).Returns(isSuperAdmin);
+        var validator = new TenantPermissionScopeValidator(
+            currentTenant.Object,
+            currentUser.Object,
+            new Mock<ITenantProvider>().Object,
+            Mock.Of<ILogger<TenantPermissionScopeValidator>>());
+
+        return (
+            new PermissionGrantManager(repository.Object, new Mock<IPermissionGrantStore>().Object, validator),
+            repository);
+    }
+
+    private static PermissionGrantInfo TenantGrant(string tenantId) => new()
+    {
+        PermissionName = "Books.View",
+        ProviderType = PermissionGrantProviderType.User,
+        ProviderKey = "user-1",
+        Scope = PermissionGrantScope.Tenant,
+        TenantId = tenantId
+    };
 }

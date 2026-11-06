@@ -17,6 +17,7 @@ await host.OnApplicationInitializationAsync(app);
 
 app.UseAccountabilityHttpTerminalObserver();
 app.UseAuthentication();
+app.UseAuthorization();
 app.UseAccountabilityHttpOperationScope();
 app.MapCrestCapabilityEndpoints();
 app.MapCrestOpenApi();

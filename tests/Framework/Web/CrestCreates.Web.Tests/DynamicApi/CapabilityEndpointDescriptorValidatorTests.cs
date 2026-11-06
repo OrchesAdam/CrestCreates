@@ -330,9 +330,11 @@ public class CapabilityEndpointDescriptorValidatorTests
     }
 
     [Fact]
-    public void Validate_Duplicate_Route_With_Constraint_Normalized_Fails()
+    public void Validate_Different_Constraint_Is_Not_A_Route_Collision()
     {
-        // /api/books/{id:int} and /api/books/{id} should be treated as the same route
+        // The map-time canonicalization keeps constraints because ASP.NET Core uses them for route
+        // precedence. Registration must use the same canonical identity, so {id:int} and {id} are
+        // distinct endpoints rather than a pre-registration conflict.
         var getCap = new CapabilityDescriptor
         {
             Id = "books.get", Name = "Get Book", Version = 1, RiskLevel = CapabilityRiskLevel.Low
@@ -361,6 +363,31 @@ public class CapabilityEndpointDescriptorValidatorTests
             InputBindings = new[] { new CapabilityEndpointInputBinding { Name = "id", Source = CapabilityEndpointParameterSource.Route } },
             OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
         };
+
+        var report = validator.Validate(new[] { endpoint1, endpoint2 });
+
+        report.HasErrors.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_Route_Conflict_Is_Case_Insensitive()
+    {
+        var cap = new CapabilityDescriptor
+        {
+            Id = "books.list", Name = "List Books", Version = 1, RiskLevel = CapabilityRiskLevel.Low
+        };
+        var validator = CreateValidator(cap);
+        var endpoint1 = new CapabilityEndpointDescriptor
+        {
+            Id = "books.list.http",
+            Name = "List Books",
+            Version = 1,
+            Capability = new VersionedDescriptorRef<CapabilityDescriptor>("books.list", 1),
+            HttpMethod = CapabilityEndpointHttpMethod.Get,
+            RoutePattern = "/api/books",
+            OutputMapping = new CapabilityEndpointOutputMapping { SuccessStatusCode = 200 }
+        };
+        var endpoint2 = CopyEndpoint(endpoint1, routePattern: "/API/Books");
 
         var report = validator.Validate(new[] { endpoint1, endpoint2 });
 

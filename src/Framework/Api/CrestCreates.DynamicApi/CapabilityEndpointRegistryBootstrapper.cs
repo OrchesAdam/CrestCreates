@@ -156,16 +156,28 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
         {
             var identity = entry.Identity;
             var found = identity.Version > 0
-                ? _registry.GetByVersion(identity.IdentityId, identity.Version) is not null
-                : _registry.GetById(identity.IdentityId) is not null;
+                ? _registry.GetByVersion(identity.IdentityId, identity.Version)
+                : _registry.GetAll()
+                    .Where(descriptor => string.Equals(descriptor.Id, identity.IdentityId, StringComparison.Ordinal)
+                                         && descriptor.State == DescriptorState.Active)
+                    .MaxBy(descriptor => descriptor.Version);
 
-            if (!found)
+            if (found is null)
             {
                 throw new InvalidOperationException(
                     $"Required capability endpoint identity '{identity.IdentityId}' is missing from the authoritative registry " +
                     $"(owner '{identity.Owner}', action '{identity.Action}', type '{identity.TypeName}', required by '{entry.RequiredBy}'). " +
                     "The owning contribution must be activated before the registry is built; required identities are never " +
                     "resolved through a generic fallback and never silently skipped.");
+            }
+
+            if (found.State != DescriptorState.Active)
+            {
+                throw new InvalidOperationException(
+                    $"Required capability endpoint identity '{identity.IdentityId}' v{found.Version} is not publishable: " +
+                    $"state is {found.State}, expected {DescriptorState.Active} " +
+                    $"(owner '{identity.Owner}', action '{identity.Action}', type '{identity.TypeName}', required by '{entry.RequiredBy}'). " +
+                    "Draft/Deprecated/Removed identities are rejected before any endpoint is mapped.");
             }
         }
 
