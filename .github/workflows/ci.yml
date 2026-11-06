@@ -294,6 +294,9 @@ jobs:
       - name: Test — CapabilityEndpoint native HTTP gate (NativeAOT publish/link/run)
         run: dotnet test tests/Framework/Api/CrestCreates.CapabilityEndpoint.AotFixture.Tests --no-build --filter "Category=NativeAotGate"
 
+      - name: Test — Core native gate (NativeAOT publish/link/run)
+        run: dotnet test tests/Core/CrestCreates.Core.AotHost.Tests --no-build --filter "Category=NativeAotGate"
+
       - name: Test — GeneratedCrud native HTTP gate (NativeAOT publish/link/run)
         run: dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests --no-build --filter "Category=NativeAotGate"
 

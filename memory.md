@@ -106,6 +106,18 @@ GitHub workflows stay manually disabled, so this is execution evidence, not a CI
   evidence-bearing path out of the matrix), the maintenance constraint (both change together, `Issue130*`
   suites are the behavioural baseline) and the revisit trigger (>~1500 lines / third SDK provider / a defect
   repeated twice on both sides). The review explicitly permits this option.
+- **Core 专属 NativeAOT 门禁（review P3 / mid-term 10）.**
+  `tests/Core/CrestCreates.Core.AotHost` (console, `PublishAot=true`,
+  `JsonSerializerIsReflectionEnabledByDefault=false`) exercises semantic identity construction /
+  implicit conversion / default rejection, severity + diagnostic ordering, source-generated JSON
+  round-trip and converter rejections (unknown severity, empty/null diagnostic), and
+  `UnitOfWorkCancellationSnapshot` merge/Attach/ContainsToken. `tests/Core/CrestCreates.Core.AotHost.Tests`
+  publishes with `CrestCreatesPublishMode=aot` (`linux-x64`), links and runs the native ELF, asserts six
+  per-scenario sentinels + `CRESTCREATES_CORE_SAMPLE_OK`, and a missing-argument negative control
+  (exit 2, no sentinel). Wired into `ci.yml` and `full-validation.yml` native gate sections and both
+  solutions. Core unit tests grew to 40 with five snapshot tests in
+  `CrestCreates.Core.Abstractions.Tests`. AGENTS.md Core AOT line updated from
+  "组合 Host 覆盖" to this dedicated evidence, with its scope stated.
 - **`CapabilityEndpointJsonRuntime` — kept, not archived.** It is `[Obsolete]` and has no production consumer,
   but it is an explicitly documented backward-compatibility budget
   (`docs/Feature/CapabilityExposure/arch-design.md:945`), unlike the un-owned `CrudControllerBase` surface.
@@ -119,6 +131,8 @@ GitHub workflows stay manually disabled, so this is execution evidence, not a CI
 | GeneratedCrud native gate (`Category=NativeAotGate`) | 3/3, 1 m 36 s |
 | Ticket formal HTTP native gate | 5/5, 2 m 40 s |
 | Procurement NativeAOT fixture (after generated handler activation) | 9/9, 1 m 56 s; native publish/link/run emitted `CRESTCREATES_PROCUREMENT_HTTP_OK` + `CRESTCREATES_PROCUREMENT_SAMPLE_OK` + `CRESTCREATES_ACCOUNTABILITY_OK` |
+| Core native gate (new) | 2/2 (17 s): native ELF (2.5 MB stripped) ran six scenarios + total sentinel; no-argument negative control exit 2 without sentinel |
+| Core unit tests | 40/40 (five new snapshot tests) |
 | GeneratedCrud JIT fixture | 25/25 (Q01 now asserts refusal + zero persistence) |
 | Ticket JIT fixture | 1/1 |
 | OrmProviders (full, after PermissionMo fail-closed + 3 new tests) | 271/271 |
@@ -138,9 +152,6 @@ script directly with the same environment; this is a local PATH detail, not a fr
 
 ### Explicitly not done (open items)
 
-- **Core dedicated AotHost + Core unit tests** (review P3 / mid-term 10): still 1 test project with 23 tests and
-  no dedicated native fixture; AGENTS.md already states the combined-Host coverage honestly. New project work,
-  not started.
 - **Giant implementation split** (review mid-term 8): `LocalDeadLetterReplayExecutor` (~410 lines),
   `RabbitMqConsumer` (~694), UoW kernel (~1206), CRUD emitter (~1564) — staged extraction not started.
 - **Sample Program.cs composition** beyond `Replace` (review mid-term 9): the two Hosts remain ~247/225 lines;

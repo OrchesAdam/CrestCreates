@@ -80,7 +80,9 @@ Handler 不应承担治理判断，不应拼字符串协议，不应使用 servi
 
 ```text
 CrestCreates Core:
-    NativeAOT-first（独立证据矩阵待明确；当前经组合 Host 原生执行覆盖）
+    NativeAOT-first；专属 tests/Core/CrestCreates.Core.AotHost 原生 publish/link/run（linux-x64，
+    语义身份类型/严重度排序/诊断码 JSON 往返与拒绝/取消快照合并与 Attach 六场景 + 总 sentinel +
+    缺参负控，reflection-free）。只覆盖这些 Core 契约，不推导 Framework/Runtime/其他 RID
 
 第一方 Runtime（逐项声明，不整体背书）:
     Workflow / HumanTask / Outbox / Memory / AgentTool:
@@ -471,4 +473,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-11-05
+**最后更新**: 2026-11-06

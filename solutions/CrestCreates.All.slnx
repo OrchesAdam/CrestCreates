@@ -200,6 +200,8 @@
   </Folder>
   <Folder Name="/tests/Core/">
     <Project Path="../tests/Core/CrestCreates.Core.Abstractions.Tests/CrestCreates.Core.Abstractions.Tests.csproj" />
+    <Project Path="../tests/Core/CrestCreates.Core.AotHost/CrestCreates.Core.AotHost.csproj" />
+    <Project Path="../tests/Core/CrestCreates.Core.AotHost.Tests/CrestCreates.Core.AotHost.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Framework/Ddd/">
     <Project Path="../tests/Framework/Ddd/CrestCreates.Domain.Tests/CrestCreates.Domain.Tests.csproj" />
