@@ -58,6 +58,61 @@ public class CapabilityRegistryHostAggregationTests
                 "the failure must name the capability missing from the authoritative registry");
     }
 
+    [Fact]
+    public void BuildFromHostCatalog_composes_host_catalog_and_activated_contributions()
+    {
+        var registry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>(
+            Array.Empty<IRegistryValidator<CapabilityDescriptor>>()));
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddCrestCapabilityEndpoints();
+        services.AddSingleton<ICapabilityRegistry>(registry);
+        services.AddCrestCapabilityEndpointContribution(new ProbeContribution
+        {
+            OwnerAssemblyName = "WidgetFeature",
+            CapabilityDescriptors =
+            [
+                new CapabilityDescriptor { Id = "WidgetFeature.WidgetAppService.Create", Name = "Create", Version = 1 },
+            ],
+        });
+
+        using var provider = services.BuildServiceProvider();
+        provider.BuildFromHostCatalog(
+        [
+            new CapabilityDescriptor { Id = "AssetManagement.Asset", Name = "AssetCapability", Version = 1 },
+        ]);
+
+        registry.State.Should().Be(RegistryState.Built);
+        registry.GetByNameAndVersion("AssetCapability", 1).Should().NotBeNull();
+        registry.GetByNameAndVersion("Create", 1).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void BuildFromHostCatalog_fails_closed_when_the_registry_was_built_without_the_host_catalog()
+    {
+        var registry = new CapabilityRegistry(new RegistryValidationEngine<CapabilityDescriptor>(
+            Array.Empty<IRegistryValidator<CapabilityDescriptor>>()));
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddCrestCapabilityEndpoints();
+        services.AddSingleton<ICapabilityRegistry>(registry);
+
+        using var provider = services.BuildServiceProvider();
+
+        // Another bootstrap built the registry first without the host's static catalog.
+        registry.Build(Array.Empty<IDescriptorProvider<CapabilityDescriptor>>());
+        registry.State.Should().Be(RegistryState.Built);
+
+        var act = () => provider.BuildFromHostCatalog(
+        [
+            new CapabilityDescriptor { Id = "AssetManagement.Asset", Name = "AssetCapability", Version = 1 },
+        ]);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AssetCapability*",
+                "a registry that omits the host catalog must not be trusted");
+    }
+
     /// <summary>Generated contributions are concrete per-assembly types; TryAddEnumerable requires it.</summary>
     private sealed class ProbeContribution : CapabilityEndpointContribution
     {

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Capability.Bootstrap;
@@ -138,6 +139,20 @@ public static class CapabilityServiceCollectionExtensions
         // Relationship Extractor
         services.AddSingleton<IDescriptorRelationshipExtractor, CapabilityRelationshipExtractor>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Replaces the built-in permissive input-validation policy regardless of registration order.
+    /// The host owns the policy choice; the framework owns the replacement semantics.
+    /// </summary>
+    public static IServiceCollection AddCapabilityInputValidationPolicy<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TPolicy>(
+        this IServiceCollection services)
+        where TPolicy : class, ICapabilityInputValidationPolicy
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.Replace(ServiceDescriptor.Singleton<ICapabilityInputValidationPolicy, TPolicy>());
         return services;
     }
 
