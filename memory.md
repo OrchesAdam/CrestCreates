@@ -31,6 +31,36 @@ local-first verification; Testcontainers suites runnable locally via podman sock
 Workflow: GitHub PR flow, never auto-merge; replaced files archived to 99_RecycleBin,
 never deleted; never output credentials.
 
+## 2026-11-06 — Giant implementation split (LocalDeadLetterReplayExecutor)
+
+Second-round review mid-term item 8 (staged split of giant implementations), first slice.
+Branch `refactor/giant-implementations-staged-20261106`, based on merged master `cf7a8e96`
+(PR #164). Public API/DI registration unchanged; this is a behavior-preserving move refactor.
+
+- **Result**: `LocalDeadLetterReplayExecutor` 583 → 62 lines of orchestration; the former
+  ~410-line `ExecuteAsync` is now five internal collaborators in the same assembly:
+  `LocalDeadLetterReplayPreflight` (fresh-state read, status/budget/identity validation, frozen
+  codec decode; budget-exhausted archive), `LocalDeadLetterReplayExecution` (scope, context
+  activation, admission, whole-batch preparation, MarkRetrying, handler execution, release),
+  `LocalDeadLetterReplaySettlement` (terminal state writes and independent
+  execution/state-write/release facts), `LocalDeadLetterStateWriter` (bounded scoped writes) and
+  `LocalDeadLetterReplayFacts` (release-problem aggregation, frame-cleanup extraction,
+  cancellation annotations).
+- **Frame invariant discovered during the split**: `LocalEventContextBridge.Activate` (tenant +
+  audit-context push) and `ContextFrame.DisposeAndCapture` are AsyncLocal writes that must run in
+  the same async frame as the handler execution. Moving activation into an awaited collaborator
+  silently lost the restored tenant/correlation; the baseline test
+  `Replay_must_execute_under_the_recorded_tenant_not_the_callers_tenant` caught it (handler saw
+  the caller's correlation). The execution phase therefore owns the whole attempt frame
+  (resolve → activate → admit → prepare → MarkRetrying → execute → release); preflight and
+  settlement remain separate because they perform no ambient writes.
+- **Evidence (executed locally, sequential)**: LocalEvent integration **116/116** with
+  `DOCKER_HOST=unix:///run/user/1000/podman/podman.sock` (the two PostgreSQL upgrade tests need
+  the socket; without it they fail on Docker discovery, not on assertions); LocalEvent NativeAOT
+  gate **1/1** (1 m 7 s, 11-scenario fixture). The first split iteration failed the tenant test
+  before the frame fix; no test was edited.
+- **Remaining slices of the same review item**: `RabbitMqConsumer` (~694 lines), UnitOfWork
+  kernel (~1206), CRUD emitter (~1564). Each needs its own branch/verification; not started.
 ## 2026-11-06 — Giant implementation split (RabbitMqConsumer)
 
 Second slice of round-2 review mid-term item 8. Branch `refactor/rabbitmq-consumer-split-20261106`,
@@ -176,8 +206,9 @@ script directly with the same environment; this is a local PATH detail, not a fr
 
 ### Explicitly not done (open items)
 
-- **Giant implementation split** (review mid-term 8): `LocalDeadLetterReplayExecutor` (~410 lines),
-  `RabbitMqConsumer` (~694), UoW kernel (~1206), CRUD emitter (~1564) — staged extraction not started.
+- **Giant implementation split** (review mid-term 8): `LocalDeadLetterReplayExecutor`, `RabbitMqConsumer`
+  and the UoW kernel were split into staged collaborators (PR #165, PR #166 and the UoW split branch);
+  the CRUD emitter (~1564 lines) remains.
 - **Sample Program.cs composition** beyond `Replace` (review mid-term 9): the two Hosts remain ~247/225 lines;
   sinking policy/registry wiring into a contributor is a design task, not a mechanical edit.
 - **Residual red baselines are unchanged and still documented**: full integration 30 red (#129 §14.6 / userinfo),
@@ -1127,3 +1158,41 @@ PR #152 head `dbb1e2cb4d7293254a91845171b525a5c4a0dc0d`（代码5e3878b2，后�
 - Preserved #131 design/plan/inventory byte-for-byte and retained both sides of memory history.
   Backup archive and SHA-256 manifest are in the same backup directory. No source code edits,
   test/build execution, new commit, push or CI change in this synchronization turn.
+
+## 2026-11-06 — Giant implementation split, staged (review mid-term 8)
+
+Source: round-2 review item 8. Public APIs unchanged; no test file was modified.
+
+- `LocalDeadLetterReplayExecutor` (branch `refactor/giant-implementations-staged-20261106`, PR #165):
+  split into preflight / execution / settlement / state-writer / facts collaborators. The execution phase
+  owns the whole attempt frame (scope, ambient activation, admission, prepare, MarkRetrying, execute,
+  release, settlement) so AsyncLocal activation is not lost to an awaited collaborator. Evidence:
+  LocalEvent integration 116/116, LocalEvent NativeAOT gate 1/1.
+- `RabbitMqConsumer` (branch `refactor/rabbitmq-consumer-split-20261106`, PR #166): 694 → 318 lines;
+  topology, delivery processor, delivery settlement and failure settlement collaborators. Public surface and
+  reflection-observed private members (`_consumerChannel`, `_settlementGate`, nested `DeliveryContext`) kept
+  so existing regression tests stay meaningful. Evidence: unit 58/58, integration 37/37 (podman RabbitMQ),
+  RabbitMQ NativeAOT gate 2/2.
+- UoW kernel (branch `refactor/unitofwork-kernel-split-20261106`): `UnitOfWorkManager.cs` 1206 → 244 lines.
+  Extracted `UnitOfWorkScopePreflight` (options / join compatibility / provider / isolation capability /
+  tenant snapshot), `UnitOfWorkScopeBootstrapper` (synchronous root and requiresNew owner creation),
+  `UnitOfWorkScope` (state carrier, caller-frame activation, provider transaction start, cancellation
+  snapshot), `UnitOfWorkScopeSettlement` (complete / rollback / termination classification),
+  `UnitOfWorkScopeNotification` (post-commit notify), `UnitOfWorkScopeRelease` (termination + cleanup on
+  dispose), `UnitOfWorkExecutionTokenPolicy` (deadline / linked-token composition) and
+  `UnitOfWorkDiagnostics` (Exception.Data attachment). Creation stays synchronous in the caller frame
+  (AsyncLocal activation invariant); diagnostic keys, exception types, state transitions and outcome
+  semantics are unchanged. Evidence: OrmProviders 271/271, `UnitOfWorkPostgresIntegrationTests` 4/4,
+  Data.Abstractions NativeAOT gate 1/1 (all local, `~/.dotnet/dotnet` 10.0.114 + podman socket).
+- CRUD emitter (branch `refactor/crud-emitter-split-20261106`): `CrudArtifactEmitter.cs` 1563 → 134 lines.
+  The public facade keeps `Emit`, `EmitBundleArtifacts`, `EmitBundle`, `DeclaredTypeFullNames`,
+  `EmitHostActivation` and `AssemblyActivationOwnerKey` unchanged; per-artifact-family internal emitters
+  (`CrudDtoEmitter`, `CrudPermissionEmitter`, `CrudMappingEmitter`, `CrudServiceContractEmitter`,
+  `CrudServiceImplementationEmitter`, `CrudTypedQueryAdapterEmitter`, `CrudCapabilityEmitter`,
+  `CrudHostActivationEmitter`) plus `CrudArtifactWriter` now own the text. Unused private constants/helpers
+  (`JsonRoot*`, `BindingMethodName`, `ResultMapperName`, `InputBindingModel`) were removed. Emitted bytes,
+  artifact order and bundle assembly are unchanged (the writer primitives were copied verbatim). Evidence:
+  CodeGenerator 461/461, JsonContracts.BuildTasks 162/162, GeneratedCrud fixture 28/28 (incl. NativeAOT
+  gate), CompatibilityProjection E2E 20/20 (local, `~/.dotnet/dotnet` 10.0.114 + podman socket).
+- UoW split PR #167 merged as `05dc7a55` (2026-11-06). All four giant implementations named by the review
+  are now split; PR #165/#166 still await explicit merge approval.
