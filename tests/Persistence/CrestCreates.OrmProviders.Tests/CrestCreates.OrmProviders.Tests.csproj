@@ -12,6 +12,7 @@
   <ItemGroup>
     <!-- 项目引用 -->
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
     <ProjectReference Include="..\..\..\src\Framework\Infrastructure\CrestCreates.Aop\CrestCreates.Aop.csproj" />
     <ProjectReference Include="..\..\..\src\Framework\Infrastructure\CrestCreates.Authorization\CrestCreates.Authorization.csproj" />
     <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore\CrestCreates.Data.EFCore.csproj" />
