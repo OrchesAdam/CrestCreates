@@ -102,9 +102,9 @@ public class SettingAppService : ISettingAppService
     {
         await EnsureReadGrantedAsync();
         var normalizedUserId = Require(userId, nameof(userId));
-        var normalizedTenantId = NormalizeTenantId(tenantId);
-        await EnsureUserOperableAsync(normalizedUserId, normalizedTenantId, cancellationToken);
-        return await GetScopedValuesAsync(SettingScope.User, normalizedUserId, groupName, normalizedTenantId, cancellationToken);
+        var effectiveTenantId = ResolveUserTenantId(tenantId);
+        await EnsureUserOperableAsync(normalizedUserId, effectiveTenantId, cancellationToken);
+        return await GetScopedValuesAsync(SettingScope.User, normalizedUserId, groupName, effectiveTenantId, cancellationToken);
     }
 
     public async Task UpdateGlobalAsync(string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
@@ -143,9 +143,9 @@ public class SettingAppService : ISettingAppService
     {
         await EnsureManageGrantedAsync();
         var normalizedUserId = Require(userId, nameof(userId));
-        var normalizedTenantId = NormalizeTenantId(tenantId);
-        await EnsureUserOperableAsync(normalizedUserId, normalizedTenantId, cancellationToken);
-        await _settingManager.SetUserAsync(name, normalizedUserId, input.Value, normalizedTenantId, cancellationToken);
+        var effectiveTenantId = ResolveUserTenantId(tenantId);
+        await EnsureUserOperableAsync(normalizedUserId, effectiveTenantId, cancellationToken);
+        await _settingManager.SetUserAsync(name, normalizedUserId, input.Value, effectiveTenantId, cancellationToken);
     }
 
     public async Task DeleteGlobalAsync(string name, CancellationToken cancellationToken = default)
@@ -183,9 +183,9 @@ public class SettingAppService : ISettingAppService
     {
         await EnsureManageGrantedAsync();
         var normalizedUserId = Require(userId, nameof(userId));
-        var normalizedTenantId = NormalizeTenantId(tenantId);
-        await EnsureUserOperableAsync(normalizedUserId, normalizedTenantId, cancellationToken);
-        await _settingManager.RemoveUserAsync(name, normalizedUserId, normalizedTenantId, cancellationToken);
+        var effectiveTenantId = ResolveUserTenantId(tenantId);
+        await EnsureUserOperableAsync(normalizedUserId, effectiveTenantId, cancellationToken);
+        await _settingManager.RemoveUserAsync(name, normalizedUserId, effectiveTenantId, cancellationToken);
     }
 
     private async Task<IReadOnlyList<SettingValueDto>> GetScopedValuesAsync(
@@ -259,10 +259,9 @@ public class SettingAppService : ISettingAppService
 
     private async Task EnsureUserOperableAsync(
         string userId,
-        string? tenantId,
+        string? targetTenantId,
         CancellationToken cancellationToken)
     {
-        var targetTenantId = tenantId ?? NormalizeTenantId(_currentTenant.Id);
         EnsureTenantOperable(targetTenantId ?? string.Empty);
 
         if (!Guid.TryParse(userId, out var parsedUserId))
@@ -277,6 +276,15 @@ public class SettingAppService : ISettingAppService
         {
             throw new InvalidOperationException("目标用户不属于指定租户");
         }
+    }
+
+    /// <summary>
+    /// Resolves the user partition once: omitted tenant ids follow the current tenant, while a
+    /// host context keeps the null (host) partition instead of inventing a tenant.
+    /// </summary>
+    private string? ResolveUserTenantId(string? tenantId)
+    {
+        return NormalizeTenantId(tenantId) ?? NormalizeTenantId(_currentTenant.Id);
     }
 
     private static string? NormalizeTenantId(string? tenantId)

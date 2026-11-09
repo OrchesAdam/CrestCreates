@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Settings;
 using CrestCreates.Application.Settings;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.Caching;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Settings;
@@ -211,6 +213,208 @@ public class SettingAppServiceTests
         _settingManagerMock.Verify(
             manager => manager.SetGlobalAsync("Global.Setting", "v", It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(" tenant-a ")]
+    public async Task Omitted_tenant_resolves_to_the_current_tenant_for_user_reads_writes_and_deletes(string? tenantId)
+    {
+        _currentTenantMock.SetupGet(tenant => tenant.Id).Returns(TenantA);
+        var userId = Guid.NewGuid();
+        _userRepositoryMock
+            .Setup(repository => repository.GetAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User(userId, "tenant-a-user", "tenant-a@test", TenantA));
+
+        await _settingAppService.GetUserValuesAsync(userId.ToString(), tenantId);
+        await _settingAppService.UpdateUserAsync(
+            userId.ToString(), "User.Setting", new UpdateSettingValueDto { Value = "v" }, tenantId);
+        await _settingAppService.DeleteUserAsync(userId.ToString(), "User.Setting", tenantId);
+
+        _settingManagerMock.Verify(
+            manager => manager.GetScopedValuesAsync(
+                SettingScope.User, userId.ToString(), null, TenantA, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _settingManagerMock.Verify(
+            manager => manager.SetUserAsync(
+                "User.Setting", userId.ToString(), "v", TenantA, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _settingManagerMock.Verify(
+            manager => manager.RemoveUserAsync(
+                "User.Setting", userId.ToString(), TenantA, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task Tenant_cannot_delete_another_tenant_user_and_nothing_is_written()
+    {
+        _currentTenantMock.SetupGet(tenant => tenant.Id).Returns(TenantA);
+
+        var act = async () => await _settingAppService.DeleteUserAsync(
+            Guid.NewGuid().ToString(), "User.Setting", " tenant-b ");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*本租户*");
+        _settingManagerMock.Verify(
+            manager => manager.GetScopedValuesAsync(
+                It.IsAny<SettingScope>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        VerifyNoWrites();
+    }
+
+    [Fact]
+    public async Task Host_explicit_tenant_user_delete_targets_the_resolved_partition()
+    {
+        var tenantBUser = Guid.NewGuid();
+        _userRepositoryMock
+            .Setup(repository => repository.GetAsync(tenantBUser, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User(tenantBUser, "tenant-b-user", "tenant-b@test", TenantB));
+
+        await _settingAppService.DeleteUserAsync(tenantBUser.ToString(), "User.Setting", " tenant-b ");
+
+        _settingManagerMock.Verify(
+            manager => manager.RemoveUserAsync(
+                "User.Setting", tenantBUser.ToString(), TenantB, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task Host_omitted_tenant_keeps_the_host_partition_instead_of_inventing_a_tenant()
+    {
+        _currentTenantMock.SetupGet(tenant => tenant.Id).Returns(string.Empty);
+        var hostUser = Guid.NewGuid();
+        _userRepositoryMock
+            .Setup(repository => repository.GetAsync(hostUser, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User(hostUser, "host-user", "host@test", string.Empty));
+
+        await _settingAppService.GetUserValuesAsync(hostUser.ToString());
+        await _settingAppService.UpdateUserAsync(
+            hostUser.ToString(), "User.Setting", new UpdateSettingValueDto { Value = "v" });
+        await _settingAppService.DeleteUserAsync(hostUser.ToString(), "User.Setting");
+
+        _settingManagerMock.Verify(
+            manager => manager.GetScopedValuesAsync(
+                SettingScope.User, hostUser.ToString(), null, null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _settingManagerMock.Verify(
+            manager => manager.SetUserAsync(
+                "User.Setting", hostUser.ToString(), "v", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _settingManagerMock.Verify(
+            manager => manager.RemoveUserAsync(
+                "User.Setting", hostUser.ToString(), null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task Omitted_tenant_targets_only_the_authorized_partition_in_the_real_store()
+    {
+        _currentTenantMock.SetupGet(tenant => tenant.Id).Returns(TenantA);
+        var userId = Guid.NewGuid();
+        _userRepositoryMock
+            .Setup(repository => repository.GetAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User(userId, "tenant-a-user", "tenant-a@test", TenantA));
+
+        var definition = new SettingDefinition("User.Setting", "User", scopes: SettingScope.User);
+        var definitions = new Mock<ISettingDefinitionManager>();
+        definitions.Setup(manager => manager.GetAll()).Returns(new[] { definition });
+        definitions.Setup(manager => manager.GetOrNull("User.Setting")).Returns(definition);
+        definitions.Setup(manager => manager.GetOrNull("User.Setting ")).Returns(definition);
+        var encryption = new Mock<ISettingEncryptionService>();
+
+        var settings = new List<SettingValue>
+        {
+            new(Guid.NewGuid(), "User.Setting", SettingScope.User, userId.ToString(), "tenant-a-value", false, TenantA),
+            new(Guid.NewGuid(), "User.Setting", SettingScope.User, userId.ToString(), "host-value", false, null),
+        };
+        var repository = new Mock<ISettingRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                It.IsAny<string>(),
+                It.IsAny<SettingScope>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string name, SettingScope scope, string providerKey, string? tenantId, CancellationToken _) =>
+                settings.SingleOrDefault(setting =>
+                    setting.Name == name &&
+                    setting.Scope == scope &&
+                    setting.ProviderKey == providerKey &&
+                    setting.TenantId == tenantId));
+        repository
+            .Setup(repo => repo.GetListByScopeAsync(
+                It.IsAny<SettingScope>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SettingScope scope, string? providerKey, string? tenantId, CancellationToken _) =>
+                settings
+                    .Where(setting =>
+                        setting.Scope == scope &&
+                        (providerKey == null || setting.ProviderKey == providerKey) &&
+                        setting.TenantId == tenantId)
+                    .ToList());
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SettingValue setting, CancellationToken _) =>
+            {
+                settings.Add(setting);
+                return setting;
+            });
+        repository
+            .Setup(repo => repo.UpdateAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SettingValue setting, CancellationToken _) => setting);
+        repository
+            .Setup(repo => repo.DeleteAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Callback((SettingValue setting, CancellationToken _) => settings.Remove(setting))
+            .Returns(Task.CompletedTask);
+
+        var removedKeys = new List<string>();
+        var cache = new Mock<ICrestCacheService>();
+        cache
+            .Setup(service => service.RemoveAsync(It.IsAny<string>(), It.IsAny<object[]>()))
+            .Callback((string prefix, object[] parts) => removedKeys.Add(prefix + "|" + string.Join(":", parts)))
+            .Returns(Task.CompletedTask);
+
+        var contributor = new SettingCacheKeyContributor();
+        var store = new SettingStore(repository.Object, encryption.Object, cache.Object, contributor);
+        var manager = new SettingManager(
+            definitions.Object,
+            repository.Object,
+            store,
+            encryption.Object,
+            new SettingValueTypeConverter(),
+            new SettingCacheInvalidator(cache.Object, contributor));
+        var service = new SettingAppService(
+            _settingProviderMock.Object,
+            manager,
+            definitions.Object,
+            new SettingValueAppServiceMapper(definitions.Object, encryption.Object),
+            _currentTenantMock.Object,
+            _currentUserMock.Object,
+            _permissionCheckerMock.Object,
+            _userRepositoryMock.Object);
+
+        var read = await service.GetUserValuesAsync(userId.ToString());
+        read.Single().Value.Should().Be("tenant-a-value");
+
+        await service.UpdateUserAsync(
+            userId.ToString(), "User.Setting", new UpdateSettingValueDto { Value = "updated-a" });
+        settings.Single(setting => setting.TenantId == TenantA).Value.Should().Be("updated-a");
+        settings.Single(setting => setting.TenantId == null).Value.Should().Be("host-value");
+
+        await service.DeleteUserAsync(userId.ToString(), "User.Setting");
+        settings.Should().NotContain(setting => setting.TenantId == TenantA);
+        settings.Single(setting => setting.TenantId == null).Value.Should().Be("host-value");
+
+        removedKeys.Should().NotBeEmpty();
+        Assert.All(removedKeys, key => Assert.Contains(TenantA, key, StringComparison.Ordinal));
+        Assert.DoesNotContain(removedKeys, key => key.Contains(":none", StringComparison.Ordinal));
     }
 
     [Fact]
