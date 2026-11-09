@@ -8,12 +8,13 @@ namespace CrestCreates.Caching;
 
 public class RedisCrestCache : ICrestCache
 {
+    private readonly IConnectionMultiplexer _multiplexer;
     private readonly IDatabase _database;
     private readonly CacheOptions _options;
 
-    public RedisCrestCache(string connectionString, CacheOptions options)
+    public RedisCrestCache(IConnectionMultiplexer multiplexer, CacheOptions options)
     {
-        var multiplexer = ConnectionMultiplexer.Connect(connectionString);
+        _multiplexer = multiplexer ?? throw new ArgumentNullException(nameof(multiplexer));
         _database = multiplexer.GetDatabase();
         _options = options;
     }
@@ -49,7 +50,7 @@ public class RedisCrestCache : ICrestCache
     {
         cancellationToken.ThrowIfCancellationRequested();
         var fullPattern = _options.Prefix + pattern;
-        var server = _database.Multiplexer.GetServer(_database.Multiplexer.GetEndPoints()[0]);
+        var server = _multiplexer.GetServer(_multiplexer.GetEndPoints()[0]);
         await foreach (var key in server.KeysAsync(pattern: fullPattern).WithCancellation(cancellationToken))
         {
             await _database.KeyDeleteAsync(key);
@@ -60,7 +61,7 @@ public class RedisCrestCache : ICrestCache
     {
         cancellationToken.ThrowIfCancellationRequested();
         var pattern = _options.Prefix + "*";
-        var server = _database.Multiplexer.GetServer(_database.Multiplexer.GetEndPoints()[0]);
+        var server = _multiplexer.GetServer(_multiplexer.GetEndPoints()[0]);
         await foreach (var key in server.KeysAsync(pattern: pattern).WithCancellation(cancellationToken))
         {
             await _database.KeyDeleteAsync(key);
@@ -78,7 +79,7 @@ public class RedisCrestCache : ICrestCache
     {
         cancellationToken.ThrowIfCancellationRequested();
         var pattern = _options.Prefix + "*";
-        var server = _database.Multiplexer.GetServer(_database.Multiplexer.GetEndPoints()[0]);
+        var server = _multiplexer.GetServer(_multiplexer.GetEndPoints()[0]);
         var count = 0;
         await foreach (var _ in server.KeysAsync(pattern: pattern).WithCancellation(cancellationToken))
         {

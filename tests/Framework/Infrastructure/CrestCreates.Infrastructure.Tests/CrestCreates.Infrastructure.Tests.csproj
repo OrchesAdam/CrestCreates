@@ -20,11 +20,15 @@
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="DependencyInjection.StaticAccessor.Hosting" />
+    <PackageReference Include="Rougamo.Fody" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
     <ProjectReference Include="../../../../src/Framework/Ddd/CrestCreates.Domain/CrestCreates.Domain.csproj" />
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Caching/CrestCreates.Caching.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Infrastructure/CrestCreates.Infrastructure.csproj" />
     <ProjectReference Include="../../Testing/CrestCreates.TestBase/CrestCreates.TestBase.csproj" />
   </ItemGroup>
