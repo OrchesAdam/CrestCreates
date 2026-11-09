@@ -278,6 +278,9 @@ public class LibraryDbContext : DbContext
             entity.Property(e => e.CreationTime).IsRequired();
             entity.Property(e => e.LastModificationTime);
 entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey, e.TenantId }).IsUnique();
+            entity.HasIndex(e => new { e.Name, e.Scope, e.ProviderKey })
+                .IsUnique()
+                .HasFilter("\"TenantId\" IS NULL");
         });
 
         modelBuilder.Entity<FeatureValue>(entity =>

@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Shared.Features;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,21 @@ public class FeatureRepository : EfCoreRepository<FeatureValue, System.Guid>, IF
     public FeatureRepository(IDataBaseContext dbContext)
         : base(dbContext)
     {
+    }
+
+    public override async Task<FeatureValue> InsertAsync(
+        FeatureValue entity,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await base.InsertAsync(entity, cancellationToken);
+        }
+        catch (DbUpdateException exception) when (EfCoreUniqueConstraintViolationDetector.IsUniqueConstraintViolation(exception))
+        {
+            DetachAfterFailedInsert(entity);
+            throw new CrestUniqueConstraintException(nameof(FeatureValue), exception);
+        }
     }
 
     public Task<FeatureValue?> FindAsync(

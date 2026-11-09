@@ -82,6 +82,20 @@ namespace CrestCreates.Data.EFCore.Repositories
             return entity;
         }
 
+        /// <summary>
+        /// A failed insert leaves the entity tracked in Added state; detaching keeps a follow-up
+        /// re-read from returning the loser's in-memory instance instead of the winner's row.
+        /// </summary>
+        protected void DetachAfterFailedInsert(TEntity entity)
+        {
+            var dbContext = (DbContext)_dbContext.GetNativeContext();
+            var entry = dbContext.Entry(entity);
+            if (entry.State != EntityState.Detached)
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
+
         public override async Task<IEnumerable<TEntity>> InsertRangeAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
         {
             await _dbContext.Set<TEntity>().AddRangeAsync(entities, cancellationToken);

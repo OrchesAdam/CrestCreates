@@ -610,6 +610,10 @@ namespace LibraryManagement.EntityFrameworkCore.Migrations
                     b.HasIndex("Name", "Scope", "ProviderKey", "TenantId")
                         .IsUnique();
 
+                    b.HasIndex("Name", "Scope", "ProviderKey")
+                        .IsUnique()
+                        .HasFilter("\"TenantId\" IS NULL");
+
                     b.ToTable("SettingValues", (string)null);
                 });
 
