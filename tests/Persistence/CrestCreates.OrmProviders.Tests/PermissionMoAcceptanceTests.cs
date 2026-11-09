@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using CrestCreates.Aop.Abstractions;
@@ -28,7 +29,7 @@ public class PermissionMoAcceptanceTests
         var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
         thrown.And.Message.Should().Contain(nameof(IPermissionChecker),
             "the diagnostic must name the service the permission gate could not resolve");
-        probe.BodyRan.Should().BeFalse("an unbound permission gate must not let the body run");
+        probe.BodyRunCount.Should().Be(0, "an unbound permission gate must not let the body run");
     }
 
     [Fact]
@@ -43,7 +44,7 @@ public class PermissionMoAcceptanceTests
 
         await act.Should().ThrowAsync<CrestPermissionException>();
         checker.CheckedPermission.Should().Be("demo.permission");
-        probe.BodyRan.Should().BeFalse("a denied call must not execute the business method");
+        probe.BodyRunCount.Should().Be(0, "a denied call must not execute the business method");
     }
 
     [Fact]
@@ -58,19 +59,84 @@ public class PermissionMoAcceptanceTests
 
         result.Should().Be("ok");
         checker.CheckedPermission.Should().Be("demo.permission");
-        probe.BodyRan.Should().BeTrue();
+        probe.BodyRunCount.Should().Be(1, "the body runs exactly once after a granted check");
     }
 
-    private static ServiceProvider BuildProvider(bool registerChecker, bool granted)
+    [Fact]
+    public async Task Faulted_Checker_After_Await_Propagates_And_Does_Not_Run_The_Body()
+    {
+        using var provider = BuildProvider(registerChecker: true, granted: false, faulted: true);
+        using var scope = provider.CreateScope();
+        var probe = scope.ServiceProvider.GetRequiredService<PermissionProbeService>();
+
+        var act = async () => await probe.RunAsync();
+
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.And.Message.Should().Contain("permission store is unavailable",
+            "the checker fault must leave the interceptor unchanged instead of being swallowed");
+        probe.BodyRunCount.Should().Be(0, "a checker fault must fail closed, not allow the body");
+    }
+
+    [Fact]
+    public async Task Denial_Thrown_After_Await_Still_Does_Not_Run_The_Body()
+    {
+        using var provider = BuildProvider(new DelayedDenialPermissionChecker());
+        using var scope = provider.CreateScope();
+        var probe = scope.ServiceProvider.GetRequiredService<PermissionProbeService>();
+
+        var act = async () => await probe.RunAsync();
+
+        await act.Should().ThrowAsync<CrestPermissionException>();
+        probe.BodyRunCount.Should().Be(0, "a denial raised after the async hop must still block the body");
+    }
+
+    [Fact]
+    public async Task Two_Hosts_Use_Their_Own_Checker_Without_Cross_Talk()
+    {
+        using var grantingProvider = BuildProvider(registerChecker: true, granted: true);
+        using var denyingProvider = BuildProvider(registerChecker: true, granted: false);
+        using var grantingScope = grantingProvider.CreateScope();
+        using var denyingScope = denyingProvider.CreateScope();
+        var grantingProbe = grantingScope.ServiceProvider.GetRequiredService<PermissionProbeService>();
+        var denyingProbe = denyingScope.ServiceProvider.GetRequiredService<PermissionProbeService>();
+        var grantingChecker = grantingScope.ServiceProvider.GetRequiredService<StubPermissionChecker>();
+        var denyingChecker = denyingScope.ServiceProvider.GetRequiredService<StubPermissionChecker>();
+
+        (await grantingProbe.RunAsync()).Should().Be("ok");
+        var denied = async () => await denyingProbe.RunAsync();
+        await denied.Should().ThrowAsync<CrestPermissionException>();
+
+        grantingProbe.BodyRunCount.Should().Be(1);
+        denyingProbe.BodyRunCount.Should().Be(0, "each host must resolve its own checker");
+        grantingChecker.CheckedPermission.Should().Be("demo.permission");
+        denyingChecker.CheckedPermission.Should().Be("demo.permission");
+    }
+
+    private static ServiceProvider BuildProvider(bool registerChecker, bool granted, bool faulted = false)
     {
         var services = new ServiceCollection();
         services.AddScoped<PermissionProbeService>();
         if (registerChecker)
         {
-            services.AddSingleton(new StubPermissionChecker(granted));
-            services.AddSingleton<IPermissionChecker>(sp => sp.GetRequiredService<StubPermissionChecker>());
+            if (faulted)
+            {
+                services.AddSingleton<IPermissionChecker>(new FaultingPermissionChecker());
+            }
+            else
+            {
+                services.AddSingleton(new StubPermissionChecker(granted));
+                services.AddSingleton<IPermissionChecker>(sp => sp.GetRequiredService<StubPermissionChecker>());
+            }
         }
 
+        return services.BuildServiceProvider();
+    }
+
+    private static ServiceProvider BuildProvider(IPermissionChecker checker)
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<PermissionProbeService>();
+        services.AddSingleton(checker);
         return services.BuildServiceProvider();
     }
 
@@ -83,13 +149,57 @@ public class PermissionMoAcceptanceTests
 
         public IServiceProvider? ServiceProvider { get; }
 
-        public bool BodyRan { get; private set; }
+        public int BodyRunCount { get; private set; }
+
+        public bool BodyRan => BodyRunCount > 0;
 
         [PermissionMo("demo.permission")]
         public Task<string> RunAsync()
         {
-            BodyRan = true;
+            BodyRunCount++;
             return Task.FromResult("ok");
+        }
+    }
+
+    private sealed class DelayedDenialPermissionChecker : IPermissionChecker
+    {
+        public Task<bool> IsGrantedAsync(string permissionName) => Task.FromResult(false);
+
+        public Task<bool> IsGrantedAsync(ClaimsPrincipal principal, string permissionName)
+            => Task.FromResult(false);
+
+        public Task<MultiplePermissionGrantResult> IsGrantedAsync(string[] permissionNames)
+            => Task.FromResult(new MultiplePermissionGrantResult(new Dictionary<string, bool>()));
+
+        public Task<MultiplePermissionGrantResult> IsGrantedAsync(
+            ClaimsPrincipal principal, string[] permissionNames)
+            => Task.FromResult(new MultiplePermissionGrantResult(new Dictionary<string, bool>()));
+
+        public async Task CheckAsync(string permissionName)
+        {
+            await Task.Yield();
+            throw new CrestPermissionException(permissionName);
+        }
+    }
+
+    private sealed class FaultingPermissionChecker : IPermissionChecker
+    {
+        public Task<bool> IsGrantedAsync(string permissionName) => Task.FromResult(false);
+
+        public Task<bool> IsGrantedAsync(ClaimsPrincipal principal, string permissionName)
+            => Task.FromResult(false);
+
+        public Task<MultiplePermissionGrantResult> IsGrantedAsync(string[] permissionNames)
+            => Task.FromResult(new MultiplePermissionGrantResult(new Dictionary<string, bool>()));
+
+        public Task<MultiplePermissionGrantResult> IsGrantedAsync(
+            ClaimsPrincipal principal, string[] permissionNames)
+            => Task.FromResult(new MultiplePermissionGrantResult(new Dictionary<string, bool>()));
+
+        public async Task CheckAsync(string permissionName)
+        {
+            await Task.Yield();
+            throw new InvalidOperationException("permission store is unavailable");
         }
     }
 
