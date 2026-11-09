@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Identity;
 using CrestCreates.Application.Identity;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Permission;
@@ -23,8 +24,10 @@ public class UserAppServiceTests
     private readonly Mock<IPasswordHasher> _passwordHasherMock;
     private readonly Mock<IPasswordPolicyValidator> _passwordPolicyValidatorMock;
     private readonly Mock<ICurrentTenant> _currentTenantMock;
+    private readonly Mock<ICurrentUser> _currentUserMock;
     private readonly Mock<IFeatureChecker> _featureCheckerMock;
     private readonly Mock<IIdentitySecurityLogWriter> _securityLogWriterMock;
+    private readonly Mock<IPermissionChecker> _permissionCheckerMock;
     private readonly UserAppService _userAppService;
 
     public UserAppServiceTests()
@@ -35,8 +38,16 @@ public class UserAppServiceTests
         _passwordHasherMock = new Mock<IPasswordHasher>();
         _passwordPolicyValidatorMock = new Mock<IPasswordPolicyValidator>();
         _currentTenantMock = new Mock<ICurrentTenant>();
+        _currentUserMock = new Mock<ICurrentUser>();
         _securityLogWriterMock = new Mock<IIdentitySecurityLogWriter>();
+        _permissionCheckerMock = new Mock<IPermissionChecker>();
         _currentTenantMock.SetupGet(currentTenant => currentTenant.Id).Returns(string.Empty);
+        _currentUserMock.SetupGet(currentUser => currentUser.IsAuthenticated).Returns(true);
+        _currentUserMock.SetupGet(currentUser => currentUser.Id).Returns("99999999-9999-9999-9999-999999999999");
+        _currentUserMock.SetupGet(currentUser => currentUser.IsSuperAdmin).Returns(false);
+        _permissionCheckerMock
+            .Setup(checker => checker.CheckAsync(It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
         _featureCheckerMock = new Mock<IFeatureChecker>();
         _featureCheckerMock
             .Setup(checker => checker.IsEnabledAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -49,8 +60,10 @@ public class UserAppServiceTests
             _passwordHasherMock.Object,
             _passwordPolicyValidatorMock.Object,
             _currentTenantMock.Object,
+            _currentUserMock.Object,
             _featureCheckerMock.Object,
-            _securityLogWriterMock.Object);
+            _securityLogWriterMock.Object,
+            _permissionCheckerMock.Object);
     }
 
     [Fact]

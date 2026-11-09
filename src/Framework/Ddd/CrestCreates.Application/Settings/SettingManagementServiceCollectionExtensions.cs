@@ -1,4 +1,5 @@
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Caching;
 using CrestCreates.Domain.Settings;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,6 +26,8 @@ public static class SettingManagementServiceCollectionExtensions
 
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<ISettingDefinitionProvider, CoreSettingDefinitionProvider>());
+        services.TryAddEnumerable(
+            ServiceDescriptor.Transient<IPermissionDefinitionProvider, SettingManagementPermissionDefinitionProvider>());
 
         return services;
     }

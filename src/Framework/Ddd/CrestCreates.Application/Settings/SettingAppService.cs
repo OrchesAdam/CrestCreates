@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Settings;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Authorization.Abstractions;
+using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.Settings;
@@ -22,6 +23,8 @@ public class SettingAppService : ISettingAppService
     private readonly SettingValueAppServiceMapper _mapper;
     private readonly ICurrentTenant _currentTenant;
     private readonly ICurrentUser _currentUser;
+    private readonly IPermissionChecker _permissionChecker;
+    private readonly IUserRepository _userRepository;
 
     public SettingAppService(
         ISettingProvider settingProvider,
@@ -29,7 +32,9 @@ public class SettingAppService : ISettingAppService
         ISettingDefinitionManager settingDefinitionManager,
         SettingValueAppServiceMapper mapper,
         ICurrentTenant currentTenant,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        IPermissionChecker permissionChecker,
+        IUserRepository userRepository)
     {
         _settingProvider = settingProvider;
         _settingManager = settingManager;
@@ -37,129 +42,150 @@ public class SettingAppService : ISettingAppService
         _mapper = mapper;
         _currentTenant = currentTenant;
         _currentUser = currentUser;
+        _permissionChecker = permissionChecker;
+        _userRepository = userRepository;
     }
 
     public async Task<IReadOnlyList<SettingValueDto>> GetCurrentValuesAsync(
         string? groupName = null,
         CancellationToken cancellationToken = default)
     {
+        RequireAuthenticated();
         var values = await _settingProvider.GetAllAsync(groupName, cancellationToken);
         return values.Select(_mapper.Map).ToArray();
     }
 
-    public Task<IReadOnlyList<SettingValueDto>> GetGlobalValuesAsync(
+    public async Task<IReadOnlyList<SettingValueDto>> GetGlobalValuesAsync(
         string? groupName = null,
         CancellationToken cancellationToken = default)
     {
-        return GetScopedValuesAsync(SettingScope.Global, string.Empty, groupName, null, cancellationToken);
+        await EnsureReadGrantedAsync();
+        EnsureGlobalManagementAllowed();
+        return await GetScopedValuesAsync(SettingScope.Global, string.Empty, groupName, null, cancellationToken);
     }
 
-    public Task<IReadOnlyList<SettingValueDto>> GetCurrentTenantValuesAsync(
+    public async Task<IReadOnlyList<SettingValueDto>> GetCurrentTenantValuesAsync(
         string? groupName = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureReadGrantedAsync();
         var tenantId = GetRequiredCurrentTenantId();
-        return GetScopedValuesAsync(SettingScope.Tenant, tenantId, groupName, tenantId, cancellationToken);
+        return await GetScopedValuesAsync(SettingScope.Tenant, tenantId, groupName, tenantId, cancellationToken);
     }
 
-    public Task<IReadOnlyList<SettingValueDto>> GetTenantValuesAsync(
+    public async Task<IReadOnlyList<SettingValueDto>> GetTenantValuesAsync(
         string tenantId,
         string? groupName = null,
         CancellationToken cancellationToken = default)
     {
+        await EnsureReadGrantedAsync();
         var normalizedTenantId = Require(tenantId, nameof(tenantId));
-        return GetScopedValuesAsync(SettingScope.Tenant, normalizedTenantId, groupName, normalizedTenantId, cancellationToken);
+        EnsureTenantOperable(normalizedTenantId);
+        return await GetScopedValuesAsync(SettingScope.Tenant, normalizedTenantId, groupName, normalizedTenantId, cancellationToken);
     }
 
-    public Task<IReadOnlyList<SettingValueDto>> GetCurrentUserValuesAsync(
+    public async Task<IReadOnlyList<SettingValueDto>> GetCurrentUserValuesAsync(
         string? groupName = null,
         CancellationToken cancellationToken = default)
     {
+        RequireAuthenticated();
         var userId = GetRequiredCurrentUserId();
         var tenantId = GetCurrentTenantIdOrNull();
-        return GetScopedValuesAsync(SettingScope.User, userId, groupName, tenantId, cancellationToken);
+        return await GetScopedValuesAsync(SettingScope.User, userId, groupName, tenantId, cancellationToken);
     }
 
-    public Task<IReadOnlyList<SettingValueDto>> GetUserValuesAsync(
+    public async Task<IReadOnlyList<SettingValueDto>> GetUserValuesAsync(
         string userId,
         string? tenantId = null,
         string? groupName = null,
         CancellationToken cancellationToken = default)
     {
-        return GetScopedValuesAsync(
-            SettingScope.User,
-            Require(userId, nameof(userId)),
-            groupName,
-            string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim(),
-            cancellationToken);
+        await EnsureReadGrantedAsync();
+        var normalizedUserId = Require(userId, nameof(userId));
+        var effectiveTenantId = ResolveUserTenantId(tenantId);
+        await EnsureUserOperableAsync(normalizedUserId, effectiveTenantId, cancellationToken);
+        return await GetScopedValuesAsync(SettingScope.User, normalizedUserId, groupName, effectiveTenantId, cancellationToken);
     }
 
-    public Task UpdateGlobalAsync(string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
+    public async Task UpdateGlobalAsync(string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
     {
-        return _settingManager.SetGlobalAsync(name, input.Value, cancellationToken);
+        await EnsureManageGrantedAsync();
+        EnsureGlobalManagementAllowed();
+        await _settingManager.SetGlobalAsync(name, input.Value, cancellationToken);
     }
 
-    public Task UpdateCurrentTenantAsync(string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
+    public async Task UpdateCurrentTenantAsync(string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
     {
-        return _settingManager.SetTenantAsync(name, GetRequiredCurrentTenantId(), input.Value, cancellationToken);
+        await EnsureManageGrantedAsync();
+        await _settingManager.SetTenantAsync(name, GetRequiredCurrentTenantId(), input.Value, cancellationToken);
     }
 
-    public Task UpdateTenantAsync(string tenantId, string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
+    public async Task UpdateTenantAsync(string tenantId, string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
     {
-        return _settingManager.SetTenantAsync(name, Require(tenantId, nameof(tenantId)), input.Value, cancellationToken);
+        await EnsureManageGrantedAsync();
+        var normalizedTenantId = Require(tenantId, nameof(tenantId));
+        EnsureTenantOperable(normalizedTenantId);
+        await _settingManager.SetTenantAsync(name, normalizedTenantId, input.Value, cancellationToken);
     }
 
-    public Task UpdateCurrentUserAsync(string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
+    public async Task UpdateCurrentUserAsync(string name, UpdateSettingValueDto input, CancellationToken cancellationToken = default)
     {
-        return _settingManager.SetUserAsync(name, GetRequiredCurrentUserId(), input.Value, GetCurrentTenantIdOrNull(), cancellationToken);
+        RequireAuthenticated();
+        await _settingManager.SetUserAsync(name, GetRequiredCurrentUserId(), input.Value, GetCurrentTenantIdOrNull(), cancellationToken);
     }
 
-    public Task UpdateUserAsync(
+    public async Task UpdateUserAsync(
         string userId,
         string name,
         UpdateSettingValueDto input,
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
-        return _settingManager.SetUserAsync(
-            name,
-            Require(userId, nameof(userId)),
-            input.Value,
-            string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim(),
-            cancellationToken);
+        await EnsureManageGrantedAsync();
+        var normalizedUserId = Require(userId, nameof(userId));
+        var effectiveTenantId = ResolveUserTenantId(tenantId);
+        await EnsureUserOperableAsync(normalizedUserId, effectiveTenantId, cancellationToken);
+        await _settingManager.SetUserAsync(name, normalizedUserId, input.Value, effectiveTenantId, cancellationToken);
     }
 
-    public Task DeleteGlobalAsync(string name, CancellationToken cancellationToken = default)
+    public async Task DeleteGlobalAsync(string name, CancellationToken cancellationToken = default)
     {
-        return _settingManager.RemoveGlobalAsync(name, cancellationToken);
+        await EnsureManageGrantedAsync();
+        EnsureGlobalManagementAllowed();
+        await _settingManager.RemoveGlobalAsync(name, cancellationToken);
     }
 
-    public Task DeleteCurrentTenantAsync(string name, CancellationToken cancellationToken = default)
+    public async Task DeleteCurrentTenantAsync(string name, CancellationToken cancellationToken = default)
     {
-        return _settingManager.RemoveTenantAsync(name, GetRequiredCurrentTenantId(), cancellationToken);
+        await EnsureManageGrantedAsync();
+        await _settingManager.RemoveTenantAsync(name, GetRequiredCurrentTenantId(), cancellationToken);
     }
 
-    public Task DeleteTenantAsync(string tenantId, string name, CancellationToken cancellationToken = default)
+    public async Task DeleteTenantAsync(string tenantId, string name, CancellationToken cancellationToken = default)
     {
-        return _settingManager.RemoveTenantAsync(name, Require(tenantId, nameof(tenantId)), cancellationToken);
+        await EnsureManageGrantedAsync();
+        var normalizedTenantId = Require(tenantId, nameof(tenantId));
+        EnsureTenantOperable(normalizedTenantId);
+        await _settingManager.RemoveTenantAsync(name, normalizedTenantId, cancellationToken);
     }
 
-    public Task DeleteCurrentUserAsync(string name, CancellationToken cancellationToken = default)
+    public async Task DeleteCurrentUserAsync(string name, CancellationToken cancellationToken = default)
     {
-        return _settingManager.RemoveUserAsync(name, GetRequiredCurrentUserId(), GetCurrentTenantIdOrNull(), cancellationToken);
+        RequireAuthenticated();
+        await _settingManager.RemoveUserAsync(name, GetRequiredCurrentUserId(), GetCurrentTenantIdOrNull(), cancellationToken);
     }
 
-    public Task DeleteUserAsync(
+    public async Task DeleteUserAsync(
         string userId,
         string name,
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
-        return _settingManager.RemoveUserAsync(
-            name,
-            Require(userId, nameof(userId)),
-            string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim(),
-            cancellationToken);
+        await EnsureManageGrantedAsync();
+        var normalizedUserId = Require(userId, nameof(userId));
+        var effectiveTenantId = ResolveUserTenantId(tenantId);
+        await EnsureUserOperableAsync(normalizedUserId, effectiveTenantId, cancellationToken);
+        await _settingManager.RemoveUserAsync(name, normalizedUserId, effectiveTenantId, cancellationToken);
     }
 
     private async Task<IReadOnlyList<SettingValueDto>> GetScopedValuesAsync(
@@ -184,6 +210,88 @@ public class SettingAppService : ISettingAppService
             .ToArray();
     }
 
+    private async Task EnsureReadGrantedAsync()
+    {
+        await _permissionChecker.CheckAsync(SettingManagementPermissions.Read).ConfigureAwait(false);
+    }
+
+    private async Task EnsureManageGrantedAsync()
+    {
+        await _permissionChecker.CheckAsync(SettingManagementPermissions.Manage).ConfigureAwait(false);
+    }
+
+    private void RequireAuthenticated()
+    {
+        if (!_currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(_currentUser.Id))
+        {
+            throw new UnauthorizedAccessException("当前用户上下文不存在");
+        }
+    }
+
+    private void EnsureGlobalManagementAllowed()
+    {
+        if (_currentUser.IsSuperAdmin || string.IsNullOrWhiteSpace(_currentTenant.Id))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException("租户上下文不能管理全局设置");
+    }
+
+    private void EnsureTenantOperable(string targetTenantId)
+    {
+        if (_currentUser.IsSuperAdmin)
+        {
+            return;
+        }
+
+        var currentTenantId = NormalizeTenantId(_currentTenant.Id);
+        if (currentTenantId is null)
+        {
+            return;
+        }
+
+        if (!string.Equals(currentTenantId, NormalizeTenantId(targetTenantId), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("租户上下文只能管理本租户设置");
+        }
+    }
+
+    private async Task EnsureUserOperableAsync(
+        string userId,
+        string? targetTenantId,
+        CancellationToken cancellationToken)
+    {
+        EnsureTenantOperable(targetTenantId ?? string.Empty);
+
+        if (!Guid.TryParse(userId, out var parsedUserId))
+        {
+            throw new InvalidOperationException($"用户 '{userId}' 不存在");
+        }
+
+        var user = await _userRepository.GetAsync(parsedUserId, cancellationToken).ConfigureAwait(false)
+                   ?? throw new InvalidOperationException($"用户 '{userId}' 不存在");
+
+        if (!string.Equals(NormalizeTenantId(user.TenantId), targetTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("目标用户不属于指定租户");
+        }
+    }
+
+    /// <summary>
+    /// Resolves the user partition once: omitted tenant ids follow the current tenant, while a
+    /// host context keeps the null (host) partition instead of inventing a tenant.
+    /// </summary>
+    private string? ResolveUserTenantId(string? tenantId)
+    {
+        return NormalizeTenantId(tenantId) ?? NormalizeTenantId(_currentTenant.Id);
+    }
+
+    private static string? NormalizeTenantId(string? tenantId)
+    {
+        return string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim();
+    }
+
     private string GetRequiredCurrentTenantId()
     {
         if (string.IsNullOrWhiteSpace(_currentTenant.Id))
@@ -206,7 +314,7 @@ public class SettingAppService : ISettingAppService
 
     private string? GetCurrentTenantIdOrNull()
     {
-        return string.IsNullOrWhiteSpace(_currentTenant.Id) ? null : _currentTenant.Id.Trim();
+        return NormalizeTenantId(_currentTenant.Id);
     }
 
     private static string Require(string? value, string parameterName)

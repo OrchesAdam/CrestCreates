@@ -1,4 +1,5 @@
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -10,6 +11,8 @@ public static class IdentityManagementServiceCollectionExtensions
     {
         services.TryAddScoped<IUserAppService, UserAppService>();
         services.TryAddScoped<IRoleAppService, RoleAppService>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Transient<IPermissionDefinitionProvider, IdentityManagementPermissionDefinitionProvider>());
         return services;
     }
 }
