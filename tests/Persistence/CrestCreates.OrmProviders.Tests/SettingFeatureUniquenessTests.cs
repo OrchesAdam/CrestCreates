@@ -166,6 +166,28 @@ public class SettingFeatureUniquenessTests
     }
 
     [Fact]
+    public async Task Feature_non_unique_database_errors_are_not_treated_as_convergence()
+    {
+        var repository = new Mock<IFeatureRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                FeatureName, FeatureScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FeatureValue?)null);
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database offline"));
+
+        var manager = CreateFeatureManager(repository.Object);
+
+        var act = async () => await manager.SetGlobalAsync(FeatureName, "value");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*offline*");
+        repository.Verify(
+            repo => repo.UpdateAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task Feature_unique_violation_without_a_visible_winner_is_rethrown()
     {
         var repository = new Mock<IFeatureRepository>();
