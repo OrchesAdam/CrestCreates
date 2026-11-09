@@ -200,58 +200,17 @@ public sealed class CapabilityEndpointDescriptorValidator
         var validEndpoints = descriptors
             .Where(d => d.HttpMethod != CapabilityEndpointHttpMethod.None
                         && !string.IsNullOrWhiteSpace(d.RoutePattern))
-            .GroupBy(d => (HttpMethod: d.HttpMethod, RoutePattern: NormalizeRoutePattern(d.RoutePattern!)))
+            .GroupBy(d => (HttpMethod: d.HttpMethod, RoutePattern: RoutePatternCollisionGuard.Canonicalize(d.RoutePattern!)))
             .Where(g => g.Count() > 1);
 
         foreach (var group in validEndpoints)
         {
             var ids = string.Join(", ", group.Select(d => d.Id));
+            var method = group.Key.HttpMethod.ToString().ToUpperInvariant();
+            var route = group.First().RoutePattern;
             AddError(issues,
-                $"Duplicate capability endpoint route: {group.Key.HttpMethod} {group.Key.RoutePattern}. Endpoint IDs: {ids}");
+                $"Duplicate capability endpoint route: {method} {route}. Endpoint IDs: {ids}");
         }
-    }
-
-    private static string NormalizeRoutePattern(string routePattern)
-    {
-        // Normalize route parameters: strip constraints, catch-all markers, and optional markers
-        // so that /api/books/{id:int} and /api/books/{id} are treated as the same route.
-        var result = new System.Text.StringBuilder(routePattern.Length);
-        var i = 0;
-        while (i < routePattern.Length)
-        {
-            if (routePattern[i] == '{')
-            {
-                result.Append('{');
-                i++;
-                // Skip optional marker
-                if (i < routePattern.Length && routePattern[i] == '*')
-                {
-                    i++;
-                    if (i < routePattern.Length && routePattern[i] == '*')
-                        i++;
-                }
-                // Read parameter name until ':', '}', or '?'
-                var nameStart = i;
-                while (i < routePattern.Length && routePattern[i] != ':' && routePattern[i] != '}' && routePattern[i] != '?')
-                    i++;
-                result.Append(routePattern[nameStart..i]);
-                // Skip constraint and optional marker until '}'
-                while (i < routePattern.Length && routePattern[i] != '}')
-                    i++;
-                if (i < routePattern.Length)
-                {
-                    result.Append('}');
-                    i++;
-                }
-            }
-            else
-            {
-                result.Append(routePattern[i]);
-                i++;
-            }
-        }
-
-        return result.ToString().TrimEnd('/');
     }
 
     private CapabilityDescriptor? ResolveLatestActiveCapability(string capabilityId)

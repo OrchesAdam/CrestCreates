@@ -49,6 +49,67 @@ public class TenantPermissionScopeValidatorTests
     }
 
     [Fact]
+    public async Task ValidateAsync_WithGlobalScopeInTenantContext_Denies()
+    {
+        _currentUserMock.Setup(u => u.IsSuperAdmin).Returns(false);
+        _currentTenantMock.Setup(t => t.Id).Returns("current-tenant");
+
+        var grant = new PermissionGrantInfo
+        {
+            PermissionName = "Test.Permission",
+            ProviderType = PermissionGrantProviderType.Role,
+            ProviderKey = "Admin",
+            Scope = PermissionGrantScope.Global
+        };
+
+        var result = await _validator.ValidateAsync(grant);
+
+        result.IsAllowed.Should().BeFalse();
+        result.FailureReason.Should().Contain("全局权限");
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithGlobalScopeInTenantContext_SuperAdminAllowed()
+    {
+        _currentUserMock.Setup(u => u.IsSuperAdmin).Returns(true);
+        _currentTenantMock.Setup(t => t.Id).Returns("current-tenant");
+
+        var grant = new PermissionGrantInfo
+        {
+            PermissionName = "Test.Permission",
+            ProviderType = PermissionGrantProviderType.Role,
+            ProviderKey = "Admin",
+            Scope = PermissionGrantScope.Global
+        };
+
+        var result = await _validator.ValidateAsync(grant);
+
+        result.IsAllowed.Should().BeTrue();
+        result.IsSuperAdminOverride.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithTenantScopeInHostContext_AllowsAuthorizedManagement()
+    {
+        _currentUserMock.Setup(u => u.IsSuperAdmin).Returns(false);
+        _currentTenantMock.Setup(t => t.Id).Returns((string?)null);
+
+        var grant = new PermissionGrantInfo
+        {
+            PermissionName = "Test.Permission",
+            ProviderType = PermissionGrantProviderType.Role,
+            ProviderKey = "Admin",
+            Scope = PermissionGrantScope.Tenant,
+            TenantId = "tenant-b"
+        };
+
+        var result = await _validator.ValidateAsync(grant);
+
+        result.IsAllowed.Should().BeTrue();
+        result.IsSuperAdminOverride.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ValidateAsync_WithSuperAdmin_CrossTenantAlwaysAllowed()
     {
         _currentUserMock.Setup(u => u.IsSuperAdmin).Returns(true);

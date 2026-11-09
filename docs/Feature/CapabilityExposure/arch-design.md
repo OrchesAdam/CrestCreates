@@ -408,9 +408,11 @@ public static IEndpointRouteBuilder MapCrestCapabilityEndpoints(this IEndpointRo
 
 | Mode | Behavior |
 |---|---|
-| `InheritCapability` | No endpoint-level authorization metadata. Pipeline `AuthorizationMiddleware` enforces based on `CapabilityDescriptor.Permissions`. |
+| `InheritCapability` | No endpoint-level authorization metadata when the capability has no permissions. With non-empty `CapabilityDescriptor.Permissions`, the endpoint gets `routeHandler.RequireAuthorization()` so anonymous callers receive 401 before dispatch, while the pipeline `AuthorizationMiddleware` remains the business-permission authority (403 on denial). |
 | `RequireAuthenticated` | `routeHandler.RequireAuthorization()` + pipeline enforcement. |
 | `AllowAnonymous` | `routeHandler.AllowAnonymous()` + pipeline enforcement. Error if capability has non-empty permissions or is marked high-risk. |
+
+Hosts that map permission-bearing capability endpoints must run `UseAuthentication()` and `UseAuthorization()` (the platform `UseCrestWeb()` pipeline already does); inheriting endpoints without this middleware would otherwise fail at request time.
 
 ## 8. Legacy Dynamic API Boundary
 

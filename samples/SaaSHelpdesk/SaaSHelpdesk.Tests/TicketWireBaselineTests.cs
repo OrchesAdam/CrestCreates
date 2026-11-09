@@ -67,7 +67,7 @@ public class TicketWireBaselineTests : BaseTest
     }
 
     [Fact]
-    public void Ticket_endpoints_publish_no_endpoint_level_authorization_metadata()
+    public void Ticket_endpoints_mirror_capability_permissions_in_endpoint_authorization_metadata()
     {
         var dataSource = Factory.Services.GetRequiredService<EndpointDataSource>();
         var ticketEndpoints = dataSource.Endpoints.OfType<RouteEndpoint>()
@@ -75,11 +75,11 @@ public class TicketWireBaselineTests : BaseTest
             .ToList();
 
         ticketEndpoints.Should().HaveCount(11);
-        ticketEndpoints
-            .SelectMany(endpoint => endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>())
-            .Should().BeEmpty(
-                "permission enforcement is performed by the capability pipeline's authorization middleware; " +
-                "the generated contribution declares InheritCapability and must not bypass it with endpoint metadata");
+        ticketEndpoints.Should().OnlyContain(endpoint =>
+            endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>().Count == 1
+            && endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Authorization.IAllowAnonymous>() == null,
+            "every Ticket capability declares permissions, so InheritCapability publishes the anonymous 401 gate; " +
+            "the pipeline authorization middleware remains the 403 business-permission authority");
     }
 
     [Fact]
@@ -92,8 +92,8 @@ public class TicketWireBaselineTests : BaseTest
 
         read.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         write.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        var body = await read.Content.ReadAsStringAsync();
-        JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().Should().Be("Crest.Auth.Unauthorized");
+        // Anonymous rejection now happens in the host authorization middleware before the capability
+        // endpoint handler runs; the pipeline error envelope is no longer produced for this request.
     }
 
     [Fact]

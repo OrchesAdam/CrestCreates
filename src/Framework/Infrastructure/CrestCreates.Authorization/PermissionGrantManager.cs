@@ -23,13 +23,8 @@ public class PermissionGrantManager : IPermissionGrantManager
 
     public async Task GrantAsync(PermissionGrantInfo grant, CancellationToken cancellationToken = default)
     {
-        var normalizedGrant = NormalizeGrant(grant);
-
-        var validationResult = await _tenantPermissionScopeValidator.ValidateAsync(normalizedGrant, cancellationToken);
-        if (!validationResult.IsAllowed)
-        {
-            throw new InvalidOperationException($"权限授予被拒绝: {validationResult.FailureReason}");
-        }
+        var normalizedGrant = PermissionGrantNormalizer.Normalize(grant);
+        await EnsureScopeAllowedAsync(normalizedGrant, "授予", cancellationToken);
 
         var existingGrant = await _permissionGrantRepository.FindAsync(
             normalizedGrant.PermissionName,
@@ -57,7 +52,8 @@ public class PermissionGrantManager : IPermissionGrantManager
 
     public async Task RevokeAsync(PermissionGrantInfo grant, CancellationToken cancellationToken = default)
     {
-        var normalizedGrant = NormalizeGrant(grant);
+        var normalizedGrant = PermissionGrantNormalizer.Normalize(grant);
+        await EnsureScopeAllowedAsync(normalizedGrant, "撤销", cancellationToken);
 
         var existingGrant = await _permissionGrantRepository.FindAsync(
             normalizedGrant.PermissionName,
@@ -130,30 +126,16 @@ public class PermissionGrantManager : IPermissionGrantManager
             .ToArray();
     }
 
-    private static PermissionGrantInfo NormalizeGrant(PermissionGrantInfo grant)
+    private async Task EnsureScopeAllowedAsync(
+        PermissionGrantInfo grant,
+        string operation,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(grant.PermissionName))
+        var validationResult = await _tenantPermissionScopeValidator.ValidateAsync(grant, cancellationToken);
+        if (!validationResult.IsAllowed)
         {
-            throw new ArgumentException("PermissionName is required.", nameof(grant));
+            throw new InvalidOperationException($"权限{operation}被拒绝: {validationResult.FailureReason}");
         }
-
-        if (string.IsNullOrWhiteSpace(grant.ProviderKey))
-        {
-            throw new ArgumentException("ProviderKey is required.", nameof(grant));
-        }
-
-        if (grant.Scope == PermissionGrantScope.Tenant && string.IsNullOrWhiteSpace(grant.TenantId))
-        {
-            throw new ArgumentException("TenantId is required when Scope is Tenant.", nameof(grant));
-        }
-
-        return new PermissionGrantInfo
-        {
-            PermissionName = grant.PermissionName.Trim(),
-            ProviderType = grant.ProviderType,
-            ProviderKey = grant.ProviderKey.Trim(),
-            Scope = grant.Scope,
-            TenantId = grant.Scope == PermissionGrantScope.Global ? null : grant.TenantId?.Trim()
-        };
     }
+
 }

@@ -86,6 +86,32 @@ public class ProviderCapabilityTests : IDisposable
     }
 
     [Fact]
+    public void Explicit_isolation_on_unknown_ef_provider_is_rejected_before_execution()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<CapDbContext>(options =>
+            options.UseInMemoryDatabase("cap-unknown-" + Guid.NewGuid().ToString("N")));
+        services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
+            new EfCoreDbContextAdapter(sp.GetRequiredService<CapDbContext>()));
+        services.AddScoped<IDataBaseContext>(sp => sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
+        services.AddSingleton<IDomainEventPublisher>(new NoOpDomainEventPublisher());
+        services.AddUnitOfWork();
+        services.AddEfCoreUnitOfWork();
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        var act = () => manager.BeginScope(new UnitOfWorkOptions
+        {
+            IsolationLevel = IsolationLevel.ReadCommitted
+        });
+
+        act.Should().Throw<NotSupportedException>().WithMessage("*<none declared>*");
+        manager.CurrentOrNull.Should().BeNull("unknown providers must reject before creating any unit of work");
+    }
+
+    [Fact]
     public void Binding_without_declared_levels_rejects_explicit_isolation_before_creating_the_unit_of_work()
     {
         var factory = new CountingUnitOfWorkFactory();

@@ -98,11 +98,21 @@ internal static class CapabilityEndpointMapper
         // GroupName/Summary/Description/Deprecated/Visibility are stored in
         // Projection metadata for future OpenAPI integration.
 
-        // Authorization
-        if (descriptor.AuthorizationMode == CapabilityEndpointAuthorizationMode.RequireAuthenticated)
-            routeHandler.RequireAuthorization();
-        else if (descriptor.AuthorizationMode == CapabilityEndpointAuthorizationMode.AllowAnonymous)
-            routeHandler.AllowAnonymous();
+        // Authorization: the capability pipeline remains the business-permission authority. The HTTP
+        // metadata only mirrors it so anonymous callers receive 401 before dispatch and explicit
+        // anonymous endpoints stay reachable.
+        switch (descriptor.AuthorizationMode)
+        {
+            case CapabilityEndpointAuthorizationMode.RequireAuthenticated:
+                routeHandler.RequireAuthorization();
+                break;
+            case CapabilityEndpointAuthorizationMode.InheritCapability when capability.Permissions.Count > 0:
+                routeHandler.RequireAuthorization();
+                break;
+            case CapabilityEndpointAuthorizationMode.AllowAnonymous:
+                routeHandler.AllowAnonymous();
+                break;
+        }
     }
 
     private static string ResolveIdempotencyKey(HttpContext context)
