@@ -11,6 +11,7 @@ using CrestCreates.Data.EFCore.DbContexts;
 using CrestCreates.Data.EFCore.Repositories;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Features;
+using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Shared.Features;
 using CrestCreates.Domain.Shared.Settings;
@@ -86,6 +87,181 @@ public class SettingFeatureUniquenessTests
         rows.Should().ContainSingle("the unique index must keep one row for the host-null natural key");
         rows[0].Value.Should().Be("loser", "the losing writer must converge on the persisted row");
         findCalls.Should().Be(2, "the first read is stale and the retry re-reads the winner");
+    }
+
+    [Fact]
+    public async Task Setting_converges_inside_an_explicit_transaction()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = CreateContext(connection);
+        await context.Database.EnsureCreatedAsync();
+        var realRepository = new SettingRepository(new EfCoreDbContextAdapter(context));
+
+        var winner = new SettingValue(
+            Guid.NewGuid(), SettingName, SettingScope.Global, string.Empty, "winner", false, null);
+        await realRepository.InsertAsync(winner);
+
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        var findCalls = 0;
+        var repository = new Mock<ISettingRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                SettingName, SettingScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => findCalls++ == 0 ? null : winner);
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Returns((SettingValue entity, CancellationToken token) => realRepository.InsertAsync(entity, token));
+        repository
+            .Setup(repo => repo.UpdateAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Returns((SettingValue entity, CancellationToken token) => realRepository.UpdateAsync(entity, token));
+
+        var manager = CreateSettingManager(repository.Object);
+
+        await manager.SetGlobalAsync(SettingName, "loser");
+
+        await context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        var rows = await context.SettingValues.AsNoTracking().ToListAsync();
+        rows.Should().ContainSingle("the unique index must keep one row for the host-null natural key");
+        rows[0].Value.Should().Be("loser", "the losing writer must converge on the persisted row");
+        findCalls.Should().Be(2, "the first read is stale and the retry re-reads the winner");
+    }
+
+    [Fact]
+    public async Task Feature_no_transaction_converges_on_a_real_repository()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = CreateContext(connection);
+        await context.Database.EnsureCreatedAsync();
+        var realRepository = new FeatureRepository(new EfCoreDbContextAdapter(context));
+
+        var winner = new FeatureValue(
+            Guid.NewGuid(), FeatureName, FeatureScope.Global, string.Empty, "winner", null);
+        await realRepository.InsertAsync(winner);
+
+        var findCalls = 0;
+        var repository = new Mock<IFeatureRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                FeatureName, FeatureScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => findCalls++ == 0 ? null : winner);
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
+            .Returns((FeatureValue entity, CancellationToken token) => realRepository.InsertAsync(entity, token));
+        repository
+            .Setup(repo => repo.UpdateAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
+            .Returns((FeatureValue entity, CancellationToken token) => realRepository.UpdateAsync(entity, token));
+
+        var manager = CreateFeatureManager(repository.Object);
+
+        await manager.SetGlobalAsync(FeatureName, "loser");
+
+        var rows = await context.FeatureValues.AsNoTracking().ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].Value.Should().Be("loser");
+        findCalls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Feature_unique_violation_without_a_visible_winner_is_rethrown()
+    {
+        var repository = new Mock<IFeatureRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                FeatureName, FeatureScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FeatureValue?)null);
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new CrestUniqueConstraintException(nameof(FeatureValue), new InvalidOperationException()));
+
+        var manager = CreateFeatureManager(repository.Object);
+
+        var act = async () => await manager.SetGlobalAsync(FeatureName, "value");
+
+        await act.Should().ThrowAsync<CrestUniqueConstraintException>();
+        repository.Verify(
+            repo => repo.UpdateAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task Feature_converges_inside_an_explicit_transaction()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = CreateContext(connection);
+        await context.Database.EnsureCreatedAsync();
+        var realRepository = new FeatureRepository(new EfCoreDbContextAdapter(context));
+
+        var winner = new FeatureValue(
+            Guid.NewGuid(), FeatureName, FeatureScope.Global, string.Empty, "winner", null);
+        await realRepository.InsertAsync(winner);
+
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        var findCalls = 0;
+        var repository = new Mock<IFeatureRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                FeatureName, FeatureScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => findCalls++ == 0 ? null : winner);
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
+            .Returns((FeatureValue entity, CancellationToken token) => realRepository.InsertAsync(entity, token));
+        repository
+            .Setup(repo => repo.UpdateAsync(It.IsAny<FeatureValue>(), It.IsAny<CancellationToken>()))
+            .Returns((FeatureValue entity, CancellationToken token) => realRepository.UpdateAsync(entity, token));
+
+        var manager = CreateFeatureManager(repository.Object);
+
+        await manager.SetGlobalAsync(FeatureName, "loser");
+
+        await context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        var rows = await context.FeatureValues.AsNoTracking().ToListAsync();
+        rows.Should().ContainSingle("the unique index must keep one row for the host-null natural key");
+        rows[0].Value.Should().Be("loser", "the losing writer must converge on the persisted row");
+        findCalls.Should().Be(2, "the first read is stale and the retry re-reads the winner");
+    }
+
+    [Fact]
+    public async Task Transaction_failures_on_other_tables_are_not_reported_as_setting_convergence()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = CreateContext(connection);
+        await context.Database.EnsureCreatedAsync();
+
+        context.Tenants.Add(new Tenant(Guid.NewGuid(), "duplicate-name"));
+        await context.SaveChangesAsync();
+
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        context.Tenants.Add(new Tenant(Guid.NewGuid(), "duplicate-name"));
+
+        var realRepository = new SettingRepository(new EfCoreDbContextAdapter(context));
+        var repository = new Mock<ISettingRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                SettingName, SettingScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SettingValue?)null);
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Returns((SettingValue entity, CancellationToken token) => realRepository.InsertAsync(entity, token));
+
+        var manager = CreateSettingManager(repository.Object);
+
+        var act = async () => await manager.SetGlobalAsync(SettingName, "value");
+
+        await act.Should().ThrowAsync<DbUpdateException>(
+            "a unique violation on another table must not be translated into SettingValue convergence");
+        repository.Verify(
+            repo => repo.UpdateAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        await transaction.RollbackAsync();
+        (await context.SettingValues.AsNoTracking().CountAsync()).Should().Be(0);
     }
 
     [Fact]

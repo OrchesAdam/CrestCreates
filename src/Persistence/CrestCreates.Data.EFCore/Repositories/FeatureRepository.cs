@@ -23,9 +23,10 @@ public class FeatureRepository : EfCoreRepository<FeatureValue, System.Guid>, IF
     {
         try
         {
-            return await base.InsertAsync(entity, cancellationToken);
+            return await InsertWithImmediateSaveAsync(entity, cancellationToken);
         }
-        catch (DbUpdateException exception) when (EfCoreUniqueConstraintViolationDetector.IsUniqueConstraintViolation(exception))
+        catch (DbUpdateException exception) when (
+            EfCoreUniqueConstraintViolationDetector.IsUniqueConstraintViolation(exception, "FeatureValues"))
         {
             DetachAfterFailedInsert(entity);
             throw new CrestUniqueConstraintException(nameof(FeatureValue), exception);

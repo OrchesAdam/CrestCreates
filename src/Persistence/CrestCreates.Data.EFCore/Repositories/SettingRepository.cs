@@ -24,9 +24,10 @@ public class SettingRepository : EfCoreRepository<SettingValue, System.Guid>, IS
     {
         try
         {
-            return await base.InsertAsync(entity, cancellationToken);
+            return await InsertWithImmediateSaveAsync(entity, cancellationToken);
         }
-        catch (DbUpdateException exception) when (EfCoreUniqueConstraintViolationDetector.IsUniqueConstraintViolation(exception))
+        catch (DbUpdateException exception) when (
+            EfCoreUniqueConstraintViolationDetector.IsUniqueConstraintViolation(exception, "SettingValues"))
         {
             DetachAfterFailedInsert(entity);
             throw new CrestUniqueConstraintException(nameof(SettingValue), exception);

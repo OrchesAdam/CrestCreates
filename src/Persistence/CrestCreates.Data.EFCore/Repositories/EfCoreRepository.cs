@@ -83,6 +83,26 @@ namespace CrestCreates.Data.EFCore.Repositories
         }
 
         /// <summary>
+        /// Flushes the insert even when a unit-of-work transaction is active. Natural-key
+        /// convergence (Setting/Feature) must observe the provider unique violation at the
+        /// statement boundary: EF Core rolls back to its automatic savepoint, leaving the
+        /// transaction usable for the winner re-read, while a deferred flush would only fail at
+        /// the final commit where no caller can recover.
+        /// </summary>
+        protected async Task<TEntity> InsertWithImmediateSaveAsync(
+            TEntity entity,
+            CancellationToken cancellationToken = default)
+        {
+            await _dbContext.Set<TEntity>().AddAsync(entity, cancellationToken);
+            using var linked = UnitOfWorkExecutionContext.CombineWithCurrent(
+                cancellationToken,
+                _chainNode,
+                out var effective);
+            await _dbContext.SaveChangesAsync(effective);
+            return entity;
+        }
+
+        /// <summary>
         /// A failed insert leaves the entity tracked in Added state; detaching keeps a follow-up
         /// re-read from returning the loser's in-memory instance instead of the winner's row.
         /// </summary>
