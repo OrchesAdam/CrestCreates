@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace LibraryManagement.EntityFrameworkCore.Migrations
 {
     /// <inheritdoc />
-    [Migration("20261109090000_R3_12_SettingHostNullUnique")]
     public partial class R3_12_SettingHostNullUnique : Migration
     {
         /// <inheritdoc />
