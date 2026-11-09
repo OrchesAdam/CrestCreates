@@ -7,9 +7,6 @@ namespace CrestCreates.Caching;
 
 public class SettingCacheInvalidator
 {
-    private const string ItemCachePrefix = "Setting.Item";
-    private const string ScopeCachePrefix = "Setting.Scope";
-
     private readonly ICrestCacheService _cacheService;
     private readonly SettingCacheKeyContributor _cacheKeyContributor;
 
@@ -28,20 +25,21 @@ public class SettingCacheInvalidator
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
-        var itemKey = _cacheKeyContributor.GetItemCacheKey(scope, providerKey, name, tenantId);
-        var scopeKey = _cacheKeyContributor.GetScopeCacheKey(scope, providerKey, tenantId);
-
-        await _cacheService.RemoveAsync(ItemCachePrefix, itemKey);
-        await _cacheService.RemoveAsync(ScopeCachePrefix, scopeKey);
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetItemCacheKey(scope, providerKey, name, tenantId));
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetScopeCacheKey(scope, providerKey, tenantId));
     }
 
-    public Task InvalidateScopeAsync(
+    public async Task InvalidateScopeAsync(
         SettingScope scope,
         string providerKey,
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
-        var pattern = _cacheKeyContributor.GetScopePattern(scope, providerKey, tenantId);
-        return _cacheService.RemoveByPatternAsync(pattern);
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetScopeCacheKey(scope, providerKey, tenantId));
+        await _cacheService.RemoveByPatternAsync(
+            _cacheKeyContributor.GetScopeItemPattern(scope, providerKey, tenantId));
     }
 }

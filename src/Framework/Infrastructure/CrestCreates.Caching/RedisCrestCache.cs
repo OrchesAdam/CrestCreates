@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Caching.Abstractions;
@@ -49,22 +50,45 @@ public class RedisCrestCache : ICrestCache
     public async Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var fullPattern = _options.Prefix + pattern;
+        var prefix = _options.Prefix ?? string.Empty;
+        var regex = CacheGlob.CreateRegex(pattern);
         var server = _multiplexer.GetServer(_multiplexer.GetEndPoints()[0]);
-        await foreach (var key in server.KeysAsync(pattern: fullPattern).WithCancellation(cancellationToken))
+        await foreach (var key in EnumerateOwnedKeysAsync(server, prefix).WithCancellation(cancellationToken))
         {
-            await _database.KeyDeleteAsync(key);
+            if (regex.IsMatch(key.ToString().AsSpan(prefix.Length)))
+            {
+                await _database.KeyDeleteAsync(key);
+            }
         }
     }
 
     public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var pattern = _options.Prefix + "*";
+        var prefix = _options.Prefix ?? string.Empty;
         var server = _multiplexer.GetServer(_multiplexer.GetEndPoints()[0]);
-        await foreach (var key in server.KeysAsync(pattern: pattern).WithCancellation(cancellationToken))
+        await foreach (var key in EnumerateOwnedKeysAsync(server, prefix).WithCancellation(cancellationToken))
         {
             await _database.KeyDeleteAsync(key);
+        }
+    }
+
+    /// <summary>
+    /// Redis receives an escaped server-side prefix filter only; the instance prefix itself is
+    /// never interpreted as a glob. Keys are re-verified with ordinal prefix ownership because
+    /// Redis glob semantics differ from the shared in-process matcher.
+    /// </summary>
+    private static async IAsyncEnumerable<RedisKey> EnumerateOwnedKeysAsync(
+        IServer server,
+        string prefix)
+    {
+        var scanPattern = CacheGlob.Escape(prefix) + "*";
+        await foreach (var key in server.KeysAsync(pattern: scanPattern))
+        {
+            if (key.ToString().StartsWith(prefix, StringComparison.Ordinal))
+            {
+                yield return key;
+            }
         }
     }
 
@@ -78,10 +102,10 @@ public class RedisCrestCache : ICrestCache
     public async Task<long> GetCountAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var pattern = _options.Prefix + "*";
+        var prefix = _options.Prefix ?? string.Empty;
         var server = _multiplexer.GetServer(_multiplexer.GetEndPoints()[0]);
         var count = 0;
-        await foreach (var _ in server.KeysAsync(pattern: pattern).WithCancellation(cancellationToken))
+        await foreach (var _ in EnumerateOwnedKeysAsync(server, prefix).WithCancellation(cancellationToken))
         {
             count++;
         }

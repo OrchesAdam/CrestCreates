@@ -4,20 +4,16 @@ namespace CrestCreates.Caching;
 
 public class FeatureCacheKeyContributor
 {
+    public const string ItemCachePrefix = "Feature.Item";
+    public const string ScopeCachePrefix = "Feature.Scope";
+
     public string GetItemCacheKey(
         FeatureScope scope,
         string providerKey,
         string featureName,
         string? tenantId = null)
     {
-        return string.Join(
-            ":",
-            "Feature",
-            "Scope",
-            scope,
-            Normalize(providerKey),
-            Normalize(tenantId),
-            Normalize(featureName));
+        return ItemCachePrefix + ":" + GetScopeKeyPart(scope, providerKey, tenantId) + ":" + Normalize(featureName);
     }
 
     public string GetScopeCacheKey(
@@ -25,52 +21,40 @@ public class FeatureCacheKeyContributor
         string providerKey,
         string? tenantId = null)
     {
-        return string.Join(
-            ":",
-            "Feature",
-            "Scope",
-            scope,
-            Normalize(providerKey),
-            Normalize(tenantId));
+        return ScopeCachePrefix + ":" + GetScopeKeyPart(scope, providerKey, tenantId);
     }
 
-    public string GetScopePattern(
+    public string GetScopeItemPattern(
         FeatureScope scope,
         string providerKey,
         string? tenantId = null)
     {
-        return string.Join(
-            ":",
-            "Feature",
-            "*",
-            "Scope",
-            scope,
-            Normalize(providerKey),
-            Normalize(tenantId),
-            "*");
+        return ItemCachePrefix + ":" + GetEscapedScopeKeyPart(scope, providerKey, tenantId) + ":*";
     }
 
     public string GetTenantFeaturePattern(string tenantId)
     {
-        return string.Join(
-            ":",
-            "Feature",
-            "*",
-            "Scope",
-            FeatureScope.Tenant,
-            Normalize(tenantId),
-            "*");
+        return GetScopeItemPattern(FeatureScope.Tenant, tenantId, tenantId);
     }
 
     public string GetGlobalFeaturePattern()
     {
+        return GetScopeItemPattern(FeatureScope.Global, string.Empty, null);
+    }
+
+    private static string GetScopeKeyPart(FeatureScope scope, string providerKey, string? tenantId)
+    {
+        return string.Join(":", "Scope", scope, Normalize(providerKey), Normalize(tenantId));
+    }
+
+    private static string GetEscapedScopeKeyPart(FeatureScope scope, string providerKey, string? tenantId)
+    {
         return string.Join(
             ":",
-            "Feature",
-            "*",
             "Scope",
-            FeatureScope.Global,
-            "*");
+            scope,
+            CacheGlob.Escape(Normalize(providerKey)),
+            CacheGlob.Escape(Normalize(tenantId)));
     }
 
     private static string Normalize(string? value)

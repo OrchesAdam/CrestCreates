@@ -327,6 +327,12 @@ public sealed class PermissionCacheConsistencyIntegrationTests
             return _inner.SetAsync(prefix, tenantId, value, parts);
         }
 
+        public Task SetAsync<T>(string prefix, string? tenantId, T value, TimeSpan expiration, params object[] parts)
+        {
+            RejectPermissionPrefix(prefix);
+            return _inner.SetAsync(prefix, tenantId, value, expiration, parts);
+        }
+
         public Task RemoveAsync(string prefix, params object[] parts)
         {
             RejectPermissionPrefix(prefix);

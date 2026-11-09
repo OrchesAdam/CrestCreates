@@ -56,6 +56,60 @@ public class CacheBehaviorTests
         await cache.ClearAsync();
     }
 
+    [Theory]
+    [InlineData("?")]
+    [InlineData("*")]
+    [InlineData("[a]")]
+    [InlineData("\\")]
+    public async Task Configured_prefix_is_literal_namespace_ownership_not_a_glob(string metacharacter)
+    {
+        var root = $"Crest-test-{Guid.NewGuid():N}";
+        var owner = new CrestMemoryCache(new CacheOptions { Prefix = root + metacharacter + ":" });
+        var sibling = new CrestMemoryCache(new CacheOptions { Prefix = root + "X:" });
+        await owner.SetAsync("key", "owner");
+        await sibling.SetAsync("key", "sibling");
+        try
+        {
+            await owner.RemoveByPatternAsync("*");
+
+            (await owner.ExistsAsync("key")).Should().BeFalse(
+                "the pattern removal must still remove the instance's own keys");
+            (await sibling.ExistsAsync("key")).Should().BeTrue(
+                "characters in the configured prefix are literal namespace ownership, never wildcards");
+            (await owner.GetCountAsync()).Should().Be(0);
+            (await sibling.GetCountAsync()).Should().Be(1);
+
+            await owner.SetAsync("key", "owner-again");
+            await owner.ClearAsync();
+
+            (await owner.ExistsAsync("key")).Should().BeFalse();
+            (await sibling.ExistsAsync("key")).Should().BeTrue(
+                "clear must also treat the configured prefix literally");
+        }
+        finally
+        {
+            await owner.ClearAsync();
+            await sibling.ClearAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Pattern_escape_makes_wildcard_characters_literal()
+    {
+        var cache = new CrestMemoryCache(new CacheOptions { Prefix = NewPrefix() });
+        await cache.SetAsync("a*b", "literal-star");
+        await cache.SetAsync("aXb", "wildcard-star");
+        await cache.SetAsync(@"path\name", "literal-backslash");
+
+        await cache.RemoveByPatternAsync(@"a\*b");
+        await cache.RemoveByPatternAsync(@"path\\name");
+
+        (await cache.ExistsAsync("a*b")).Should().BeFalse();
+        (await cache.ExistsAsync("aXb")).Should().BeTrue("an escaped star must not act as a wildcard");
+        (await cache.ExistsAsync(@"path\name")).Should().BeFalse("an escaped backslash must stay literal");
+        await cache.ClearAsync();
+    }
+
     [Fact]
     public async Task Clear_only_removes_keys_under_the_configured_prefix()
     {
