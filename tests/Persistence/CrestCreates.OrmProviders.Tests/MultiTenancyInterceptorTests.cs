@@ -198,6 +198,274 @@ public class MultiTenancyInterceptorTests
         Assert.Contains("tenant-a", exception.Message);
     }
 
+    [Fact]
+    public async Task SavingChanges_Host_CanModifyAndDeleteMandatoryRowsWithExplicitUnchangedTenant()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            seed.Users.Add(new User(Guid.NewGuid(), "alice", "alice@example.com", "tenant-a"));
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var modify = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            var user = await modify.Users.IgnoreQueryFilters().SingleAsync();
+            user.Email = "alice.updated@example.com";
+
+            await modify.SaveChangesAsync();
+        }
+
+        await using (var verify = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            var persisted = await verify.Users.IgnoreQueryFilters().SingleAsync();
+            Assert.Equal("alice.updated@example.com", persisted.Email);
+            Assert.Equal("tenant-a", persisted.TenantId);
+        }
+
+        await using (var delete = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            var user = await delete.Users.IgnoreQueryFilters().SingleAsync();
+            delete.Users.Remove(user);
+
+            await delete.SaveChangesAsync();
+        }
+
+        await AssertNoUsersAsync(databaseName);
+    }
+
+    [Fact]
+    public async Task SavingChanges_Tenant_CanModifyAndDeleteItsOwnMandatoryRows()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            seed.Users.Add(new User(Guid.NewGuid(), "alice", "alice@example.com", "tenant-a"));
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var modify = new CrestCreatesDbContext(CreateOptions(databaseName, "tenant-a")))
+        {
+            var user = await modify.Users.IgnoreQueryFilters().SingleAsync();
+            user.Email = "alice.updated@example.com";
+
+            await modify.SaveChangesAsync();
+        }
+
+        await using (var delete = new CrestCreatesDbContext(CreateOptions(databaseName, "tenant-a")))
+        {
+            var user = await delete.Users.IgnoreQueryFilters().SingleAsync();
+            delete.Users.Remove(user);
+
+            await delete.SaveChangesAsync();
+        }
+
+        await AssertNoUsersAsync(databaseName);
+    }
+
+    [Fact]
+    public async Task SavingChanges_Host_CannotChangeMandatoryOwnershipAndNothingIsPersisted()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            seed.Users.Add(new User(Guid.NewGuid(), "alice", "alice@example.com", "tenant-a"));
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var mutate = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            var user = await mutate.Users.IgnoreQueryFilters().SingleAsync();
+            user.Email = "changed@example.com";
+            user.TenantId = "tenant-b";
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => mutate.SaveChangesAsync());
+            Assert.Contains("change tenant ownership", exception.Message);
+        }
+
+        await using var verify = new CrestCreatesDbContext(CreateOptions(databaseName, null));
+        var persisted = await verify.Users.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal("alice@example.com", persisted.Email);
+        Assert.Equal("tenant-a", persisted.TenantId);
+    }
+
+    [Fact]
+    public async Task SavingChanges_Host_CannotDeleteMandatoryRowWhileChangingOwnership()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            seed.Users.Add(new User(Guid.NewGuid(), "alice", "alice@example.com", "tenant-a"));
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var delete = new CrestCreatesDbContext(CreateOptions(databaseName, null)))
+        {
+            var user = await delete.Users.IgnoreQueryFilters().SingleAsync();
+            user.TenantId = "tenant-b";
+            delete.Users.Remove(user);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => delete.SaveChangesAsync());
+            Assert.Contains("change tenant ownership", exception.Message);
+        }
+
+        await using var verify = new CrestCreatesDbContext(CreateOptions(databaseName, null));
+        var persisted = await verify.Users.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal("tenant-a", persisted.TenantId);
+    }
+
+    [Fact]
+    public async Task SavingChanges_Tenant_CanModifyAndDeleteItsOwnOptionalRow()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            seed.Entities.Add(new OptionalTenantEntity { Id = Guid.NewGuid(), TenantId = "tenant-a", Name = "owned" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var modify = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            var entity = await modify.Entities.SingleAsync();
+            entity.Name = "updated";
+
+            await modify.SaveChangesAsync();
+        }
+
+        await using (var delete = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            var entity = await delete.Entities.SingleAsync();
+            delete.Entities.Remove(entity);
+
+            await delete.SaveChangesAsync();
+        }
+
+        await using var verify = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null));
+        Assert.Equal(0, await verify.Entities.IgnoreQueryFilters().CountAsync());
+    }
+
+    [Fact]
+    public async Task SavingChanges_Host_CanDeleteSharedOptionalRow()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null)))
+        {
+            seed.Entities.Add(new OptionalTenantEntity { Id = Guid.NewGuid(), Name = "shared" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var delete = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null)))
+        {
+            var entity = await delete.Entities.SingleAsync();
+            delete.Entities.Remove(entity);
+
+            await delete.SaveChangesAsync();
+        }
+
+        await using var verify = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null));
+        Assert.Equal(0, await verify.Entities.IgnoreQueryFilters().CountAsync());
+    }
+
+    [Fact]
+    public async Task SavingChanges_Host_CannotDeleteOptionalRowOwnedByTenant()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            seed.Entities.Add(new OptionalTenantEntity { Id = Guid.NewGuid(), TenantId = "tenant-a", Name = "owned" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var host = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null)))
+        {
+            var entity = await host.Entities.IgnoreQueryFilters().SingleAsync();
+            host.Entities.Remove(entity);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => host.SaveChangesAsync());
+            Assert.Contains("tenant-a", exception.Message);
+        }
+
+        await using var verify = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null));
+        Assert.Equal(1, await verify.Entities.IgnoreQueryFilters().CountAsync());
+    }
+
+    [Fact]
+    public async Task SavingChanges_SharedOptionalRow_CannotBecomeTenantOwned()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null)))
+        {
+            seed.Entities.Add(new OptionalTenantEntity { Id = Guid.NewGuid(), Name = "shared" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var tenant = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            var entity = await tenant.Entities.IgnoreQueryFilters().SingleAsync();
+            entity.TenantId = "tenant-a";
+            entity.Name = "claimed";
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => tenant.SaveChangesAsync());
+            Assert.Contains("change tenant ownership", exception.Message);
+            Assert.Contains("<shared>", exception.Message);
+        }
+
+        await using var verify = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null));
+        var persisted = await verify.Entities.IgnoreQueryFilters().SingleAsync();
+        Assert.True(string.IsNullOrEmpty(persisted.TenantId));
+        Assert.Equal("shared", persisted.Name);
+    }
+
+    [Fact]
+    public async Task SavingChanges_TenantOwnedOptionalRow_CannotBecomeShared()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            seed.Entities.Add(new OptionalTenantEntity { Id = Guid.NewGuid(), TenantId = "tenant-a", Name = "owned" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var tenant = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            var entity = await tenant.Entities.SingleAsync();
+            entity.TenantId = string.Empty;
+            entity.Name = "released";
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => tenant.SaveChangesAsync());
+            Assert.Contains("change tenant ownership", exception.Message);
+        }
+
+        await using var verify = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null));
+        var persisted = await verify.Entities.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal("tenant-a", persisted.TenantId);
+        Assert.Equal("owned", persisted.Name);
+    }
+
+    [Fact]
+    public async Task SavingChanges_OptionalRow_CannotMoveToAnotherTenant()
+    {
+        var databaseName = Guid.NewGuid();
+        await using (var seed = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            seed.Entities.Add(new OptionalTenantEntity { Id = Guid.NewGuid(), TenantId = "tenant-a", Name = "owned" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var tenant = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, "tenant-a")))
+        {
+            var entity = await tenant.Entities.SingleAsync();
+            entity.TenantId = "tenant-b";
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => tenant.SaveChangesAsync());
+            Assert.Contains("change tenant ownership", exception.Message);
+        }
+
+        await using var verify = new OptionalTenantDbContext(CreateOptionalOptions(databaseName, null));
+        var persisted = await verify.Entities.IgnoreQueryFilters().SingleAsync();
+        Assert.Equal("tenant-a", persisted.TenantId);
+    }
+
     private static async Task AssertNoUsersAsync(Guid databaseName)
     {
         await using var verify = new CrestCreatesDbContext(CreateOptions(databaseName, null));

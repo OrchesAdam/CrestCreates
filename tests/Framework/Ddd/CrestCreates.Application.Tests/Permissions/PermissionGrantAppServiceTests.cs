@@ -217,6 +217,154 @@ public class PermissionGrantAppServiceTests
         users.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData("grant-user")]
+    [InlineData("revoke-user")]
+    [InlineData("grant-role")]
+    [InlineData("revoke-role")]
+    public async Task TenantScopedMutation_WithWhitespaceTenantId_RejectsMissingSubjectBeforeManager(string operation)
+    {
+        var (service, manager, users, roles, checker) = CreateService(currentTenantId: "tenant-a");
+        checker
+            .Setup(c => c.CheckAsync(PermissionManagementPermissions.Manage))
+            .Returns(Task.CompletedTask);
+        var userId = Guid.NewGuid();
+        users
+            .Setup(repository => repository.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((User?)null);
+        roles
+            .Setup(repository => repository.FindByNameAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Role?)null);
+
+        var action = CreateMutation(service, operation, userId, " tenant-a ");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*不属于租户*");
+        manager.VerifyNoOtherCalls();
+
+        if (operation.EndsWith("user", StringComparison.Ordinal))
+        {
+            users.Verify(
+                repository => repository.GetAsync(userId, It.IsAny<CancellationToken>()),
+                Times.Once,
+                "the normalized tenant must reach the subject ownership check instead of the cross-tenant early return");
+        }
+        else
+        {
+            roles.Verify(
+                repository => repository.FindByNameAsync(
+                    "Librarian", "tenant-a", It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+    }
+
+    [Theory]
+    [InlineData("grant-user")]
+    [InlineData("revoke-user")]
+    [InlineData("grant-role")]
+    [InlineData("revoke-role")]
+    public async Task TenantScopedMutation_WithWhitespaceInputs_PassesOneNormalizedGrantToManager(string operation)
+    {
+        var (service, manager, users, roles, checker) = CreateService(currentTenantId: " tenant-a ");
+        checker
+            .Setup(c => c.CheckAsync(PermissionManagementPermissions.Manage))
+            .Returns(Task.CompletedTask);
+        var userId = Guid.NewGuid();
+        users
+            .Setup(repository => repository.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new User(userId, "librarian", "librarian@test", "tenant-a"));
+        roles
+            .Setup(repository => repository.FindByNameAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Role { Name = "Librarian", TenantId = "tenant-a" });
+        manager
+            .Setup(m => m.GrantAsync(It.IsAny<PermissionGrantInfo>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        manager
+            .Setup(m => m.RevokeAsync(It.IsAny<PermissionGrantInfo>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await CreateMutation(service, operation, userId, " tenant-a ")();
+
+        var expectedProviderKey = operation.EndsWith("user", StringComparison.Ordinal)
+            ? userId.ToString()
+            : "Librarian";
+        if (operation.StartsWith("grant", StringComparison.Ordinal))
+        {
+            manager.Verify(
+                m => m.GrantAsync(
+                    It.Is<PermissionGrantInfo>(grant =>
+                        grant.PermissionName == "Books.View" &&
+                        grant.ProviderType == (operation.EndsWith("user", StringComparison.Ordinal)
+                            ? PermissionGrantProviderType.User
+                            : PermissionGrantProviderType.Role) &&
+                        grant.ProviderKey == expectedProviderKey &&
+                        grant.Scope == PermissionGrantScope.Tenant &&
+                        grant.TenantId == "tenant-a"),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+        else
+        {
+            manager.Verify(
+                m => m.RevokeAsync(
+                    It.Is<PermissionGrantInfo>(grant =>
+                        grant.PermissionName == "Books.View" &&
+                        grant.ProviderType == (operation.EndsWith("user", StringComparison.Ordinal)
+                            ? PermissionGrantProviderType.User
+                            : PermissionGrantProviderType.Role) &&
+                        grant.ProviderKey == expectedProviderKey &&
+                        grant.Scope == PermissionGrantScope.Tenant &&
+                        grant.TenantId == "tenant-a"),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+    }
+
+    [Theory]
+    [InlineData("grant-user")]
+    [InlineData("revoke-user")]
+    [InlineData("grant-role")]
+    [InlineData("revoke-role")]
+    public async Task TenantScopedMutation_WithWhitespaceTenantId_ReachesRealManagerButNeverWritesMissingSubject(string operation)
+    {
+        var grants = new Mock<IPermissionGrantRepository>();
+        var store = new Mock<IPermissionGrantStore>();
+        var tenant = new Mock<ICurrentTenant>();
+        tenant.SetupGet(currentTenant => currentTenant.Id).Returns("tenant-a");
+        var scopeValidator = new TenantPermissionScopeValidator(
+            tenant.Object,
+            new Mock<ICurrentUser>().Object,
+            new Mock<ITenantProvider>().Object,
+            Mock.Of<Microsoft.Extensions.Logging.ILogger<TenantPermissionScopeValidator>>());
+        var manager = new PermissionGrantManager(grants.Object, store.Object, scopeValidator);
+
+        var users = new Mock<IUserRepository>();
+        var roles = new Mock<IRoleRepository>();
+        users
+            .Setup(repository => repository.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((User?)null);
+        roles
+            .Setup(repository => repository.FindByNameAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Role?)null);
+        var checker = new Mock<IPermissionChecker>();
+        checker
+            .Setup(c => c.CheckAsync(PermissionManagementPermissions.Manage))
+            .Returns(Task.CompletedTask);
+
+        var service = new PermissionGrantAppService(
+            manager, roles.Object, users.Object, tenant.Object, checker.Object);
+
+        var action = CreateMutation(service, operation, Guid.NewGuid(), " tenant-a ");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*不属于租户*");
+        grants.VerifyNoOtherCalls();
+        store.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public void AddPermissionManagement_RegistersPermissionDefinitions()
     {
@@ -230,6 +378,23 @@ public class PermissionGrantAppServiceTests
 
         definitions.GetOrNull(PermissionManagementPermissions.Read).Should().NotBeNull();
         definitions.GetOrNull(PermissionManagementPermissions.Manage).Should().NotBeNull();
+    }
+
+    private static Func<Task> CreateMutation(
+        PermissionGrantAppService service,
+        string operation,
+        Guid userId,
+        string tenantId)
+    {
+        var change = TenantScopedChange(tenantId, " Books.View ");
+        return operation switch
+        {
+            "grant-user" => () => service.GrantToUserAsync($" {userId} ", change),
+            "revoke-user" => () => service.RevokeFromUserAsync($" {userId} ", change),
+            "grant-role" => () => service.GrantToRoleAsync(" Librarian ", change),
+            "revoke-role" => () => service.RevokeFromRoleAsync(" Librarian ", change),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, null)
+        };
     }
 
     private static (

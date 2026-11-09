@@ -122,8 +122,8 @@ public class PermissionGrantAppService : IPermissionGrantAppService
     {
         await EnsureReadGrantedAsync();
 
-        var effectiveTenantId = string.IsNullOrWhiteSpace(tenantId) ? _currentTenant.Id : tenantId.Trim();
-        var currentTenantId = _currentTenant.Id;
+        var effectiveTenantId = string.IsNullOrWhiteSpace(tenantId) ? _currentTenant.Id?.Trim() : tenantId.Trim();
+        var currentTenantId = _currentTenant.Id?.Trim();
         if (!string.IsNullOrEmpty(currentTenantId) &&
             !string.Equals(currentTenantId, effectiveTenantId, StringComparison.OrdinalIgnoreCase))
         {
@@ -160,7 +160,7 @@ public class PermissionGrantAppService : IPermissionGrantAppService
         var roles = await _roleRepository.GetByUserIdAsync(parsedUserId, cancellationToken);
         return roles
             .Where(role => string.IsNullOrWhiteSpace(tenantId) ||
-                           string.Equals(role.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+                           string.Equals(role.TenantId?.Trim(), tenantId.Trim(), StringComparison.OrdinalIgnoreCase))
             .Where(role => !string.IsNullOrWhiteSpace(role.Name))
             .Select(role => role.Name)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -181,7 +181,7 @@ public class PermissionGrantAppService : IPermissionGrantAppService
         PermissionGrantInfo grant,
         CancellationToken cancellationToken)
     {
-        var currentTenantId = _currentTenant.Id;
+        var currentTenantId = _currentTenant.Id?.Trim();
         if (string.IsNullOrEmpty(currentTenantId) ||
             grant.Scope != PermissionGrantScope.Tenant ||
             !string.Equals(currentTenantId, grant.TenantId, StringComparison.OrdinalIgnoreCase))
@@ -212,7 +212,7 @@ public class PermissionGrantAppService : IPermissionGrantAppService
 
     private async Task EnsureTenantUserReadableAsync(string userId, CancellationToken cancellationToken)
     {
-        var currentTenantId = _currentTenant.Id;
+        var currentTenantId = _currentTenant.Id?.Trim();
         if (string.IsNullOrEmpty(currentTenantId))
         {
             return;
@@ -227,7 +227,7 @@ public class PermissionGrantAppService : IPermissionGrantAppService
 
     private async Task EnsureTenantRoleReadableAsync(string roleName, CancellationToken cancellationToken)
     {
-        var currentTenantId = _currentTenant.Id;
+        var currentTenantId = _currentTenant.Id?.Trim();
         if (string.IsNullOrEmpty(currentTenantId))
         {
             return;
@@ -252,7 +252,7 @@ public class PermissionGrantAppService : IPermissionGrantAppService
 
         var user = await _userRepository.GetAsync(parsedUserId, cancellationToken);
         return user is not null &&
-               string.Equals(user.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)
+               string.Equals(user.TenantId?.Trim(), tenantId.Trim(), StringComparison.OrdinalIgnoreCase)
             ? user
             : null;
     }
@@ -262,14 +262,14 @@ public class PermissionGrantAppService : IPermissionGrantAppService
         PermissionGrantProviderType providerType,
         string providerKey)
     {
-        return new PermissionGrantInfo
+        return PermissionGrantNormalizer.Normalize(new PermissionGrantInfo
         {
             PermissionName = input.PermissionName,
             ProviderType = providerType,
             ProviderKey = providerKey,
             Scope = input.Scope,
             TenantId = input.TenantId
-        };
+        });
     }
 
     private static PermissionGrantDto MapToDto(PermissionGrantInfo grant)
