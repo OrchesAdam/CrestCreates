@@ -93,7 +93,7 @@ namespace CrestCreates.Data.EFCore.Interceptors
                     break;
                 case EntityState.Modified:
                 case EntityState.Deleted:
-                    EnsureOwnershipUnchanged(entry, nameof(IMustHaveTenant.TenantId), entityTenantId, currentTenantId, required: true);
+                    EnsureRequiredOwnershipUnchanged(entry, nameof(IMustHaveTenant.TenantId), entityTenantId, currentTenantId);
                     break;
             }
         }
@@ -125,31 +125,57 @@ namespace CrestCreates.Data.EFCore.Interceptors
                     break;
                 case EntityState.Modified:
                 case EntityState.Deleted:
-                    EnsureOwnershipUnchanged(entry, nameof(IMultiTenant.TenantId), entityTenantId, currentTenantId, required: false);
+                    EnsureOptionalOwnershipUnchanged(entry, nameof(IMultiTenant.TenantId), entityTenantId, currentTenantId);
                     break;
             }
         }
 
-        private static void EnsureOwnershipUnchanged(
+        /// <summary>
+        /// Mandatory modifications/deletes keep the persisted tenant. The host may administer a row
+        /// that names an explicit tenant, but only while that ownership stays unchanged; a tenant
+        /// context remains limited to its own rows.
+        /// </summary>
+        private static void EnsureRequiredOwnershipUnchanged(
             Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
             string propertyName,
             string? entityTenantId,
-            string? currentTenantId,
-            bool required)
+            string? currentTenantId)
         {
             var originalTenantId = Normalize(entry.Property(propertyName).OriginalValue as string);
 
-            if (required && entityTenantId is null)
+            if (entityTenantId is null)
             {
                 throw new InvalidOperationException(
                     "Cannot write IMustHaveTenant entity without a persisted tenant id.");
             }
 
-            if (originalTenantId is not null &&
-                !string.Equals(entityTenantId, originalTenantId, StringComparison.Ordinal))
+            if (!string.Equals(entityTenantId, originalTenantId, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException(
-                    $"Cannot change tenant ownership from '{originalTenantId}' to '{entityTenantId}'.");
+                throw OwnershipChanged(originalTenantId, entityTenantId);
+            }
+
+            if (currentTenantId is not null &&
+                !string.Equals(entityTenantId, currentTenantId, StringComparison.Ordinal))
+            {
+                throw TenantMismatch(entityTenantId, currentTenantId);
+            }
+        }
+
+        /// <summary>
+        /// Optional modifications/deletes must keep the persisted ownership exactly, including the
+        /// shared (empty) state. The host writes only shared rows; a tenant writes only its own.
+        /// </summary>
+        private static void EnsureOptionalOwnershipUnchanged(
+            Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+            string propertyName,
+            string? entityTenantId,
+            string? currentTenantId)
+        {
+            var originalTenantId = Normalize(entry.Property(propertyName).OriginalValue as string);
+
+            if (!string.Equals(entityTenantId, originalTenantId, StringComparison.Ordinal))
+            {
+                throw OwnershipChanged(originalTenantId, entityTenantId);
             }
 
             if (!string.Equals(entityTenantId, currentTenantId, StringComparison.Ordinal))
@@ -160,6 +186,10 @@ namespace CrestCreates.Data.EFCore.Interceptors
 
         private static string? Normalize(string? tenantId)
             => string.IsNullOrEmpty(tenantId) ? null : tenantId;
+
+        private static InvalidOperationException OwnershipChanged(string? originalTenantId, string? entityTenantId)
+            => new(
+                $"Cannot change tenant ownership from '{originalTenantId ?? "<shared>"}' to '{entityTenantId ?? "<shared>"}'.");
 
         private static InvalidOperationException TenantMismatch(string? entityTenantId, string? currentTenantId)
             => new(
