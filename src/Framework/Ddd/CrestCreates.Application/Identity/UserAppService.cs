@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Identity;
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Permission;
@@ -23,8 +24,10 @@ public class UserAppService : IUserAppService
     private readonly IPasswordHasher _passwordHasher;
     private readonly IPasswordPolicyValidator _passwordPolicyValidator;
     private readonly ICurrentTenant _currentTenant;
+    private readonly ICurrentUser _currentUser;
     private readonly IFeatureChecker _featureChecker;
     private readonly IIdentitySecurityLogWriter _securityLogWriter;
+    private readonly IPermissionChecker _permissionChecker;
 
     public UserAppService(
         IUserRepository userRepository,
@@ -33,8 +36,10 @@ public class UserAppService : IUserAppService
         IPasswordHasher passwordHasher,
         IPasswordPolicyValidator passwordPolicyValidator,
         ICurrentTenant currentTenant,
+        ICurrentUser currentUser,
         IFeatureChecker featureChecker,
-        IIdentitySecurityLogWriter securityLogWriter)
+        IIdentitySecurityLogWriter securityLogWriter,
+        IPermissionChecker permissionChecker)
     {
         _userRepository = userRepository;
         _roleRepository = roleRepository;
@@ -42,14 +47,21 @@ public class UserAppService : IUserAppService
         _passwordHasher = passwordHasher;
         _passwordPolicyValidator = passwordPolicyValidator;
         _currentTenant = currentTenant;
+        _currentUser = currentUser;
         _featureChecker = featureChecker;
         _securityLogWriter = securityLogWriter;
+        _permissionChecker = permissionChecker;
     }
 
     public async Task<IdentityUserDto> CreateAsync(
         CreateIdentityUserDto input,
         CancellationToken cancellationToken = default)
     {
+        await EnsureManageGrantedAsync();
+        var tenantId = NormalizeRequired(input.TenantId, nameof(input.TenantId));
+        EnsureTenantOperable(tenantId);
+        await EnsureSuperAdminChangeAllowedAsync(input.IsSuperAdmin);
+
         if (!await _featureChecker.IsEnabledAsync("Identity.UserCreationEnabled", cancellationToken))
         {
             throw new InvalidOperationException("用户创建功能已禁用");
@@ -57,7 +69,6 @@ public class UserAppService : IUserAppService
 
         var userName = NormalizeRequired(input.UserName, nameof(input.UserName));
         var email = NormalizeRequired(input.Email, nameof(input.Email));
-        var tenantId = NormalizeRequired(input.TenantId, nameof(input.TenantId));
 
         await EnsureUserNameAvailableAsync(userName, tenantId, cancellationToken);
         await EnsureEmailAvailableAsync(email, tenantId, null, cancellationToken);
@@ -83,15 +94,29 @@ public class UserAppService : IUserAppService
 
     public async Task<IdentityUserDto?> GetAsync(Guid userId, CancellationToken cancellationToken = default)
     {
+        await EnsureReadGrantedAsync();
         var user = await _userRepository.GetAsync(userId, cancellationToken);
-        return user == null ? null : MapToDto(user);
+        if (user == null)
+        {
+            return null;
+        }
+
+        EnsureTenantOperable(user.TenantId);
+        return MapToDto(user);
     }
 
     public async Task<IReadOnlyList<IdentityUserDto>> GetListAsync(
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
-        var effectiveTenantId = string.IsNullOrWhiteSpace(tenantId) ? _currentTenant.Id : tenantId;
+        await EnsureReadGrantedAsync();
+        var requestedTenantId = Normalize(tenantId);
+        if (requestedTenantId is not null)
+        {
+            EnsureTenantOperable(requestedTenantId);
+        }
+
+        var effectiveTenantId = requestedTenantId ?? Normalize(_currentTenant.Id);
         var users = string.IsNullOrWhiteSpace(effectiveTenantId)
             ? await _userRepository.GetListAsync(cancellationToken)
             : await _userRepository.GetListAsync(user => user.TenantId == effectiveTenantId, cancellationToken);
@@ -107,8 +132,12 @@ public class UserAppService : IUserAppService
         UpdateIdentityUserDto input,
         CancellationToken cancellationToken = default)
     {
+        await EnsureManageGrantedAsync();
         var user = await _userRepository.GetAsync(userId, cancellationToken)
                    ?? throw new InvalidOperationException($"用户 '{userId}' 不存在");
+
+        EnsureTenantOperable(user.TenantId);
+        await EnsureSuperAdminChangeAllowedAsync(user.IsSuperAdmin || input.IsSuperAdmin);
 
         var email = NormalizeRequired(input.Email, nameof(input.Email));
         await EnsureEmailAvailableAsync(email, user.TenantId, user.Id, cancellationToken);
@@ -125,8 +154,12 @@ public class UserAppService : IUserAppService
 
     public async Task SetActiveAsync(Guid userId, bool isActive, CancellationToken cancellationToken = default)
     {
+        await EnsureManageGrantedAsync();
         var user = await _userRepository.GetAsync(userId, cancellationToken)
                    ?? throw new InvalidOperationException($"用户 '{userId}' 不存在");
+
+        EnsureTenantOperable(user.TenantId);
+        await EnsureSuperAdminChangeAllowedAsync(user.IsSuperAdmin);
 
         user.IsActive = isActive;
         user.LastModificationTime = DateTime.UtcNow;
@@ -142,11 +175,29 @@ public class UserAppService : IUserAppService
         ChangeIdentityPasswordDto input,
         CancellationToken cancellationToken = default)
     {
+        var isSelf = IsCurrentUser(userId);
+        if (isSelf)
+        {
+            RequireAuthenticated();
+        }
+        else
+        {
+            await EnsureManageGrantedAsync();
+        }
+
         var user = await _userRepository.GetAsync(userId, cancellationToken)
                    ?? throw new InvalidOperationException($"用户 '{userId}' 不存在");
 
-        if (string.IsNullOrWhiteSpace(user.PasswordHash) ||
-            !_passwordHasher.VerifyPassword(user.PasswordHash, input.CurrentPassword))
+        if (!isSelf)
+        {
+            EnsureTenantOperable(user.TenantId);
+            await EnsureSuperAdminChangeAllowedAsync(user.IsSuperAdmin);
+        }
+
+        // Self-service keeps the current-password proof; a scoped manager performs a reset.
+        if (isSelf &&
+            (string.IsNullOrWhiteSpace(user.PasswordHash) ||
+             !_passwordHasher.VerifyPassword(user.PasswordHash, input.CurrentPassword)))
         {
             throw new UnauthorizedAccessException("当前密码错误");
         }
@@ -166,8 +217,11 @@ public class UserAppService : IUserAppService
 
     public async Task AssignRoleAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default)
     {
+        await EnsureManageGrantedAsync();
         var user = await _userRepository.GetAsync(userId, cancellationToken)
                    ?? throw new InvalidOperationException($"用户 '{userId}' 不存在");
+        EnsureTenantOperable(user.TenantId);
+
         var role = await _roleRepository.GetAsync(roleId, cancellationToken)
                    ?? throw new InvalidOperationException($"角色 '{roleId}' 不存在");
 
@@ -189,6 +243,11 @@ public class UserAppService : IUserAppService
 
     public async Task RemoveRoleAsync(Guid userId, Guid roleId, CancellationToken cancellationToken = default)
     {
+        await EnsureManageGrantedAsync();
+        var user = await _userRepository.GetAsync(userId, cancellationToken)
+                   ?? throw new InvalidOperationException($"用户 '{userId}' 不存在");
+        EnsureTenantOperable(user.TenantId);
+
         var existingLink = await _userRoleRepository.FindAsync(userId, roleId, cancellationToken);
         if (existingLink == null)
         {
@@ -202,6 +261,11 @@ public class UserAppService : IUserAppService
         Guid userId,
         CancellationToken cancellationToken = default)
     {
+        await EnsureReadGrantedAsync();
+        var user = await _userRepository.GetAsync(userId, cancellationToken)
+                   ?? throw new InvalidOperationException($"用户 '{userId}' 不存在");
+        EnsureTenantOperable(user.TenantId);
+
         var roles = await _roleRepository.GetByUserIdAsync(userId, cancellationToken);
         return roles
             .Select(role => new IdentityUserRoleDto
@@ -211,6 +275,69 @@ public class UserAppService : IUserAppService
                 DisplayName = role.DisplayName
             })
             .ToArray();
+    }
+
+    private async Task EnsureReadGrantedAsync()
+    {
+        await _permissionChecker.CheckAsync(IdentityManagementPermissions.UsersRead).ConfigureAwait(false);
+    }
+
+    private async Task EnsureManageGrantedAsync()
+    {
+        await _permissionChecker.CheckAsync(IdentityManagementPermissions.UsersManage).ConfigureAwait(false);
+    }
+
+    private async Task EnsureSuperAdminChangeAllowedAsync(bool touchesSuperAdmin)
+    {
+        if (!touchesSuperAdmin)
+        {
+            return;
+        }
+
+        if (!_currentUser.IsSuperAdmin && !string.IsNullOrWhiteSpace(_currentTenant.Id))
+        {
+            throw new InvalidOperationException("SuperAdmin 变更只能在 host 上下文执行");
+        }
+
+        await _permissionChecker.CheckAsync(IdentityManagementPermissions.UsersManageSuperAdmin)
+            .ConfigureAwait(false);
+    }
+
+    private void EnsureTenantOperable(string targetTenantId)
+    {
+        if (_currentUser.IsSuperAdmin)
+        {
+            return;
+        }
+
+        var currentTenantId = Normalize(_currentTenant.Id);
+        if (currentTenantId is null)
+        {
+            return;
+        }
+
+        if (!string.Equals(currentTenantId, Normalize(targetTenantId), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("租户上下文只能管理本租户用户");
+        }
+    }
+
+    private void RequireAuthenticated()
+    {
+        if (!_currentUser.IsAuthenticated || string.IsNullOrWhiteSpace(_currentUser.Id))
+        {
+            throw new UnauthorizedAccessException("当前用户上下文不存在");
+        }
+    }
+
+    private bool IsCurrentUser(Guid userId)
+    {
+        return Guid.TryParse(_currentUser.Id, out var callerId) && callerId == userId;
+    }
+
+    private static string? Normalize(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private async Task EnsureUserNameAvailableAsync(
