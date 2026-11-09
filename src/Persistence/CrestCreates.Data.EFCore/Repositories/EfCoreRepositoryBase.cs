@@ -396,9 +396,9 @@ namespace CrestCreates.Data.EFCore.Repositories
                 .AsNoTracking()
                 .Where(e => e.Id.Equals(entity.Id))
                 .FirstOrDefaultAsync(cancellationToken);
-            var currentTenant = CurrentTenant?.Id;
-            var persistedTenant = persisted is null ? null : ReadTenantId(persisted);
-            var submittedTenant = ReadTenantId(entity);
+            var currentTenant = NormalizeTenantId(CurrentTenant?.Id);
+            var persistedTenant = persisted is null ? null : NormalizeTenantId(ReadTenantId(persisted));
+            var submittedTenant = NormalizeTenantId(ReadTenantId(entity));
 
             if (persisted is null)
             {
@@ -406,10 +406,29 @@ namespace CrestCreates.Data.EFCore.Repositories
                     $"{typeof(TEntity).Name} (Id={entity.Id}) does not exist or is not visible for a tenant-scoped write.");
             }
 
-            if (!string.Equals(persistedTenant, currentTenant, StringComparison.Ordinal))
+            if (!string.Equals(persistedTenant, submittedTenant, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    $"{typeof(TEntity).Name} (Id={entity.Id}) belongs to tenant '{persistedTenant}', not the current tenant '{currentTenant}'.");
+                    $"Cannot change tenant ownership from '{persistedTenant ?? "<shared>"}' to '{submittedTenant ?? "<shared>"}'.");
+            }
+
+            if (currentTenant is null)
+            {
+                if (typeof(IMustHaveTenant).IsAssignableFrom(typeof(TEntity)))
+                {
+                    if (submittedTenant is null)
+                    {
+                        throw new InvalidOperationException(
+                            "Cannot write IMustHaveTenant entity without a persisted tenant id.");
+                    }
+                }
+                else if (submittedTenant is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"{typeof(TEntity).Name} (Id={entity.Id}) belongs to tenant '{submittedTenant}' and the host may only write shared rows.");
+                }
+
+                return;
             }
 
             if (!string.Equals(submittedTenant, currentTenant, StringComparison.Ordinal))
@@ -418,6 +437,9 @@ namespace CrestCreates.Data.EFCore.Repositories
                     $"Cannot write {typeof(TEntity).Name} for tenant '{submittedTenant}' while the current tenant is '{currentTenant}'.");
             }
         }
+
+        private static string? NormalizeTenantId(string? tenantId)
+            => string.IsNullOrEmpty(tenantId) ? null : tenantId;
 
         private async Task SaveChangesIfNoActiveTransactionAsync(CancellationToken cancellationToken)
         {
