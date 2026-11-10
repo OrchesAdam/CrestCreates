@@ -116,10 +116,12 @@ internal static class EfCoreUniqueConstraintViolationDetector
         }
 
         var message = exception.Message;
+        var reportedObject = ExtractQuotedValue(message, "in object '");
         var objectNames = target.Schema is null
             ? new[] { target.Table, "dbo." + target.Table }
             : new[] { target.Schema + "." + target.Table };
-        if (!objectNames.Any(name => message.Contains("'" + name + "'", StringComparison.Ordinal)))
+        if (reportedObject is null ||
+            !objectNames.Contains(reportedObject, StringComparer.Ordinal))
         {
             return false;
         }
