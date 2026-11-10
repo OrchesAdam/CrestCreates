@@ -19,6 +19,7 @@ using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using LibraryManagement.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Npgsql;
@@ -262,6 +263,113 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Cross_schema_same_index_name_is_not_setting_convergence()
+    {
+        var (context, schemas) = await CreateCrossSchemaContextAsync();
+        await using var _ = context;
+        await context.Database.EnsureCreatedAsync();
+        context.Tenants.Add(new CrestCreates.Domain.Permission.Tenant(Guid.NewGuid(), "duplicate-name"));
+        await context.SaveChangesAsync();
+
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        context.Tenants.Add(new CrestCreates.Domain.Permission.Tenant(Guid.NewGuid(), "duplicate-name"));
+        var setting = new SettingValue(
+            Guid.NewGuid(), SettingName, SettingScope.Global, string.Empty, "new", false, null);
+
+        var failure = await Record.ExceptionAsync(() => new SettingRepository(context).InsertAsync(setting));
+
+        AssertPostgresForeignConflict(failure, expectedSchema: schemas.Tenant, expectedTable: "Tenants");
+        context.Entry(setting).State.Should().Be(
+            EntityState.Added,
+            "a same-named index in another schema must not detach the Setting insert");
+        (await context.SettingValues.AsNoTracking().CountAsync()).Should().Be(0);
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task Cross_schema_same_index_name_is_not_feature_convergence()
+    {
+        var (context, schemas) = await CreateCrossSchemaContextAsync();
+        await using var _ = context;
+        await context.Database.EnsureCreatedAsync();
+        context.Tenants.Add(new CrestCreates.Domain.Permission.Tenant(Guid.NewGuid(), "duplicate-name"));
+        await context.SaveChangesAsync();
+
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        context.Tenants.Add(new CrestCreates.Domain.Permission.Tenant(Guid.NewGuid(), "duplicate-name"));
+        var feature = new CrestCreates.Domain.Features.FeatureValue(
+            Guid.NewGuid(), FeatureName, CrestCreates.Domain.Shared.Features.FeatureScope.Global,
+            string.Empty, "new", null);
+
+        var failure = await Record.ExceptionAsync(
+            () => new FeatureRepository(context).InsertAsync(feature));
+
+        AssertPostgresForeignConflict(failure, expectedSchema: schemas.Tenant, expectedTable: "Tenants");
+        context.Entry(feature).State.Should().Be(EntityState.Added);
+        (await context.FeatureValues.AsNoTracking().CountAsync()).Should().Be(0);
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task Cross_schema_same_table_and_index_name_is_not_setting_convergence()
+    {
+        var (context, schemas) = await CreateCrossSchemaContextAsync(tenantUsesSettingsTableName: true);
+        await using var _ = context;
+        await context.Database.EnsureCreatedAsync();
+        context.Model.FindEntityType(typeof(SettingValue))!.GetSchema().Should().Be(schemas.Settings);
+        context.Model.FindEntityType(typeof(CrestCreates.Domain.Permission.Tenant))!.GetTableName()
+            .Should().Be("Settings");
+
+        context.Tenants.Add(new CrestCreates.Domain.Permission.Tenant(Guid.NewGuid(), "duplicate-name"));
+        await context.SaveChangesAsync();
+
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        context.Tenants.Add(new CrestCreates.Domain.Permission.Tenant(Guid.NewGuid(), "duplicate-name"));
+        var setting = new SettingValue(
+            Guid.NewGuid(), SettingName, SettingScope.Global, string.Empty, "new", false, null);
+
+        var failure = await Record.ExceptionAsync(() => new SettingRepository(context).InsertAsync(setting));
+
+        AssertPostgresForeignConflict(failure, expectedSchema: schemas.Tenant, expectedTable: "Settings");
+        context.Entry(setting).State.Should().Be(EntityState.Added);
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task Target_schema_conflict_still_converges_on_postgres()
+    {
+        var (context, schemas) = await CreateCrossSchemaContextAsync();
+        await using var _ = context;
+        await context.Database.EnsureCreatedAsync();
+        var realRepository = new SettingRepository(context);
+
+        context.Model.FindEntityType(typeof(SettingValue))!.GetSchema().Should().Be(schemas.Settings);
+        await realRepository.InsertAsync(new SettingValue(
+            Guid.NewGuid(), SettingName, SettingScope.Global, string.Empty, "winner", false, null));
+
+        var findCalls = 0;
+        var repository = new Mock<ISettingRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                SettingName, SettingScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .Returns(async () => findCalls++ == 0 ? null : await realRepository.FindAsync(
+                SettingName, SettingScope.Global, string.Empty, null));
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Returns((SettingValue entity, CancellationToken token) => realRepository.InsertAsync(entity, token));
+        repository
+            .Setup(repo => repo.UpdateAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Returns((SettingValue entity, CancellationToken token) => realRepository.UpdateAsync(entity, token));
+
+        await CreateSettingManager(repository.Object).SetGlobalAsync(SettingName, "loser");
+
+        var rows = await context.SettingValues.AsNoTracking().ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].Value.Should().Be("loser");
+        findCalls.Should().Be(2);
+    }
+
+    [Fact]
     public async Task Two_postgres_writers_that_both_read_empty_converge_to_one_row()
     {
         var schema = await CreateSchemaAsync();
@@ -427,6 +535,111 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
             .Options;
         return new SimilarPostgresContext(options);
     }
+
+    private async Task<(CrossSchemaContext Context, CrossSchemas Schemas)> CreateCrossSchemaContextAsync(
+        bool tenantUsesSettingsTableName = false)
+    {
+        var baseSchema = await CreateSchemaAsync();
+        var schemas = new CrossSchemas(
+            $"settings_{Guid.NewGuid():N}",
+            $"features_{Guid.NewGuid():N}",
+            $"tenant_{Guid.NewGuid():N}");
+
+        await using (var connection = new NpgsqlConnection(SchemaConnectionString(baseSchema)))
+        {
+            await connection.OpenAsync();
+            foreach (var schema in new[] { schemas.Settings, schemas.Features, schemas.Tenant })
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = $"""CREATE SCHEMA IF NOT EXISTS "{schema}";""";
+                await command.ExecuteNonQueryAsync();
+            }
+        }
+
+        var options = new DbContextOptionsBuilder<CrestCreatesDbContext>()
+            .UseNpgsql(SchemaConnectionString(baseSchema))
+            .ReplaceService<IModelCacheKeyFactory, CrossSchemaModelCacheKeyFactory>()
+            .Options;
+        var context = new CrossSchemaContext(
+            options, schemas, tenantUsesSettingsTableName);
+        return (context, schemas);
+    }
+
+    private static void AssertPostgresForeignConflict(
+        Exception? failure,
+        string expectedSchema,
+        string expectedTable)
+    {
+        failure.Should().BeOfType<DbUpdateException>(
+            "a foreign relation conflict must keep the provider exception unwrapped");
+        var postgres = failure!.InnerException.Should().BeOfType<PostgresException>().Subject;
+        postgres.SqlState.Should().Be("23505");
+        postgres.ConstraintName.Should().Be("UX_NaturalKey");
+        postgres.SchemaName.Should().Be(expectedSchema);
+        postgres.TableName.Should().Be(expectedTable);
+    }
+
+    private sealed record CrossSchemas(string Settings, string Features, string Tenant);
+
+    private sealed class CrossSchemaContext : CrestCreatesDbContext
+    {
+        private readonly CrossSchemas _schemas;
+        private readonly bool _tenantUsesSettingsTableName;
+
+        public CrossSchemaContext(
+            DbContextOptions<CrestCreatesDbContext> options,
+            CrossSchemas schemas,
+            bool tenantUsesSettingsTableName)
+            : base(options)
+        {
+            _schemas = schemas;
+            _tenantUsesSettingsTableName = tenantUsesSettingsTableName;
+        }
+
+        public string ModelKey =>
+            $"{_schemas.Settings}|{_schemas.Features}|{_schemas.Tenant}|{_tenantUsesSettingsTableName}";
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<SettingValue>().ToTable("Settings", _schemas.Settings);
+            modelBuilder.Entity<SettingValue>()
+                .HasIndex(setting => new { setting.Name, setting.Scope, setting.ProviderKey })
+                .IsUnique()
+                .HasFilter("\"TenantId\" IS NULL")
+                .HasDatabaseName("UX_NaturalKey");
+
+            modelBuilder.Entity<CrestCreates.Domain.Features.FeatureValue>()
+                .ToTable("Features", _schemas.Features);
+            modelBuilder.Entity<CrestCreates.Domain.Features.FeatureValue>()
+                .HasIndex(feature => new { feature.Name, feature.Scope, feature.ProviderKey })
+                .IsUnique()
+                .HasFilter("\"TenantId\" IS NULL")
+                .HasDatabaseName("UX_NaturalKey");
+
+            modelBuilder.Entity<CrestCreates.Domain.Permission.Tenant>()
+                .ToTable(_tenantUsesSettingsTableName ? "Settings" : "Tenants", _schemas.Tenant);
+            modelBuilder.Entity<CrestCreates.Domain.Permission.Tenant>()
+                .HasIndex(tenant => tenant.NormalizedName)
+                .IsUnique()
+                .HasDatabaseName("UX_NaturalKey");
+        }
+    }
+
+    private sealed class CrossSchemaModelCacheKeyFactory : IModelCacheKeyFactory
+    {
+        public object Create(DbContext context, bool designTime)
+        {
+            return context is CrossSchemaContext crossSchema
+                ? new CrossSchemaModelCacheKey(crossSchema.ModelKey, designTime)
+                : new CrossSchemaModelCacheKey(context.GetType().Name, designTime);
+        }
+
+        public object Create(DbContext context) => Create(context, false);
+    }
+
+    private sealed record CrossSchemaModelCacheKey(string Key, bool DesignTime);
 
     private sealed class RemappedPostgresContext : CrestCreatesDbContext
     {

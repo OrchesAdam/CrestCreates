@@ -50,16 +50,21 @@ internal static class EfCoreUniqueConstraintViolationDetector
             return false;
         }
 
-        var constraintName = ReadString(exception, "ConstraintName");
-        if (!string.IsNullOrEmpty(constraintName))
+        var tableName = ReadString(exception, "TableName");
+        var schemaName = ReadString(exception, "SchemaName");
+        var expectedSchema = target.ResolveSchema();
+        if (string.IsNullOrEmpty(tableName) ||
+            string.IsNullOrEmpty(schemaName) ||
+            string.IsNullOrEmpty(expectedSchema) ||
+            !string.Equals(tableName, target.Table, StringComparison.Ordinal) ||
+            !string.Equals(schemaName, expectedSchema, StringComparison.Ordinal))
         {
-            return target.IndexNames.Contains(constraintName, StringComparer.Ordinal);
+            return false;
         }
 
-        var tableName = ReadString(exception, "TableName");
-        return !string.IsNullOrEmpty(tableName) &&
-               string.Equals(tableName, target.Table, StringComparison.Ordinal) &&
-               target.MatchesSchema(ReadString(exception, "SchemaName"));
+        var constraintName = ReadString(exception, "ConstraintName");
+        return string.IsNullOrEmpty(constraintName) ||
+               target.IndexNames.Contains(constraintName, StringComparer.Ordinal);
     }
 
     private static bool IsSqliteUniqueViolation(Exception exception, EfCoreUniqueConstraintTarget target)

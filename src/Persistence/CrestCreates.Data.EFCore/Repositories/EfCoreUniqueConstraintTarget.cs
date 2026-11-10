@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,16 +13,20 @@ namespace CrestCreates.Data.EFCore.Repositories;
 /// </summary>
 internal sealed class EfCoreUniqueConstraintTarget
 {
+    private readonly Func<string?> _defaultSchemaResolver;
+
     private EfCoreUniqueConstraintTarget(
         string? schema,
         string table,
         IReadOnlyList<IReadOnlyList<string>> keyColumnSets,
-        IReadOnlyList<string> indexNames)
+        IReadOnlyList<string> indexNames,
+        Func<string?> defaultSchemaResolver)
     {
         Schema = schema;
         Table = table;
         KeyColumnSets = keyColumnSets;
         IndexNames = indexNames;
+        _defaultSchemaResolver = defaultSchemaResolver;
     }
 
     public string? Schema { get; }
@@ -55,13 +60,65 @@ internal sealed class EfCoreUniqueConstraintTarget
             .Select(name => name!)
             .ToList();
 
-        return new EfCoreUniqueConstraintTarget(entityType.GetSchema(), table, keyColumnSets, indexNames);
+        return new EfCoreUniqueConstraintTarget(
+            entityType.GetSchema(),
+            table,
+            keyColumnSets,
+            indexNames,
+            CreateDefaultSchemaResolver(dbContext));
     }
 
-    public bool MatchesSchema(string? reportedSchema)
+    /// <summary>
+    /// Effective schema of an unqualified model mapping. PostgreSQL resolves such tables through
+    /// the connection's search_path, so the session's <c>current_schema()</c> is the only
+    /// authoritative value; an unresolvable default stays null and the caller fails closed.
+    /// </summary>
+    public string? ResolveSchema()
     {
-        return reportedSchema is null ||
-               Schema is null ||
-               string.Equals(reportedSchema, Schema, StringComparison.Ordinal);
+        return Schema ?? _defaultSchemaResolver();
+    }
+
+    private static Func<string?> CreateDefaultSchemaResolver(DbContext dbContext)
+    {
+        if (!string.Equals(
+                dbContext.Database.ProviderName,
+                "Npgsql.EntityFrameworkCore.PostgreSQL",
+                StringComparison.Ordinal))
+        {
+            return static () => null;
+        }
+
+        return () => ReadNpgsqlCurrentSchema(dbContext);
+    }
+
+    private static string? ReadNpgsqlCurrentSchema(DbContext dbContext)
+    {
+        try
+        {
+            var connection = dbContext.Database.GetDbConnection();
+            var wasClosed = connection.State != ConnectionState.Open;
+            if (wasClosed)
+            {
+                connection.Open();
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT current_schema()";
+                return command.ExecuteScalar() as string;
+            }
+            finally
+            {
+                if (wasClosed)
+                {
+                    connection.Close();
+                }
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 }
