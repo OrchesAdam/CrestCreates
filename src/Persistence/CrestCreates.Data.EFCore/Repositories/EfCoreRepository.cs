@@ -102,13 +102,15 @@ namespace CrestCreates.Data.EFCore.Repositories
             return entity;
         }
 
+        protected DbContext GetNativeDbContext() => (DbContext)_dbContext.GetNativeContext();
+
         /// <summary>
         /// A failed insert leaves the entity tracked in Added state; detaching keeps a follow-up
         /// re-read from returning the loser's in-memory instance instead of the winner's row.
         /// </summary>
         protected void DetachAfterFailedInsert(TEntity entity)
         {
-            var dbContext = (DbContext)_dbContext.GetNativeContext();
+            var dbContext = GetNativeDbContext();
             var entry = dbContext.Entry(entity);
             if (entry.State != EntityState.Detached)
             {

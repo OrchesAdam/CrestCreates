@@ -144,6 +144,124 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Setting_converges_with_a_custom_table_mapping_on_postgres()
+    {
+        var schema = await CreateSchemaAsync();
+        await using var context = CreateRemappedContext(schema);
+        await context.Database.EnsureCreatedAsync();
+        var realRepository = new SettingRepository(context);
+
+        context.Model.FindEntityType(typeof(SettingValue))!.GetTableName().Should().Be("AppSettings");
+        (await ReadIndexDefinitionAsync(schema, "SettingValues", HostNullIndex)).Should().BeNull();
+        (await ReadIndexDefinitionAsync(schema, "AppSettings", "IX_AppSettings_Name_Scope_ProviderKey"))
+            .Should().Contain("\"TenantId\" IS NULL");
+
+        await realRepository.InsertAsync(new SettingValue(
+            Guid.NewGuid(), SettingName, SettingScope.Global, string.Empty, "winner", false, null));
+
+        var findCalls = 0;
+        var repository = new Mock<ISettingRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                SettingName, SettingScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .Returns(async () => findCalls++ == 0 ? null : await realRepository.FindAsync(
+                SettingName, SettingScope.Global, string.Empty, null));
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Returns((SettingValue entity, CancellationToken token) => realRepository.InsertAsync(entity, token));
+        repository
+            .Setup(repo => repo.UpdateAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Returns((SettingValue entity, CancellationToken token) => realRepository.UpdateAsync(entity, token));
+
+        await CreateSettingManager(repository.Object).SetGlobalAsync(SettingName, "loser");
+
+        var rows = await context.SettingValues.AsNoTracking().ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].Value.Should().Be("loser");
+        findCalls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Feature_converges_with_a_custom_table_mapping_inside_a_postgres_transaction()
+    {
+        var schema = await CreateSchemaAsync();
+        await using var context = CreateRemappedContext(schema);
+        await context.Database.EnsureCreatedAsync();
+        var realRepository = new FeatureRepository(context);
+
+        await realRepository.InsertAsync(new CrestCreates.Domain.Features.FeatureValue(
+            Guid.NewGuid(), FeatureName, CrestCreates.Domain.Shared.Features.FeatureScope.Global,
+            string.Empty, "winner", null));
+
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        var findCalls = 0;
+        var repository = new Mock<CrestCreates.Domain.Features.IFeatureRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                FeatureName, CrestCreates.Domain.Shared.Features.FeatureScope.Global,
+                string.Empty, null, It.IsAny<CancellationToken>()))
+            .Returns(async () => findCalls++ == 0 ? null : await realRepository.FindAsync(
+                FeatureName, CrestCreates.Domain.Shared.Features.FeatureScope.Global,
+                string.Empty, null));
+        repository
+            .Setup(repo => repo.InsertAsync(
+                It.IsAny<CrestCreates.Domain.Features.FeatureValue>(), It.IsAny<CancellationToken>()))
+            .Returns((CrestCreates.Domain.Features.FeatureValue entity, CancellationToken token) =>
+                realRepository.InsertAsync(entity, token));
+        repository
+            .Setup(repo => repo.UpdateAsync(
+                It.IsAny<CrestCreates.Domain.Features.FeatureValue>(), It.IsAny<CancellationToken>()))
+            .Returns((CrestCreates.Domain.Features.FeatureValue entity, CancellationToken token) =>
+                realRepository.UpdateAsync(entity, token));
+
+        await CreateFeatureManager(repository.Object).SetGlobalAsync(FeatureName, "loser");
+
+        await context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        var rows = await context.FeatureValues.AsNoTracking().ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].Value.Should().Be("loser");
+        findCalls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Similar_table_conflict_is_not_setting_convergence_on_postgres()
+    {
+        var schema = await CreateSchemaAsync();
+        await using var context = CreateSimilarTableContext(schema);
+        await context.Database.EnsureCreatedAsync();
+
+        context.Tenants.Add(new CrestCreates.Domain.Permission.Tenant(Guid.NewGuid(), "duplicate-name"));
+        await context.SaveChangesAsync();
+
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        context.Tenants.Add(new CrestCreates.Domain.Permission.Tenant(Guid.NewGuid(), "duplicate-name"));
+
+        var realRepository = new SettingRepository(context);
+        var repository = new Mock<ISettingRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                SettingName, SettingScope.Global, string.Empty, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SettingValue?)null);
+        repository
+            .Setup(repo => repo.InsertAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()))
+            .Returns((SettingValue entity, CancellationToken token) => realRepository.InsertAsync(entity, token));
+
+        var act = async () => await CreateSettingManager(repository.Object)
+            .SetGlobalAsync(SettingName, "value");
+
+        await act.Should().ThrowAsync<DbUpdateException>(
+            "a PostgreSQL unique violation on OtherSettingValues must keep its original attribution");
+        repository.Verify(
+            repo => repo.UpdateAsync(It.IsAny<SettingValue>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        context.ChangeTracker.Entries<SettingValue>().Single().State.Should().Be(EntityState.Added);
+
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
     public async Task Two_postgres_writers_that_both_read_empty_converge_to_one_row()
     {
         var schema = await CreateSchemaAsync();
@@ -294,6 +412,51 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
         return new CrestCreatesDbContext(options);
     }
 
+    private RemappedPostgresContext CreateRemappedContext(string schema)
+    {
+        var options = new DbContextOptionsBuilder<CrestCreatesDbContext>()
+            .UseNpgsql(SchemaConnectionString(schema))
+            .Options;
+        return new RemappedPostgresContext(options);
+    }
+
+    private SimilarPostgresContext CreateSimilarTableContext(string schema)
+    {
+        var options = new DbContextOptionsBuilder<CrestCreatesDbContext>()
+            .UseNpgsql(SchemaConnectionString(schema))
+            .Options;
+        return new SimilarPostgresContext(options);
+    }
+
+    private sealed class RemappedPostgresContext : CrestCreatesDbContext
+    {
+        public RemappedPostgresContext(DbContextOptions<CrestCreatesDbContext> options)
+            : base(options)
+        {
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<SettingValue>().ToTable("AppSettings");
+            modelBuilder.Entity<CrestCreates.Domain.Features.FeatureValue>().ToTable("AppFeatures");
+        }
+    }
+
+    private sealed class SimilarPostgresContext : CrestCreatesDbContext
+    {
+        public SimilarPostgresContext(DbContextOptions<CrestCreatesDbContext> options)
+            : base(options)
+        {
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<CrestCreates.Domain.Permission.Tenant>().ToTable("OtherSettingValues");
+        }
+    }
+
     private ServiceProvider BuildUnitOfWorkProvider(string schema)
     {
         var services = new ServiceCollection();
@@ -338,7 +501,12 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
-    private async Task<string?> ReadHostNullIndexDefinitionAsync(string schema)
+    private Task<string?> ReadHostNullIndexDefinitionAsync(string schema)
+    {
+        return ReadIndexDefinitionAsync(schema, "SettingValues", HostNullIndex);
+    }
+
+    private async Task<string?> ReadIndexDefinitionAsync(string schema, string table, string indexName)
     {
         await using var connection = new NpgsqlConnection(SchemaConnectionString(schema));
         await connection.OpenAsync();
@@ -348,10 +516,11 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
             SELECT indexdef
             FROM pg_indexes
             WHERE schemaname = current_schema()
-              AND tablename = 'SettingValues'
+              AND tablename = @table
               AND indexname = @indexName;
             """;
-        command.Parameters.AddWithValue("indexName", HostNullIndex);
+        command.Parameters.AddWithValue("table", table);
+        command.Parameters.AddWithValue("indexName", indexName);
         return await command.ExecuteScalarAsync() as string;
     }
 
