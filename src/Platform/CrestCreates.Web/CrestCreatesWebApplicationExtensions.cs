@@ -103,11 +103,8 @@ public static class CrestCreatesWebApplicationExtensions
         {
             services.AddOpenIddictServer(oidcOptions =>
             {
-                oidcOptions.EnablePasswordFlow = true;
-                oidcOptions.EnableClientCredentialsFlow = true;
-                oidcOptions.EnableRefreshTokenFlow = true;
-                oidcOptions.AccessTokenLifetimeMinutes = 60;
                 oidcOptions.RefreshTokenLifetimeDays = 14;
+                configuration.GetSection(OpenIddictServerOptions.SectionName).Bind(oidcOptions);
             });
             services.AddOpenIddictAuthentication();
         }

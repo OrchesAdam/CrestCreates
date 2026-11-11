@@ -9,8 +9,8 @@ using Xunit.Abstractions;
 namespace SaaSHelpdesk.Tests.Authorization;
 
 /// <summary>
-/// Verifies the /health endpoint returns expected healthy status
-/// with module diagnostics data after application startup.
+/// Verifies the /health endpoint returns expected healthy status with the
+/// public module health projection after application startup.
 /// </summary>
 public class HealthEndpointTests : IClassFixture<HelpdeskWebApplicationFactory>
 {
@@ -25,7 +25,8 @@ public class HealthEndpointTests : IClassFixture<HelpdeskWebApplicationFactory>
 
     /// <summary>
     /// The /health endpoint must return HTTP 200 with status "Healthy"
-    /// and include a "modules" check that reports module and phase counts.
+    /// and include a healthy "modules" check with its stable public code.
+    /// Module counts and failure details stay internal to the health check.
     /// </summary>
     [Fact]
     public async Task HealthEndpoint_Should_Return_Healthy_With_Module_Checks()
@@ -70,22 +71,14 @@ public class HealthEndpointTests : IClassFixture<HelpdeskWebApplicationFactory>
         modulesCheck!.Value.TryGetProperty("status", out var moduleStatus).Should().BeTrue();
         moduleStatus.GetString().Should().Be("Healthy", "modules check must be Healthy");
 
-        // Assert data contains module counts and phase counts
-        modulesCheck.Value.TryGetProperty("data", out var data).Should().BeTrue("modules check must have data");
+        // Assert the stable public code and the sanitized projection
+        modulesCheck.Value.TryGetProperty("code", out var code).Should().BeTrue("modules check must have a stable code");
+        code.GetString().Should().Be("HEALTH_CHECK_HEALTHY");
 
-        data.TryGetProperty("totalModules", out var totalModules).Should().BeTrue("data must contain totalModules");
-        totalModules.GetInt32().Should().BeGreaterThan(0, "there must be at least one module");
-
-        data.TryGetProperty("failedModules", out var failedModules).Should().BeTrue("data must contain failedModules");
-        failedModules.GetInt32().Should().Be(0, "no modules should have failed");
-
-        data.TryGetProperty("totalPhases", out var totalPhases).Should().BeTrue("data must contain totalPhases");
-        totalPhases.GetInt32().Should().BeGreaterThan(0, "there must be at least one phase");
-
-        data.TryGetProperty("failedPhases", out var failedPhases).Should().BeTrue("data must contain failedPhases");
-        failedPhases.GetInt32().Should().Be(0, "no phases should have failed");
-
-        data.TryGetProperty("modules", out var modulesList).Should().BeTrue("data must contain modules list");
-        modulesList.GetArrayLength().Should().BeGreaterThan(0, "modules list must not be empty");
+        foreach (var sensitiveMember in new[] { "description", "exception", "data" })
+        {
+            if (modulesCheck.Value.TryGetProperty(sensitiveMember, out var value))
+                value.ValueKind.Should().Be(JsonValueKind.Null, $"{sensitiveMember} must not be publicly exposed");
+        }
     }
 }

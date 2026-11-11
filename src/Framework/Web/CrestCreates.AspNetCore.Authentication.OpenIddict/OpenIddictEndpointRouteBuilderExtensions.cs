@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Hosting;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using OpenIddict.Validation.AspNetCore;
@@ -57,10 +58,6 @@ public static class OpenIddictEndpointRouteBuilderExtensions
             .Produces<Dictionary<string, object>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .DisableAntiforgery();
-
-        group.MapGet("/logout", (Delegate)LogoutAsync)
-            .WithName("CrestOpenIddictLogoutGet")
-            .Produces<OpenIddictLogoutResponse>(StatusCodes.Status200OK);
 
         group.MapPost("/logout", (Delegate)LogoutAsync)
             .WithName("CrestOpenIddictLogoutPost")
@@ -144,13 +141,26 @@ public static class OpenIddictEndpointRouteBuilderExtensions
         IOpenIddictApplicationManager applicationManager,
         IPasswordGrantHandler passwordGrantHandler,
         IRefreshTokenGrantHandler refreshTokenGrantHandler,
-        IIdentityClaimsBuilder claimsBuilder)
+        IIdentityClaimsBuilder claimsBuilder,
+        OpenIddictServerOptions options,
+        IHostEnvironment environment)
     {
         var request = httpContext.GetOpenIddictServerRequest() ??
             throw new InvalidOperationException("The OpenID Connect request cannot be retrieved.");
 
         if (request.IsPasswordGrantType())
         {
+            var application = await applicationManager.FindByClientIdAsync(request.ClientId!, httpContext.RequestAborted);
+            if (application is null ||
+                (await applicationManager.HasClientTypeAsync(application, ClientTypes.Public, httpContext.RequestAborted) &&
+                 (!options.EnableDevelopmentPublicPasswordClient || !environment.IsDevelopment())))
+            {
+                return Results.Forbid(new AuthenticationProperties(new Dictionary<string, string?>
+                {
+                    [OpenIddictServerAspNetCoreConstants.Properties.Error] = Errors.UnauthorizedClient,
+                    [OpenIddictServerAspNetCoreConstants.Properties.ErrorDescription] = "Public password clients require explicit Development opt-in."
+                }), [OpenIddictServerAspNetCoreDefaults.AuthenticationScheme]);
+            }
             return await HandlePasswordGrantAsync(httpContext, request, passwordGrantHandler, claimsBuilder);
         }
 
@@ -251,8 +261,14 @@ public static class OpenIddictEndpointRouteBuilderExtensions
     {
         var info = await httpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 
+        if (!info.Succeeded || info.Principal is null)
+            return Results.Forbid(new AuthenticationProperties(new Dictionary<string, string?>
+            {
+                [OpenIddictServerAspNetCoreConstants.Properties.Error] = Errors.InvalidGrant
+            }), [OpenIddictServerAspNetCoreDefaults.AuthenticationScheme]);
+
         var result = await refreshTokenGrantHandler.HandleAsync(
-            info.Principal!,
+            info.Principal,
             httpContext.RequestAborted);
 
         if (!result.IsSuccess)
@@ -357,9 +373,42 @@ public static class OpenIddictEndpointRouteBuilderExtensions
         return Results.Ok(claims);
     }
 
-    private static Task<IResult> LogoutAsync()
+    private static async Task<IResult> LogoutAsync(
+        HttpContext httpContext,
+        IOpenIddictAuthorizationManager authorizationManager,
+        IOpenIddictTokenManager tokenManager)
     {
-        return Task.FromResult<IResult>(Results.Ok(new { message = "已退出登录" }));
+        // This is a bearer-authenticated token-family revocation endpoint, not browser end-session.
+        // An ambient cookie or caller-supplied user/authorization id cannot select the target.
+        if (!httpContext.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            return Results.Unauthorized();
+        var authentication = await httpContext.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        if (!authentication.Succeeded || authentication.Principal is null)
+            return Results.Unauthorized();
+
+        var principal = authentication.Principal;
+        var subject = principal.GetClaim(Claims.Subject);
+        var tokenId = principal.GetTokenId();
+        if (string.IsNullOrEmpty(subject) || string.IsNullOrEmpty(tokenId))
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        var cancellationToken = httpContext.RequestAborted;
+        var token = await tokenManager.FindByIdAsync(tokenId, cancellationToken);
+        if (token is null || !string.Equals(subject, await tokenManager.GetSubjectAsync(token, cancellationToken), StringComparison.Ordinal))
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        var authorizationId = await tokenManager.GetAuthorizationIdAsync(token, cancellationToken);
+        if (!string.IsNullOrEmpty(authorizationId))
+        {
+            var authorization = await authorizationManager.FindByIdAsync(authorizationId, cancellationToken);
+            if (authorization is null || !string.Equals(subject, await authorizationManager.GetSubjectAsync(authorization, cancellationToken), StringComparison.Ordinal))
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            if (!await authorizationManager.TryRevokeAsync(authorization, cancellationToken))
+                return Results.StatusCode(StatusCodes.Status409Conflict);
+            await tokenManager.RevokeByAuthorizationIdAsync(authorizationId, cancellationToken);
+        }
+        else if (!await tokenManager.TryRevokeAsync(token, cancellationToken))
+            return Results.StatusCode(StatusCodes.Status409Conflict);
+
+        return Results.Ok(new OpenIddictLogoutResponse { Message = "已退出登录" });
     }
 
     public sealed class OpenIddictTokenRequest

@@ -58,6 +58,7 @@ builder.Services.AddOpenIddictServer(options =>
     options.EnableRefreshTokenFlow = true;
     options.AccessTokenLifetimeMinutes = 60;
     options.RefreshTokenLifetimeDays = 14;
+    builder.Configuration.GetSection(OpenIddictServerOptions.SectionName).Bind(options);
 });
 builder.Services.AddOpenIddictAuthentication();
 builder.Services.AddDataFilterServices();
