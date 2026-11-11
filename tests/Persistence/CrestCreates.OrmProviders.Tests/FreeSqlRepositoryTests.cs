@@ -48,6 +48,43 @@ namespace CrestCreates.OrmProviders.Tests
             _uowManager = new FreeSqlUnitOfWorkManager(_freeSql);
         }
 
+        [Theory]
+        [InlineData(0)]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(3)]
+        public async Task GetPagedAsync_ShouldUseStableTypedOrdering(int overload)
+        {
+            var repository = new TestFreeSqlRepository<TestOrder, long>(_uowManager);
+            for (var id = 6; id >= 1; id--)
+                await repository.InsertAsync(new TestOrder(id, id <= 3 ? "A" : "B", Guid.NewGuid(), 100m));
+
+            var statements = new System.Collections.Generic.List<string>();
+            _freeSql.Aop.CommandBefore += (_, args) => statements.Add(args.Command.CommandText);
+            var ids = new System.Collections.Generic.List<long>();
+            for (var page = 0; page < 3; page++)
+            {
+                var result = overload switch
+                {
+                    0 => await repository.GetPagedAsync(page, 2),
+                    1 => await repository.GetPagedAsync(page, 2, entity => entity.Id > 0),
+                    2 => await repository.GetPagedAsync(page, 2, entity => entity.Id > 0, entity => entity.OrderNumber, false),
+                    _ => await repository.GetPagedAsync(page, 2, entity => entity.OrderNumber, false)
+                };
+                ids.AddRange(result.Items.Select(entity => entity.Id));
+            }
+            Assert.Equal(overload < 2 ? new long[] { 1, 2, 3, 4, 5, 6 } : new long[] { 4, 5, 6, 1, 2, 3 }, ids);
+            var pagedSql = statements.Where(sql => sql.Contains("LIMIT", StringComparison.OrdinalIgnoreCase)).ToList();
+            Assert.Equal(3, pagedSql.Count);
+            foreach (var sql in pagedSql)
+            {
+                var order = sql.Substring(sql.IndexOf("ORDER BY", StringComparison.OrdinalIgnoreCase));
+                Assert.Matches(@"(?is)ORDER\s+BY.*[\""\[`. ]Id[\""\]` ]", order);
+                if (overload >= 2)
+                    Assert.Matches(@"(?is)OrderNumber.*DESC\s*,.*Id", order);
+            }
+        }
+
         [Fact]
         public async Task InsertAsync_ShouldAddEntity()
         {

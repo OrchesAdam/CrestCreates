@@ -42,6 +42,13 @@
 | SQLServer / MySQL | **unverified** | **unverified** | **unverified**（模块 SqlServer 硬编码不构成证据） |
 | trim / NativeAOT | **unverified** | **unverified** | **unverified** |
 
+## 1.0 R3-31 定向补充（2026-11-11）
+
+- FreeSql builder 回调在 Build 前配置；原 `Action<IFreeSql>` 重载改为 `Action<FreeSqlBuilder>`，已构建实例重载保持不变。
+- SqlSugar 接口工厂只注册 `ISqlSugarClient`；`ConnectionConfig` 重载继续提供同 scope 的具体 `SqlSugarClient`。
+- FreeSql/SqlSugar 四种分页重载缺省按 Id 升序，显式排序后追加 Id 升序；旧 stamp 仍作不透明字符串精确匹配，新 stamp 统一 N 格式。
+- `SqlSugarPostgresIntegrationTests` 18/18：PostgreSQL 16/JIT 下正式仓储软删入口，host/A/B、bool live-row 参数、stamp、留行/幂等及 stamped 批次拒绝。此为定向执行证据，不提升整个 SqlSugar PostgreSQL 组合的支持声明，不推导 UoW、取消或 NativeAOT。
+
 ## 1.1 最终审查 R1 修复（2026-10-23）
 
 - EF 两个入口的无 stamp 租户批次写（UpdateRange、实体/谓词 DeleteRange）在跟踪/写入前确定性拒绝，失败零写；租户单行仍走持久归属校验。

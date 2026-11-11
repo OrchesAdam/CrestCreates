@@ -240,7 +240,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 .Where($"{ColumnName("Id")} = @entityId", new { entityId = id });
             if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
             {
-                query = query.Where($"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0", new { });
+                query = query.Where($"{ColumnName(nameof(ISoftDelete.IsDeleted))} = @liveRow", new { liveRow = false });
             }
 
             return await query.FirstAsync(cancellationToken);
@@ -469,7 +469,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 if (entity is IHasConcurrencyStamp stamp)
                 {
                     var oldStamp = stamp.ConcurrencyStamp;
-                    stamp.ConcurrencyStamp = Guid.NewGuid().ToString();
+                    stamp.ConcurrencyStamp = Guid.NewGuid().ToString("N");
                     var conditions = new List<string>
                     {
                         $"{ColumnName("Id")} = @entityId",
@@ -578,10 +578,11 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                         {
                             $"{ColumnName("Id")} = @entityId",
                             $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp",
-                            $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0"
+                            $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = @liveRow"
                         };
                         var softParameters = new Dictionary<string, object>(StringComparer.Ordinal)
                         {
+                            ["liveRow"] = false,
                             ["entityId"] = entity.Id,
                             ["entityStamp"] = stamp.ConcurrencyStamp
                         };
@@ -599,10 +600,11 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                         var softConditions = new List<string>
                         {
                             $"{ColumnName("Id")} = @entityId",
-                            $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0"
+                            $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = @liveRow"
                         };
                         var softParameters = new Dictionary<string, object>(StringComparer.Ordinal)
                         {
+                            ["liveRow"] = false,
                             ["entityId"] = entity.Id
                         };
                         AddTenantCondition(softConditions, softParameters);
@@ -680,10 +682,11 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     var conditions = new List<string>
                     {
                         $"{ColumnName("Id")} = @entityId",
-                        $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0"
+                        $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = @liveRow"
                     };
                     var parameters = new Dictionary<string, object>(StringComparer.Ordinal)
                     {
+                        ["liveRow"] = false,
                         ["entityId"] = id
                     };
                     AddTenantCondition(conditions, parameters);
@@ -748,10 +751,11 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     {
                         $"{ColumnName("Id")} = @entityId",
                         $"{ColumnName(nameof(IHasConcurrencyStamp.ConcurrencyStamp))} = @entityStamp",
-                        $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0"
+                        $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = @liveRow"
                     };
                     var softParameters = new Dictionary<string, object>(StringComparer.Ordinal)
                     {
+                        ["liveRow"] = false,
                         ["entityId"] = id,
                         ["entityStamp"] = expectedStamp
                     };
@@ -808,8 +812,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
 
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
-                    var conditions = new List<string> { $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0" };
-                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+                    var conditions = new List<string> { $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = @liveRow" };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal) { ["liveRow"] = false };
                     AddTenantCondition(conditions, parameters);
                     await SqlSugarSoftDeleteOperation.ExecuteAsync(
                         _sqlSugarClient.Updateable<TEntity>()
@@ -853,8 +857,8 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Deleting many entities {EntityType} by predicate", typeof(TEntity).Name);
                 if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
                 {
-                    var conditions = new List<string> { $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = 0" };
-                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+                    var conditions = new List<string> { $"{ColumnName(nameof(ISoftDelete.IsDeleted))} = @liveRow" };
+                    var parameters = new Dictionary<string, object>(StringComparer.Ordinal) { ["liveRow"] = false };
                     AddTenantCondition(conditions, parameters);
                     await SqlSugarSoftDeleteOperation.ExecuteAsync(
                         _sqlSugarClient.Updateable<TEntity>()
@@ -908,6 +912,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var total = await Queryable().CountAsync(cancellationToken);
                 var items = await Queryable()
+                    .OrderBy(entity => entity.Id)
                     .Skip(pageIndex * pageSize)
                     .Take(pageSize)
                     .ToListAsync(cancellationToken);
@@ -932,6 +937,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 var total = await Queryable().Where(predicate).CountAsync(cancellationToken);
                 var items = await Queryable()
                     .Where(predicate)
+                    .OrderBy(entity => entity.Id)
                     .Skip(pageIndex * pageSize)
                     .Take(pageSize)
                     .ToListAsync(cancellationToken);
@@ -955,6 +961,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} with predicate and order - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = Queryable().Where(predicate);
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
+                query = query.OrderBy(entity => entity.Id);
                 var total = await query.CountAsync(cancellationToken);
                 var items = await query
                     .Skip(pageIndex * pageSize)
@@ -980,6 +987,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} with order - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = Queryable();
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
+                query = query.OrderBy(entity => entity.Id);
                 var total = await query.CountAsync(cancellationToken);
                 var items = await query
                     .Skip(pageIndex * pageSize)

@@ -148,6 +148,41 @@ public sealed class Issue130S3AssemblyTests : IDisposable
     }
 
     [Fact]
+    public void R3_31_FreeSql_builder_configuration_creates_schema_and_reads_writes()
+    {
+        var services = new ServiceCollection();
+        services.AddFreeSqlWithUow(
+            builder => builder.UseConnectionString(FreeSql.DataType.Sqlite, _database.ConnectionString),
+            repositoryAssembly: null);
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        using var freeSql = scope.ServiceProvider.GetRequiredService<IFreeSql>();
+
+        freeSql.CodeFirst.SyncStructure<Issue130SoftStamped>();
+        Assert.Equal(1, freeSql.Insert(new Issue130SoftStamped(1, "builder-configured")).ExecuteAffrows());
+        Assert.Equal("builder-configured", freeSql.Select<Issue130SoftStamped>()
+            .Where(entity => entity.Id == 1).ToOne().Name);
+    }
+
+    [Fact]
+    public void R3_31_SqlSugar_interface_factory_supports_scope_without_concrete_alias()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IDomainEventPublisher>(new Issue130NoOpDomainEventPublisher());
+        services.AddSqlSugarWithUow(() => new SqlSugarScope(Config()));
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true });
+        using var scope = provider.CreateScope();
+        var client = scope.ServiceProvider.GetRequiredService<ISqlSugarClient>();
+
+        Assert.IsType<SqlSugarScope>(client);
+        Assert.Same(client, scope.ServiceProvider.GetRequiredService<ISqlSugarClient>());
+        Assert.Null(scope.ServiceProvider.GetService<SqlSugarClient>());
+        client.CodeFirst.InitTables(typeof(Issue130SoftStamped));
+        Assert.Equal(1, client.Insertable(new Issue130SoftStamped(1, "interface-factory")).ExecuteCommand());
+        Assert.Equal("interface-factory", client.Queryable<Issue130SoftStamped>().Single(entity => entity.Id == 1).Name);
+    }
+
+    [Fact]
     public void U03_SqlSugar_extension_registers_scoped_client_and_interface_alias()
     {
         using var provider = BuildProvider();
