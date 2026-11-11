@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using CrestCreates.MongoDB.Tests.Helpers;
 using CrestCreates.MongoDB.Tests.TestEntities;
@@ -17,7 +18,7 @@ public class MongoTenantFilterTests
     private readonly Mock<ICurrentTenant> _currentTenant = new();
 
     [Fact]
-    public async Task GetListAsync_MustHaveTenant_ShouldFilterByTenant()
+    public void TenantExpression_MustHaveTenant_ShouldFilterByTenant()
     {
         _currentTenant.Setup(t => t.Id).Returns("tenant-a");
         var entities = new List<TenantTestEntity>
@@ -28,11 +29,8 @@ public class MongoTenantFilterTests
         var collection = MongoMockHelper.CreateCollection(entities);
         var sut = CreateTenantRepo(collection);
 
-        var result = await sut.GetListAsync();
-
-        // InMemoryCollection returns all (tenant filter is applied at query level)
-        // The repository builds a filter but InMemoryCollection ignores it
-        result.Should().HaveCount(2);
+        var result = entities.Where(((TestableTenantRepo)sut).TenantPredicate());
+        result.Select(x => x.Id).Should().Equal("1");
     }
 
     [Fact]
@@ -108,6 +106,7 @@ public class MongoTenantFilterTests
 
     private class TestableTenantRepo : MongoRepositoryBase<TenantTestEntity, string>
     {
+        public Func<TenantTestEntity, bool> TenantPredicate() => BuildTenantFilter()!.Compile();
         public TestableTenantRepo(global::MongoDB.Driver.IMongoDatabase db, InMemoryMongoCollection<TenantTestEntity> col, ICurrentTenant? t)
             : base(db, t) { SetCollection(this, col); }
     }
