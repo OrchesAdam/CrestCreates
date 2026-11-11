@@ -243,16 +243,20 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
                 }
                 catch (Exception exception)
                 {
+                    // 回滚未确认：保留句柄与所有权，后续 abandon/Dispose 仍可重试终结。
                     terminationFailure = exception;
                 }
 
-                try
+                if (_unitOfWork != null && terminationFailure is null)
                 {
-                    DisposeUnitOfWork();
-                }
-                catch (Exception exception)
-                {
-                    subsequentFailures.Add(exception);
+                    try
+                    {
+                        DisposeUnitOfWork();
+                    }
+                    catch (Exception exception)
+                    {
+                        subsequentFailures.Add(exception);
+                    }
                 }
 
                 _trackedEntities.Clear();

@@ -1,13 +1,18 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.EFCore.DbContexts;
+using CrestCreates.Data.EFCore.Extensions;
 using CrestCreates.Data.EFCore.UnitOfWork;
+using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.UnitOfWork;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CrestCreates.OrmProviders.Tests;
@@ -17,6 +22,88 @@ namespace CrestCreates.OrmProviders.Tests;
 /// </summary>
 public class EfCoreTransactionWrapperTests
 {
+    [Fact]
+    public async Task Abandon_updates_shared_wrapper_facts()
+    {
+        using var context = CreateContext(openConnection: true);
+        var unitOfWork = new EfCoreUnitOfWork(context, new NoOpDomainEventPublisher());
+        await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+        var wrapper = EfCoreDataBaseTransaction.GetOrCreate(context.Database.CurrentTransaction!, context);
+
+        unitOfWork.AbandonPendingWork();
+
+        wrapper.IsRolledBack.Should().BeTrue("the formal abandon confirmed the native rollback");
+        wrapper.IsCompleted.Should().BeTrue();
+        wrapper.IsOutcomeUnknown.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Abandon_rollback_failure_marks_unknown_and_keeps_ownership_for_retry()
+    {
+        using var context = CreateContextWithFakeTransactionManager(out var transactionManager);
+        var unitOfWork = new EfCoreUnitOfWork(context, new NoOpDomainEventPublisher());
+        await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+        transactionManager!.RollbackFailure = "rollback-failure";
+        var wrapper = EfCoreDataBaseTransaction.GetOrCreate(context.Database.CurrentTransaction!, context);
+
+        var first = () => unitOfWork.AbandonPendingWork();
+        first.Should().Throw<UnitOfWorkAbandonFailureException>()
+            .Which.InnerException!.Message.Should().Be("rollback-failure");
+
+        wrapper.IsOutcomeUnknown.Should().BeTrue();
+        wrapper.IsRolledBack.Should().BeFalse();
+        wrapper.IsCompleted.Should().BeTrue();
+        transactionManager.RollbackCalls.Should().Be(1);
+
+        transactionManager.RollbackFailure = null;
+        unitOfWork.AbandonPendingWork();
+        transactionManager.RollbackCalls.Should().Be(2, "an unconfirmed abandon keeps the transaction for retry");
+        wrapper.IsOutcomeUnknown.Should().BeTrue("a confirmed retry must not rewrite the earlier unknown outcome");
+    }
+
+    [Fact]
+    public async Task Abandon_cleanup_failure_keeps_the_confirmed_rollback_fact()
+    {
+        using var context = CreateContextWithFakeTransactionManager(out var transactionManager);
+        var unitOfWork = new EfCoreUnitOfWork(context, new NoOpDomainEventPublisher());
+        await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+        transactionManager!.DisposeFailure = "dispose-failure";
+        var wrapper = EfCoreDataBaseTransaction.GetOrCreate(context.Database.CurrentTransaction!, context);
+
+        var act = () => unitOfWork.AbandonPendingWork();
+        act.Should().Throw<UnitOfWorkAbandonCleanupFailureException>();
+
+        wrapper.IsRolledBack.Should().BeTrue("the rollback was confirmed before handle cleanup failed");
+        wrapper.IsCompleted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Kernel_abandon_marks_the_shared_wrapper_rolled_back()
+    {
+        var services = new ServiceCollection();
+        services.AddDbContext<WrapperDbContext>(options => options.UseSqlite("Data Source=:memory:"));
+        services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
+            new EfCoreDbContextAdapter(sp.GetRequiredService<WrapperDbContext>()));
+        services.AddScoped<IDataBaseContext>(sp => sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
+        services.AddSingleton<IDomainEventPublisher>(new NoOpDomainEventPublisher());
+        services.AddUnitOfWork();
+        services.AddEfCoreUnitOfWork();
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+
+        var unitOfWorkScope = manager.BeginScope();
+        await unitOfWorkScope.StartAsync();
+        var dataBaseContext = scope.ServiceProvider.GetRequiredService<IDataBaseContext>();
+        var wrapper = (EfCoreDataBaseTransaction)dataBaseContext.CurrentTransaction!;
+
+        unitOfWorkScope.Dispose();
+
+        wrapper.IsRolledBack.Should().BeTrue("the kernel abandon path must publish the same rollback fact");
+        wrapper.IsCompleted.Should().BeTrue();
+    }
+
     [Fact]
     public void Repeated_lookup_returns_the_same_wrapper_and_transaction_identity()
     {
@@ -150,6 +237,92 @@ public class EfCoreTransactionWrapperTests
         return context;
     }
 
+    private static DbContext CreateContextWithFakeTransactionManager(out FakeTransactionManager? manager)
+    {
+        var context = new DbContext(
+            new DbContextOptionsBuilder<DbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .ReplaceService<IDbContextTransactionManager, FakeTransactionManager>()
+                .Options);
+        manager = context.GetService<IDbContextTransactionManager>() as FakeTransactionManager;
+        return context;
+    }
+
+    public sealed class WrapperDbContext : DbContext
+    {
+        public WrapperDbContext(DbContextOptions<WrapperDbContext> options)
+            : base(options)
+        {
+        }
+    }
+
+    private sealed class FakeTransactionManager : IDbContextTransactionManager
+    {
+        private string? _rollbackFailure;
+        private string? _disposeFailure;
+
+        public StubDbContextTransaction? Current { get; private set; }
+
+        IDbContextTransaction? IDbContextTransactionManager.CurrentTransaction => Current;
+
+        public string? RollbackFailure
+        {
+            get => _rollbackFailure;
+            set
+            {
+                _rollbackFailure = value;
+                if (Current is not null)
+                {
+                    Current.RollbackFailure = value;
+                }
+            }
+        }
+
+        public string? DisposeFailure
+        {
+            get => _disposeFailure;
+            set
+            {
+                _disposeFailure = value;
+                if (Current is not null)
+                {
+                    Current.DisposeFailure = value;
+                }
+            }
+        }
+
+        public int RollbackCalls => Current?.RollbackCount ?? 0;
+
+        public IDbContextTransaction BeginTransaction()
+        {
+            Current = new StubDbContextTransaction
+            {
+                RollbackFailure = _rollbackFailure,
+                DisposeFailure = _disposeFailure
+            };
+            return Current;
+        }
+
+        public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(BeginTransaction());
+
+        public void CommitTransaction() => Current?.Commit();
+
+        public Task CommitTransactionAsync(CancellationToken cancellationToken = default)
+            => Current?.CommitAsync(cancellationToken) ?? Task.CompletedTask;
+
+        public void RollbackTransaction() => Current?.Rollback();
+
+        public Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
+            => Current?.RollbackAsync(cancellationToken) ?? Task.CompletedTask;
+
+        public void ResetState()
+        {
+        }
+
+        public Task ResetStateAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
     private sealed class StubDbContextTransaction : IDbContextTransaction
     {
         private readonly TaskCompletionSource _commitStarted =
@@ -163,13 +336,17 @@ public class EfCoreTransactionWrapperTests
 
         public string? CommitFailure { get; init; }
 
-        public string? RollbackFailure { get; init; }
+        public string? RollbackFailure { get; set; }
+
+        public string? DisposeFailure { get; set; }
 
         public bool BlockCommit { get; init; }
 
         public int CommitCount { get; private set; }
 
         public int RollbackCount { get; private set; }
+
+        public int DisposeCount { get; private set; }
 
         public TaskCompletionSource CommitStarted => _commitStarted;
 
@@ -223,6 +400,11 @@ public class EfCoreTransactionWrapperTests
 
         public void Dispose()
         {
+            DisposeCount++;
+            if (DisposeFailure is not null)
+            {
+                throw new InvalidOperationException(DisposeFailure);
+            }
         }
 
         public ValueTask DisposeAsync() => default;

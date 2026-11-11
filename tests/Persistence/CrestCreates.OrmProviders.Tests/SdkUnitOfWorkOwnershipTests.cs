@@ -38,6 +38,53 @@ public class SdkUnitOfWorkOwnershipTests : IDisposable
     }
 
     [Fact]
+    public async Task SqlSugar_failed_abandon_is_not_reported_as_success_on_retry()
+    {
+        var (client, ado) = CreateSqlSugarMocks();
+        ado.Setup(adapter => adapter.RollbackTran()).Throws(new ApplicationException("rollback-failed"));
+        var unitOfWork = new SqlSugarUnitOfWork(client.Object, new NoOpDomainEventPublisher());
+        await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+
+        var abandon = () => unitOfWork.AbandonPendingWork();
+
+        abandon.Should().Throw<UnitOfWorkAbandonFailureException>();
+        abandon.Should().Throw<UnitOfWorkAbandonFailureException>(
+            "no successful rollback has confirmed termination");
+        ado.Verify(adapter => adapter.RollbackTran(), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task SqlSugar_failed_abandon_keeps_begin_rejected_and_terminates_on_retry()
+    {
+        var (client, ado) = CreateSqlSugarMocks();
+        var attempts = 0;
+        ado.Setup(adapter => adapter.RollbackTran()).Callback(() =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                throw new ApplicationException("rollback-failed");
+            }
+        });
+        var unitOfWork = new SqlSugarUnitOfWork(client.Object, new NoOpDomainEventPublisher());
+        await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+
+        var abandon = () => unitOfWork.AbandonPendingWork();
+        abandon.Should().Throw<UnitOfWorkAbandonFailureException>();
+
+        var begin = async () => await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+        await begin.Should().ThrowAsync<InvalidOperationException>().WithMessage("*already in progress*");
+
+        unitOfWork.Dispose();
+        ado.Verify(adapter => adapter.RollbackTran(), Times.Exactly(2),
+            "Dispose retries the unconfirmed rollback instead of dropping ownership");
+
+        var second = () => unitOfWork.AbandonPendingWork();
+        second.Should().NotThrow("a confirmed termination makes later abandons idempotent");
+        ado.Verify(adapter => adapter.RollbackTran(), Times.Exactly(2));
+    }
+
+    [Fact]
     public async Task SqlSugar_commit_that_started_ignores_late_cancellation_and_never_rolls_back()
     {
         var (client, ado) = CreateSqlSugarMocks();

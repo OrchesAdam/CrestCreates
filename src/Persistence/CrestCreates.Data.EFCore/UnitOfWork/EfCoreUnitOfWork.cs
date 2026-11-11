@@ -251,20 +251,31 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
 
             try
             {
-                _currentTransaction?.Rollback();
+                if (_currentTransaction != null)
+                {
+                    _currentTransaction.Rollback();
+                    EfCoreDataBaseTransaction.MarkRolledBack(_currentTransaction);
+                }
             }
             catch (Exception exception)
             {
                 terminationFailure = exception;
+                if (_currentTransaction != null)
+                {
+                    EfCoreDataBaseTransaction.MarkOutcomeUnknown(_currentTransaction);
+                }
             }
 
-            try
+            if (terminationFailure is null)
             {
-                DisposeTransaction();
-            }
-            catch (Exception exception)
-            {
-                subsequentFailures.Add(exception);
+                try
+                {
+                    DisposeTransaction();
+                }
+                catch (Exception exception)
+                {
+                    subsequentFailures.Add(exception);
+                }
             }
 
             try

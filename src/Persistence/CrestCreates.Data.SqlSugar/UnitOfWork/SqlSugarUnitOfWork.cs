@@ -208,13 +208,14 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
                     try
                     {
                         _sqlSugarClient.Ado.RollbackTran();
+                        _isTransactionStarted = false;
                     }
                     catch (Exception exception)
                     {
+                        // 回滚未确认：保留事务所有权，后续 abandon/Dispose 仍可重试终结；
+                        // 正常返回必须意味着有真实回滚证据。
                         terminationFailure = exception;
                     }
-
-                    _isTransactionStarted = false;
                 }
 
                 _trackedEntities.Clear();
@@ -260,14 +261,11 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
                     try
                     {
                         _sqlSugarClient.Ado.RollbackTran();
+                        _isTransactionStarted = false;
                     }
                     catch
                     {
-                        // 忽略回滚异常
-                    }
-                    finally
-                    {
-                        _isTransactionStarted = false;
+                        // 回滚仍未确认：保留事务所有权，不把 Dispose 当作成功终结。
                     }
                 }
 
