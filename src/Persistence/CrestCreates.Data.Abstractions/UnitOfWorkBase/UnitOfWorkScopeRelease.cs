@@ -98,12 +98,24 @@ namespace CrestCreates.Data.Abstractions
                     UnitOfWorkScopeSettlement.ClassifyTerminationResult(scope, exception);
                     return;
                 }
+
+                scope.TransactionOutcome = scope.IsTransactional
+                    ? UnitOfWorkTransactionOutcome.RolledBack
+                    : UnitOfWorkTransactionOutcome.NotStarted;
+                scope.TransitionTo(UnitOfWorkState.RolledBack);
+                return;
             }
 
-            // 无终结能力的 Provider：依赖其容器释放语义（见 Provider 矩阵）。
-            scope.TransactionOutcome = scope.IsTransactional
-                ? UnitOfWorkTransactionOutcome.RolledBack
-                : UnitOfWorkTransactionOutcome.NotStarted;
+            // 无终结能力的 Provider：内核无法确认回滚事实。
+            // 非事务工作单元没有事务结果；事务工作单元必须报告 Unknown，不得凭容器清理猜测 RolledBack。
+            if (scope.IsTransactional)
+            {
+                scope.TransactionOutcome = UnitOfWorkTransactionOutcome.Unknown;
+                scope.TransitionTo(UnitOfWorkState.Failed);
+                return;
+            }
+
+            scope.TransactionOutcome = UnitOfWorkTransactionOutcome.NotStarted;
             scope.TransitionTo(UnitOfWorkState.RolledBack);
         }
     }

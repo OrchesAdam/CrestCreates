@@ -37,8 +37,8 @@ public class EfCoreDbContextAdapter : IEntityFrameworkCoreDbContext
     public OrmProvider Provider => OrmProvider.EfCore;
 
     public IDataBaseTransaction? CurrentTransaction =>
-        EffectiveDbContext.Database.CurrentTransaction != null
-            ? new EfCoreDataBaseTransaction(EffectiveDbContext.Database.CurrentTransaction!, EffectiveDbContext)
+        EffectiveDbContext.Database.CurrentTransaction is { } transaction
+            ? EfCoreDataBaseTransaction.GetOrCreate(transaction, EffectiveDbContext)
             : null;
 
     public string? ConnectionString => EffectiveDbContext.Database.GetConnectionString();
@@ -57,7 +57,7 @@ public class EfCoreDbContextAdapter : IEntityFrameworkCoreDbContext
     {
         var effective = EffectiveDbContext;
         var transaction = await effective.Database.BeginTransactionAsync(cancellationToken);
-        return new EfCoreDataBaseTransaction(transaction, effective);
+        return EfCoreDataBaseTransaction.GetOrCreate(transaction, effective);
     }
 
     public IQueryableBuilder<TEntity> Queryable<TEntity>() where TEntity : class

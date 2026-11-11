@@ -359,13 +359,12 @@ namespace CrestCreates.Data.EFCore.DbContexts
         {
             var effective = EffectiveDataContext;
             var transaction = await effective.Database.BeginTransactionAsync(cancellationToken);
-            return new EfCoreDataBaseTransaction(transaction, effective);
+            return EfCoreDataBaseTransaction.GetOrCreate(transaction, effective);
         }
 
         public IDataBaseTransaction? CurrentTransaction =>
-            EffectiveDataContext.Database.CurrentTransaction != null
-                ? new EfCoreDataBaseTransaction(
-                    EffectiveDataContext.Database.CurrentTransaction!, EffectiveDataContext)
+            EffectiveDataContext.Database.CurrentTransaction is { } transaction
+                ? EfCoreDataBaseTransaction.GetOrCreate(transaction, EffectiveDataContext)
                 : null;
 
         public string? ConnectionString => EffectiveDataContext.Database.GetConnectionString();

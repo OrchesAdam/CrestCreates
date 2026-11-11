@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Data.Abstractions.UnitOfWorkBase;
+using CrestCreates.Data.EFCore.DbContexts;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CrestCreates.Data.EFCore.UnitOfWork
@@ -81,6 +82,13 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             {
                 await _currentTransaction.CommitAsync(cancellationToken);
                 committed = true;
+                EfCoreDataBaseTransaction.MarkCommitted(_currentTransaction);
+            }
+            catch (Exception)
+            {
+                // 提交派发期失败/响应丢失：结果未知，包装器不得报告已回滚或已提交。
+                EfCoreDataBaseTransaction.MarkOutcomeUnknown(_currentTransaction);
+                throw;
             }
             finally
             {
@@ -119,7 +127,17 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
                 if (_currentTransaction != null)
                 {
                     await _currentTransaction.RollbackAsync(cancellationToken);
+                    EfCoreDataBaseTransaction.MarkRolledBack(_currentTransaction);
                 }
+            }
+            catch (Exception)
+            {
+                if (_currentTransaction != null)
+                {
+                    EfCoreDataBaseTransaction.MarkOutcomeUnknown(_currentTransaction);
+                }
+
+                throw;
             }
             finally
             {

@@ -10,6 +10,7 @@ using CrestCreates.DataFilter.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.DTOs;
@@ -27,6 +28,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         protected readonly ILogger<SqlSugarRepository<TEntity, TKey>>? _logger;
         private readonly ICurrentUserProvider? _currentUserProvider;
         private readonly ICurrentTenant? _currentTenant;
+        private readonly IUnitOfWorkManager? _unitOfWorkManager;
         private static readonly bool HasTenantMarker =
             typeof(IMustHaveTenant).IsAssignableFrom(typeof(TEntity)) ||
             typeof(IMultiTenant).IsAssignableFrom(typeof(TEntity));
@@ -37,12 +39,14 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             ISqlSugarClient sqlSugarClient,
             ILogger<SqlSugarRepository<TEntity, TKey>>? logger = null,
             ICurrentUserProvider? currentUserProvider = null,
-            ICurrentTenant? currentTenant = null)
+            ICurrentTenant? currentTenant = null,
+            IUnitOfWorkManager? unitOfWorkManager = null)
         {
             _sqlSugarClient = sqlSugarClient;
             _logger = logger;
             _currentUserProvider = currentUserProvider;
             _currentTenant = currentTenant;
+            _unitOfWorkManager = unitOfWorkManager;
 
             SqlSugarSoftDeleteFilterRegistration.EnsureRegistered(_sqlSugarClient, typeof(TEntity));
         }
@@ -56,6 +60,16 @@ namespace CrestCreates.Data.SqlSugar.Repositories
         }
 
 
+
+        private void TrackDomainEvents(TEntity entity)
+        {
+            if (entity is IHasDomainEvents hasDomainEvents &&
+                hasDomainEvents.DomainEvents.Count > 0 &&
+                _unitOfWorkManager?.CurrentOrNull is IUnitOfWorkDomainEventTracker tracker)
+            {
+                tracker.TrackEntity(hasDomainEvents);
+            }
+        }
 
         private void ApplyCreationAudit(TEntity entity)
         {
@@ -397,6 +411,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 cancellationToken.ThrowIfCancellationRequested();
                 await _sqlSugarClient.Insertable(entity).IgnoreColumns("DomainEvents").ExecuteCommandAsync(cancellationToken);
                 _logger?.LogDebug("Added entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
+                TrackDomainEvents(entity);
                 return entity;
             }
             catch (Exception ex)
@@ -422,6 +437,10 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 }
                 await _sqlSugarClient.Insertable(entityList).IgnoreColumns("DomainEvents").ExecuteCommandAsync(cancellationToken);
                 _logger?.LogDebug("Inserted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
+                foreach (var item in entityList)
+                {
+                    TrackDomainEvents(item);
+                }
                 return entityList;
             }
             catch (Exception ex)
@@ -488,6 +507,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     await update.ExecuteCommandAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Updated entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
+                TrackDomainEvents(entity);
                 return entity;
             }
             catch (Exception ex)
@@ -524,6 +544,10 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                 }
                 await updateRange.ExecuteCommandAsync(cancellationToken);
                 _logger?.LogDebug("Updated {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
+                foreach (var item in entityList)
+                {
+                    TrackDomainEvents(item);
+                }
                 return entityList;
             }
             catch (Exception ex)
@@ -625,6 +649,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
                     await _sqlSugarClient.Deleteable(entity).ExecuteCommandAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Deleted entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
+                TrackDomainEvents(entity);
             }
             catch (Exception ex)
             {
