@@ -49,11 +49,13 @@ public class CrestMemoryCache : ICrestCache
     public Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var fullPattern = (_options.Prefix ?? string.Empty) + pattern;
+        var prefix = _options.Prefix ?? string.Empty;
+        var regex = CacheGlob.CreateRegex(pattern);
         var keysToRemove = new List<string>();
         foreach (var item in _cache)
         {
-            if (item.Key.Contains(fullPattern))
+            if (item.Key.StartsWith(prefix, StringComparison.Ordinal) &&
+                regex.IsMatch(item.Key.AsSpan(prefix.Length)))
             {
                 keysToRemove.Add(item.Key);
             }
@@ -72,7 +74,7 @@ public class CrestMemoryCache : ICrestCache
         var prefix = _options.Prefix ?? string.Empty;
         foreach (var item in _cache)
         {
-            if (item.Key.StartsWith(prefix))
+            if (item.Key.StartsWith(prefix, StringComparison.Ordinal))
             {
                 keysToRemove.Add(item.Key);
             }
@@ -98,7 +100,7 @@ public class CrestMemoryCache : ICrestCache
         var prefix = _options.Prefix ?? string.Empty;
         foreach (var item in _cache)
         {
-            if (item.Key.StartsWith(prefix))
+            if (item.Key.StartsWith(prefix, StringComparison.Ordinal))
             {
                 count++;
             }

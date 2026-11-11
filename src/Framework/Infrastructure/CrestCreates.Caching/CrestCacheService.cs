@@ -46,6 +46,12 @@ public class CrestCacheService : ICrestCacheService
         await _crestCache.SetAsync(key, value);
     }
 
+    public async Task SetAsync<T>(string prefix, string? tenantId, T value, TimeSpan expiration, params object[] parts)
+    {
+        var key = _keyGenerator.GenerateTenantKey(prefix, tenantId, parts);
+        await _crestCache.SetAsync(key, value, expiration);
+    }
+
     public async Task RemoveAsync(string prefix, params object[] parts)
     {
         var key = _keyGenerator.GenerateKey(prefix, parts);

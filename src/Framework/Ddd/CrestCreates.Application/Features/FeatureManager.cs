@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Caching;
+using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Shared.Features;
 
@@ -124,15 +125,35 @@ public class FeatureManager : IFeatureManager
 
         if (existing == null)
         {
-            await _featureRepository.InsertAsync(
-                new FeatureValue(
-                    Guid.NewGuid(),
+            try
+            {
+                await _featureRepository.InsertAsync(
+                    new FeatureValue(
+                        Guid.NewGuid(),
+                        definition.Name,
+                        scope,
+                        normalizedProviderKey,
+                        normalizedValue,
+                        normalizedTenantId),
+                    cancellationToken);
+            }
+            catch (CrestUniqueConstraintException)
+            {
+                var concurrent = await _featureRepository.FindAsync(
                     definition.Name,
                     scope,
                     normalizedProviderKey,
-                    normalizedValue,
-                    normalizedTenantId),
-                cancellationToken);
+                    normalizedTenantId,
+                    cancellationToken);
+
+                if (concurrent == null)
+                {
+                    throw;
+                }
+
+                concurrent.SetValue(normalizedValue);
+                await _featureRepository.UpdateAsync(concurrent, cancellationToken);
+            }
         }
         else
         {

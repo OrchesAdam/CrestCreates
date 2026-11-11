@@ -11,9 +11,6 @@ namespace CrestCreates.Application.Features;
 
 public class FeatureStore : IFeatureStore
 {
-    private const string ItemCachePrefix = "Feature.Item";
-    private const string ScopeCachePrefix = "Feature.Scope";
-
     private readonly IFeatureRepository _featureRepository;
     private readonly ICrestCacheService _cacheService;
     private readonly FeatureCacheKeyContributor _cacheKeyContributor;
@@ -38,7 +35,7 @@ public class FeatureStore : IFeatureStore
         var normalizedProviderKey = NormalizeProviderKey(scope, providerKey, tenantId);
         var normalizedTenantId = NormalizeTenantId(scope, tenantId);
         var cacheKey = _cacheKeyContributor.GetItemCacheKey(scope, normalizedProviderKey, name, normalizedTenantId);
-        var cached = await _cacheService.GetAsync<FeatureValueEntry?>(ItemCachePrefix, cacheKey);
+        var cached = await _cacheService.GetAsync<FeatureValueEntry?>(cacheKey);
         if (cached is not null)
         {
             return cached;
@@ -57,7 +54,7 @@ public class FeatureStore : IFeatureStore
         }
 
         var entry = MapToEntry(feature);
-        await _cacheService.SetAsync(ItemCachePrefix, entry, cacheKey);
+        await _cacheService.SetAsync(cacheKey, entry);
         return entry;
     }
 
@@ -70,7 +67,7 @@ public class FeatureStore : IFeatureStore
         var normalizedProviderKey = NormalizeProviderKey(scope, providerKey, tenantId);
         var normalizedTenantId = NormalizeTenantId(scope, tenantId);
         var cacheKey = _cacheKeyContributor.GetScopeCacheKey(scope, normalizedProviderKey, normalizedTenantId);
-        var cached = await _cacheService.GetAsync<List<FeatureValueEntry>>(ScopeCachePrefix, cacheKey);
+        var cached = await _cacheService.GetAsync<List<FeatureValueEntry>>(cacheKey);
         if (cached is not null)
         {
             return cached;
@@ -87,7 +84,7 @@ public class FeatureStore : IFeatureStore
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        await _cacheService.SetAsync(ScopeCachePrefix, result, cacheKey);
+        await _cacheService.SetAsync(cacheKey, result);
         return result;
     }
 

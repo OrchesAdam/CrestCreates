@@ -22,4 +22,16 @@ public class SettingCacheKeyContributorTests
         globalKey.Should().NotBe(tenantKey);
         tenantKey.Should().NotBe(userKey);
     }
+
+    [Fact]
+    public void Item_scope_and_pattern_keys_come_from_one_contract()
+    {
+        var itemKey = _contributor.GetItemCacheKey(SettingScope.Global, string.Empty, "App.DisplayName");
+        var scopeKey = _contributor.GetScopeCacheKey(SettingScope.Global, string.Empty);
+        var pattern = _contributor.GetScopeItemPattern(SettingScope.Global, string.Empty);
+
+        itemKey.Should().Be("Setting.Item:Scope:Global:none:none:App.DisplayName");
+        scopeKey.Should().Be("Setting.Scope:Scope:Global:none:none");
+        pattern.Should().Be("Setting.Item:Scope:Global:none:none:*");
+    }
 }

@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.DbContextProvider.Abstract;
+using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Shared.Settings;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +16,24 @@ public class SettingRepository : EfCoreRepository<SettingValue, System.Guid>, IS
     public SettingRepository(IDataBaseContext dbContext)
         : base(dbContext)
     {
+    }
+
+    public override async Task<SettingValue> InsertAsync(
+        SettingValue entity,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await InsertWithImmediateSaveAsync(entity, cancellationToken);
+        }
+        catch (DbUpdateException exception) when (
+            EfCoreUniqueConstraintViolationDetector.IsUniqueConstraintViolation(
+                exception,
+                EfCoreUniqueConstraintTarget.TryCreate<SettingValue>(GetNativeDbContext())))
+        {
+            DetachAfterFailedInsert(entity);
+            throw new CrestUniqueConstraintException(nameof(SettingValue), exception);
+        }
     }
 
     public Task<SettingValue?> FindAsync(

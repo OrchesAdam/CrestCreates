@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Caching;
+using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Shared.Settings;
 
@@ -137,16 +138,36 @@ public class SettingManager : ISettingManager
 
         if (existing is null)
         {
-            await _settingRepository.InsertAsync(
-                new SettingValue(
-                    Guid.NewGuid(),
+            try
+            {
+                await _settingRepository.InsertAsync(
+                    new SettingValue(
+                        Guid.NewGuid(),
+                        definition.Name,
+                        scope,
+                        normalizedProviderKey,
+                        persistedValue,
+                        definition.IsEncrypted,
+                        normalizedTenantId),
+                    cancellationToken);
+            }
+            catch (CrestUniqueConstraintException)
+            {
+                var concurrent = await _settingRepository.FindAsync(
                     definition.Name,
                     scope,
                     normalizedProviderKey,
-                    persistedValue,
-                    definition.IsEncrypted,
-                    normalizedTenantId),
-                cancellationToken);
+                    normalizedTenantId,
+                    cancellationToken);
+
+                if (concurrent is null)
+                {
+                    throw;
+                }
+
+                concurrent.SetValue(persistedValue, definition.IsEncrypted);
+                await _settingRepository.UpdateAsync(concurrent, cancellationToken);
+            }
         }
         else
         {

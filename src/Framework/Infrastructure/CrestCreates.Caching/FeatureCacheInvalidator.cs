@@ -7,9 +7,6 @@ namespace CrestCreates.Caching;
 
 public class FeatureCacheInvalidator
 {
-    private const string ItemCachePrefix = "Feature.Item";
-    private const string ScopeCachePrefix = "Feature.Scope";
-
     private readonly ICrestCacheService _cacheService;
     private readonly FeatureCacheKeyContributor _cacheKeyContributor;
 
@@ -28,11 +25,10 @@ public class FeatureCacheInvalidator
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
-        var itemKey = _cacheKeyContributor.GetItemCacheKey(scope, providerKey, name, tenantId);
-        var scopeKey = _cacheKeyContributor.GetScopeCacheKey(scope, providerKey, tenantId);
-
-        await _cacheService.RemoveAsync(ItemCachePrefix, itemKey);
-        await _cacheService.RemoveAsync(ScopeCachePrefix, scopeKey);
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetItemCacheKey(scope, providerKey, name, tenantId));
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetScopeCacheKey(scope, providerKey, tenantId));
     }
 
     public async Task InvalidateTenantAsync(
@@ -40,31 +36,31 @@ public class FeatureCacheInvalidator
         string featureName,
         CancellationToken cancellationToken = default)
     {
-        var itemKey = _cacheKeyContributor.GetItemCacheKey(FeatureScope.Tenant, tenantId, featureName, tenantId);
-        var scopeKey = _cacheKeyContributor.GetScopeCacheKey(FeatureScope.Tenant, tenantId, tenantId);
-
-        await _cacheService.RemoveAsync(ItemCachePrefix, itemKey);
-        await _cacheService.RemoveAsync(ScopeCachePrefix, scopeKey);
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetItemCacheKey(FeatureScope.Tenant, tenantId, featureName, tenantId));
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetScopeCacheKey(FeatureScope.Tenant, tenantId, tenantId));
     }
 
     public async Task InvalidateGlobalAsync(
         string featureName,
         CancellationToken cancellationToken = default)
     {
-        var itemKey = _cacheKeyContributor.GetItemCacheKey(FeatureScope.Global, string.Empty, featureName, null);
-        var scopeKey = _cacheKeyContributor.GetScopeCacheKey(FeatureScope.Global, string.Empty, null);
-
-        await _cacheService.RemoveAsync(ItemCachePrefix, itemKey);
-        await _cacheService.RemoveAsync(ScopeCachePrefix, scopeKey);
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetItemCacheKey(FeatureScope.Global, string.Empty, featureName, null));
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetScopeCacheKey(FeatureScope.Global, string.Empty, null));
     }
 
-    public Task InvalidateScopeAsync(
+    public async Task InvalidateScopeAsync(
         FeatureScope scope,
         string providerKey,
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
-        var pattern = _cacheKeyContributor.GetScopePattern(scope, providerKey, tenantId);
-        return _cacheService.RemoveByPatternAsync(pattern);
+        await _cacheService.RemoveAsync(
+            _cacheKeyContributor.GetScopeCacheKey(scope, providerKey, tenantId));
+        await _cacheService.RemoveByPatternAsync(
+            _cacheKeyContributor.GetScopeItemPattern(scope, providerKey, tenantId));
     }
 }

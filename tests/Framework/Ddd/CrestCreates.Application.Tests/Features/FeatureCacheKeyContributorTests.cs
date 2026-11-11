@@ -32,11 +32,24 @@ public class FeatureCacheKeyContributorTests
     }
 
     [Fact]
-    public void GetScopePattern_ShouldContainWildcard()
+    public void GetScopeItemPattern_ShouldMatchTheItemKeyShape()
     {
-        var pattern = _contributor.GetScopePattern(FeatureScope.Tenant, "tenant-1", "tenant-1");
+        var itemKey = _contributor.GetItemCacheKey(
+            FeatureScope.Tenant, "tenant-1", "Identity.UserCreationEnabled", "tenant-1");
+        var pattern = _contributor.GetScopeItemPattern(FeatureScope.Tenant, "tenant-1", "tenant-1");
 
-        pattern.Should().Contain("*");
+        itemKey.Should().Be("Feature.Item:Scope:Tenant:tenant-1:tenant-1:Identity.UserCreationEnabled");
+        pattern.Should().Be("Feature.Item:Scope:Tenant:tenant-1:tenant-1:*");
+        _contributor.GetScopeCacheKey(FeatureScope.Tenant, "tenant-1", "tenant-1")
+            .Should().Be("Feature.Scope:Scope:Tenant:tenant-1:tenant-1");
+    }
+
+    [Fact]
+    public void GetScopeItemPattern_ShouldEscapeLiteralMetacharacters()
+    {
+        var pattern = _contributor.GetScopeItemPattern(FeatureScope.Tenant, "tenant*1", "tenant*1");
+
+        pattern.Should().Contain(@"tenant\*1");
     }
 
     [Fact]

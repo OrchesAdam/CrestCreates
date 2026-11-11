@@ -92,7 +92,7 @@ public class CacheMoAttribute : AsyncMoAttribute
                 }
                 else
                 {
-                    await cache.SetAsync(_prefix, tenantId, context.ReturnValue, context.Arguments!);
+                    await cache.SetAsync(_prefix, tenantId, context.ReturnValue, expiration, context.Arguments!);
                 }
             }
         }
