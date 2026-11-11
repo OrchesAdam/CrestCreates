@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using CrestCreates.Domain.Shared.Attributes;
 
 namespace CrestCreates.HealthCheck.Mvc.HealthChecks;
@@ -39,8 +41,12 @@ public class DatabaseHealthCheck : IHealthCheck
 
     private readonly TimeSpan _timeout;
 
-    public DatabaseHealthCheck(Func<System.Data.Common.DbConnection> connectionFactory, TimeSpan? timeout = null)
+    private readonly ILogger<DatabaseHealthCheck> _logger;
+
+    public DatabaseHealthCheck(Func<System.Data.Common.DbConnection> connectionFactory, TimeSpan? timeout = null,
+        ILogger<DatabaseHealthCheck>? logger = null)
     {
+        _logger = logger ?? NullLogger<DatabaseHealthCheck>.Instance;
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _timeout = timeout ?? TimeSpan.FromSeconds(5);
         if (_timeout <= TimeSpan.Zero || _timeout.TotalMilliseconds > uint.MaxValue - 1)
@@ -49,12 +55,14 @@ public class DatabaseHealthCheck : IHealthCheck
 
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var creatingConnection = true;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             deadline.CancelAfter(_timeout);
             await using var connection = _connectionFactory();
+            creatingConnection = false;
             // Await the provider before disposing its connection, even if it ignores cancellation.
             await connection.OpenAsync(deadline.Token);
             deadline.Token.ThrowIfCancellationRequested();
@@ -64,8 +72,20 @@ public class DatabaseHealthCheck : IHealthCheck
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            var failureCode = exception switch
+            {
+                OperationCanceledException when deadline.IsCancellationRequested => "DEADLINE_EXCEEDED",
+                TimeoutException => "TIMEOUT",
+                System.Net.Sockets.SocketException => "CONNECTION_FAILURE",
+                ArgumentException when creatingConnection => "CONFIGURATION_FAILURE",
+                _ => "PROVIDER_FAILURE"
+            };
+            // Deliberately omit the exception object and all provider-supplied text.
+            _logger.LogWarning(new EventId(17601, "DATABASE_PROBE_FAILED"),
+                "Health probe {Probe} failed: {FailureCode} ({ExceptionType})",
+                "Database", failureCode, exception.GetType().Name);
             return HealthCheckResult.Unhealthy("DATABASE_UNREACHABLE");
         }
     }
@@ -77,8 +97,12 @@ public class RedisHealthCheck : IHealthCheck
     private readonly StackExchange.Redis.IConnectionMultiplexer _connection;
     private readonly TimeSpan _timeout;
 
-    public RedisHealthCheck(StackExchange.Redis.IConnectionMultiplexer connection, TimeSpan? timeout = null)
+    private readonly ILogger<RedisHealthCheck> _logger;
+
+    public RedisHealthCheck(StackExchange.Redis.IConnectionMultiplexer connection, TimeSpan? timeout = null,
+        ILogger<RedisHealthCheck>? logger = null)
     {
+        _logger = logger ?? NullLogger<RedisHealthCheck>.Instance;
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
         _timeout = timeout ?? TimeSpan.FromSeconds(5);
         if (_timeout <= TimeSpan.Zero || _timeout.TotalMilliseconds > uint.MaxValue - 1)
@@ -97,8 +121,18 @@ public class RedisHealthCheck : IHealthCheck
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            var failureCode = exception switch
+            {
+                TimeoutException or StackExchange.Redis.RedisTimeoutException => "TIMEOUT",
+                StackExchange.Redis.RedisConnectionException or System.Net.Sockets.SocketException => "CONNECTION_FAILURE",
+                ArgumentException => "CONFIGURATION_FAILURE",
+                _ => "PROVIDER_FAILURE"
+            };
+            _logger.LogWarning(new EventId(17602, "REDIS_PROBE_FAILED"),
+                "Health probe {Probe} failed: {FailureCode} ({ExceptionType})",
+                "Redis", failureCode, exception.GetType().Name);
             return HealthCheckResult.Unhealthy("REDIS_UNREACHABLE");
         }
     }
