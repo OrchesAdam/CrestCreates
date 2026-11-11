@@ -65,20 +65,21 @@ internal sealed class EfCoreUniqueConstraintTarget
             table,
             keyColumnSets,
             indexNames,
-            CreateDefaultSchemaResolver(dbContext));
+            CreateDefaultSchemaResolver(dbContext, table));
     }
 
     /// <summary>
-    /// Effective schema of an unqualified model mapping. PostgreSQL resolves such tables through
-    /// the connection's search_path, so the session's <c>current_schema()</c> is the only
-    /// authoritative value; an unresolvable default stays null and the caller fails closed.
+    /// Effective schema of an unqualified model mapping. PostgreSQL resolves an unqualified table
+    /// to the first relation found along the connection's search_path, which is not necessarily
+    /// the search_path's first schema (<c>current_schema()</c>); an unresolved relation stays null
+    /// and the caller fails closed.
     /// </summary>
     public string? ResolveSchema()
     {
         return Schema ?? _defaultSchemaResolver();
     }
 
-    private static Func<string?> CreateDefaultSchemaResolver(DbContext dbContext)
+    private static Func<string?> CreateDefaultSchemaResolver(DbContext dbContext, string table)
     {
         if (!string.Equals(
                 dbContext.Database.ProviderName,
@@ -88,10 +89,10 @@ internal sealed class EfCoreUniqueConstraintTarget
             return static () => null;
         }
 
-        return () => ReadNpgsqlCurrentSchema(dbContext);
+        return () => ReadNpgsqlResolvedSchema(dbContext, table);
     }
 
-    private static string? ReadNpgsqlCurrentSchema(DbContext dbContext)
+    private static string? ReadNpgsqlResolvedSchema(DbContext dbContext, string table)
     {
         try
         {
@@ -105,7 +106,18 @@ internal sealed class EfCoreUniqueConstraintTarget
             try
             {
                 using var command = connection.CreateCommand();
-                command.CommandText = "SELECT current_schema()";
+                command.CommandText =
+                    """
+                    SELECT namespace.nspname
+                    FROM pg_catalog.pg_class AS relation
+                    JOIN pg_catalog.pg_namespace AS namespace
+                      ON namespace.oid = relation.relnamespace
+                    WHERE relation.oid = pg_catalog.to_regclass(@relation);
+                    """;
+                var relationName = command.CreateParameter();
+                relationName.ParameterName = "relation";
+                relationName.Value = "\"" + table.Replace("\"", "\"\"") + "\"";
+                command.Parameters.Add(relationName);
                 return command.ExecuteScalar() as string;
             }
             finally

@@ -370,6 +370,163 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Setting_converges_when_the_target_table_is_in_a_later_search_path_schema()
+    {
+        var schema = await CreateSchemaAsync();
+        var firstSchema = await CreateSchemaAsync();
+        var secondSchema = await CreateSchemaAsync();
+        await using var context = CreateCrestContext(schema);
+        await context.Database.EnsureCreatedAsync();
+        var realRepository = new SettingRepository(context);
+        await realRepository.InsertAsync(new SettingValue(
+            Guid.NewGuid(), SettingName, SettingScope.Global, string.Empty, "winner", false, null));
+
+        context.Database.SetConnectionString(
+            SchemaConnectionString(firstSchema + "," + secondSchema + "," + schema));
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        await using (var command = context.Database.GetDbConnection().CreateCommand())
+        {
+            command.CommandText = "SELECT current_schema()";
+            (await command.ExecuteScalarAsync()).Should().Be(
+                firstSchema,
+                "current_schema() is the first valid search_path schema even when the table lives later");
+        }
+
+        context.Model.FindEntityType(typeof(SettingValue))!.GetSchema().Should().BeNull();
+
+        await CreateSettingManager(CreateStaleThenRealRepository(realRepository))
+            .SetGlobalAsync(SettingName, "loser");
+
+        await context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        var rows = await context.SettingValues.AsNoTracking().ToListAsync();
+        rows.Should().ContainSingle(
+            "the unique conflict must be attributed to the schema where the relation actually resolves");
+        rows[0].Value.Should().Be("loser");
+    }
+
+    [Fact]
+    public async Task Unresolvable_relation_schema_fails_closed()
+    {
+        var schema = await CreateSchemaAsync();
+        var emptySchema = await CreateSchemaAsync();
+        await using var context = CreateCrestContext(schema);
+        await context.Database.EnsureCreatedAsync();
+        context.Database.SetConnectionString(SchemaConnectionString(emptySchema));
+
+        var target = EfCoreUniqueConstraintTarget.TryCreate<SettingValue>(context);
+
+        target.Should().NotBeNull();
+        target!.Schema.Should().BeNull();
+        target.ResolveSchema().Should().BeNull(
+            "an unqualified relation that exists in no search_path schema must not be treated as a wildcard");
+    }
+
+    [Fact]
+    public async Task Feature_converges_when_the_target_table_is_in_a_later_search_path_schema()
+    {
+        var schema = await CreateSchemaAsync();
+        var firstSchema = await CreateSchemaAsync();
+        await using var context = CreateCrestContext(schema);
+        await context.Database.EnsureCreatedAsync();
+        var realRepository = new FeatureRepository(context);
+        var winner = new CrestCreates.Domain.Features.FeatureValue(
+            Guid.NewGuid(), FeatureName, CrestCreates.Domain.Shared.Features.FeatureScope.Global,
+            string.Empty, "winner", null);
+        await realRepository.InsertAsync(winner);
+
+        context.Database.SetConnectionString(SchemaConnectionString(firstSchema + "," + schema));
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        await using (var command = context.Database.GetDbConnection().CreateCommand())
+        {
+            command.CommandText = "SELECT current_schema()";
+            (await command.ExecuteScalarAsync()).Should().Be(firstSchema);
+        }
+
+        context.Model.FindEntityType(
+            typeof(CrestCreates.Domain.Features.FeatureValue))!.GetSchema().Should().BeNull();
+
+        var findCalls = 0;
+        var repository = new Mock<CrestCreates.Domain.Features.IFeatureRepository>();
+        repository
+            .Setup(repo => repo.FindAsync(
+                FeatureName, CrestCreates.Domain.Shared.Features.FeatureScope.Global,
+                string.Empty, null, It.IsAny<CancellationToken>()))
+            .Returns(async () => findCalls++ == 0
+                ? null
+                : await realRepository.FindAsync(
+                    FeatureName, CrestCreates.Domain.Shared.Features.FeatureScope.Global,
+                    string.Empty, null));
+        repository
+            .Setup(repo => repo.InsertAsync(
+                It.IsAny<CrestCreates.Domain.Features.FeatureValue>(), It.IsAny<CancellationToken>()))
+            .Returns((CrestCreates.Domain.Features.FeatureValue entity, CancellationToken token) =>
+                realRepository.InsertAsync(entity, token));
+        repository
+            .Setup(repo => repo.UpdateAsync(
+                It.IsAny<CrestCreates.Domain.Features.FeatureValue>(), It.IsAny<CancellationToken>()))
+            .Returns((CrestCreates.Domain.Features.FeatureValue entity, CancellationToken token) =>
+                realRepository.UpdateAsync(entity, token));
+
+        await CreateFeatureManager(repository.Object).SetGlobalAsync(FeatureName, "loser");
+
+        await context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        var rows = await context.FeatureValues.AsNoTracking().ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].Value.Should().Be("loser");
+        findCalls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task First_search_path_schema_with_the_same_table_name_supplies_the_relation_identity()
+    {
+        var firstSchema = await CreateSchemaAsync();
+        var laterSchema = await CreateSchemaAsync();
+        await using (var seedContext = CreateCrestContext(firstSchema))
+        {
+            await seedContext.GetService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>()
+                .CreateTablesAsync();
+            await new SettingRepository(seedContext).InsertAsync(new SettingValue(
+                Guid.NewGuid(), SettingName, SettingScope.Global, string.Empty, "first", false, null));
+        }
+
+        await using (var seedContext = CreateCrestContext(laterSchema))
+        {
+            await seedContext.GetService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>()
+                .CreateTablesAsync();
+            await new SettingRepository(seedContext).InsertAsync(new SettingValue(
+                Guid.NewGuid(), SettingName, SettingScope.Global, string.Empty, "later", false, null));
+        }
+
+        await using var context = CreateCrestContext(firstSchema);
+        context.Database.SetConnectionString(SchemaConnectionString(firstSchema + "," + laterSchema));
+        await using var transaction = await context.Database.BeginTransactionAsync();
+
+        (await new SettingRepository(context).FindAsync(SettingName, SettingScope.Global, string.Empty, null))!
+            .Value.Should().Be("first", "an unqualified relation resolves to the first search_path match");
+
+        await CreateSettingManager(CreateStaleThenRealRepository(new SettingRepository(context)))
+            .SetGlobalAsync(SettingName, "loser");
+        await context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        await using (var firstContext = CreateCrestContext(firstSchema))
+        {
+            (await firstContext.SettingValues.AsNoTracking().SingleAsync()).Value.Should().Be("loser");
+        }
+
+        await using (var laterContext = CreateCrestContext(laterSchema))
+        {
+            (await laterContext.SettingValues.AsNoTracking().SingleAsync()).Value.Should().Be(
+                "later",
+                "the relation in the later schema must not be updated by the first-match conflict");
+        }
+    }
+
+    [Fact]
     public async Task Two_postgres_writers_that_both_read_empty_converge_to_one_row()
     {
         var schema = await CreateSchemaAsync();
