@@ -89,7 +89,14 @@ public static class OpenIddictServiceCollectionExtensions
                             server.SigningCredentials.Add(new SigningCredentials(key, SecurityAlgorithms.RsaSha256));
                         foreach (var key in material.EncryptionKeys)
                             server.EncryptionCredentials.Add(new EncryptingCredentials(key, SecurityAlgorithms.RsaOAEP, SecurityAlgorithms.Aes256CbcHmacSha512));
-                    }).ValidateOnStart();
+                    })
+                    // Validators run after every PostConfigure, including OpenIddict's credential sorting.
+                    // Keep historical certificates for validation/decryption; only guard new issuance.
+                    .Validate(server => IsSelectedCertificateValid(server.SigningCredentials.FirstOrDefault()?.Key, server.TimeProvider!),
+                        "OpenIddict selected signing certificate is outside its validity period.")
+                    .Validate(server => IsSelectedCertificateValid(server.EncryptionCredentials.FirstOrDefault()?.Key, server.TimeProvider!),
+                        "OpenIddict selected encryption certificate is outside its validity period.")
+                    .ValidateOnStart();
 
                 serverOptions.DisableAccessTokenEncryption();
 
@@ -117,6 +124,14 @@ public static class OpenIddictServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Scoped<CrestCreates.MultiTenancy.Abstract.IDataSeeder, HostOpenIddictDataSeeder>());
 
         return services;
+    }
+
+    private static bool IsSelectedCertificateValid(SecurityKey? key, TimeProvider timeProvider)
+    {
+        if (key is not X509SecurityKey certificate) return true;
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        return certificate.Certificate.NotBefore.ToUniversalTime() <= now &&
+            certificate.Certificate.NotAfter.ToUniversalTime() >= now;
     }
 
     public static AuthenticationBuilder AddOpenIddictAuthentication(

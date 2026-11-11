@@ -8,6 +8,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Domain.Permission;
@@ -130,6 +132,71 @@ public class OpenIddictSessionIntegrationTests
     }
 
     [Fact]
+    public async Task Mixed_certificate_RSA_rotation_rejects_expired_issuance_and_retains_historical_decryption()
+    {
+        await using var database = new PostgreSqlBuilder("postgres:17-alpine").Build();
+        await database.StartAsync();
+        using var oldRsa = RSA.Create(2048);
+        using var currentRsa = RSA.Create(2048);
+        var now = DateTimeOffset.UtcNow;
+        using var expired = new CertificateRequest("CN=historical-fixture", oldRsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(now.AddHours(-3), now.AddHours(-1));
+        using var current = new CertificateRequest("CN=current-fixture", currentRsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(now.AddDays(-1), now.AddDays(3));
+        using var future = new CertificateRequest("CN=future-fixture", currentRsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(now.AddDays(1), now.AddDays(4));
+        var oldKey = new X509SecurityKey(expired);
+        var currentKey = new X509SecurityKey(current);
+        var futureKey = new X509SecurityKey(future);
+        var rsaKey = new RsaSecurityKey(currentRsa) { KeyId = "mixed-current-rsa" };
+        var user = new User(Guid.NewGuid(), "alice", "alice@example.test", "tenant-a")
+        { IsActive = true, PasswordHash = "fixture-hash" };
+        var roles = new List<Role>();
+        var connection = database.GetConnectionString();
+        (string Access, string Refresh) original;
+        // Issue the historical artifact while the very same certificate was valid; no wall-clock sleeps.
+        await using (var oldHost = await StartHost(connection, user, roles, new SecurityKey[] { rsaKey },
+            new SecurityKey[] { oldKey }, initialize: true, timeProvider: new FixtureTimeProvider(now.AddHours(-2))))
+        {
+            using var client = Client(oldHost);
+            original = await Password(client);
+            Assert.Equal(oldKey.KeyId, new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(original.Refresh).Kid);
+        }
+        foreach (var signingExpired in new[] { true, false })
+        {
+            var exception = await Assert.ThrowsAsync<OptionsValidationException>(() => StartHost(connection, user, roles,
+                signingExpired ? new SecurityKey[] { rsaKey, oldKey } : new SecurityKey[] { rsaKey },
+                signingExpired ? new SecurityKey[] { rsaKey } : new SecurityKey[] { rsaKey, oldKey }));
+            Assert.Equal($"OpenIddict selected {(signingExpired ? "signing" : "encryption")} certificate is outside its validity period.",
+                Assert.Single(exception.Failures));
+        }
+        await using (var futureHost = await StartHost(connection, user, roles, new SecurityKey[] { futureKey, rsaKey },
+            new SecurityKey[] { futureKey, rsaKey }))
+        {
+            using var client = Client(futureHost);
+            var tokens = await Password(client);
+            Assert.Equal(rsaKey.KeyId, new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(tokens.Access).Kid);
+            Assert.Equal(rsaKey.KeyId, new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(tokens.Refresh).Kid);
+        }
+        await using var rotated = await StartHost(connection, user, roles, new SecurityKey[] { rsaKey, currentKey },
+            new SecurityKey[] { rsaKey, oldKey, currentKey });
+        using var rotatedClient = Client(rotated);
+        using var response = await Refresh(rotatedClient, original.Refresh);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var refreshed = await Tokens(response);
+        Assert.Equal(currentKey.KeyId, new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(refreshed.Access).Kid);
+        Assert.Equal(currentKey.KeyId, new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(refreshed.Refresh).Kid);
+        Assert.Equal(HttpStatusCode.OK, (await Probe(rotatedClient, refreshed.Access)).StatusCode);
+        var options = rotated.Services.GetRequiredService<IOptionsMonitor<global::OpenIddict.Server.OpenIddictServerOptions>>().CurrentValue;
+        Assert.Contains(oldKey, options.TokenValidationParameters.TokenDecryptionKeys);
+    }
+
+    private sealed class FixtureTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    [Fact]
     public async Task Refresh_rejects_changed_user_tenant_and_request_tenant_but_allows_host_in_host_context()
     {
         await using var database = new PostgreSqlBuilder("postgres:17-alpine").Build();
@@ -167,11 +234,12 @@ public class OpenIddictSessionIntegrationTests
 
     private static async Task<WebApplication> StartHost(string connection, User user, List<Role> roles,
         SecurityKey[] signing, SecurityKey[] encryption, bool initialize = false, IdentityCalls? calls = null,
-        string? currentTenant = "tenant-a")
+        string? currentTenant = "tenant-a", TimeProvider? timeProvider = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Production });
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Logging.ClearProviders();
+        if (timeProvider is not null) builder.Services.AddSingleton(timeProvider);
         builder.Services.AddDbContext<OpenIddictDbContext>(o => o.UseNpgsql(connection));
         builder.Services.AddOpenIddictServer(o =>
         {
@@ -230,8 +298,16 @@ public class OpenIddictSessionIntegrationTests
                 superAdmin = result.Principal.FindFirst("is_super_admin")?.Value,
                 organization = result.Principal.FindFirst("org_id")?.Value });
         });
-        await app.StartAsync();
-        return app;
+        try
+        {
+            await app.StartAsync();
+            return app;
+        }
+        catch
+        {
+            await app.DisposeAsync();
+            throw;
+        }
     }
 
     private sealed class IdentityCalls { public int UserReads; }

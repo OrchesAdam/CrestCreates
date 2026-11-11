@@ -108,6 +108,80 @@ public class OpenIddictConfigurationTests
         Assert.Contains("key usage", exception.Message);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Expired_certificate_preferred_over_RSA_fails_startup_without_disclosing_material(bool signing)
+    {
+        using var rsa = RSA.Create(2048);
+        using var certificate = new CertificateRequest("CN=PRIVATE_CERTIFICATE_SUBJECT", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow.AddDays(-1));
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Production });
+        builder.Services.AddOpenIddictServer(o =>
+        {
+            o.SigningKeys.Add(new Microsoft.IdentityModel.Tokens.RsaSecurityKey(rsa));
+            o.EncryptionKeys.Add(new Microsoft.IdentityModel.Tokens.RsaSecurityKey(rsa));
+            if (signing) o.SigningCertificates.Add(certificate);
+            else o.EncryptionCertificates.Add(certificate);
+        });
+        await using var app = builder.Build();
+        var exception = await Assert.ThrowsAsync<OptionsValidationException>(() => app.StartAsync());
+        Assert.Equal($"OpenIddict selected {(signing ? "signing" : "encryption")} certificate is outside its validity period.", Assert.Single(exception.Failures));
+        Assert.DoesNotContain("PRIVATE_", exception.ToString());
+        Assert.DoesNotContain(certificate.Thumbprint, exception.ToString());
+        Assert.Null(exception.InnerException);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Mixed_certificate_and_RSA_preserve_official_selection(bool future)
+    {
+        using var rsa = RSA.Create(2048);
+        using var certificate = new CertificateRequest("CN=mixed-fixture", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(future ? 1 : -1), DateTimeOffset.UtcNow.AddDays(3));
+        var key = new Microsoft.IdentityModel.Tokens.RsaSecurityKey(rsa) { KeyId = "current-rsa" };
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Production });
+        builder.Services.AddOpenIddictServer(o =>
+        {
+            o.SigningKeys.Add(key);
+            o.EncryptionKeys.Add(key);
+            o.SigningCertificates.Add(certificate);
+            o.EncryptionCertificates.Add(certificate);
+        });
+        using var provider = builder.Services.BuildServiceProvider();
+        var server = provider.GetRequiredService<IOptionsMonitor<ServerOptions>>().CurrentValue;
+        Assert.Equal(future ? key.KeyId : certificate.Thumbprint, server.SigningCredentials[0].Key.KeyId);
+        Assert.Equal(future ? key.KeyId : certificate.Thumbprint, server.EncryptionCredentials[0].Key.KeyId);
+        Assert.Equal(2, server.SigningCredentials.Count);
+        Assert.Equal(2, server.EncryptionCredentials.Count);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Final_validation_runs_after_host_postconfigure_and_rejects_future_selected_certificate(bool signing)
+    {
+        using var rsa = RSA.Create(2048);
+        using var certificate = new CertificateRequest("CN=future-fixture", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow.AddDays(3));
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Production });
+        builder.Services.AddOpenIddictServer(o =>
+        {
+            o.SigningKeys.Add(new Microsoft.IdentityModel.Tokens.RsaSecurityKey(rsa));
+            o.EncryptionKeys.Add(new Microsoft.IdentityModel.Tokens.RsaSecurityKey(rsa));
+        });
+        builder.Services.PostConfigure<ServerOptions>(o =>
+        {
+            var key = new Microsoft.IdentityModel.Tokens.X509SecurityKey(certificate);
+            if (signing) o.SigningCredentials.Insert(0, new Microsoft.IdentityModel.Tokens.SigningCredentials(key, Microsoft.IdentityModel.Tokens.SecurityAlgorithms.RsaSha256));
+            else o.EncryptionCredentials.Insert(0, new Microsoft.IdentityModel.Tokens.EncryptingCredentials(key,
+                Microsoft.IdentityModel.Tokens.SecurityAlgorithms.RsaOAEP, Microsoft.IdentityModel.Tokens.SecurityAlgorithms.Aes256CbcHmacSha512));
+        });
+        using var provider = builder.Services.BuildServiceProvider();
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptionsMonitor<ServerOptions>>().CurrentValue);
+    }
+
     [Fact]
     public void Certificate_loading_failure_does_not_disclose_path_or_provider_exception()
     {
