@@ -3,13 +3,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace CrestCreates.AspNetCore.Authentication.OpenIddict;
 
 /// <summary>
-/// Seeds OpenIddict scopes and a default client application at startup.
+/// Seeds OpenIddict scopes and, only with explicit Development opt-in, a public password client.
 /// All operations are idempotent — safe to run on every startup.
 /// </summary>
 public class HostOpenIddictDataSeeder : IDataSeeder
@@ -17,21 +18,32 @@ public class HostOpenIddictDataSeeder : IDataSeeder
     private readonly IOpenIddictApplicationManager _applicationManager;
     private readonly IOpenIddictScopeManager _scopeManager;
     private readonly ILogger<HostOpenIddictDataSeeder> _logger;
+    private readonly OpenIddictServerOptions _options;
+    private readonly IHostEnvironment _environment;
 
     public HostOpenIddictDataSeeder(
         IOpenIddictApplicationManager applicationManager,
         IOpenIddictScopeManager scopeManager,
-        ILogger<HostOpenIddictDataSeeder> logger)
+        ILogger<HostOpenIddictDataSeeder> logger,
+        OpenIddictServerOptions options,
+        IHostEnvironment environment)
     {
         _applicationManager = applicationManager;
         _scopeManager = scopeManager;
         _logger = logger;
+        _options = options;
+        _environment = environment;
     }
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
+        if (_options.EnableDevelopmentPublicPasswordClient &&
+            (!_environment.IsDevelopment() || !_options.EnablePasswordFlow))
+            throw new InvalidOperationException("The public password client requires Development and the explicitly enabled password flow.");
+
         await SeedScopesAsync(cancellationToken);
-        await SeedClientAsync(cancellationToken);
+        if (_options.EnableDevelopmentPublicPasswordClient)
+            await SeedClientAsync(cancellationToken);
     }
 
     private async Task SeedScopesAsync(CancellationToken cancellationToken)
@@ -93,7 +105,6 @@ public class HostOpenIddictDataSeeder : IDataSeeder
             Permissions.Endpoints.Authorization,
             Permissions.GrantTypes.Password,
             Permissions.GrantTypes.RefreshToken,
-            Permissions.GrantTypes.ClientCredentials,
             Permissions.Prefixes.Scope + Scopes.OpenId,
             Permissions.Prefixes.Scope + Scopes.Profile,
             Permissions.Prefixes.Scope + Scopes.Email,
