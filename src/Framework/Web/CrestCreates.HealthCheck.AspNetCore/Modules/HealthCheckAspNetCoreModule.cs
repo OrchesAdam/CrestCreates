@@ -17,7 +17,7 @@ public class HealthCheckAspNetCoreModule : ModuleBase
     }
 }
 
-internal static class HealthReportResponseMapper
+public static class HealthReportResponseMapper
 {
     public static HealthReportResponse FromHealthReport(HealthReport report)
     {
@@ -36,9 +36,15 @@ internal static class HealthReportResponseMapper
             Name = entry.Key,
             Status = entry.Value.Status.ToString(),
             Duration = entry.Value.Duration,
-            Description = entry.Value.Description,
-            Exception = entry.Value.Exception?.Message,
-            Data = entry.Value.Data.Count > 0 ? new HealthReportData(entry.Value.Data) : null,
+            Code = entry.Value.Status switch
+            {
+                HealthStatus.Healthy => "HEALTH_CHECK_HEALTHY",
+                HealthStatus.Degraded => "HEALTH_CHECK_DEGRADED",
+                _ => "HEALTH_CHECK_UNHEALTHY"
+            },
+            Description = null,
+            Exception = null,
+            Data = null,
             Tags = entry.Value.Tags.ToList()
         };
     }
