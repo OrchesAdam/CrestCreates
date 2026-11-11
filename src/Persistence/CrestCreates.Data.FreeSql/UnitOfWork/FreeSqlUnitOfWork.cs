@@ -19,6 +19,7 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
         private readonly FreeSqlUnitOfWorkManager _unitOfWorkManager;
         private global::FreeSql.IUnitOfWork? _unitOfWork;
         private bool _disposed;
+        private bool _rollbackConfirmedCleanupPending;
         private int _operationInProgress;
         private readonly List<IHasDomainEvents> _trackedEntities = new List<IHasDomainEvents>();
 
@@ -54,6 +55,7 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
             {
                 // 仓储从同一个 FreeSqlUnitOfWorkManager.Orm 获取连接，确保事务边界一致。
                 _unitOfWork = _unitOfWorkManager.Begin();
+                _rollbackConfirmedCleanupPending = false;
             }
             finally
             {
@@ -86,6 +88,7 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
                 {
                     if (committed)
                     {
+                        _rollbackConfirmedCleanupPending = false;
                         try
                         {
                             DisposeUnitOfWork();
@@ -117,15 +120,21 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
             {
                 if (_unitOfWork == null)
                 {
+                    _rollbackConfirmedCleanupPending = false;
                     return Task.CompletedTask;
                 }
 
-                // 回滚未确认时抛出并保留句柄，后续 Abandon/Dispose 仍可重试终结。
-                _unitOfWork.Rollback();
+                // 回滚未确认时抛出并保留句柄；已确认则不得重复终结，只重试释放句柄。
+                if (!_rollbackConfirmedCleanupPending)
+                {
+                    _unitOfWork.Rollback();
+                    _rollbackConfirmedCleanupPending = true;
+                }
 
                 try
                 {
                     DisposeUnitOfWork();
+                    _rollbackConfirmedCleanupPending = false;
                 }
                 catch (Exception cleanupException)
                 {
@@ -245,7 +254,11 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
 
                 try
                 {
-                    _unitOfWork?.Rollback();
+                    if (_unitOfWork != null && !_rollbackConfirmedCleanupPending)
+                    {
+                        _unitOfWork.Rollback();
+                        _rollbackConfirmedCleanupPending = true;
+                    }
                 }
                 catch (Exception exception)
                 {
@@ -258,11 +271,16 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
                     try
                     {
                         DisposeUnitOfWork();
+                        _rollbackConfirmedCleanupPending = false;
                     }
                     catch (Exception exception)
                     {
                         subsequentFailures.Add(exception);
                     }
+                }
+                else if (_unitOfWork == null)
+                {
+                    _rollbackConfirmedCleanupPending = false;
                 }
 
                 _trackedEntities.Clear();

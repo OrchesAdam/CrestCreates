@@ -286,6 +286,27 @@ public class SdkUnitOfWorkOwnershipTests : IDisposable
             "the confirmed rollback must not be repeated because handle cleanup failed");
     }
 
+    [Fact]
+    public async Task FreeSql_confirmed_rollback_cleanup_failure_is_retried_by_abandon_without_a_second_rollback()
+    {
+        var native = new Mock<global::FreeSql.IUnitOfWork>();
+        native.Setup(instance => instance.Rollback());
+        native.SetupSequence(instance => instance.Dispose())
+            .Throws(new ApplicationException("dispose-failure"));
+        var unitOfWork = CreateFreeSqlUnitOfWork(native.Object);
+
+        var act = async () => await unitOfWork.RollbackTransactionAsync();
+        await act.Should().ThrowAsync<UnitOfWorkRollbackCleanupFailureException>();
+        native.Verify(instance => instance.Rollback(), Times.Once);
+        native.Verify(instance => instance.Dispose(), Times.Once);
+
+        unitOfWork.AbandonPendingWork();
+
+        native.Verify(instance => instance.Rollback(), Times.Once,
+            "the confirmed rollback must not be repeated; the retry only releases the retained handle");
+        native.Verify(instance => instance.Dispose(), Times.Exactly(2));
+    }
+
     private static FreeSqlUnitOfWork CreateFreeSqlUnitOfWork(global::FreeSql.IUnitOfWork native)
     {
         var freeSql = new FreeSqlBuilder()

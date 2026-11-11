@@ -67,6 +67,30 @@ public class EfCoreTransactionWrapperTests
     }
 
     [Fact]
+    public async Task Confirmed_rollback_cleanup_failure_is_retried_by_abandon_without_a_second_rollback()
+    {
+        using var context = CreateContextWithFakeTransactionManager(out var transactionManager);
+        var unitOfWork = new EfCoreUnitOfWork(context, new NoOpDomainEventPublisher());
+        await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+        transactionManager!.DisposeFailure = "dispose-failure";
+        var wrapper = EfCoreDataBaseTransaction.GetOrCreate(context.Database.CurrentTransaction!, context);
+
+        var act = async () => await unitOfWork.RollbackTransactionAsync();
+        await act.Should().ThrowAsync<UnitOfWorkRollbackCleanupFailureException>();
+        transactionManager.RollbackCalls.Should().Be(1);
+        transactionManager.DisposeCalls.Should().Be(1);
+
+        transactionManager.DisposeFailure = null;
+        unitOfWork.AbandonPendingWork();
+
+        transactionManager.RollbackCalls.Should().Be(1,
+            "the rollback is already confirmed; a later abandon may only retry releasing the handle");
+        transactionManager.DisposeCalls.Should().Be(2);
+        wrapper.IsRolledBack.Should().BeTrue();
+        wrapper.IsOutcomeUnknown.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Abandon_updates_shared_wrapper_facts()
     {
         using var context = CreateContext(openConnection: true);
@@ -336,6 +360,8 @@ public class EfCoreTransactionWrapperTests
         }
 
         public int RollbackCalls => Current?.RollbackCount ?? 0;
+
+        public int DisposeCalls => Current?.DisposeCount ?? 0;
 
         public IDbContextTransaction BeginTransaction()
         {

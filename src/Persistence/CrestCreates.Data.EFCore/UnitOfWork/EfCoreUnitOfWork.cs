@@ -28,6 +28,7 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
     {
         private readonly DbContext _dbContext;
         private IDbContextTransaction? _currentTransaction;
+        private bool _rollbackConfirmedCleanupPending;
 
         [ActivatorUtilitiesConstructor]
         public EfCoreUnitOfWork(IDataBaseContext dbContext, IDomainEventPublisher domainEventPublisher)
@@ -62,6 +63,7 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
             _currentTransaction = options.IsolationLevel is { } isolationLevel
                 ? await _dbContext.Database.BeginTransactionAsync(isolationLevel, cancellationToken)
                 : await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+            _rollbackConfirmedCleanupPending = false;
         }
 
         /// <summary>
@@ -124,30 +126,36 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
         {
             if (_currentTransaction == null)
             {
+                _rollbackConfirmedCleanupPending = false;
                 return;
             }
 
-            try
+            if (!_rollbackConfirmedCleanupPending)
             {
-                await _currentTransaction.RollbackAsync(cancellationToken);
-                EfCoreDataBaseTransaction.MarkRolledBack(_currentTransaction);
-            }
-            catch (Exception)
-            {
-                // 回滚未确认：标记未知并保留句柄，后续 Abandon/Dispose 仍可重试终结；原异常不被清理覆盖。
-                EfCoreDataBaseTransaction.MarkOutcomeUnknown(_currentTransaction);
-                throw;
+                try
+                {
+                    await _currentTransaction.RollbackAsync(cancellationToken);
+                    EfCoreDataBaseTransaction.MarkRolledBack(_currentTransaction);
+                    _rollbackConfirmedCleanupPending = true;
+                }
+                catch (Exception)
+                {
+                    // 回滚未确认：标记未知并保留句柄，后续 Abandon/Dispose 仍可重试终结；原异常不被清理覆盖。
+                    EfCoreDataBaseTransaction.MarkOutcomeUnknown(_currentTransaction);
+                    throw;
+                }
             }
 
             try
             {
                 DisposeTransaction();
+                _rollbackConfirmedCleanupPending = false;
             }
             catch (Exception cleanupException)
             {
                 throw new UnitOfWorkRollbackCleanupFailureException(
                     "The transaction rollback was confirmed, but releasing the transaction handle failed. " +
-                    "The rollback fact is preserved; treat this as a cleanup failure.",
+                    "The rollback fact is preserved; retrying termination may only release the retained handle.",
                     cleanupException);
             }
         }
@@ -258,10 +266,11 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
 
             try
             {
-                if (_currentTransaction != null)
+                if (_currentTransaction != null && !_rollbackConfirmedCleanupPending)
                 {
                     _currentTransaction.Rollback();
                     EfCoreDataBaseTransaction.MarkRolledBack(_currentTransaction);
+                    _rollbackConfirmedCleanupPending = true;
                 }
             }
             catch (Exception exception)
@@ -278,6 +287,7 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
                 try
                 {
                     DisposeTransaction();
+                    _rollbackConfirmedCleanupPending = false;
                 }
                 catch (Exception exception)
                 {
