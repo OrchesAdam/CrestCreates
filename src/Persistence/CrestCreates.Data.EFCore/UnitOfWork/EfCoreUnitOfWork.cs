@@ -122,26 +122,33 @@ namespace CrestCreates.Data.EFCore.UnitOfWork
 
         public override async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
+            if (_currentTransaction == null)
+            {
+                return;
+            }
+
             try
             {
-                if (_currentTransaction != null)
-                {
-                    await _currentTransaction.RollbackAsync(cancellationToken);
-                    EfCoreDataBaseTransaction.MarkRolledBack(_currentTransaction);
-                }
+                await _currentTransaction.RollbackAsync(cancellationToken);
+                EfCoreDataBaseTransaction.MarkRolledBack(_currentTransaction);
             }
             catch (Exception)
             {
-                if (_currentTransaction != null)
-                {
-                    EfCoreDataBaseTransaction.MarkOutcomeUnknown(_currentTransaction);
-                }
-
+                // 回滚未确认：标记未知并保留句柄，后续 Abandon/Dispose 仍可重试终结；原异常不被清理覆盖。
+                EfCoreDataBaseTransaction.MarkOutcomeUnknown(_currentTransaction);
                 throw;
             }
-            finally
+
+            try
             {
                 DisposeTransaction();
+            }
+            catch (Exception cleanupException)
+            {
+                throw new UnitOfWorkRollbackCleanupFailureException(
+                    "The transaction rollback was confirmed, but releasing the transaction handle failed. " +
+                    "The rollback fact is preserved; treat this as a cleanup failure.",
+                    cleanupException);
             }
         }
 

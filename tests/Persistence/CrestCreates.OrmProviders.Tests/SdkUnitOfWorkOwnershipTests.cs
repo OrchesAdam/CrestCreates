@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Data.Abstractions;
@@ -243,6 +244,59 @@ public class SdkUnitOfWorkOwnershipTests : IDisposable
 
         var second = async () => await unitOfWork.CommitTransactionAsync();
         await second.Should().ThrowAsync<InvalidOperationException>().WithMessage("*No transaction*");
+    }
+
+    [Fact]
+    public async Task FreeSql_rollback_failure_retains_ownership_and_preserves_the_original_exception()
+    {
+        var native = new Mock<global::FreeSql.IUnitOfWork>();
+        var attempts = 0;
+        native.Setup(unitOfWork => unitOfWork.Rollback()).Callback(() =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                throw new ApplicationException("rollback-failure");
+            }
+        });
+        var unitOfWork = CreateFreeSqlUnitOfWork(native.Object);
+
+        var failure = await Record.ExceptionAsync(() => unitOfWork.RollbackTransactionAsync());
+
+        failure.Should().BeOfType<ApplicationException>().Which.Message.Should().Be("rollback-failure");
+
+        unitOfWork.AbandonPendingWork();
+
+        attempts.Should().Be(2, "a failed explicit rollback keeps the handle for the abandon retry");
+        native.Verify(instance => instance.Dispose(), Times.Once);
+    }
+
+    [Fact]
+    public async Task FreeSql_confirmed_rollback_cleanup_failure_is_reported_without_rewriting_the_rollback()
+    {
+        var native = new Mock<global::FreeSql.IUnitOfWork>();
+        native.Setup(instance => instance.Dispose()).Throws(new ApplicationException("dispose-failure"));
+        var unitOfWork = CreateFreeSqlUnitOfWork(native.Object);
+
+        var act = async () => await unitOfWork.RollbackTransactionAsync();
+
+        (await act.Should().ThrowAsync<UnitOfWorkRollbackCleanupFailureException>())
+            .Which.InnerException!.Message.Should().Be("dispose-failure");
+        native.Verify(instance => instance.Rollback(), Times.Once,
+            "the confirmed rollback must not be repeated because handle cleanup failed");
+    }
+
+    private static FreeSqlUnitOfWork CreateFreeSqlUnitOfWork(global::FreeSql.IUnitOfWork native)
+    {
+        var freeSql = new FreeSqlBuilder()
+            .UseConnectionString(DataType.Sqlite, "Data Source=:memory:")
+            .Build();
+        var unitOfWork = new FreeSqlUnitOfWork(
+            new FreeSqlUnitOfWorkManager(freeSql), new NoOpDomainEventPublisher());
+        typeof(FreeSqlUnitOfWork)
+            .GetField("_unitOfWork", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(unitOfWork, native);
+        return unitOfWork;
     }
 
     private static (Mock<ISqlSugarClient> Client, Mock<SqlSugarAdo> Ado) CreateSqlSugarMocks()

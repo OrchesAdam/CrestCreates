@@ -95,6 +95,23 @@ public class UnitOfWorkAbandonCapabilityTests
     }
 
     [Fact]
+    public async Task Confirmed_rollback_cleanup_failure_keeps_rolled_back_for_non_abandonable_provider()
+    {
+        var unitOfWork = new RollbackCleanupFailureUnitOfWork();
+        var manager = new UnitOfWorkManager(new CountingUnitOfWorkFactory(unitOfWork));
+
+        using var scope = manager.BeginScope();
+        await scope.StartAsync();
+        await scope.RollbackAsync();
+
+        scope.State.Should().Be(UnitOfWorkState.Failed, "the cleanup failure is checkable as Failed");
+        scope.TransactionOutcome.Should().Be(
+            UnitOfWorkTransactionOutcome.RolledBack,
+            "the rollback was confirmed; only the handle cleanup failed");
+        scope.RollbackTerminationFailure.Should().BeOfType<UnitOfWorkRollbackCleanupFailureException>();
+    }
+
+    [Fact]
     public void FreeSql_assembly_no_longer_exposes_the_legacy_transaction_track()
     {
         var legacy = typeof(CrestCreates.Data.FreeSql.UnitOfWork.FreeSqlUnitOfWorkManager)
@@ -147,7 +164,7 @@ public class UnitOfWorkAbandonCapabilityTests
             return Task.CompletedTask;
         }
 
-        public Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
+        public virtual Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
             RollbackCount++;
             return Task.CompletedTask;
@@ -163,5 +180,13 @@ public class UnitOfWorkAbandonCapabilityTests
         public int AbandonCount { get; private set; }
 
         public void AbandonPendingWork() => AbandonCount++;
+    }
+
+    private sealed class RollbackCleanupFailureUnitOfWork : CountingUnitOfWork
+    {
+        public override Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
+            => throw new UnitOfWorkRollbackCleanupFailureException(
+                "rollback-confirmed-cleanup-failed",
+                new InvalidOperationException("dispose-failed"));
     }
 }

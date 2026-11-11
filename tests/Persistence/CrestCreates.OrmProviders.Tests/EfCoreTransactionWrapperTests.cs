@@ -23,6 +23,50 @@ namespace CrestCreates.OrmProviders.Tests;
 public class EfCoreTransactionWrapperTests
 {
     [Fact]
+    public async Task Rollback_failure_is_not_replaced_by_cleanup_failure()
+    {
+        using var context = CreateContextWithFakeTransactionManager(out var transactionManager);
+        var unitOfWork = new EfCoreUnitOfWork(context, new NoOpDomainEventPublisher());
+        await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+        transactionManager!.RollbackFailure = "rollback-failure";
+        transactionManager.DisposeFailure = "dispose-failure";
+        var wrapper = EfCoreDataBaseTransaction.GetOrCreate(context.Database.CurrentTransaction!, context);
+
+        var failure = await Record.ExceptionAsync(() => unitOfWork.RollbackTransactionAsync());
+
+        failure.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(
+            "rollback-failure",
+            "the cleanup failure is secondary and must not replace the original rollback failure");
+        wrapper.IsOutcomeUnknown.Should().BeTrue();
+        transactionManager.RollbackCalls.Should().Be(1);
+
+        transactionManager.RollbackFailure = null;
+        transactionManager.DisposeFailure = null;
+        unitOfWork.AbandonPendingWork();
+
+        transactionManager.RollbackCalls.Should().Be(2, "an unconfirmed rollback keeps the handle for retry");
+        wrapper.IsOutcomeUnknown.Should().BeTrue("a confirmed retry must not rewrite the earlier unknown outcome");
+    }
+
+    [Fact]
+    public async Task Confirmed_rollback_cleanup_failure_keeps_the_rolled_back_fact()
+    {
+        using var context = CreateContextWithFakeTransactionManager(out var transactionManager);
+        var unitOfWork = new EfCoreUnitOfWork(context, new NoOpDomainEventPublisher());
+        await unitOfWork.BeginTransactionAsync(new UnitOfWorkBeginOptions());
+        transactionManager!.DisposeFailure = "dispose-failure";
+        var wrapper = EfCoreDataBaseTransaction.GetOrCreate(context.Database.CurrentTransaction!, context);
+
+        var act = async () => await unitOfWork.RollbackTransactionAsync();
+
+        (await act.Should().ThrowAsync<UnitOfWorkRollbackCleanupFailureException>())
+            .Which.InnerException!.Message.Should().Be("dispose-failure");
+        wrapper.IsRolledBack.Should().BeTrue("the rollback was confirmed before handle cleanup failed");
+        wrapper.IsCompleted.Should().BeTrue();
+        wrapper.IsOutcomeUnknown.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Abandon_updates_shared_wrapper_facts()
     {
         using var context = CreateContext(openConnection: true);

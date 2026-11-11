@@ -120,13 +120,19 @@ namespace CrestCreates.Data.FreeSql.UnitOfWork
                     return Task.CompletedTask;
                 }
 
+                // 回滚未确认时抛出并保留句柄，后续 Abandon/Dispose 仍可重试终结。
+                _unitOfWork.Rollback();
+
                 try
                 {
-                    _unitOfWork.Rollback();
-                }
-                finally
-                {
                     DisposeUnitOfWork();
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new UnitOfWorkRollbackCleanupFailureException(
+                        "The unit of work rollback was confirmed, but releasing the FreeSql unit of work failed. " +
+                        "The rollback fact is preserved; treat this as a cleanup failure.",
+                        cleanupException);
                 }
             }
             finally

@@ -42,6 +42,18 @@ namespace CrestCreates.Data.Abstractions
     }
 
     /// <summary>
+    /// 事务回滚**已确认**，但事务句柄清理（Dispose）失败。
+    /// 回滚事实保留；释放失败作为次级诊断，不得把已确认回滚改写为未知。
+    /// </summary>
+    public sealed class UnitOfWorkRollbackCleanupFailureException : InvalidOperationException
+    {
+        public UnitOfWorkRollbackCleanupFailureException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+    }
+
+    /// <summary>
     /// Provider 终结未完成事务时**回滚无法确认**（终结失败）。
     /// 原始终结故障保留为 <see cref="Exception.InnerException"/>；句柄释放/丢弃等后续失败
     /// 经 <see cref="SubsequentFailures"/> 保留。内核据此不得宣称 RolledBack
