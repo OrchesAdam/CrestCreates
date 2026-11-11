@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using CrestCreates.HealthCheck.AspNetCore.Modules;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace CrestCreates.HealthCheck.Mvc.Controllers;
@@ -19,20 +20,7 @@ public class HealthController : ControllerBase
     public async Task<IActionResult> GetHealth(CancellationToken cancellationToken = default)
     {
         var report = await _healthCheckService.CheckHealthAsync(cancellationToken);
-        var response = new
-        {
-            status = report.Status.ToString(),
-            totalDuration = report.TotalDuration,
-            checks = report.Entries.Select(e => new
-            {
-                name = e.Key,
-                status = e.Value.Status.ToString(),
-                duration = e.Value.Duration,
-                description = e.Value.Description,
-                exception = e.Value.Exception?.Message,
-                tags = e.Value.Tags
-            })
-        };
+        var response = HealthReportResponseMapper.FromHealthReport(report);
 
         return report.Status == HealthStatus.Healthy ? Ok(response) : StatusCode(503, response);
     }
@@ -44,20 +32,7 @@ public class HealthController : ControllerBase
         var report = await _healthCheckService.CheckHealthAsync(
             registration => registration.Tags.Contains(tag), 
             cancellationToken);
-        var response = new
-        {
-            status = report.Status.ToString(),
-            totalDuration = report.TotalDuration,
-            checks = report.Entries.Select(e => new
-            {
-                name = e.Key,
-                status = e.Value.Status.ToString(),
-                duration = e.Value.Duration,
-                description = e.Value.Description,
-                exception = e.Value.Exception?.Message,
-                tags = e.Value.Tags
-            })
-        };
+        var response = HealthReportResponseMapper.FromHealthReport(report);
 
         return report.Status == HealthStatus.Healthy ? Ok(response) : StatusCode(503, response);
     }

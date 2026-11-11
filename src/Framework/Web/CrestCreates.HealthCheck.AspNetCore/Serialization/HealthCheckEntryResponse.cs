@@ -7,6 +7,7 @@ public sealed record HealthCheckEntryResponse
 {
     public string Name { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
+    public string Code { get; init; } = string.Empty;
     public TimeSpan Duration { get; init; }
     public string? Description { get; init; }
     public string? Exception { get; init; }

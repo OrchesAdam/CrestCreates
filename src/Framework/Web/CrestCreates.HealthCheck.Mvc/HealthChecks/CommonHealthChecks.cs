@@ -35,28 +35,38 @@ public class MemoryHealthCheck : IHealthCheck
 [HealthCheck(Name = "Database", Tags = new[] { "database", "sql", "critical" }, Description = "Check database connectivity")]
 public class DatabaseHealthCheck : IHealthCheck
 {
-    private readonly string _connectionString;
+    private readonly Func<System.Data.Common.DbConnection> _connectionFactory;
 
-    public DatabaseHealthCheck(string connectionString = "Server=localhost;Database=master;Integrated Security=true")
+    private readonly TimeSpan _timeout;
+
+    public DatabaseHealthCheck(Func<System.Data.Common.DbConnection> connectionFactory, TimeSpan? timeout = null)
     {
-        _connectionString = connectionString;
+        _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
+        _timeout = timeout ?? TimeSpan.FromSeconds(5);
+        if (_timeout <= TimeSpan.Zero || _timeout.TotalMilliseconds > uint.MaxValue - 1)
+            throw new ArgumentOutOfRangeException(nameof(timeout));
     }
 
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         try
         {
-            await Task.Delay(10, cancellationToken);
-            var data = new Dictionary<string, object>
-            {
-                { "connectionString", _connectionString },
-                { "status", "connected" }
-            };
-            return HealthCheckResult.Healthy("Database connection is healthy", data);
+            cancellationToken.ThrowIfCancellationRequested();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(_timeout);
+            await using var connection = _connectionFactory();
+            // Await the provider before disposing its connection, even if it ignores cancellation.
+            await connection.OpenAsync(deadline.Token);
+            deadline.Token.ThrowIfCancellationRequested();
+            return HealthCheckResult.Healthy("DATABASE_REACHABLE");
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return HealthCheckResult.Unhealthy("Database connection failed", ex);
+            throw;
+        }
+        catch (Exception)
+        {
+            return HealthCheckResult.Unhealthy("DATABASE_UNREACHABLE");
         }
     }
 }
@@ -64,28 +74,32 @@ public class DatabaseHealthCheck : IHealthCheck
 [HealthCheck(Name = "Redis", Tags = new[] { "redis", "cache", "infrastructure" }, Description = "Check Redis connectivity")]
 public class RedisHealthCheck : IHealthCheck
 {
-    private readonly string _connectionString;
+    private readonly StackExchange.Redis.IConnectionMultiplexer _connection;
+    private readonly TimeSpan _timeout;
 
-    public RedisHealthCheck(string connectionString = "localhost:6379")
+    public RedisHealthCheck(StackExchange.Redis.IConnectionMultiplexer connection, TimeSpan? timeout = null)
     {
-        _connectionString = connectionString;
+        _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+        _timeout = timeout ?? TimeSpan.FromSeconds(5);
+        if (_timeout <= TimeSpan.Zero || _timeout.TotalMilliseconds > uint.MaxValue - 1)
+            throw new ArgumentOutOfRangeException(nameof(timeout));
     }
 
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         try
         {
-            await Task.Delay(10, cancellationToken);
-            var data = new Dictionary<string, object>
-            {
-                { "connectionString", _connectionString },
-                { "status", "connected" }
-            };
-            return HealthCheckResult.Healthy("Redis connection is healthy", data);
+            cancellationToken.ThrowIfCancellationRequested();
+            await _connection.GetDatabase().PingAsync().WaitAsync(_timeout, cancellationToken);
+            return HealthCheckResult.Healthy("REDIS_REACHABLE");
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return HealthCheckResult.Unhealthy("Redis connection failed", ex);
+            throw;
+        }
+        catch (Exception)
+        {
+            return HealthCheckResult.Unhealthy("REDIS_UNREACHABLE");
         }
     }
 }
