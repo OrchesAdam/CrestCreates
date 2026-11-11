@@ -35,6 +35,51 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
             """);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task SqlSugar_soft_delete_overloads_bind_live_row_as_boolean(int overload)
+    {
+        using var client = Issue130SqlSugarBed.Create(_database, _userProvider, _tenant);
+        var soft = new Issue130SqlSugarRepository<Issue130SoftOnly>(client, _userProvider);
+        var stamped = new Issue130SqlSugarRepository<Issue130SoftStamped>(client, _userProvider);
+        await soft.InsertAsync(new Issue130SoftOnly(1, "live"));
+        InsertStamped(2, "legacy-stamp");
+        var commands = new List<(string Sql, object LiveRow)>();
+        client.Aop.OnLogExecuting = (sql, parameters) =>
+        {
+            if (!sql.TrimStart().StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)) return;
+            var parameter = Assert.Single(parameters.Where(p => p.ParameterName.TrimStart('@', ':') == "liveRow"));
+            commands.Add((sql, parameter.Value));
+        };
+
+        switch (overload)
+        {
+            case 0: await soft.DeleteAsync((await soft.GetAsync(1))!); break;
+            case 1: await soft.DeleteAsync(1); break;
+            case 2: await soft.DeleteRangeAsync(new[] { (await soft.GetAsync(1))! }); break;
+            case 3: await soft.DeleteRangeAsync(entity => entity.Id == 1); break;
+            case 4: await stamped.DeleteAsync((await stamped.GetAsync(2))!); break;
+            case 5: await stamped.DeleteAsync(2, "stamp-2"); break;
+        }
+
+        var command = Assert.Single(commands);
+        Assert.False(Assert.IsType<bool>(command.LiveRow));
+        Assert.Contains("@liveRow", command.Sql);
+        Assert.DoesNotMatch(@"(?i)IsDeleted[\""\]`]*\s*=\s*0", command.Sql);
+        if (overload >= 4)
+        {
+            Assert.Contains("@entityStamp", command.Sql);
+            Assert.Matches("^[0-9a-f]{32}$", _database.Read(Issue130Tables.SoftStamped, 2).Text("ConcurrencyStamp"));
+        }
+        Assert.Equal(1, _database.Read(overload >= 4 ? Issue130Tables.SoftStamped : Issue130Tables.SoftOnly,
+            overload >= 4 ? 2 : 1).Integer("IsDeleted"));
+    }
+
     // ---------------------------------------------------------------- EF Core
 
     [Fact]

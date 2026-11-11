@@ -24,27 +24,15 @@ namespace CrestCreates.Data.FreeSql.Extensions
         /// </remarks>
         public static IServiceCollection AddFreeSqlWithUow(
             this IServiceCollection services,
-            Action<IFreeSql> freeSqlBuilder,
+            Action<FreeSqlBuilder> freeSqlBuilder,
             Assembly repositoryAssembly)
         {
-            // 1. 创建静态的 FreeSql 实例
-            var freeSqlBuilder1 = new FreeSqlBuilder();
-            var freeSql = freeSqlBuilder1.Build();
-            freeSqlBuilder?.Invoke(freeSql);
+            ArgumentNullException.ThrowIfNull(services);
+            ArgumentNullException.ThrowIfNull(freeSqlBuilder);
 
-            // 3. 注册 UnitOfWorkManager
-            services.AddScoped<FreeSqlUnitOfWorkManager>(sp => 
-                new FreeSqlUnitOfWorkManager(freeSql));
-
-            // 4. 注册 IFreeSql（关键：从 UowManager.Orm 获取）
-            // 这样注入的 IFreeSql 会自动跟随 UowManager 切换事务
-            services.AddScoped<IFreeSql>(sp => 
-                sp.GetRequiredService<FreeSqlUnitOfWorkManager>().Orm);
-
-            // 5. 注册 FreeSql 工作单元与其 Provider 绑定
-            services.AddFreeSqlUnitOfWorkCore();
-
-            return services;
+            var builder = new FreeSqlBuilder();
+            freeSqlBuilder(builder);
+            return services.AddFreeSqlWithUow(builder.Build(), repositoryAssembly);
         }
 
         /// <summary>

@@ -14,6 +14,7 @@
     <ProjectReference Include="../../../../samples/LibraryManagement/LibraryManagement.EntityFrameworkCore/LibraryManagement.EntityFrameworkCore.csproj" />
     <ProjectReference Include="../../../../samples/LibraryManagement/LibraryManagement.Web/LibraryManagement.Web.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Security/CrestCreates.Security.csproj" />
+    <ProjectReference Include="../../../../src/Persistence/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
   </ItemGroup>

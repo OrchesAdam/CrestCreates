@@ -36,18 +36,25 @@ public class SqlSugarConcurrencyTests : IDisposable
         _sqlSugarClient?.Dispose();
     }
 
-    [Fact]
-    public async Task UpdateAsync_WithCorrectStamp_ShouldUpdateStamp()
+    [Theory]
+    [InlineData("01234567-89ab-cdef-0123-456789abcdef")]
+    [InlineData("opaque:Legacy-STAMP/v1")]
+    public async Task UpdateAsync_WithCorrectStamp_ShouldUpdateStamp(string oldStamp)
     {
         var entity = new TestConcurrentEntity(Guid.NewGuid()) { Name = "Original" };
         await _repository.InsertAsync(entity);
 
-        var oldStamp = entity.ConcurrencyStamp;
+        await _sqlSugarClient.Updateable<TestConcurrentEntity>()
+            .SetColumns(row => row.ConcurrencyStamp == oldStamp)
+            .Where(row => row.Id == entity.Id).ExecuteCommandAsync();
+        entity.ConcurrencyStamp = oldStamp;
         entity.Name = "Updated";
         var result = await _repository.UpdateAsync(entity);
 
         Assert.NotNull(result);
         Assert.NotEqual(oldStamp, result.ConcurrencyStamp);
+        Assert.Matches("^[0-9a-f]{32}$", result.ConcurrencyStamp);
+        Assert.Equal(result.ConcurrencyStamp, (await _repository.GetAsync(entity.Id)).ConcurrencyStamp);
         Assert.Equal("Updated", result.Name);
     }
 

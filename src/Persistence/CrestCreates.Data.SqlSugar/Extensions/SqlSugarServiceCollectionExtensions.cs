@@ -20,7 +20,9 @@ namespace CrestCreates.Data.SqlSugar.Extensions
             ConnectionConfig connectionConfig)
         {
             ArgumentNullException.ThrowIfNull(connectionConfig);
-            return services.AddSqlSugarWithUow(() => new SqlSugarClient(connectionConfig));
+            services.AddSqlSugarWithUow(() => new SqlSugarClient(connectionConfig));
+            services.AddScoped(sp => (SqlSugarClient)sp.GetRequiredService<ISqlSugarClient>());
+            return services;
         }
 
         public static IServiceCollection AddSqlSugarWithUow(
@@ -31,7 +33,6 @@ namespace CrestCreates.Data.SqlSugar.Extensions
             ArgumentNullException.ThrowIfNull(clientFactory);
 
             services.AddScoped<ISqlSugarClient>(_ => clientFactory());
-            services.AddScoped(sp => (SqlSugarClient)sp.GetRequiredService<ISqlSugarClient>());
             services.TryAddScoped<ICurrentUserProvider>(sp =>
             sp.GetService<ICurrentUser>() is { } currentUser
                 ? new CurrentUserProviderAdapter(currentUser)

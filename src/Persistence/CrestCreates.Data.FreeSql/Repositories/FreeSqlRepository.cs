@@ -522,7 +522,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 if (entity is IHasConcurrencyStamp stamp)
                 {
                     var oldStamp = stamp.ConcurrencyStamp;
-                    stamp.ConcurrencyStamp = Guid.NewGuid().ToString();
+                    stamp.ConcurrencyStamp = Guid.NewGuid().ToString("N");
                     var update = IgnoreCreationAuditColumns(_orm.Update<TEntity>()
                         .SetSource(entity)
                         .Where(e => e.Id.Equals(entity.Id))
@@ -833,7 +833,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = SelectForCurrentTenant();
                 var total = await query.CountAsync(cancellationToken);
-                var items = await query.Page(pageIndex + 1, pageSize).ToListAsync(cancellationToken);
+                var items = await query.OrderBy(entity => entity.Id).Page(pageIndex + 1, pageSize).ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType} out of {Total}", items.Count, typeof(TEntity).Name, total);
                 return new PagedResult<TEntity>(items, (int)total, pageIndex, pageSize);
             }
@@ -854,7 +854,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} with predicate - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = SelectForCurrentTenant().Where(predicate);
                 var total = await query.CountAsync(cancellationToken);
-                var items = await query.Page(pageIndex + 1, pageSize).ToListAsync(cancellationToken);
+                var items = await query.OrderBy(entity => entity.Id).Page(pageIndex + 1, pageSize).ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType} out of {Total}", items.Count, typeof(TEntity).Name, total);
                 return new PagedResult<TEntity>(items, (int)total, pageIndex, pageSize);
             }
@@ -875,6 +875,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} with predicate and order - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = SelectForCurrentTenant().Where(predicate);
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
+                query = query.OrderBy(entity => entity.Id);
                 var total = await query.CountAsync(cancellationToken);
                 var items = await query.Page(pageIndex + 1, pageSize).ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType} out of {Total}", items.Count, typeof(TEntity).Name, total);
@@ -897,6 +898,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 _logger?.LogDebug("Getting paged entities {EntityType} with order - Page {PageIndex}, Size {PageSize}", typeof(TEntity).Name, pageIndex, pageSize);
                 var query = SelectForCurrentTenant();
                 query = ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy);
+                query = query.OrderBy(entity => entity.Id);
                 var total = await query.CountAsync(cancellationToken);
                 var items = await query.Page(pageIndex + 1, pageSize).ToListAsync(cancellationToken);
                 _logger?.LogDebug("Got {Count} entities {EntityType} out of {Total}", items.Count, typeof(TEntity).Name, total);

@@ -36,7 +36,7 @@ namespace CrestCreates.Data.SqlSugar.Repositories
             {
                 update = update.SetColumns(
                     nameof(IHasConcurrencyStamp.ConcurrencyStamp),
-                    Guid.NewGuid().ToString());
+                    Guid.NewGuid().ToString("N"));
             }
 
             return await update.ExecuteCommandAsync(cancellationToken);
