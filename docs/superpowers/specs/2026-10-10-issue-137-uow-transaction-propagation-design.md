@@ -36,7 +36,7 @@
 | A | `UnitOfWorkMoAttribute`（Rougamo AOP）`src/Framework/Infrastructure/CrestCreates.Aop/Interceptors/UnitOfWorkMoAttribute.cs` | `[UnitOfWorkMo]`（手写服务、生成 CRUD 服务、`CrestAppServiceBase` 的 Create/Update/Delete） | OnEntry：`BeginScope(isTransactional)`（**无 requiresNew**，即 Required）；owner 且事务 → `BeginTransactionAsync`；自维护静态 `AsyncLocal<Stack<IUnitOfWorkScope?>>`。OnSuccess：owner 且事务 → `CommitTransactionAsync`；owner 非事务 → `SaveChangesAsync`。OnException：owner → `RollbackTransactionAsync`。之后 `scope.Dispose()`。Manager 缺失 → warn + skip（无 ORM 兼容路径，保留）。 |
 | B | 生成 Dynamic API `DynamicApiGeneratedRuntime.ExecuteAsync`（`src/Framework/Api/CrestCreates.DynamicApi/DynamicApiGeneratedRuntime.cs`） | `DynamicApiAotSourceGenerator` 生成端点：方法/类型含 `[UnitOfWorkMo]` → (requiresUoW=true, requiresTransaction=属性值，默认 true)；否则 GET → (false,false)，非 GET → (true,true)（生成器 678-707 行） | `context.RequestServices.GetService<IUnitOfWorkManager>()`；null → 直接执行；`BeginScope(isTransactional)`；owner 且事务 → Begin / Commit，owner 非事务 → SaveChanges；catch：owner → Rollback，rethrow。**与 A 相同模式的第二份实现（两个重载）。** |
 | C | `IUnitOfWorkManager.Execute/ExecuteAsync<T>` | 框架 API / 测试 / AOT fixture | `BeginScope(requiresNew: true)`；`BeginTransactionAsync`；action；`CommitTransactionAsync`；catch → TryRollback（吞清理异常）。**同步版与异步版是两份实现。** |
-| D | FreeSql `TransactionalAttribute` + `FreeSqlUnitOfWorkManager` | FreeSql 包内 | 直接使用 FreeSql SDK 的 `UnitOfWorkManager.Begin(propagation, isolation)`；**Provider 内部路径**，不是平台 Manager 第二条主链（#124 已裁定保留并声明）。 |
+| D | FreeSql `TransactionalAttribute` + `FreeSqlUnitOfWorkManager` | FreeSql 包内 | ~~直接使用 FreeSql SDK 的 `UnitOfWorkManager.Begin(propagation, isolation)`~~；R3-30 复核确认无消费者，attribute/helper 已归档至 `99_RecycleBin/issue-r3-30-freesql-legacy-transaction/`；唯一执行链为 `AddUnitOfWork` + binding |
 
 ### 1.3 资源链与 requiresNew 隔离
 
@@ -95,7 +95,7 @@ UnitOfWorkManager.BeginScope
 | `Data.Abstractions.RepositoryBase.Repository<,>`（构造期捕获 DbSet/QueryableBuilder） | **零消费者**（生成仓储走 `CrestRepositoryBase`） | **归档**（跨 UoW 缓存资源对象的反面样本，防止被误用） |
 | `IUnitOfWorkManager.Begin(OrmProvider?)` + `ScopedUnitOfWorkProxy` | 测试、AOT fixture（旧式单 UoW API） | **归档**；调用方迁移到 `BeginScope + StartAsync`（测试/fixture 同步迁移） |
 | `UnitOfWorkIntegrationExtensions` / 内部 `UnitOfWorkTransactionParticipant`（DistributedTransaction 包） | 零消费者 | 不在 #137 重开；由 §4.5 CAP 最小契约替代，处置记录交 #125（本项负责交接文档与最小契约） |
-| FreeSql `TransactionalAttribute` / `FreeSqlUnitOfWorkManager` | FreeSql 包内部 | 保留（Provider 内部路径），能力声明进 Provider 矩阵 |
+| FreeSql `TransactionalAttribute` / `TransactionHelper` | FreeSql 包内 | 已归档（R3-30；无消费者，防回流守卫在 OrmProviders.Tests） |
 | `UnitOfWorkWithEvents`（Provider 基类） | EF/FreeSql UoW | 保留；生命周期顺序与故障语义按 §4.5 固定 |
 | `UnitOfWorkProviderBindingRegistry.ResolveProvider` 默认选择规则 | 装配 | 保留（#124 已裁定） |
 

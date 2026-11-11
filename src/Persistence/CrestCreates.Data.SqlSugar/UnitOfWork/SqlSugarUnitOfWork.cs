@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Threading;
 using SqlSugar;
@@ -14,12 +15,13 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
     /// <summary>
     /// SqlSugar 工作单元实现：flush / commit / 提交后通知职责分离（内核负责顺序）。
     /// </summary>
-    public class SqlSugarUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkCommittedNotifier, IUnitOfWorkAbandonable
+    public class SqlSugarUnitOfWork : UnitOfWorkWithEvents, IUnitOfWorkCommittedNotifier, IUnitOfWorkAbandonable, IUnitOfWorkDomainEventTracker
     {
         private readonly ISqlSugarClient _sqlSugarClient;
         private bool _isTransactionStarted;
         private bool _disposed;
-        private readonly List<object> _trackedEntities = new List<object>();
+        private int _operationInProgress;
+        private readonly List<IHasDomainEvents> _trackedEntities = new List<IHasDomainEvents>();
 
         public SqlSugarUnitOfWork(ISqlSugarClient sqlSugarClient, IDomainEventPublisher domainEventPublisher)
             : base(domainEventPublisher)
@@ -48,8 +50,16 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
                 throw new InvalidOperationException("Transaction already in progress");
             }
 
-            await Task.Run(() => _sqlSugarClient.Ado.BeginTran(), cancellationToken);
-            _isTransactionStarted = true;
+            EnterOperation("begin");
+            try
+            {
+                await Task.Run(() => _sqlSugarClient.Ado.BeginTran(), cancellationToken);
+                _isTransactionStarted = true;
+            }
+            finally
+            {
+                ExitOperation();
+            }
         }
 
         /// <summary>
@@ -57,18 +67,32 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
         /// </summary>
         public override async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
         {
-            if (!_isTransactionStarted)
-            {
-                throw new InvalidOperationException("No transaction has been started");
-            }
-
+            EnterOperation("commit");
             try
             {
-                await Task.Run(() => _sqlSugarClient.Ado.CommitTran(), cancellationToken);
+                if (!_isTransactionStarted)
+                {
+                    throw new InvalidOperationException("No transaction has been started");
+                }
+
+                var committed = false;
+                try
+                {
+                    await Task.Run(() => _sqlSugarClient.Ado.CommitTran(), cancellationToken);
+                    committed = true;
+                }
+                finally
+                {
+                    // 提交未确认时保留事务标记，交由内核 abandon/Dispose 终结；不得提前丢弃所有权。
+                    if (committed)
+                    {
+                        _isTransactionStarted = false;
+                    }
+                }
             }
             finally
             {
-                _isTransactionStarted = false;
+                ExitOperation();
             }
         }
 
@@ -77,18 +101,20 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
         /// </summary>
         public override async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
         {
-            if (!_isTransactionStarted)
-            {
-                return;
-            }
-
+            EnterOperation("rollback");
             try
             {
+                if (!_isTransactionStarted)
+                {
+                    return;
+                }
+
                 await Task.Run(() => _sqlSugarClient.Ado.RollbackTran(), CancellationToken.None);
+                _isTransactionStarted = false;
             }
             finally
             {
-                _isTransactionStarted = false;
+                ExitOperation();
             }
         }
 
@@ -115,29 +141,16 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
         /// </summary>
         public async Task PublishCommittedNotificationsAsync(CancellationToken cancellationToken = default)
         {
-            foreach (var entity in new List<object>(_trackedEntities))
+            foreach (var entity in new List<IHasDomainEvents>(_trackedEntities))
             {
-                var entityType = entity.GetType();
-                var domainEventsProperty = entityType.GetProperty("DomainEvents");
-                var clearDomainEventsMethod = entityType.GetMethod("ClearDomainEvents");
-
-                if (domainEventsProperty == null || clearDomainEventsMethod == null)
+                foreach (var domainEvent in entity.DomainEvents.ToArray())
                 {
-                    continue;
+                    await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
                 }
 
-                if (domainEventsProperty.GetValue(entity) is IReadOnlyCollection<IDomainEvent> domainEvents)
-                {
-                    foreach (var domainEvent in domainEvents)
-                    {
-                        await _domainEventPublisher.PublishAsync(domainEvent, cancellationToken);
-                    }
-
-                    clearDomainEventsMethod.Invoke(entity, null);
-                }
+                entity.ClearDomainEvents();
+                _trackedEntities.Remove(entity);
             }
-
-            _trackedEntities.Clear();
         }
 
         /// <summary>
@@ -146,8 +159,17 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
         public void TrackEntity<TEntity, TId>(TEntity entity)
             where TEntity : Entity<TId>
             where TId : IEquatable<TId>
+            => TrackEntity((IHasDomainEvents)entity);
+
+        /// <inheritdoc />
+        public void TrackEntity(IHasDomainEvents entity)
         {
-            if (entity != null && entity.DomainEvents.Count > 0)
+            if (entity.DomainEvents.Count == 0)
+            {
+                return;
+            }
+
+            if (!_trackedEntities.Any(tracked => ReferenceEquals(tracked, entity)))
             {
                 _trackedEntities.Add(entity);
             }
@@ -169,32 +191,62 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
         /// </summary>
         public void AbandonPendingWork()
         {
-            Exception? terminationFailure = null;
-
-            if (_isTransactionStarted)
-            {
-                try
-                {
-                    _sqlSugarClient.Ado.RollbackTran();
-                }
-                catch (Exception exception)
-                {
-                    terminationFailure = exception;
-                }
-
-                _isTransactionStarted = false;
-            }
-
-            _trackedEntities.Clear();
-
-            if (terminationFailure is not null)
+            if (!TryEnterOperation())
             {
                 throw new UnitOfWorkAbandonFailureException(
-                    "The SqlSugar unit of work could not confirm the rollback of its pending transaction. " +
-                    "The original termination failure is preserved; the transaction outcome must not be reported as rolled back.",
-                    terminationFailure);
+                    "The SqlSugar unit of work still has an operation in progress; termination cannot be confirmed. " +
+                    "The transaction outcome must not be reported as rolled back.",
+                    new InvalidOperationException("A commit or rollback is still executing on the same unit of work."));
+            }
+
+            try
+            {
+                Exception? terminationFailure = null;
+
+                if (_isTransactionStarted)
+                {
+                    try
+                    {
+                        _sqlSugarClient.Ado.RollbackTran();
+                        _isTransactionStarted = false;
+                    }
+                    catch (Exception exception)
+                    {
+                        // 回滚未确认：保留事务所有权，后续 abandon/Dispose 仍可重试终结；
+                        // 正常返回必须意味着有真实回滚证据。
+                        terminationFailure = exception;
+                    }
+                }
+
+                _trackedEntities.Clear();
+
+                if (terminationFailure is not null)
+                {
+                    throw new UnitOfWorkAbandonFailureException(
+                        "The SqlSugar unit of work could not confirm the rollback of its pending transaction. " +
+                        "The original termination failure is preserved; the transaction outcome must not be reported as rolled back.",
+                        terminationFailure);
+                }
+            }
+            finally
+            {
+                ExitOperation();
             }
         }
+
+        private void EnterOperation(string operation)
+        {
+            if (Interlocked.CompareExchange(ref _operationInProgress, 1, 0) != 0)
+            {
+                throw new InvalidOperationException(
+                    $"A unit-of-work operation is already in progress; '{operation}' was rejected to keep " +
+                    "the native transaction under a single owner.");
+            }
+        }
+
+        private void ExitOperation() => Interlocked.Exchange(ref _operationInProgress, 0);
+
+        private bool TryEnterOperation() => Interlocked.CompareExchange(ref _operationInProgress, 1, 0) == 0;
 
         protected virtual void Dispose(bool disposing)
         {
@@ -203,20 +255,17 @@ namespace CrestCreates.Data.SqlSugar.UnitOfWork
 
             if (disposing)
             {
-                // 如果事务还在进行中，自动回滚
-                if (_isTransactionStarted)
+                // 如果事务还在进行中且没有操作占用，自动回滚；正在执行的操作保留所有权。
+                if (_isTransactionStarted && Volatile.Read(ref _operationInProgress) == 0)
                 {
                     try
                     {
                         _sqlSugarClient.Ado.RollbackTran();
+                        _isTransactionStarted = false;
                     }
                     catch
                     {
-                        // 忽略回滚异常
-                    }
-                    finally
-                    {
-                        _isTransactionStarted = false;
+                        // 回滚仍未确认：保留事务所有权，不把 Dispose 当作成功终结。
                     }
                 }
 

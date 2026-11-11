@@ -194,6 +194,11 @@ namespace CrestCreates.Data.Abstractions
                 throw new InvalidOperationException($"Cannot start a unit-of-work scope in state '{_state}'.");
             }
 
+            if (_isOwner)
+            {
+                UnitOfWorkScopePreflight.ValidateAbandonCapabilities(_manager, _provider, _unitOfWork);
+            }
+
             _started = true;
             _callerToken = cancellationToken;
 

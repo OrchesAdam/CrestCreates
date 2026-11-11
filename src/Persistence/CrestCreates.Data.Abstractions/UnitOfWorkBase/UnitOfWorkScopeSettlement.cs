@@ -219,7 +219,8 @@ namespace CrestCreates.Data.Abstractions
 
             scope.RollbackTerminationFailure ??= terminationFailure;
 
-            if (terminationFailure is UnitOfWorkAbandonCleanupFailureException)
+            if (terminationFailure is UnitOfWorkAbandonCleanupFailureException or
+                UnitOfWorkRollbackCleanupFailureException)
             {
                 if (scope.TransactionOutcome != UnitOfWorkTransactionOutcome.Unknown)
                 {

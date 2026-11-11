@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using CrestCreates.Domain.UnitOfWork;
 
 namespace CrestCreates.Data.Abstractions
 {
@@ -92,6 +93,39 @@ namespace CrestCreates.Data.Abstractions
             }
 
             return new TenantKeySnapshot(factory(serviceProvider));
+        }
+
+        /// <summary>
+        /// 执行前能力校验：声明了终结/丢弃能力但实例未实现 <see cref="IUnitOfWorkAbandonable"/>
+        /// 的 Provider 无法被内核兑现，必须在开始事务与业务之前确定性拒绝。
+        /// </summary>
+        internal static void ValidateAbandonCapabilities(
+            UnitOfWorkManager manager,
+            OrmProvider provider,
+            IUnitOfWork unitOfWork)
+        {
+            var binding = manager.Bindings?.GetRequired(provider);
+            if (binding is null)
+            {
+                // 自定义工厂路径：能力语义由调用方自行解释（不经过能力索引）。
+                return;
+            }
+
+            var capabilities = binding.Capabilities;
+            if (!capabilities.PromptTerminationOnAbandon && !capabilities.DiscardUncommittedOnAbandon)
+            {
+                return;
+            }
+
+            if (unitOfWork is IUnitOfWorkAbandonable)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"The '{provider}' provider declares abandon termination/discard capabilities, but its unit of work " +
+                $"('{unitOfWork.GetType().FullName}') does not implement {nameof(IUnitOfWorkAbandonable)}. " +
+                "The kernel cannot honor the declaration; fix the provider binding or remove the declaration.");
         }
 
         /// <summary>

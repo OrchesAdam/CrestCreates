@@ -9,12 +9,14 @@ using CrestCreates.Data.Abstractions;
 using CrestCreates.DataFilter.Entities;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Entities;
+using CrestCreates.Domain.DomainEvents;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.DTOs;
 using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using Microsoft.Extensions.Logging;
+using KernelUnitOfWorkManager = CrestCreates.Data.Abstractions.IUnitOfWorkManager;
 
 namespace CrestCreates.Data.FreeSql.Repositories
 {
@@ -35,6 +37,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
         protected readonly ILogger<FreeSqlRepository<TEntity, TKey>>? _logger;
         private readonly ICurrentUserProvider? _currentUserProvider;
         private readonly ICurrentTenant? _currentTenant;
+        private readonly KernelUnitOfWorkManager? _unitOfWorkManager;
         private static readonly bool HasTenantMarker =
             typeof(IMustHaveTenant).IsAssignableFrom(typeof(TEntity)) ||
             typeof(IMultiTenant).IsAssignableFrom(typeof(TEntity));
@@ -50,12 +53,14 @@ namespace CrestCreates.Data.FreeSql.Repositories
             UnitOfWork.FreeSqlUnitOfWorkManager uowManager,
             ILogger<FreeSqlRepository<TEntity, TKey>>? logger = null,
             ICurrentUserProvider? currentUserProvider = null,
-            ICurrentTenant? currentTenant = null)
+            ICurrentTenant? currentTenant = null,
+            KernelUnitOfWorkManager? unitOfWorkManager = null)
         {
             _orm = uowManager.Orm ?? throw new InvalidOperationException("UnitOfWorkManager.Orm must not be null.");
             _logger = logger;
             _currentUserProvider = currentUserProvider;
             _currentTenant = currentTenant;
+            _unitOfWorkManager = unitOfWorkManager;
 
             if (typeof(ISoftDelete).IsAssignableFrom(typeof(TEntity)))
             {
@@ -63,6 +68,16 @@ namespace CrestCreates.Data.FreeSql.Repositories
             }
         }
 
+
+        private void TrackDomainEvents(TEntity entity)
+        {
+            if (entity is IHasDomainEvents hasDomainEvents &&
+                hasDomainEvents.DomainEvents.Count > 0 &&
+                _unitOfWorkManager?.CurrentOrNull is IUnitOfWorkDomainEventTracker tracker)
+            {
+                tracker.TrackEntity(hasDomainEvents);
+            }
+        }
 
         private void ApplyCreationAudit(TEntity entity)
         {
@@ -450,6 +465,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 ApplyCreationAudit(entity);
                 await _orm.Insert(entity).ExecuteAffrowsAsync(cancellationToken);
                 _logger?.LogDebug("Added entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
+                TrackDomainEvents(entity);
                 return entity;
             }
             catch (Exception ex)
@@ -475,6 +491,10 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 }
                 await _orm.Insert(entityList).ExecuteAffrowsAsync(cancellationToken);
                 _logger?.LogDebug("Inserted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
+                foreach (var item in entityList)
+                {
+                    TrackDomainEvents(item);
+                }
                 return entityList;
             }
             catch (Exception ex)
@@ -525,6 +545,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     await update.ExecuteAffrowsAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Updated entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
+                TrackDomainEvents(entity);
                 return entity;
             }
             catch (Exception ex)
@@ -556,6 +577,10 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 }
                 await IgnoreCreationAuditColumns(_orm.Update<TEntity>().SetSource(entityList)).ExecuteAffrowsAsync(cancellationToken);
                 _logger?.LogDebug("Updated {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
+                foreach (var item in entityList)
+                {
+                    TrackDomainEvents(item);
+                }
                 return entityList;
             }
             catch (Exception ex)
@@ -617,6 +642,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                         .ExecuteAffrowsAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Deleted entity {EntityType} with id: {Id}", typeof(TEntity).Name, entity.Id);
+                TrackDomainEvents(entity);
             }
             catch (Exception ex)
             {
@@ -745,6 +771,10 @@ namespace CrestCreates.Data.FreeSql.Repositories
                     await WithTenant(_orm.Delete<TEntity>().Where(e => ids.Contains(e.Id))).ExecuteAffrowsAsync(cancellationToken);
                 }
                 _logger?.LogDebug("Deleted {Count} entities {EntityType}", entityList.Count, typeof(TEntity).Name);
+                foreach (var item in entityList)
+                {
+                    TrackDomainEvents(item);
+                }
             }
             catch (Exception ex)
             {
