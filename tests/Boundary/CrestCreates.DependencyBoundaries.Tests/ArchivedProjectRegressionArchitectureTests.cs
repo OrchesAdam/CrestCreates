@@ -472,6 +472,36 @@ public class ArchivedProjectRegressionArchitectureTests
     }
 
     [Theory]
+    [InlineData("namespace CrestCreates.EventBus { namespace EventStore { class Renamed {} } }", "CrestCreates.EventBus.EventStore")]
+    [InlineData("namespace CrestCreates { namespace EventBus { namespace EventStore { class Renamed {} } } }", "CrestCreates.EventBus.EventStore")]
+    [InlineData("namespace CrestCreates.EventBus { namespace EventStore.Transport { class Renamed {} } }", "CrestCreates.EventBus.EventStore.Transport")]
+    [InlineData("namespace CrestCreates.EventBus.EventStore { namespace Transport { class Renamed {} } }", "CrestCreates.EventBus.EventStore.Transport")]
+    [InlineData("namespace CrestCreates.EventBus; namespace EventStore { class Renamed {} }", "CrestCreates.EventBus.EventStore")]
+    public void EventStoreGuard_RejectsCompleteNestedNamespace(string source, string qualified)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Consumer.cs"), source);
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation =>
+                violation.Contains("ARC131-NAMESPACE", StringComparison.Ordinal)
+                && violation.EndsWith(": " + qualified, StringComparison.Ordinal));
+        });
+    }
+
+    [Theory]
+    [InlineData("namespace CrestCreates.EventBus { namespace EventStoreMetrics { class Renamed {} } }")]
+    [InlineData("namespace CrestCreates.EventBusMetrics { namespace EventStore { class Renamed {} } }")]
+    [InlineData("namespace Other { namespace CrestCreates.EventBus.EventStore { class Renamed {} } }")]
+    public void EventStoreGuard_AllowsDifferentCompleteNamespace(string source)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Consumer.cs"), source);
+            Assert.Empty(RetiredBuildInputViolations(root, project));
+        });
+    }
+
+    [Theory]
     [InlineData("ProjectReference", "src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj")]
     [InlineData("ProjectReference", "99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj")]
     [InlineData("PackageReference", "CrestCreates.EventBus.EventStore")]
@@ -617,9 +647,17 @@ public class ArchivedProjectRegressionArchitectureTests
                 if (name is not null && RetiredEventStoreTypes.Contains(name, StringComparer.Ordinal))
                     violations.Add($"ARC131-TYPE {owner} -> {relative}: {name}");
 
-                if (node is NameSyntax namespaceName)
+                var qualified = node switch
                 {
-                    var qualified = string.Concat(namespaceName.DescendantTokens().Select(token => token.ValueText));
+                    BaseNamespaceDeclarationSyntax declaration => string.Join(".", declaration.AncestorsAndSelf()
+                        .OfType<BaseNamespaceDeclarationSyntax>().Reverse()
+                        .Select(part => string.Concat(part.Name.DescendantTokens().Select(token => token.ValueText)))),
+                    NameSyntax reference when reference.AncestorsAndSelf().OfType<NameSyntax>().Last().Parent
+                        is not BaseNamespaceDeclarationSyntax => string.Concat(reference.DescendantTokens().Select(token => token.ValueText)),
+                    _ => null
+                };
+                if (qualified is not null)
+                {
                     if (qualified.StartsWith("global::", StringComparison.Ordinal))
                         qualified = qualified["global::".Length..];
                     if (qualified.Equals(EventStoreNamespace, StringComparison.Ordinal)
