@@ -80,6 +80,8 @@ public sealed class LocalEventTypedReplayNativeTests
                 execution.Output.Should().Contain($"{scenario}:PASS", $"scenario '{scenario}' must execute natively");
             }
 
+            execution.Output.Should().Contain("unknown-tenant-replay-refusal:PASS",
+                "R3-16 retains an explicit native tenant rejection with zero execution and unchanged budget");
             execution.Output.Should().Contain("CRESTCREATES_LOCALEVENT_TYPED_REPLAY_NATIVE_OK");
         }
         catch (Exception exception)

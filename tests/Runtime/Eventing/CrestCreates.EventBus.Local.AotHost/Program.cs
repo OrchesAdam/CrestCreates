@@ -601,6 +601,31 @@ internal static class Program
                     "the caller audit correlation must be restored after the attempt");
                 Check(callerAccessor.Current?.OperationId == callerOperationId,
                     "the caller audit operation frame must be left untouched");
+
+                var unknownTenant = pending with
+                {
+                    MessageId = "unknown-tenant-replay",
+                    TenantId = "aot-tenant-missing",
+                    Status = DeadLetterStatus.Pending,
+                };
+                await store.EnqueueAsync(unknownTenant, CancellationToken.None);
+                var callsBeforeRefusal = control.ChannelCalls;
+                var refused = await manager.RetryAsync(unknownTenant.MessageId);
+                Check(!refused.Success && refused.ProblemCode == "UnknownTenant"
+                    && refused.Execution == LocalEventExecutionOutcome.NotStarted
+                    && refused.StateWrite == LocalEventStateWriteOutcome.NotAttempted
+                    && !refused.AnyHandlerInvoked,
+                    "unknown tenant replay must be refused before any handler or state write");
+                Check(control.ChannelCalls == callsBeforeRefusal,
+                    "unknown tenant replay must have zero handler side effects");
+                var preserved = await store.GetByIdAsync(unknownTenant.MessageId, CancellationToken.None);
+                Check(preserved == unknownTenant,
+                    "unknown tenant refusal must preserve the entire record and retry budget");
+                Check(callerTenant.Id == "aot-tenant-b"
+                    && callerAccessor.Current?.CorrelationId == "aot-caller-correlation-B"
+                    && callerAccessor.Current?.OperationId == callerOperationId,
+                    "unknown tenant refusal must preserve the caller tenant and audit frames");
+                Console.WriteLine("unknown-tenant-replay-refusal:PASS");
             }
         }
         finally

@@ -289,6 +289,14 @@ flowchart TD
 
 “执行完成”在最后一个 Handler 成功返回时立即记录，不被后续取消/释放异常改写。scope 释放不是 Handler 的业务重试原因。状态写入继续使用独立有界 token，避免已取消 token 阻止必要结算；不能无限等待或覆盖原异常。
 
+### 8.1 R3-16 有限裁定：并发所有权与取消后的副作用（2026-11-12）
+
+维持 #126/#146 已批准边界：`MarkRetryingAsync` 只是状态写入，没有原子 claim 的结果或 attempt/owner token；成功返回不表示获得独占执行权。两个请求都读到 Pending 并通过预检时，人工/人工或人工/后台均可进入 Handler。结算没有 owner 校验，迟到取消恢复 Pending 可能覆盖另一请求已经写入的 Retried；两个失败也不能据此承诺累计预算。单次 `StateWrite.Confirmed` 只表示该次写入得到确认，不表示消息终态不可被并发请求覆盖。调用方须避免同消息重放重叠；本次不增加 CAS/租约、崩溃 Retrying 恢复或 per-handler checkpoint。
+
+入口预取消保持原记录与预算、零 Handler。执行未完成时的调用方合作式取消，即使首个 Handler 已产生副作用，仍按既有协议尝试恢复 Pending，RetryCount 不增并传播原取消。可观察事实来自异常 Data：`LocalEventReplayExecution=Cancelled`、`LocalEventReplayAnyHandlerInvoked=true/false`、`LocalEventReplaySettlement=RestorePendingConfirmed` 或未确认原因。AnyHandlerInvoked 只证明进入 Handler，不证明事务回滚或副作用可撤销。后续重放从第一个 Handler 开始，前次副作用可能再次发生；该预算是业务失败计数，不是总执行次数上限。成功完成后的取消仍按上表保留 Completed。
+
+可执行边界证据在 [LocalDeadLetterReplaySemanticsTests](../../../tests/Runtime/Eventing/CrestCreates.EventBus.Local.Tests.Integration/LocalDeadLetterReplaySemanticsTests.cs)：四个屏障场景覆盖人工/人工、人工/后台的双执行和成功后迟到取消覆盖；独立两 Handler 场景覆盖首个副作用后取消、预算不增、第二 Handler 未进入及后续从头重复。屏障仅在测试 store 适配层，真实 manager/background 共用正式 executor 与内存 store；测试通过确认的是这些限制，不能标记为“互斥已支持”，也不外推 EF store 并发写入结果。现有结构化事实已满足本项诊断需求，无须新增公开选项或每次重放警告。原生 fixture 保留 admission/codec 拒绝，并在现有租户恢复场景补未知租户拒绝：要求 `UnknownTenant`、NotStarted、零 Handler、整条记录/预算与 caller frame 不变，harness 必须读到 `unknown-tenant-replay-refusal:PASS` 及既有各场景/总 sentinel。并发与部分执行取消的新增证据仍属于 JIT 集成测试，不据此新增原生并发支持声明。
+
 同步发布借用 scope，不处理调用方稍后 Dispose 的失败；执行检查拒绝在接受前直接返回错误，不创建 DLQ。Handler 准备/执行失败按既有 Replayable 能力由统一 recorder 记录一次，原异常为主。
 
 Channel 成功返回只代表入队。在消费阶段，已接受事件的准备/策略/租户恢复失败必须可观察；Replayable 时用原 work item 身份/上下文记录一次 Pending 诊断行（RetryCount=0），修复条件后才能通过 replay 准备。dispatch-only 仅报告执行拒绝/错误，不伪造可靠投递。宿主停止的协作取消维持不创建 DLQ 的原规则，内存 Channel 不承诺停机持久性。

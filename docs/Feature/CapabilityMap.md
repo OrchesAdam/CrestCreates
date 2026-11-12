@@ -299,7 +299,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | src/Runtime/Eventing/CrestCreates.EventBus.DeadLetter.EFCore/CrestCreates.EventBus.DeadLetter.EFCore.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Eventing/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Eventing/CrestCreates.EventBus.Local.Channel/CrestCreates.EventBus.Local.Channel.csproj | Runtime | 导航（本轮未重评，不背书） | — |
-| src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj | Runtime | 导航（本轮未重评，不背书） | — |
+| src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj | Runtime | 导航（重放并发/取消有限裁定见 [#146 §8.1](../superpowers/specs/2026-10-14-issue-146-local-event-framework-hardening-design.md#81-r3-16-有限裁定并发所有权与取消后的副作用2026-11-12)，不整体背书） | — |
 | src/Runtime/Eventing/CrestCreates.EventBus.MediatorAdapter/CrestCreates.EventBus.MediatorAdapter.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Eventing/CrestCreates.EventBus.RabbitMQ/CrestCreates.EventBus.RabbitMQ.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Eventing/CrestCreates.Runtime.Delivery.Abstractions/CrestCreates.Runtime.Delivery.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | — |
