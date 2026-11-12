@@ -286,8 +286,8 @@ public class CapRound2FixTests : IClassFixture<CapIntegrationFixture>
         public IUnitOfWork Create(OrmProvider provider) => _unitOfWork;
     }
 
-    /// <summary>无受管资源曝光的伪工作单元（NoTransactionAssociation 拒绝用例）。</summary>
-    private sealed class PlainFakeUnitOfWork : IUnitOfWork
+    // 满足绑定声明的 abandon 契约，让拒绝用例实际到达 CAP 资源关联检查。
+    private sealed class PlainFakeUnitOfWork : IUnitOfWork, IUnitOfWorkAbandonable
     {
         public Task BeginTransactionAsync(UnitOfWorkBeginOptions options, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
@@ -299,6 +299,10 @@ public class CapRound2FixTests : IClassFixture<CapIntegrationFixture>
         public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
         public void Dispose()
+        {
+        }
+
+        public void AbandonPendingWork()
         {
         }
     }
