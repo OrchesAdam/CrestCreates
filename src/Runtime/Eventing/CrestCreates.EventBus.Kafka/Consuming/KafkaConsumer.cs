@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -11,7 +12,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using CrestCreates.EventBus.Kafka.Connection;
-using CrestCreates.EventBus.Kafka.Generated;
 using CrestCreates.EventBus.Kafka.Options;
 using CrestCreates.EventBus.Kafka.Serialization;
 
@@ -19,8 +19,7 @@ namespace CrestCreates.EventBus.Kafka.Consuming;
 
 /// <summary>
 /// Background service that consumes messages from Kafka topics and dispatches them to handlers.
-/// Supports consumer groups for horizontal scaling, manual commits for exactly-once semantics,
-/// and retry logic with dead letter queue fallback.
+/// Uses manual settlement; forwarding and commit are not atomic and duplicates remain possible.
 /// </summary>
 public sealed class KafkaConsumer : BackgroundService
 {
@@ -30,8 +29,7 @@ public sealed class KafkaConsumer : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<KafkaConsumer> _logger;
     private readonly List<KafkaSubscriptionInfo> _subscriptions;
-    private IConsumer<string, byte[]>? _consumer;
-    private readonly CancellationTokenSource _stopCts = new();
+    private readonly Func<ConsumerConfig, IConsumer<string, byte[]>> _factory;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="KafkaConsumer"/> class.
@@ -47,7 +45,11 @@ public sealed class KafkaConsumer : BackgroundService
         JsonSerializerContext jsonContext,
         IOptions<KafkaOptions> options,
         IServiceProvider serviceProvider,
-        ILogger<KafkaConsumer> logger)
+        ILogger<KafkaConsumer> logger) : this(producerPool, jsonContext, options, serviceProvider, logger, null) { }
+
+    internal KafkaConsumer(KafkaProducerPool producerPool, JsonSerializerContext jsonContext,
+        IOptions<KafkaOptions> options, IServiceProvider serviceProvider, ILogger<KafkaConsumer> logger,
+        Func<ConsumerConfig, IConsumer<string, byte[]>>? factory)
     {
         _producerPool = producerPool ?? throw new ArgumentNullException(nameof(producerPool));
         _jsonContext = jsonContext ?? throw new ArgumentNullException(nameof(jsonContext));
@@ -55,7 +57,19 @@ public sealed class KafkaConsumer : BackgroundService
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _subscriptions = KafkaSubscriptionRegistry.GetSubscriptions().ToList();
+        _factory = factory ?? (config => new ConsumerBuilder<string, byte[]>(config).Build());
+        _subscriptions = serviceProvider.GetServices<KafkaSubscriptionInfo>().ToList();
+        if (_options.EnableAutoCommit)
+            throw new ArgumentException("Kafka settlement requires EnableAutoCommit=false.", nameof(options));
+        if (_options.RetryCount < 0 || _options.RetryDelaySeconds < 0 || string.IsNullOrWhiteSpace(_options.DeadLetterTopicSuffix))
+            throw new ArgumentException("Kafka retry budget/delay must be nonnegative and DLQ suffix must be nonempty.", nameof(options));
+        foreach (var group in _subscriptions.GroupBy(s => s.Topic, StringComparer.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(group.Key) || group.Count() != 1)
+                throw new ArgumentException("Kafka requires exactly one explicit subscription per topic.");
+            if (group.Single().ConsumerGroup is { } consumerGroup && consumerGroup != _options.ConsumerGroupId)
+                throw new ArgumentException("Subscription ConsumerGroup must match KafkaOptions.ConsumerGroupId.");
+        }
     }
 
     /// <inheritdoc/>
@@ -75,8 +89,8 @@ public sealed class KafkaConsumer : BackgroundService
         {
             BootstrapServers = _options.BootstrapServers,
             GroupId = _options.ConsumerGroupId,
-            EnableAutoCommit = _options.EnableAutoCommit,
-            AutoCommitIntervalMs = _options.AutoCommitIntervalMs,
+            EnableAutoCommit = false,
+            EnableAutoOffsetStore = false,
             SessionTimeoutMs = _options.SessionTimeoutMs,
             MaxPollIntervalMs = _options.MaxPollIntervalMs,
             AutoOffsetReset = AutoOffsetReset.Earliest,
@@ -105,218 +119,127 @@ public sealed class KafkaConsumer : BackgroundService
             consumerConfig.SaslPassword = _options.SaslPassword;
         }
 
-        _consumer = new ConsumerBuilder<string, byte[]>(consumerConfig)
-            .SetErrorHandler((_, e) => _logger.LogError("Kafka consumer error: {Reason} (code: {Code})", e.Reason, e.Code))
-            .SetPartitionsAssignedHandler((_, partitions) => _logger.LogInformation("Partitions assigned: {Partitions}", string.Join(", ", partitions)))
-            .SetPartitionsRevokedHandler((_, partitions) => _logger.LogWarning("Partitions revoked: {Partitions}", string.Join(", ", partitions)))
-            .Build();
-
-        _consumer.Subscribe(topics);
-
-        _logger.LogInformation(
-            "Kafka consumer subscribed to topics: {Topics} with group: {ConsumerGroup}",
-            string.Join(", ", topics), _options.ConsumerGroupId);
-
+        using var consumer = _factory(consumerConfig);
         try
         {
-            while (!stoppingToken.IsCancellationRequested)
+            consumer.Subscribe(topics);
+            while (true)
             {
-                try
-                {
-                    var consumeResult = _consumer.Consume(stoppingToken);
-
-                    if (consumeResult == null)
-                        continue;
-
-                    await ProcessMessageAsync(consumeResult, stoppingToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error consuming message");
-                }
+                stoppingToken.ThrowIfCancellationRequested();
+                var record = consumer.Consume(stoppingToken);
+                if (record != null) await ProcessMessageAsync(consumer, record, stoppingToken);
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex, "Kafka consumption stopped with an unsettled record; restart required.");
+            _serviceProvider.GetService<IHostApplicationLifetime>()?.StopApplication();
+            throw;
         }
         finally
         {
-            _consumer.Close();
-            _consumer.Dispose();
-            _consumer = null;
+            // Only the loop owns Close/Dispose. BackgroundService.StopAsync only cancels.
+            consumer.Close();
         }
     }
 
-    /// <inheritdoc/>
-    public override async Task StopAsync(CancellationToken cancellationToken)
+    internal async Task ProcessMessageAsync(IConsumer<string, byte[]> consumer,
+        ConsumeResult<string, byte[]> record, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Stopping Kafka consumer");
-        _stopCts.Cancel();
-
-        try
-        {
-            _consumer?.Close();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error closing consumer during stop");
-        }
-
-        await base.StopAsync(cancellationToken);
-    }
-
-    private async Task ProcessMessageAsync(
-        ConsumeResult<string, byte[]> consumeResult,
-        CancellationToken cancellationToken)
-    {
+        cancellationToken.ThrowIfCancellationRequested();
         KafkaMessageEnvelope? envelope = null;
-
+        KafkaSubscriptionInfo? subscription = null;
+        object? payload = null;
+        string? reason = null;
         try
         {
-            envelope = JsonSerializer.Deserialize(
-                consumeResult.Message.Value,
-                KafkaMessageEnvelopeContext.Default.KafkaMessageEnvelope);
-
-            if (envelope == null)
-            {
-                _logger.LogError("Failed to deserialize message envelope");
-                return;
-            }
-
-            var subscription = _subscriptions.FirstOrDefault(s => s.Topic == consumeResult.Topic);
-            if (subscription == null)
-            {
-                _logger.LogWarning("No subscription found for topic {Topic}", consumeResult.Topic);
-                return;
-            }
-
-            using var scope = _serviceProvider.CreateScope();
-
-            var eventTypeInfo = _jsonContext.GetTypeInfo(subscription.EventType);
-            if (eventTypeInfo == null)
-            {
-                _logger.LogError("Event type {EventType} is not registered in JsonSerializerContext", subscription.EventType.Name);
-                return;
-            }
-
-            var eventPayload = JsonSerializer.Deserialize(envelope.Payload, eventTypeInfo);
-
-            if (eventPayload == null)
-            {
-                _logger.LogError("Failed to deserialize event payload for type {EventType}", envelope.EventType);
-                return;
-            }
-
-            await subscription.InvokeHandler(scope.ServiceProvider, eventPayload, cancellationToken);
-
-            // Manual commit
-            _consumer!.Commit(consumeResult);
-
-            _logger.LogInformation(
-                "Successfully handled event {EventType} from topic {Topic} partition {Partition} offset {Offset}",
-                envelope.EventType, consumeResult.Topic, consumeResult.Partition, consumeResult.Offset);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing message from topic {Topic}", consumeResult.Topic);
-
-            var retryCount = envelope?.RetryCount ?? 0;
-
-            if (retryCount < _options.RetryCount)
-            {
-                // Add delay before retry
-                if (_options.RetryDelaySeconds > 0)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(_options.RetryDelaySeconds), cancellationToken);
-                }
-
-                // Check if cancellation was requested during the delay
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Increment retry count and republish
-                var updatedEnvelope = UpdateRetryCount(consumeResult.Message.Value, retryCount + 1);
-
-                // Preserve headers and add retry count header for traceability
-                var retryHeaders = consumeResult.Message.Headers ?? new Headers();
-                retryHeaders.Add("x-retry-count", System.Text.Encoding.UTF8.GetBytes((retryCount + 1).ToString()));
-
-                var producer = await _producerPool.GetProducerAsync(cancellationToken);
-                try
-                {
-                    await producer.ProduceAsync(
-                        consumeResult.Topic,
-                        new Message<string, byte[]>
-                        {
-                            Key = consumeResult.Message.Key,
-                            Value = updatedEnvelope,
-                            Headers = retryHeaders
-                        },
-                        cancellationToken);
-
-                    // Commit the failed message to move past it
-                    _consumer!.Commit(consumeResult);
-
-                    _logger.LogWarning(
-                        "Retrying message, attempt {Attempt} of {MaxRetries}",
-                        retryCount + 1, _options.RetryCount);
-                }
-                finally
-                {
-                    _producerPool.ReturnProducer(producer);
-                }
-            }
+            if (record.Message.Value == null) reason = "null-envelope";
             else
             {
-                // Max retries reached, send to DLQ
-                var dlqTopic = $"{consumeResult.Topic}{_options.DeadLetterTopicSuffix}";
-
-                // Add retry count header for traceability
-                var dlqHeaders = consumeResult.Message.Headers ?? new Headers();
-                dlqHeaders.Add("x-retry-count", System.Text.Encoding.UTF8.GetBytes(retryCount.ToString()));
-                dlqHeaders.Add("x-original-topic", System.Text.Encoding.UTF8.GetBytes(consumeResult.Topic));
-
-                var producer = await _producerPool.GetProducerAsync(cancellationToken);
-                try
+                envelope = JsonSerializer.Deserialize(record.Message.Value, KafkaMessageEnvelopeContext.Default.KafkaMessageEnvelope);
+                if (envelope == null) reason = "null-envelope";
+                else
                 {
-                    await producer.ProduceAsync(
-                        dlqTopic,
-                        new Message<string, byte[]>
-                        {
-                            Key = consumeResult.Message.Key,
-                            Value = consumeResult.Message.Value,
-                            Headers = dlqHeaders
-                        },
-                        cancellationToken);
-
-                    // Commit to move past the failed message
-                    _consumer!.Commit(consumeResult);
-
-                    _logger.LogError(
-                        "Max retries ({MaxRetries}) reached, sent to DLQ topic {DlqTopic}",
-                        _options.RetryCount, dlqTopic);
-                }
-                finally
-                {
-                    _producerPool.ReturnProducer(producer);
+                    subscription = _subscriptions.SingleOrDefault(s => s.Topic == record.Topic);
+                    if (subscription == null) reason = "unknown-subscription";
+                    else if (!string.Equals(envelope.EventType, subscription.EventType.FullName ?? subscription.EventType.Name, StringComparison.Ordinal))
+                        reason = "event-type-mismatch";
+                    else if (_jsonContext.GetTypeInfo(subscription.EventType) is not { } typeInfo)
+                        reason = "missing-type-info";
+                    else if (envelope.Payload == null) reason = "invalid-payload";
+                    else
+                    {
+                        payload = JsonSerializer.Deserialize(envelope.Payload, typeInfo);
+                        if (payload == null) reason = "null-payload";
+                        else if (envelope.RetryCount < 0) reason = "invalid-retry-count";
+                    }
                 }
             }
         }
+        catch (JsonException) { reason = envelope == null ? "invalid-envelope" : "invalid-payload"; }
+        catch (NotSupportedException) { reason = "unsupported-payload"; }
+
+        if (reason != null)
+            await ForwardAsync(record, record.Topic + _options.DeadLetterTopicSuffix,
+                record.Message.Value, reason, envelope?.RetryCount ?? 0, cancellationToken);
+        else
+        {
+            // Settlement is outside this catch: commit failure must not become a handler retry.
+            Exception? failure = null;
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                await subscription!.InvokeHandler(scope.ServiceProvider, payload!, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) { failure = ex; }
+            if (failure != null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _logger.LogWarning(failure, "Kafka handler failed on {Topic}", record.Topic);
+                if (envelope!.RetryCount < _options.RetryCount)
+                {
+                    if (_options.RetryDelaySeconds > 0)
+                        await Task.Delay(TimeSpan.FromSeconds(_options.RetryDelaySeconds), cancellationToken);
+                    envelope.RetryCount++;
+                    await ForwardAsync(record, record.Topic,
+                        JsonSerializer.SerializeToUtf8Bytes(envelope, KafkaMessageEnvelopeContext.Default.KafkaMessageEnvelope),
+                        "handler-retry", envelope.RetryCount, cancellationToken);
+                }
+                else
+                    await ForwardAsync(record, record.Topic + _options.DeadLetterTopicSuffix,
+                        record.Message.Value, "handler-retries-exhausted", envelope.RetryCount, cancellationToken);
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        consumer.Commit(record);
     }
 
-    private static byte[] UpdateRetryCount(byte[] originalMessage, int newRetryCount)
+    private async Task ForwardAsync(ConsumeResult<string, byte[]> record, string topic,
+        byte[]? value, string reason, int retryCount, CancellationToken cancellationToken)
     {
-        var envelope = JsonSerializer.Deserialize(
-            originalMessage,
-            KafkaMessageEnvelopeContext.Default.KafkaMessageEnvelope);
-
-        if (envelope == null)
-            return originalMessage;
-
-        envelope.RetryCount = newRetryCount;
-
-        return JsonSerializer.SerializeToUtf8Bytes(
-            envelope,
-            KafkaMessageEnvelopeContext.Default.KafkaMessageEnvelope);
+        cancellationToken.ThrowIfCancellationRequested();
+        var headers = new Headers();
+        if (record.Message.Headers != null)
+            foreach (var header in record.Message.Headers) headers.Add(header.Key, header.GetValueBytes());
+        headers.Add("x-settlement-reason", Encoding.UTF8.GetBytes(reason));
+        headers.Add("x-retry-count", Encoding.UTF8.GetBytes(retryCount.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        headers.Add("x-original-topic", Encoding.UTF8.GetBytes(record.Topic));
+        headers.Add("x-original-partition", Encoding.UTF8.GetBytes(record.Partition.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        headers.Add("x-original-offset", Encoding.UTF8.GetBytes(record.Offset.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        var producer = await _producerPool.GetProducerAsync(cancellationToken);
+        try
+        {
+            var delivery = await producer.ProduceAsync(topic, new Message<string, byte[]>
+            {
+                Key = record.Message.Key, Value = value!, Headers = headers, Timestamp = record.Message.Timestamp
+            }, cancellationToken);
+            if (delivery.Status != PersistenceStatus.Persisted)
+                throw new InvalidOperationException("Kafka forwarding delivery was not confirmed persisted.");
+            _logger.LogWarning("Kafka record {Topic}/{Partition}/{Offset} forwarded to {Target}: {Reason}",
+                record.Topic, record.Partition, record.Offset, topic, reason);
+        }
+        finally { _producerPool.ReturnProducer(producer); }
     }
 }

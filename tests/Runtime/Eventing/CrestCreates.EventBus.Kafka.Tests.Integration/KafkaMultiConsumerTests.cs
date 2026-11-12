@@ -12,7 +12,7 @@ namespace CrestCreates.EventBus.Kafka.Tests.Integration;
 public class KafkaMultiConsumerTests : KafkaIntegrationTestBase
 {
     [Fact]
-    public async Task MultipleEvents_DifferentKeys_DifferentPartitions()
+    public async Task MultipleEvents_DifferentKeys_AllDelivered()
     {
         var publisher = ServiceProvider.GetRequiredService<KafkaPublisher>();
         var topic = Options.DefaultTopic;
@@ -42,7 +42,7 @@ public class KafkaMultiConsumerTests : KafkaIntegrationTestBase
     }
 
     [Fact]
-    public async Task ConsumerGroup_Rebalance_MultipleConsumers()
+    public async Task RawConsumers_CanSubscribe()
     {
         var topic = Options.DefaultTopic;
         var groupId = $"rebalance-cg-{Guid.NewGuid():N}";
@@ -58,7 +58,7 @@ public class KafkaMultiConsumerTests : KafkaIntegrationTestBase
     }
 
     [Fact]
-    public async Task SASLConnection_Plaintext_ConnectsSuccessfully()
+    public async Task PlaintextProducer_CanBeBorrowed()
     {
         var pool = ServiceProvider.GetRequiredService<KafkaProducerPool>();
         var producer = await pool.GetProducerAsync();
