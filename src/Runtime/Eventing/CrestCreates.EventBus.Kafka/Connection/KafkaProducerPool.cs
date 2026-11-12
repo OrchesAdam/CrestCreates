@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Confluent.Kafka;
@@ -17,19 +17,39 @@ namespace CrestCreates.EventBus.Kafka.Connection;
 public sealed class KafkaProducerPool : IAsyncDisposable, IDisposable
 {
     private readonly KafkaOptions _options;
+    private readonly int _capacity;
     private readonly ILogger<KafkaProducerPool> _logger;
-    private readonly ConcurrentQueue<IProducer<string, byte[]>> _producerPool = new();
-    private readonly SemaphoreSlim _producerSemaphore;
+    private readonly object _gate = new();
+    private readonly Queue<IProducer<string, byte[]>> _producerPool = new();
+    private readonly HashSet<IProducer<string, byte[]>> _borrowed = new(ReferenceEqualityComparer.Instance);
     private readonly ProducerConfig _producerConfig;
+    private readonly Func<IProducer<string, byte[]>> _factory;
+    private TaskCompletionSource _changed = NewSignal();
     private bool _disposed;
-    private int _activeProducers;
+    private int _leased;
+
+    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private void SignalChanged()
+    {
+        var previous = _changed;
+        _changed = NewSignal();
+        previous.TrySetResult();
+    }
 
     public KafkaProducerPool(
         IOptions<KafkaOptions> options,
-        ILogger<KafkaProducerPool> logger)
+        ILogger<KafkaProducerPool> logger) : this(options, logger, null)
     {
+    }
+
+    internal KafkaProducerPool(IOptions<KafkaOptions> options, ILogger<KafkaProducerPool> logger,
+        Func<IProducer<string, byte[]>>? factory)
+    {
+        _factory = factory ?? CreateProducer;
         _options = options.Value;
         _logger = logger;
+        _capacity = _options.ProducerPoolSize;
 
         if (_options.ProducerPoolSize <= 0)
         {
@@ -38,16 +58,15 @@ public sealed class KafkaProducerPool : IAsyncDisposable, IDisposable
                 "ProducerPoolSize must be greater than 0.");
         }
 
-        _producerSemaphore = new SemaphoreSlim(_options.ProducerPoolSize, _options.ProducerPoolSize);
-
         _producerConfig = new ProducerConfig
         {
             BootstrapServers = _options.BootstrapServers,
             EnableIdempotence = true,
             Acks = Acks.All,
             MaxInFlight = 5,
-            MessageSendMaxRetries = _options.RetryCount,
-            RetryBackoffMs = _options.RetryDelaySeconds * 1000,
+            // librdkafka idempotence requires transport retries even with zero handler retries.
+            MessageSendMaxRetries = Math.Max(1, _options.RetryCount),
+            RetryBackoffMs = (int)Math.Clamp((long)_options.RetryDelaySeconds * 1000, 1, 300000),
             LingerMs = 10,
             BatchSize = 16384,
             CompressionType = CompressionType.Snappy
@@ -82,30 +101,65 @@ public sealed class KafkaProducerPool : IAsyncDisposable, IDisposable
 
     public async Task<IProducer<string, byte[]>> GetProducerAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        await _producerSemaphore.WaitAsync(cancellationToken);
-
-        if (_producerPool.TryDequeue(out var producer))
+        while (true)
         {
-            return producer;
+            Task wait;
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_leased < _capacity)
+                {
+                    _leased++;
+                    if (_producerPool.TryDequeue(out var idle))
+                    {
+                        _borrowed.Add(idle);
+                        return idle;
+                    }
+                    break;
+                }
+                wait = _changed.Task;
+            }
+            await wait.WaitAsync(cancellationToken);
         }
 
-        return CreateProducer();
+        IProducer<string, byte[]>? producer = null;
+        try
+        {
+            producer = _factory();
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                cancellationToken.ThrowIfCancellationRequested();
+                _borrowed.Add(producer);
+                return producer;
+            }
+        }
+        catch
+        {
+            lock (_gate)
+            {
+                _leased--;
+                SignalChanged();
+            }
+            producer?.Dispose();
+            throw;
+        }
     }
 
     public void ReturnProducer(IProducer<string, byte[]> producer)
     {
-        if (_disposed)
+        bool dispose;
+        lock (_gate)
         {
-            producer.Dispose();
-            Interlocked.Decrement(ref _activeProducers);
-            _producerSemaphore.Release();
-            return;
+            if (!_borrowed.Remove(producer))
+                throw new InvalidOperationException("Producer is not currently borrowed from this pool.");
+            _leased--;
+            dispose = _disposed;
+            if (!dispose) _producerPool.Enqueue(producer);
+            SignalChanged();
         }
-
-        _producerPool.Enqueue(producer);
-        _producerSemaphore.Release();
+        if (dispose) producer.Dispose();
     }
 
     private IProducer<string, byte[]> CreateProducer()
@@ -121,44 +175,33 @@ public sealed class KafkaProducerPool : IAsyncDisposable, IDisposable
             })
             .Build();
 
-        Interlocked.Increment(ref _activeProducers);
-
-        _logger.LogDebug("Created new Kafka producer, active producers: {Count}", _activeProducers);
-
         return producer;
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        while (_producerPool.TryDequeue(out var producer))
-        {
-            producer.Dispose();
-            Interlocked.Decrement(ref _activeProducers);
-        }
-
-        _producerSemaphore.Dispose();
-
-        _logger.LogInformation("Kafka producer pool disposed");
-
-        await ValueTask.CompletedTask;
+        Dispose();
+        return ValueTask.CompletedTask;
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        while (_producerPool.TryDequeue(out var producer))
+        IProducer<string, byte[]>[] idle;
+        lock (_gate)
         {
-            producer.Dispose();
-            Interlocked.Decrement(ref _activeProducers);
+            if (_disposed) return;
+            _disposed = true;
+            idle = _producerPool.ToArray();
+            _producerPool.Clear();
+            SignalChanged();
         }
-
-        _producerSemaphore.Dispose();
-
-        _logger.LogInformation("Kafka producer pool disposed");
+        // Outstanding leases keep ownership until ReturnProducer; waiters observe disposal.
+        List<Exception>? errors = null;
+        foreach (var producer in idle)
+        {
+            try { producer.Dispose(); }
+            catch (Exception ex) { (errors ??= new()).Add(ex); }
+        }
+        if (errors != null) throw new AggregateException(errors);
     }
 }

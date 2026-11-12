@@ -13,6 +13,14 @@ namespace CrestCreates.EventBus.Kafka.Extensions;
 
 public static class KafkaEventBusServiceCollectionExtensions
 {
+    /// <summary>Contributes a typed subscription to this host. One subscription per topic is required.</summary>
+    public static IServiceCollection AddKafkaSubscription(this IServiceCollection services, KafkaSubscriptionInfo subscription)
+    {
+        ArgumentNullException.ThrowIfNull(subscription);
+        services.AddSingleton(subscription);
+        return services;
+    }
+
     public static IServiceCollection AddKafkaEventBus<TContext>(
         this IServiceCollection services,
         Action<KafkaOptions>? configure = null)

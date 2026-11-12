@@ -298,7 +298,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | src/Runtime/Eventing/CrestCreates.EventBus.Abstract/CrestCreates.EventBus.Abstract.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Eventing/CrestCreates.EventBus.DeadLetter.EFCore/CrestCreates.EventBus.DeadLetter.EFCore.csproj | Runtime | 导航（本轮未重评，不背书） | — |
-| src/Runtime/Eventing/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj | Runtime | 导航（本轮未重评，不背书） | — |
+| src/Runtime/Eventing/CrestCreates.EventBus.Kafka/CrestCreates.EventBus.Kafka.csproj | Runtime | 指定结算边界，JIT-only；见 §9 | R3-18 |
 | src/Runtime/Eventing/CrestCreates.EventBus.Local.Channel/CrestCreates.EventBus.Local.Channel.csproj | Runtime | 导航（本轮未重评，不背书） | — |
 | src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj | Runtime | 导航（重放并发/取消有限裁定见 [#146 §8.1](../superpowers/specs/2026-10-14-issue-146-local-event-framework-hardening-design.md#81-r3-16-有限裁定并发所有权与取消后的副作用2026-11-12)，不整体背书） | — |
 | src/Runtime/Eventing/CrestCreates.EventBus.MediatorAdapter/CrestCreates.EventBus.MediatorAdapter.csproj | Runtime | 导航（本轮未重评，不背书） | — |
@@ -404,3 +404,17 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
   凭据未打印/入库，工件留在 `/tmp` 且只含元数据（字符数与 token 数，无响应或推理正文）。
 
 纪律：新增 outcome、码表项或终态载荷时，必须同批更新词表/码表/JSON 根闭包、§10.1 矩阵行、原生场景与 sentinel 点名、`memory.md` 与 `AGENTS.md` 的对应声明，并补对应变异判别；不得以「状态名出现」替代「内容 + 零副作用」的覆盖判据，也不得从本节推导其他项目或组合的支持状态。
+
+## 9. R3-18 Kafka 结算与支持边界
+
+日期：2026-11-12。定位为 Kafka 传输执行实现，限界保留，技术责任 Eventing。唯一装配使用现有 `AddKafkaEventBus`，宿主通过新增 `AddKafkaSubscription(KafkaSubscriptionInfo)` 显式贡献现有 typed invoker。库内静态空 registry 不再是消费者发现源；客户端生成的列表不会因同名类型自动覆盖库内列表。宿主可逐项贡献其列表，须同时注册 handler 与对应 JSON context；本次未修订 Kafka generator 的输出协议或证明属性声明可自动装配。
+
+- 每个 topic 只允许一项订阅，重复项（含不同事件类型）在启动前拒绝；可在单个 typed invoker 内显式编排多个 handler。订阅的 `ConsumerGroup` 若非空必须等于 `KafkaOptions.ConsumerGroupId`，不再默默忽略不同 group。主题名、FullName 事件身份和信封 wire 保持原协议，canonical identity 迁移仍属 R3-33。
+- `EnableAutoCommit=true` 拒绝；自动 offset store 固定关闭，`AutoCommitIntervalMs` 保留源码兼容但不参与结算。空/坏信封、无订阅、事件类型不符、缺 JSON type info、空/坏 payload 直接转原始 DLQ，保留正文（含 tombstone/null）、key、全部原始 headers，再附原因和来源 topic/partition/offset。普通 handler 失败仍按信封 RetryCount 与现有预算重投原 topic，耗尽后转 DLQ；关联身份保留。DLQ suffix 必须非空。
+- 仅在 producer 报告 `PersistenceStatus.Persisted` 后 commit 当前记录。消费循环串行执行；重投、DLQ、commit 或消费故障直接终止循环并请求宿主停止，绝不继续消费后一条记录。修复故障后由部署方重启宿主，使用同一 group 恢复；没有内置自动重启。Stop 仅取消，Close/Dispose 归消费循环所有。
+- Forward 与 commit 没有跨资源原子性；确认后、commit 前崩溃或取消仍可能重复投递，handler 的部分副作用也可能重复。producer idempotence 不是分布式 exactly-once，不承诺该保证，也不承诺 handler 重试后业务顺序不变。
+- producer pool 的容量预留、借用身份、归还及停机在同一锁协议下维护；创建失败归还容量，等待者在停机后拒绝，已借出的 producer 由归还方最终释放。Dispose/DisposeAsync 不等待调用方持有的 lease；调用方仍须遵守一次 Get/一次 Return，归还后不得继续操作 producer。未借用/外来/直接重复归还被拒绝；原始 producer API 没有每次借用 token，不能检测归还后再次借出期间的陈旧持有者误归还。未引入公开测试工厂或后台 Task.Run。
+
+执行证据为 **JIT-only（linux-x64，Confluent.Kafka 2.12.0 + Apache Kafka 4.0.0 单 broker、单进程宿主）**：[KafkaSettlementTests](../../tests/Runtime/Eventing/CrestCreates.EventBus.Kafka.Tests.Integration/KafkaSettlementTests.cs) 从真实 `AddKafkaEventBus`/DI subscription/hosted consumer 执行，覆盖毒消息后正常消息、原始 DLQ 保留、broker 拒绝超限 DLQ 写入时零提交，以及同 group 新宿主恢复、handler 重投预算。缺 type info 场景下第二条记录也不可执行，明确隔离两条，其他毒消息有同分区正常业务字段对照。`unknown-subscription` 由内部确定性单元用例验证，真实 broker 订阅只会投递已订阅 topic，不宣称该分支有 broker 执行证据。池并发用同步屏障验证创建失败恢复满容量与停机/借还/等待交错；commit 故障、未确认 delivery、取消和 Stop 所有权用 SDK 接口替身验证。准确命令及结果见 `memory.md` R3-18。
+
+未执行 trim 或 NativeAOT publish/link/run，无原生门禁，不新增原生支持声明；SASL/TLS、多 broker 故障、分布式 exactly-once、跨进程 rebalance 与 broker 重启恢复未验证。测试的“重启”是同一测试进程内销毁并重建 Host，未声称 kill OS 进程或重启 Kafka。

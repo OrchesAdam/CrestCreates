@@ -13,7 +13,7 @@ namespace CrestCreates.EventBus.Kafka.Tests.Integration;
 public class KafkaRetryAndDLQTests : KafkaIntegrationTestBase
 {
     [Fact]
-    public async Task HandlerFailureRetry_ConsumerSeeksBack_Redelivers()
+    public async Task RawConsumer_SeekBack_RedeliversSameOffset()
     {
         var publisher = ServiceProvider.GetRequiredService<KafkaPublisher>();
         var topic = Options.DefaultTopic;
@@ -43,7 +43,7 @@ public class KafkaRetryAndDLQTests : KafkaIntegrationTestBase
     }
 
     [Fact]
-    public async Task HandlerFailureDLQ_RetriesExhausted_PublishedToDLQTopic()
+    public async Task StandaloneDlqPublisher_PreservesEnvelope()
     {
         var publisher = ServiceProvider.GetRequiredService<KafkaPublisher>();
         var mainTopic = Options.DefaultTopic;
@@ -76,7 +76,7 @@ public class KafkaRetryAndDLQTests : KafkaIntegrationTestBase
     }
 
     [Fact]
-    public async Task IdempotentConsumption_ProducerPool_ProducesIdempotentProducer()
+    public async Task ProducerPool_CanBorrowAndReturn()
     {
         var pool = ServiceProvider.GetRequiredService<KafkaProducerPool>();
         var producer = await pool.GetProducerAsync();

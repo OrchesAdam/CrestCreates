@@ -110,11 +110,14 @@ public class KafkaPublisher
 
             // Publish
             var deliveryResult = await producer.ProduceAsync(topic, message, cancellationToken);
+            if (deliveryResult.Status != PersistenceStatus.Persisted)
+                throw new InvalidOperationException("Kafka delivery was not confirmed persisted.");
 
             _logger.LogDebug(
                 "Published event {EventType} to topic {Topic} partition {Partition} offset {Offset}",
                 eventType, topic, deliveryResult.Partition, deliveryResult.Offset);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (ProduceException<string, byte[]> ex)
         {
             _logger.LogError(ex, "Failed to publish event to topic {Topic}", topic);
@@ -180,11 +183,14 @@ public class KafkaPublisher
             message.Headers.Add("retry-count", System.Text.Encoding.UTF8.GetBytes(retryCount.ToString()));
 
             var deliveryResult = await producer.ProduceAsync(dlqTopic, message, cancellationToken);
+            if (deliveryResult.Status != PersistenceStatus.Persisted)
+                throw new InvalidOperationException("Kafka DLQ delivery was not confirmed persisted.");
 
             _logger.LogWarning(
                 "Published message to dead letter topic {DlqTopic} from original topic {OriginalTopic}",
                 dlqTopic, originalTopic);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (ProduceException<string, byte[]> ex)
         {
             _logger.LogError(ex, "Failed to publish to dead letter topic {DlqTopic}", dlqTopic);
