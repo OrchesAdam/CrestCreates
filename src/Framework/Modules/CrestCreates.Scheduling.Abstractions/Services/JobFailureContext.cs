@@ -14,4 +14,7 @@ public record JobFailureContext(
     DateTimeOffset FailedAt,
     object? Args,
     int AttemptNumber
-);
+)
+{
+    public string? ArgsJson { get; init; }
+}

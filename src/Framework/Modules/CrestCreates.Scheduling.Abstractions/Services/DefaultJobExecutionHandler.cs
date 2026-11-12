@@ -1,6 +1,4 @@
 using System;
-using System.Diagnostics.CodeAnalysis;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Scheduling.Jobs;
@@ -22,6 +20,7 @@ public class DefaultJobExecutionHandler : IJobExecutionHandler
     {
         _historyRepository = historyRepository;
         _retryOptions = retryOptions?.Value;
+        _retryOptions?.Validate();
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<DefaultJobExecutionHandler>.Instance;
     }
 
@@ -96,8 +95,6 @@ public class DefaultJobExecutionHandler : IJobExecutionHandler
         return _historyRepository.CreateAsync(record, ct);
     }
 
-    [UnconditionalSuppressMessage("AotAnalysis", "IL2026:RequiresUnreferencedCode",
-        Justification = "Job args types should be registered with source-generated JSON context in AoT builds.")]
     public Task HandleAsync(JobFailureContext context, CancellationToken ct = default)
     {
         var record = new JobRecord
@@ -107,7 +104,7 @@ public class DefaultJobExecutionHandler : IJobExecutionHandler
             TenantId = context.TenantId,
             OrganizationId = context.OrganizationId,
             UserId = context.UserId,
-            ArgsJson = context.Args is IJobArgs args ? JsonSerializer.Serialize(args) : null,
+            ArgsJson = context.ArgsJson,
             Result = JobExecutionResult.Failed,
             AttemptNumber = context.AttemptNumber,
             ErrorMessage = context.Exception.Message,
@@ -118,14 +115,8 @@ public class DefaultJobExecutionHandler : IJobExecutionHandler
     }
 
     public bool ShouldRetry(JobFailureContext context)
-        => _retryOptions?.MaxRetries > 0 && context.AttemptNumber < _retryOptions.MaxRetries;
+        => _retryOptions?.MaxRetries > 0 && context.AttemptNumber <= _retryOptions.MaxRetries;
 
     public TimeSpan? GetNextRetryDelay(JobFailureContext context, int attemptNumber)
-    {
-        if (_retryOptions?.InitialDelay == null) return null;
-        var delay = _retryOptions.InitialDelay.Value * Math.Pow(_retryOptions.BackoffMultiplier, attemptNumber - 1);
-        return _retryOptions.MaxDelay.HasValue
-            ? TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds, _retryOptions.MaxDelay.Value.TotalMilliseconds))
-            : delay;
-    }
+        => _retryOptions?.GetDelay(attemptNumber);
 }

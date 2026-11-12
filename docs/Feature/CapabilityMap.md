@@ -222,8 +222,8 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | src/Framework/Modules/CrestCreates.ModuleDiagnostics/CrestCreates.ModuleDiagnostics.csproj | Framework | 导航（本轮未重评，不背书） | — |
 | src/Framework/Modules/CrestCreates.Organization.Abstractions/CrestCreates.Organization.Abstractions.csproj | Framework | D-11 保留 | [arch-design.md](../../docs/Feature/Organization/arch-design.md) |
 | src/Framework/Modules/CrestCreates.Organization/CrestCreates.Organization.csproj | Framework | D-11 保留 | [arch-design.md](../../docs/Feature/Organization/arch-design.md) |
-| src/Framework/Modules/CrestCreates.Scheduling.Abstractions/CrestCreates.Scheduling.Abstractions.csproj | Framework | 导航（本轮未重评，不背书） | — |
-| src/Framework/Modules/CrestCreates.Scheduling.Quartz/CrestCreates.Scheduling.Quartz.csproj | Framework | 导航（本轮未重评，不背书） | — |
+| src/Framework/Modules/CrestCreates.Scheduling.Abstractions/CrestCreates.Scheduling.Abstractions.csproj | Framework | typed 调度契约；R3-19 指定边界见 §10 | R3-19 |
+| src/Framework/Modules/CrestCreates.Scheduling.Quartz/CrestCreates.Scheduling.Quartz.csproj | Framework | Quartz RAM 执行实现，JIT-only；见 §10 | R3-19 |
 | src/Framework/Testing/CrestCreates.Testing/CrestCreates.Testing.csproj | Framework | 导航（本轮未重评，不背书） | — |
 | src/Framework/Web/CrestCreates.AspNetCore.Authentication.OpenIddict/CrestCreates.AspNetCore.Authentication.OpenIddict.csproj | Framework | 导航（本轮未重评，不背书） | — |
 | src/Framework/Web/CrestCreates.AspNetCore/CrestCreates.AspNetCore.csproj | Framework | 导航（本轮未重评，不背书） | — |
@@ -418,3 +418,19 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 执行证据为 **JIT-only（linux-x64，Confluent.Kafka 2.12.0 + Apache Kafka 4.0.0 单 broker、单进程宿主）**：[KafkaSettlementTests](../../tests/Runtime/Eventing/CrestCreates.EventBus.Kafka.Tests.Integration/KafkaSettlementTests.cs) 从真实 `AddKafkaEventBus`/DI subscription/hosted consumer 执行，覆盖毒消息后正常消息、原始 DLQ 保留、broker 拒绝超限 DLQ 写入时零提交，以及同 group 新宿主恢复、handler 重投预算。缺 type info 场景下第二条记录也不可执行，明确隔离两条，其他毒消息有同分区正常业务字段对照。`unknown-subscription` 由内部确定性单元用例验证，真实 broker 订阅只会投递已订阅 topic，不宣称该分支有 broker 执行证据。池并发用同步屏障验证创建失败恢复满容量与停机/借还/等待交错；commit 故障、未确认 delivery、取消和 Stop 所有权用 SDK 接口替身验证。准确命令及结果见 `memory.md` R3-18。
 
 未执行 trim 或 NativeAOT publish/link/run，无原生门禁，不新增原生支持声明；SASL/TLS、多 broker 故障、分布式 exactly-once、跨进程 rebalance 与 broker 重启恢复未验证。测试的“重启”是同一测试进程内销毁并重建 Host，未声称 kill OS 进程或重启 Kafka。
+
+## 10. R3-19 Quartz 执行与支持边界
+
+日期：2026-11-12。定位为既有后台作业契约与 Quartz 适配，技术责任 Scheduling。唯一装配为 `AddQuartzScheduling()`，`SchedulingQuartzModule` 委托同一入口；该入口包含 adapter 和默认 failure handler，不强制引入内存历史仓库。`IJobExecutionHandler` 可选，只增加跟踪，不再决定业务参数、身份或租户上下文是否存在。
+
+- 参数化任务显式调用 `AddQuartzJobArgs(MyJsonContext.Default.MyArgs)`，注册 `JsonTypeInfo<TArg>`；缺合约在创建调度状态前拒绝。运行时仅按这一合约解码一次，`NoArgs` 使用强类型常量；无反射序列化 fallback。周期参数新增 `ISchedulerService.RegisterAsync<TJob,TArg>(metadata, args)`；原无参数 generic 重载仅接受 `NoArgs`，其他参数类型明确拒绝。接口替身/外部实现需补新增重载。失败记录由新增 `JobFailureContext.ArgsJson` 保留原始 JSON，手动构建 failure context 的调用方若需要历史参数也须提供该属性。
+- 返回 `JobId` 同时保存实际 Quartz name/group 和独立稳定 UUID；业务、历史、GetAll 和控制操作共用它。`GetAll` 的 JobType/ArgType 来自 typed 注册的类型，而非 adapter 反射推断。命名任务不再把任意名字解析成 GUID。重复 name/group 由 Quartz 明确拒绝，重新定义需显式 Delete/Register，不再隐式删除已有周期与重试。UUID-only 控制仍映射 UUID 命名的单次任务。
+- 每次 fire 由 factory 包装 job 独占一个 AsyncScope，官方 `SimpleJobFactory` 的异步 return 路径等待其释放，包括构造异常、业务异常与取消；adapter 使用该 scope，不另开子 scope。同一 JobKey 使用 `DisallowConcurrentExecution`，不同 JobKey 可并发。
+- `MaxRetries` 表示初次执行之外的重试次数：attempt 1，最多到 `1 + MaxRetries`。每次原始 cron fire 从 1 开始，重试计数及原始 ScheduledAt 只放独立单次 trigger，不写 MergedMap、不替换 cron。metadata.Retry 优先（含 0 禁用），否则使用既有 failure/execution handler 策略与全局 JobRetryOptions；自定义 handler 仍须履行有界策略契约。默认 retry delay 为 1 秒、指数退避默认上限 1 分钟，绝对上限 1 天；非正自定义 handler delay 收敛为 100 ms。配置 count/倍率/期限非法则拒绝。默认 handler 原先把 MaxRetries 当总尝试数的行为已迁移，同名选项现在会多一次初始执行。
+- cron misfire 显式为 FireAndProceed（FireOnceNow），保留 Quartz 原 SmartPolicy 的合并补发一次行为；`Enabled=false` 在插入前暂停专属 trigger group，Resume 后可执行。metadata.Timeout 是协作 deadline，和 Quartz interrupt token 合并传入业务及 context；取消不创建重试。已完成业务的成功回调在业务 catch 外执行，历史写入故障不会重跑业务，Quartz listener 仍可观察异常。调度/历史写入不构成分布式原子事务。
+- 显式指定 TenantId 时要求 `ICurrentTenant` 与 `ITenantProvider`，经现有 provider 按权威 Id 解析，再用可恢复 `Change` frame；缺少设施、未知/不匹配租户均在业务构造前拒绝。host 不指定租户时设施仍可选，已注册时显式进入空 frame，不回退名称。公开调度 tenant/org/user 参数仍为 nullable GUID，其他字符串 Id 未扩展；未建立认证 principal，审计 retention 自动调度仍保持关闭。
+- Start/Stop 共用异步锁，每个 service 实例使用独立 Quartz scheduler 名称；并发 Start 只创建一个 scheduler。Stop 等待运行任务及 scope 释放，开始 shutdown 后不由调用方取消中断，停止后拒绝重启；容器应异步 Dispose。非协作任务可阻塞停机，不承诺强制终止。
+
+执行证据：`tests/Framework/Modules/CrestCreates.Scheduling.IntegrationTests/QuartzSchedulerIntegrationTests.cs` 通过真实 RAMJobStore/adapter/DI 验证参数、有无历史、命名 cron、延迟/立即、有限重试与下一周期、构造/取消/失败释放、同任务串行、命名取消、deadline、host/A/B、类型查询和并发启动；同步屏障、Quartz listener/trigger 状态与释放计数作为断言，参数测试关闭 STJ 默认反射兜底。原调度/历史套件同步验证。准确命令及结果见 `memory.md` R3-19。
+
+支持声明为 **JIT-only（linux-x64，Quartz 3.17.1 RAMJobStore，已执行场景）**。本次固定使用 RAM；Type/Retry/Timeout 等 map 值为进程内对象，不构成持久 JobStore 协议。持久化 JobStore、进程重启恢复、多节点集群、数据库 history provider、其他 RID、认证主体链、trim 和 NativeAOT 均未验证；没有调度 native fixture，不新增 native publish/link/run 声明。源生成 JSON 测试不能替代 NativeAOT 证据。

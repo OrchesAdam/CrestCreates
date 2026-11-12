@@ -13,7 +13,7 @@ public class SchedulingQuartzModule : ModuleBase
 {
     public override void OnConfigureServices(IServiceCollection services)
     {
-        services.AddSingleton<ISchedulerService, QuartzSchedulerService>();
+        services.AddQuartzScheduling();
     }
 
     public override async Task OnApplicationInitializationAsync(IHost host)

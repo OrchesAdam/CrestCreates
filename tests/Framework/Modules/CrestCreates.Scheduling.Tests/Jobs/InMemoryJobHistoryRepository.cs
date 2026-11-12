@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -12,6 +13,11 @@ public class InMemoryJobHistoryRepository : IJobHistoryRepository
 {
     private readonly List<JobRecord> _records = new();
     private readonly object _lock = new();
+    private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _successes = new();
+
+    public Task WaitForSuccessAsync(Guid jobUuid)
+        => _successes.GetOrAdd(jobUuid, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously))
+            .Task.WaitAsync(TimeSpan.FromSeconds(8));
 
     public Task<IJobRecord> CreateAsync(IJobRecord record, CancellationToken ct = default)
     {
@@ -37,6 +43,8 @@ public class InMemoryJobHistoryRepository : IJobHistoryRepository
                 StackTrace = record.StackTrace
             };
             _records.Add(newRecord);
+            if (newRecord.Result == JobExecutionResult.Succeeded)
+                _successes.GetOrAdd(newRecord.JobUuid, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
             return Task.FromResult<IJobRecord>(newRecord);
         }
     }

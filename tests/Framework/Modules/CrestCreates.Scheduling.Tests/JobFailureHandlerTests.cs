@@ -100,7 +100,7 @@ public class JobFailureHandlerTests
         // Arrange
         var options = Options.Create(new JobRetryOptions { MaxRetries = 3 });
         var handler = new DefaultJobFailureHandler(_loggerMock.Object, options);
-        var context = _context with { AttemptNumber = 3 };
+        var context = _context with { AttemptNumber = 4 };
 
         // Act
         var result = handler.ShouldRetry(context);
