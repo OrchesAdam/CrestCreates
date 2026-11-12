@@ -256,7 +256,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | src/Persistence/CrestCreates.Data.FreeSql/CrestCreates.Data.FreeSql.csproj | Persistence | 导航（本轮未重评，不背书） | [OrmProviderSupportMatrix.md](../../docs/Feature/OrmProviderSupportMatrix.md) |
 | src/Persistence/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj | Persistence | 导航（本轮未重评，不背书） | [OrmProviderSupportMatrix.md](../../docs/Feature/OrmProviderSupportMatrix.md) |
 | src/Persistence/CrestCreates.DbContextProvider.Abstract/CrestCreates.DbContextProvider.Abstract.csproj | Persistence | 导航（本轮未重评，不背书） | [OrmProviderSupportMatrix.md](../../docs/Feature/OrmProviderSupportMatrix.md) |
-| src/Persistence/CrestCreates.OrmProviders.MongoDB/CrestCreates.OrmProviders.MongoDB.csproj | Persistence | 导航（本轮未重评，不背书） | [OrmProviderSupportMatrix.md](../../docs/Feature/OrmProviderSupportMatrix.md) |
+| src/Persistence/CrestCreates.OrmProviders.MongoDB/CrestCreates.OrmProviders.MongoDB.csproj | Persistence | 限界保留；R3-08 仓储语义与执行边界见支持矩阵 §1.0.1 | [OrmProviderSupportMatrix.md](../../docs/Feature/OrmProviderSupportMatrix.md) |
 | src/Persistence/CrestCreates.Runtime.Persistence.PostgreSql/CrestCreates.Runtime.Persistence.PostgreSql.csproj | Persistence | 导航；#132 retention provider + V016/V017 已交付（见 §7） | [arch-design.md](../../docs/Feature/RuntimePersistence/arch-design.md) |
 | src/Platform/CrestCreates.Platform.Agent/CrestCreates.Platform.Agent.csproj | Platform | 导航（本轮未重评，不背书） | — |
 | src/Platform/CrestCreates.Platform.All/CrestCreates.Platform.All.csproj | Platform | 导航（本轮未重评，不背书） | — |

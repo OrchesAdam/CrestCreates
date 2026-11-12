@@ -49,6 +49,22 @@
 - FreeSql/SqlSugar 四种分页重载缺省按 Id 升序，显式排序后追加 Id 升序；旧 stamp 仍作不透明字符串精确匹配，新 stamp 统一 N 格式。
 - `SqlSugarPostgresIntegrationTests` 18/18：PostgreSQL 16/JIT 下正式仓储软删入口，host/A/B、bool live-row 参数、stamp、留行/幂等及 stamped 批次拒绝。此为定向执行证据，不提升整个 SqlSugar PostgreSQL 组合的支持声明，不推导 UoW、取消或 NativeAOT。
 
+## 1.0.1 R3-08 MongoDB 定向边界（2026-11-11）
+
+此补充独立于上表的 EF/FreeSql/SqlSugar 组合，不提升该表任何支持等级。MongoDB 保留为 **experimental，standalone JIT**；执行面是 `MongoRepositoryBase<TEntity,TKey>`，驱动 MongoDB.Driver 3.4.0，真实服务器为 Podman/Testcontainers `mongo:7`，每例独立数据库。
+
+- 所有普通读（同步 `IQueryable`、Get/List/Count/Any/Exists 与四种分页）组合 live-row 与租户条件，由 BSON serializer 解析具体成员映射。required 租户只读当前租户，host 无结果；optional 租户读自身与 null 共享行，host 只读 null；缺少 `ICurrentTenant` 按 host 处理。
+- 普通写不允许跨租户或租户写共享 null 行。最终 update/delete 条件保留持久 ownership、live-row、适用的 expected stamp；不能靠 detached entity 提交的 TenantId 改换持久归属。软删除只 patch `IsDeleted`/`DeletionTime` 与适用的 stamp，不 replacement 写入调用方其他字段；未接入当前用户的删除人审计，不新增平台 Audit Logging 背书。
+- 分页改为 **0-based**，负 index、非正 size、offset 溢出在 count/query 前拒绝。缺省按 Id 升序；显式排序追加 Id 升序作为 tie-breaker（直接按 Id 排序保留调用方方向）。这是固定数据集上的确定性排序，不承诺并发插入/删除时 offset 分页快照一致。
+- 陈旧 stamp 的更新/单行删除抛 `CrestConcurrencyException`；新生成 stamp 为 GUID N 格式，旧 token 仍按不透明字符串精确比较。带 expected stamp 的删除在缺失/隐藏/已删除行时也按并发冲突拒绝；普通 id 删除隐藏行保持无操作。stamped 两种批量删除与 tenant `UpdateRange` 为 **unsupported**，数据库命令前拒绝；其他 standalone 批次不承诺原子性。
+- **所有正式 managed UoW 窗口内的 Mongo 仓储操作均 unsupported**，包括未 Start、非事务型和事务型窗口。使用既有 `UnitOfWorkExecutionContext.ResolveParticipation` 在 DB 执行前拒绝；`GetQueryable` 获取及延迟执行、标量执行、枚举推进也受守卫约束。同步 IQueryable 保持单源服务端 LINQ 组合；返回值不再暴露 Mongo 专用 query provider，异步查询使用仓储 async 方法。租户上下文变化后旧 query 拒绝执行。
+- R3-08 审查修复：guarded 根保留在表达式树中，执行 visitor 收集并校验每个 guarded source 后再解包为原生表达式。多个 guarded source 的组合（包括同租户 `Concat`/`Union` 与标准 `Join`）当前 **unsupported**，在 Mongo command 前确定性拒绝；任一源租户上下文变化同样拒绝。单源投影、标量和 untyped 重建不受该多源限制。未新增公开 API 或 runtime reflection fallback。
+- 未新增 Mongo session/transaction binding，不承诺 replica-set 事务、Mongo/EF 跨资源事务、领域事件/UoW 组合或 generated CRUD 组合；trim/NativeAOT **unverified**，其他服务器/驱动/RID 未验证。
+
+验证入口：`tests/Persistence/CrestCreates.MongoDB.Tests/MongoSemanticsIntegrationTests.cs`。包含 host/A/B 全读重载、BSON 重命名、分页/非法参数零命令、真实留行/stamp/幂等回读、伪造归属、共享写拒绝、最终写前归属/stamp 竞态、managed 窗口所有公开重载零 Mongo command 观察，以及多源双租户切换、同租户多源拒绝、标准 Join 拒绝、managed 多源零命令和单源兼容回归。managed 测试使用正式 `UnitOfWorkManager` 内核与测试工厂（EfCore provider 身份），不等同于真实 EF/Mongo 事务组合验证。
+
+本轮执行：SDK `/home/orches/.dotnet/dotnet` 10.0.114，`-m:1 -p:UseSharedCompilation=false`，所有测试进程串行；Mongo 项目 **76/76**（58 条真实 Mongo 集成 + 18 条单元），exit 0、零跳过（`/tmp/r308-mongo-multisource-final.log`）；TenantIdentity/CapabilityMap 守卫复跑 **50/50**，exit 0、零跳过（`/tmp/r308-multisource-boundary.log`）。多源修复前定向真实 Mongo 回归 **8 failed / 0 passed**（`/tmp/r308-multisource-red.log`，其中单源用例当时因不兼容的 `Cast` 断言失败，后续改为直接枚举 untyped query）；修复后定向 **9/9**（`/tmp/r308-multisource-green.log`）。此前 R3-08 主修复的精确基线 `765516b8` 三条负例实跑 **3 failed / 0 passed**（删除泄漏、0 页、并发异常类型）。命令、环境、日志与镜像身份见 `memory.md` 的 R3-08 条目。
+
 ## 1.1 最终审查 R1 修复（2026-10-23）
 
 - EF 两个入口的无 stamp 租户批次写（UpdateRange、实体/谓词 DeleteRange）在跟踪/写入前确定性拒绝，失败零写；租户单行仍走持久归属校验。

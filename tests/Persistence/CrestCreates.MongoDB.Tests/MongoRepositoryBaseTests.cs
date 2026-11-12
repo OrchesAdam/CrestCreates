@@ -31,7 +31,7 @@ public class MongoRepositoryBaseTests
         var result = await sut.InsertAsync(entity);
 
         result.Name.Should().Be("Test");
-        entities.Should().ContainSingle();
+        (await sut.GetCountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public class MongoRepositoryBaseTests
         var result = await sut.InsertRangeAsync(items);
 
         result.Should().HaveCount(2);
-        entities.Should().HaveCount(2);
+        (await sut.GetCountAsync()).Should().Be(2);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class MongoRepositoryBaseTests
         var sut = CreateRepo(collection);
 
         await sut.DeleteAsync(entities[0]);
-        entities.Should().BeEmpty();
+        (await sut.GetCountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -118,21 +118,22 @@ public class MongoRepositoryBaseTests
         var sut = CreateRepo(collection);
 
         await sut.DeleteAsync("x");
-        entities.Should().BeEmpty();
+        (await sut.GetCountAsync()).Should().Be(0);
     }
 
     [Fact]
-    public async Task SoftDelete_ShouldMarkIsDeleted()
+    public async Task RequiredTenantDelete_ShouldRejectHostBeforeWriting()
     {
         var entities = new List<SoftDeleteTestEntity>();
         var collection = MongoMockHelper.CreateCollection(entities);
         var sut = CreateSoftDeleteRepo(collection);
 
         var entity = new SoftDeleteTestEntity { Id = "sd-1", Name = "Soft" };
-        await sut.DeleteAsync(entity);
+        await sut.Invoking(x => x.DeleteAsync(entity)).Should().ThrowAsync<InvalidOperationException>();
 
-        entity.IsDeleted.Should().BeTrue();
-        entity.DeletionTime.Should().NotBeNull();
+        entity.IsDeleted.Should().BeFalse();
+        entity.DeletionTime.Should().BeNull();
+        entities.Should().BeEmpty();
     }
 
     [Fact]
@@ -147,7 +148,7 @@ public class MongoRepositoryBaseTests
         var collection = MongoMockHelper.CreateCollection(entities);
         var sut = CreateRepo(collection);
 
-        var result = await sut.GetPagedAsync(1, 10);
+        var result = await sut.GetPagedAsync(0, 10);
         result.Items.Should().HaveCount(3);
         result.TotalCount.Should().Be(3);
     }
@@ -174,6 +175,7 @@ public class MongoRepositoryBaseTests
     [Fact]
     public async Task Insert_ShouldSetCreationAudit()
     {
+        _currentTenant.Setup(t => t.Id).Returns("tenant-a");
         var entities = new List<TenantTestEntity>();
         var collection = MongoMockHelper.CreateCollection(entities);
         var sut = CreateTenantRepo(collection);
