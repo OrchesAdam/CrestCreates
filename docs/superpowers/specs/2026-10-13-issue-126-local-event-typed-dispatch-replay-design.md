@@ -190,7 +190,7 @@ DispatchAsync<TEvent>: => DispatchAsync((ILocalEvent)e)
 | 零 handler 重放 | 失败（已有死信重放至少需要 1 个匹配 handler），不得标成功 |
 | 记录时治理/本地版本不一致 | 确定性报错（作为记录失败报告，不覆盖原 handler 异常） |
 
-不承诺：进程崩溃/store 故障后遗留 Retrying 的恢复；人工与后台并发重放的互斥（无原子 claim/CAS）。
+不承诺：进程崩溃/store 故障后遗留 Retrying 的恢复；人工与后台或人工与人工并发重放的互斥（无原子 claim/CAS）。R3-16 维持该边界：双 Pending 预检可能双执行，迟到取消可能覆盖另一请求成功终态；部分 Handler 副作用后的合作式取消仍恢复 Pending、不增预算，后续从头重放可能重复副作用。结构化诊断字段、确定性屏障证据与准确解释统一见 [#146 §8.1](2026-10-14-issue-146-local-event-framework-hardening-design.md#81-r3-16-有限裁定并发所有权与取消后的副作用2026-11-12)。
 
 ### 5.4 InMemoryDeadLetterStore 修正
 

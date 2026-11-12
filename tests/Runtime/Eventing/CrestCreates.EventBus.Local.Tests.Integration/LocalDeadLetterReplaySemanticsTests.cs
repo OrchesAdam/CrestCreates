@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.EventBus.Abstractions;
@@ -276,8 +278,15 @@ public class LocalDeadLetterReplaySemanticsTests
     [Fact]
     public async Task PreCanceledToken_LeavesStateUntouched()
     {
+        var calls = 0;
         using var provider = LocalEventTestComposition.Build(
-            declare: builder => builder.Declare<ReplayableFailingEvent>(replayable: true));
+            declare: builder => builder.Declare<ReplayableFailingEvent>(replayable: true),
+            configure: services => services.AddSingleton<ILocalEventHandler<ReplayableFailingEvent>>(
+                new BoundaryHandler(_ =>
+                {
+                    Interlocked.Increment(ref calls);
+                    return Task.CompletedTask;
+                })));
         var store = provider.GetRequiredService<IDeadLetterStore>();
         var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
 
@@ -295,6 +304,8 @@ public class LocalDeadLetterReplaySemanticsTests
         var updated = await store.GetByIdAsync(message.MessageId, CancellationToken.None);
         updated!.Status.Should().Be(DeadLetterStatus.Pending);
         updated.RetryCount.Should().Be(0);
+        updated.Should().Be(message);
+        calls.Should().Be(0);
     }
 
     [Fact]
@@ -377,6 +388,204 @@ public class LocalDeadLetterReplaySemanticsTests
         {
             await service.StopAsync(CancellationToken.None);
         }
+    }
+
+    // These are boundary witnesses: passing means duplicate execution remains possible, not that
+    // replay acquired exclusive ownership. The barrier is in a test store, outside production code.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ConcurrentPendingReplays_HaveNoOwnership_AndLateCancellationCanOverwriteSuccess(
+        bool useBackground, bool cancelManualAfterSuccess)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var manualCancellation = new CancellationTokenSource();
+        var bothHandlers = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHandlers = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var handler = new BoundaryHandler(async token =>
+        {
+            if (Interlocked.Increment(ref calls) == 2)
+                bothHandlers.TrySetResult();
+            if (cancelManualAfterSuccess && token == manualCancellation.Token)
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            else
+                await releaseHandlers.Task.WaitAsync(timeout.Token);
+        });
+        using var provider = LocalEventTestComposition.Build(
+            builder => builder.Declare<ReplayableFailingEvent>(replayable: true),
+            services =>
+            {
+                services.AddSingleton<ILocalEventHandler<ReplayableFailingEvent>>(handler);
+                services.AddSingleton<ReplayBarrierStore>();
+                services.AddSingleton<IDeadLetterStore>(sp => sp.GetRequiredService<ReplayBarrierStore>());
+            },
+            options => options.RetryIntervalSeconds = 1);
+        var store = provider.GetRequiredService<ReplayBarrierStore>();
+        var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
+        var message = LocalEventTestComposition.CreateModernMessage<ReplayableFailingEvent>(
+            LocalEventTestComposition.SerializeWithCodec(new ReplayableFailingEvent()),
+            LocalEventIdentity.BuildLocalReplayKey(typeof(ReplayableFailingEvent)));
+        await store.EnqueueAsync(message, timeout.Token);
+        using var background = new LocalDeadLetterBackgroundService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<ILocalDeadLetterReplayExecutor>(),
+            provider.GetRequiredService<IOptions<LocalDeadLetterOptions>>());
+        var manual = manager.RetryAsync(message.MessageId, manualCancellation.Token);
+        Task<DeadLetterRetryResult>? second = null;
+        try
+        {
+            if (useBackground)
+                await background.StartAsync(timeout.Token);
+            else
+                second = manager.RetryAsync(message.MessageId, timeout.Token);
+
+            await store.BothAtMark.Task.WaitAsync(timeout.Token);
+            store.PendingSnapshots.Should().Be(2);
+            calls.Should().Be(0);
+            store.AllowMarks.TrySetResult();
+            await bothHandlers.Task.WaitAsync(timeout.Token);
+            calls.Should().Be(2);
+            releaseHandlers.TrySetResult();
+            await store.SuccessWritten.Task.WaitAsync(timeout.Token);
+            if (cancelManualAfterSuccess)
+            {
+                if (second is not null)
+                    (await second.WaitAsync(timeout.Token)).Success.Should().BeTrue();
+                else
+                    await background.StopAsync(timeout.Token);
+                (await store.GetByIdAsync(message.MessageId, timeout.Token))!.Status
+                    .Should().Be(DeadLetterStatus.Retried);
+                manualCancellation.Cancel();
+                var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                    () => manual.WaitAsync(timeout.Token));
+                error.Data["LocalEventReplayAnyHandlerInvoked"].Should().Be("true");
+                error.Data["LocalEventReplaySettlement"].Should().Be("RestorePendingConfirmed");
+                store.Writes.ToArray().Should().Equal(
+                    DeadLetterStatus.Pending, DeadLetterStatus.Retried, DeadLetterStatus.Pending);
+            }
+            else
+            {
+                var result = await manual.WaitAsync(timeout.Token);
+                result.Success.Should().BeTrue();
+                result.AnyHandlerInvoked.Should().BeTrue();
+                if (second is not null)
+                    (await second.WaitAsync(timeout.Token)).Success.Should().BeTrue();
+                await store.BothSuccessesWritten.Task.WaitAsync(timeout.Token);
+                store.Writes.ToArray().Should().Equal(
+                    DeadLetterStatus.Pending, DeadLetterStatus.Retried, DeadLetterStatus.Retried);
+            }
+            var final = await store.GetByIdAsync(message.MessageId, timeout.Token);
+            final!.Status.Should().Be(cancelManualAfterSuccess ? DeadLetterStatus.Pending : DeadLetterStatus.Retried);
+            final.RetryCount.Should().Be(0);
+        }
+        finally
+        {
+            store.AllowMarks.TrySetResult();
+            releaseHandlers.TrySetResult();
+            manualCancellation.Cancel();
+            await background.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task CancellationAfterFirstHandlerEffect_KeepsBudget_AndNextReplayRepeatsFirstHandler()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var effects = 0;
+        var secondCalls = 0;
+        using var provider = LocalEventTestComposition.Build(
+            builder => builder.Declare<ReplayableFailingEvent>(replayable: true),
+            services =>
+            {
+                services.AddSingleton<ILocalEventHandler<ReplayableFailingEvent>>(new BoundaryHandler(_ =>
+                {
+                    if (Interlocked.Increment(ref effects) == 1)
+                        cancellation.Cancel();
+                    return Task.CompletedTask;
+                }));
+                services.AddSingleton<ILocalEventHandler<ReplayableFailingEvent>>(new BoundaryHandler(_ =>
+                {
+                    Interlocked.Increment(ref secondCalls);
+                    return Task.CompletedTask;
+                }));
+            });
+        var store = provider.GetRequiredService<IDeadLetterStore>();
+        var manager = provider.GetRequiredService<ILocalDeadLetterManager>();
+        var message = LocalEventTestComposition.CreateModernMessage<ReplayableFailingEvent>(
+            LocalEventTestComposition.SerializeWithCodec(new ReplayableFailingEvent()),
+            LocalEventIdentity.BuildLocalReplayKey(typeof(ReplayableFailingEvent)), retryCount: 1);
+        await store.EnqueueAsync(message, CancellationToken.None);
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => manager.RetryAsync(message.MessageId, cancellation.Token));
+        error.Data["LocalEventReplayExecution"].Should().Be("Cancelled");
+        error.Data["LocalEventReplayAnyHandlerInvoked"].Should().Be("true");
+        error.Data["LocalEventReplaySettlement"].Should().Be("RestorePendingConfirmed");
+        effects.Should().Be(1);
+        secondCalls.Should().Be(0);
+        var pending = await store.GetByIdAsync(message.MessageId, CancellationToken.None);
+        pending!.Status.Should().Be(DeadLetterStatus.Pending);
+        pending.RetryCount.Should().Be(1);
+        (await manager.RetryAsync(message.MessageId)).Success.Should().BeTrue();
+        effects.Should().Be(2);
+        secondCalls.Should().Be(1);
+        var completed = await store.GetByIdAsync(message.MessageId, CancellationToken.None);
+        completed!.Status.Should().Be(DeadLetterStatus.Retried);
+        completed.RetryCount.Should().Be(1);
+    }
+
+    internal sealed class BoundaryHandler(Func<CancellationToken, Task> execute)
+        : ILocalEventHandler<ReplayableFailingEvent>
+    {
+        public Task HandleAsync(ReplayableFailingEvent @event, CancellationToken cancellationToken = default)
+            => execute(cancellationToken);
+    }
+
+    private sealed class ReplayBarrierStore(IOptions<LocalDeadLetterOptions> options) : IDeadLetterStore
+    {
+        private readonly InMemoryDeadLetterStore _inner = new(options);
+        private int _marks;
+        private int _successes;
+        public int PendingSnapshots;
+        public ConcurrentQueue<DeadLetterStatus> Writes { get; } = new();
+        public TaskCompletionSource BothAtMark { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource AllowMarks { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SuccessWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource BothSuccessesWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task MarkRetryingAsync(string id, CancellationToken ct)
+        {
+            // Both callers already read Pending and passed admission/codec/handler preparation.
+            if ((await _inner.GetByIdAsync(id, ct))!.Status == DeadLetterStatus.Pending)
+                Interlocked.Increment(ref PendingSnapshots);
+            if (Interlocked.Increment(ref _marks) == 2)
+                BothAtMark.TrySetResult();
+            await AllowMarks.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
+            await _inner.MarkRetryingAsync(id, ct);
+        }
+
+        public async Task EnqueueAsync(DeadLetterMessage message, CancellationToken ct)
+        {
+            await _inner.EnqueueAsync(message, ct);
+            Writes.Enqueue(message.Status);
+            if (message.Status == DeadLetterStatus.Retried)
+            {
+                if (Interlocked.Increment(ref _successes) == 2)
+                    BothSuccessesWritten.TrySetResult();
+                SuccessWritten.TrySetResult();
+            }
+        }
+
+        public Task<DeadLetterMessage?> GetByIdAsync(string id, CancellationToken ct) => _inner.GetByIdAsync(id, ct);
+        public Task<IReadOnlyList<DeadLetterMessage>> GetPendingAsync(int skip, int take, CancellationToken ct)
+            => _inner.GetPendingAsync(skip, take, ct);
+        public Task MarkRetriedAsync(string id, CancellationToken ct) => _inner.MarkRetriedAsync(id, ct);
+        public Task MarkArchivedAsync(string id, CancellationToken ct) => _inner.MarkArchivedAsync(id, ct);
+        public Task<int> CountAsync(DeadLetterStatus? status, CancellationToken ct) => _inner.CountAsync(status, ct);
+        public Task<IReadOnlyList<DeadLetterMessage>> GetByEventNameAsync(string name, int skip, int take, CancellationToken ct)
+            => _inner.GetByEventNameAsync(name, skip, take, ct);
     }
 
     internal sealed class LegacyAliasHandler : ILocalEventHandler<LegacyAliasedReplayEvent>
