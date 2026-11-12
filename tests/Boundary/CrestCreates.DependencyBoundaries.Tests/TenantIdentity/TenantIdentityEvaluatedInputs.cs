@@ -19,8 +19,11 @@ internal sealed record EvaluatedProjectInputs(
 
     public bool IsAvailable => UnavailableReason is null;
 
-    public IReadOnlyList<(string Kind, string Path)> DistributionInputs { get; init; } = [];
+    public IReadOnlyList<EvaluatedDistributionInput> DistributionInputs { get; init; } = [];
 }
+
+internal sealed record EvaluatedDistributionInput(
+    string Kind, string Path, string Pack, string PackagePath, string BuildAction);
 
 /// <summary>
 /// Reads the Compile items and preprocessor symbols from MSBuild itself, so conditions, imports and property
@@ -80,7 +83,9 @@ internal static class TenantIdentityEvaluatedInputs
     }
 
     // Distribution items have a broader dependency surface than the Compile-only cache proves.
-    // Archive guards always evaluate them afresh, including imports and conditional item metadata.
+    // Archive guards always evaluate Debug inputs afresh, retaining Compile paths of every extension
+    // and NuGet's effective _GetPackageFiles output (including default Pack/BuildAction semantics).
+    // This is the evaluated Debug input surface, not a claim about every configuration/TFM or pack execution.
     public static EvaluatedProjectInputs ReadForArchiveGuard(string projectFile, string configuration)
     {
         var (inputs, error) = Evaluate(projectFile, configuration, includeDistribution: true);
@@ -102,9 +107,13 @@ internal static class TenantIdentityEvaluatedInputs
         start.ArgumentList.Add(projectFile);
         start.ArgumentList.Add("-nologo");
         start.ArgumentList.Add($"-p:Configuration={configuration}");
-        start.ArgumentList.Add("-t:AddImplicitDefineConstants");
+        start.ArgumentList.Add("-m:1");
+        start.ArgumentList.Add("-p:UseSharedCompilation=false");
         start.ArgumentList.Add(includeDistribution
-            ? "-getItem:Compile,Content,None,EmbeddedResource,AdditionalFiles,Analyzer,ProjectReference,PackageReference"
+            ? "-t:AddImplicitDefineConstants;_GetPackageFiles"
+            : "-t:AddImplicitDefineConstants");
+        start.ArgumentList.Add(includeDistribution
+            ? "-getItem:Compile,EmbeddedResource,_PackageFiles,AdditionalFiles,Analyzer,ProjectReference,PackageReference"
             : "-getItem:Compile");
         start.ArgumentList.Add("-getProperty:DefineConstants");
         start.ArgumentList.Add("-getProperty:TargetFramework");
@@ -143,7 +152,7 @@ internal static class TenantIdentityEvaluatedInputs
                 .EnumerateArray()
                 .Select(item => item.GetProperty("FullPath").GetString())
                 .OfType<string>()
-                .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                .Where(path => includeDistribution || path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
                 .Select(Path.GetFullPath)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(path => path, StringComparer.Ordinal)
@@ -157,11 +166,12 @@ internal static class TenantIdentityEvaluatedInputs
                 root.GetProperty("Properties").GetProperty("DefineConstants").GetString() ?? string.Empty)
             {
                 DistributionInputs = root.GetProperty("Items").EnumerateObject()
-                    .SelectMany(group => group.Value.EnumerateArray().Select(item => (
-                        Kind: group.Name,
-                        Path: item.TryGetProperty("FullPath", out var fullPath)
+                    .SelectMany(group => group.Value.EnumerateArray().Select(item => new EvaluatedDistributionInput(
+                        group.Name,
+                        item.TryGetProperty("FullPath", out var fullPath)
                             ? fullPath.GetString() ?? string.Empty
-                            : item.GetProperty("Identity").GetString() ?? string.Empty)))
+                            : item.GetProperty("Identity").GetString() ?? string.Empty,
+                        Metadata(item, "Pack"), Metadata(item, "PackagePath"), Metadata(item, "BuildAction"))))
                     .ToArray()
             }, null);
         }
@@ -170,6 +180,9 @@ internal static class TenantIdentityEvaluatedInputs
             return (null, $"could not parse dotnet msbuild output: {exception.Message}");
         }
     }
+
+    private static string Metadata(JsonElement item, string name) =>
+        item.TryGetProperty(name, out var value) ? value.GetString() ?? string.Empty : string.Empty;
 
     private static string CacheKey(
         string repoRoot,

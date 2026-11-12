@@ -289,7 +289,8 @@ public class ArchivedProjectRegressionArchitectureTests
                 $"<Project><PropertyGroup><RetiredRoot>../../{AuditArchiveRoot}</RetiredRoot></PropertyGroup>"
                 + $"<ItemGroup><{kind} Include=\"$(RetiredRoot)/*.cs\" Link=\"Hidden.cs\" Pack=\"true\" PackagePath=\"contentFiles/cs/any\" /></ItemGroup></Project>");
             var violations = AuditCleanupViolations(root, project);
-            Assert.Contains(violations, violation => violation.Contains($"ARC132-INPUT {kind}", StringComparison.Ordinal));
+            var inputKind = kind == "Compile" ? "Compile" : "_PackageFiles";
+            Assert.Contains(violations, violation => violation.Contains($"ARC132-INPUT {inputKind}", StringComparison.Ordinal));
             if (kind == "Compile")
                 Assert.Contains(violations, violation => violation.Contains("ARC132-TYPE", StringComparison.Ordinal));
         });
@@ -310,6 +311,111 @@ public class ArchivedProjectRegressionArchitectureTests
         });
     }
 
+    [Theory]
+    [InlineData("None", "CopiedPayload.cs", "Pack=\"true\"")]
+    [InlineData("Content", "CopiedPayload.CS", "")]
+    [InlineData("None", "Payload.txt", "Pack=\"true\" BuildAction=\"Compile\"")]
+    [InlineData("Content", "Payload.txt", "BuildAction=\"Compile\" PackageCopyToOutput=\"true\"")]
+    public void AuditCleanupGuard_RejectsCopiedPackedSource(string kind, string filename, string metadata)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            var directory = Path.GetDirectoryName(project)!;
+            CopyArchivedAuditDto(Path.Combine(directory, filename));
+            File.WriteAllText(Path.Combine(directory, "Archive.props"),
+                $"<Project><ItemGroup><Compile Remove=\"{filename}\" /><None Remove=\"{filename}\" />"
+                + $"<{kind} Include=\"{filename}\" {metadata} PackagePath=\"contentFiles/cs/any\" /></ItemGroup></Project>");
+            var violations = AuditCleanupViolations(root, project);
+            Assert.Contains(violations, violation => violation.Contains("ARC132-TYPE", StringComparison.Ordinal)
+                && violation.Contains(filename, StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void AuditCleanupGuard_RejectsImportedCompileRegardlessOfExtension_WithoutChangingTenantInputs()
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            var directory = Path.GetDirectoryName(project)!;
+            var source = Path.Combine(directory, "Restored.cs.txt");
+            CopyArchivedAuditDto(source);
+            File.WriteAllText(Path.Combine(directory, "Archive.props"),
+                "<Project><ItemGroup><Compile Include=\"Restored.cs.txt\" /></ItemGroup></Project>");
+            var tenant = TenantIdentityEvaluatedInputs.Read(root, project, "Debug");
+            Assert.True(tenant.IsAvailable, tenant.UnavailableReason);
+            Assert.DoesNotContain(source, tenant.CompileFiles);
+            var warmTenant = TenantIdentityEvaluatedInputs.Read(root, project, "Debug");
+            Assert.Equal("msbuild-cache", warmTenant.Source);
+            Assert.DoesNotContain(source, warmTenant.CompileFiles);
+            var archive = TenantIdentityEvaluatedInputs.ReadForArchiveGuard(project, "Debug");
+            Assert.True(archive.IsAvailable, archive.UnavailableReason);
+            Assert.Equal("msbuild", archive.Source);
+            Assert.Contains(source, archive.CompileFiles);
+            Assert.Contains(AuditCleanupViolations(root, project), violation =>
+                violation.Contains("ARC132-TYPE", StringComparison.Ordinal)
+                && violation.Contains("Restored.cs.txt", StringComparison.Ordinal));
+        });
+    }
+
+    [Theory]
+    [InlineData("None", "Pack=\"false\" BuildAction=\"Compile\"", "", "")]
+    [InlineData("None", "BuildAction=\"Compile\"", "", "")]
+    [InlineData("Content", "Pack=\"false\"", "", "")]
+    [InlineData("Content", "", "<Content Remove=\"CopiedPayload.cs\" />", "")]
+    [InlineData("Content", "", "", "<IncludeContentInPack>false</IncludeContentInPack>")]
+    public void AuditCleanupGuard_IgnoresCopiedButUndistributedSource(string kind, string metadata, string removal, string properties)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            var directory = Path.GetDirectoryName(project)!;
+            CopyArchivedAuditDto(Path.Combine(directory, "CopiedPayload.cs"));
+            File.WriteAllText(Path.Combine(directory, "Archive.props"),
+                $"<Project><PropertyGroup>{properties}</PropertyGroup><ItemGroup>"
+                + "<Compile Remove=\"CopiedPayload.cs\" /><None Remove=\"CopiedPayload.cs\" />"
+                + $"<{kind} Include=\"CopiedPayload.cs\" {metadata} PackagePath=\"contentFiles/cs/any\" />"
+                + removal + "</ItemGroup></Project>");
+            Assert.Empty(AuditCleanupViolations(root, project));
+        });
+    }
+
+    [Fact]
+    public void AuditCleanupGuard_IgnoresPackedHistoryAndNonSourcePayloads()
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            var directory = Path.GetDirectoryName(project)!;
+            File.WriteAllText(Path.Combine(directory, "History.cs"),
+                "// class AuditLogCleanupAppService {}\npublic class History { public const string Text = \"CleanupAuditLogsResultDto\"; }");
+            CopyArchivedAuditDto(Path.Combine(directory, "History.txt"));
+            File.WriteAllText(Path.Combine(directory, "Archive.props"),
+                "<Project><ItemGroup><Compile Remove=\"History.cs\" /><None Remove=\"History.cs;History.txt\" />"
+                + "<Content Include=\"History.cs\" /><Content Include=\"History.txt\" PackageContentFileBuildAction=\"Compile\" PackageCopyToOutput=\"true\" />"
+                + "</ItemGroup></Project>");
+            Assert.Empty(AuditCleanupViolations(root, project));
+        });
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Pack=\"false\"")]
+    public void AuditCleanupGuard_RejectsUnpackedArchiveEmbeddedResources(string metadata)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            var archive = Path.Combine(root, AuditArchiveRoot, "Retired.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(archive)!);
+            CopyArchivedAuditDto(archive);
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Archive.props"),
+                $"<Project><ItemGroup><EmbeddedResource Include=\"../../{AuditArchiveRoot}/Retired.cs\" {metadata} /></ItemGroup></Project>");
+            Assert.Contains(AuditCleanupViolations(root, project), violation =>
+                violation.Contains("ARC132-INPUT EmbeddedResource", StringComparison.Ordinal));
+        });
+    }
+
+    private static void CopyArchivedAuditDto(string destination) => File.Copy(
+        Path.Combine(FindRepositoryRoot(), AuditArchiveRoot,
+            "src/Framework/Ddd/CrestCreates.Application.Contracts/DTOs/AuditLog/CleanupAuditLogsDto.cs"), destination);
+
     private static IReadOnlyList<string> AuditCleanupViolations(string root, string project)
     {
         var inputs = TenantIdentityEvaluatedInputs.ReadForArchiveGuard(project, "Debug");
@@ -318,20 +424,30 @@ public class ArchivedProjectRegressionArchitectureTests
             return [$"ARC132-COVERAGE {owner}: {inputs.UnavailableReason}"];
 
         var violations = new List<string>();
-        foreach (var (kind, path) in inputs.DistributionInputs)
+        foreach (var input in inputs.DistributionInputs)
         {
-            var relative = Path.GetRelativePath(root, Path.GetFullPath(path)).Replace('\\', '/');
+            var relative = Path.GetRelativePath(root, Path.GetFullPath(input.Path)).Replace('\\', '/');
             if (relative.StartsWith(AuditArchiveRoot + "/", StringComparison.OrdinalIgnoreCase))
-                violations.Add($"ARC132-INPUT {kind} {owner} -> {relative}");
+                violations.Add($"ARC132-INPUT {input.Kind} {owner} -> {relative}");
         }
 
         var options = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
             .WithPreprocessorSymbols(inputs.DefineConstants.Split(';', StringSplitOptions.RemoveEmptyEntries));
-        foreach (var file in inputs.CompileFiles)
+        // Parse declarations/references, not tokens in comments or history strings. NuGet has already
+        // applied Pack defaults and IncludeContentInPack; BuildAction is its effective contentFiles action.
+        var sources = inputs.CompileFiles.Concat(inputs.DistributionInputs
+                .Where(input => input.Kind == "_PackageFiles"
+                    && (input.Path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                        || input.BuildAction.Equals("Compile", StringComparison.OrdinalIgnoreCase)
+                        || input.PackagePath.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                            .Any(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))))
+                .Select(input => input.Path))
+            .Select(Path.GetFullPath).Distinct(StringComparer.Ordinal);
+        foreach (var file in sources)
         {
             if (!File.Exists(file))
             {
-                violations.Add($"ARC132-COVERAGE {owner}: missing Compile input {file}");
+                violations.Add($"ARC132-COVERAGE {owner}: missing source input {file}");
                 continue;
             }
 
