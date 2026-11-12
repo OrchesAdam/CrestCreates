@@ -14,11 +14,18 @@ namespace CrestCreates.EventBus.Kafka.Tests.Integration;
 
 public sealed class KafkaSettlementTests : KafkaIntegrationTestBase
 {
-    private async Task<string> CreateTopicAsync()
+    private async Task<string> CreateTopicAsync(bool logAppendTime = false)
     {
         var topic = "settlement-" + Guid.NewGuid().ToString("N");
         using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = Options.BootstrapServers }).Build();
-        await admin.CreateTopicsAsync(new[] { new TopicSpecification { Name = topic, NumPartitions = 1, ReplicationFactor = 1 } });
+        await admin.CreateTopicsAsync(new[] { new TopicSpecification
+        {
+            Name = topic, NumPartitions = 1, ReplicationFactor = 1,
+            Configs = new Dictionary<string, string>
+            {
+                ["message.timestamp.type"] = logAppendTime ? "LogAppendTime" : "CreateTime"
+            }
+        } });
         return topic;
     }
 
@@ -84,15 +91,21 @@ public sealed class KafkaSettlementTests : KafkaIntegrationTestBase
     }
 
     [Theory]
-    [InlineData("invalid-envelope", "invalid-envelope")]
-    [InlineData("null-envelope", "null-envelope")]
-    [InlineData("mismatch", "event-type-mismatch")]
-    [InlineData("bad-payload", "invalid-payload")]
-    [InlineData("null-payload", "null-payload")]
-    [InlineData("missing-type", "missing-type-info")]
-    public async Task PoisonThenFollowingRecord_SamePartition_SettlesWithoutLoss(string kind, string reason)
+    [InlineData("invalid-envelope", "invalid-envelope", false)]
+    [InlineData("null-envelope", "null-envelope", false)]
+    [InlineData("mismatch", "event-type-mismatch", false)]
+    [InlineData("bad-payload", "invalid-payload", false)]
+    [InlineData("null-payload", "null-payload", false)]
+    [InlineData("missing-type", "missing-type-info", false)]
+    [InlineData("invalid-envelope", "invalid-envelope", true)]
+    [InlineData("null-envelope", "null-envelope", true)]
+    [InlineData("mismatch", "event-type-mismatch", true)]
+    [InlineData("bad-payload", "invalid-payload", true)]
+    [InlineData("null-payload", "null-payload", true)]
+    [InlineData("missing-type", "missing-type-info", true)]
+    public async Task PoisonThenFollowingRecord_SamePartition_SettlesWithoutLoss(string kind, string reason, bool logAppendTime)
     {
-        var topic = await CreateTopicAsync();
+        var topic = await CreateTopicAsync(logAppendTime);
         var group = "group-" + Guid.NewGuid().ToString("N");
         var poison = kind switch
         {
@@ -110,6 +123,11 @@ public sealed class KafkaSettlementTests : KafkaIntegrationTestBase
             Interlocked.Increment(ref calls); handled.TrySetResult(); return Task.CompletedTask;
         }, missingType: kind == "missing-type");
         await SendAsync(topic, poison, Envelope());
+        using var sourceObserver = Observer("timestamp-" + Guid.NewGuid().ToString("N"));
+        sourceObserver.Assign(new TopicPartitionOffset(topic, 0, Offset.Beginning));
+        var source = sourceObserver.Consume(TimeSpan.FromSeconds(15));
+        Assert.NotNull(source);
+        Assert.Equal(logAppendTime ? TimestampType.LogAppendTime : TimestampType.CreateTime, source.Message.Timestamp.Type);
         await host.StartAsync();
         if (kind != "missing-type") await handled.Task.WaitAsync(TimeSpan.FromSeconds(20));
         await WaitCommittedAsync(topic, group, 2);
@@ -118,6 +136,8 @@ public sealed class KafkaSettlementTests : KafkaIntegrationTestBase
         var dlq = observer.Consume(TimeSpan.FromSeconds(15));
         Assert.NotNull(dlq);
         Assert.Equal(poison, dlq.Message.Value);
+        Assert.Equal(TimestampType.CreateTime, dlq.Message.Timestamp.Type);
+        Assert.Equal(source.Message.Timestamp.UnixTimestampMs, dlq.Message.Timestamp.UnixTimestampMs);
         Assert.Equal("same-partition-key", dlq.Message.Key);
         Assert.Equal(new byte[] { 3 }, dlq.Message.Headers.GetLastBytes("correlation"));
         Assert.Equal(2, dlq.Message.Headers.Count(h => h.Key == "correlation"));
@@ -167,10 +187,12 @@ public sealed class KafkaSettlementTests : KafkaIntegrationTestBase
         await restarted.StopAsync();
     }
 
-    [Fact]
-    public async Task HandlerRetry_ThenDlq_ConfirmsBothBeforeCommitting()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HandlerRetry_ThenDlq_ConfirmsBothBeforeCommitting(bool logAppendTime)
     {
-        var topic = await CreateTopicAsync();
+        var topic = await CreateTopicAsync(logAppendTime);
         var group = "retry-" + Guid.NewGuid().ToString("N");
         var original = Envelope();
         await SendAsync(topic, original);
@@ -189,6 +211,13 @@ public sealed class KafkaSettlementTests : KafkaIntegrationTestBase
         Assert.Equal(1, envelope.RetryCount);
         Assert.Equal("same-partition-key", dlq.Message.Key);
         Assert.Equal(2, calls);
+        using var sourceObserver = Observer("retry-timestamp-" + Guid.NewGuid().ToString("N"));
+        sourceObserver.Assign(new TopicPartitionOffset(topic, 0, new Offset(1)));
+        var retry = sourceObserver.Consume(TimeSpan.FromSeconds(15));
+        Assert.NotNull(retry);
+        Assert.Equal(logAppendTime ? TimestampType.LogAppendTime : TimestampType.CreateTime, retry.Message.Timestamp.Type);
+        Assert.Equal(TimestampType.CreateTime, dlq.Message.Timestamp.Type);
+        Assert.Equal(retry.Message.Timestamp.UnixTimestampMs, dlq.Message.Timestamp.UnixTimestampMs);
         await host.StopAsync();
     }
 }

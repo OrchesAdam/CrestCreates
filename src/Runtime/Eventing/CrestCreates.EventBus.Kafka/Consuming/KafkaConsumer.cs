@@ -233,7 +233,10 @@ public sealed class KafkaConsumer : BackgroundService
         {
             var delivery = await producer.ProduceAsync(topic, new Message<string, byte[]>
             {
-                Key = record.Message.Key, Value = value!, Headers = headers, Timestamp = record.Message.Timestamp
+                Key = record.Message.Key, Value = value!, Headers = headers,
+                Timestamp = record.Message.Timestamp.Type == TimestampType.NotAvailable
+                    ? Timestamp.Default
+                    : new Timestamp(record.Message.Timestamp.UnixTimestampMs, TimestampType.CreateTime)
             }, cancellationToken);
             if (delivery.Status != PersistenceStatus.Persisted)
                 throw new InvalidOperationException("Kafka forwarding delivery was not confirmed persisted.");
