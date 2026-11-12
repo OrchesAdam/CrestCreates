@@ -82,22 +82,26 @@ GET /api/audit-logs?page=1&pageSize=20&sort=executionTime+desc
     &httpStatusCode=200
 ```
 
-## Audit Log Cleanup
+## 审计保留治理
 
-### 配置
+#132 已归档旧 Cleanup 服务、接口和日期清理 DTO；旧仓储裸删除方法已移除。
+正式入口是 `IAuditRetentionAppService`，HTTP 通过 `AddCrestAuditRetentionHttp()` 显式装配，
+在 `/api/audit-retention` 下发布 `POST preview`、`POST execute`、`GET run`、
+`POST batches/export`、`POST holds` 和 `POST holds/release`。
+不再提供旧生成路由 `/api/audit-log-cleanup/process-cleanup` 或更早的
+`/api/auditlogcleanupapp/processcleanup` Controller 默认入口；常见的旧路径拼写
+`/api/auditlogcleanup` 也不发布。
 
-```csharp
-services.AddAuditLogCleanup(options =>
-{
-    options.RetentionPeriodDays = 90; // 保留90天
-    options.CleanupBatchSize = 1000;
-    options.IsEnabled = true;
-});
-```
+执行默认关闭（Global Setting `AuditLogging.Retention.Enabled=false`），必须显式启用且通过
+`AuditLogging.Retention.*` 权限和当前租户校验。期限来自 Setting Management 的
+`AuditLogging.RetentionDays`（默认 90），请求不能指定任意日期绕过策略。
 
-### Cleanup Job
-
-已在 `AuditLogCleanupJob` 中注册（Phase 4），执行频率：每天凌晨3:00。
+V1 仅覆盖正式 PostgreSQL 固定库 AuditEnvelope 存储：发生时间与首次接收时间都严格早于
+cutoff 才符合清理条件，边界相等、active hold、受保护或隔离记录保留，批次生成持久收据。
+旧 AuditLog 查询模型不因此获得清理能力。typed job 与 HTTP 复用相同授权入口；自动调度尚未交付，
+不能声称已经注册每日清理任务。设计和实施证据见
+[保留治理设计](../../../superpowers/specs/2026-10-27-issue-132-audit-retention-governance-design.md)
+及仓库 `memory.md` 的 #132 交付记录。
 
 ## 验证检查点
 
@@ -107,5 +111,7 @@ services.AddAuditLogCleanup(options =>
 - [ ] 客户邮件在审计日志中被脱敏
 - [ ] 匿名请求不产生审计记录
 - [ ] 审计日志可通过 `/api/audit-logs` 查询
-- [ ] `AuditLogCleanupJob` 正确清理超过保留期的记录
+- [ ] 旧清理服务无法解析，旧清理路由返回 404
+- [ ] 正式 retention 默认关闭；匿名、无权限或越权请求零 purge
+- [ ] PostgreSQL retention 保留 cutoff 边界与 hold，并可按 receipt 对账
 - [ ] 删除工单后审计日志仍然保留（不级联删除）

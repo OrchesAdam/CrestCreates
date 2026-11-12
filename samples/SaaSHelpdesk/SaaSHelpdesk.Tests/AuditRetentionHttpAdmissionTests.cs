@@ -137,6 +137,29 @@ public sealed class AuditRetentionHttpAdmissionTests : BaseTest
         using var client = await SignInAsPlainUserAsync(host, userId);
         await GrantAsync(host.Services, userId, AuditRetentionPermissions.Preview);
 
+        // The retired contract cannot be resolved or projected by the real generated Host.
+        typeof(AuditRetentionAppService).Assembly.GetType(
+            "CrestCreates.Application.AuditLog.AuditLogCleanupAppService").Should().BeNull();
+        typeof(CrestCreates.Application.Contracts.Interfaces.IAuditRetentionAppService).Assembly.GetType(
+            "CrestCreates.Application.Contracts.Interfaces.IAuditLogCleanupAppService").Should().BeNull();
+        var endpoints = host.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>()
+            .Endpoints.OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>();
+        endpoints.Should().NotContain(endpoint => (endpoint.RoutePattern.RawText ?? string.Empty)
+            .Replace("-", string.Empty).Contains("auditlogcleanup", StringComparison.OrdinalIgnoreCase));
+        // The retired generated convention used kebab case. The older Controller generator stripped
+        // only "Service", leaving "App" in its prefix; retain checks for the previously assumed spelling too.
+        foreach (var route in new[]
+                 {
+                     "/api/audit-log-cleanup/process-cleanup",
+                     "/api/auditlogcleanupapp/processcleanup",
+                     "/api/auditlogcleanup", "/api/auditlogcleanup/processcleanup"
+                 })
+        {
+            using var retired = await client.PostAsJsonAsync(route, new { retentionDays = 1 });
+            retired.StatusCode.Should().Be(HttpStatusCode.NotFound, route);
+        }
+        store.DeleteCalls.Should().Be(0);
+
         var preview = await client.PostAsJsonAsync(
             "/api/audit-retention/preview",
             new { storeId = StoreId });
