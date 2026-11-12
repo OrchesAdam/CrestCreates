@@ -458,7 +458,7 @@ samples/SaaSHelpdesk/
 - `AuditLoggingMiddleware` 正常采集
 - `IAuditLogRedactor` 脱敏（如客户邮箱部分隐藏）
 - `IAuditLogWriter` 持久化
-- `AuditLogCleanupAppService` 定期清理策略
+- `IAuditRetentionAppService` 正式 PostgreSQL 保留治理：默认关闭、权限/租户 admission、cutoff/hold/receipt；旧清理链已随 #132 退出（见 [Spec 11](./specs/11-audit-logging.md)）
 
 ### 5.7 File Management
 
@@ -481,7 +481,7 @@ samples/SaaSHelpdesk/
 | `SLAOverdueCheckJob` | 每5分钟 | 扫描所有未解决工单，检查SLA是否逾期 |
 | `AutoCloseResolvedTicketsJob` | 每天2:00 | 自动关闭超过N天的已解决工单 |
 | `WeeklyReportJob` | 每周一8:00 | 生成上周工单统计报表 |
-| `AuditLogCleanupJob` | 每天3:00 | 清理超过保留期的审计日志 |
+| `AuditRetentionJob` | 自动调度未交付 | typed job 复用正式 admission，不能声称已注册每日任务 |
 
 **验证点**：
 - `IJob` 接口实现

@@ -18,6 +18,8 @@ internal sealed record EvaluatedProjectInputs(
     public string? UnavailableReason { get; init; }
 
     public bool IsAvailable => UnavailableReason is null;
+
+    public IReadOnlyList<(string Kind, string Path)> DistributionInputs { get; init; } = [];
 }
 
 /// <summary>
@@ -77,7 +79,18 @@ internal static class TenantIdentityEvaluatedInputs
         return evaluated;
     }
 
-    private static (EvaluatedProjectInputs? Evaluated, string? Error) Evaluate(string projectFile, string configuration)
+    // Distribution items have a broader dependency surface than the Compile-only cache proves.
+    // Archive guards always evaluate them afresh, including imports and conditional item metadata.
+    public static EvaluatedProjectInputs ReadForArchiveGuard(string projectFile, string configuration)
+    {
+        var (inputs, error) = Evaluate(projectFile, configuration, includeDistribution: true);
+        return inputs ?? new EvaluatedProjectInputs("msbuild-failed", configuration, string.Empty, [], string.Empty)
+        {
+            UnavailableReason = error ?? "dotnet msbuild produced no evaluable output"
+        };
+    }
+
+    private static (EvaluatedProjectInputs? Evaluated, string? Error) Evaluate(string projectFile, string configuration, bool includeDistribution = false)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -90,7 +103,9 @@ internal static class TenantIdentityEvaluatedInputs
         start.ArgumentList.Add("-nologo");
         start.ArgumentList.Add($"-p:Configuration={configuration}");
         start.ArgumentList.Add("-t:AddImplicitDefineConstants");
-        start.ArgumentList.Add("-getItem:Compile");
+        start.ArgumentList.Add(includeDistribution
+            ? "-getItem:Compile,Content,None,EmbeddedResource,AdditionalFiles,Analyzer,ProjectReference,PackageReference"
+            : "-getItem:Compile");
         start.ArgumentList.Add("-getProperty:DefineConstants");
         start.ArgumentList.Add("-getProperty:TargetFramework");
 
@@ -139,7 +154,16 @@ internal static class TenantIdentityEvaluatedInputs
                 configuration,
                 root.GetProperty("Properties").GetProperty("TargetFramework").GetString() ?? string.Empty,
                 files,
-                root.GetProperty("Properties").GetProperty("DefineConstants").GetString() ?? string.Empty), null);
+                root.GetProperty("Properties").GetProperty("DefineConstants").GetString() ?? string.Empty)
+            {
+                DistributionInputs = root.GetProperty("Items").EnumerateObject()
+                    .SelectMany(group => group.Value.EnumerateArray().Select(item => (
+                        Kind: group.Name,
+                        Path: item.TryGetProperty("FullPath", out var fullPath)
+                            ? fullPath.GetString() ?? string.Empty
+                            : item.GetProperty("Identity").GetString() ?? string.Empty)))
+                    .ToArray()
+            }, null);
         }
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
         {

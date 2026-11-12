@@ -14,7 +14,7 @@
 | [08](./08-file-management.md) | File Management | LocalFileSystemProvider、Setting驱动校验、Feature存储配额 |
 | [09](./09-setting-and-feature.md) | Setting & Feature Management | DefinitionProvider、三级作用域、Feature Checker、加密Setting |
 | [10](./10-dashboard-and-reporting.md) | Dashboard & Reporting | 聚合查询、Feature控制报表可见性 |
-| [11](./11-audit-logging.md) | Audit Logging | 审计中间件、脱敏、AuditLogCleanup |
+| [11](./11-audit-logging.md) | Audit Logging | 审计中间件、脱敏、AuditRetention 授权与保留治理 |
 | [12](./12-localization-validation-healthcheck-security.md) | Localization, Validation, HealthCheck & Security | 中英文、FluentValidation、/health端点、安全头、AOP [UnitOfWorkMo] |
 | [13](./13-vfs-and-organization.md) | Virtual File System & Organization | 嵌入资源读取、邮件模板渲染、组织层级权限 |
 | [14](./14-domain-events-and-eventbus.md) | Domain Events & EventBus | LocalEventBus、IEventHandler、TicketHistory |
