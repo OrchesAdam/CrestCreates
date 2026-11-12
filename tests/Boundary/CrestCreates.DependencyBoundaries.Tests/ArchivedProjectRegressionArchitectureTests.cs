@@ -7,7 +7,7 @@ using Xunit;
 namespace CrestCreates.DependencyBoundaries.Tests;
 
 /// <summary>
-/// #131 design §5 step 4/5 and #132 cleanup exit: archived projects and retired audit contracts
+/// #131 design §5 step 4/5 and #132 cleanup exit: archived projects and retired EventStore/audit contracts
 /// must not re-enter active compilation, distribution, solution membership or module aggregation.
 /// Anti-revival guards are guards, not consumers.
 /// </summary>
@@ -35,7 +35,6 @@ public class ArchivedProjectRegressionArchitectureTests
         "CrestCreates.Configuration.Services",
         "CrestCreates.Configuration.Modules",
         "CrestCreates.Draft.Abstractions",
-        "CrestCreates.EventBus.EventStore",
     ];
 
     /// <summary>Only these files may still spell the archived identifiers, and only as guards or history.</summary>
@@ -176,8 +175,7 @@ public class ArchivedProjectRegressionArchitectureTests
                 continue;
             }
 
-            if (text.Contains("ConfigurationModule", StringComparison.Ordinal)
-                || text.Contains("EventStoreModule", StringComparison.Ordinal))
+            if (text.Contains("ConfigurationModule", StringComparison.Ordinal))
             {
                 violations.Add($"{relative}: archived module name");
             }
@@ -225,6 +223,7 @@ public class ArchivedProjectRegressionArchitectureTests
         }
     }
 
+
     [Fact]
     public void EventBusAbstractions_KeepTheirLiveContracts_ButNotTheArchivedStoreOnes()
     {
@@ -240,6 +239,15 @@ public class ArchivedProjectRegressionArchitectureTests
     }
 
     private const string AuditArchiveRoot = "99_RecycleBin/issue-132-audit-retention";
+    private const string EventStoreProject = "src/Runtime/Eventing/CrestCreates.EventBus.EventStore";
+    private const string EventStoreNamespace = "CrestCreates.EventBus.EventStore";
+    private const string EventStoreContract = "src/Runtime/Eventing/CrestCreates.EventBus.Abstract/IEventStore.cs";
+    private static readonly string[] RetiredEventStoreTypes =
+    [
+        "EventStoreModule", "EventRetryService", "EventStoreJsonSerializer", "InMemoryEventRetryStore",
+        "IEventStore", "IEventStoreSerializer", "IEventRetryStore"
+    ];
+
     private static readonly string[] RetiredAuditTypes =
     [
         "AuditLogCleanupAppService", "IAuditLogCleanupAppService",
@@ -247,13 +255,13 @@ public class ArchivedProjectRegressionArchitectureTests
     ];
 
     [Fact]
-    public void ActiveBuildInputs_DoNotReviveRetiredAuditCleanup()
+    public void ActiveBuildInputs_DoNotReviveRetiredAuditCleanupOrEventStore()
     {
         var root = FindRepositoryRoot();
         var violations = ActiveProjectFiles(root).Order(StringComparer.Ordinal)
-            .SelectMany(project => AuditCleanupViolations(root, project)).ToArray();
+            .SelectMany(project => RetiredBuildInputViolations(root, project)).ToArray();
         Assert.True(violations.Length == 0,
-            "retired audit cleanup re-entered active build/distribution inputs:" + Environment.NewLine
+            "retired audit cleanup or EventStore re-entered active build/distribution inputs:" + Environment.NewLine
             + string.Join(Environment.NewLine, violations));
     }
 
@@ -269,7 +277,7 @@ public class ArchivedProjectRegressionArchitectureTests
         WithAuditMutationProject((root, project) =>
         {
             File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Restored.cs"), source);
-            Assert.Contains(AuditCleanupViolations(root, project), violation => violation.Contains(diagnostic, StringComparison.Ordinal));
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation => violation.Contains(diagnostic, StringComparison.Ordinal));
         });
     }
 
@@ -288,7 +296,7 @@ public class ArchivedProjectRegressionArchitectureTests
             File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Archive.props"),
                 $"<Project><PropertyGroup><RetiredRoot>../../{AuditArchiveRoot}</RetiredRoot></PropertyGroup>"
                 + $"<ItemGroup><{kind} Include=\"$(RetiredRoot)/*.cs\" Link=\"Hidden.cs\" Pack=\"true\" PackagePath=\"contentFiles/cs/any\" /></ItemGroup></Project>");
-            var violations = AuditCleanupViolations(root, project);
+            var violations = RetiredBuildInputViolations(root, project);
             var inputKind = kind == "Compile" ? "Compile" : "_PackageFiles";
             Assert.Contains(violations, violation => violation.Contains($"ARC132-INPUT {inputKind}", StringComparison.Ordinal));
             if (kind == "Compile")
@@ -307,7 +315,7 @@ public class ArchivedProjectRegressionArchitectureTests
             File.WriteAllText(Path.Combine(directory, "Removed.cs"), "public class AuditLogCleanupAppService {}");
             File.WriteAllText(Path.Combine(directory, "Archive.props"),
                 "<Project><ItemGroup><Compile Remove=\"Removed.cs\" /></ItemGroup></Project>");
-            Assert.Empty(AuditCleanupViolations(root, project));
+            Assert.Empty(RetiredBuildInputViolations(root, project));
         });
     }
 
@@ -325,7 +333,7 @@ public class ArchivedProjectRegressionArchitectureTests
             File.WriteAllText(Path.Combine(directory, "Archive.props"),
                 $"<Project><ItemGroup><Compile Remove=\"{filename}\" /><None Remove=\"{filename}\" />"
                 + $"<{kind} Include=\"{filename}\" {metadata} PackagePath=\"contentFiles/cs/any\" /></ItemGroup></Project>");
-            var violations = AuditCleanupViolations(root, project);
+            var violations = RetiredBuildInputViolations(root, project);
             Assert.Contains(violations, violation => violation.Contains("ARC132-TYPE", StringComparison.Ordinal)
                 && violation.Contains(filename, StringComparison.Ordinal));
         });
@@ -351,7 +359,7 @@ public class ArchivedProjectRegressionArchitectureTests
             Assert.True(archive.IsAvailable, archive.UnavailableReason);
             Assert.Equal("msbuild", archive.Source);
             Assert.Contains(source, archive.CompileFiles);
-            Assert.Contains(AuditCleanupViolations(root, project), violation =>
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation =>
                 violation.Contains("ARC132-TYPE", StringComparison.Ordinal)
                 && violation.Contains("Restored.cs.txt", StringComparison.Ordinal));
         });
@@ -374,7 +382,7 @@ public class ArchivedProjectRegressionArchitectureTests
                 + "<Compile Remove=\"CopiedPayload.cs\" /><None Remove=\"CopiedPayload.cs\" />"
                 + $"<{kind} Include=\"CopiedPayload.cs\" {metadata} PackagePath=\"contentFiles/cs/any\" />"
                 + removal + "</ItemGroup></Project>");
-            Assert.Empty(AuditCleanupViolations(root, project));
+            Assert.Empty(RetiredBuildInputViolations(root, project));
         });
     }
 
@@ -391,7 +399,7 @@ public class ArchivedProjectRegressionArchitectureTests
                 "<Project><ItemGroup><Compile Remove=\"History.cs\" /><None Remove=\"History.cs;History.txt\" />"
                 + "<Content Include=\"History.cs\" /><Content Include=\"History.txt\" PackageContentFileBuildAction=\"Compile\" PackageCopyToOutput=\"true\" />"
                 + "</ItemGroup></Project>");
-            Assert.Empty(AuditCleanupViolations(root, project));
+            Assert.Empty(RetiredBuildInputViolations(root, project));
         });
     }
 
@@ -407,28 +415,173 @@ public class ArchivedProjectRegressionArchitectureTests
             CopyArchivedAuditDto(archive);
             File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Archive.props"),
                 $"<Project><ItemGroup><EmbeddedResource Include=\"../../{AuditArchiveRoot}/Retired.cs\" {metadata} /></ItemGroup></Project>");
-            Assert.Contains(AuditCleanupViolations(root, project), violation =>
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation =>
                 violation.Contains("ARC132-INPUT EmbeddedResource", StringComparison.Ordinal));
         });
     }
+
+    [Theory]
+    [InlineData("EventStoreModule")]
+    [InlineData("EventRetryService")]
+    [InlineData("EventStoreJsonSerializer")]
+    [InlineData("InMemoryEventRetryStore")]
+    [InlineData("IEventStore")]
+    [InlineData("IEventStoreSerializer")]
+    [InlineData("IEventRetryStore")]
+    public void EventStoreGuard_RejectsExactRetiredDeclarationsAndTypedRegistration(string name)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Renamed.cs"),
+                $"public interface {name} {{}} public class Registration {{ public System.Type Module => typeof({name}); }}");
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation => violation.Contains("ARC131-TYPE", StringComparison.Ordinal)
+                && violation.Contains(name, StringComparison.Ordinal));
+        });
+    }
+
+    [Theory]
+    [InlineData("Renamed.cs", false)]
+    [InlineData("Renamed.payload", true)]
+    public void EventStoreGuard_RejectsActualArchivedContractUnderRenamedCompileInput(string filename, bool imported)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            CopyArchivedEventContract(Path.Combine(Path.GetDirectoryName(project)!, filename));
+            if (imported)
+                File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Archive.props"),
+                    $"<Project><ItemGroup><Compile Include=\"{filename}\" /></ItemGroup></Project>");
+            var violations = RetiredBuildInputViolations(root, project);
+            foreach (var name in new[] { "IEventStore", "IEventStoreSerializer", "IEventRetryStore" })
+                Assert.Contains(violations, violation => violation.Contains("ARC131-TYPE", StringComparison.Ordinal)
+                    && violation.EndsWith(": " + name, StringComparison.Ordinal));
+        });
+    }
+
+    [Theory]
+    [InlineData("using Store = global::CrestCreates.EventBus.Abstract.IEventStore; class Consumer { Store value; }")]
+    [InlineData("class Consumer { void Register() { Add<EventStoreModule>(); } void Add<T>() {} }")]
+    [InlineData("namespace CrestCreates.EventBus.EventStore { class Renamed {} }")]
+    [InlineData("using Store = CrestCreates.EventBus.EventStore; class Consumer {}")]
+    public void EventStoreGuard_RejectsAliasesModulesAndRetiredNamespace(string source)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Consumer.cs"), source);
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation => violation.Contains("ARC131-", StringComparison.Ordinal));
+        });
+    }
+
+    [Theory]
+    [InlineData("ProjectReference", "src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj")]
+    [InlineData("ProjectReference", "99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj")]
+    [InlineData("PackageReference", "CrestCreates.EventBus.EventStore")]
+    public void EventStoreGuard_RejectsImportedExpandedProjectAndPackageReferences(string kind, string identity)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            var value = kind == "ProjectReference" ? "../../" + identity : identity;
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Archive.props"),
+                $"<Project><PropertyGroup><RetiredIdentity>{value}</RetiredIdentity></PropertyGroup>"
+                + $"<ItemGroup><{kind} Include=\"$(RetiredIdentity)\" /></ItemGroup></Project>");
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation => violation.Contains($"ARC131-INPUT {kind}", StringComparison.Ordinal));
+        });
+    }
+
+    [Theory]
+    [InlineData("Compile", false)]
+    [InlineData("EmbeddedResource", false)]
+    [InlineData("EmbeddedResource", true)]
+    [InlineData("Content", false)]
+    public void EventStoreGuard_RejectsImportedArchiveContractInputs(string kind, bool unpacked)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            var relative = ArchiveRoot + "/src/Runtime/Eventing/CrestCreates.EventBus.Abstract/IEventStore.cs";
+            var source = Path.Combine(root, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+            CopyArchivedEventContract(source);
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Archive.props"),
+                $"<Project><PropertyGroup><RetiredSource>../../{relative}</RetiredSource></PropertyGroup>"
+                + $"<ItemGroup><{kind} Include=\"$(RetiredSource)\" Pack=\"{(!unpacked).ToString().ToLowerInvariant()}\" /></ItemGroup></Project>");
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation => violation.Contains(
+                $"ARC131-INPUT {(kind == "Content" ? "_PackageFiles" : kind)}", StringComparison.Ordinal));
+        });
+    }
+
+    [Theory]
+    [InlineData("None", "Copied.cs", "Pack=\"true\"", "contentFiles/cs/any")]
+    [InlineData("Content", "Copied.CS", "", "contentFiles/cs/any")]
+    [InlineData("Content", "Copied.payload", "BuildAction=\"Compile\"", "contentFiles/cs/any")]
+    [InlineData("None", "Copied.payload", "Pack=\"true\"", "contentFiles/cs/any/Restored.cs")]
+    public void EventStoreGuard_RejectsCopiedPackedContracts(string kind, string filename, string metadata, string packagePath)
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            CopyArchivedEventContract(Path.Combine(Path.GetDirectoryName(project)!, filename));
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(project)!, "Archive.props"),
+                $"<Project><ItemGroup><Compile Remove=\"{filename}\" /><None Remove=\"{filename}\" />"
+                + $"<{kind} Include=\"{filename}\" {metadata} PackagePath=\"{packagePath}\" /></ItemGroup></Project>");
+            Assert.Contains(RetiredBuildInputViolations(root, project), violation => violation.Contains("ARC131-TYPE", StringComparison.Ordinal)
+                && violation.Contains(filename, StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public void EventStoreGuard_IgnoresHistoryRemovedUnpackedAndSimilarlyNamedLiveContracts()
+    {
+        WithAuditMutationProject((root, project) =>
+        {
+            var directory = Path.GetDirectoryName(project)!;
+            File.WriteAllText(Path.Combine(directory, "History.cs"),
+                "// EventStoreModule IEventStore CrestCreates.EventBus.EventStore\n"
+                + "public interface ILocalEventStore {} public interface IEventStoreMetrics {} "
+                + "public interface ILocalEventDispatchRegistry {} public interface ITenantEventContextAccessor {} "
+                + "namespace CrestCreates.EventBus.EventStoreMetrics { public class History { "
+                + "public const string Text = \"CrestCreates.EventBus.EventStore IEventStore\"; } }");
+            CopyArchivedEventContract(Path.Combine(directory, "Removed.cs"));
+            File.WriteAllText(Path.Combine(directory, "Archive.props"),
+                "<Project><ItemGroup><Compile Remove=\"Removed.cs\" />"
+                + "<None Update=\"Removed.cs\" Pack=\"false\" BuildAction=\"Compile\" />"
+                + "<PackageReference Include=\"CrestCreates.EventBus.EventStoreMetrics\" />"
+                + "</ItemGroup></Project>");
+            Assert.Empty(RetiredBuildInputViolations(root, project));
+        });
+    }
+
+    private static void CopyArchivedEventContract(string destination) => File.Copy(
+        Path.Combine(FindRepositoryRoot(), ArchiveRoot,
+            "src/Runtime/Eventing/CrestCreates.EventBus.Abstract/IEventStore.cs"), destination);
 
     private static void CopyArchivedAuditDto(string destination) => File.Copy(
         Path.Combine(FindRepositoryRoot(), AuditArchiveRoot,
             "src/Framework/Ddd/CrestCreates.Application.Contracts/DTOs/AuditLog/CleanupAuditLogsDto.cs"), destination);
 
-    private static IReadOnlyList<string> AuditCleanupViolations(string root, string project)
+    private static IReadOnlyList<string> RetiredBuildInputViolations(string root, string project)
     {
         var inputs = TenantIdentityEvaluatedInputs.ReadForArchiveGuard(project, "Debug");
         var owner = Relative(root, project);
         if (!inputs.IsAvailable)
-            return [$"ARC132-COVERAGE {owner}: {inputs.UnavailableReason}"];
+            return [$"ARC131-COVERAGE / ARC132-COVERAGE {owner}: {inputs.UnavailableReason}"];
 
         var violations = new List<string>();
         foreach (var input in inputs.DistributionInputs)
         {
+            // PackageReference.FullPath is synthetic, not a filesystem identity. Use evaluated Identity.
+            if (input.Kind == "PackageReference")
+            {
+                if (input.Identity.Equals(EventStoreNamespace, StringComparison.OrdinalIgnoreCase))
+                    violations.Add($"ARC131-INPUT {input.Kind} {owner} -> {input.Identity}");
+                continue;
+            }
+
             var relative = Path.GetRelativePath(root, Path.GetFullPath(input.Path)).Replace('\\', '/');
             if (relative.StartsWith(AuditArchiveRoot + "/", StringComparison.OrdinalIgnoreCase))
                 violations.Add($"ARC132-INPUT {input.Kind} {owner} -> {relative}");
+
+            if (IsEventStorePath(relative)
+                || (input.Kind == "ProjectReference" && Path.GetFileName(input.Path)
+                    .Equals(EventStoreNamespace + ".csproj", StringComparison.OrdinalIgnoreCase)))
+                violations.Add($"ARC131-INPUT {input.Kind} {owner} -> {relative}");
         }
 
         var options = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
@@ -447,7 +600,7 @@ public class ArchivedProjectRegressionArchitectureTests
         {
             if (!File.Exists(file))
             {
-                violations.Add($"ARC132-COVERAGE {owner}: missing source input {file}");
+                violations.Add($"ARC131-COVERAGE / ARC132-COVERAGE {owner}: missing source input {file}");
                 continue;
             }
 
@@ -461,6 +614,19 @@ public class ArchivedProjectRegressionArchitectureTests
                     IdentifierNameSyntax identifier => identifier.Identifier.ValueText,
                     _ => null
                 };
+                if (name is not null && RetiredEventStoreTypes.Contains(name, StringComparer.Ordinal))
+                    violations.Add($"ARC131-TYPE {owner} -> {relative}: {name}");
+
+                if (node is NameSyntax namespaceName)
+                {
+                    var qualified = string.Concat(namespaceName.DescendantTokens().Select(token => token.ValueText));
+                    if (qualified.StartsWith("global::", StringComparison.Ordinal))
+                        qualified = qualified["global::".Length..];
+                    if (qualified.Equals(EventStoreNamespace, StringComparison.Ordinal)
+                        || qualified.StartsWith(EventStoreNamespace + ".", StringComparison.Ordinal))
+                        violations.Add($"ARC131-NAMESPACE {owner} -> {relative}: {qualified}");
+                }
+
                 if (name is not null && RetiredAuditTypes.Contains(name, StringComparer.Ordinal))
                     violations.Add($"ARC132-TYPE {owner} -> {relative}: {name}");
 
@@ -473,6 +639,13 @@ public class ArchivedProjectRegressionArchitectureTests
         }
         return violations;
     }
+
+    private static bool IsEventStorePath(string relative) => new[]
+        {
+            EventStoreProject, ArchiveRoot + "/" + EventStoreProject,
+            EventStoreContract, ArchiveRoot + "/" + EventStoreContract
+        }.Any(path => relative.Equals(path, StringComparison.OrdinalIgnoreCase)
+            || relative.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase));
 
     private static void WithAuditMutationProject(Action<string, string> check)
     {

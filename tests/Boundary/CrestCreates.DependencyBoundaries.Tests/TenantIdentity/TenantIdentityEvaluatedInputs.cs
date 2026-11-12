@@ -23,7 +23,7 @@ internal sealed record EvaluatedProjectInputs(
 }
 
 internal sealed record EvaluatedDistributionInput(
-    string Kind, string Path, string Pack, string PackagePath, string BuildAction);
+    string Kind, string Path, string Pack, string PackagePath, string BuildAction, string Identity);
 
 /// <summary>
 /// Reads the Compile items and preprocessor symbols from MSBuild itself, so conditions, imports and property
@@ -171,7 +171,8 @@ internal static class TenantIdentityEvaluatedInputs
                         item.TryGetProperty("FullPath", out var fullPath)
                             ? fullPath.GetString() ?? string.Empty
                             : item.GetProperty("Identity").GetString() ?? string.Empty,
-                        Metadata(item, "Pack"), Metadata(item, "PackagePath"), Metadata(item, "BuildAction"))))
+                        Metadata(item, "Pack"), Metadata(item, "PackagePath"), Metadata(item, "BuildAction"),
+                        Metadata(item, "Identity"))))
                     .ToArray()
             }, null);
         }

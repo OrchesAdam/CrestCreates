@@ -98,11 +98,12 @@
 | --- | --- |
 | 项目 | `src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj`（4 源文件） |
 | 定位 | 实验执行实现 + `EventStoreModule`（`[CrestModule]`），引用 EventBus.Abstract / Domain / Infrastructure |
-| 唯一装配入口 | [EventStoreModule.cs:12-13](../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventStoreModule.cs)：`IEventStoreSerializer → EventStoreJsonSerializer`、`IEventRetryStore → InMemoryEventRetryStore` 单例注册 |
-| 真实调用点 | 无 ProjectReference 消费者、无测试；方案成员 `CrestCreates.slnx:180`、`solutions/CrestCreates.All.slnx:151`、`CrestCreates.Platform.slnx:134`、`CrestCreates.Runtime.slnx:68`。契约文件 `src/Runtime/Eventing/CrestCreates.EventBus.Abstract/IEventStore.cs`（`IEventStore`/`IEventStoreSerializer`/`IEventRetryStore`）在本包之外仅被本包实现，`IEventStore` 无任何实现或消费 |
+| 归档前装配入口（不可用于 active Host） | [EventStoreModule.cs:12-13](../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventStoreModule.cs)：`IEventStoreSerializer → EventStoreJsonSerializer`、`IEventRetryStore → InMemoryEventRetryStore` 单例注册 |
+| 归档前调用点（以下方案成员均已移除） | 无 ProjectReference 消费者、无测试；原方案成员 `CrestCreates.slnx:180`、`solutions/CrestCreates.All.slnx:151`、`CrestCreates.Platform.slnx:134`、`CrestCreates.Runtime.slnx:68`。契约文件 `src/Runtime/Eventing/CrestCreates.EventBus.Abstract/IEventStore.cs`（`IEventStore`/`IEventStoreSerializer`/`IEventRetryStore`）在本包之外仅被本包实现，`IEventStore` 无任何实现或消费 |
 | 功能状态 | 归档（S3 已执行）；归档前状态为未交付 |
-| 执行证据 | 无测试入口。[EventRetryService.cs](../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventRetryService.cs) 用 `Guid.NewGuid()` 新建再删除记录，不表达真实重试结算；序列化器为反射 JSON；重试存储为内存 |
+| 执行证据 | 归档实现无运行测试入口。[EventRetryService.cs](../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventRetryService.cs) 用 `Guid.NewGuid()` 新建再删除记录，不表达真实重试结算；序列化器为反射 JSON；重试存储为内存 |
 | 处理结论 | 归档实现，并把无消费者的 `IEventStore.cs` 契约文件一并归档（保留 EventBus.Abstract 内其余在用契约，不按目录整包搬走）。事件投递与重放继续走正式 LocalEvent / RabbitMQ / Outbox 主链；它们不是 event sourcing 迁移目标，不宣称具备该能力。技术责任 Eventing |
+| 退出守卫（R3-17） | [ArchivedProjectRegressionArchitectureTests](../../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/ArchivedProjectRegressionArchitectureTests.cs) 与 #132 共用每项目一次 Debug MSBuild 求值及语法遍历：精确禁止七个旧类型、旧命名空间、项目/包身份、原 active 路径与实际归档路径重新进入 Compile/资源/有效 NuGet 源码分发输入。变异涵盖真实归档接口改名、非 `.cs` Compile、alias、typed 模块注册、导入与属性展开引用、有效 Pack/BuildAction/PackagePath。注释、历史字符串、移除输入、Pack=false 和相似在用接口为阴性对照。现有 generated module manifests 另行盘点无旧模块/契约名，不将已生成产物存在性作为干净检出的测试前提。仅仓库有限模式退出守卫，不代表全配置/全 TFM、任意 target 生成输入或 EventStore 功能执行证据；执行结果见 `memory.md` R3-17。 |
 
 ### D-07 治理草稿主链：DescriptorDraft + Abstractions（保留）
 
