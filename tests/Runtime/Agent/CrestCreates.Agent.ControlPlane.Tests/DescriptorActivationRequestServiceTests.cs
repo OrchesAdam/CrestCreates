@@ -97,6 +97,77 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
         gate.Invocations.Should().HaveCount(1);
     }
 
+    [Fact]
+    public async Task R321_CreateHoldsRequestGateAcrossSubmitAudit()
+    {
+        var inner = new InMemoryDescriptorActivationAuditor();
+        var auditEntered = new TaskCompletionSource<DescriptorActivationAuditRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAudit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pausable = new PausableAuditor(inner, auditEntered, releaseAudit);
+        var policyMock = new Mock<IDescriptorActivationPolicyProvider>();
+        var draftStoreMock = new Mock<DraftAbstractions.IDescriptorDraftStore>();
+        var gateMock = new Mock<IRuntimeActivationGate>();
+        var rechecker = new Mock<IActivationEvidenceRechecker>();
+        rechecker.Setup(x => x.RecheckAsync(It.IsAny<string>(), It.IsAny<ActivationBindingSnapshot>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ActivationEvidenceRecheckResult { IsStale = false, Drifts = Array.Empty<ActivationEvidenceDrift>() });
+        gateMock.Setup(x => x.ActivateAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AgentToolResult<RuntimeActivationGateResult>.Success(new RuntimeActivationGateResult
+            {
+                ActivatedDescriptorRef = "activated:test", DraftId = "draft-001", TenantId = TestTenantId,
+                ActivatedAt = DateTimeOffset.UtcNow
+            }));
+        var service = new DefaultDescriptorActivationRequestService(
+            policyMock.Object, pausable, new Mock<IDescriptorStableHashBuilder>().Object, draftStoreMock.Object,
+            gateMock.Object, rechecker.Object, new ActivationBindingHashValidator(),
+            NullLogger<DefaultDescriptorActivationRequestService>.Instance);
+        SetupDraftAndPolicy(draftStoreMock, policyMock, policy: CreatePolicy(
+            requireHumanReviewForAll: false, autoActivateAllowedWhenPolicyPermits: true));
+        var context = CreateActivationContext();
+
+        var create = service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot(),
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed
+        });
+        var submitAudit = await auditEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var queuedGate = service.ExecuteActivationGateAsync(context, submitAudit.ActivationRequestId);
+        var queuedCancel = service.CancelActivationRequestAsync(context, submitAudit.ActivationRequestId, "race");
+        releaseAudit.TrySetResult();
+
+        var created = await create.WaitAsync(TimeSpan.FromSeconds(10));
+        var gateResult = await queuedGate.WaitAsync(TimeSpan.FromSeconds(10));
+        var cancelResult = await queuedCancel.WaitAsync(TimeSpan.FromSeconds(10));
+        created.Value!.Status.Should().Be(ActivationRequestStatus.Activated);
+        gateResult.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        cancelResult.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        gateMock.Invocations.Should().HaveCount(1);
+        inner.GetAllRecords().Should().ContainSingle(r => r.Action == DescriptorActivationAuditAction.Activate);
+        (await service.GetActivationRequestStatusAsync(context, submitAudit.ActivationRequestId)).Value!.Status
+            .Should().Be(ActivationRequestStatus.Activated);
+    }
+
+    private sealed class PausableAuditor(
+        InMemoryDescriptorActivationAuditor inner,
+        TaskCompletionSource<DescriptorActivationAuditRecord> entered,
+        TaskCompletionSource release) : IDescriptorActivationAuditor
+    {
+        private int _paused;
+        public async Task RecordAsync(DescriptorActivationAuditRecord record, CancellationToken ct = default)
+        {
+            if (record.Action == DescriptorActivationAuditAction.Submit
+                && Interlocked.Exchange(ref _paused, 1) == 0)
+            {
+                await inner.RecordAsync(record, ct);
+                entered.TrySetResult(record);
+                await release.Task.WaitAsync(ct);
+                return;
+            }
+            await inner.RecordAsync(record, ct);
+        }
+
+        public IReadOnlyList<DescriptorActivationAuditRecord> GetAllRecords() => inner.GetAllRecords();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
