@@ -9,6 +9,9 @@ internal sealed record ActivationResourceSnapshot(
     ActivationRequest Request,
     Draft Owner)
 {
+    // Copies retain the same gate for the entire lifetime of this in-memory request,
+    // including terminal states and callers already waiting for a transition.
+    public SemaphoreSlim MutationGate { get; } = new(1, 1);
     public string? AppliedCompletionEventId { get; init; }
     public DescriptorActivationReviewDecision? AppliedDecision { get; init; }
 }

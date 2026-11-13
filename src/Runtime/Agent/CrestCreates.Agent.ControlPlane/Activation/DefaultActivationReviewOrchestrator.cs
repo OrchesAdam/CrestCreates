@@ -112,6 +112,10 @@ public sealed class DefaultActivationReviewOrchestrator : IActivationReviewOrche
         string completionEventId,
         CancellationToken ct = default)
     {
+        if (reviewDecision.ActorKind is not (DescriptorActivationActorKind.Human
+            or DescriptorActivationActorKind.Agent or DescriptorActivationActorKind.System))
+            return ActivationReviewDispatchOutcome.Conflict;
+
         var context = new AgentToolInvocationContext
         {
             ActorId = reviewDecision.ActorId,

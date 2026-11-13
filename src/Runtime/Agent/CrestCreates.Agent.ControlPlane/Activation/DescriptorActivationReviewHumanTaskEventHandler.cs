@@ -187,7 +187,10 @@ public sealed class DescriptorActivationReviewHumanTaskEventHandler
             throw new InvalidOperationException(
                 $"HumanTask '{@event.HumanTaskKey.InstanceId}' actor does not match the typed activation review decision.");
 
-        return parsedDecision with
+        // ActorKind comes from the bound persisted decision, never inferred from the
+        // callback source or the fact that this is a HumanTask. HumanTask currently has
+        // no independent completion ActorKind fact; request-service policy validates it.
+        return persistedDecision with
         {
             TenantId = taskInput.TenantId,
             CorrelationId = correlationId

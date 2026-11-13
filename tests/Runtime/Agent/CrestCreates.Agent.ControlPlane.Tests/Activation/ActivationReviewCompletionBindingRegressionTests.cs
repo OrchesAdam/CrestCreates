@@ -109,6 +109,39 @@ public sealed class ActivationReviewCompletionBindingRegressionTests : AgentCont
         }
     }
 
+    [Theory]
+    [InlineData(DescriptorActivationActorKind.Agent, false)]
+    [InlineData(DescriptorActivationActorKind.System, false)]
+    [InlineData(DescriptorActivationActorKind.Agent, true)]
+    [InlineData(DescriptorActivationActorKind.System, true)]
+    public async Task R321_PersistedNonHumanDecisionCannotSatisfyHumanReview(
+        DescriptorActivationActorKind kind, bool reject)
+    {
+        var fixture = await CreateFixtureAsync("request-a", TestActorId);
+        var decision = CreateDecision(fixture.RequestId,
+            reject ? DescriptorActivationReviewOutcome.Rejected : DescriptorActivationReviewOutcome.Approved,
+            ReviewerId) with { ActorKind = kind };
+        var completion = await fixture.CompleteAsync(reject ? "Reject" : "Approve", decision, actorId: ReviewerId);
+        (await fixture.DispatchAsync(completion)).Should().Be(ActivationReviewDispatchOutcome.Conflict);
+        (await fixture.GetStatusAsync(fixture.RequestId)).Should().Be(ActivationRequestStatus.UnderReview);
+        fixture.ActivationGate.Verify(x => x.ActivateAsync(
+            It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task R321_UnknownActorKindIsNotSilentlyMappedToSystem()
+    {
+        var service = new Mock<IDescriptorActivationRequestService>();
+        var orchestrator = new DefaultActivationReviewOrchestrator(
+            Mock.Of<IServiceScopeFactory>(), service.Object,
+            NullLogger<DefaultActivationReviewOrchestrator>.Instance, Mock.Of<IRuntimeStateContractRegistry>());
+        var decision = CreateDecision("request-a", DescriptorActivationReviewOutcome.Approved, ReviewerId)
+            with { ActorKind = (DescriptorActivationActorKind)99 };
+        (await orchestrator.ProcessReviewDecisionAsync(decision, "completion-a"))
+            .Should().Be(ActivationReviewDispatchOutcome.Conflict);
+        service.Invocations.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task HonestAuthorizedApprovalStillUsesRequestServiceAndGate()
     {

@@ -151,10 +151,13 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
         }
 
-        // Determine initial status
+        // Publish auto-approved requests in their final admission state so an awaited
+        // submission audit cannot race a later unconditional approval write.
+        var autoActivate = eligibility == DescriptorActivationEligibility.AutoActivatable
+            && policy.AutoActivateAllowedWhenPolicyPermits;
         var initialStatus = eligibility == DescriptorActivationEligibility.RequiresHumanReview
             ? ActivationRequestStatus.UnderReview
-            : ActivationRequestStatus.Submitted;
+            : autoActivate ? ActivationRequestStatus.Approved : ActivationRequestStatus.Submitted;
 
         // Create activation request
         var actorKind = DescriptorActivationActorKindExtensions.FromAgentToolActorKind(context.ActorKind)
@@ -193,42 +196,28 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             Diagnostics = eligibilityDiagnostics
         };
 
-        _requests[(context.TenantId, activationRequest.RequestId)] =
-            new ActivationResourceSnapshot(activationRequest, draft);
-
-        await RecordAudit(context, activationRequest.RequestId, DescriptorActivationAuditAction.Submit,
-            "Created", [], ct, activationRequest);
-
-        // Auto-activate if eligible and policy permits
-        if (eligibility == DescriptorActivationEligibility.AutoActivatable
-            && policy.AutoActivateAllowedWhenPolicyPermits)
+        var snapshot = new ActivationResourceSnapshot(activationRequest, draft);
+        await snapshot.MutationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            _logger.LogInformation(
-                "Auto-activating request {RequestId} for draft {DraftId} (governance: {Governance})",
-                activationRequest.RequestId, request.DraftId, governanceDecision);
+            _requests[(context.TenantId, activationRequest.RequestId)] = snapshot;
+            await RecordAudit(context, activationRequest.RequestId, DescriptorActivationAuditAction.Submit,
+                "Created", [], ct, activationRequest);
 
-            var updatedRequest = activationRequest with
+            if (autoActivate)
             {
-                Status = ActivationRequestStatus.Approved
-            };
-            _requests[(context.TenantId, activationRequest.RequestId)] =
-                new ActivationResourceSnapshot(updatedRequest, draft);
-
-            await RecordAudit(context, activationRequest.RequestId, DescriptorActivationAuditAction.Approve,
-                "AutoApproved", eligibilityDiagnostics, ct, updatedRequest);
-
-            // Execute gate for auto-activated request
-            var gateResult = await ExecuteActivationGateAsync(context, activationRequest.RequestId, ct);
-
-            // Return the gate result (may be success or failure)
-            if (gateResult.Status == AgentToolResultStatus.Success && gateResult.Value is not null)
-            {
-                return AgentToolResult<ActivationRequest>.Success(gateResult.Value);
+                await RecordAudit(context, activationRequest.RequestId, DescriptorActivationAuditAction.Approve,
+                    "AutoApproved", eligibilityDiagnostics, ct, activationRequest);
+                // Creation already owns the request gate; do not reacquire it.
+                return await ExecuteGateCoreAsync(context, activationRequest.RequestId, ct);
             }
-            return gateResult;
-        }
 
-        return AgentToolResult<ActivationRequest>.Success(activationRequest);
+            return AgentToolResult<ActivationRequest>.Success(activationRequest);
+        }
+        finally
+        {
+            snapshot.MutationGate.Release();
+        }
     }
 
     public async Task<AgentToolResult<DescriptorActivationDecision>> EvaluateActivationEligibilityAsync(
@@ -260,9 +249,15 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         return AgentToolResult<DescriptorActivationDecision>.Success(decision);
     }
 
-    public async Task<AgentToolResult<ActivationRequest>> ApproveActivationRequestAsync(
+    public Task<AgentToolResult<ActivationRequest>> ApproveActivationRequestAsync(
         AgentToolInvocationContext context, string requestId,
         DescriptorActivationReviewDecision reviewDecision, CancellationToken ct = default, string? completionEventId = null)
+        => WithRequestLockAsync(context, requestId,
+            () => ApproveCoreAsync(context, requestId, reviewDecision, ct, completionEventId), ct);
+
+    private async Task<AgentToolResult<ActivationRequest>> ApproveCoreAsync(
+        AgentToolInvocationContext context, string requestId,
+        DescriptorActivationReviewDecision reviewDecision, CancellationToken ct, string? completionEventId)
     {
         var snapshot = GetRequestSnapshot(context.TenantId, requestId);
         if (snapshot is null)
@@ -356,6 +351,10 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
         }
 
+        var humanReviewFailure = await ValidateHumanReviewerAsync(context, request, reviewDecision, ct);
+        if (humanReviewFailure is not null)
+            return humanReviewFailure;
+
         // Self-approval check (ActorId only — same actor bypassing self-approval by switching ActorKind is a security boundary violation)
         // Use the policy captured at request creation time, not a live lookup, to prevent policy-change attacks.
         var policy = request.Policy ?? await _policyProvider.GetPolicyAsync(context.TenantId, snapshot.Owner?.DescriptorKind, ct);
@@ -386,12 +385,18 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             "Approved", [], ct, updatedRequest);
 
         // Evidence recheck + gate execution (matches interface contract: "rechecks evidence hashes, then calls Runtime Activation Gate")
-        return await ExecuteActivationGateAsync(context, requestId, ct);
+        return await ExecuteGateCoreAsync(context, requestId, ct);
     }
 
-    public async Task<AgentToolResult<ActivationRequest>> RejectActivationRequestAsync(
+    public Task<AgentToolResult<ActivationRequest>> RejectActivationRequestAsync(
         AgentToolInvocationContext context, string requestId,
         DescriptorActivationReviewDecision reviewDecision, CancellationToken ct = default, string? completionEventId = null)
+        => WithRequestLockAsync(context, requestId,
+            () => RejectCoreAsync(context, requestId, reviewDecision, ct, completionEventId), ct);
+
+    private async Task<AgentToolResult<ActivationRequest>> RejectCoreAsync(
+        AgentToolInvocationContext context, string requestId,
+        DescriptorActivationReviewDecision reviewDecision, CancellationToken ct, string? completionEventId)
     {
         var snapshot = GetRequestSnapshot(context.TenantId, requestId);
         if (snapshot is null)
@@ -455,6 +460,10 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
         }
 
+        var humanReviewFailure = await ValidateHumanReviewerAsync(context, request, reviewDecision, ct);
+        if (humanReviewFailure is not null)
+            return humanReviewFailure;
+
         var updatedRequest = request with { Status = ActivationRequestStatus.Rejected };
         _requests[(context.TenantId, requestId)] = snapshot with
         {
@@ -469,8 +478,12 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         return AgentToolResult<ActivationRequest>.Success(updatedRequest);
     }
 
-    public async Task<AgentToolResult<ActivationRequest>> RecheckEvidenceAsync(
+    public Task<AgentToolResult<ActivationRequest>> RecheckEvidenceAsync(
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
+        => WithRequestLockAsync(context, requestId, () => RecheckCoreAsync(context, requestId, ct), ct);
+
+    private async Task<AgentToolResult<ActivationRequest>> RecheckCoreAsync(
+        AgentToolInvocationContext context, string requestId, CancellationToken ct)
     {
         var snapshot = GetRequestSnapshot(context.TenantId, requestId);
         if (snapshot is null)
@@ -499,6 +512,19 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             return AgentToolResult<ActivationRequest>.Success(request);
         }
 
+        if (request.BindingSnapshot.Hashes is null)
+        {
+            var diagnostic = new AgentToolDiagnostic
+            {
+                Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
+                Severity = SeverityLevel.Error,
+                Message = "BindingSnapshot.Hashes is required for evidence recheck."
+            };
+            await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
+                "MissingBindingHashes", [diagnostic], ct, request);
+            return AgentToolResult<ActivationRequest>.InvalidRequest([diagnostic]);
+        }
+
         // Run evidence recheck
         var recheckResult = await _evidenceRechecker.RecheckAsync(
             context.TenantId, request.BindingSnapshot, ct);
@@ -524,8 +550,12 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         return AgentToolResult<ActivationRequest>.Success(request);
     }
 
-    public async Task<AgentToolResult<ActivationRequest>> ExecuteActivationGateAsync(
+    public Task<AgentToolResult<ActivationRequest>> ExecuteActivationGateAsync(
         AgentToolInvocationContext context, string requestId, CancellationToken ct = default)
+        => WithRequestLockAsync(context, requestId, () => ExecuteGateCoreAsync(context, requestId, ct), ct);
+
+    private async Task<AgentToolResult<ActivationRequest>> ExecuteGateCoreAsync(
+        AgentToolInvocationContext context, string requestId, CancellationToken ct)
     {
         var snapshot = GetRequestSnapshot(context.TenantId, requestId);
         if (snapshot is null)
@@ -543,15 +573,18 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             return AgentToolResult<ActivationRequest>.InvalidRequest([identityDiagnostic]);
         }
 
-        // Gate cannot be called for non-activatable states
+        // Approved requests have passed review. Submitted requests may bypass review
+        // only when their captured eligibility and policy do not require a human.
         if (request.Status != ActivationRequestStatus.Approved
-            && request.Status != ActivationRequestStatus.Submitted)
+            && !(request.Status == ActivationRequestStatus.Submitted
+                && request.Eligibility == DescriptorActivationEligibility.AutoActivatable
+                && request.Policy is { RequireHumanReviewForAll: false }))
         {
             var diag = new AgentToolDiagnostic
             {
                 Code = DescriptorActivationDiagnosticCodes.GateInvalidState,
                 Severity = SeverityLevel.Error,
-                Message = $"Cannot execute activation gate for request in status '{request.Status}'. Expected 'Approved' or 'Submitted'."
+                Message = $"Cannot execute activation gate for request in status '{request.Status}'. Expected 'Approved', or 'Submitted' with AutoActivatable eligibility and a captured policy that does not require human review."
             };
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
                 "GateInvalidState", [diag], ct, request);
@@ -569,6 +602,19 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
                 "GateBlocked", [diag], ct, request);
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
+        }
+
+        if (request.BindingSnapshot.Hashes is null)
+        {
+            var diagnostic = new AgentToolDiagnostic
+            {
+                Code = DescriptorActivationDiagnosticCodes.BindingHashesRequired,
+                Severity = SeverityLevel.Error,
+                Message = "BindingSnapshot.Hashes is required for activation gate execution."
+            };
+            await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
+                "MissingBindingHashes", [diagnostic], ct, request);
+            return AgentToolResult<ActivationRequest>.InvalidRequest([diagnostic]);
         }
 
         // Evidence recheck before gate execution
@@ -594,7 +640,29 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         // Execute the gate — ONLY component that mutates active descriptor/runtime state
-        var gateResult = await _activationGate.ActivateAsync(context, request, ct);
+        AgentToolResult<RuntimeActivationGateResult> gateResult;
+        try
+        {
+            gateResult = await _activationGate.ActivateAsync(context, request, ct);
+        }
+        catch (Exception exception)
+        {
+            // Once the external gate has been entered its side effects may be unknown.
+            // Never release ownership with an executable request that could invoke it again.
+            var failedRequest = request with { Status = ActivationRequestStatus.ActivationFailed };
+            _requests[(context.TenantId, requestId)] = snapshot with { Request = failedRequest };
+            try
+            {
+                await RecordAudit(context, requestId, DescriptorActivationAuditAction.GateDenied,
+                    exception is OperationCanceledException ? "GateCancelled" : "GateFailed", [],
+                    CancellationToken.None, failedRequest);
+            }
+            catch (Exception auditException)
+            {
+                _logger.LogError(auditException, "Failed to audit activation gate failure for request {RequestId}", requestId);
+            }
+            throw;
+        }
 
         if (gateResult.Status != AgentToolResultStatus.Success)
         {
@@ -620,8 +688,12 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         return AgentToolResult<ActivationRequest>.Success(activatedRequest);
     }
 
-    public async Task<AgentToolResult<ActivationRequest>> CancelActivationRequestAsync(
+    public Task<AgentToolResult<ActivationRequest>> CancelActivationRequestAsync(
         AgentToolInvocationContext context, string requestId, string reason, CancellationToken ct = default)
+        => WithRequestLockAsync(context, requestId, () => CancelCoreAsync(context, requestId, reason, ct), ct);
+
+    private async Task<AgentToolResult<ActivationRequest>> CancelCoreAsync(
+        AgentToolInvocationContext context, string requestId, string reason, CancellationToken ct)
     {
         var snapshot = GetRequestSnapshot(context.TenantId, requestId);
         if (snapshot is null)
@@ -666,6 +738,45 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
     }
 
     // ── Internal helpers ──
+
+    private async Task<AgentToolResult<ActivationRequest>> WithRequestLockAsync(
+        AgentToolInvocationContext context, string requestId,
+        Func<Task<AgentToolResult<ActivationRequest>>> operation, CancellationToken ct)
+    {
+        var snapshot = GetRequestSnapshot(context.TenantId, requestId);
+        if (snapshot is null)
+            return AgentToolResult<ActivationRequest>.NotFound($"Activation request '{requestId}' not found.");
+
+        await snapshot.MutationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // The operation reads the current snapshot after acquiring ownership.
+            return await operation().ConfigureAwait(false);
+        }
+        finally
+        {
+            snapshot.MutationGate.Release();
+        }
+    }
+
+    private async Task<AgentToolResult<ActivationRequest>?> ValidateHumanReviewerAsync(
+        AgentToolInvocationContext context, ActivationRequest request,
+        DescriptorActivationReviewDecision decision, CancellationToken ct)
+    {
+        if (request.Eligibility != DescriptorActivationEligibility.RequiresHumanReview
+            || decision.ActorKind == DescriptorActivationActorKind.Human)
+            return null;
+
+        var diagnostic = new AgentToolDiagnostic
+        {
+            Code = DescriptorActivationDiagnosticCodes.HumanReviewActorRequired,
+            Severity = SeverityLevel.Error,
+            Message = "A request requiring human review must be approved or rejected by a Human actor."
+        };
+        await RecordAudit(context, request.RequestId, DescriptorActivationAuditAction.Block,
+            "HumanReviewActorRequired", [diagnostic], ct, request);
+        return AgentToolResult<ActivationRequest>.InvalidRequest([diagnostic]);
+    }
 
     private ActivationResourceSnapshot? GetRequestSnapshot(string tenantId, string requestId)
         => _requests.TryGetValue((tenantId, requestId), out var snapshot) ? snapshot : null;
