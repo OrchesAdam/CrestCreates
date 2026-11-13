@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using CrestCreates.Agent.ControlPlane.Abstractions;
 using CrestCreates.Agent.ControlPlane.Abstractions.Activation;
 using CrestCreates.Agent.ControlPlane.Abstractions.Json;
@@ -79,6 +80,14 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
             return AgentToolResult<ActivationRequest>.InvalidRequest([diag]);
         }
 
+        var identityDiagnostic = ValidateBindingIdentity(context.TenantId, request.DraftId, request.BindingSnapshot);
+        if (identityDiagnostic is not null)
+        {
+            await RecordAudit(context, null, DescriptorActivationAuditAction.Block,
+                "BindingIdentityMismatch", [identityDiagnostic], ct);
+            return AgentToolResult<ActivationRequest>.InvalidRequest([identityDiagnostic]);
+        }
+
         // Validate binding hashes for completeness and metadata consistency
         var hashIssues = _bindingHashValidator.Validate(request.BindingSnapshot.Hashes);
         var hashErrors = hashIssues.Where(i => i.Severity == BindingHashValidationSeverity.Error).ToList();
@@ -106,6 +115,15 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         if (draft is null)
         {
             return AgentToolResult<ActivationRequest>.NotFound($"Draft '{request.DraftId}' not found.");
+        }
+
+        var draftDiagnostic = ValidateDraftBinding(context.TenantId, draft.TenantId, draft.ProposedVersion,
+            request.BindingSnapshot);
+        if (draftDiagnostic is not null)
+        {
+            await RecordAudit(context, null, DescriptorActivationAuditAction.Block,
+                "BindingDraftMismatch", [draftDiagnostic], ct);
+            return AgentToolResult<ActivationRequest>.InvalidRequest([draftDiagnostic]);
         }
 
         // Use pre-evaluated governance decision from the request, or fail-closed default.
@@ -462,6 +480,14 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
 
         var request = snapshot.Request;
 
+        var identityDiagnostic = ValidateBindingIdentity(context.TenantId, request.DraftId, request.BindingSnapshot);
+        if (identityDiagnostic is not null)
+        {
+            await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
+                "BindingIdentityMismatch", [identityDiagnostic], ct, request);
+            return AgentToolResult<ActivationRequest>.InvalidRequest([identityDiagnostic]);
+        }
+
         // Terminal states don't need recheck
         if (request.Status == ActivationRequestStatus.Activated
             || request.Status == ActivationRequestStatus.ActivationFailed
@@ -508,6 +534,14 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         var request = snapshot.Request;
+
+        var identityDiagnostic = ValidateBindingIdentity(context.TenantId, request.DraftId, request.BindingSnapshot);
+        if (identityDiagnostic is not null)
+        {
+            await RecordAudit(context, requestId, DescriptorActivationAuditAction.Block,
+                "BindingIdentityMismatch", [identityDiagnostic], ct, request);
+            return AgentToolResult<ActivationRequest>.InvalidRequest([identityDiagnostic]);
+        }
 
         // Gate cannot be called for non-activatable states
         if (request.Status != ActivationRequestStatus.Approved
@@ -724,6 +758,60 @@ public class DefaultDescriptorActivationRequestService : IDescriptorActivationRe
         }
 
         return diagnostics.AsReadOnly();
+    }
+
+    private static AgentToolDiagnostic? ValidateBindingIdentity(
+        string contextTenantId, string requestDraftId, ActivationBindingSnapshot snapshot)
+    {
+        if (!string.Equals(snapshot.TenantId, contextTenantId, StringComparison.Ordinal))
+        {
+            return new AgentToolDiagnostic
+            {
+                Code = DescriptorActivationDiagnosticCodes.BindingTenantMismatch,
+                Severity = SeverityLevel.Error,
+                Message = $"Binding snapshot tenant '{snapshot.TenantId}' does not match the request tenant '{contextTenantId}'."
+            };
+        }
+
+        if (!string.Equals(snapshot.DraftId, requestDraftId, StringComparison.Ordinal))
+        {
+            return new AgentToolDiagnostic
+            {
+                Code = DescriptorActivationDiagnosticCodes.BindingDraftMismatch,
+                Severity = SeverityLevel.Error,
+                Message = $"Binding snapshot draft '{snapshot.DraftId}' does not match the requested draft '{requestDraftId}'."
+            };
+        }
+
+        return null;
+    }
+
+    private static AgentToolDiagnostic? ValidateDraftBinding(
+        string contextTenantId, string? draftTenantId, string? proposedVersion, ActivationBindingSnapshot snapshot)
+    {
+        if (!string.IsNullOrEmpty(draftTenantId)
+            && !string.Equals(draftTenantId, contextTenantId, StringComparison.Ordinal))
+        {
+            return new AgentToolDiagnostic
+            {
+                Code = DescriptorActivationDiagnosticCodes.BindingTenantMismatch,
+                Severity = SeverityLevel.Error,
+                Message = $"Persisted draft belongs to tenant '{draftTenantId}', not the request tenant '{contextTenantId}'."
+            };
+        }
+
+        if (proposedVersion is not null
+            && !string.Equals(proposedVersion, snapshot.DraftVersion.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            return new AgentToolDiagnostic
+            {
+                Code = DescriptorActivationDiagnosticCodes.BindingDraftVersionMismatch,
+                Severity = SeverityLevel.Error,
+                Message = $"Persisted draft version '{proposedVersion}' does not match the bound version '{snapshot.DraftVersion}'."
+            };
+        }
+
+        return null;
     }
 
     private async Task RecordAudit(

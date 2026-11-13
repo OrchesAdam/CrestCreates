@@ -306,6 +306,55 @@ public class ActivationBindingHashValidatorIntegrationTests
         result.Drifts.Should().Contain(d => d.FieldName == "BindingHash.SourceReviewHash");
     }
 
+    [Fact]
+    public async Task EvidenceRechecker_DraftVersionDrift_IsStale()
+    {
+        var hashBuilderMock = new Mock<IDescriptorStableHashBuilder>();
+        var draftStoreMock = new Mock<DraftAbstractions.IDescriptorDraftStore>();
+        var artifactResolverMock = new Mock<IActivationBindingArtifactResolver>();
+        var draft = new DraftAbstractions.DescriptorDraft
+        {
+            TenantId = TestTenantId,
+            DraftId = "draft-001",
+            DescriptorKind = DescriptorKind.Event,
+            DescriptorId = "test.desc-001",
+            Operation = DraftAbstractions.DescriptorDraftOperation.Create,
+            AuthorKind = DraftAbstractions.DescriptorDraftAuthorKind.Agent,
+            AuthorId = "agent-001",
+            CreatedAt = DateTimeOffset.UtcNow,
+            ProposedVersion = "2",
+            Payload = new StubDescriptorDraftPayload(),
+            Status = DraftAbstractions.DescriptorDraftStatus.Created
+        };
+        draftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(draft);
+        var boundHashes = CreateValidBindingHashes();
+        hashBuilderMock.Setup(h => h.Build(It.IsAny<IDescriptor>()))
+            .Returns(new DescriptorStableHashes
+            {
+                ContractHash = boundHashes.ContractHash,
+                DefinitionHash = boundHashes.DefinitionHash
+            });
+        artifactResolverMock.Setup(r => r.ResolveAsync(
+                TestTenantId, It.IsAny<ActivationBindingSnapshot>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ResolvedBindingArtifacts
+            {
+                CurrentSourceReviewHash = boundHashes.SourceReviewHash,
+                CurrentReviewManifestHash = boundHashes.ReviewManifestHash,
+                CurrentPackageHashes = boundHashes.PackageHashes,
+                CurrentEvidenceHashes = boundHashes.PackageHashes
+            });
+        var rechecker = new DefaultActivationEvidenceRechecker(
+            hashBuilderMock.Object, draftStoreMock.Object, artifactResolverMock.Object,
+            new ActivationBindingHashValidator(), NullLogger<DefaultActivationEvidenceRechecker>.Instance);
+
+        var result = await rechecker.RecheckAsync(TestTenantId, CreateTestBindingSnapshot());
+
+        result.IsStale.Should().BeTrue();
+        result.Drifts.Should().Contain(d => d.FieldName == "DraftVersion"
+            && d.BoundHashValue == "1" && d.CurrentHashValue == "2");
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     // 7. Runtime gate: valid hashes → activates
     // ════════════════════════════════════════════════════════════════════════
