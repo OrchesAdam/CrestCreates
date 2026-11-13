@@ -193,6 +193,58 @@ public class FileManagementServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UploadAsync_Success_LeavesCallerStreamOpen()
+    {
+        var service = CreateService(new RecordingStorageProvider(), new InMemoryFileRepository(), maxFileSize: 100);
+        var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("hello"));
+
+        var entity = await service.UploadAsync(stream, "reuse.bin", "application/octet-stream", tenantId: _tenantId);
+
+        Assert.True(stream.CanRead);
+        stream.Position = 0;
+        using var reader = new StreamReader(stream);
+        Assert.Equal("hello", await reader.ReadToEndAsync());
+        Assert.Equal(5, entity.Size);
+    }
+
+    [Fact]
+    public async Task UploadAsync_Overage_LeavesCallerStreamOpen()
+    {
+        var provider = new RecordingStorageProvider();
+        var service = CreateService(provider, new InMemoryFileRepository(), maxFileSize: 100);
+        await using var stream = new NonSeekableStream(new byte[200]);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.UploadAsync(stream, "big.bin", "application/octet-stream", tenantId: _tenantId));
+
+        Assert.False(stream.Disposed);
+        Assert.Equal(1, provider.DeleteCalls);
+    }
+
+    [Fact]
+    public async Task UploadAsync_MetadataFailure_LeavesCallerStreamOpen()
+    {
+        var service = CreateService(new RecordingStorageProvider(), new ThrowingFileRepository(), maxFileSize: 100);
+        var stream = new MemoryStream(new byte[10]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.UploadAsync(stream, "small.bin", "application/octet-stream", tenantId: _tenantId));
+
+        Assert.True(stream.CanRead);
+    }
+
+    [Fact]
+    public async Task UploadAsync_Success_DoesNotObserveCallerDisposeFailure()
+    {
+        var service = CreateService(new RecordingStorageProvider(), new InMemoryFileRepository(), maxFileSize: 100);
+        var stream = new ThrowingDisposeStream(new byte[7]);
+
+        var entity = await service.UploadAsync(stream, "dispose.bin", "application/octet-stream", tenantId: _tenantId);
+
+        Assert.Equal(7, entity.Size);
+    }
+
+    [Fact]
     public async Task DeleteAsync_RepeatedDelete_IsIdempotent()
     {
         using var stream = new MemoryStream(new byte[10]);
@@ -226,7 +278,19 @@ public class FileManagementServiceTests : IDisposable
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        protected override void Dispose(bool disposing) { if (disposing) _inner.Dispose(); base.Dispose(disposing); }
+        public bool Disposed { get; private set; }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { Disposed = true; _inner.Dispose(); }
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class ThrowingDisposeStream : MemoryStream
+    {
+        public ThrowingDisposeStream(byte[] payload) : base(payload) { }
+        protected override void Dispose(bool disposing) => throw new InvalidOperationException("caller dispose failure");
+        public override ValueTask DisposeAsync() => ValueTask.FromException(new InvalidOperationException("caller dispose failure"));
     }
 
     private sealed class RecordingStorageProvider : IFileStorageProvider

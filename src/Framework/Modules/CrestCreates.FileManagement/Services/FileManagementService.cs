@@ -239,11 +239,6 @@ internal sealed class SizeLimitingReadStream : Stream
     public override void SetLength(long value) => throw new NotSupportedException();
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing) _inner.Dispose();
-        base.Dispose(disposing);
-    }
-
-    public override ValueTask DisposeAsync() => _inner.DisposeAsync();
+    // The caller retains ownership of the source stream: this wrapper only observes reads.
+    protected override void Dispose(bool disposing) => base.Dispose(disposing);
 }
