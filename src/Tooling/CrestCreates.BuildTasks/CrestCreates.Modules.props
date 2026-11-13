@@ -1,8 +1,12 @@
 <Project>
-  <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
-  <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
-  <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
-  <UsingTask TaskName="CrestCreates.BuildTasks.ScanEntityPermissions" AssemblyFile="$(MSBuildThisFileDirectory)bin\Debug\net10.0\CrestCreates.BuildTasks.dll" />
+  <PropertyGroup>
+    <CrestCreatesBuildTasksAssembly Condition="'$(CrestCreatesBuildTasksAssembly)' == '' and Exists('$(MSBuildThisFileDirectory)bin/$(Configuration)/net10.0/CrestCreates.BuildTasks.dll')">$(MSBuildThisFileDirectory)bin/$(Configuration)/net10.0/CrestCreates.BuildTasks.dll</CrestCreatesBuildTasksAssembly>
+    <CrestCreatesBuildTasksAssembly Condition="'$(CrestCreatesBuildTasksAssembly)' == ''">$(MSBuildThisFileDirectory)bin/Debug/net10.0/CrestCreates.BuildTasks.dll</CrestCreatesBuildTasksAssembly>
+  </PropertyGroup>
+  <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(CrestCreatesBuildTasksAssembly)" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(CrestCreatesBuildTasksAssembly)" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(CrestCreatesBuildTasksAssembly)" />
+  <UsingTask TaskName="CrestCreates.BuildTasks.ScanEntityPermissions" AssemblyFile="$(CrestCreatesBuildTasksAssembly)" />
 
   <PropertyGroup>
     <EnableModuleManifestGeneration Condition="'$(EnableModuleManifestGeneration)' == ''">true</EnableModuleManifestGeneration>
@@ -10,11 +14,12 @@
   </PropertyGroup>
 
   <Target Name="InitializeCrestCreatesBuildTaskPaths"
-          BeforeTargets="CleanStaleModuleAutoInitializer;GenerateModuleManifest;CollectAndGenerateAggregatedModules;ScanEntityPermissions">
+          BeforeTargets="CleanStaleModuleAutoInitializer;GenerateModuleManifest;CollectAndGenerateAggregatedModules;GetCrestCreatesModuleManifestPath;ScanEntityPermissions">
     <PropertyGroup>
       <ModuleManifestOutputPath Condition="'$(ModuleManifestOutputPath)' == ''">$(IntermediateOutputPath)ModuleManifest.json</ModuleManifestOutputPath>
       <AggregatedModuleManifestPath Condition="'$(AggregatedModuleManifestPath)' == ''">$(IntermediateOutputPath)AggregatedModuleManifest.json</AggregatedModuleManifestPath>
-      <AggregatedModuleCodePath Condition="'$(AggregatedModuleCodePath)' == ''">$(IntermediateOutputPath)ModuleAutoInitializer.g.cs</AggregatedModuleCodePath>
+      <CrestCreatesModuleAutoInitializerFile Condition="'$(CrestCreatesModuleAutoInitializerFile)' == ''">$(IntermediateOutputPath)ModuleAutoInitializer.g.cs</CrestCreatesModuleAutoInitializerFile>
+      <AggregatedModuleCodePath Condition="'$(AggregatedModuleCodePath)' == ''">$(CrestCreatesModuleAutoInitializerFile)</AggregatedModuleCodePath>
       <EntityPermissionsManifestOutputPath Condition="'$(EntityPermissionsManifestOutputPath)' == ''">$(IntermediateOutputPath)EntityPermissionsManifest.json</EntityPermissionsManifestOutputPath>
     </PropertyGroup>
   </Target>
@@ -23,10 +28,6 @@
   <Target Name="CleanStaleModuleAutoInitializer"
           BeforeTargets="GenerateModuleManifest"
           Condition="'$(EnableModuleManifestGeneration)' == 'true'">
-    <Delete Files="$(IntermediateOutputPath)\ModuleAutoInitializer.g.cs"
-            Condition="Exists('$(IntermediateOutputPath)\ModuleAutoInitializer.g.cs')" />
-    <Delete Files="$(IntermediateOutputPath)ModuleAutoInitializer.g.cs"
-            Condition="Exists('$(IntermediateOutputPath)ModuleAutoInitializer.g.cs')" />
     <Delete Files="$(MSBuildProjectDirectory)\CrestCreates.Generated\ModuleAutoInitializer.g.cs"
             Condition="Exists('$(MSBuildProjectDirectory)\CrestCreates.Generated\ModuleAutoInitializer.g.cs')" />
   </Target>
@@ -40,13 +41,32 @@
 
     <ScanModulesFromSource
       SourceFiles="$(_ModuleSourceFiles)"
+      DefineConstants="$(DefineConstants)"
       OutputPath="$(ModuleManifestOutputPath)" />
 
     <Message Text="Generated module manifest at $(ModuleManifestOutputPath)" Importance="high" />
   </Target>
 
+  <!-- Only projects importing this contract contribute required manifest paths. Ordinary
+       references have no such target and contribute nothing. Recurse for transitive modules. -->
+  <Target Name="GetCrestCreatesModuleManifestPath"
+          DependsOnTargets="GenerateModuleManifest;ResolveProjectReferences"
+          Returns="@(_CrestModuleManifestPaths)"
+          Condition="'$(EnableModuleManifestGeneration)' == 'true'">
+    <MSBuild Projects="@(_MSBuildProjectReferenceExistent)"
+             Targets="GetCrestCreatesModuleManifestPath"
+             Properties="Configuration=$(Configuration);%(_MSBuildProjectReferenceExistent.SetConfiguration);%(_MSBuildProjectReferenceExistent.SetPlatform);%(_MSBuildProjectReferenceExistent.SetTargetFramework)"
+             RemoveProperties="%(_MSBuildProjectReferenceExistent.GlobalPropertiesToRemove);$(_GlobalPropertiesToRemoveFromProjectReferences);RuntimeIdentifier;SelfContained"
+             SkipNonexistentTargets="true" BuildInParallel="false">
+      <Output TaskParameter="TargetOutputs" ItemName="_CrestModuleManifestPaths" />
+    </MSBuild>
+    <ItemGroup>
+      <_CrestModuleManifestPaths Include="$([System.IO.Path]::GetFullPath('$(ModuleManifestOutputPath)', '$(MSBuildProjectDirectory)'))" />
+    </ItemGroup>
+  </Target>
+
   <Target Name="CollectAndGenerateAggregatedModules"
-          DependsOnTargets="GenerateModuleManifest"
+          DependsOnTargets="GenerateModuleManifest;ResolveProjectReferences"
           BeforeTargets="CoreCompile"
           Condition="'$(EnableModuleManifestGeneration)' == 'true'">
 
@@ -54,15 +74,17 @@
       <_ModuleManifestFiles Include="$(ModuleManifestOutputPath)" />
     </ItemGroup>
 
-    <Message Text="Looking for module manifests in referenced projects..." Importance="high" />
-
-    <ItemGroup>
-      <_ReferencedProjectPaths Include="@(ProjectReference->'%(FullPath)')" />
-    </ItemGroup>
+    <MSBuild Projects="@(_MSBuildProjectReferenceExistent)"
+             Targets="GetCrestCreatesModuleManifestPath"
+             Properties="Configuration=$(Configuration);%(_MSBuildProjectReferenceExistent.SetConfiguration);%(_MSBuildProjectReferenceExistent.SetPlatform);%(_MSBuildProjectReferenceExistent.SetTargetFramework)"
+             RemoveProperties="%(_MSBuildProjectReferenceExistent.GlobalPropertiesToRemove);$(_GlobalPropertiesToRemoveFromProjectReferences);RuntimeIdentifier;SelfContained"
+             SkipNonexistentTargets="true" BuildInParallel="false">
+      <Output TaskParameter="TargetOutputs" ItemName="_ReferencedModuleManifestFiles" />
+    </MSBuild>
 
     <CollectModuleManifests
       ModuleManifestFiles="@(_ModuleManifestFiles)"
-      ReferencedProjectPaths="@(_ReferencedProjectPaths)"
+      ReferencedModuleManifestFiles="@(_ReferencedModuleManifestFiles)"
       OutputPath="$(AggregatedModuleManifestPath)" />
 
     <GenerateAggregatedModuleCode
@@ -74,6 +96,7 @@
 
     <!-- Include the generated file before CoreCompile so it participates in the current compilation. -->
     <ItemGroup Condition="Exists('$(AggregatedModuleCodePath)')">
+      <Compile Remove="$(AggregatedModuleCodePath)" />
       <Compile Include="$(AggregatedModuleCodePath)"
                Link="ModuleAutoInitializer.g.cs"
                Visible="false" />
