@@ -213,6 +213,19 @@ public class QuartzSchedulerIntegrationTests
     }
 
     [Fact]
+    public async Task ScheduledHookFailure_OnDisabledJob_ClearsPreInsertionPause()
+    {
+        await using var host = new Harness(history: true, failScheduleHook: true);
+        var native = await host.Native();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => host.Scheduler.RegisterAsync<ProbeJob>(
+            new JobMetadata { Name = "failed-disabled", Group = SchedulerConstants.DefaultGroup, Enabled = false, CronExpression = Cron }));
+        Assert.Empty(await native.GetPausedTriggerGroups());
+        Assert.Empty(await host.Scheduler.GetAllAsync());
+        Assert.Empty(host.Probe.Records);
+        Assert.Equal(0, host.Probe.Created);
+    }
+
+    [Fact]
     public async Task SynchronousProviderDispose_WaitsForShutdownAndReleasesCompletedJobResources()
     {
         var prior = SchedulerRepository.Instance.LookupAll().Select(s => s.SchedulerName).ToHashSet();
@@ -240,6 +253,66 @@ public class QuartzSchedulerIntegrationTests
             Assert.Equal(1, probe.Released);
         }
         finally { await scheduler.StopAsync().WaitAsync(Limit); }
+    }
+
+    [Fact]
+    public async Task SynchronousDispose_UnderNonPumpingSynchronizationContext_Completes()
+    {
+        var prior = SchedulerRepository.Instance.LookupAll().Select(s => s.SchedulerName).ToHashSet();
+        var probe = new Probe();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        probe.Action = async _ => await release.Task.WaitAsync(Limit);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(probe);
+        services.AddScoped<AsyncDependency>();
+        services.AddScoped<ProbeJob>();
+        services.AddQuartzScheduling();
+        var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        var scheduler = provider.GetRequiredService<ISchedulerService>();
+        var disposeError = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var disposeDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Thread? disposeThread = null;
+        try
+        {
+            await scheduler.StartAsync();
+            var native = SchedulerRepository.Instance.LookupAll().Single(s => !prior.Contains(s.SchedulerName));
+            await scheduler.ExecuteNowAsync<ProbeJob>();
+            await Read(probe.Executions);
+            disposeThread = new Thread(() =>
+            {
+                SynchronizationContext.SetSynchronizationContext(new NonPumpingContext());
+                try { provider.Dispose(); disposeError.TrySetResult(null); }
+                catch (Exception ex) { disposeError.TrySetResult(ex); }
+                finally { disposeDone.TrySetResult(); }
+            }) { IsBackground = true, Name = "quartz-sync-dispose" };
+            disposeThread.Start();
+            using var deadline = new CancellationTokenSource(Limit);
+            while (true)
+            {
+                try { await scheduler.StartAsync(); }
+                catch (InvalidOperationException) { break; }
+                await Task.Delay(10, deadline.Token);
+            }
+            release.TrySetResult();
+            await disposeDone.Task.WaitAsync(Limit);
+            Assert.Null(await disposeError.Task);
+            Assert.DoesNotContain(native, SchedulerRepository.Instance.LookupAll());
+            Assert.Equal(1, probe.Released);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Task.WhenAny(disposeDone.Task, Task.Delay(Limit));
+            if (disposeThread is { IsAlive: false }) disposeThread.Join();
+            if (disposeDone.Task.IsCompleted)
+                await Record.ExceptionAsync(() => scheduler.StopAsync().WaitAsync(Limit));
+        }
+    }
+
+    private sealed class NonPumpingContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) { }
     }
 
     [Theory]

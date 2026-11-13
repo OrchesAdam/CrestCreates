@@ -54,7 +54,9 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
         TaskCompletionSource? completion = null;
         global::Quartz.IScheduler? scheduler = null;
         Task shutdown;
-        await _lifecycle.WaitAsync(ct);
+        // Context-free continuations keep a blocking Dispose safe under a single-threaded
+        // SynchronizationContext: shutdown completion must not need the blocked caller thread.
+        await _lifecycle.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             _stopped = true;
@@ -74,20 +76,20 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
             try
             {
                 if (scheduler != null)
-                    await scheduler.Shutdown(true, CancellationToken.None);
+                    await scheduler.Shutdown(true, CancellationToken.None).ConfigureAwait(false);
                 logger.LogInformation("Quartz scheduler stopped");
                 completion.SetResult();
             }
             catch (Exception ex) { completion.SetException(ex); }
         }
         // All Stop/Dispose callers share full cleanup, not Quartz's early IsShutdown flag.
-        await shutdown;
+        await shutdown.ConfigureAwait(false);
     }
 
     /// <summary>Blocks until shutdown and running job cleanup complete. Prefer DisposeAsync.</summary>
     public void Dispose() => StopAsync().GetAwaiter().GetResult();
 
-    public async ValueTask DisposeAsync() => await StopAsync();
+    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 
     public Task<SchedulingJobs.JobId> RegisterAsync<TJob>(JobMetadata metadata) where TJob : SchedulingJobs.IJob
         => RegisterAsync<TJob, SchedulingJobs.NoArgs>(metadata, new());
@@ -148,18 +150,31 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
         // Serialize check → history → insert so a concurrent duplicate cannot write a ghost record
         // and history remains ordered before an immediate fire.
         await _registration.WaitAsync();
+        var paused = false;
         try
         {
             if (metadata?.Name != null && await _scheduler!.CheckExists(key))
                 throw new InvalidOperationException($"Job '{key.Name}' in group '{key.Group}' is already registered.");
             // Pausing the group before insertion prevents an immediate disabled job from racing execution.
             if (metadata?.Enabled == false)
+            {
                 await _scheduler!.PauseTriggers(GroupMatcher<TriggerKey>.GroupEquals(uuid.ToString()));
+                paused = true;
+            }
             await using var scope = serviceProvider.CreateAsyncScope();
             var handler = scope.ServiceProvider.GetService<IJobExecutionHandler>();
             if (handler != null)
                 await handler.OnJobScheduledAsync(new(uuid, typeof(TJob), typeof(TArg), tenantId, organizationId, userId, json, time));
             await _scheduler!.ScheduleJob(job, trigger);
+        }
+        catch
+        {
+            if (paused)
+            {
+                try { await _scheduler!.ResumeTriggers(GroupMatcher<TriggerKey>.GroupEquals(uuid.ToString())); }
+                catch (Exception cleanup) { logger.LogWarning(cleanup, "Failed to release the pre-insertion pause for job {JobKey}.", key); }
+            }
+            throw;
         }
         finally { _registration.Release(); }
         return id;
