@@ -51,7 +51,7 @@ public class FileManagementService : IFileManagementService
         var extension = Path.GetExtension(fileName);
         var fileKey = FileKey.Create(effectiveTenantId, extension);
 
-        var entity = new FileEntity
+        var provisional = new FileEntity
         {
             Key = fileKey,
             TenantId = effectiveTenantId,
@@ -62,11 +62,32 @@ public class FileManagementService : IFileManagementService
             UploadedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             AccessMode = accessMode
         };
+        var storageKey = fileKey.ToStorageKey();
 
-        await _storageProvider.UploadAsync(stream, entity, ct);
-        await _repository.CreateAsync(entity, ct);
+        await using var limited = new SizeLimitingReadStream(stream, _validationOptions.MaxFileSize);
+        try
+        {
+            await _storageProvider.UploadAsync(limited, provisional, ct);
+        }
+        catch
+        {
+            await TryDeleteAsync(storageKey);
+            throw;
+        }
+
+        // Size comes from bytes actually read, including non-seekable request bodies.
+        var entity = provisional with { Size = limited.BytesRead };
+        try
+        {
+            await _repository.CreateAsync(entity, ct);
+        }
+        catch
+        {
+            await TryDeleteAsync(storageKey);
+            throw;
+        }
+
         _logger.LogInformation("Uploaded file {FileName} for tenant {TenantId}", fileName, effectiveTenantId);
-
         return entity;
     }
 
@@ -143,9 +164,86 @@ public class FileManagementService : IFileManagementService
             throw new ArgumentException($"File size exceeds the maximum allowed size of {_validationOptions.MaxFileSize} bytes", nameof(stream));
     }
 
+    private async Task TryDeleteAsync(string storageKey)
+    {
+        try
+        {
+            await _storageProvider.DeleteAsync(storageKey, CancellationToken.None);
+        }
+        catch (Exception cleanupFailure)
+        {
+            _logger.LogWarning(cleanupFailure,
+                "Failed to remove storage object {StorageKey} after an unsuccessful upload.", storageKey);
+        }
+    }
+
     private static string SanitizeFileName(string fileName)
     {
         var name = Path.GetFileName(fileName);
         return string.IsNullOrEmpty(name) ? fileName : name;
     }
+}
+internal sealed class SizeLimitingReadStream : Stream
+{
+    private readonly Stream _inner;
+    private readonly long _limit;
+
+    public long BytesRead { get; private set; }
+
+    public SizeLimitingReadStream(Stream inner, long limit)
+    {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentOutOfRangeException.ThrowIfNegative(limit);
+        _inner = inner;
+        _limit = limit;
+    }
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException("The limited upload stream has no seekable length.");
+    public override long Position
+    {
+        get => BytesRead;
+        set => throw new NotSupportedException("The limited upload stream is not seekable.");
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        var read = _inner.Read(buffer, offset, count);
+        Count(read);
+        return read;
+    }
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        => ReadAsync(new Memory<byte>(buffer, offset, count), cancellationToken).AsTask();
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        var read = await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        Count(read);
+        return read;
+    }
+
+    private void Count(int read)
+    {
+        if (read <= 0) return;
+        BytesRead += read;
+        if (BytesRead > _limit)
+            throw new ArgumentException(
+                $"File size exceeds the maximum allowed size of {_limit} bytes", nameof(_inner));
+    }
+
+    public override void Flush() { }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _inner.Dispose();
+        base.Dispose(disposing);
+    }
+
+    public override ValueTask DisposeAsync() => _inner.DisposeAsync();
 }

@@ -150,7 +150,7 @@
 | 唯一装配入口 | [FileManagementModule.cs:16](../../src/Framework/Modules/CrestCreates.FileManagement/Modules/FileManagementModule.cs#L16)（`[CrestModule]`，构造入参 `IConfiguration`） |
 | 真实调用点 | 仅 `tests/Framework/Modules/CrestCreates.FileManagement.Tests/`。基线检索未检出任何 Platform 或样例 Host 装配 `FileManagementModule`，也无其他项目引用 |
 | 功能状态 | experimental（本地文件 + 内存元数据实验模块）。**不是**已交付的持久文件平台 |
-| 执行证据 | JIT：`LocalFileSystemProviderTests.UploadAndDownload_RoundTrip_PreservesContent` 为真实本地文件 round-trip；`FileManagementServiceTests` 用内存元数据，其 tenant 参数检查不证明真实身份授权已接通。`AzureBlobStorageProvider` / `S3StorageProvider` 只记「实现存在，外部执行未验证」。整模块 trimming-verified / NativeAOT-verified **未验证** |
+| 执行证据 | JIT：`LocalFileSystemProviderTests.UploadAndDownload_RoundTrip_PreservesContent` 为真实本地文件 round-trip；`FileManagementServiceTests` 用内存元数据，其 tenant 参数检查不证明真实身份授权已接通。R3-22 定向切片：非 seek 上传流边读边限额并以实际读取字节记录 `Size`；上传失败与元数据写入失败均尝试删除已落对象且不覆盖根因；重复删除幂等（本模块 29/29）。`AzureBlobStorageProvider` / `S3StorageProvider` 只记「实现存在，外部执行未验证」；S3 手写 SigV4/预签名已知不能用于真实兼容端点（未修复，无真实端点或官方 SDK 证据）。整模块 trimming-verified / NativeAOT-verified **未验证** |
 | 处理结论 | 限界保留。技术责任 Framework/Modules/FileManagement，状态由 #131 实施 PR 维护。升级条件：真实 Host 装配 + 持久元数据 store + 租户鉴权接通 + 云 Provider 成功/失败证据；未达前禁止提升宣传状态。若选择退出，按设计 §5 归档流程处理，不转为主链 fallback |
 
 ### D-11 组织与数据权限内核：Organization + Abstractions（保留）
