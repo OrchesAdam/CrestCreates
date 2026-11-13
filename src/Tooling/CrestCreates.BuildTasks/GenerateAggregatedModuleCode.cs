@@ -31,13 +31,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
                 return false;
             }
 
-            var json = File.ReadAllText(ModuleManifestFile);
-            var modules = JsonSerializer.Deserialize<List<ModuleManifest>>(json);
-            if (modules == null || modules.Count == 0)
-            {
-                Log.LogWarning("No modules found in manifest file");
-                return true;
-            }
+            var modules = CollectModuleManifests.ReadManifest<ModuleManifest>(ModuleManifestFile);
 
             var sortedModules = TopologicalSort(modules);
             var code = GenerateCode(sortedModules);
@@ -62,45 +56,39 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
 
     private List<ModuleManifest> TopologicalSort(List<ModuleManifest> modules)
     {
+        var identities = new Dictionary<string, ModuleManifest>(StringComparer.Ordinal);
+        foreach (var module in modules)
+            if (!identities.TryAdd(module.FullName, module)) throw new InvalidDataException($"Duplicate module identity: {module.FullName}");
+        var dependencies = new Dictionary<string, List<ModuleManifest>>(StringComparer.Ordinal);
+        foreach (var module in modules)
+        {
+            var resolved = new List<ModuleManifest>();
+            foreach (var name in module.DependsOn)
+            {
+                if (identities.TryGetValue(name, out var exact)) resolved.Add(exact);
+                else
+                {
+                    var matches = modules.Where(m => m.Name == name).ToList();
+                    if (matches.Count != 1)
+                        throw new InvalidDataException($"Unknown or ambiguous dependency '{name}' for {module.FullName}");
+                    resolved.Add(matches[0]);
+                }
+            }
+            dependencies.Add(module.FullName, resolved);
+        }
         var sorted = new List<ModuleManifest>();
-        var visited = new HashSet<string>();
-        var visiting = new HashSet<string>();
-
-        foreach (var module in modules.OrderBy(m => m.Order))
+        var remaining = modules.ToDictionary(m => m.FullName, StringComparer.Ordinal);
+        var completed = new HashSet<string>(StringComparer.Ordinal);
+        while (remaining.Count != 0)
         {
-            if (!visited.Contains(module.FullName))
-            {
-                Visit(module, modules, visited, visiting, sorted);
-            }
+            var next = remaining.Values.Where(m => dependencies[m.FullName].All(d => completed.Contains(d.FullName)))
+                .OrderBy(m => m.Order).ThenBy(m => m.FullName, StringComparer.Ordinal).FirstOrDefault();
+            if (next == null) throw new InvalidDataException($"Circular module dependency: {string.Join(", ", remaining.Keys.Order(StringComparer.Ordinal))}");
+            sorted.Add(next);
+            completed.Add(next.FullName);
+            remaining.Remove(next.FullName);
         }
-
         return sorted;
-    }
-
-    private void Visit(ModuleManifest module, List<ModuleManifest> allModules,
-        HashSet<string> visited, HashSet<string> visiting, List<ModuleManifest> sorted)
-    {
-        if (visited.Contains(module.FullName)) return;
-        if (visiting.Contains(module.FullName))
-        {
-            Log.LogWarning($"Circular dependency detected involving {module.FullName}");
-            return;
-        }
-
-        visiting.Add(module.FullName);
-
-        foreach (var depName in module.DependsOn)
-        {
-            var dep = allModules.FirstOrDefault(m => m.Name == depName || m.FullName == depName);
-            if (dep != null && !visited.Contains(dep.FullName))
-            {
-                Visit(dep, allModules, visited, visiting, sorted);
-            }
-        }
-
-        visiting.Remove(module.FullName);
-        visited.Add(module.FullName);
-        sorted.Add(module);
     }
 
     private string GenerateCode(List<ModuleManifest> modules)
@@ -203,6 +191,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine();
         sb.AppendLine("    public static async Task InitializeAllModulesAsync(IServiceProvider serviceProvider)");
         sb.AppendLine("    {");
+        if (modules.Count == 0) sb.AppendLine("        await Task.CompletedTask;");
 
         // PreInit phase — resolve from DI and call with diagnostics
         for (var i = 0; i < modules.Count; i++)
@@ -225,7 +214,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         }
 
         sb.AppendLine();
-        sb.AppendLine("        var sortedModules = _registeredModules.OrderBy(m => m.Order).ToList();");
+        sb.AppendLine("        var sortedModules = _registeredModules.ToList();");
 
         // Init phase
         for (var i = 0; i < modules.Count; i++)
@@ -277,7 +266,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         sb.AppendLine();
 
         // AppInit phase
-        sb.AppendLine("        foreach (var module in _registeredModules.OrderBy(m => m.Order))");
+        sb.AppendLine("        foreach (var module in _registeredModules)");
         sb.AppendLine("        {");
         sb.AppendLine("            // ModuleDiagnostics: module.ModuleType.Name → AppInit");
         sb.AppendLine("            var _appInitTimer = ModulePhaseTimer.StartNew(module.ModuleType.Name, \"AppInit\");");
@@ -325,13 +314,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         return sb.ToString();
     }
 
-    public class ModuleManifest
+    public class ModuleManifest : CollectModuleManifests.ModuleManifest
     {
-        public string FullName { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string Namespace { get; set; } = string.Empty;
-        public List<string> DependsOn { get; set; } = new();
-        public int Order { get; set; }
-        public bool AutoRegisterServices { get; set; }
     }
 }

@@ -1,17 +1,17 @@
 using Microsoft.Build.Framework;
-using Microsoft.Build.Utilities;
-using System;
-using System.Collections.Generic;
-using System.IO;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace CrestCreates.BuildTasks;
 
 public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
 {
-    [Required]
     public string SourceFiles { get; set; } = string.Empty;
+
+    public string DefineConstants { get; set; } = string.Empty;
 
     [Required]
     public string OutputPath { get; set; } = string.Empty;
@@ -20,82 +20,69 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
     {
         try
         {
-            var files = SourceFiles.Split(';', StringSplitOptions.RemoveEmptyEntries);
-            var modules = new List<object>();
-
-            var classRegex = new Regex(@"class\s+(\w+)\s*:\s*(?:IModule|ModuleBase)", RegexOptions.Compiled);
-            var orderRegex = new Regex(@"Order\s*=\s*(-?\d+)", RegexOptions.Compiled);
-            var autoRegRegex = new Regex(@"AutoRegisterServices\s*=\s*(true|false)", RegexOptions.Compiled);
-            var depRegex = new Regex(@"typeof\s*\(\s*(\w+)\s*\)", RegexOptions.Compiled);
-
-            foreach (var file in files)
+            var symbols = DefineConstants.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(symbol => symbol.Trim())
+                .Where(symbol => symbol.Length != 0)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            var parseOptions = new CSharpParseOptions(LanguageVersion.Preview).WithPreprocessorSymbols(symbols);
+            var modules = new SortedDictionary<string, CollectModuleManifests.ModuleManifest>(StringComparer.Ordinal);
+            foreach (var file in SourceFiles.Split(';', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal))
             {
-                if (!File.Exists(file)) continue;
-                if (!file.EndsWith(".cs")) continue;
+                var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(file), parseOptions, file);
+                var errors = tree.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+                if (errors.Count != 0)
+                    throw new InvalidDataException(string.Join(Environment.NewLine, errors));
 
-                var content = File.ReadAllText(file);
-
-                var moduleAttr = ExtractModuleAttribute(content);
-                if (moduleAttr == null) continue;
-
-                var classMatch = classRegex.Match(content);
-                if (!classMatch.Success) continue;
-
-                var moduleName = classMatch.Groups[1].Value;
-                var dependsOn = new List<string>();
-
-                var depMatches = depRegex.Matches(moduleAttr);
-                for (int i = 0; i < depMatches.Count; i++)
+                foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
                 {
-                    dependsOn.Add(depMatches[i].Groups[1].Value);
+                    var attributes = declaration.AttributeLists.SelectMany(a => a.Attributes)
+                        .Where(a => IsModuleAttribute(ResolveAlias(a.Name, declaration))).ToList();
+                    if (attributes.Count == 0) continue;
+                    if (attributes.Count != 1) throw new InvalidDataException($"Duplicate CrestModule attribute: {declaration.Identifier}");
+                    if (declaration.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.TypeParameterList != null))
+                        throw new InvalidDataException($"Module must be a closed type: {declaration.Identifier}");
+
+                    var ns = string.Join(".", declaration.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse().Select(n => n.Name.ToString()));
+                    var typeName = string.Join(".", declaration.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Reverse().Select(t => t.Identifier.ValueText));
+                    var module = new CollectModuleManifests.ModuleManifest
+                    {
+                        Name = declaration.Identifier.ValueText, Namespace = ns,
+                        FullName = string.IsNullOrEmpty(ns) ? typeName : ns + "." + typeName,
+                        AutoRegisterServices = true
+                    };
+                    var seen = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var argument in attributes[0].ArgumentList?.Arguments ?? default)
+                    {
+                        var name = argument.NameEquals?.Name.Identifier.ValueText ?? argument.NameColon?.Name.Identifier.ValueText;
+                        if (name != null && !seen.Add(name)) throw new InvalidDataException($"Duplicate module argument: {name}");
+                        switch (name)
+                        {
+                            case "Order":
+                                if (!int.TryParse(argument.Expression.WithoutTrivia().ToString(), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var order))
+                                    throw new InvalidDataException($"Invalid module Order: {argument}");
+                                module.Order = order;
+                                break;
+                            case "AutoRegisterServices":
+                                if (argument.Expression is not LiteralExpressionSyntax literal || literal.Token.Value is not bool value)
+                                    throw new InvalidDataException($"Invalid module AutoRegisterServices: {argument}");
+                                module.AutoRegisterServices = value;
+                                break;
+                            case null:
+                            case "dependsOn":
+                            case "DependsOn":
+                                ReadDependencies(argument.Expression, declaration, module.DependsOn);
+                                break;
+                            default:
+                                throw new InvalidDataException($"Unknown module argument: {name}");
+                        }
+                    }
+                    module.DependsOn = module.DependsOn.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+                    if (!modules.TryAdd(module.FullName, module)) throw new InvalidDataException($"Duplicate module identity: {module.FullName}");
                 }
-
-                var order = 0;
-                var orderMatch = orderRegex.Match(moduleAttr);
-                if (orderMatch.Success)
-                {
-                    order = int.Parse(orderMatch.Groups[1].Value);
-                }
-
-                var autoReg = true;
-                var autoRegMatch = autoRegRegex.Match(moduleAttr);
-                if (autoRegMatch.Success)
-                {
-                    autoReg = bool.Parse(autoRegMatch.Groups[1].Value);
-                }
-
-                var nsMatch = Regex.Match(content, @"namespace\s+([\w\.]+)");
-                var ns = nsMatch.Success ? nsMatch.Groups[1].Value : "Unknown";
-
-                modules.Add(new
-                {
-                    FullName = $"{ns}.{moduleName}",
-                    Name = moduleName,
-                    Namespace = ns,
-                    DependsOn = dependsOn,
-                    Order = order,
-                    AutoRegisterServices = autoReg
-                });
             }
-
-            if (modules.Count == 0)
-            {
-                Log.LogMessage(MessageImportance.High, $"No modules found in {SourceFiles}");
-                return true;
-            }
-
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            var json = JsonSerializer.Serialize(modules, options);
-
-            var dir = Path.GetDirectoryName(OutputPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-
-            File.WriteAllText(OutputPath, json);
-            Log.LogMessage(MessageImportance.High, $"Generated module manifest at {OutputPath} with {modules.Count} modules");
-
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(OutputPath))!);
+            File.WriteAllText(OutputPath, JsonSerializer.Serialize(modules.Values, new JsonSerializerOptions { WriteIndented = true }));
             return true;
         }
         catch (Exception ex)
@@ -105,37 +92,36 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
         }
     }
 
-    private string? ExtractModuleAttribute(string content)
+    private static bool IsModuleAttribute(string name) => name.Split('.').Last() is "CrestModule" or "CrestModuleAttribute";
+
+    private static string ResolveAlias(NameSyntax name, ClassDeclarationSyntax declaration)
+    {
+        var text = name.WithoutTrivia().ToString().Replace("global::", "", StringComparison.Ordinal);
+        var first = text.Split('.', ':')[0];
+        var usings = declaration.Ancestors().SelectMany(n => n switch
         {
-            var startIndex = content.IndexOf("[CrestModule");
-            if (startIndex < 0) return null;
+            BaseNamespaceDeclarationSyntax ns => ns.Usings.AsEnumerable(),
+            CompilationUnitSyntax root => root.Usings.AsEnumerable(),
+            _ => Enumerable.Empty<UsingDirectiveSyntax>()
+        });
+        var alias = usings.FirstOrDefault(u => u.Alias?.Name.Identifier.ValueText == first);
+        return alias?.Name is { } target ? target.ToString().Replace("global::", "", StringComparison.Ordinal) + text[first.Length..].Replace("::", ".", StringComparison.Ordinal) : text;
+    }
 
-            var depth = 0;
-            var inBrackets = false;
-            var endIndex = startIndex;
-
-            for (int i = startIndex; i < content.Length; i++)
-            {
-                var c = content[i];
-                
-                if (c == '[')
-                {
-                    depth++;
-                    inBrackets = true;
-                }
-                else if (c == ']')
-                {
-                    depth--;
-                    if (depth == 0 && inBrackets)
-                    {
-                        endIndex = i + 1;
-                        break;
-                    }
-                }
-            }
-
-            if (endIndex <= startIndex) return null;
-
-            return content.Substring(startIndex, endIndex - startIndex);
+    private static void ReadDependencies(ExpressionSyntax expression, ClassDeclarationSyntax declaration, List<string> dependencies)
+    {
+        if (expression is TypeOfExpressionSyntax typeOf && typeOf.Type is NameSyntax name)
+        {
+            dependencies.Add(ResolveAlias(name, declaration));
+            return;
         }
+        var initializer = expression switch
+        {
+            ArrayCreationExpressionSyntax array => array.Initializer,
+            ImplicitArrayCreationExpressionSyntax array => array.Initializer,
+            _ => null
+        };
+        if (initializer == null) throw new InvalidDataException($"Module dependencies must be typeof expressions or arrays: {expression}");
+        foreach (var item in initializer.Expressions) ReadDependencies(item, declaration, dependencies);
+    }
 }
