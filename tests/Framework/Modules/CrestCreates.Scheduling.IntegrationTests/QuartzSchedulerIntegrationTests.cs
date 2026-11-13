@@ -162,6 +162,86 @@ public class QuartzSchedulerIntegrationTests
         Assert.False(await host.Scheduler.ExistsAsync(id));
     }
 
+    [Fact]
+    public async Task DuplicateDisabledNamedJob_LeavesHistoryAndExistingScheduleUntouched()
+    {
+        await using var host = new Harness(history: true);
+        var native = await host.Native();
+        var metadata = new JobMetadata { Name = "duplicate-disabled", Group = "custom", Enabled = false };
+        var id = await host.Scheduler.RegisterAsync<ProbeJob>(metadata);
+        var key = new JobKey(id.Name!, id.Group!);
+        var trigger = Assert.Single(await native.GetTriggersOfJob(key));
+        var pausedGroups = (await native.GetPausedTriggerGroups()).Order().ToArray();
+
+        var error = await Record.ExceptionAsync(() => host.Scheduler.RegisterAsync<ProbeJob>(metadata));
+
+        Assert.Single(host.Probe.Records, r => r.Result == JobExecutionResult.Scheduled);
+        var refusal = Assert.IsType<InvalidOperationException>(error);
+        Assert.Contains(metadata.Name, refusal.Message);
+        Assert.Contains(metadata.Group, refusal.Message);
+        Assert.Equal(pausedGroups, (await native.GetPausedTriggerGroups()).Order().ToArray());
+        Assert.Equal(id, Assert.Single(await host.Scheduler.GetAllAsync(JobStatus.Paused)).Id);
+        var retained = Assert.Single(await native.GetTriggersOfJob(key));
+        Assert.Equal(trigger.Key, retained.Key);
+        Assert.Equal(trigger.StartTimeUtc, retained.StartTimeUtc);
+        Assert.Equal(trigger.GetNextFireTimeUtc(), retained.GetNextFireTimeUtc());
+        Assert.Equal(0, host.Probe.Created);
+
+        await host.Scheduler.ResumeAsync(id);
+        Assert.Equal(id, (await Read(host.Probe.Executions)).JobId);
+        await Read(host.Probe.Completed);
+        await Read(host.Probe.Releases);
+        Assert.Equal(1, host.Probe.Created);
+        Assert.Equal(1, host.Probe.Released);
+        Assert.Single(host.Probe.Records, r => r.Result == JobExecutionResult.Succeeded);
+        Assert.Empty(await native.GetTriggersOfJob(key));
+    }
+
+    [Fact]
+    public async Task ScheduledHookFailure_LeavesNoJobOrHistory()
+    {
+        await using var host = new Harness(history: true, failScheduleHook: true);
+        var native = await host.Native();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => host.Scheduler.RegisterAsync<ProbeJob>(
+            new JobMetadata { Name = "failed-notification", Group = SchedulerConstants.DefaultGroup, CronExpression = Cron }));
+        Assert.Equal("schedule notification failed", error.Message);
+        Assert.False(host.Probe.JobExistedDuringNotification);
+        Assert.Empty(await host.Scheduler.GetAllAsync());
+        Assert.Empty(await native.GetTriggerKeys(global::Quartz.Impl.Matchers.GroupMatcher<TriggerKey>.AnyGroup()));
+        Assert.Empty(host.Probe.Records);
+        Assert.Equal(0, host.Probe.Created);
+    }
+
+    [Fact]
+    public async Task SynchronousProviderDispose_WaitsForShutdownAndReleasesCompletedJobResources()
+    {
+        var prior = SchedulerRepository.Instance.LookupAll().Select(s => s.SchedulerName).ToHashSet();
+        var probe = new Probe();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(probe);
+        services.AddScoped<AsyncDependency>();
+        services.AddScoped<ProbeJob>();
+        services.AddQuartzScheduling();
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        var scheduler = provider.GetRequiredService<ISchedulerService>();
+        try
+        {
+            await scheduler.StartAsync();
+            var native = SchedulerRepository.Instance.LookupAll().Single(s => !prior.Contains(s.SchedulerName));
+            await scheduler.ExecuteNowAsync<ProbeJob>();
+            await Read(probe.Executions);
+            await Read(probe.Releases);
+            await Task.Run(provider.Dispose).WaitAsync(Limit);
+            Assert.DoesNotContain(native, SchedulerRepository.Instance.LookupAll());
+            await Task.Run(() => ((IDisposable)scheduler).Dispose()).WaitAsync(Limit);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => scheduler.StartAsync());
+            Assert.Equal(1, probe.Created);
+            Assert.Equal(1, probe.Released);
+        }
+        finally { await scheduler.StopAsync().WaitAsync(Limit); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -476,6 +556,7 @@ public class QuartzSchedulerIntegrationTests
         public TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Func<JobExecutionContext<NoArgs>, Task>? Action;
         public bool FailPayload;
+        public bool JobExistedDuringNotification;
         public int SuccessNotifications;
         public int FailureNotifications;
         public Channel<JobExecutionContext<Payload>> Payloads { get; } = Channel.CreateUnbounded<JobExecutionContext<Payload>>();
@@ -558,7 +639,7 @@ public class QuartzSchedulerIntegrationTests
             _native.ListenerManager.AddJobListener(new CompletionListener(Probe));
             return _native;
         }
-        public Harness(bool history = false, bool codec = true, int retry = 0, bool failSuccessHook = false, bool tenants = false, bool unknownTenant = false, bool? tenantProvider = null, bool observeAdapterScope = false)
+        public Harness(bool history = false, bool codec = true, int retry = 0, bool failSuccessHook = false, bool tenants = false, bool unknownTenant = false, bool? tenantProvider = null, bool observeAdapterScope = false, bool failScheduleHook = false)
         {
             var services = new ServiceCollection();
             services.AddLogging();
@@ -580,7 +661,19 @@ public class QuartzSchedulerIntegrationTests
                 repository.Setup(r => r.CreateAsync(It.IsAny<IJobRecord>(), It.IsAny<CancellationToken>()))
                     .Callback<IJobRecord, CancellationToken>((record, _) => Probe.Records.Enqueue(record)).Returns<IJobRecord, CancellationToken>((record, _) => Task.FromResult<IJobRecord>(record));
                 services.AddSingleton(repository.Object);
-                if (!failSuccessHook) services.AddScoped<IJobExecutionHandler, DefaultJobExecutionHandler>();
+                if (failScheduleHook)
+                {
+                    var handler = new Mock<IJobExecutionHandler>();
+                    handler.Setup(h => h.OnJobScheduledAsync(It.IsAny<JobScheduledContext>(), It.IsAny<CancellationToken>()))
+                        .Returns<JobScheduledContext, CancellationToken>(async (_, _) =>
+                        {
+                            var native = await Native();
+                            Probe.JobExistedDuringNotification = await native.CheckExists(new JobKey("failed-notification"));
+                            throw new InvalidOperationException("schedule notification failed");
+                        });
+                    services.AddSingleton(handler.Object);
+                }
+                else if (!failSuccessHook) services.AddScoped<IJobExecutionHandler, DefaultJobExecutionHandler>();
                 else
                 {
                     var handler = new Mock<IJobExecutionHandler>();

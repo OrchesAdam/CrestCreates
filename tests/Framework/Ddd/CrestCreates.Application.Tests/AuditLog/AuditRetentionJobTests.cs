@@ -1,4 +1,6 @@
 using System;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Accountability.Abstractions.Retention;
@@ -7,6 +9,7 @@ using CrestCreates.Application.Contracts.AuditRetention;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Scheduling.Jobs;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
@@ -15,6 +18,33 @@ namespace CrestCreates.Application.Tests.AuditLog;
 public sealed class AuditRetentionJobTests
 {
     private static readonly DateTimeOffset ScheduledAt = new(2026, 10, 27, 12, 30, 0, TimeSpan.Zero);
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("tenant-1")]
+    public void Application_registration_provides_singleton_static_args_contract_without_scheduler(string? tenantId)
+    {
+        var services = new ServiceCollection();
+        services.AddAuditRetentionApplication();
+        services.AddAuditRetentionApplication();
+        using var provider = services.BuildServiceProvider();
+        Assert.Null(provider.GetService<CrestCreates.Scheduling.Services.ISchedulerService>());
+        var contract = Assert.Single(provider.GetServices<JsonTypeInfo<AuditRetentionJobArgs>>());
+        using var scope = provider.CreateScope();
+        Assert.Same(contract, scope.ServiceProvider.GetRequiredService<JsonTypeInfo<AuditRetentionJobArgs>>());
+        Assert.IsAssignableFrom<System.Text.Json.Serialization.JsonSerializerContext>(contract.OriginatingResolver);
+        var args = new AuditRetentionJobArgs { StoreId = "store-1", TenantId = tenantId, ReasonCode = "retention.custom" };
+
+        var json = JsonSerializer.Serialize(args, contract);
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal("store-1", document.RootElement.GetProperty("StoreId").GetString());
+        Assert.Equal(tenantId, document.RootElement.GetProperty("TenantId").GetString());
+        Assert.Equal("retention.custom", document.RootElement.GetProperty("ReasonCode").GetString());
+        var decoded = JsonSerializer.Deserialize(json, contract)!;
+        Assert.Equal(args.StoreId, decoded.StoreId);
+        Assert.Equal(args.TenantId, decoded.TenantId);
+        Assert.Equal(args.ReasonCode, decoded.ReasonCode);
+    }
 
     [Fact]
     public async Task Job_maps_args_to_the_same_admission_with_a_stable_request_id()

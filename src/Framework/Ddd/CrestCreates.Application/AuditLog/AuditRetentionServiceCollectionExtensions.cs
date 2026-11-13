@@ -14,6 +14,7 @@ public static class AuditRetentionServiceCollectionExtensions
         services.TryAddScoped<IAuditRetentionAppService, AuditRetentionAppService>();
         services.TryAddEnumerable(ServiceDescriptor.Transient<IPermissionDefinitionProvider, AuditRetentionPermissionDefinitionProvider>());
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton(AuditRetentionJobJsonContext.Default.AuditRetentionJobArgs);
         return services;
     }
 }

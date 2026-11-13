@@ -11,9 +11,10 @@ using SchedulingServices = CrestCreates.Scheduling.Services;
 namespace CrestCreates.Scheduling.Quartz.Services;
 
 public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<QuartzSchedulerService> logger)
-    : ISchedulerService, IAsyncDisposable
+    : ISchedulerService, IAsyncDisposable, IDisposable
 {
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private readonly SemaphoreSlim _registration = new(1, 1);
     private global::Quartz.IScheduler? _scheduler;
     private bool _stopped;
     private Task? _shutdownTask;
@@ -83,6 +84,9 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
         await shutdown;
     }
 
+    /// <summary>Blocks until shutdown and running job cleanup complete. Prefer DisposeAsync.</summary>
+    public void Dispose() => StopAsync().GetAwaiter().GetResult();
+
     public async ValueTask DisposeAsync() => await StopAsync();
 
     public Task<SchedulingJobs.JobId> RegisterAsync<TJob>(JobMetadata metadata) where TJob : SchedulingJobs.IJob
@@ -141,15 +145,23 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
             builder.WithCronSchedule(metadata.CronExpression, cron => cron.WithMisfireHandlingInstructionFireAndProceed());
         var trigger = builder.Build();
         await StartAsync();
-        // Pausing the group before insertion prevents an immediate disabled job from racing execution.
-        if (metadata?.Enabled == false)
-            await _scheduler!.PauseTriggers(GroupMatcher<TriggerKey>.GroupEquals(uuid.ToString()));
-        await using var scope = serviceProvider.CreateAsyncScope();
-        var handler = scope.ServiceProvider.GetService<IJobExecutionHandler>();
-        if (handler != null)
-            await handler.OnJobScheduledAsync(new(uuid, typeof(TJob), typeof(TArg), tenantId, organizationId, userId, json, time));
-        // Duplicate names fail explicitly; replacing an active job would orphan its retry/control identity.
-        await _scheduler!.ScheduleJob(job, trigger);
+        // Serialize check → history → insert so a concurrent duplicate cannot write a ghost record
+        // and history remains ordered before an immediate fire.
+        await _registration.WaitAsync();
+        try
+        {
+            if (metadata?.Name != null && await _scheduler!.CheckExists(key))
+                throw new InvalidOperationException($"Job '{key.Name}' in group '{key.Group}' is already registered.");
+            // Pausing the group before insertion prevents an immediate disabled job from racing execution.
+            if (metadata?.Enabled == false)
+                await _scheduler!.PauseTriggers(GroupMatcher<TriggerKey>.GroupEquals(uuid.ToString()));
+            await using var scope = serviceProvider.CreateAsyncScope();
+            var handler = scope.ServiceProvider.GetService<IJobExecutionHandler>();
+            if (handler != null)
+                await handler.OnJobScheduledAsync(new(uuid, typeof(TJob), typeof(TArg), tenantId, organizationId, userId, json, time));
+            await _scheduler!.ScheduleJob(job, trigger);
+        }
+        finally { _registration.Release(); }
         return id;
     }
 
