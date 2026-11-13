@@ -162,6 +162,106 @@ public class QuartzSchedulerIntegrationTests
         Assert.False(await host.Scheduler.ExistsAsync(id));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisabledJob_ResumeClearsGroupPause_ForActualRetries(bool namedCron)
+    {
+        await using var host = new Harness(retry: 2);
+        host.Probe.Action = _ => throw new InvalidOperationException("retry after resume");
+        var native = await host.Native();
+        var id = await host.Scheduler.RegisterAsync<ProbeJob>(new JobMetadata
+        {
+            Name = namedCron ? "disabled-retry" : null!, // Exercise the UUID-name fallback.
+            Group = namedCron ? "custom" : SchedulerConstants.DefaultGroup,
+            CronExpression = namedCron ? Cron : null,
+            Enabled = false
+        });
+        var key = new JobKey(id.Name!, id.Group!);
+        Assert.Equal(0, host.Probe.Created);
+        Assert.Equal(JobStatus.Paused, Assert.Single(await host.Scheduler.GetAllAsync()).Status);
+        // Both public control identities must recover the stored UUID group.
+        await host.Scheduler.ResumeAsync(namedCron ? JobId.Create(id.Name!, id.Group!) : new JobId(id.Uuid));
+        if (namedCron)
+            await native.ScheduleJob(TriggerBuilder.Create().WithIdentity("occurrence", id.Uuid.ToString()).ForJob(key).StartNow().Build());
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            var completed = await Read(host.Probe.Completed);
+            Assert.Equal(attempt, completed.Trigger.JobDataMap.ContainsKey("AttemptNumber") ? completed.Trigger.JobDataMap.GetInt("AttemptNumber") : 1);
+            Assert.Equal(id, (await Read(host.Probe.Executions)).JobId);
+            await Read(host.Probe.Releases);
+        }
+        Assert.DoesNotContain(id.Uuid.ToString(), await native.GetPausedTriggerGroups());
+        Assert.Equal(3, host.Probe.Created);
+        Assert.Equal(3, host.Probe.Released);
+        if (namedCron)
+        {
+            var primary = Assert.IsAssignableFrom<ICronTrigger>(Assert.Single(await native.GetTriggersOfJob(key)));
+            Assert.Equal(Cron, primary.CronExpressionString);
+            Assert.NotNull(primary.GetNextFireTimeUtc());
+            await host.Scheduler.PauseAsync(JobId.Create(id.Name!, id.Group!));
+            Assert.Equal(TriggerState.Paused, await native.GetTriggerState(primary.Key));
+            await host.Scheduler.ResumeAsync(JobId.Create(id.Name!, id.Group!));
+            Assert.Equal(TriggerState.Normal, await native.GetTriggerState(primary.Key));
+        }
+    }
+
+    [Fact]
+    public async Task Stop_AllowsRunningJobToObserveTerminalState_AndAllCallersAwaitRelease()
+    {
+        await using var host = new Harness();
+        var native = await host.Native();
+        var shuttingDown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queryResult = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseJob = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<IEnumerable<JobInfo>>? query = null;
+        native.ListenerManager.AddSchedulerListener(new ShutdownListener(shuttingDown));
+        host.Probe.Action = async _ =>
+        {
+            await shuttingDown.Task.WaitAsync(Limit);
+            query = host.Scheduler.GetAllAsync();
+            // Bound the job itself so the old lock cycle can fail and still drain during cleanup.
+            queryResult.TrySetResult(await Record.ExceptionAsync(async () => await query.WaitAsync(TimeSpan.FromSeconds(2))));
+            await releaseJob.Task.WaitAsync(Limit);
+        };
+        await host.Scheduler.ExecuteNowAsync<ProbeJob>();
+        await Read(host.Probe.Executions);
+        var stop = host.Scheduler.StopAsync();
+        Task? secondStop = null;
+        Task? dispose = null;
+        try
+        {
+            await shuttingDown.Task.WaitAsync(Limit);
+            secondStop = host.Scheduler.StopAsync();
+            dispose = ((IAsyncDisposable)host.Scheduler).DisposeAsync().AsTask();
+            var refusal = await queryResult.Task.WaitAsync(Limit);
+            Assert.Equal("The scheduler has been stopped.", Assert.IsType<InvalidOperationException>(refusal).Message);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => host.Scheduler.StartAsync().WaitAsync(Limit));
+            Assert.False(stop.IsCompleted);
+            Assert.False(secondStop.IsCompleted);
+            Assert.False(dispose.IsCompleted);
+            Assert.Equal(0, host.Probe.Released);
+        }
+        finally
+        {
+            releaseJob.TrySetResult();
+            await Task.WhenAll(stop, secondStop ?? Task.CompletedTask, dispose ?? Task.CompletedTask).WaitAsync(Limit);
+            if (query != null) await Record.ExceptionAsync(async () => await query.WaitAsync(Limit));
+        }
+        Assert.Equal(1, host.Probe.Created);
+        Assert.Equal(1, host.Probe.Released);
+        Assert.DoesNotContain(native, SchedulerRepository.Instance.LookupAll());
+    }
+
+    private sealed class ShutdownListener(TaskCompletionSource shuttingDown) : SchedulerListenerSupport
+    {
+        public override Task SchedulerShuttingdown(CancellationToken cancellationToken = default)
+        {
+            shuttingDown.TrySetResult();
+            return Task.CompletedTask;
+        }
+    }
+
     [Fact]
     public async Task ConcurrentStart_CreatesOneScheduler_AndStopIsTerminal()
     {
@@ -171,6 +271,25 @@ public class QuartzSchedulerIntegrationTests
         Assert.Single(SchedulerRepository.Instance.LookupAll(), s => !host.PriorSchedulers.Contains(s.SchedulerName));
         await host.Scheduler.StopAsync();
         Assert.DoesNotContain(native, SchedulerRepository.Instance.LookupAll());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => host.Scheduler.StartAsync());
+    }
+
+    [Fact]
+    public async Task ConcurrentStartAndStop_DoesNotLosePublishedScheduler()
+    {
+        await using var host = new Harness();
+        var begin = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var starts = Enumerable.Range(0, 12).Select(_ => Task.Run(async () =>
+        {
+            await begin.Task;
+            var error = await Record.ExceptionAsync(() => host.Scheduler.StartAsync());
+            if (error != null)
+                Assert.Equal("The scheduler has been stopped.", Assert.IsType<InvalidOperationException>(error).Message);
+        })).ToArray();
+        var stop = Task.Run(async () => { await begin.Task; await host.Scheduler.StopAsync(); });
+        begin.SetResult();
+        await Task.WhenAll(starts.Append(stop)).WaitAsync(Limit);
+        Assert.DoesNotContain(SchedulerRepository.Instance.LookupAll(), s => !host.PriorSchedulers.Contains(s.SchedulerName));
         await Assert.ThrowsAsync<InvalidOperationException>(() => host.Scheduler.StartAsync());
     }
 

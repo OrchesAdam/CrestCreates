@@ -16,6 +16,7 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private global::Quartz.IScheduler? _scheduler;
     private bool _stopped;
+    private Task? _shutdownTask;
 
     public async Task StartAsync(CancellationToken ct = default)
     {
@@ -49,16 +50,37 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
 
     public async Task StopAsync(CancellationToken ct = default)
     {
+        TaskCompletionSource? completion = null;
+        global::Quartz.IScheduler? scheduler = null;
+        Task shutdown;
         await _lifecycle.WaitAsync(ct);
         try
         {
             _stopped = true;
-            if (_scheduler == null || _scheduler.IsShutdown) return;
-            // Once shutdown begins it owns completion, even if the caller cancels.
-            await _scheduler.Shutdown(true, CancellationToken.None);
-            logger.LogInformation("Quartz scheduler stopped");
+            if (_shutdownTask == null)
+            {
+                completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _shutdownTask = completion.Task;
+                scheduler = _scheduler;
+            }
+            shutdown = _shutdownTask;
         }
         finally { _lifecycle.Release(); }
+
+        // Shutdown can synchronously call listeners that reenter this service.
+        if (completion != null)
+        {
+            try
+            {
+                if (scheduler != null)
+                    await scheduler.Shutdown(true, CancellationToken.None);
+                logger.LogInformation("Quartz scheduler stopped");
+                completion.SetResult();
+            }
+            catch (Exception ex) { completion.SetException(ex); }
+        }
+        // All Stop/Dispose callers share full cleanup, not Quartz's early IsShutdown flag.
+        await shutdown;
     }
 
     public async ValueTask DisposeAsync() => await StopAsync();
@@ -134,7 +156,17 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
     public async Task DeleteAsync(SchedulingJobs.JobId jobId) { await StartAsync(); await _scheduler!.DeleteJob(ToQuartzKey(jobId)); }
     public async Task CancelAsync(SchedulingJobs.JobId jobId) { await StartAsync(); await _scheduler!.Interrupt(ToQuartzKey(jobId)); }
     public async Task PauseAsync(SchedulingJobs.JobId jobId) { await StartAsync(); await _scheduler!.PauseJob(ToQuartzKey(jobId)); }
-    public async Task ResumeAsync(SchedulingJobs.JobId jobId) { await StartAsync(); await _scheduler!.ResumeJob(ToQuartzKey(jobId)); }
+    public async Task ResumeAsync(SchedulingJobs.JobId jobId)
+    {
+        await StartAsync();
+        var key = ToQuartzKey(jobId);
+        var detail = await _scheduler!.GetJobDetail(key);
+        if (detail == null) return;
+        // Named control tokens may lack the UUID that owns the trigger-group pause.
+        var group = detail.JobDataMap.GetString("JobUuid")!;
+        await _scheduler.ResumeTriggers(GroupMatcher<TriggerKey>.GroupEquals(group));
+        await _scheduler.ResumeJob(key);
+    }
     public async Task<bool> ExistsAsync(SchedulingJobs.JobId jobId) { await StartAsync(); return await _scheduler!.CheckExists(ToQuartzKey(jobId)); }
 
     public async Task<IEnumerable<JobInfo>> GetAllAsync(JobStatus status = JobStatus.All)
