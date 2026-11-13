@@ -16,6 +16,15 @@ public static class DescriptorActivationDiagnosticCodes
     private const string IncompleteBindingValue = "ACTIVATION_INCOMPLETE_BINDING";
     public static DiagnosticCode IncompleteBinding { get; } = new(IncompleteBindingValue);
 
+    private const string BindingTenantMismatchValue = "ACTIVATION_BINDING_TENANT_MISMATCH";
+    public static DiagnosticCode BindingTenantMismatch { get; } = new(BindingTenantMismatchValue);
+
+    private const string BindingDraftMismatchValue = "ACTIVATION_BINDING_DRAFT_MISMATCH";
+    public static DiagnosticCode BindingDraftMismatch { get; } = new(BindingDraftMismatchValue);
+
+    private const string BindingDraftVersionMismatchValue = "ACTIVATION_BINDING_DRAFT_VERSION_MISMATCH";
+    public static DiagnosticCode BindingDraftVersionMismatch { get; } = new(BindingDraftVersionMismatchValue);
+
     private const string ReviewRequestMismatchValue = "ACTIVATION_REVIEW_REQUEST_MISMATCH";
     public static DiagnosticCode ReviewRequestMismatch { get; } = new(ReviewRequestMismatchValue);
 

@@ -258,6 +258,63 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
     }
 
     [Fact]
+    public async Task CreateActivationRequestAsync_BindingTenantMismatch_RejectsBeforeAnyRequestState()
+    {
+        var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
+        SetupDraftAndPolicy(draftStoreMock, policyMock);
+
+        var result = await service.CreateActivationRequestAsync(CreateActivationContext(), new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            BindingSnapshot = CreateTestBindingSnapshot() with { TenantId = "tenant-other" }
+        });
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().ContainSingle(d => d.Code == DescriptorActivationDiagnosticCodes.BindingTenantMismatch);
+        var record = Assert.Single(auditor.GetAllRecords());
+        record.Action.Should().Be(DescriptorActivationAuditAction.Block);
+        record.Outcome.Should().Be("BindingIdentityMismatch");
+    }
+
+    [Fact]
+    public async Task CreateActivationRequestAsync_BindingDraftMismatch_RejectsBeforeAnyRequestState()
+    {
+        var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
+        SetupDraftAndPolicy(draftStoreMock, policyMock);
+
+        var result = await service.CreateActivationRequestAsync(CreateActivationContext(), new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            BindingSnapshot = CreateTestBindingSnapshot() with { DraftId = "draft-other" }
+        });
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().ContainSingle(d => d.Code == DescriptorActivationDiagnosticCodes.BindingDraftMismatch);
+        Assert.Single(auditor.GetAllRecords()).Action.Should().Be(DescriptorActivationAuditAction.Block);
+    }
+
+    [Fact]
+    public async Task CreateActivationRequestAsync_DraftVersionMismatch_RejectsBeforeAnyRequestState()
+    {
+        var (service, auditor, policyMock, draftStoreMock, _, _) = CreateTestService();
+        var draft = CreateTestDraft("draft-001") with { ProposedVersion = "2" };
+        draftStoreMock.Setup(s => s.GetAsync(TestTenantId, "draft-001", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(draft);
+        policyMock.Setup(p => p.GetPolicyAsync(TestTenantId, It.IsAny<DescriptorKind?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreatePolicy());
+
+        var result = await service.CreateActivationRequestAsync(CreateActivationContext(), new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001",
+            BindingSnapshot = CreateTestBindingSnapshot()
+        });
+
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().ContainSingle(d => d.Code == DescriptorActivationDiagnosticCodes.BindingDraftVersionMismatch);
+        Assert.Single(auditor.GetAllRecords()).Action.Should().Be(DescriptorActivationAuditAction.Block);
+    }
+
+    [Fact]
      public async Task CreateActivationRequestAsync_AllowedWithReviewPolicy_CreatesRequiresHumanReviewUnderReviewRequest()
      {
          // Arrange
