@@ -27,26 +27,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAgentControlPlane(this IServiceCollection services)
     {
-        var options = AgentToolAuthorizationOptions.ProductionDefaults;
-        AddPackageArtifactServices(services);
-        services.TryAddSingleton<IAgentToolManifestProvider, StaticAgentToolManifestProvider>();
-        services.TryAddSingleton(options);
-        services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
-            new DefaultAgentToolAuthorizationService(options));
-        services.TryAddSingleton(TimeProvider.System);
-        services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
-        services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
-        AddDescriptorReviewMessageTemplateCatalog(services);
-        services.TryAddSingleton<ActivationBindingHashValidator>();
-        services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
-        services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
-        services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
-        services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IRuntimeStateContractContributor, DescriptorActivationRuntimeStateContractContributor>());
-        AddActivationReviewConsumer(services);
-        services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
-            ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
-        return services;
+        return services.AddAgentControlPlane(AgentToolAuthorizationOptions.ProductionDefaults);
     }
 
     /// <summary>
@@ -94,26 +75,7 @@ public static class AgentControlPlaneServiceCollectionExtensions
     {
         // Convert legacy policy to options so both the authorization service
         // and the visibility scope share a single policy truth.
-        var options = PolicyToOptions(policy);
-
-        AddPackageArtifactServices(services);
-        services.TryAddSingleton<IAgentToolManifestProvider, StaticAgentToolManifestProvider>();
-        services.TryAddSingleton(options);
-        services.TryAddSingleton<IAgentToolAuthorizationService>(_ =>
-            new DefaultAgentToolAuthorizationService(options));
-        services.TryAddSingleton(TimeProvider.System);
-        services.TryAddSingleton<IDescriptorReviewReportBuilder, DefaultDescriptorReviewReportBuilder>();
-        services.TryAddSingleton<IDescriptorReviewReportRenderer, DefaultDescriptorReviewReportRenderer>();
-        AddDescriptorReviewMessageTemplateCatalog(services);
-        services.TryAddSingleton<ActivationBindingHashValidator>();
-        services.TryAddSingleton<IDescriptorActivationPolicyProvider, DefaultDescriptorActivationPolicyProvider>();
-        services.TryAddSingleton<IActivationEvidenceRechecker, DefaultActivationEvidenceRechecker>();
-        services.TryAddSingleton<IDescriptorActivationRequestService, DefaultDescriptorActivationRequestService>();
-        services.TryAddSingleton<IActivationReviewOrchestrator, DefaultActivationReviewOrchestrator>();
-        AddActivationReviewConsumer(services);
-        services.TryAddSingleton<IAgentControlPlaneToolService>(sp =>
-            ActivatorUtilities.CreateInstance<DefaultAgentControlPlaneToolService>(sp, options));
-        return services;
+        return services.AddAgentControlPlane(PolicyToOptions(policy));
     }
 
     /// <summary>

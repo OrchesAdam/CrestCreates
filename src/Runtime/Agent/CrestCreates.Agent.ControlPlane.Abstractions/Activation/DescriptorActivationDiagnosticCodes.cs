@@ -40,6 +40,9 @@ public static class DescriptorActivationDiagnosticCodes
     private const string InvalidStatusForApprovalValue = "ACTIVATION_INVALID_STATUS_FOR_APPROVAL";
     public static DiagnosticCode InvalidStatusForApproval { get; } = new(InvalidStatusForApprovalValue);
 
+    private const string HumanReviewActorRequiredValue = "ACTIVATION_HUMAN_REVIEW_ACTOR_REQUIRED";
+    public static DiagnosticCode HumanReviewActorRequired { get; } = new(HumanReviewActorRequiredValue);
+
     private const string SelfApprovalForbiddenValue = "ACTIVATION_SELF_APPROVAL_FORBIDDEN";
     public static DiagnosticCode SelfApprovalForbidden { get; } = new(SelfApprovalForbiddenValue);
 

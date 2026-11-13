@@ -23,6 +23,338 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 
 public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
 {
+    [Theory]
+    [InlineData(DescriptorActivationActorKind.Agent, false)]
+    [InlineData(DescriptorActivationActorKind.System, false)]
+    [InlineData(DescriptorActivationActorKind.Agent, true)]
+    [InlineData(DescriptorActivationActorKind.System, true)]
+    public async Task R321_HumanReviewRejectsNonHuman(DescriptorActivationActorKind kind, bool reject)
+    {
+        var (service, auditor, policy, drafts, gate, _) = CreateTestService();
+        SetupDraftAndPolicy(drafts, policy, policy: CreatePolicy(requireHumanReviewForAll: true));
+        var context = CreateActivationContext();
+        var created = await service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot()
+        });
+        var id = created.Value!.RequestId;
+        var decision = CreateTestReviewDecision(id, actorKind: kind,
+            outcome: reject ? DescriptorActivationReviewOutcome.Rejected : DescriptorActivationReviewOutcome.Approved);
+        var result = reject
+            ? await service.RejectActivationRequestAsync(context, id, decision)
+            : await service.ApproveActivationRequestAsync(context, id, decision);
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().ContainSingle(d => d.Code == "ACTIVATION_HUMAN_REVIEW_ACTOR_REQUIRED");
+        (await service.GetActivationRequestStatusAsync(context, id)).Value!.Status.Should().Be(ActivationRequestStatus.UnderReview);
+        auditor.GetAllRecords().Should().Contain(r => r.Action == DescriptorActivationAuditAction.Block
+            && r.Outcome == "HumanReviewActorRequired");
+        gate.Invocations.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task R321_ConcurrentMutationsCallGateOnce(bool approve)
+    {
+        var (service, _, policy, drafts, gate, _) = CreateTestService();
+        SetupDraftAndPolicy(drafts, policy, policy: CreatePolicy(requireHumanReviewForAll: approve,
+            autoActivateAllowedWhenPolicyPermits: false));
+        var context = CreateActivationContext();
+        var created = await service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot(),
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed
+        });
+        var id = created.Value!.RequestId;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        gate.Setup(x => x.ActivateAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                entered.TrySetResult();
+                await release.Task;
+                return AgentToolResult<RuntimeActivationGateResult>.Success(new RuntimeActivationGateResult
+                {
+                    ActivatedDescriptorRef = "activated:test", DraftId = "draft-001", TenantId = TestTenantId,
+                    ActivatedAt = DateTimeOffset.UtcNow
+                });
+            });
+        Task<AgentToolResult<ActivationRequest>> Run() => approve
+            ? service.ApproveActivationRequestAsync(context, id, CreateTestReviewDecision(id))
+            : service.ExecuteActivationGateAsync(context, id);
+        var first = Run();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = Run();
+        release.TrySetResult();
+        var results = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(10));
+        results.Count(r => r.Status == AgentToolResultStatus.Success).Should().Be(1);
+        results.Count(r => r.Status == AgentToolResultStatus.InvalidRequest).Should().Be(1);
+        gate.Invocations.Should().HaveCount(1);
+        (await service.GetActivationRequestStatusAsync(context, id)).Value!.Status.Should().Be(ActivationRequestStatus.Activated);
+        var late = await service.ApproveActivationRequestAsync(context, id, CreateTestReviewDecision(id));
+        late.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        (await service.GetActivationRequestStatusAsync(context, id)).Value!.Status.Should().Be(ActivationRequestStatus.Activated);
+        gate.Invocations.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task R321_CreateHoldsRequestGateAcrossSubmitAudit()
+    {
+        var inner = new InMemoryDescriptorActivationAuditor();
+        var auditEntered = new TaskCompletionSource<DescriptorActivationAuditRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAudit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pausable = new PausableAuditor(inner, auditEntered, releaseAudit);
+        var policyMock = new Mock<IDescriptorActivationPolicyProvider>();
+        var draftStoreMock = new Mock<DraftAbstractions.IDescriptorDraftStore>();
+        var gateMock = new Mock<IRuntimeActivationGate>();
+        var rechecker = new Mock<IActivationEvidenceRechecker>();
+        rechecker.Setup(x => x.RecheckAsync(It.IsAny<string>(), It.IsAny<ActivationBindingSnapshot>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ActivationEvidenceRecheckResult { IsStale = false, Drifts = Array.Empty<ActivationEvidenceDrift>() });
+        gateMock.Setup(x => x.ActivateAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AgentToolResult<RuntimeActivationGateResult>.Success(new RuntimeActivationGateResult
+            {
+                ActivatedDescriptorRef = "activated:test", DraftId = "draft-001", TenantId = TestTenantId,
+                ActivatedAt = DateTimeOffset.UtcNow
+            }));
+        var service = new DefaultDescriptorActivationRequestService(
+            policyMock.Object, pausable, new Mock<IDescriptorStableHashBuilder>().Object, draftStoreMock.Object,
+            gateMock.Object, rechecker.Object, new ActivationBindingHashValidator(),
+            NullLogger<DefaultDescriptorActivationRequestService>.Instance);
+        SetupDraftAndPolicy(draftStoreMock, policyMock, policy: CreatePolicy(
+            requireHumanReviewForAll: false, autoActivateAllowedWhenPolicyPermits: true));
+        var context = CreateActivationContext();
+
+        var create = service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot(),
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed
+        });
+        var submitAudit = await auditEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var queuedGate = service.ExecuteActivationGateAsync(context, submitAudit.ActivationRequestId);
+        var queuedCancel = service.CancelActivationRequestAsync(context, submitAudit.ActivationRequestId, "race");
+        releaseAudit.TrySetResult();
+
+        var created = await create.WaitAsync(TimeSpan.FromSeconds(10));
+        var gateResult = await queuedGate.WaitAsync(TimeSpan.FromSeconds(10));
+        var cancelResult = await queuedCancel.WaitAsync(TimeSpan.FromSeconds(10));
+        created.Value!.Status.Should().Be(ActivationRequestStatus.Activated);
+        gateResult.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        cancelResult.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        gateMock.Invocations.Should().HaveCount(1);
+        inner.GetAllRecords().Should().ContainSingle(r => r.Action == DescriptorActivationAuditAction.Activate);
+        (await service.GetActivationRequestStatusAsync(context, submitAudit.ActivationRequestId)).Value!.Status
+            .Should().Be(ActivationRequestStatus.Activated);
+    }
+
+    private sealed class PausableAuditor(
+        InMemoryDescriptorActivationAuditor inner,
+        TaskCompletionSource<DescriptorActivationAuditRecord> entered,
+        TaskCompletionSource release) : IDescriptorActivationAuditor
+    {
+        private int _paused;
+        public async Task RecordAsync(DescriptorActivationAuditRecord record, CancellationToken ct = default)
+        {
+            if (record.Action == DescriptorActivationAuditAction.Submit
+                && Interlocked.Exchange(ref _paused, 1) == 0)
+            {
+                await inner.RecordAsync(record, ct);
+                entered.TrySetResult(record);
+                await release.Task.WaitAsync(ct);
+                return;
+            }
+            await inner.RecordAsync(record, ct);
+        }
+
+        public IReadOnlyList<DescriptorActivationAuditRecord> GetAllRecords() => inner.GetAllRecords();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task R321_GateExceptionLeavesTerminalState(bool cancelled)
+    {
+        var (service, auditor, policy, drafts, gate, _) = CreateTestService();
+        SetupDraftAndPolicy(drafts, policy, policy: CreatePolicy(autoActivateAllowedWhenPolicyPermits: false));
+        var context = CreateActivationContext();
+        var created = await service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot(),
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed
+        });
+        var exception = cancelled ? (Exception)new OperationCanceledException() : new InvalidOperationException("gate failure");
+        gate.Setup(x => x.ActivateAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(exception);
+        var id = created.Value!.RequestId;
+        var action = () => service.ExecuteActivationGateAsync(context, id);
+        (await action.Should().ThrowAsync<Exception>()).Which.Should().BeSameAs(exception);
+        (await service.GetActivationRequestStatusAsync(context, id)).Value!.Status.Should().Be(ActivationRequestStatus.ActivationFailed);
+        (await service.ExecuteActivationGateAsync(context, id)).Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        (await service.RecheckEvidenceAsync(context, id)).Value!.Status.Should().Be(ActivationRequestStatus.ActivationFailed);
+        gate.Invocations.Should().HaveCount(1);
+        auditor.GetAllRecords().Should().Contain(r => r.Outcome == (cancelled ? "GateCancelled" : "GateFailed"));
+    }
+
+    [Fact]
+    public async Task R321_QueuedCancelAndRecheckCannotOverwriteGateAndOtherRequestIsIndependent()
+    {
+        var (service, _, policy, drafts, gate, _) = CreateTestService();
+        SetupDraftAndPolicy(drafts, policy, policy: CreatePolicy(autoActivateAllowedWhenPolicyPermits: false));
+        var context = CreateActivationContext();
+        async Task<string> Create() => (await service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot(),
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed
+        })).Value!.RequestId;
+        var id = await Create();
+        var otherId = await Create();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        gate.Setup(x => x.ActivateAsync(It.IsAny<AgentToolInvocationContext>(), It.IsAny<ActivationRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                entered.TrySetResult();
+                await release.Task;
+                return AgentToolResult<RuntimeActivationGateResult>.Success(new RuntimeActivationGateResult
+                {
+                    ActivatedDescriptorRef = "activated:test", DraftId = "draft-001", TenantId = TestTenantId,
+                    ActivatedAt = DateTimeOffset.UtcNow
+                });
+            });
+        var first = service.ExecuteActivationGateAsync(context, id);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            var cancel = service.CancelActivationRequestAsync(context, id, "cancel");
+            var recheck = service.RecheckEvidenceAsync(context, id);
+            using var cancellation = new CancellationTokenSource();
+            var waiter = service.CancelActivationRequestAsync(context, id, "cancel waiter", cancellation.Token);
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiter);
+            (await service.GetActivationRequestStatusAsync(context, id)).Value!.Status.Should().Be(ActivationRequestStatus.Submitted);
+            (await service.CancelActivationRequestAsync(context, otherId, "independent").WaitAsync(TimeSpan.FromSeconds(10)))
+                .Value!.Status.Should().Be(ActivationRequestStatus.Cancelled);
+            release.TrySetResult();
+            (await first.WaitAsync(TimeSpan.FromSeconds(10))).Value!.Status.Should().Be(ActivationRequestStatus.Activated);
+            (await cancel).Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+            (await recheck).Value!.Status.Should().Be(ActivationRequestStatus.Activated);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await first;
+        }
+    }
+
+    // Corruption probes start with a real submission, then mutate only the stored request.
+    private static void CorruptRequest(DefaultDescriptorActivationRequestService service, string id,
+        Func<ActivationRequest, ActivationRequest> mutate)
+    {
+        var field = typeof(DefaultDescriptorActivationRequestService).GetField("_requests",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var requests = (System.Collections.IDictionary)field.GetValue(service)!;
+        var snapshot = requests[(TestTenantId, id)]!;
+        var property = snapshot.GetType().GetProperty("Request")!;
+        property.SetValue(snapshot, mutate((ActivationRequest)property.GetValue(snapshot)!));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task R321_GateFailsClosedForCorruptRequest(bool missingHashes)
+    {
+        var (service, _, policy, drafts, gate, rechecker) = CreateTestService();
+        SetupDraftAndPolicy(drafts, policy, policy: CreatePolicy(autoActivateAllowedWhenPolicyPermits: false));
+        var context = CreateActivationContext();
+        var created = await service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot(),
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed
+        });
+        var id = created.Value!.RequestId;
+        CorruptRequest(service, id, request => missingHashes
+            ? request with { BindingSnapshot = request.BindingSnapshot with { Hashes = null! } }
+            : request with { Eligibility = DescriptorActivationEligibility.RequiresHumanReview });
+        var result = await service.ExecuteActivationGateAsync(context, id);
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().ContainSingle(d => d.Code == (missingHashes
+            ? "ACTIVATION_BINDING_HASHES_REQUIRED" : "ACTIVATION_GATE_INVALID_STATE"));
+        gate.Invocations.Should().BeEmpty();
+        rechecker.Invocations.Should().BeEmpty();
+        (await service.GetActivationRequestStatusAsync(context, id)).Value!.Status.Should().Be(ActivationRequestStatus.Submitted);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task R321_SubmittedGateRequiresCapturedAutoEligibilityAndPolicy(int corruption)
+    {
+        var (service, _, policy, drafts, gate, rechecker) = CreateTestService();
+        SetupDraftAndPolicy(drafts, policy, policy: CreatePolicy(autoActivateAllowedWhenPolicyPermits: false));
+        var context = CreateActivationContext();
+        var created = await service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot(),
+            GovernanceDecision = DescriptorLifecycleDecisionKind.Allowed
+        });
+        var id = created.Value!.RequestId;
+        CorruptRequest(service, id, request => corruption switch
+        {
+            0 => request with { Policy = null },
+            1 => request with { Policy = request.Policy! with { RequireHumanReviewForAll = true } },
+            _ => request with { Eligibility = (DescriptorActivationEligibility)99 }
+        });
+        var result = await service.ExecuteActivationGateAsync(context, id);
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().ContainSingle(d => d.Code == DescriptorActivationDiagnosticCodes.GateInvalidState);
+        gate.Invocations.Should().BeEmpty();
+        rechecker.Invocations.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task R321_MissingHashesRejectAndRecheckFailClosed(bool reject)
+    {
+        var (service, _, policy, drafts, gate, rechecker) = CreateTestService();
+        SetupDraftAndPolicy(drafts, policy, policy: CreatePolicy(requireHumanReviewForAll: true));
+        var context = CreateActivationContext();
+        var created = await service.CreateActivationRequestAsync(context, new SubmitActivationRequestRequest
+        {
+            DraftId = "draft-001", BindingSnapshot = CreateTestBindingSnapshot()
+        });
+        var id = created.Value!.RequestId;
+        CorruptRequest(service, id, request => request with
+        {
+            BindingSnapshot = request.BindingSnapshot with { Hashes = null! }
+        });
+        var result = reject
+            ? await service.RejectActivationRequestAsync(context, id,
+                CreateTestReviewDecision(id, DescriptorActivationReviewOutcome.Rejected))
+            : await service.RecheckEvidenceAsync(context, id);
+        result.Status.Should().Be(AgentToolResultStatus.InvalidRequest);
+        result.Diagnostics.Should().ContainSingle(d => d.Code == DescriptorActivationDiagnosticCodes.BindingHashesRequired);
+        (await service.GetActivationRequestStatusAsync(context, id)).Value!.Status.Should().Be(ActivationRequestStatus.UnderReview);
+        gate.Invocations.Should().BeEmpty();
+        rechecker.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void R321_AllRegistrationOverloadsHaveSameContributorsAndHandlers()
+    {
+        var defaults = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var options = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var legacy = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        defaults.AddAgentControlPlane();
+        options.AddAgentControlPlane(AgentToolAuthorizationOptions.ProductionDefaults);
+        legacy.AddAgentControlPlane(new AgentToolAuthorizationPolicy());
+        static object[] Keys(Microsoft.Extensions.DependencyInjection.ServiceCollection services) => services
+            .Select(d => (object)(d.ServiceType, d.Lifetime, d.ImplementationType,
+                d.ImplementationInstance?.GetType(), d.ImplementationFactory is not null)).ToArray();
+        Keys(options).Should().Equal(Keys(defaults));
+        Keys(legacy).Should().Equal(Keys(defaults));
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     // Governance decision is now passed via SubmitActivationRequestRequest.GovernanceDecision,
     // not via IDescriptorLifecycleGovernanceService mock (memory #153: governance evaluation
@@ -519,8 +851,9 @@ public class DescriptorActivationRequestServiceTests : AgentControlPlaneTestBase
             actorId: "self-actor", forbidSelfApproval: true);
 
         var context = CreateActivationContext(actorId: "self-actor");
+        // The creator was Agent; changing to Human must still fail the ActorId self-approval check.
         var reviewDecision = CreateTestReviewDecision(requestId, actorId: "self-actor",
-            actorKind: DescriptorActivationActorKind.Agent);
+            actorKind: DescriptorActivationActorKind.Human);
 
         // Act
         var result = await service.ApproveActivationRequestAsync(context, requestId, reviewDecision);
