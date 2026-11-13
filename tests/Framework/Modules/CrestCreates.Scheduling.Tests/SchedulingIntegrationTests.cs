@@ -2,6 +2,8 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.MultiTenancy;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Scheduling.Jobs;
 using CrestCreates.Scheduling.Services;
 using CrestCreates.Scheduling.Tests.Jobs;
@@ -13,11 +15,23 @@ using Xunit;
 
 namespace CrestCreates.Scheduling.Tests;
 
-public class SchedulingIntegrationTests : IDisposable
+public class SchedulingIntegrationTests : IAsyncLifetime
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ISchedulerService _scheduler;
     private readonly InMemoryJobHistoryRepository _repository;
+    private readonly Guid _tenantId = Guid.NewGuid();
+
+    private sealed class FixtureTenantProvider(Guid tenantId) : ITenantProvider
+    {
+        public Task<ITenantInfo?> GetTenantAsync(string id, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<ITenantInfo?>(id == tenantId.ToString()
+                ? new TenantInfo(tenantId.ToString(), "scheduling-test-tenant")
+                : null);
+        }
+    }
 
     public SchedulingIntegrationTests()
     {
@@ -25,6 +39,8 @@ public class SchedulingIntegrationTests : IDisposable
         var services = new ServiceCollection();
 
         services.AddSingleton<IJobHistoryRepository>(_repository);
+        services.AddSingleton<ICurrentTenant, CurrentTenant>();
+        services.AddSingleton<ITenantProvider>(new FixtureTenantProvider(_tenantId));
         services.AddLogging();
         services.AddSingleton<IJobExecutionHandler>(sp =>
             new DefaultJobExecutionHandler(
@@ -43,10 +59,12 @@ public class SchedulingIntegrationTests : IDisposable
         _scheduler.StartAsync().GetAwaiter().GetResult();
     }
 
-    public void Dispose()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
     {
-        _scheduler.StopAsync().GetAwaiter().GetResult();
-        if (_serviceProvider is IDisposable d) d.Dispose();
+        await _scheduler.StopAsync();
+        await ((ServiceProvider)_serviceProvider).DisposeAsync();
     }
 
     [Fact]
@@ -98,13 +116,13 @@ public class SchedulingIntegrationTests : IDisposable
         // Arrange
         var repository = _repository;
         repository.Clear();
-        var tenantId = Guid.NewGuid();
+        var tenantId = _tenantId;
         var orgId = Guid.NewGuid();
         var userId = Guid.NewGuid();
 
         // Act
         var jobId = await _scheduler.ExecuteNowAsync<SuccessJob>(tenantId, orgId, userId);
-        await Task.Delay(500); // Wait for execution
+        await repository.WaitForSuccessAsync(jobId.Uuid);
 
         // Assert
         var records = await repository.GetByJobIdAsync(jobId.Uuid);
@@ -132,9 +150,9 @@ public class SchedulingIntegrationTests : IDisposable
         retryServices.AddQuartzScheduling();
         retryServices.AddQuartzJobs();
         retryServices.AddScoped<RetryableJob>();
-        var retryProvider = retryServices.BuildServiceProvider();
+        await using var retryProvider = retryServices.BuildServiceProvider();
         var retryScheduler = retryProvider.GetRequiredService<ISchedulerService>();
-        retryScheduler.StartAsync().GetAwaiter().GetResult();
+        await retryScheduler.StartAsync();
 
         // Reset static counter
         RetryableJob.Reset();
@@ -143,12 +161,14 @@ public class SchedulingIntegrationTests : IDisposable
         var jobId = await retryScheduler.ExecuteNowAsync<RetryableJob>();
         await Task.Delay(2000); // Wait for retries (up to 3 attempts)
 
-        retryScheduler.StopAsync().GetAwaiter().GetResult();
+        await retryScheduler.StopAsync();
 
         // Assert
         var records = await repository.GetByJobIdAsync(jobId.Uuid);
         var failedRecords = records.Where(r => r.Result == JobExecutionResult.Failed).ToList();
-        Assert.True(failedRecords.Count >= 2, $"Expected at least 2 failed attempts, got {failedRecords.Count}");
+        Assert.Equal(2, failedRecords.Count);
+        Assert.Equal(new[] { 1, 2 }, failedRecords.Select(r => r.AttemptNumber));
+        Assert.Single(records, r => r.Result == JobExecutionResult.Succeeded && r.AttemptNumber == 3);
     }
 
     [Fact]
@@ -173,9 +193,9 @@ public class SchedulingIntegrationTests : IDisposable
         // Arrange
         var repository = _repository;
         repository.Clear();
-        var tenantId = Guid.NewGuid();
-        await _scheduler.ExecuteNowAsync<SuccessJob>(tenantId);
-        await Task.Delay(500);
+        var tenantId = _tenantId;
+        var jobId = await _scheduler.ExecuteNowAsync<SuccessJob>(tenantId);
+        await repository.WaitForSuccessAsync(jobId.Uuid);
 
         // Act
         var records = await repository.GetByTenantAsync(tenantId);

@@ -15,6 +15,8 @@ public interface ISchedulerService
     Task<JobId> RegisterAsync<TJob>(JobMetadata metadata) where TJob : IJob;
     Task<JobId> RegisterAsync<TJob, TArg>(JobMetadata metadata) where TJob : IJob<TArg> where TArg : IJobArgs;
 
+    Task<JobId> RegisterAsync<TJob, TArg>(JobMetadata metadata, TArg args) where TJob : IJob<TArg> where TArg : IJobArgs;
+
     // Delayed / scheduled jobs
     Task<JobId> ScheduleAsync<TJob>(TimeSpan delay, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : IJob;
     Task<JobId> ScheduleAsync<TJob, TArg>(TimeSpan delay, TArg args, Guid? tenantId = null, Guid? organizationId = null, Guid? userId = null) where TJob : IJob<TArg> where TArg : IJobArgs;

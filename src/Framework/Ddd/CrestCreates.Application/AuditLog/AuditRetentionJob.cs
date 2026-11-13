@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.AuditRetention;
@@ -13,6 +14,9 @@ public sealed class AuditRetentionJobArgs : IJobArgs
     public string? TenantId { get; set; }
     public string ReasonCode { get; set; } = "retention.scheduled";
 }
+
+[JsonSerializable(typeof(AuditRetentionJobArgs))]
+internal partial class AuditRetentionJobJsonContext : JsonSerializerContext;
 
 /// <summary>
 /// Typed retention entry point for the existing scheduler. It calls the same Application admission

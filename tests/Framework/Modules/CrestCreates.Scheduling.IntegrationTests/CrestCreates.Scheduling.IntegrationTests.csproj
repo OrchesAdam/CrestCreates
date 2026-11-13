@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <RootNamespace>CrestCreates.Scheduling.IntegrationTests</RootNamespace>
   </PropertyGroup>
 
@@ -25,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy/CrestCreates.MultiTenancy.csproj" />
     <ProjectReference Include="../../../../src/Framework/Modules/CrestCreates.Scheduling.Abstractions/CrestCreates.Scheduling.Abstractions.csproj" />
     <ProjectReference Include="../../../../src/Framework/Modules/CrestCreates.Scheduling.Quartz/CrestCreates.Scheduling.Quartz.csproj" />
   </ItemGroup>

@@ -18,6 +18,7 @@ public class DefaultJobFailureHandler : IJobFailureHandler
     {
         _logger = logger;
         _retryOptions = retryOptions?.Value;
+        _retryOptions?.Validate();
     }
 
     public Task HandleAsync(JobFailureContext context, CancellationToken ct = default)
@@ -30,14 +31,8 @@ public class DefaultJobFailureHandler : IJobFailureHandler
     }
 
     public bool ShouldRetry(JobFailureContext context)
-        => _retryOptions?.MaxRetries > 0 && context.AttemptNumber < _retryOptions.MaxRetries;
+        => _retryOptions?.MaxRetries > 0 && context.AttemptNumber <= _retryOptions.MaxRetries;
 
     public TimeSpan? GetNextRetryDelay(JobFailureContext context, int attemptNumber)
-    {
-        if (_retryOptions?.InitialDelay == null) return null;
-        var delay = _retryOptions.InitialDelay.Value * Math.Pow(_retryOptions.BackoffMultiplier, attemptNumber - 1);
-        return _retryOptions.MaxDelay.HasValue
-            ? TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds, _retryOptions.MaxDelay.Value.TotalMilliseconds))
-            : delay;
-    }
+        => _retryOptions?.GetDelay(attemptNumber);
 }
