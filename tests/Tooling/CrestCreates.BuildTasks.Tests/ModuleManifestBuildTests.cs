@@ -116,6 +116,35 @@ public partial class ModuleManifestTests
         }
     }
 
+    [Fact]
+    public async System.Threading.Tasks.Task EmptyManifest_PlainClassLibrary_RequiresNoRuntimeReferences()
+    {
+        var root = FindRoot();
+        var import = Path.Combine(root, "src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props");
+        var directory = Path.Combine(_directory, "Plain");
+        Directory.CreateDirectory(directory);
+        var project = Path.Combine(directory, "Plain.csproj");
+        File.WriteAllText(project, $"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+                <EnableEntityPermissionsScan>false</EnableEntityPermissionsScan>
+                <CrestCreatesBuildTasksAssembly>{SecurityElement.Escape(typeof(ScanModulesFromSource).Assembly.Location)}</CrestCreatesBuildTasksAssembly>
+              </PropertyGroup>
+              <Import Project="{SecurityElement.Escape(import)}" />
+            </Project>
+            """);
+        File.WriteAllText(Path.Combine(directory, "Class1.cs"), "namespace Plain; public sealed class Class1 {}\n");
+
+        var result = await RunBuild(project, "plain-no-runtime");
+
+        result.ExitCode.Should().Be(0, result.Log);
+        var initializer = Path.Combine(directory, "obj/Release/net10.0/ModuleAutoInitializer.g.cs");
+        var code = File.ReadAllText(initializer);
+        code.Should().Contain("RegisterAllModules").And.NotContain("IServiceCollection")
+            .And.NotContain("ModuleDiagnosticsStore").And.NotContain("IHost");
+    }
+
     private async System.Threading.Tasks.Task<(int ExitCode, string Log)> RunBuild(string project, string name, string? failureTargets = null)
     {
         var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");

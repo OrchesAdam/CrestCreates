@@ -9,6 +9,10 @@ namespace CrestCreates.BuildTasks;
 
 public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
 {
+    private const string ModuleAttributeNamespace = "CrestCreates.Domain.Shared.Attributes";
+    private const string ModuleAttributeShortName = "CrestModule";
+    private const string ModuleAttributeLongName = "CrestModuleAttribute";
+
     public string SourceFiles { get; set; } = string.Empty;
 
     public string DefineConstants { get; set; } = string.Empty;
@@ -20,24 +24,34 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
     {
         try
         {
-            var symbols = DefineConstants.Split(';', StringSplitOptions.RemoveEmptyEntries)
+            var symbols = DefineConstants
+                .Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(symbol => symbol.Trim())
                 .Where(symbol => symbol.Length != 0)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
             var parseOptions = new CSharpParseOptions(LanguageVersion.Preview).WithPreprocessorSymbols(symbols);
-            var modules = new SortedDictionary<string, CollectModuleManifests.ModuleManifest>(StringComparer.Ordinal);
+            var trees = new List<SyntaxTree>();
             foreach (var file in SourceFiles.Split(';', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal))
             {
                 var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(file), parseOptions, file);
                 var errors = tree.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
                 if (errors.Count != 0)
                     throw new InvalidDataException(string.Join(Environment.NewLine, errors));
+                trees.Add(tree);
+            }
 
+            var hasGlobalFormalUsing = trees
+                .SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>())
+                .Any(IsFormalGlobalUsing);
+
+            var modules = new SortedDictionary<string, CollectModuleManifests.ModuleManifest>(StringComparer.Ordinal);
+            foreach (var tree in trees)
+            {
                 foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
                 {
                     var attributes = declaration.AttributeLists.SelectMany(a => a.Attributes)
-                        .Where(a => IsModuleAttribute(ResolveAlias(a.Name, declaration))).ToList();
+                        .Where(a => IsFormalModuleAttribute(a, declaration, hasGlobalFormalUsing)).ToList();
                     if (attributes.Count == 0) continue;
                     if (attributes.Count != 1) throw new InvalidDataException($"Duplicate CrestModule attribute: {declaration.Identifier}");
                     if (declaration.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.TypeParameterList != null))
@@ -92,20 +106,55 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
         }
     }
 
-    private static bool IsModuleAttribute(string name) => name.Split('.').Last() is "CrestModule" or "CrestModuleAttribute";
-
-    private static string ResolveAlias(NameSyntax name, ClassDeclarationSyntax declaration)
+    private static bool IsFormalModuleAttribute(
+        AttributeSyntax attribute,
+        ClassDeclarationSyntax declaration,
+        bool hasGlobalFormalUsing)
     {
-        var text = name.WithoutTrivia().ToString().Replace("global::", "", StringComparison.Ordinal);
-        var first = text.Split('.', ':')[0];
-        var usings = declaration.Ancestors().SelectMany(n => n switch
+        var raw = attribute.Name.WithoutTrivia().ToString().Replace("global::", "", StringComparison.Ordinal);
+        var first = raw.Split(new[] { '.', ':' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+        var alias = UsingsFor(declaration).FirstOrDefault(u => u.Alias?.Name.Identifier.ValueText == first);
+        var normalized = alias?.Name is { } target
+            ? NormalizeName(target.ToString()) + raw[first.Length..].Replace("::", ".", StringComparison.Ordinal)
+            : raw.Replace("::", ".", StringComparison.Ordinal);
+        normalized = normalized.Trim('.');
+
+        if (normalized is ModuleAttributeShortName or ModuleAttributeLongName)
+            return HasFormalUsing(declaration) || hasGlobalFormalUsing;
+
+        return normalized == $"{ModuleAttributeNamespace}.{ModuleAttributeShortName}"
+            || normalized == $"{ModuleAttributeNamespace}.{ModuleAttributeLongName}";
+    }
+
+    private static bool IsFormalGlobalUsing(UsingDirectiveSyntax directive)
+        => directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword)
+            && directive.Alias is null
+            && NormalizeName(directive.Name?.ToString()) == ModuleAttributeNamespace;
+
+    private static bool HasFormalUsing(ClassDeclarationSyntax declaration)
+        => UsingsFor(declaration).Any(u => u.Alias is null
+            && NormalizeName(u.Name?.ToString()) == ModuleAttributeNamespace);
+
+    private static IEnumerable<UsingDirectiveSyntax> UsingsFor(SyntaxNode node)
+        => node.Ancestors().SelectMany(n => n switch
         {
             BaseNamespaceDeclarationSyntax ns => ns.Usings.AsEnumerable(),
             CompilationUnitSyntax root => root.Usings.AsEnumerable(),
             _ => Enumerable.Empty<UsingDirectiveSyntax>()
         });
-        var alias = usings.FirstOrDefault(u => u.Alias?.Name.Identifier.ValueText == first);
-        return alias?.Name is { } target ? target.ToString().Replace("global::", "", StringComparison.Ordinal) + text[first.Length..].Replace("::", ".", StringComparison.Ordinal) : text;
+
+    private static string NormalizeName(string? name)
+        => (name ?? string.Empty).Replace("global::", "", StringComparison.Ordinal)
+            .Replace("::", ".", StringComparison.Ordinal).Trim();
+
+    private static string ResolveAlias(NameSyntax name, ClassDeclarationSyntax declaration)
+    {
+        var text = NormalizeName(name.WithoutTrivia().ToString());
+        var first = text.Split('.', ':')[0];
+        var alias = UsingsFor(declaration).FirstOrDefault(u => u.Alias?.Name.Identifier.ValueText == first);
+        return alias?.Name is { } target
+            ? NormalizeName(target.ToString()) + text[first.Length..].Replace("::", ".", StringComparison.Ordinal)
+            : text;
     }
 
     private static void ReadDependencies(ExpressionSyntax expression, ClassDeclarationSyntax declaration, List<string> dependencies)

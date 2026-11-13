@@ -35,15 +35,16 @@ public partial class ModuleManifestTests
     public void Scan_AllDeclarationsAndAttributeForms_IgnoresCommentsAndStrings()
     {
         var source = FileWith("Modules.cs", """
-            using CM = CrestCreates.Domain.Shared.CrestModuleAttribute;
+            using CrestCreates.Domain.Shared.Attributes;
+            using CM = CrestCreates.Domain.Shared.Attributes.CrestModuleAttribute;
             namespace Ns;
             // [CrestModule] class Fake : ModuleBase {}
             class Parent : ModuleBase { string fake = "[CrestModule] class Fake : ModuleBase"; }
             [CM(typeof(global::Ns.Dep), Order = -2, AutoRegisterServices = false)]
             class First : Parent {}
-            [global::CrestCreates.Domain.Shared.CrestModule(DependsOn = new[] { typeof(Ns.First) })]
+            [global::CrestCreates.Domain.Shared.Attributes.CrestModule(DependsOn = new[] { typeof(Ns.First) })]
             class Second : Parent {}
-            [CrestCreates.Domain.Shared.CrestModule] class Dep : Parent {}
+            [CrestCreates.Domain.Shared.Attributes.CrestModule] class Dep : Parent {}
             """);
         var output = FileWith("manifest.json", "stale");
         Attach(new ScanModulesFromSource { SourceFiles = source, OutputPath = output }).Execute().Should().BeTrue();
@@ -66,11 +67,14 @@ public partial class ModuleManifestTests
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void Scan_UsesEvaluatedPreprocessorSymbols(bool constantsSupplied)
+    [InlineData("TRACE;KEEP", true)]
+    [InlineData("TRACE,KEEP", true)]
+    [InlineData("TRACE,KEEP;EXTRA", true)]
+    [InlineData("", false)]
+    public void Scan_UsesEvaluatedPreprocessorSymbols(string defineConstants, bool accepted)
     {
         var source = FileWith("Conditional.cs", """
+            using CrestCreates.Domain.Shared.Attributes;
             #if !KEEP
             #error Scanner must receive KEEP
             #endif
@@ -80,12 +84,12 @@ public partial class ModuleManifestTests
         var task = Attach(new ScanModulesFromSource
         {
             SourceFiles = source,
-            DefineConstants = constantsSupplied ? "TRACE;KEEP" : string.Empty,
+            DefineConstants = defineConstants,
             OutputPath = output
         });
 
-        task.Execute().Should().Be(constantsSupplied);
-        if (constantsSupplied)
+        task.Execute().Should().Be(accepted);
+        if (accepted)
         {
             var modules = JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(output))!;
             modules.Select(m => m.FullName).Should().Equal("ConditionalModule");
@@ -96,6 +100,24 @@ public partial class ModuleManifestTests
         }
     }
 
+    [Fact]
+    public void Scan_PseudoCrestModuleAttributes_AreIgnored()
+    {
+        var source = FileWith("Pseudo.cs", """
+            using System;
+            namespace Other { public sealed class CrestModuleAttribute : Attribute {} }
+            [Other.CrestModule] public class QualifiedFake {}
+            namespace Other { [CrestModule] public class UnqualifiedFake {} }
+            """);
+        var output = FileWith("pseudo-manifest.json", "stale");
+
+        Attach(new ScanModulesFromSource { SourceFiles = source, OutputPath = output })
+            .Execute().Should().BeTrue();
+
+        JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(output))!
+            .Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("[CrestModule(Order = wrong)] class M {}")]
     [InlineData("[CrestModule(AutoRegisterServices = 1)] class M {}")]
@@ -103,7 +125,11 @@ public partial class ModuleManifestTests
     [InlineData("[CrestModule] class M {} [CrestModule] class M {}")]
     public void Scan_InvalidDeclarations_Fail(string source)
     {
-        Attach(new ScanModulesFromSource { SourceFiles = FileWith("Bad.cs", source), OutputPath = Path.Combine(_directory, "out.json") }).Execute().Should().BeFalse();
+        Attach(new ScanModulesFromSource
+        {
+            SourceFiles = FileWith("Bad.cs", "using CrestCreates.Domain.Shared.Attributes;\n" + source),
+            OutputPath = Path.Combine(_directory, "out.json")
+        }).Execute().Should().BeFalse();
         _engine.Verify(e => e.LogErrorEvent(It.IsAny<BuildErrorEventArgs>()), Times.AtLeastOnce);
     }
 
@@ -196,6 +222,7 @@ public partial class ModuleManifestTests
     public void Scan_NestedNamespacesTypesAndDependencyArray_PreservesIdentity()
     {
         var source = FileWith("Nested.cs", """
+            using CrestCreates.Domain.Shared.Attributes;
             namespace Outer { namespace Inner {
               class Container {
                 [CrestModule(new System.Type[] { typeof(global::Outer.Inner.Dep) })] public class Nested {}
@@ -245,7 +272,9 @@ public partial class ModuleManifestTests
         FileWith("initializer.cs", "Old.Module");
         Generate([]).Should().BeTrue();
         var code = File.ReadAllText(Path.Combine(_directory, "initializer.cs"));
-        code.Should().Contain("RegisterAllModules").And.Contain("InitializeModulesAsync").And.NotContain("Old.Module").And.NotContain("services.AddSingleton<");
+        code.Should().Contain("RegisterAllModules").And.Contain("InitializeModulesAsync")
+            .And.NotContain("Old.Module").And.NotContain("services.AddSingleton<")
+            .And.NotContain("IServiceCollection").And.NotContain("ModuleDiagnosticsStore");
     }
 
     [Fact]

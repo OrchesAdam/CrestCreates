@@ -40,6 +40,8 @@ public class MyModule : ModuleBase
 }
 ```
 
+Only `CrestCreates.Domain.Shared.Attributes.CrestModuleAttribute` (or an alias resolving to it) is recognized; same-named attributes in other namespaces do not create modules. An empty module set writes `[]` manifests and a dependency-free empty initializer.
+
 ### 在应用程序中使用
 
 ```csharp
