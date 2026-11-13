@@ -226,6 +226,43 @@ public class QuartzSchedulerIntegrationTests
     }
 
     [Fact]
+    public async Task HandlerScopeReleaseFailure_AfterInsert_KeepsDisabledJobPaused()
+    {
+        await using var host = new Harness(history: true, failHandlerDispose: true);
+        var native = await host.Native();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => host.Scheduler.RegisterAsync<ProbeJob>(
+            new JobMetadata { Name = "dispose-failure", Group = SchedulerConstants.DefaultGroup, Enabled = false }));
+        Assert.Equal("handler dispose failed", error.Message);
+        var info = Assert.Single(await host.Scheduler.GetAllAsync(JobStatus.Paused));
+        var key = new JobKey(info.Id.Name!, info.Id.Group!);
+        var trigger = Assert.Single(await native.GetTriggersOfJob(key));
+        Assert.Equal(TriggerState.Paused, await native.GetTriggerState(trigger.Key));
+        Assert.Equal(0, host.Probe.Created);
+        await host.Scheduler.ResumeAsync(info.Id);
+        Assert.Equal(info.Id, (await Read(host.Probe.Executions)).JobId);
+        await Read(host.Probe.Completed);
+        await Read(host.Probe.Releases);
+        Assert.Equal(1, host.Probe.Created);
+        await host.Scheduler.DeleteAsync(info.Id);
+    }
+
+    private sealed class DisposeThrowingHandler : IJobExecutionHandler, IAsyncDisposable
+    {
+        private static int _disposed;
+        public ValueTask DisposeAsync()
+            => Interlocked.Increment(ref _disposed) == 1
+                ? ValueTask.FromException(new InvalidOperationException("handler dispose failed"))
+                : ValueTask.CompletedTask;
+        public Task OnJobScheduledAsync(JobScheduledContext context, CancellationToken ct = default) => Task.CompletedTask;
+        public Task OnJobStartedAsync(JobStartedContext context, CancellationToken ct = default) => Task.CompletedTask;
+        public Task OnJobSucceededAsync(JobSucceededContext context, CancellationToken ct = default) => Task.CompletedTask;
+        public Task OnJobCancelledAsync(JobCancelledContext context, CancellationToken ct = default) => Task.CompletedTask;
+        public Task HandleAsync(JobFailureContext context, CancellationToken ct = default) => Task.CompletedTask;
+        public bool ShouldRetry(JobFailureContext context) => false;
+        public TimeSpan? GetNextRetryDelay(JobFailureContext context, int attemptNumber) => null;
+    }
+
+    [Fact]
     public async Task SynchronousProviderDispose_WaitsForShutdownAndReleasesCompletedJobResources()
     {
         var prior = SchedulerRepository.Instance.LookupAll().Select(s => s.SchedulerName).ToHashSet();
@@ -712,7 +749,7 @@ public class QuartzSchedulerIntegrationTests
             _native.ListenerManager.AddJobListener(new CompletionListener(Probe));
             return _native;
         }
-        public Harness(bool history = false, bool codec = true, int retry = 0, bool failSuccessHook = false, bool tenants = false, bool unknownTenant = false, bool? tenantProvider = null, bool observeAdapterScope = false, bool failScheduleHook = false)
+        public Harness(bool history = false, bool codec = true, int retry = 0, bool failSuccessHook = false, bool tenants = false, bool unknownTenant = false, bool? tenantProvider = null, bool observeAdapterScope = false, bool failScheduleHook = false, bool failHandlerDispose = false)
         {
             var services = new ServiceCollection();
             services.AddLogging();
@@ -734,7 +771,9 @@ public class QuartzSchedulerIntegrationTests
                 repository.Setup(r => r.CreateAsync(It.IsAny<IJobRecord>(), It.IsAny<CancellationToken>()))
                     .Callback<IJobRecord, CancellationToken>((record, _) => Probe.Records.Enqueue(record)).Returns<IJobRecord, CancellationToken>((record, _) => Task.FromResult<IJobRecord>(record));
                 services.AddSingleton(repository.Object);
-                if (failScheduleHook)
+                if (failHandlerDispose)
+                    services.AddScoped<IJobExecutionHandler, DisposeThrowingHandler>();
+                else if (failScheduleHook)
                 {
                     var handler = new Mock<IJobExecutionHandler>();
                     handler.Setup(h => h.OnJobScheduledAsync(It.IsAny<JobScheduledContext>(), It.IsAny<CancellationToken>()))

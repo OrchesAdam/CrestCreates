@@ -151,6 +151,7 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
         // and history remains ordered before an immediate fire.
         await _registration.WaitAsync();
         var paused = false;
+        var inserted = false;
         try
         {
             if (metadata?.Name != null && await _scheduler!.CheckExists(key))
@@ -166,10 +167,12 @@ public class QuartzSchedulerService(IServiceProvider serviceProvider, ILogger<Qu
             if (handler != null)
                 await handler.OnJobScheduledAsync(new(uuid, typeof(TJob), typeof(TArg), tenantId, organizationId, userId, json, time));
             await _scheduler!.ScheduleJob(job, trigger);
+            inserted = true;
         }
         catch
         {
-            if (paused)
+            // A failure after insertion (e.g. handler-scope release) must keep the disabled job paused.
+            if (paused && !inserted)
             {
                 try { await _scheduler!.ResumeTriggers(GroupMatcher<TriggerKey>.GroupEquals(uuid.ToString())); }
                 catch (Exception cleanup) { logger.LogWarning(cleanup, "Failed to release the pre-insertion pause for job {JobKey}.", key); }
