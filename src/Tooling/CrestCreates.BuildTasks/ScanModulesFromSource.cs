@@ -44,6 +44,8 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
             var hasGlobalFormalUsing = trees
                 .SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>())
                 .Any(IsFormalGlobalUsing);
+            var globalAliases = CollectGlobalAliases(trees);
+            var shadowScopes = CollectShadowScopes(trees);
 
             var modules = new SortedDictionary<string, CollectModuleManifests.ModuleManifest>(StringComparer.Ordinal);
             foreach (var tree in trees)
@@ -51,7 +53,8 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
                 foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
                 {
                     var attributes = declaration.AttributeLists.SelectMany(a => a.Attributes)
-                        .Where(a => IsFormalModuleAttribute(a, declaration, hasGlobalFormalUsing)).ToList();
+                        .Where(a => IsFormalModuleAttribute(a, declaration, hasGlobalFormalUsing, globalAliases, shadowScopes))
+                        .ToList();
                     if (attributes.Count == 0) continue;
                     if (attributes.Count != 1) throw new InvalidDataException($"Duplicate CrestModule attribute: {declaration.Identifier}");
                     if (declaration.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.TypeParameterList != null))
@@ -85,7 +88,7 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
                             case null:
                             case "dependsOn":
                             case "DependsOn":
-                                ReadDependencies(argument.Expression, declaration, module.DependsOn);
+                                ReadDependencies(argument.Expression, declaration, globalAliases, module.DependsOn);
                                 break;
                             default:
                                 throw new InvalidDataException($"Unknown module argument: {name}");
@@ -109,18 +112,17 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
     private static bool IsFormalModuleAttribute(
         AttributeSyntax attribute,
         ClassDeclarationSyntax declaration,
-        bool hasGlobalFormalUsing)
+        bool hasGlobalFormalUsing,
+        IReadOnlyDictionary<string, string> globalAliases,
+        IReadOnlySet<string> shadowScopes)
     {
-        var raw = attribute.Name.WithoutTrivia().ToString().Replace("global::", "", StringComparison.Ordinal);
-        var first = raw.Split(new[] { '.', ':' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
-        var alias = UsingsFor(declaration).FirstOrDefault(u => u.Alias?.Name.Identifier.ValueText == first);
-        var normalized = alias?.Name is { } target
-            ? NormalizeName(target.ToString()) + raw[first.Length..].Replace("::", ".", StringComparison.Ordinal)
-            : raw.Replace("::", ".", StringComparison.Ordinal);
-        normalized = normalized.Trim('.');
+        var normalized = ExpandAlias(attribute.Name, declaration, globalAliases).Trim('.');
 
         if (normalized is ModuleAttributeShortName or ModuleAttributeLongName)
+        {
+            if (IsShadowed(declaration, shadowScopes)) return false;
             return HasFormalUsing(declaration) || hasGlobalFormalUsing;
+        }
 
         return normalized == $"{ModuleAttributeNamespace}.{ModuleAttributeShortName}"
             || normalized == $"{ModuleAttributeNamespace}.{ModuleAttributeLongName}";
@@ -130,6 +132,76 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
         => directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword)
             && directive.Alias is null
             && NormalizeName(directive.Name?.ToString()) == ModuleAttributeNamespace;
+
+    private static Dictionary<string, string> CollectGlobalAliases(IEnumerable<SyntaxTree> trees)
+    {
+        var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var directive in trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>())
+                     .Where(directive => directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword) && directive.Alias is not null))
+        {
+            var name = directive.Alias!.Name.Identifier.ValueText;
+            var target = NormalizeName(directive.Name?.ToString());
+            if (aliases.TryGetValue(name, out var existing) && existing != target)
+                throw new InvalidDataException($"Conflicting global using alias: {name}");
+            aliases[name] = target;
+        }
+        return aliases;
+    }
+
+    private static HashSet<string> CollectShadowScopes(IEnumerable<SyntaxTree> trees)
+    {
+        var scopes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>()))
+        {
+            if (type.Identifier.ValueText is not (ModuleAttributeShortName or ModuleAttributeLongName)) continue;
+            var namespaces = type.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse()
+                .Select(n => n.Name.ToString()).ToArray();
+            if (type.Identifier.ValueText == ModuleAttributeLongName
+                && string.Join(".", namespaces) == ModuleAttributeNamespace)
+                continue;
+            var containers = type.Ancestors().OfType<TypeDeclarationSyntax>().Reverse().Select(t => t.Identifier.ValueText);
+            scopes.Add(ScopeKey(namespaces, containers));
+        }
+        return scopes;
+    }
+
+    private static bool IsShadowed(ClassDeclarationSyntax declaration, IReadOnlySet<string> shadowScopes)
+    {
+        var namespaces = declaration.Ancestors().OfType<BaseNamespaceDeclarationSyntax>()
+            .Reverse().Select(n => n.Name.ToString()).ToArray();
+        var containers = declaration.Ancestors().OfType<TypeDeclarationSyntax>()
+            .Reverse().Select(t => t.Identifier.ValueText).ToArray();
+
+        for (var containerCount = 0; containerCount <= containers.Length; containerCount++)
+        {
+            for (var namespaceCount = 0; namespaceCount <= namespaces.Length; namespaceCount++)
+            {
+                if (shadowScopes.Contains(ScopeKey(
+                        namespaces.Take(namespaceCount), containers.Take(containerCount))))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static string ScopeKey(IEnumerable<string> namespaces, IEnumerable<string> containers)
+        => string.Join(".", namespaces) + "|" + string.Join(".", containers);
+
+    private static string ExpandAlias(
+        NameSyntax name,
+        ClassDeclarationSyntax declaration,
+        IReadOnlyDictionary<string, string> globalAliases)
+    {
+        var text = NormalizeName(name.WithoutTrivia().ToString());
+        var first = text.Split(new[] { '.', ':' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+        var localAlias = UsingsFor(declaration).FirstOrDefault(u => u.Alias?.Name.Identifier.ValueText == first);
+        var target = localAlias?.Name is { } local
+            ? NormalizeName(local.ToString())
+            : globalAliases.TryGetValue(first, out var global) ? global : null;
+        return target is null
+            ? text.Replace("::", ".", StringComparison.Ordinal)
+            : target + text[first.Length..].Replace("::", ".", StringComparison.Ordinal);
+    }
 
     private static bool HasFormalUsing(ClassDeclarationSyntax declaration)
         => UsingsFor(declaration).Any(u => u.Alias is null
@@ -147,21 +219,15 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
         => (name ?? string.Empty).Replace("global::", "", StringComparison.Ordinal)
             .Replace("::", ".", StringComparison.Ordinal).Trim();
 
-    private static string ResolveAlias(NameSyntax name, ClassDeclarationSyntax declaration)
-    {
-        var text = NormalizeName(name.WithoutTrivia().ToString());
-        var first = text.Split('.', ':')[0];
-        var alias = UsingsFor(declaration).FirstOrDefault(u => u.Alias?.Name.Identifier.ValueText == first);
-        return alias?.Name is { } target
-            ? NormalizeName(target.ToString()) + text[first.Length..].Replace("::", ".", StringComparison.Ordinal)
-            : text;
-    }
-
-    private static void ReadDependencies(ExpressionSyntax expression, ClassDeclarationSyntax declaration, List<string> dependencies)
+    private static void ReadDependencies(
+        ExpressionSyntax expression,
+        ClassDeclarationSyntax declaration,
+        IReadOnlyDictionary<string, string> globalAliases,
+        List<string> dependencies)
     {
         if (expression is TypeOfExpressionSyntax typeOf && typeOf.Type is NameSyntax name)
         {
-            dependencies.Add(ResolveAlias(name, declaration));
+            dependencies.Add(ExpandAlias(name, declaration, globalAliases));
             return;
         }
         var initializer = expression switch
@@ -171,6 +237,6 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
             _ => null
         };
         if (initializer == null) throw new InvalidDataException($"Module dependencies must be typeof expressions or arrays: {expression}");
-        foreach (var item in initializer.Expressions) ReadDependencies(item, declaration, dependencies);
+        foreach (var item in initializer.Expressions) ReadDependencies(item, declaration, globalAliases, dependencies);
     }
 }

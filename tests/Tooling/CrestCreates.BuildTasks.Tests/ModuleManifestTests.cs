@@ -118,6 +118,44 @@ public partial class ModuleManifestTests
             .Should().BeEmpty();
     }
 
+    [Fact]
+    public void Scan_GlobalUsingAliasAcrossFiles_IsDiscovered()
+    {
+        var alias = FileWith("GlobalAlias.cs",
+            "global using CrestModule = global::CrestCreates.Domain.Shared.Attributes.CrestModuleAttribute;\n");
+        var module = FileWith("GlobalAliasModule.cs", "[CrestModule] public class GlobalAliasModule {}\n");
+        var output = FileWith("global-alias-manifest.json", "stale");
+
+        Attach(new ScanModulesFromSource
+        {
+            SourceFiles = alias + ";" + module,
+            OutputPath = output
+        }).Execute().Should().BeTrue();
+
+        JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(output))!
+            .Select(m => m.FullName).Should().Equal("GlobalAliasModule");
+    }
+
+    [Fact]
+    public void Scan_LocalShadowingAttribute_IsIgnoredDespiteFormalUsing()
+    {
+        var source = FileWith("Shadow.cs", """
+            using CrestCreates.Domain.Shared.Attributes;
+            namespace Other
+            {
+                public sealed class CrestModuleAttribute : System.Attribute {}
+                [CrestModule] public class Ordinary {}
+            }
+            """);
+        var output = FileWith("shadow-manifest.json", "stale");
+
+        Attach(new ScanModulesFromSource { SourceFiles = source, OutputPath = output })
+            .Execute().Should().BeTrue();
+
+        JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(output))!
+            .Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("[CrestModule(Order = wrong)] class M {}")]
     [InlineData("[CrestModule(AutoRegisterServices = 1)] class M {}")]
