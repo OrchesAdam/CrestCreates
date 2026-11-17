@@ -480,6 +480,95 @@ public class ModuleDiagnosticsStoreTests
     }
 
     [Fact]
+    public void RemovedAnchor_RepeatedConfigurationAndDiagnosticsHealStore()
+    {
+        var services = new ServiceCollection();
+        services.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        services.Remove(services.Single(descriptor => descriptor.ServiceType == typeof(IModuleDiagnosticsStore)));
+
+        services.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        services.AddModuleDiagnostics();
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount.Should().Be(1);
+        new CrestCreates.ModuleDiagnostics.HealthChecks.ModuleHealthCheck(provider.GetRequiredService<IModuleDiagnosticsStore>()).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void TypeBasedStatePreRegistrationWithoutSnapshot_IsRejected()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ModuleInitializationState, ModuleInitializationState>();
+
+        Action configure = () => services.AddModuleDiagnostics();
+
+        configure.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+    }
+
+    [Fact]
+    public void CopiedCollection_RemovedSnapshot_RejectsCopyWithoutAffectingSource()
+    {
+        var first = new ServiceCollection();
+        first.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        IServiceCollection second = new ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        second.Remove(second.Single(descriptor => descriptor.ServiceType.Name == "ModuleConfigurationRegistration"));
+
+        Action configureCopy = () => second.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        Action diagnosticsCopy = () => second.AddModuleDiagnostics();
+        configureCopy.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+        diagnosticsCopy.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+
+        first.ConfigureModuleServices<ConfigurationTwo>(_ => { });
+        using var sourceProvider = first.BuildServiceProvider();
+        sourceProvider.GetRequiredService<IModuleDiagnosticsStore>().GetAll().Select(record => record.ModuleName)
+            .Should().Equal(typeof(ConfigurationOne).FullName, typeof(ConfigurationTwo).FullName);
+    }
+
+    private sealed class RaceModule<T> : CrestCreates.Modularity.ModuleBase;
+
+    [Fact]
+    public void ConcurrentConfiguration_DoesNotFalseRejectDuringSnapshotReplace()
+    {
+        var workerTypes = new[]
+        {
+            typeof(RaceModule<int>), typeof(RaceModule<long>), typeof(RaceModule<short>), typeof(RaceModule<byte>),
+            typeof(RaceModule<uint>), typeof(RaceModule<ulong>), typeof(RaceModule<ushort>), typeof(RaceModule<sbyte>)
+        };
+        var falseRejections = 0;
+        var otherErrors = new System.Collections.Generic.List<Exception>();
+        for (var round = 0; round < 300; round++)
+        {
+            var services = new ServiceCollection();
+            services.AddModuleDiagnostics();
+            System.Threading.Tasks.Parallel.For(0, 8, worker =>
+            {
+                try
+                {
+                    services.ConfigureModuleServices<RaceModule<object>>(_ => { });
+                    var configure = typeof(ModuleDiagnosticsServiceCollectionExtensions)
+                        .GetMethod(nameof(ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices))!
+                        .MakeGenericMethod(workerTypes[worker]);
+                    configure.Invoke(null, new object[] { services, (Action<IServiceCollection>)(_ => { }) });
+                }
+                catch (Exception raw)
+                {
+                    var error = raw is System.Reflection.TargetInvocationException invocation && invocation.InnerException is not null
+                        ? invocation.InnerException
+                        : raw;
+                    if (error is InvalidOperationException invalid && invalid.Message.Contains("snapshot was removed"))
+                        System.Threading.Interlocked.Increment(ref falseRejections);
+                    else
+                        lock (otherErrors) otherErrors.Add(error);
+                }
+            });
+        }
+
+        falseRejections.Should().Be(0);
+        otherErrors.Should().BeEmpty();
+    }
+
+    [Fact]
     public void FailedConfiguration_IsNotReplayedAndKeepsOneFailure()
     {
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();

@@ -11,13 +11,19 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
 {
     public static IServiceCollection AddModuleDiagnostics(this IServiceCollection services)
     {
-        GetConfiguration(services).RegisterHealthCheck(services);
-        return services;
+        lock (services)
+        {
+            GetConfiguration(services).RegisterHealthCheck(services);
+            return services;
+        }
     }
 
     public static void ConfigureModuleServices<TModule>(this IServiceCollection services, Action<IServiceCollection> configure)
     {
-        GetConfiguration(services).Configure(typeof(TModule), services, () => configure(services));
+        lock (services)
+        {
+            GetConfiguration(services).Configure(typeof(TModule), services, () => configure(services));
+        }
     }
 
     private static ModuleConfigurationState GetConfiguration(IServiceCollection services)
@@ -75,7 +81,12 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
         {
             lock (_sync)
             {
-                if (_healthCheckRegistered) return;
+                if (_healthCheckRegistered)
+                {
+                    RegisterStore(services);
+                    Publish(services);
+                    return;
+                }
                 services.AddHealthChecks().AddCheck<ModuleHealthCheck>("modules", tags: new[] { "modules" });
                 _healthCheckRegistered = true;
                 Publish(services);
@@ -88,6 +99,8 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
             {
                 if (_configured.TryGetValue(moduleType, out var failure))
                 {
+                    RegisterStore(services);
+                    Publish(services);
                     failure?.Throw();
                     return;
                 }
@@ -117,11 +130,16 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
 
         public void Publish(IServiceCollection services)
         {
-            lock (_sync)
+            // Entry points hold lock(services) before any _sync, so Replace stays atomic against
+            // GetConfiguration's snapshot-removal detection and the lock order never inverts.
+            lock (services)
             {
-                var registration = new ModuleConfigurationRegistration(this, _configured.ToArray(), _diagnostics.GetAll(),
-                    _healthCheckRegistered, _storeDescriptor, _configurationDepth != 0);
-                services.Replace(ServiceDescriptor.Singleton(registration));
+                lock (_sync)
+                {
+                    var registration = new ModuleConfigurationRegistration(this, _configured.ToArray(), _diagnostics.GetAll(),
+                        _healthCheckRegistered, _storeDescriptor, _configurationDepth != 0);
+                    services.Replace(ServiceDescriptor.Singleton(registration));
+                }
             }
         }
 
