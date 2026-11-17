@@ -33,6 +33,7 @@
   </Target>
 
   <Target Name="GenerateModuleManifest"
+          DependsOnTargets="ResolveReferences"
           Condition="'$(EnableModuleManifestGeneration)' == 'true'">
 
     <PropertyGroup>
@@ -42,6 +43,7 @@
     <ScanModulesFromSource
       SourceFiles="$(_ModuleSourceFiles)"
       DefineConstants="$(DefineConstants)"
+      ReferencePaths="@(ReferencePath)"
       OutputPath="$(ModuleManifestOutputPath)" />
 
     <Message Text="Generated module manifest at $(ModuleManifestOutputPath)" Importance="high" />

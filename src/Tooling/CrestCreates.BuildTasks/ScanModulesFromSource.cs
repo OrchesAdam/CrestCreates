@@ -2,7 +2,6 @@ using Microsoft.Build.Framework;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using System.Globalization;
 using System.Text.Json;
 
 namespace CrestCreates.BuildTasks;
@@ -10,12 +9,14 @@ namespace CrestCreates.BuildTasks;
 public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
 {
     private const string ModuleAttributeNamespace = "CrestCreates.Domain.Shared.Attributes";
-    private const string ModuleAttributeShortName = "CrestModule";
+    private const string ModuleAttributeName = "CrestModule";
     private const string ModuleAttributeLongName = "CrestModuleAttribute";
 
     public string SourceFiles { get; set; } = string.Empty;
 
     public string DefineConstants { get; set; } = string.Empty;
+
+    public ITaskItem[] ReferencePaths { get; set; } = Array.Empty<ITaskItem>();
 
     [Required]
     public string OutputPath { get; set; } = string.Empty;
@@ -41,31 +42,61 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
                 trees.Add(tree);
             }
 
-            var hasGlobalFormalUsing = trees
-                .SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>())
-                .Any(IsFormalGlobalUsing);
-            var globalAliases = CollectGlobalAliases(trees);
-            var shadowScopes = CollectShadowScopes(trees);
+            var compilation = CSharpCompilation.Create(
+                "CrestCreates.ModuleDiscovery",
+                trees,
+                ReferencePaths.Select(reference => MetadataReference.CreateFromFile(
+                    Path.GetFullPath(reference.ItemSpec),
+                    MetadataReferenceProperties.Assembly.WithAliases(reference.GetMetadata("Aliases")
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)))),
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            var formalAttributes = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+            foreach (var assembly in compilation.SourceModule.ReferencedAssemblySymbols.Prepend(compilation.Assembly))
+                if (assembly.GetTypeByMetadataName($"{ModuleAttributeNamespace}.{ModuleAttributeLongName}") is { } attribute)
+                    formalAttributes.Add(attribute);
 
+            var semanticModels = new Dictionary<SyntaxTree, SemanticModel>();
+            foreach (var tree in trees) semanticModels.Add(tree, compilation.GetSemanticModel(tree));
             var modules = new SortedDictionary<string, CollectModuleManifests.ModuleManifest>(StringComparer.Ordinal);
             foreach (var tree in trees)
             {
+                var semanticModel = semanticModels[tree];
                 foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>())
                 {
-                    var attributes = declaration.AttributeLists.SelectMany(a => a.Attributes)
-                        .Where(a => IsFormalModuleAttribute(a, declaration, hasGlobalFormalUsing, globalAliases, shadowScopes))
-                        .ToList();
+                    var attributes = new List<AttributeSyntax>();
+                    foreach (var attribute in declaration.AttributeLists.SelectMany(list => list.Attributes))
+                    {
+                        var attributeType = semanticModel.GetTypeInfo(attribute).Type;
+                        if (attributeType is null || attributeType.TypeKind == TypeKind.Error)
+                        {
+                            // Generated attributes bind later in CoreCompile; only visible formal candidates fail here.
+                            if (!IsModuleAttributeCandidate(attribute.Name, attribute, semanticModel, semanticModels, formalAttributes, new HashSet<UsingDirectiveSyntax>())) continue;
+                            var location = attribute.GetLocation().GetLineSpan();
+                            Log.LogError(null, "CCMB001", null, location.Path,
+                                location.StartLinePosition.Line + 1, location.StartLinePosition.Character + 1,
+                                location.EndLinePosition.Line + 1, location.EndLinePosition.Character + 1,
+                                "Cannot bind attribute type '{0}'. Check source and resolved references.", attribute.Name);
+                            return false;
+                        }
+                        if (formalAttributes.Contains(attributeType)) attributes.Add(attribute);
+                    }
                     if (attributes.Count == 0) continue;
                     if (attributes.Count != 1) throw new InvalidDataException($"Duplicate CrestModule attribute: {declaration.Identifier}");
                     if (declaration.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.TypeParameterList != null))
                         throw new InvalidDataException($"Module must be a closed type: {declaration.Identifier}");
 
-                    var ns = string.Join(".", declaration.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse().Select(n => n.Name.ToString()));
-                    var typeName = string.Join(".", declaration.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Reverse().Select(t => t.Identifier.ValueText));
+                    var moduleType = semanticModel.GetDeclaredSymbol(declaration)!;
+                    var attributeValues = moduleType.GetAttributes()
+                        .Single(attribute => attribute.ApplicationSyntaxReference is { } syntax
+                            && syntax.SyntaxTree == tree && syntax.Span == attributes[0].Span)
+                        .NamedArguments.ToDictionary(argument => argument.Key, argument => argument.Value, StringComparer.Ordinal);
                     var module = new CollectModuleManifests.ModuleManifest
                     {
-                        Name = declaration.Identifier.ValueText, Namespace = ns,
-                        FullName = string.IsNullOrEmpty(ns) ? typeName : ns + "." + typeName,
+                        Name = moduleType.Name,
+                        Namespace = moduleType.ContainingNamespace.IsGlobalNamespace
+                            ? string.Empty
+                            : moduleType.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+                        FullName = moduleType.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
                         AutoRegisterServices = true
                     };
                     var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -76,19 +107,21 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
                         switch (name)
                         {
                             case "Order":
-                                if (!int.TryParse(argument.Expression.WithoutTrivia().ToString(), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var order))
+                                if (!attributeValues.TryGetValue(name, out var orderValue)
+                                    || orderValue.Kind != TypedConstantKind.Primitive || orderValue.Value is not int)
                                     throw new InvalidDataException($"Invalid module Order: {argument}");
-                                module.Order = order;
+                                module.Order = (int)orderValue.Value;
                                 break;
                             case "AutoRegisterServices":
-                                if (argument.Expression is not LiteralExpressionSyntax literal || literal.Token.Value is not bool value)
+                                if (!attributeValues.TryGetValue(name, out var autoRegisterValue)
+                                    || autoRegisterValue.Kind != TypedConstantKind.Primitive || autoRegisterValue.Value is not bool)
                                     throw new InvalidDataException($"Invalid module AutoRegisterServices: {argument}");
-                                module.AutoRegisterServices = value;
+                                module.AutoRegisterServices = (bool)autoRegisterValue.Value;
                                 break;
                             case null:
                             case "dependsOn":
                             case "DependsOn":
-                                ReadDependencies(argument.Expression, declaration, globalAliases, module.DependsOn);
+                                ReadDependencies(argument.Expression, semanticModel, module.DependsOn);
                                 break;
                             default:
                                 throw new InvalidDataException($"Unknown module argument: {name}");
@@ -109,125 +142,95 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
         }
     }
 
-    private static bool IsFormalModuleAttribute(
-        AttributeSyntax attribute,
-        ClassDeclarationSyntax declaration,
-        bool hasGlobalFormalUsing,
-        IReadOnlyDictionary<string, string> globalAliases,
-        IReadOnlySet<string> shadowScopes)
-    {
-        var normalized = ExpandAlias(attribute.Name, declaration, globalAliases).Trim('.');
-
-        if (normalized is ModuleAttributeShortName or ModuleAttributeLongName)
-        {
-            if (IsShadowed(declaration, shadowScopes)) return false;
-            return HasFormalUsing(declaration) || hasGlobalFormalUsing;
-        }
-
-        return normalized == $"{ModuleAttributeNamespace}.{ModuleAttributeShortName}"
-            || normalized == $"{ModuleAttributeNamespace}.{ModuleAttributeLongName}";
-    }
-
-    private static bool IsFormalGlobalUsing(UsingDirectiveSyntax directive)
-        => directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword)
-            && directive.Alias is null
-            && NormalizeName(directive.Name?.ToString()) == ModuleAttributeNamespace;
-
-    private static Dictionary<string, string> CollectGlobalAliases(IEnumerable<SyntaxTree> trees)
-    {
-        var aliases = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var directive in trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>())
-                     .Where(directive => directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword) && directive.Alias is not null))
-        {
-            var name = directive.Alias!.Name.Identifier.ValueText;
-            var target = NormalizeName(directive.Name?.ToString());
-            if (aliases.TryGetValue(name, out var existing) && existing != target)
-                throw new InvalidDataException($"Conflicting global using alias: {name}");
-            aliases[name] = target;
-        }
-        return aliases;
-    }
-
-    private static HashSet<string> CollectShadowScopes(IEnumerable<SyntaxTree> trees)
-    {
-        var scopes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var type in trees.SelectMany(tree => tree.GetRoot().DescendantNodes().OfType<BaseTypeDeclarationSyntax>()))
-        {
-            if (type.Identifier.ValueText is not (ModuleAttributeShortName or ModuleAttributeLongName)) continue;
-            var namespaces = type.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Reverse()
-                .Select(n => n.Name.ToString()).ToArray();
-            if (type.Identifier.ValueText == ModuleAttributeLongName
-                && string.Join(".", namespaces) == ModuleAttributeNamespace)
-                continue;
-            var containers = type.Ancestors().OfType<TypeDeclarationSyntax>().Reverse().Select(t => t.Identifier.ValueText);
-            scopes.Add(ScopeKey(namespaces, containers));
-        }
-        return scopes;
-    }
-
-    private static bool IsShadowed(ClassDeclarationSyntax declaration, IReadOnlySet<string> shadowScopes)
-    {
-        var namespaces = declaration.Ancestors().OfType<BaseNamespaceDeclarationSyntax>()
-            .Reverse().Select(n => n.Name.ToString()).ToArray();
-        var containers = declaration.Ancestors().OfType<TypeDeclarationSyntax>()
-            .Reverse().Select(t => t.Identifier.ValueText).ToArray();
-
-        for (var containerCount = 0; containerCount <= containers.Length; containerCount++)
-        {
-            for (var namespaceCount = 0; namespaceCount <= namespaces.Length; namespaceCount++)
-            {
-                if (shadowScopes.Contains(ScopeKey(
-                        namespaces.Take(namespaceCount), containers.Take(containerCount))))
-                    return true;
-            }
-        }
-        return false;
-    }
-
-    private static string ScopeKey(IEnumerable<string> namespaces, IEnumerable<string> containers)
-        => string.Join(".", namespaces) + "|" + string.Join(".", containers);
-
-    private static string ExpandAlias(
+    private static bool IsModuleAttributeCandidate(
         NameSyntax name,
-        ClassDeclarationSyntax declaration,
-        IReadOnlyDictionary<string, string> globalAliases)
+        SyntaxNode location,
+        SemanticModel semanticModel,
+        IReadOnlyDictionary<SyntaxTree, SemanticModel> semanticModels,
+        HashSet<ISymbol> formalAttributes,
+        HashSet<UsingDirectiveSyntax> visitedAliases)
     {
-        var text = NormalizeName(name.WithoutTrivia().ToString());
-        var first = text.Split(new[] { '.', ':' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
-        var localAlias = UsingsFor(declaration).FirstOrDefault(u => u.Alias?.Name.Identifier.ValueText == first);
-        var target = localAlias?.Name is { } local
-            ? NormalizeName(local.ToString())
-            : globalAliases.TryGetValue(first, out var global) ? global : null;
-        return target is null
-            ? text.Replace("::", ".", StringComparison.Ordinal)
-            : target + text[first.Length..].Replace("::", ".", StringComparison.Ordinal);
+        if (HasFormalModuleName(name)) return true;
+        if (name is not SimpleNameSyntax simple) return false;
+        var alias = GetVisibleAlias(simple.Identifier.ValueText, location, semanticModel, semanticModels);
+        if (alias is not null && IsFormalAliasTarget(alias.Value.Directive, alias.Value.Model, semanticModels, formalAttributes, visitedAliases)) return true;
+        if (location is not AttributeSyntax || simple.Identifier.Text.StartsWith("@", StringComparison.Ordinal)) return false;
+        var suffixedAlias = GetVisibleAlias(simple.Identifier.ValueText + "Attribute", location, semanticModel, semanticModels);
+        return suffixedAlias is not null && IsFormalAliasTarget(suffixedAlias.Value.Directive, suffixedAlias.Value.Model, semanticModels, formalAttributes, visitedAliases);
     }
 
-    private static bool HasFormalUsing(ClassDeclarationSyntax declaration)
-        => UsingsFor(declaration).Any(u => u.Alias is null
-            && NormalizeName(u.Name?.ToString()) == ModuleAttributeNamespace);
+    private static bool IsFormalAliasTarget(
+        UsingDirectiveSyntax alias,
+        SemanticModel semanticModel,
+        IReadOnlyDictionary<SyntaxTree, SemanticModel> semanticModels,
+        HashSet<ISymbol> formalAttributes,
+        HashSet<UsingDirectiveSyntax> visitedAliases)
+    {
+        if (!visitedAliases.Add(alias)) return true;
+        var target = semanticModel.GetDeclaredSymbol(alias)?.Target;
+        if (target is not null && formalAttributes.Contains(target)) return true;
+        if (target is not null and not INamespaceSymbol and not IErrorTypeSymbol) return false;
+        return IsModuleAttributeCandidate(alias.Name!, alias, semanticModel, semanticModels, formalAttributes, visitedAliases);
+    }
 
-    private static IEnumerable<UsingDirectiveSyntax> UsingsFor(SyntaxNode node)
-        => node.Ancestors().SelectMany(n => n switch
+    private static bool HasFormalModuleName(NameSyntax name)
+        => name switch
         {
-            BaseNamespaceDeclarationSyntax ns => ns.Usings.AsEnumerable(),
-            CompilationUnitSyntax root => root.Usings.AsEnumerable(),
-            _ => Enumerable.Empty<UsingDirectiveSyntax>()
-        });
+            AliasQualifiedNameSyntax aliasQualified => IsFormalModuleName(aliasQualified.Name),
+            QualifiedNameSyntax qualified => IsFormalModuleName(qualified.Right),
+            SimpleNameSyntax simple => IsFormalModuleName(simple),
+            _ => false
+        };
 
-    private static string NormalizeName(string? name)
-        => (name ?? string.Empty).Replace("global::", "", StringComparison.Ordinal)
-            .Replace("::", ".", StringComparison.Ordinal).Trim();
+    private static bool IsFormalModuleName(SimpleNameSyntax name)
+        => name.Identifier.ValueText is ModuleAttributeName or ModuleAttributeLongName;
+
+    private static (UsingDirectiveSyntax Directive, SemanticModel Model)? GetVisibleAlias(
+        string name,
+        SyntaxNode location,
+        SemanticModel semanticModel,
+        IReadOnlyDictionary<SyntaxTree, SemanticModel> semanticModels)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var usingTargetScope = (location as UsingDirectiveSyntax)?.Parent;
+        foreach (var scope in location.Ancestors().OfType<BaseNamespaceDeclarationSyntax>()
+                     .Append(location.SyntaxTree.GetRoot()))
+        {
+            if (scope == usingTargetScope) continue;
+            var usings = scope switch
+            {
+                CompilationUnitSyntax compilation => compilation.Usings,
+                BaseNamespaceDeclarationSyntax declaration => declaration.Usings,
+                _ => default
+            };
+            foreach (var directive in usings)
+                if (directive.Alias is { } alias)
+                {
+                    var aliasName = alias.Name.Identifier.ValueText;
+                    if (aliasName == name && names.Add(aliasName)) return (directive, semanticModel);
+                    names.Add(aliasName);
+                }
+        }
+        if (usingTargetScope is CompilationUnitSyntax) return null;
+        foreach (var (tree, model) in semanticModels)
+            foreach (var directive in tree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>())
+                if (directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword) && directive.Alias is { } alias
+                    && names.Add(alias.Name.Identifier.ValueText) && alias.Name.Identifier.ValueText == name)
+                    return (directive, model);
+        return null;
+    }
 
     private static void ReadDependencies(
         ExpressionSyntax expression,
-        ClassDeclarationSyntax declaration,
-        IReadOnlyDictionary<string, string> globalAliases,
+        SemanticModel semanticModel,
         List<string> dependencies)
     {
-        if (expression is TypeOfExpressionSyntax typeOf && typeOf.Type is NameSyntax name)
+        if (expression is TypeOfExpressionSyntax typeOf)
         {
-            dependencies.Add(ExpandAlias(name, declaration, globalAliases));
+            if (semanticModel.GetTypeInfo(typeOf.Type).Type is not INamedTypeSymbol dependency
+                || dependency.TypeKind == TypeKind.Error)
+                throw new InvalidDataException($"Module dependency type could not be resolved: {typeOf.Type}");
+            dependencies.Add(dependency.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
             return;
         }
         var initializer = expression switch
@@ -237,6 +240,6 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
             _ => null
         };
         if (initializer == null) throw new InvalidDataException($"Module dependencies must be typeof expressions or arrays: {expression}");
-        foreach (var item in initializer.Expressions) ReadDependencies(item, declaration, globalAliases, dependencies);
+        foreach (var item in initializer.Expressions) ReadDependencies(item, semanticModel, dependencies);
     }
 }

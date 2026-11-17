@@ -38,12 +38,20 @@ public partial class ModuleManifestTests
         var leaf = CreateProject("Leaf", import, contracts);
         var source = Path.Combine(Path.GetDirectoryName(leaf)!, "Modules.cs");
         File.WriteAllText(source, """
-            using CM = CrestCreates.Domain.Shared.Attributes.CrestModuleAttribute;
-            namespace Fixture;
-            public class Parent : CrestCreates.Modularity.ModuleBase {}
+            extern alias contracts;
+            using CM = contracts::CrestCreates.Domain.Shared.Attributes.CrestModuleAttribute;
+            using CrestCreates.Domain.Shared.Attributes;
+            namespace @Fixture;
+            public static class ModuleOptions { public const int FirstOrder = -2; public const bool AutoRegister = false; }
+            public class Parent : global::CrestCreates.Modularity.ModuleBase {}
             [CM] public class Dep : Parent {}
-            [global::CrestCreates.Domain.Shared.Attributes.CrestModule(typeof(Fixture.Dep), Order = -2, AutoRegisterServices = false)]
+            [global::CrestCreates.Domain.Shared.Attributes.CrestModule(typeof(Dep), Order = ModuleOptions.FirstOrder, AutoRegisterServices = ModuleOptions.AutoRegister)]
             public class First : Parent {}
+            public class NestedModules { [CM] public class Dep : Parent {} }
+            public class DerivedAttributeContainer : AttributeParent {
+                [CrestModule] public class Ordinary {}
+            }
+            [CrestCreates.Domain.Shared.Attributes.CrestModule] public class RelativeOrdinary {}
             """);
         var middle = CreateProject("Middle", import, leaf);
         var host = CreateProject("Host", import, middle);
@@ -52,11 +60,15 @@ public partial class ModuleManifestTests
         var leafManifest = Path.Combine(Path.GetDirectoryName(leaf)!, "custom-obj/Release/special/net10.0/ModuleManifest.json");
         File.Exists(leafManifest).Should().BeTrue();
         var leafModules = JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(leafManifest))!;
-        leafModules.Select(m => m.FullName).Should().Equal("Fixture.Dep", "Fixture.First");
+        leafModules.Select(m => m.FullName).Should().Equal("Fixture.Dep", "Fixture.First", "Fixture.NestedModules.Dep");
+        var firstModule = leafModules.Single(module => module.Name == "First");
+        firstModule.DependsOn.Should().Equal("Fixture.Dep");
+        firstModule.Order.Should().Be(-2);
+        firstModule.AutoRegisterServices.Should().BeFalse();
         var hostObj = Path.Combine(Path.GetDirectoryName(host)!, "custom-obj/Release/special/net10.0");
         var aggregate = Path.Combine(hostObj, "AggregatedModuleManifest.json");
         JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(aggregate))!.Select(m => m.FullName)
-            .Should().Equal("Fixture.Dep", "Fixture.First");
+            .Should().Equal("Fixture.Dep", "Fixture.First", "Fixture.NestedModules.Dep");
         var initializer = Path.Combine(hostObj, "ModuleAutoInitializer.g.cs");
         var code = File.ReadAllText(initializer);
         code.Split("services.AddSingleton<Fixture.Dep>();").Length.Should().Be(2);
@@ -71,6 +83,22 @@ public partial class ModuleManifestTests
         File.ReadAllText(leafManifest).Trim().Should().Be("[]");
         File.ReadAllText(aggregate).Trim().Should().Be("[]");
         File.ReadAllText(initializer).Should().Contain("RegisterAllModules").And.NotContain("Fixture.Dep").And.NotContain("Fixture.First");
+
+        // Ordinary unbound attributes are rejected by CoreCompile, not preempted by the scanner.
+        File.WriteAllText(source, "using CrestCreates.Domain.Shared.Attributes;\n[MissingModule]\npublic class UnboundModule {}\n");
+        var unbound = await RunBuild(host, packaged ? "package-unbound" : "source-unbound");
+        unbound.ExitCode.Should().NotBe(0, unbound.Log);
+        unbound.Log.Should().Contain("CS0246").And.Contain("Modules.cs").And.NotContain("CCMB001");
+        File.ReadAllText(leafManifest).Trim().Should().Be("[]");
+
+        // An unbound formal module attribute candidate still fails closed before any manifest write.
+        File.WriteAllText(source, "[CrestModule]\npublic class UnboundModule {}\n");
+        File.WriteAllText(leafManifest, "stale-unbound");
+        var unboundFormal = await RunBuild(host, packaged ? "package-unbound-formal" : "source-unbound-formal");
+        unboundFormal.ExitCode.Should().NotBe(0, unboundFormal.Log);
+        unboundFormal.Log.Should().Contain("CCMB001").And.Contain("Modules.cs");
+        File.ReadAllText(leafManifest).Should().Be("stale-unbound");
+        File.WriteAllText(source, "namespace Fixture; public class Ordinary {}");
 
         // Exercise fail-closed behavior through MSBuild, not just direct task calls.
         var failureTarget = Path.Combine(_directory, "Failure.targets");
@@ -107,7 +135,7 @@ public partial class ModuleManifestTests
                     <CrestCreatesBuildTasksAssembly>{SecurityElement.Escape(typeof(ScanModulesFromSource).Assembly.Location)}</CrestCreatesBuildTasksAssembly>
                   </PropertyGroup>
                   <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup>
-                  {(reference == null ? "" : $"<ItemGroup><ProjectReference Include=\"{SecurityElement.Escape(reference)}\" /></ItemGroup>")}
+                  {(reference == null ? "" : $"<ItemGroup><ProjectReference Include=\"{SecurityElement.Escape(reference)}\" Aliases=\"global,contracts\" /></ItemGroup>")}
                   {(targets == null ? "" : $"<Import Project=\"{SecurityElement.Escape(targets)}\" />")}
                   <Import Project="$(R323FailureTargets)" Condition="'$(R323FailureTargets)' != '' and '$(MSBuildProjectName)' == 'Host'" />
                 </Project>
@@ -183,6 +211,12 @@ public partial class ModuleManifestTests
             public int Order { get; set; }
             public bool AutoRegisterServices { get; set; } = true;
           }
+        }
+        namespace Fixture {
+          public class AttributeParent { public class CrestModuleAttribute : Attribute {} }
+        }
+        namespace Fixture.CrestCreates.Domain.Shared.Attributes {
+          public class CrestModuleAttribute : Attribute {}
         }
         namespace CrestCreates.Modularity {
           public interface IModule {
