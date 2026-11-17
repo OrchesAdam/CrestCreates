@@ -76,6 +76,35 @@ public partial class ModuleManifestTests
         result.Should().Equal(1, 2, 5, 5);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async System.Threading.Tasks.Task GeneratedLifecycle_CopiedCollectionOwnsConfigurationState(bool configureBeforeCopy)
+    {
+        var body = """
+            var first = new ServiceCollection();
+            first.AddModuleDiagnostics();
+            """ + (configureBeforeCopy ? "ModuleAutoInitializer.RegisterAllModules(first);\n" : "") + """
+            IServiceCollection second = new ServiceCollection();
+            foreach (var descriptor in first) second.Add(descriptor);
+            ModuleAutoInitializer.RegisterAllModules(second);
+            ModuleAutoInitializer.RegisterAllModules(first);
+            using var firstProvider = first.BuildServiceProvider();
+            using var secondProvider = second.BuildServiceProvider();
+            using var firstHost = new TestHost(firstProvider);
+            using var secondHost = new TestHost(secondProvider);
+            await ModuleAutoInitializer.InitializeModulesAsync(firstHost);
+            await ModuleAutoInitializer.InitializeModulesAsync(secondHost);
+            return new[] { ProbeModule.Configured, ProbeModule.Initialized,
+                firstProvider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount,
+                secondProvider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount };
+            """;
+
+        var result = await RunLifecycle(body);
+
+        result.Should().Equal(configureBeforeCopy ? new[] { 1, 2, 5, 5 } : new[] { 2, 2, 5, 5 });
+    }
+
     [Fact]
     public async System.Threading.Tasks.Task GeneratedLifecycle_InitializationFailureIsNotReplayed()
     {

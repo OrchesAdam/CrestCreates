@@ -27,9 +27,16 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         if (symbol is null || !symbol.GetAttributes().Any(attribute => attribute.AttributeClass?.Name == "CrestModuleAttribute")) return null;
         var names = new Stack<string>();
         for (var containing = symbol; containing is not null; containing = containing.ContainingType) names.Push(containing.Name);
+        var extensionName = string.Join("_", names);
+        var existingClass = symbol.ContainingNamespace.GetMembers(extensionName + "Extensions").Any(member => member switch
+        {
+            INamedTypeSymbol type => type.Arity == 0 && SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, symbol.ContainingAssembly),
+            INamespaceSymbol ns => ns.Locations.Any(location => location.IsInSource),
+            _ => false
+        });
         return new ModuleInfo(
-            symbol.ContainingNamespace.IsGlobalNamespace ? string.Empty : symbol.ContainingNamespace.ToDisplayString(),
-            symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat), string.Join("_", names), symbol.ContainingType is not null);
+            symbol.ContainingNamespace.IsGlobalNamespace ? string.Empty : symbol.ContainingNamespace.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+            symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat), extensionName, symbol.ContainingType is not null, existingClass);
     }
 
     private static void GenerateModuleCode(SourceProductionContext context, (ImmutableArray<ModuleInfo?>, Compilation) input)
@@ -40,9 +47,12 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         if (modules.Count == 0) return;
         foreach (var module in modules)
         {
+            var proposedClassName = module.ExtensionName + "Extensions";
+            var sameClassName = module.IsNested && modules.Any(candidate => candidate.FullName != module.FullName
+                && candidate.Namespace == module.Namespace && candidate.ExtensionName + "Extensions" == proposedClassName);
             using var hash = SHA256.Create();
             var identity = string.Concat(hash.ComputeHash(Encoding.UTF8.GetBytes(module.FullName)).Select(value => value.ToString("x2")));
-            context.AddSource("Module." + identity + ".Extensions.g.cs", SourceText.From(GenerateSingleModuleExtension(module, identity), Encoding.UTF8));
+            context.AddSource("Module." + identity + ".Extensions.g.cs", SourceText.From(GenerateSingleModuleExtension(module, identity, sameClassName || module.ExistingClassConflict), Encoding.UTF8));
         }
         if (input.Item2.GetTypeByMetadataName("Microsoft.AspNetCore.Builder.WebApplication") is not null
             && input.Item2.GetTypeByMetadataName("CrestCreates.Web.Module.WebModule") is not null)
@@ -66,10 +76,11 @@ public class ModuleSourceGenerator : IIncrementalGenerator
             """, Encoding.UTF8));
     }
 
-    private static string GenerateSingleModuleExtension(ModuleInfo module, string identity)
+    private static string GenerateSingleModuleExtension(ModuleInfo module, string identity, bool nameConflict)
     {
         var extensionName = module.ExtensionName + (module.IsNested ? "_" + identity.Substring(0, 16) : string.Empty);
-        var extensionClass = module.ExtensionName + "Extensions_" + identity;
+        var extensionClass = module.ExtensionName + "Extensions" + (nameConflict ? "_" + identity : string.Empty);
+        var qualifiedExtensionClass = "global::" + (module.Namespace.Length == 0 ? string.Empty : module.Namespace + ".") + extensionClass;
         var code = new StringBuilder();
         code.AppendLine("#nullable enable");
         code.AppendLine("using Microsoft.Extensions.DependencyInjection;");
@@ -85,7 +96,7 @@ public class ModuleSourceGenerator : IIncrementalGenerator
         code.AppendLine("        return services;");
         code.AppendLine("    }");
         code.AppendLine($"    public static IHostBuilder Add{extensionName}(this IHostBuilder hostBuilder)");
-        code.AppendLine($"        => hostBuilder.ConfigureServices((context, services) => {extensionClass}.Add{extensionName}(services));");
+        code.AppendLine($"        => hostBuilder.ConfigureServices((context, services) => {qualifiedExtensionClass}.Add{extensionName}(services));");
         code.AppendLine($"    public static global::{module.FullName} Get{extensionName}(this IServiceProvider services) => services.GetRequiredService<global::{module.FullName}>();");
         code.AppendLine($"    public static global::{module.FullName}? TryGet{extensionName}(this IServiceProvider services) => services.GetService<global::{module.FullName}>();");
         code.AppendLine("}");
@@ -95,17 +106,19 @@ public class ModuleSourceGenerator : IIncrementalGenerator
 
     private sealed class ModuleInfo
     {
-        public ModuleInfo(string ns, string fullName, string extensionName, bool isNested)
+        public ModuleInfo(string ns, string fullName, string extensionName, bool isNested, bool existingClassConflict)
         {
             Namespace = ns;
             FullName = fullName;
             ExtensionName = extensionName;
             IsNested = isNested;
+            ExistingClassConflict = existingClassConflict;
         }
 
         public string Namespace { get; }
         public string FullName { get; }
         public string ExtensionName { get; }
         public bool IsNested { get; }
+        public bool ExistingClassConflict { get; }
     }
 }

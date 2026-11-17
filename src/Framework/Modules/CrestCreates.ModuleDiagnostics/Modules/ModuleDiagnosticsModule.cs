@@ -24,23 +24,45 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
     {
         lock (services)
         {
-            var state = services.FirstOrDefault(descriptor => descriptor.ServiceType == typeof(ModuleConfigurationState))?.ImplementationInstance as ModuleConfigurationState;
-            if (state is not null) return state;
-            state = new ModuleConfigurationState();
-            services.AddSingleton(state);
+            var descriptor = services.FirstOrDefault(item => item.ServiceType == typeof(ModuleConfigurationState));
+            var existing = descriptor?.ImplementationInstance as ModuleConfigurationState;
+            if (existing is not null && ReferenceEquals(existing.Owner, services)) return existing;
+            var state = existing?.Clone(services) ?? new ModuleConfigurationState(services);
+            if (descriptor is null) services.AddSingleton(state);
+            else services[services.IndexOf(descriptor)] = ServiceDescriptor.Singleton(state);
             state.RegisterStore(services);
             services.TryAddSingleton<ModuleInitializationState>();
             return state;
         }
     }
 
-    private sealed class ModuleConfigurationState
+    private sealed class ModuleConfigurationState(IServiceCollection owner)
     {
         private readonly object _sync = new();
         private readonly Dictionary<Type, ExceptionDispatchInfo?> _configured = new();
         private readonly ModuleDiagnosticsStore _diagnostics = new();
         private bool _healthCheckRegistered;
         private ServiceDescriptor? _storeDescriptor;
+        private int _configurationDepth;
+
+        public IServiceCollection Owner { get; } = owner;
+
+        public ModuleConfigurationState Clone(IServiceCollection owner)
+        {
+            lock (_sync)
+            {
+                if (_configurationDepth != 0) throw new InvalidOperationException("Module configuration cannot be copied before its current callback completes.");
+                var clone = new ModuleConfigurationState(owner)
+                {
+                    _healthCheckRegistered = _healthCheckRegistered,
+                    _storeDescriptor = _storeDescriptor
+                };
+                // Replaying registrations already present in the copy would duplicate configuration side effects.
+                foreach (var entry in _configured) clone._configured.Add(entry.Key, entry.Value);
+                foreach (var diagnostic in _diagnostics.GetAll()) clone._diagnostics.Record(diagnostic);
+                return clone;
+            }
+        }
 
         public void RegisterHealthCheck(IServiceCollection services)
         {
@@ -62,6 +84,7 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
                     return;
                 }
                 _configured.Add(moduleType, null);
+                _configurationDepth++;
                 var timer = ModulePhaseTimer.StartNew(moduleType.FullName!, "ConfigureServices");
                 try
                 {
@@ -75,6 +98,10 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
                     _diagnostics.Record(timer.StopFailed(error));
                     RegisterStore(services);
                     throw;
+                }
+                finally
+                {
+                    _configurationDepth--;
                 }
             }
         }
