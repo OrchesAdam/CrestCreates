@@ -77,9 +77,11 @@ public partial class ModuleManifestTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async System.Threading.Tasks.Task GeneratedLifecycle_CopiedCollectionOwnsConfigurationState(bool configureBeforeCopy)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async System.Threading.Tasks.Task GeneratedLifecycle_CopiedCollectionOwnsConfigurationState(bool configureBeforeCopy, bool configureSourceFirst)
     {
         var body = """
             var first = new ServiceCollection();
@@ -87,8 +89,9 @@ public partial class ModuleManifestTests
             """ + (configureBeforeCopy ? "ModuleAutoInitializer.RegisterAllModules(first);\n" : "") + """
             IServiceCollection second = new ServiceCollection();
             foreach (var descriptor in first) second.Add(descriptor);
-            ModuleAutoInitializer.RegisterAllModules(second);
-            ModuleAutoInitializer.RegisterAllModules(first);
+            """ + (configureSourceFirst
+                ? "ModuleAutoInitializer.RegisterAllModules(first);\nModuleAutoInitializer.RegisterAllModules(second);\n"
+                : "ModuleAutoInitializer.RegisterAllModules(second);\nModuleAutoInitializer.RegisterAllModules(first);\n") + """
             using var firstProvider = first.BuildServiceProvider();
             using var secondProvider = second.BuildServiceProvider();
             using var firstHost = new TestHost(firstProvider);

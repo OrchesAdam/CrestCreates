@@ -58,7 +58,7 @@ await host.InitializeModulesAsync();
 host.Run();
 ```
 
-`RegisterAllModules` 对同一 `IServiceCollection` 的同一模块只注册并执行一次 `OnConfigureServices`，另一个 collection 有独立配置状态。复制 service descriptors 时，配置历史、失败事实和健康检查注册标记迁移为新 collection 的独立快照；已经带入的注册不重放，后续新增配置彼此隔离。正在执行的配置回调尚未完成时不允许复制配置快照。初始化 Task 始终由各 provider 持有，不迁移 Task，也不在配置期执行用户 DI 工厂。配置失败会保留异常，重复调用不会重放已发生的副作用。`InitializeAllModulesAsync` 执行前三个阶段，`InitializeModulesAsync` 再执行 AppInit；各阶段在同一个根 provider 内按模块类型共享执行 Task，包括失败和取消结果。多个生成 initializer 重叠引用同一模块时也共享阶段状态；不同 provider 独立执行，即使来自同一个 collection。
+`RegisterAllModules` 对同一 `IServiceCollection` 的同一模块只注册并执行一次 `OnConfigureServices`，另一个 collection 有独立配置状态。配置状态 marker 的 descriptor 在回调开始前和完成（成功/失败）后、以及健康检查注册后发布不可变快照，包含配置历史、失败事实、诊断、健康标记、Store 锚点及完成状态。复制 service descriptors 时只继承复制时已发布的快照，首次使用副本不会回读来源 collection 的实时状态；已经带入的注册不重放，后续变更彼此隔离。复制时仍在执行的快照，即使来源后来完成，也仍然拒绝使用；复制时已经完成的快照，不因来源随后开始新回调而失效。初始化 Task 始终由各 provider 持有，不迁移 Task，也不在配置期执行用户 DI 工厂。配置失败会保留异常，重复调用不会重放已发生的副作用。`InitializeAllModulesAsync` 执行前三个阶段，`InitializeModulesAsync` 再执行 AppInit；各阶段在同一个根 provider 内按模块类型共享执行 Task，包括失败和取消结果。多个生成 initializer 重叠引用同一模块时也共享阶段状态；不同 provider 独立执行，即使来自同一个 collection。
 
 诊断通过 DI 中的 `IModuleDiagnosticsStore` 读取，不再提供进程静态 `Store`。诊断注册描述符捕获当时的固定配置快照，每个 provider 再复制为自己的 Store；已经构建的 provider 即使延迟解析诊断，也不会读到 collection 后续新增的配置事实，再由各自 Store 记录初始化阶段；记录、计数和快照读取在同一把锁下完成。`RegisteredModules` 仅为不可变的生成描述符元数据，不持有 Host 运行状态。Source Generator 只生成注册扩展及应用本地入口，hint 以完整类型身份区分，聚合初始化代码仍由 BuildTasks 唯一生成。普通模块保留 `XExtensions` 公开类名及 `AddX` / `GetX` / `TryGetX` 方法，既有静态调用继续有效；只有当前编译中已有同名非泛型类型/命名空间占用名称，或嵌套 owner 的扩展类名称发生冲突时，冲突扩展类才追加完整 owner 哈希。普通模块与嵌套模块名称冲突时优先保留普通模块公开类名；不同 namespace 的同名模块不视为冲突。嵌套模块的方法名仍包含容器路径及稳定 owner 后缀，避免与普通含下划线的模块名称碰撞。生成的 HostBuilder 静态转发使用 `global::` 全限定目标，避免同名 global alias 重定向注册调用。
 

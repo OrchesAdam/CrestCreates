@@ -24,19 +24,26 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
     {
         lock (services)
         {
-            var descriptor = services.FirstOrDefault(item => item.ServiceType == typeof(ModuleConfigurationState));
-            var existing = descriptor?.ImplementationInstance as ModuleConfigurationState;
-            if (existing is not null && ReferenceEquals(existing.Owner, services)) return existing;
-            var state = existing?.Clone(services) ?? new ModuleConfigurationState(services);
-            if (descriptor is null) services.AddSingleton(state);
-            else services[services.IndexOf(descriptor)] = ServiceDescriptor.Singleton(state);
+            var registration = services.FirstOrDefault(item => item.ServiceType == typeof(ModuleConfigurationRegistration))
+                ?.ImplementationInstance as ModuleConfigurationRegistration;
+            if (registration is not null && ReferenceEquals(registration.State.Owner, services)) return registration.State;
+            var state = new ModuleConfigurationState(services, registration);
             state.RegisterStore(services);
             services.TryAddSingleton<ModuleInitializationState>();
+            state.Publish(services);
             return state;
         }
     }
 
-    private sealed class ModuleConfigurationState(IServiceCollection owner)
+    private sealed record ModuleConfigurationRegistration(
+        ModuleConfigurationState State,
+        KeyValuePair<Type, ExceptionDispatchInfo?>[] Configured,
+        IReadOnlyList<ModulePhaseDiagnostic> Diagnostics,
+        bool HealthCheckRegistered,
+        ServiceDescriptor? StoreDescriptor,
+        bool IsConfiguring);
+
+    private sealed class ModuleConfigurationState
     {
         private readonly object _sync = new();
         private readonly Dictionary<Type, ExceptionDispatchInfo?> _configured = new();
@@ -45,23 +52,18 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
         private ServiceDescriptor? _storeDescriptor;
         private int _configurationDepth;
 
-        public IServiceCollection Owner { get; } = owner;
+        public IServiceCollection Owner { get; }
 
-        public ModuleConfigurationState Clone(IServiceCollection owner)
+        public ModuleConfigurationState(IServiceCollection owner, ModuleConfigurationRegistration? registration)
         {
-            lock (_sync)
-            {
-                if (_configurationDepth != 0) throw new InvalidOperationException("Module configuration cannot be copied before its current callback completes.");
-                var clone = new ModuleConfigurationState(owner)
-                {
-                    _healthCheckRegistered = _healthCheckRegistered,
-                    _storeDescriptor = _storeDescriptor
-                };
-                // Replaying registrations already present in the copy would duplicate configuration side effects.
-                foreach (var entry in _configured) clone._configured.Add(entry.Key, entry.Value);
-                foreach (var diagnostic in _diagnostics.GetAll()) clone._diagnostics.Record(diagnostic);
-                return clone;
-            }
+            Owner = owner;
+            if (registration is null) return;
+            if (registration.IsConfiguring) throw new InvalidOperationException("Module configuration cannot be copied before its current callback completes.");
+            _healthCheckRegistered = registration.HealthCheckRegistered;
+            _storeDescriptor = registration.StoreDescriptor;
+            // Copied descriptors contain these registrations; only their published facts may be inherited.
+            foreach (var entry in registration.Configured) _configured.Add(entry.Key, entry.Value);
+            foreach (var diagnostic in registration.Diagnostics) _diagnostics.Record(diagnostic);
         }
 
         public void RegisterHealthCheck(IServiceCollection services)
@@ -71,6 +73,7 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
                 if (_healthCheckRegistered) return;
                 services.AddHealthChecks().AddCheck<ModuleHealthCheck>("modules", tags: new[] { "modules" });
                 _healthCheckRegistered = true;
+                Publish(services);
             }
         }
 
@@ -85,24 +88,35 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
                 }
                 _configured.Add(moduleType, null);
                 _configurationDepth++;
+                Publish(services);
                 var timer = ModulePhaseTimer.StartNew(moduleType.FullName!, "ConfigureServices");
                 try
                 {
                     configure();
                     _diagnostics.Record(timer.Stop(ModulePhaseStatus.Success));
-                    RegisterStore(services);
                 }
                 catch (Exception error)
                 {
                     _configured[moduleType] = ExceptionDispatchInfo.Capture(error);
                     _diagnostics.Record(timer.StopFailed(error));
-                    RegisterStore(services);
                     throw;
                 }
                 finally
                 {
                     _configurationDepth--;
+                    RegisterStore(services);
+                    Publish(services);
                 }
+            }
+        }
+
+        public void Publish(IServiceCollection services)
+        {
+            lock (_sync)
+            {
+                var registration = new ModuleConfigurationRegistration(this, _configured.ToArray(), _diagnostics.GetAll(),
+                    _healthCheckRegistered, _storeDescriptor, _configurationDepth != 0);
+                services.Replace(ServiceDescriptor.Singleton(registration));
             }
         }
 
