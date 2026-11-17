@@ -52,11 +52,17 @@ builder = ModuleAutoInitializer.RegisterModules(builder);
 
 var host = builder.Build();
 
-// 自动初始化所有模块
-await ModuleAutoInitializer.InitializeAllModulesAsync(host.Services);
+// 执行 PreInit、Init、PostInit 和 AppInit
+await host.InitializeModulesAsync();
 
 host.Run();
 ```
+
+`RegisterAllModules` 对同一 `IServiceCollection` 的同一模块只注册并执行一次 `OnConfigureServices`，另一个 collection 有独立配置状态。配置失败会保留异常，重复调用不会重放已发生的副作用。`InitializeAllModulesAsync` 执行前三个阶段，`InitializeModulesAsync` 再执行 AppInit；各阶段在同一个根 provider 内按模块类型共享执行 Task，包括失败和取消结果。多个生成 initializer 重叠引用同一模块时也共享阶段状态；不同 provider 独立执行，即使来自同一个 collection。
+
+诊断通过 DI 中的 `IModuleDiagnosticsStore` 读取，不再提供进程静态 `Store`。诊断注册描述符捕获当时的固定配置快照，每个 provider 再复制为自己的 Store；已经构建的 provider 即使延迟解析诊断，也不会读到 collection 后续新增的配置事实，再由各自 Store 记录初始化阶段；记录、计数和快照读取在同一把锁下完成。`RegisteredModules` 仅为不可变的生成描述符元数据，不持有 Host 运行状态。Source Generator 只生成按完整类型身份区分 hint 和扩展类名的注册扩展及应用本地入口，聚合初始化代码仍由 BuildTasks 唯一生成。普通模块的 `AddX` / `GetX` / `TryGetX` 方法名保持不变；嵌套模块的方法名包含容器路径及稳定 owner 后缀，避免与普通含下划线的模块名称碰撞，扩展类本身的生成名称不再使用简单模块名。
+
+构建目前每次消费实际 evaluated Compile、解析后的引用、DefineConstants 和导入配置，不使用可能遗漏依赖的 Inputs/Outputs 跳过缓存。三个模块输出（本地清单、聚合清单、initializer）仅在内容改变时写入；无语义变化的构建保留原时间戳。该策略保证重算输入的正确性，不声明已经实现跳过扫描的构建缓存，也不新增 NativeAOT 验证级别。
 
 ## 配置
 

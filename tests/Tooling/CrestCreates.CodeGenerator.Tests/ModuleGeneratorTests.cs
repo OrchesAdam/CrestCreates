@@ -15,6 +15,8 @@ namespace CrestCreates.CodeGenerator.Tests
             var services = new ServiceCollection();
 
             services.AddCoreModule();
+            services.AddCoreModule();
+            Assert.Single(services.Where(descriptor => descriptor.ServiceType == typeof(CoreModule)));
 
             using var provider = services.BuildServiceProvider();
             var coreModule = provider.GetService<CoreModule>();
@@ -45,6 +47,65 @@ namespace CrestCreates.CodeGenerator.Tests
 
             Assert.NotNull(provider.GetApplicationModule());
             Assert.NotNull(provider.TryGetApplicationModule());
+        }
+
+        [Fact]
+        public void SameNamedModules_GenerateDistinctOwnerHintsAndCompile()
+        {
+            const string source = """
+                namespace One { [CrestCreates.Domain.Shared.Attributes.CrestModule] public class SharedModule {} }
+                namespace Two { [CrestCreates.Domain.Shared.Attributes.CrestModule] public class SharedModule {} }
+                """;
+            var result = SourceGeneratorTestHelper.RunGenerator<CrestCreates.CodeGenerator.ModuleGenerator.ModuleSourceGenerator>(source);
+
+            Assert.True(result.CompilationSuccess, string.Join(System.Environment.NewLine, result.GetErrors()));
+            Assert.True(result.HasNoErrors());
+            Assert.Equal(2, result.GeneratedSources.Count);
+            Assert.Contains(result.GeneratedSources, generated => generated.SourceText.Contains("namespace One"));
+            Assert.Contains(result.GeneratedSources, generated => generated.SourceText.Contains("namespace Two"));
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void NestedAndPartialModules_CompileWithoutHintCollisions(bool partial)
+        {
+            var source = partial ? """
+                namespace Fixture {
+                    [CrestCreates.Domain.Shared.Attributes.CrestModule] public partial class EntryModule {}
+                    public partial class EntryModule {}
+                }
+                """ : """
+                namespace Fixture {
+                    public class First { [CrestCreates.Domain.Shared.Attributes.CrestModule] public class SharedModule {} }
+                    public class Second { [CrestCreates.Domain.Shared.Attributes.CrestModule] public class SharedModule {} }
+                }
+                """;
+            var result = SourceGeneratorTestHelper.RunGenerator<CrestCreates.CodeGenerator.ModuleGenerator.ModuleSourceGenerator>(source);
+
+            Assert.True(result.CompilationSuccess, string.Join(System.Environment.NewLine, result.GetErrors()));
+            Assert.True(result.HasNoErrors());
+            Assert.Equal(partial ? 1 : 2, result.GeneratedSources.Count);
+        }
+
+        [Fact]
+        public void NestedAndUnderscoreModuleNames_PreserveOrdinaryRegistrationApi()
+        {
+            const string source = """
+                using Microsoft.Extensions.DependencyInjection;
+                namespace Fixture {
+                    public class First { [CrestCreates.Domain.Shared.Attributes.CrestModule] public class SharedModule {} }
+                    [CrestCreates.Domain.Shared.Attributes.CrestModule] public class First_SharedModule {}
+                    public static class Consumer {
+                        public static void Register(IServiceCollection services) => services.AddFirst_SharedModule();
+                    }
+                }
+                """;
+            var result = SourceGeneratorTestHelper.RunGenerator<CrestCreates.CodeGenerator.ModuleGenerator.ModuleSourceGenerator>(source);
+
+            Assert.True(result.CompilationSuccess, string.Join(System.Environment.NewLine, result.GetErrors()));
+            Assert.True(result.HasNoErrors());
+            Assert.Equal(2, result.GeneratedSources.Count);
         }
 
         [Fact]

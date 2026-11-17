@@ -131,8 +131,7 @@ public class ScanModulesFromSource : Microsoft.Build.Utilities.Task
                     if (!modules.TryAdd(module.FullName, module)) throw new InvalidDataException($"Duplicate module identity: {module.FullName}");
                 }
             }
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(OutputPath))!);
-            File.WriteAllText(OutputPath, JsonSerializer.Serialize(modules.Values, new JsonSerializerOptions { WriteIndented = true }));
+            BuildOutput.WriteIfChanged(OutputPath, JsonSerializer.Serialize(modules.Values, new JsonSerializerOptions { WriteIndented = true }));
             return true;
         }
         catch (Exception ex)

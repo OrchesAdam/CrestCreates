@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -6,48 +5,38 @@ namespace CrestCreates.ModuleDiagnostics.Stores;
 
 public class ModuleDiagnosticsStore : IModuleDiagnosticsStore
 {
-    private readonly ConcurrentDictionary<string, List<ModulePhaseDiagnostic>> _records = new();
-    private volatile int _totalCount;
-    private volatile int _failureCount;
+    private readonly object _sync = new();
+    private readonly Dictionary<string, List<ModulePhaseDiagnostic>> _records = new(System.StringComparer.Ordinal);
+    private int _totalCount;
+    private int _failureCount;
 
-    public bool HasFailures => _failureCount > 0;
-    public int TotalCount => _totalCount;
+    public bool HasFailures { get { lock (_sync) return _failureCount > 0; } }
+    public int TotalCount { get { lock (_sync) return _totalCount; } }
 
     public void Record(ModulePhaseDiagnostic diagnostic)
     {
-        _records.AddOrUpdate(
-            diagnostic.ModuleName,
-            _ => new List<ModulePhaseDiagnostic> { diagnostic },
-            (_, list) =>
-            {
-                list.Add(diagnostic);
-                return list;
-            });
-
-        System.Threading.Interlocked.Increment(ref _totalCount);
-
-        if (diagnostic.Status == ModulePhaseStatus.Failed)
+        lock (_sync)
         {
-            System.Threading.Interlocked.Increment(ref _failureCount);
+            if (!_records.TryGetValue(diagnostic.ModuleName, out var records))
+                _records.Add(diagnostic.ModuleName, records = new List<ModulePhaseDiagnostic>());
+            records.Add(diagnostic);
+            _totalCount++;
+            if (diagnostic.Status == ModulePhaseStatus.Failed) _failureCount++;
         }
     }
 
     public IReadOnlyList<ModulePhaseDiagnostic> GetAll()
     {
-        return _records.Values.SelectMany(v => v).ToList();
+        lock (_sync) return _records.Values.SelectMany(records => records).ToArray();
     }
 
     public IReadOnlyList<ModulePhaseDiagnostic> GetByModule(string moduleName)
     {
-        if (_records.TryGetValue(moduleName, out var list))
-        {
-            return list.ToList();
-        }
-        return System.Array.Empty<ModulePhaseDiagnostic>();
+        lock (_sync) return _records.TryGetValue(moduleName, out var records) ? records.ToArray() : System.Array.Empty<ModulePhaseDiagnostic>();
     }
 
     public IReadOnlyList<ModulePhaseDiagnostic> GetFailed()
     {
-        return GetAll().Where(d => d.Status == ModulePhaseStatus.Failed).ToList();
+        lock (_sync) return _records.Values.SelectMany(records => records).Where(record => record.Status == ModulePhaseStatus.Failed).ToArray();
     }
 }

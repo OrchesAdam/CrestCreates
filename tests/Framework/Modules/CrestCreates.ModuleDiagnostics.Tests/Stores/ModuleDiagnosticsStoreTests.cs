@@ -118,6 +118,112 @@ public class ModuleDiagnosticsStoreTests
     }
 
     [Fact]
+    public void Registration_DoesNotShareDiagnosticsAcrossProviders()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(services);
+        using var first = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        using var second = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var firstStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(first);
+        var secondStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(second);
+        firstStore.Record(CreateFailure("OnlyFirst", "Init", "fixture"));
+
+        firstStore.Should().NotBeSameAs(secondStore);
+        secondStore.GetAll().Should().BeEmpty();
+        secondStore.HasFailures.Should().BeFalse();
+    }
+
+    [Fact]
+    public void BuiltProvider_LazyDiagnosticsDoNotReadLaterConfiguration()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(services, _ => { });
+        using var first = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationTwo>(services, _ => { });
+        using var second = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var firstStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(first);
+        var secondStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(second);
+
+        firstStore.GetAll().Select(record => record.ModuleName).Should().Equal(typeof(ConfigurationOne).FullName);
+        secondStore.GetAll().Select(record => record.ModuleName).Should().Equal(typeof(ConfigurationOne).FullName, typeof(ConfigurationTwo).FullName);
+    }
+
+    private sealed class ConfigurationOne : CrestCreates.Modularity.ModuleBase;
+    private sealed class ConfigurationTwo : CrestCreates.Modularity.ModuleBase;
+
+    [Fact]
+    public void FailedConfiguration_IsNotReplayedAndKeepsOneFailure()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var calls = 0;
+        Action configure = () => CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(services, _ =>
+        {
+            calls++;
+            throw new InvalidOperationException("fixture configuration failure");
+        });
+        configure.Should().Throw<InvalidOperationException>();
+        configure.Should().Throw<InvalidOperationException>();
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var store = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(provider);
+
+        calls.Should().Be(1);
+        store.GetFailed().Should().ContainSingle();
+        store.TotalCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task CancelledInitialization_IsNotReplayed()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(services);
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var state = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState>(provider);
+        var calls = 0;
+        Func<System.Threading.Tasks.Task> initialize = () =>
+        {
+            calls++;
+            return System.Threading.Tasks.Task.FromCanceled(new System.Threading.CancellationToken(true));
+        };
+        var first = state.RunInitializationAsync(typeof(ConfigurationOne), initialize);
+        var second = state.RunInitializationAsync(typeof(ConfigurationOne), initialize);
+        Func<System.Threading.Tasks.Task> wait = () => first;
+        await wait.Should().ThrowAsync<OperationCanceledException>();
+
+        second.Should().BeSameAs(first);
+        first.IsCanceled.Should().BeTrue();
+        calls.Should().Be(1);
+    }
+
+    [Fact]
+    public void RepeatedRegistration_AddsOneHealthCheck()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(services);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(services);
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var options = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckServiceOptions>>(provider);
+
+        options.Value.Registrations.Count(registration => registration.Name == "modules").Should().Be(1);
+    }
+
+    [Fact]
+    public void Record_ConcurrentWritersAndSnapshots_PreserveEveryValue()
+    {
+        const int count = 20000;
+        System.Threading.Tasks.Parallel.For(0, count, index =>
+        {
+            _store.Record(CreateSuccess("Shared", index.ToString()));
+            if (index % 100 == 0) _store.GetAll();
+        });
+
+        _store.TotalCount.Should().Be(count);
+        var snapshot = _store.GetByModule("Shared");
+        snapshot.Should().HaveCount(count);
+        snapshot.Select(record => record.Phase).Distinct().Should().HaveCount(count);
+        _store.GetAll().Should().HaveCount(count);
+    }
+
+    [Fact]
     public void EmptyStore_TotalCountShouldBeZero()
     {
         _store.TotalCount.Should().Be(0);
