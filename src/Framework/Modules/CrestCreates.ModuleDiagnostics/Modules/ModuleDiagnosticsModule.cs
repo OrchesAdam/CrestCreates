@@ -27,6 +27,11 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
             var registration = services.FirstOrDefault(item => item.ServiceType == typeof(ModuleConfigurationRegistration))
                 ?.ImplementationInstance as ModuleConfigurationRegistration;
             if (registration is not null && ReferenceEquals(registration.State.Owner, services)) return registration.State;
+            // The snapshot and the framework's type-based initialization-state registration are published
+            // together; that pairing without a snapshot means the published facts were removed and cannot
+            // be recovered. Factory-based state registrations are user-supplied and stay legitimate.
+            if (registration is null && services.Any(item => item.ServiceType == typeof(ModuleInitializationState) && item.ImplementationType == typeof(ModuleInitializationState)))
+                throw new InvalidOperationException("The module configuration snapshot was removed from this service collection; configuration facts cannot be recovered. Rebuild the composition from its original source.");
             var state = new ModuleConfigurationState(services, registration);
             state.RegisterStore(services);
             services.TryAddSingleton<ModuleInitializationState>();
@@ -127,14 +132,18 @@ public static class ModuleDiagnosticsServiceCollectionExtensions
             if (_storeDescriptor is not null)
             {
                 var index = services.IndexOf(_storeDescriptor);
-                if (index < 0) return;
-                services[index] = descriptor;
+                if (index >= 0)
+                {
+                    services[index] = descriptor;
+                    _storeDescriptor = descriptor;
+                    return;
+                }
+                // The anchor was removed; fall back to the unanchored path so later configuration
+                // rebuilds the default store instead of leaving the service unresolvable.
+                _storeDescriptor = null;
             }
-            else
-            {
-                if (services.Any(item => item.ServiceType == typeof(IModuleDiagnosticsStore))) return;
-                services.Add(descriptor);
-            }
+            if (services.Any(item => item.ServiceType == typeof(IModuleDiagnosticsStore))) return;
+            services.Add(descriptor);
             _storeDescriptor = descriptor;
         }
 

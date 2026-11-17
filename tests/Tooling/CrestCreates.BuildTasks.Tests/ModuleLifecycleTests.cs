@@ -109,6 +109,36 @@ public partial class ModuleManifestTests
     }
 
     [Fact]
+    public async System.Threading.Tasks.Task GeneratedLifecycle_ChainedCopiesInheritPublishedConfigurationFacts()
+    {
+        var result = await RunLifecycle("""
+            var first = new ServiceCollection();
+            first.AddModuleDiagnostics();
+            ModuleAutoInitializer.RegisterAllModules(first);
+            IServiceCollection second = new ServiceCollection();
+            foreach (var descriptor in first) second.Add(descriptor);
+            IServiceCollection third = new ServiceCollection();
+            foreach (var descriptor in second) third.Add(descriptor);
+            ModuleAutoInitializer.RegisterAllModules(third);
+            using var firstProvider = first.BuildServiceProvider();
+            using var secondProvider = second.BuildServiceProvider();
+            using var thirdProvider = third.BuildServiceProvider();
+            using var firstHost = new TestHost(firstProvider);
+            using var secondHost = new TestHost(secondProvider);
+            using var thirdHost = new TestHost(thirdProvider);
+            await ModuleAutoInitializer.InitializeModulesAsync(firstHost);
+            await ModuleAutoInitializer.InitializeModulesAsync(secondHost);
+            await ModuleAutoInitializer.InitializeModulesAsync(thirdHost);
+            return new[] { ProbeModule.Configured, ProbeModule.Initialized,
+                firstProvider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount,
+                secondProvider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount,
+                thirdProvider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount };
+            """);
+
+        result.Should().Equal(1, 3, 5, 5, 5);
+    }
+
+    [Fact]
     public async System.Threading.Tasks.Task GeneratedLifecycle_InitializationFailureIsNotReplayed()
     {
         var result = await RunLifecycle("""

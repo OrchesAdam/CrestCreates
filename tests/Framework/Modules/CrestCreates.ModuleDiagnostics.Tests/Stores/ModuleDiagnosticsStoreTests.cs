@@ -427,6 +427,59 @@ public class ModuleDiagnosticsStoreTests
     }
 
     [Fact]
+    public void RemovedStoreAnchor_RebuildsDefaultStoreOnLaterConfiguration()
+    {
+        var services = new ServiceCollection();
+        services.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        var anchor = services.Single(descriptor => descriptor.ServiceType == typeof(IModuleDiagnosticsStore));
+        services.Remove(anchor);
+
+        services.ConfigureModuleServices<ConfigurationTwo>(_ => { });
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IModuleDiagnosticsStore>().GetAll().Select(record => record.ModuleName)
+            .Should().Equal(typeof(ConfigurationOne).FullName, typeof(ConfigurationTwo).FullName);
+    }
+
+    [Fact]
+    public void RemovedStoreAnchor_DoesNotDisplaceExplicitStore()
+    {
+        var services = new ServiceCollection();
+        services.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        var anchor = services.Single(descriptor => descriptor.ServiceType == typeof(IModuleDiagnosticsStore));
+        services.Remove(anchor);
+        var calls = 0;
+        services.AddSingleton<IModuleDiagnosticsStore>(_ =>
+        {
+            calls++;
+            return new ModuleDiagnosticsStore();
+        });
+
+        services.ConfigureModuleServices<ConfigurationTwo>(_ => { });
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IModuleDiagnosticsStore>().GetAll().Should().BeEmpty();
+        calls.Should().Be(1);
+    }
+
+    [Fact]
+    public void RemovedConfigurationSnapshot_IsRejectedInsteadOfReplayed()
+    {
+        var services = new ServiceCollection();
+        var calls = 0;
+        services.ConfigureModuleServices<ConfigurationOne>(_ => calls++);
+        var snapshot = services.Single(descriptor => descriptor.ServiceType.Name == "ModuleConfigurationRegistration");
+        services.Remove(snapshot);
+
+        Action configureAgain = () => services.ConfigureModuleServices<ConfigurationOne>(_ => calls++);
+        Action diagnosticsAgain = () => services.AddModuleDiagnostics();
+
+        configureAgain.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+        diagnosticsAgain.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+        calls.Should().Be(1);
+    }
+
+    [Fact]
     public void FailedConfiguration_IsNotReplayedAndKeepsOneFailure()
     {
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
