@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj" />
+    <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

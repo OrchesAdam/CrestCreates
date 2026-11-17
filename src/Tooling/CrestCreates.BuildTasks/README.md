@@ -33,18 +33,14 @@ using CrestCreates.Domain.Shared.Attributes;
 
 namespace MyApp.Modules;
 
-[Module(typeof(CoreModule), Order = 0)]
-public class MyModule : IModule
+[CrestModule(typeof(CoreModule), Order = 0)]
+public class MyModule : ModuleBase
 {
-    public string Name => "MyModule";
-    
-    public void OnPreInitialize() { }
-    public void OnInitialize() { }
-    public void OnPostInitialize() { }
-    public void OnConfigureServices(IServiceCollection services) { }
-    public void OnApplicationInitialization(IHost host) { }
+    public override void OnConfigureServices(IServiceCollection services) { }
 }
 ```
+
+Only `CrestCreates.Domain.Shared.Attributes.CrestModuleAttribute` (or an alias resolving to it) is recognized. Roslyn binds attribute and dependency types against the evaluated `Compile` and resolved `ReferencePath` inputs, preserving reference `Aliases`, including references visible only through `extern alias`. Same-named attributes with another bound identity do not create modules. Module and `typeof` dependency identities share the same symbol-based C# type-name format; unresolved dependency types fail the build. `Order` and `AutoRegisterServices` consume compiler-bound typed constants, including valid implicit constant conversions. Direct task callers must supply their resolved references and alias metadata through `ReferencePaths`. Unresolved or ambiguous attribute types on class declarations fail with `CCMB001` and a source location when the attribute name could denote the formal module attribute (rightmost `CrestModule`/`CrestModuleAttribute`, or a using-alias chain resolved in its visible namespace scope, with global usings shared across files); failure does not overwrite an existing manifest. Attribute alias lookup includes the `Attribute` suffix except for verbatim identifiers. A using directive's target excludes aliases declared in its own scope, including global aliases for compilation-unit targets; aliases from enclosing scopes remain visible. Scanning runs before source generators, so other unbound attributes, including invalid peer-alias chains with no formal candidate, are left to CoreCompile, which rejects genuinely missing types and accepts generator-supplied ones. An empty module set writes `[]` manifests and a dependency-free empty initializer.
 
 ### 在应用程序中使用
 
@@ -57,7 +53,7 @@ builder = ModuleAutoInitializer.RegisterModules(builder);
 var host = builder.Build();
 
 // 自动初始化所有模块
-ModuleAutoInitializer.InitializeAllModules(host.Services);
+await ModuleAutoInitializer.InitializeAllModulesAsync(host.Services);
 
 host.Run();
 ```
@@ -83,9 +79,9 @@ host.Run();
 
 ## 工作原理
 
-1. **编译时扫描**: 构建时自动扫描 `[Module]` 属性
-2. **跨项目发现**: 自动发现引用项目中的模块
-3. **拓扑排序**: 根据依赖关系和 Order 值排序
+1. **编译时扫描**: 构建时自动扫描 `[CrestModule]` 属性
+2. **跨项目发现**: 通过引用项目的 `GetCrestCreatesModuleManifestPath` 目标输出收集清单（包含传递引用）；普通未导入此目标的项目不贡献清单。显式贡献的清单必须存在且有效，不能猜测 `obj/Debug` 路径。
+3. **拓扑排序**: 依赖优先，可用节点按 Order、FullName（Ordinal）排序；未知或歧义依赖、循环和冲突身份使构建失败
 4. **代码生成**: 生成类型安全的注册代码
 5. **自动注册**: 生成的代码自动注册到 DI 容器
 
@@ -115,7 +111,7 @@ packages/
 
 ### 模块未被发现
 
-- 检查 `[Module]` 属性是否正确添加
+- 检查 `[CrestModule]` 属性是否正确添加
 - 确认类实现了 `IModule` 接口
 - 验证类是 `public` 的
 
