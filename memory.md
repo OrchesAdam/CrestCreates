@@ -1,4 +1,10 @@
-# CrestCreates platform status — 2026-11-05
+# CrestCreates platform status — 2026-11-06
+
+## 2026-11-17 — 99_RecycleBin 工作区清理（维护者决定）
+
+- 按维护者明确决定，`99_RecycleBin/` 整体从工作区删除并取消 git 跟踪（152 个跟踪文件暂存为删除，其余 265 个为 gitignore 副本；历史内容保留在删除前提交 `13a35f90` 及更早，可恢复）。#131/#132 等防回流守卫本身保留，只保留"不得进入 Compile/ProjectReference/pack/方案输入"与退役声明拒绝逻辑。
+- 配套调整：`ArchivedProjectRegressionArchitectureTests` 删除 `Archive_KeepsEveryOriginalPathAndItsAdjudication` 磁盘存在性测试，`CopyArchived*Contract` 两个 helper 改为内嵌归档文件内容快照（`IEventStore.cs`、`CleanupAuditLogsDto.cs` 逐字保留）；`CapabilityMapCoverageArchitectureTests` 删除 `ArchivedIndex_MatchesRecycleBinContent`（archived-index 结构断言并入 `ScopeAdjudications`）。`docs/Feature/CapabilityMap.md` 与设计 spec 中 16 个指向 `99_RecycleBin` 的 Markdown 链接降级为代码片段，相关叙述补记清理事实。
+- 证据：`tests/Boundary/CrestCreates.DependencyBoundaries.Tests` 全量串行通过（见本条下方补记的日志计数）。变更未提交；产品运行链、AOT 支持级别零变化。
 
 ## 2026-11-13 — R3-23 module discovery + manifest collection
 
@@ -170,7 +176,9 @@
 - Before production fixes, three new regressions failed (two MVC secret-disclosure cases and tenant aggregate-only probe). Final serial verification using /home/orches/.dotnet/dotnet: Web.Tests 115/115; existing IntegrationTests filtered to HealthConnectivityIntegrationTests 2/2 against Podman PostgreSQL/Redis, including stopped-server negatives and Redis recovery on the same multiplexer. Logs: /tmp/r305-before.log, /tmp/r305-web-final.log, /tmp/r305-integration.log. No new NativeAOT evidence. Existing HealthCheckSourceGenerator CS8785 array TypedConstant warning was observed before and after; generator changes are outside this slice. No commit/push/PR performed.
 
 
-Verified remote master: `64aeb1bd2fa3dab23c410c1b672ebb4034797cc4` (2026-11-05, PR #161 status sync).
+Local checkout synchronized to user-selected `a1dc49145cef729b0fabf15c41389f3c7e1b0e34` on 2026-11-06 (PR #170).
+Local origin/master points to the same object; no fresh fetch was performed in this synchronization.
+Historical remote verification: `64aeb1bd2fa3dab23c410c1b672ebb4034797cc4` (2026-11-05, PR #161 status sync).
 #121 implementation and bounded adjudication items are all delivered; final closure awaits
 this documentation reconciliation being merged. See
 [closure audit](docs/review/2026-11-05-issue-121-closure-audit.md).
@@ -1406,3 +1414,20 @@ Source: round-2 review item 8. Public APIs unchanged; no test file was modified.
   `CrestCreates.slnx` build 0 errors / 433 warnings (59s); server-side and sample unit suites sequential —
   Capability 180/180, DynamicApi 145/145, RabbitMQ 58/58, Asset sample 29/29, Procurement sample 29/29.
   GitHub workflows remain manually disabled; this is execution evidence, not a CI run.
+
+
+## 2026-11-06 — Round 3 review resynchronized to a1dc4914
+
+- Fast-forwarded local master from user-selected 64aeb1bd to user-selected a1dc4914.
+  Local plan, reference index and memory were preserved in
+  `99_RecycleBin/2026-11-06-pre-a1dc4914-sync/`; earlier pre-64aeb1bd backup remains.
+- Updated all 54 issue task cards without renumbering or losing the 234 acceptance assertions.
+  Permission AOP implementation is fixed; Library migration/seed closure is fixed in source;
+  retired generic CRUD/Clone stubs, four implementation splits and sample composition must not
+  be implemented again. Remaining safety/concurrency/Provider findings retain their evidence limits.
+- Fresh SDK 10.0.114 source-build targeted checks: PermissionMo + AOP UoW 7/7, compile-time-only
+  and OpenIddict seed-closure guards 4/4. Initial sandbox IPC failures retried serially with
+  escalation; no diagnostic suppression. No full suite, real PG startup or native execution.
+- Report: `docs/review/2026-11-06-round3-a1dc4914-recheck.md`; plan:
+  `docs/superpowers/plans/2026-11-06-round3-review-fix-plan.md`; commands/TRX:
+  `docs/review/probes/round3-a1dc4914-sync/`. No product edits beyond merged commits, no commit/push.

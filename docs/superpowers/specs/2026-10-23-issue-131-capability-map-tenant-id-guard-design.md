@@ -40,7 +40,7 @@
 | 通用 Draft：`src/Metadata/Draft/CrestCreates.Draft{,.Abstractions}` | 4+2 个源码文件；Workflow 对 abstractions、Workflow.Tests 对实现有引用，但其 C# 中未检出实际使用；其余消费者为自身测试。TenantIsolatedDraftStore.DeleteAsync 直接透传，null context 放行 | 实验性业务草稿，拟归档两个生产项目与专用测试、移除 Workflow 无效引用。不是 DescriptorDraft 的别名，不自动做 payload 转换，不用其现有弱隔离用例证明治理主链安全 |
 | EventStore：`src/Runtime/Eventing/CrestCreates.EventBus.EventStore` | 无 ProjectReference 消费者；仅内存 retry store、反射 JSON serializer；EventRetryService 用 Guid.NewGuid 删除原记录，不能表达真实重试结算 | 未交付可靠事件存储，拟归档。事件投递/重放继续走正式 LocalEvent/RabbitMQ/Outbox；它们不是 event sourcing 数据迁移目标，不宣称具备该能力 |
 
-上述共 7 个生产项目。源码落点：[ConfigurationService](../../../99_RecycleBin/issue-131-capability-map/src/Framework/Infrastructure/CrestCreates.Configuration/Services/ConfigurationService.cs)、[Draft wrapper](../../../99_RecycleBin/issue-131-capability-map/src/Metadata/Draft/CrestCreates.Draft/TenantIsolatedDraftStore.cs)、[EventRetryService](../../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventRetryService.cs)。
+上述共 7 个生产项目。源码落点：`ConfigurationService`、`Draft wrapper`、`EventRetryService`。
 
 EventStore 的 `IEventStore` / `IEventStoreSerializer` / `IEventRetryStore` 仍位于 `CrestCreates.EventBus.Abstract/IEventStore.cs`。本轮检索未发现正式链消费；实施须重新核验接口、实现及生成输入，再将无消费者的该契约文件一并归档，不能只搬实现却留下可误导的新入口。独立保留文件中的在用契约，不能按目录名整包搬走 EventBus.Abstract。
 

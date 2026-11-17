@@ -10,7 +10,6 @@ namespace CrestCreates.DependencyBoundaries.Tests;
 public class CapabilityMapCoverageArchitectureTests
 {
     private const string MapRelativePath = "docs/Feature/CapabilityMap.md";
-    private const string ArchiveRoot = "99_RecycleBin/issue-131-capability-map";
 
     private static readonly string[] DecisionIds =
     [
@@ -90,39 +89,7 @@ public class CapabilityMapCoverageArchitectureTests
         var archived = ReadIndexRows(root, "archived-index").Select(Columns).ToArray();
         Assert.Equal(8, archived.Length);
         Assert.Equal(7, archived.Count(columns => columns[0].StartsWith("src/", StringComparison.Ordinal)));
-    }
-
-    [Fact]
-    public void ArchivedIndex_MatchesRecycleBinContent()
-    {
-        var root = FindRepositoryRoot();
-        var rows = ReadIndexRows(root, "archived-index");
-        Assert.Equal(8, rows.Count);
-
-        var archivedOnDisk = Directory
-            .EnumerateFiles(Path.Combine(root, ArchiveRoot), "*.csproj", SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/'))
-            .Select(path => path[(ArchiveRoot.Length + 1)..])
-            .OrderBy(path => path, StringComparer.Ordinal)
-            .ToArray();
-
-        var indexedOriginal = rows
-            .Select(Columns)
-            .Select(columns => columns[0])
-            .OrderBy(path => path, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(archivedOnDisk, indexedOriginal);
-
-        foreach (var columns in rows.Select(Columns))
-        {
-            var recycleBinPath = Regex.Match(columns[1], @"\((?<target>[^)]+)\)").Groups["target"].Value;
-            recycleBinPath = recycleBinPath.StartsWith("../../", StringComparison.Ordinal)
-                ? recycleBinPath["../../".Length..]
-                : recycleBinPath;
-            Assert.True(File.Exists(Path.Combine(root, recycleBinPath)), $"archived project is not locatable: {columns[0]}");
-            Assert.StartsWith("D-0", columns[2]);
-        }
+        Assert.All(archived, columns => Assert.StartsWith("D-0", columns[2]));
     }
 
     [Fact]

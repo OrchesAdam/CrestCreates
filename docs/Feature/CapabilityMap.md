@@ -28,7 +28,7 @@
 
 ## 2. #131 裁定条目
 
-12 条裁定覆盖 15 个生产项目：已归档 7 个（D-01…D-06，落点见 §4.1 与 `99_RecycleBin/issue-131-capability-map/README.md`），保留或限界保留 8 个（D-07…D-12）。
+12 条裁定覆盖 15 个生产项目：已归档 7 个（D-01…D-06，落点见 §4.1；归档正文已于 2026-11-17 从工作区清理，完整内容保留在 git 历史 `99_RecycleBin/issue-131-capability-map/`），保留或限界保留 8 个（D-07…D-12）。
 
 归档状态口径：设计阶段写「拟归档」，S3 执行后本表写「归档（S3 已执行）」。防回流由 [ArchivedProjectRegressionArchitectureTests](../../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/ArchivedProjectRegressionArchitectureTests.cs) 承担。
 
@@ -74,9 +74,9 @@
 | --- | --- |
 | 项目 | `src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj`（3 源文件） |
 | 定位 | 执行实现（`ConfigurationService` 包装 `IConfiguration`）+ `ConfigurationModule`（`[CrestModule]`） |
-| 唯一装配入口 | [ConfigurationModule.cs:15](../../99_RecycleBin/issue-131-capability-map/src/Framework/Infrastructure/CrestCreates.Configuration/Modules/ConfigurationModule.cs) `services.AddScoped<IConfigurationService, ConfigurationService>()` |
+| 唯一装配入口 | `ConfigurationModule.cs:15` `services.AddScoped<IConfigurationService, ConfigurationService>()` |
 | 真实调用点 | 仅本包内部。基线检索：`IConfigurationService` 在项目外无任何 `.cs` 出现；无 ProjectReference 消费者；方案成员 `CrestCreates.slnx:73`、`solutions/CrestCreates.All.slnx:48`、`CrestCreates.Framework.slnx:31`、`CrestCreates.Metadata.slnx:18`、`CrestCreates.Platform.slnx:32`、`CrestCreates.Runtime.slnx:16` |
-| 功能状态 | 归档（S3 已执行）。归档前行为事实：[ConfigurationService.cs](../../99_RecycleBin/issue-131-capability-map/src/Framework/Infrastructure/CrestCreates.Configuration/Services/ConfigurationService.cs) 的 `Set<T>` 抛 `NotSupportedException`，`Subscribe<T>` 只把回调存进字典，`NotifySubscribers()` 是空循环体，`Refresh()` 仅 `IConfigurationRoot.Reload()` |
+| 功能状态 | 归档（S3 已执行）。归档前行为事实：`ConfigurationService.cs` 的 `Set<T>` 抛 `NotSupportedException`，`Subscribe<T>` 只把回调存进字典，`NotifySubscribers()` 是空循环体，`Refresh()` 仅 `IConfigurationRoot.Reload()` |
 | 执行证据 | 无测试入口；不适用 |
 | 处理结论 | 整体归档。启动期配置用 `IConfiguration`/Options，运行时可管理配置用正式 Setting Management（AGENTS「平台能力」）。不得宣称 `Subscribe` 可用，也不得为它另补一套管理存储。技术责任 Infrastructure/Settings |
 
@@ -89,7 +89,7 @@
 | 唯一装配入口 | 无 DI 扩展；`TenantIsolatedDraftStore` 需手工构造 |
 | 真实调用点 | `src/Runtime/Workflow/CrestCreates.Workflow/CrestCreates.Workflow.csproj:20` 引用 Draft.Abstractions、`tests/Runtime/Workflow/CrestCreates.Workflow.Tests/CrestCreates.Workflow.Tests.csproj:26` 引用 Draft；两个 C# 项目均未检出 `IDraftStore`/`DraftRecord`/`TenantIsolatedDraftStore` 使用。其余消费者只有专用测试 `tests/Metadata/Draft/CrestCreates.Draft.Tests/`。方案成员：`CrestCreates.slnx:126-127`、`solutions/CrestCreates.All.slnx:99-100`、`CrestCreates.Metadata.slnx`、`CrestCreates.Platform.slnx`、`CrestCreates.Runtime.slnx`，另有 `samples/ProcurementApproval/CrestCreates.Sample.ProcurementApproval.slnx:45` 引用 Draft.Abstractions；CI 步骤 `.github/workflows/ci.yml:180`、`full-validation.yml:116` 运行 `CrestCreates.Draft.Tests` |
 | 功能状态 | 归档（S3 已执行）；实验性业务草稿，从未交付 |
-| 执行证据 | JIT：`tests/Metadata/Draft/CrestCreates.Draft.Tests/`（`TenantIsolatedDraftStoreTests.cs` 等）存在；[TenantIsolatedDraftStore.cs](../../99_RecycleBin/issue-131-capability-map/src/Metadata/Draft/CrestCreates.Draft/TenantIsolatedDraftStore.cs) 的 `DeleteAsync` 直接透传内层 store，null context 时放行不过滤。其隔离强度**不用于**证明治理主链安全 |
+| 执行证据 | JIT：`tests/Metadata/Draft/CrestCreates.Draft.Tests/`（`TenantIsolatedDraftStoreTests.cs` 等）存在；`TenantIsolatedDraftStore.cs` 的 `DeleteAsync` 直接透传内层 store，null context 时放行不过滤。其隔离强度**不用于**证明治理主链安全 |
 | 处理结论 | 归档两个生产项目 + 专用测试 `CrestCreates.Draft.Tests`，并移除 Workflow/Workflow.Tests 的无效引用与上述方案、CI 输入。它不是 DescriptorDraft 的别名，不自动做 payload 转换。防复活边界（禁止 PG 重新注册旧 `IDraftStore`）保留为守卫，不随实验退出放松。技术责任 Metadata/Draft |
 
 ### D-06 未交付事件存储：CrestCreates.EventBus.EventStore（已归档）
@@ -98,10 +98,10 @@
 | --- | --- |
 | 项目 | `src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj`（4 源文件） |
 | 定位 | 实验执行实现 + `EventStoreModule`（`[CrestModule]`），引用 EventBus.Abstract / Domain / Infrastructure |
-| 归档前装配入口（不可用于 active Host） | [EventStoreModule.cs:12-13](../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventStoreModule.cs)：`IEventStoreSerializer → EventStoreJsonSerializer`、`IEventRetryStore → InMemoryEventRetryStore` 单例注册 |
+| 归档前装配入口（不可用于 active Host） | `EventStoreModule.cs:12-13`：`IEventStoreSerializer → EventStoreJsonSerializer`、`IEventRetryStore → InMemoryEventRetryStore` 单例注册 |
 | 归档前调用点（以下方案成员均已移除） | 无 ProjectReference 消费者、无测试；原方案成员 `CrestCreates.slnx:180`、`solutions/CrestCreates.All.slnx:151`、`CrestCreates.Platform.slnx:134`、`CrestCreates.Runtime.slnx:68`。契约文件 `src/Runtime/Eventing/CrestCreates.EventBus.Abstract/IEventStore.cs`（`IEventStore`/`IEventStoreSerializer`/`IEventRetryStore`）在本包之外仅被本包实现，`IEventStore` 无任何实现或消费 |
 | 功能状态 | 归档（S3 已执行）；归档前状态为未交付 |
-| 执行证据 | 归档实现无运行测试入口。[EventRetryService.cs](../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/EventRetryService.cs) 用 `Guid.NewGuid()` 新建再删除记录，不表达真实重试结算；序列化器为反射 JSON；重试存储为内存 |
+| 执行证据 | 归档实现无运行测试入口。`EventRetryService.cs` 用 `Guid.NewGuid()` 新建再删除记录，不表达真实重试结算；序列化器为反射 JSON；重试存储为内存 |
 | 处理结论 | 归档实现，并把无消费者的 `IEventStore.cs` 契约文件一并归档（保留 EventBus.Abstract 内其余在用契约，不按目录整包搬走）。事件投递与重放继续走正式 LocalEvent / RabbitMQ / Outbox 主链；它们不是 event sourcing 迁移目标，不宣称具备该能力。技术责任 Eventing |
 | 退出守卫（R3-17） | [ArchivedProjectRegressionArchitectureTests](../../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/ArchivedProjectRegressionArchitectureTests.cs) 与 #132 共用每项目一次 Debug MSBuild 求值及语法遍历：精确禁止七个旧类型、旧命名空间、项目/包身份、原 active 路径与实际归档路径重新进入 Compile/资源/有效 NuGet 源码分发输入。变异涵盖真实归档接口改名、非 `.cs` Compile、alias、typed 模块注册、导入与属性展开引用、有效 Pack/BuildAction/PackagePath。注释、历史字符串、移除输入、Pack=false 和相似在用接口为阴性对照。现有 generated module manifests 另行盘点无旧模块/契约名，不将已生成产物存在性作为干净检出的测试前提。仅仓库有限模式退出守卫，不代表全配置/全 TFM、任意 target 生成输入或 EventStore 功能执行证据；执行结果见 `memory.md` R3-17。 |
 
@@ -179,7 +179,7 @@
 
 ## 3. 归档与准入
 
-归档操作、顺序与验证要求见设计 §5；S3 已把 7 个生产项目、通用 Draft 专用测试与无消费者的 `IEventStore.cs` 移至 `99_RecycleBin/issue-131-capability-map/`，保留原相对路径与 README，并在 [ArchivedProjectRegressionArchitectureTests](../../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/ArchivedProjectRegressionArchitectureTests.cs) 建立禁止回流守卫。
+归档操作、顺序与验证要求见设计 §5；S3 已把 7 个生产项目、通用 Draft 专用测试与无消费者的 `IEventStore.cs` 移至 `99_RecycleBin/issue-131-capability-map/`，保留原相对路径与 README，并在 [ArchivedProjectRegressionArchitectureTests](../../tests/Boundary/CrestCreates.DependencyBoundaries.Tests/ArchivedProjectRegressionArchitectureTests.cs) 建立禁止回流守卫。归档正文已于 2026-11-17 经维护者决定从工作区清理并取消 git 跟踪，可从合并前的提交历史恢复。
 
 S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并附准入记录（由 `CapabilityMapCoverageArchitectureTests` 强制）：为什么既有项目不能承载、层次与依赖边界、消费者或静态聚合目的、唯一声明与装配路径、验证方式、支持级别、维护责任、未交付时的退出条件。缺记录即门禁失败。
 
@@ -322,19 +322,19 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 
 ### 4.1 归档项目索引
 
-`99_RecycleBin/issue-131-capability-map/` 下的项目不再是 active `src/**/*.csproj`，由 `ArchivedProjectRegressionArchitectureTests` 校验其落点真实、且不进入任何 Compile/ProjectReference/pack/方案输入。
+`99_RecycleBin/issue-131-capability-map/` 下的项目不再是 active `src/**/*.csproj`，由 `ArchivedProjectRegressionArchitectureTests` 校验其不进入任何 Compile/ProjectReference/pack/方案输入；归档正文已清理出工作区，落点与 README 以 git 历史为准。
 
 <!-- capability-map:archived-index:start -->
 | Archived project | Recycle-bin path | Record |
 | --- | --- | --- |
-| src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj | [src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj](../../99_RecycleBin/issue-131-capability-map/src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj) | D-04 |
-| src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj | [src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj](../../99_RecycleBin/issue-131-capability-map/src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj) | D-01 |
-| src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj | [src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj](../../99_RecycleBin/issue-131-capability-map/src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj) | D-02 |
-| src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj | [src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj](../../99_RecycleBin/issue-131-capability-map/src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj) | D-05 |
-| src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj | [src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj](../../99_RecycleBin/issue-131-capability-map/src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj) | D-05 |
-| src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj | [src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj](../../99_RecycleBin/issue-131-capability-map/src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj) | D-03 |
-| src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj | [src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj](../../99_RecycleBin/issue-131-capability-map/src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj) | D-06 |
-| tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj | [tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj](../../99_RecycleBin/issue-131-capability-map/tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj) | D-05 |
+| src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj | `src/Framework/Infrastructure/CrestCreates.Configuration/CrestCreates.Configuration.csproj` | D-04 |
+| src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj | `src/Integrations/CrestCreates.Integration.ExternalApi/CrestCreates.Integration.ExternalApi.csproj` | D-01 |
+| src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj | `src/Integrations/CrestCreates.Integration.LegacyDatabase/CrestCreates.Integration.LegacyDatabase.csproj` | D-02 |
+| src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj | `src/Metadata/Draft/CrestCreates.Draft.Abstractions/CrestCreates.Draft.Abstractions.csproj` | D-05 |
+| src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj | `src/Metadata/Draft/CrestCreates.Draft/CrestCreates.Draft.csproj` | D-05 |
+| src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj | `src/Runtime/Agent/CrestCreates.Agent.Runtime/CrestCreates.Agent.Runtime.csproj` | D-03 |
+| src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj | `src/Runtime/Eventing/CrestCreates.EventBus.EventStore/CrestCreates.EventBus.EventStore.csproj` | D-06 |
+| tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj | `tests/Metadata/Draft/CrestCreates.Draft.Tests/CrestCreates.Draft.Tests.csproj` | D-05 |
 <!-- capability-map:archived-index:end -->
 
 ## 5. 非 src 项目的作用说明
@@ -361,7 +361,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 | --- | --- | --- | --- | --- |
 | `CrestCreates.Accountability.Abstractions` | 抽象契约（scope/policy/run/batch/hold/`IAuditRetentionStore`/精确 receipt 读取） | 已交付指定边界（V1） | retention 过滤 38/38；PG 20/20 | 保留；后续扩展必须保持 receipt/Unknown 语义 |
 | `CrestCreates.Accountability` | 执行实现（`AuditRetentionExecutor`，终态拒绝新批、receipt 对账、镜像失败优先、显式导出） | 已交付指定边界（V1） | retention 过滤 38/38；PG 20/20；原生九场景 | 保留；不得新增公开故障开关或裸删旁路 |
-| `CrestCreates.AuditLogging` + `CrestCreates.Application` | admission 与 typed job（含 `AuditLogging.Retention.Export`） | 已交付指定边界（V1） | Application retention 21/21；P08 真实身份/权限/Setting/HTTP 2/2 | 保留；旧 cleanup 已归档到 `99_RecycleBin/issue-132-audit-retention/` |
+| `CrestCreates.AuditLogging` + `CrestCreates.Application` | admission 与 typed job（含 `AuditLogging.Retention.Export`） | 已交付指定边界（V1） | Application retention 21/21；P08 真实身份/权限/Setting/HTTP 2/2 | 保留；旧 cleanup 曾归档到 `99_RecycleBin/issue-132-audit-retention/`（工作区副本已于 2026-11-17 清理，见 git 历史） |
 | `CrestCreates.Runtime.Persistence.PostgreSql` | Provider（V016/V017、sink、retention store） | 已交付指定边界（V1，仅 PostgreSQL 固定数据库） | PG 20/20；sink/迁移集成过滤 22/22；NativeAOT linux-x64 九场景 + 总 sentinel + 三类负控 | 限界保留；EF/FreeSql/SqlSugar/MongoDB、其他 RID、自动调度未验证 |
 
 支持声明：正式 PostgreSQL retention V1 的已执行场景为 **NativeAOT-verified（linux-x64）**；
