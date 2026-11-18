@@ -12,6 +12,8 @@ public class ModulePhaseTimerTests
     public void StartNew_Stop_ShouldRecordNonZeroElapsedTime()
     {
         var timer = ModulePhaseTimer.StartNew("TestModule", "PreInit");
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        System.Threading.SpinWait.SpinUntil(() => System.Diagnostics.Stopwatch.GetElapsedTime(started) >= TimeSpan.FromMilliseconds(1));
 
         var result = timer.Stop(ModulePhaseStatus.Success);
 

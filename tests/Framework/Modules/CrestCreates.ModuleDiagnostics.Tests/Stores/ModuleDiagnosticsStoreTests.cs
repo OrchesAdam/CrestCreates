@@ -1,7 +1,11 @@
 using System;
 using System.Linq;
+using CrestCreates.ModuleDiagnostics.Modules;
 using CrestCreates.ModuleDiagnostics.Stores;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace CrestCreates.ModuleDiagnostics.Tests.Stores;
@@ -115,6 +119,525 @@ public class ModuleDiagnosticsStoreTests
 
         all.Should().HaveCount(2);
         all.Select(r => r.Status).Should().Contain(new[] { ModulePhaseStatus.Success, ModulePhaseStatus.Failed });
+    }
+
+    [Fact]
+    public void Registration_DoesNotShareDiagnosticsAcrossProviders()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(services);
+        using var first = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        using var second = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var firstStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(first);
+        var secondStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(second);
+        firstStore.Record(CreateFailure("OnlyFirst", "Init", "fixture"));
+
+        firstStore.Should().NotBeSameAs(secondStore);
+        secondStore.GetAll().Should().BeEmpty();
+        secondStore.HasFailures.Should().BeFalse();
+    }
+
+    [Fact]
+    public void BuiltProvider_LazyDiagnosticsDoNotReadLaterConfiguration()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(services, _ => { });
+        using var first = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationTwo>(services, _ => { });
+        using var second = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var firstStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(first);
+        var secondStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(second);
+
+        firstStore.GetAll().Select(record => record.ModuleName).Should().Equal(typeof(ConfigurationOne).FullName);
+        secondStore.GetAll().Select(record => record.ModuleName).Should().Equal(typeof(ConfigurationOne).FullName, typeof(ConfigurationTwo).FullName);
+    }
+
+    private sealed class ConfigurationOne : CrestCreates.Modularity.ModuleBase;
+    private sealed class ConfigurationTwo : CrestCreates.Modularity.ModuleBase;
+    private sealed class ConfigurationThree : CrestCreates.Modularity.ModuleBase;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CopiedCollection_UsesPublishedHealthSnapshot(bool configureSourceFirst)
+    {
+        var first = new ServiceCollection();
+        first.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        IServiceCollection second = new ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        if (configureSourceFirst)
+        {
+            first.AddModuleDiagnostics();
+            second.AddModuleDiagnostics();
+        }
+        else
+        {
+            second.AddModuleDiagnostics();
+            first.AddModuleDiagnostics();
+        }
+        using var firstProvider = first.BuildServiceProvider();
+        using var secondProvider = second.BuildServiceProvider();
+
+        firstProvider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Count(registration => registration.Name == "modules").Should().Be(1);
+        secondProvider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Count(registration => registration.Name == "modules").Should().Be(1);
+    }
+
+    [Fact]
+    public void CopiedCollection_DoesNotInheritFailurePublishedAfterCopy()
+    {
+        var first = new ServiceCollection();
+        first.AddModuleDiagnostics();
+        IServiceCollection second = new ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        var calls = 0;
+        Action configureFirst = () => first.ConfigureModuleServices<ConfigurationOne>(_ =>
+        {
+            calls++;
+            throw new InvalidOperationException("source-only failure");
+        });
+        configureFirst.Should().Throw<InvalidOperationException>();
+
+        second.ConfigureModuleServices<ConfigurationOne>(_ => calls++);
+
+        using var firstProvider = first.BuildServiceProvider();
+        using var secondProvider = second.BuildServiceProvider();
+        calls.Should().Be(2);
+        firstProvider.GetRequiredService<IModuleDiagnosticsStore>().GetFailed().Should().ContainSingle();
+        secondProvider.GetRequiredService<IModuleDiagnosticsStore>().GetFailed().Should().BeEmpty();
+        secondProvider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void CopiedCollection_KeepsCopiedStoreAnchorAfterSourcePublishesLaterFacts()
+    {
+        var first = new ServiceCollection();
+        first.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        IServiceCollection second = new ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        first.ConfigureModuleServices<ConfigurationTwo>(_ => { });
+
+        second.ConfigureModuleServices<ConfigurationThree>(_ => { });
+
+        using var firstProvider = first.BuildServiceProvider();
+        using var secondProvider = second.BuildServiceProvider();
+        firstProvider.GetRequiredService<IModuleDiagnosticsStore>().GetAll().Select(record => record.ModuleName)
+            .Should().BeEquivalentTo(typeof(ConfigurationOne).FullName, typeof(ConfigurationTwo).FullName);
+        secondProvider.GetRequiredService<IModuleDiagnosticsStore>().GetAll().Select(record => record.ModuleName)
+            .Should().BeEquivalentTo(typeof(ConfigurationOne).FullName, typeof(ConfigurationThree).FullName);
+    }
+
+    [Fact]
+    public void CopiedCollection_ReadySnapshotDoesNotBecomeIncompleteWhenSourceStartsLater()
+    {
+        var first = new ServiceCollection();
+        first.AddModuleDiagnostics();
+        IServiceCollection second = new ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        var calls = 0;
+
+        first.ConfigureModuleServices<ConfigurationOne>(_ =>
+        {
+            calls++;
+            second.ConfigureModuleServices<ConfigurationOne>(_ => calls++);
+        });
+
+        using var firstProvider = first.BuildServiceProvider();
+        using var secondProvider = second.BuildServiceProvider();
+        calls.Should().Be(2);
+        firstProvider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount.Should().Be(1);
+        secondProvider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void CopiedCollection_IncompleteSnapshotStaysRejectedAfterSourceCompletes()
+    {
+        var first = new ServiceCollection();
+        IServiceCollection second = new ServiceCollection();
+        first.ConfigureModuleServices<ConfigurationOne>(services =>
+        {
+            foreach (var descriptor in services) second.Add(descriptor);
+            services.AddSingleton("only-source");
+        });
+
+        Action configureSecond = () => second.AddModuleDiagnostics();
+
+        configureSecond.Should().Throw<InvalidOperationException>().WithMessage("*current callback completes*");
+        using var provider = first.BuildServiceProvider();
+        provider.GetRequiredService<string>().Should().Be("only-source");
+        configureSecond.Should().Throw<InvalidOperationException>().WithMessage("*current callback completes*");
+    }
+
+    [Fact]
+    public void CopiedCollection_PreservesConfigurationFactsWithoutSharingState()
+    {
+        var first = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var calls = 0;
+        Action configure = () => CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(first, _ => calls++);
+        configure();
+        Microsoft.Extensions.DependencyInjection.IServiceCollection second = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(second, _ => calls++);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationTwo>(second, _ => calls++);
+        using var firstProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(first);
+        using var secondProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(second);
+
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationTwo>(first, _ => calls++);
+        using var updatedFirst = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(first);
+        calls.Should().Be(3);
+        Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(updatedFirst).TotalCount.Should().Be(2);
+        Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(firstProvider).GetAll()
+            .Select(record => record.ModuleName).Should().Equal(typeof(ConfigurationOne).FullName);
+        Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(secondProvider).GetAll()
+            .Select(record => record.ModuleName).Should().Equal(typeof(ConfigurationOne).FullName, typeof(ConfigurationTwo).FullName);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task CopiedCollection_DoesNotSharePendingInitialization()
+    {
+        var first = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(first);
+        using var firstProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(first);
+        var gate = new System.Threading.Tasks.TaskCompletionSource(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var firstState = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState>(firstProvider);
+        var pending = firstState.RunInitializationAsync(typeof(ConfigurationOne), () => { calls++; return gate.Task; });
+        Microsoft.Extensions.DependencyInjection.IServiceCollection second = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(second);
+        using var secondProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(second);
+        var secondState = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState>(secondProvider);
+        var completed = secondState.RunInitializationAsync(typeof(ConfigurationOne), () => { calls++; return System.Threading.Tasks.Task.CompletedTask; });
+        await completed.WaitAsync(TimeSpan.FromSeconds(2));
+        gate.SetResult();
+        await pending;
+
+        completed.Should().NotBeSameAs(pending);
+        secondState.Should().NotBeSameAs(firstState);
+        calls.Should().Be(2);
+    }
+
+    [Fact]
+    public void CopiedCollection_PreservesExplicitStoreFactory()
+    {
+        var first = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var calls = 0;
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<IModuleDiagnosticsStore>(first, provider =>
+        {
+            provider.Should().NotBeNull();
+            calls++;
+            return new ModuleDiagnosticsStore();
+        });
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(first, _ => { });
+        Microsoft.Extensions.DependencyInjection.IServiceCollection second = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationTwo>(second, _ => { });
+        calls.Should().Be(0);
+        using var firstProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(first);
+        using var secondProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(second);
+        var firstStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(firstProvider);
+        var secondStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(secondProvider);
+
+        calls.Should().Be(2);
+        firstStore.Should().NotBeSameAs(secondStore);
+    }
+
+    [Fact]
+    public void CopiedCollection_DoesNotInvokeInitializationFactoryDuringConfiguration()
+    {
+        var first = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var calls = 0;
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState>(first, provider =>
+        {
+            provider.Should().NotBeNull();
+            calls++;
+            return new CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState();
+        });
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(first);
+        Microsoft.Extensions.DependencyInjection.IServiceCollection second = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(second);
+        calls.Should().Be(0);
+        using var firstProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(first);
+        using var secondProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(second);
+        var firstState = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState>(firstProvider);
+        var secondState = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState>(secondProvider);
+
+        calls.Should().Be(2);
+        firstState.Should().NotBeSameAs(secondState);
+    }
+
+    [Fact]
+    public void CopiedCollection_PreservesFailureWithoutSuppressingOtherCollectionsConfiguration()
+    {
+        var first = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var calls = 0;
+        Action firstFailure = () => CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(first, _ =>
+        {
+            calls++;
+            throw new InvalidOperationException("copied configuration failure");
+        });
+        firstFailure.Should().Throw<InvalidOperationException>();
+        Microsoft.Extensions.DependencyInjection.IServiceCollection second = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        Action copiedFailure = () => CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(second, _ => calls++);
+        copiedFailure.Should().Throw<InvalidOperationException>().WithMessage("copied configuration failure");
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationTwo>(second, _ => calls++);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationTwo>(first, _ => calls++);
+        using var firstProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(first);
+        using var secondProvider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(second);
+        var firstStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(firstProvider);
+        var secondStore = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(secondProvider);
+
+        calls.Should().Be(3);
+        firstStore.GetFailed().Should().ContainSingle();
+        secondStore.GetFailed().Should().ContainSingle();
+        firstStore.TotalCount.Should().Be(2);
+        secondStore.TotalCount.Should().Be(2);
+    }
+
+    [Fact]
+    public void CopiedCollection_RejectsIncompleteConfigurationSnapshot()
+    {
+        var first = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Action configure = () => CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(first, _ =>
+        {
+            Microsoft.Extensions.DependencyInjection.IServiceCollection second = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+            foreach (var descriptor in first) second.Add(descriptor);
+            CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(second);
+        });
+
+        configure.Should().Throw<InvalidOperationException>().WithMessage("*current callback completes*");
+    }
+
+    [Fact]
+    public void CopiedCollection_HealthRegistrationRemainsIdempotent()
+    {
+        var first = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(first);
+        Microsoft.Extensions.DependencyInjection.IServiceCollection second = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(second);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(second);
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(second);
+        var options = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckServiceOptions>>(provider);
+
+        options.Value.Registrations.Count(registration => registration.Name == "modules").Should().Be(1);
+    }
+
+    [Fact]
+    public void RemovedStoreAnchor_RebuildsDefaultStoreOnLaterConfiguration()
+    {
+        var services = new ServiceCollection();
+        services.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        var anchor = services.Single(descriptor => descriptor.ServiceType == typeof(IModuleDiagnosticsStore));
+        services.Remove(anchor);
+
+        services.ConfigureModuleServices<ConfigurationTwo>(_ => { });
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IModuleDiagnosticsStore>().GetAll().Select(record => record.ModuleName)
+            .Should().Equal(typeof(ConfigurationOne).FullName, typeof(ConfigurationTwo).FullName);
+    }
+
+    [Fact]
+    public void RemovedStoreAnchor_DoesNotDisplaceExplicitStore()
+    {
+        var services = new ServiceCollection();
+        services.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        var anchor = services.Single(descriptor => descriptor.ServiceType == typeof(IModuleDiagnosticsStore));
+        services.Remove(anchor);
+        var calls = 0;
+        services.AddSingleton<IModuleDiagnosticsStore>(_ =>
+        {
+            calls++;
+            return new ModuleDiagnosticsStore();
+        });
+
+        services.ConfigureModuleServices<ConfigurationTwo>(_ => { });
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IModuleDiagnosticsStore>().GetAll().Should().BeEmpty();
+        calls.Should().Be(1);
+    }
+
+    [Fact]
+    public void RemovedConfigurationSnapshot_IsRejectedInsteadOfReplayed()
+    {
+        var services = new ServiceCollection();
+        var calls = 0;
+        services.ConfigureModuleServices<ConfigurationOne>(_ => calls++);
+        var snapshot = services.Single(descriptor => descriptor.ServiceType.Name == "ModuleConfigurationRegistration");
+        services.Remove(snapshot);
+
+        Action configureAgain = () => services.ConfigureModuleServices<ConfigurationOne>(_ => calls++);
+        Action diagnosticsAgain = () => services.AddModuleDiagnostics();
+
+        configureAgain.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+        diagnosticsAgain.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+        calls.Should().Be(1);
+    }
+
+    [Fact]
+    public void RemovedAnchor_RepeatedConfigurationAndDiagnosticsHealStore()
+    {
+        var services = new ServiceCollection();
+        services.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        services.Remove(services.Single(descriptor => descriptor.ServiceType == typeof(IModuleDiagnosticsStore)));
+
+        services.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        services.AddModuleDiagnostics();
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IModuleDiagnosticsStore>().TotalCount.Should().Be(1);
+        new CrestCreates.ModuleDiagnostics.HealthChecks.ModuleHealthCheck(provider.GetRequiredService<IModuleDiagnosticsStore>()).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void TypeBasedStatePreRegistrationWithoutSnapshot_IsRejected()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ModuleInitializationState, ModuleInitializationState>();
+
+        Action configure = () => services.AddModuleDiagnostics();
+
+        configure.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+    }
+
+    [Fact]
+    public void CopiedCollection_RemovedSnapshot_RejectsCopyWithoutAffectingSource()
+    {
+        var first = new ServiceCollection();
+        first.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        IServiceCollection second = new ServiceCollection();
+        foreach (var descriptor in first) second.Add(descriptor);
+        second.Remove(second.Single(descriptor => descriptor.ServiceType.Name == "ModuleConfigurationRegistration"));
+
+        Action configureCopy = () => second.ConfigureModuleServices<ConfigurationOne>(_ => { });
+        Action diagnosticsCopy = () => second.AddModuleDiagnostics();
+        configureCopy.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+        diagnosticsCopy.Should().Throw<InvalidOperationException>().WithMessage("*snapshot was removed*");
+
+        first.ConfigureModuleServices<ConfigurationTwo>(_ => { });
+        using var sourceProvider = first.BuildServiceProvider();
+        sourceProvider.GetRequiredService<IModuleDiagnosticsStore>().GetAll().Select(record => record.ModuleName)
+            .Should().Equal(typeof(ConfigurationOne).FullName, typeof(ConfigurationTwo).FullName);
+    }
+
+    private sealed class RaceModule<T> : CrestCreates.Modularity.ModuleBase;
+
+    [Fact]
+    public void ConcurrentConfiguration_DoesNotFalseRejectDuringSnapshotReplace()
+    {
+        var workerTypes = new[]
+        {
+            typeof(RaceModule<int>), typeof(RaceModule<long>), typeof(RaceModule<short>), typeof(RaceModule<byte>),
+            typeof(RaceModule<uint>), typeof(RaceModule<ulong>), typeof(RaceModule<ushort>), typeof(RaceModule<sbyte>)
+        };
+        var falseRejections = 0;
+        var otherErrors = new System.Collections.Generic.List<Exception>();
+        for (var round = 0; round < 300; round++)
+        {
+            var services = new ServiceCollection();
+            services.AddModuleDiagnostics();
+            System.Threading.Tasks.Parallel.For(0, 8, worker =>
+            {
+                try
+                {
+                    services.ConfigureModuleServices<RaceModule<object>>(_ => { });
+                    var configure = typeof(ModuleDiagnosticsServiceCollectionExtensions)
+                        .GetMethod(nameof(ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices))!
+                        .MakeGenericMethod(workerTypes[worker]);
+                    configure.Invoke(null, new object[] { services, (Action<IServiceCollection>)(_ => { }) });
+                }
+                catch (Exception raw)
+                {
+                    var error = raw is System.Reflection.TargetInvocationException invocation && invocation.InnerException is not null
+                        ? invocation.InnerException
+                        : raw;
+                    if (error is InvalidOperationException invalid && invalid.Message.Contains("snapshot was removed"))
+                        System.Threading.Interlocked.Increment(ref falseRejections);
+                    else
+                        lock (otherErrors) otherErrors.Add(error);
+                }
+            });
+        }
+
+        falseRejections.Should().Be(0);
+        otherErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void FailedConfiguration_IsNotReplayedAndKeepsOneFailure()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var calls = 0;
+        Action configure = () => CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.ConfigureModuleServices<ConfigurationOne>(services, _ =>
+        {
+            calls++;
+            throw new InvalidOperationException("fixture configuration failure");
+        });
+        configure.Should().Throw<InvalidOperationException>();
+        configure.Should().Throw<InvalidOperationException>();
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var store = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<IModuleDiagnosticsStore>(provider);
+
+        calls.Should().Be(1);
+        store.GetFailed().Should().ContainSingle();
+        store.TotalCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task CancelledInitialization_IsNotReplayed()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(services);
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var state = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState>(provider);
+        var calls = 0;
+        Func<System.Threading.Tasks.Task> initialize = () =>
+        {
+            calls++;
+            return System.Threading.Tasks.Task.FromCanceled(new System.Threading.CancellationToken(true));
+        };
+        var first = state.RunInitializationAsync(typeof(ConfigurationOne), initialize);
+        var second = state.RunInitializationAsync(typeof(ConfigurationOne), initialize);
+        Func<System.Threading.Tasks.Task> wait = () => first;
+        await wait.Should().ThrowAsync<OperationCanceledException>();
+
+        second.Should().BeSameAs(first);
+        first.IsCanceled.Should().BeTrue();
+        calls.Should().Be(1);
+    }
+
+    [Fact]
+    public void RepeatedRegistration_AddsOneHealthCheck()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(services);
+        CrestCreates.ModuleDiagnostics.Modules.ModuleDiagnosticsServiceCollectionExtensions.AddModuleDiagnostics(services);
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var options = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckServiceOptions>>(provider);
+
+        options.Value.Registrations.Count(registration => registration.Name == "modules").Should().Be(1);
+    }
+
+    [Fact]
+    public void Record_ConcurrentWritersAndSnapshots_PreserveEveryValue()
+    {
+        const int count = 20000;
+        System.Threading.Tasks.Parallel.For(0, count, index =>
+        {
+            _store.Record(CreateSuccess("Shared", index.ToString()));
+            if (index % 100 == 0) _store.GetAll();
+        });
+
+        _store.TotalCount.Should().Be(count);
+        var snapshot = _store.GetByModule("Shared");
+        snapshot.Should().HaveCount(count);
+        snapshot.Select(record => record.Phase).Distinct().Should().HaveCount(count);
+        _store.GetAll().Should().HaveCount(count);
     }
 
     [Fact]

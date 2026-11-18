@@ -450,7 +450,7 @@ public partial class ModuleManifestTests
         dependency.FullName.Should().Be(expectedFullName);
         modules.Single(module => module.Name == "Root").DependsOn.Should().Equal(expectedFullName);
         Generate(modules).Should().BeTrue();
-        File.ReadAllText(Path.Combine(_directory, "initializer.cs")).Should().Contain($"services.AddSingleton<{expectedFullName}>();");
+        File.ReadAllText(Path.Combine(_directory, "initializer.cs")).Should().Contain($"services.TryAddSingleton<global::{expectedFullName}>();");
     }
 
     [Theory]
@@ -1031,8 +1031,8 @@ public partial class ModuleManifestTests
         var code = File.ReadAllText(Path.Combine(_directory, "initializer.cs"));
         Generate(modules.Reverse()).Should().BeTrue();
         File.ReadAllText(Path.Combine(_directory, "initializer.cs")).Should().Be(code);
-        code.IndexOf("services.AddSingleton<Ns.Dep>", StringComparison.Ordinal).Should().BeLessThan(code.IndexOf("services.AddSingleton<Ns.Z>", StringComparison.Ordinal));
-        code.IndexOf("services.AddSingleton<Ns.A>", StringComparison.Ordinal).Should().BeLessThan(code.IndexOf("services.AddSingleton<Ns.B>", StringComparison.Ordinal));
+        code.IndexOf("services.TryAddSingleton<global::Ns.Dep>", StringComparison.Ordinal).Should().BeLessThan(code.IndexOf("services.TryAddSingleton<global::Ns.Z>", StringComparison.Ordinal));
+        code.IndexOf("services.TryAddSingleton<global::Ns.A>", StringComparison.Ordinal).Should().BeLessThan(code.IndexOf("services.TryAddSingleton<global::Ns.B>", StringComparison.Ordinal));
         code.Should().NotContain("_registeredModules.OrderBy");
     }
 }

@@ -159,9 +159,10 @@ public class CrestWebPresetTests
 
         using var serviceProvider = builder.Services.BuildServiceProvider();
 
-        serviceProvider.GetRequiredService<IModuleDiagnosticsStore>()
-            .Should()
-            .BeSameAs(ModuleDiagnosticsServiceCollectionExtensions.Store);
+        serviceProvider.GetRequiredService<IModuleDiagnosticsStore>().Should().NotBeNull();
+        using var anotherProvider = builder.Services.BuildServiceProvider();
+        serviceProvider.GetRequiredService<IModuleDiagnosticsStore>().Should()
+            .NotBeSameAs(anotherProvider.GetRequiredService<IModuleDiagnosticsStore>());
 
         var registrations = serviceProvider
             .GetRequiredService<IOptions<HealthCheckServiceOptions>>()

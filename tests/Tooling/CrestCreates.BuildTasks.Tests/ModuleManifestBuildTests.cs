@@ -71,10 +71,43 @@ public partial class ModuleManifestTests
             .Should().Equal("Fixture.Dep", "Fixture.First", "Fixture.NestedModules.Dep");
         var initializer = Path.Combine(hostObj, "ModuleAutoInitializer.g.cs");
         var code = File.ReadAllText(initializer);
-        code.Split("services.AddSingleton<Fixture.Dep>();").Length.Should().Be(2);
-        code.Split("services.AddSingleton<Fixture.First>();").Length.Should().Be(2);
-        code.IndexOf("services.AddSingleton<Fixture.Dep>", StringComparison.Ordinal).Should().BeLessThan(code.IndexOf("services.AddSingleton<Fixture.First>", StringComparison.Ordinal));
+        code.Split("services.TryAddSingleton<global::Fixture.Dep>();").Length.Should().Be(2);
+        code.Split("services.TryAddSingleton<global::Fixture.First>();").Length.Should().Be(2);
+        code.IndexOf("services.TryAddSingleton<global::Fixture.Dep>", StringComparison.Ordinal).Should().BeLessThan(code.IndexOf("services.TryAddSingleton<global::Fixture.First>", StringComparison.Ordinal));
         Directory.GetDirectories(_directory, "Debug", SearchOption.AllDirectories).Should().BeEmpty();
+
+        var stableTime = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        foreach (var output in new[] { leafManifest, aggregate, initializer }) File.SetLastWriteTimeUtc(output, stableTime);
+        var unchanged = await RunBuild(host, packaged ? "package-unchanged" : "source-unchanged");
+        unchanged.ExitCode.Should().Be(0, unchanged.Log);
+        foreach (var output in new[] { leafManifest, aggregate, initializer }) File.GetLastWriteTimeUtc(output).Should().Be(stableTime, output);
+
+        var originalSource = File.ReadAllText(source);
+        File.WriteAllText(source, originalSource + "\n#if R324_ENABLED\n[CM] public class ConditionalModule : Parent {}\n#endif\n");
+        FileWith("Directory.Build.targets", "<Project><PropertyGroup><DefineConstants>$(DefineConstants);R324_ENABLED</DefineConstants></PropertyGroup></Project>");
+        var conditional = await RunBuild(host, packaged ? "package-conditional" : "source-conditional");
+        conditional.ExitCode.Should().Be(0, conditional.Log);
+        JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(aggregate))!
+            .Select(module => module.FullName).Should().Contain("Fixture.ConditionalModule");
+
+        FileWith("Directory.Build.targets", "<Project />");
+        var imported = await RunBuild(host, packaged ? "package-imported" : "source-imported");
+        imported.ExitCode.Should().Be(0, imported.Log);
+        JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(aggregate))!
+            .Select(module => module.FullName).Should().NotContain("Fixture.ConditionalModule");
+
+        File.WriteAllText(source, originalSource.Replace("ModuleOptions.FirstOrder", "ReferenceOptions.Order", StringComparison.Ordinal));
+        var contractSource = Path.Combine(Path.GetDirectoryName(contracts)!, "Contracts.cs");
+        File.AppendAllText(contractSource, "\nnamespace Fixture { public static class ReferenceOptions { public const int Order = 11; } }\n");
+        var referenceAdded = await RunBuild(host, packaged ? "package-reference-added" : "source-reference-added");
+        referenceAdded.ExitCode.Should().Be(0, referenceAdded.Log);
+        JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(leafManifest))!
+            .Single(module => module.Name == "First").Order.Should().Be(11);
+        File.WriteAllText(contractSource, File.ReadAllText(contractSource).Replace("Order = 11", "Order = 12", StringComparison.Ordinal));
+        var referenceChanged = await RunBuild(host, packaged ? "package-reference-changed" : "source-reference-changed");
+        referenceChanged.ExitCode.Should().Be(0, referenceChanged.Log);
+        JsonSerializer.Deserialize<List<CollectModuleManifests.ModuleManifest>>(File.ReadAllText(aggregate))!
+            .Single(module => module.Name == "First").Order.Should().Be(12);
 
         // An ordinary rebuild must replace every stale manifest and initializer.
         File.WriteAllText(source, "namespace Fixture; public class Ordinary {}");
@@ -134,7 +167,11 @@ public partial class ModuleManifestTests
                     <EnableEntityPermissionsScan>false</EnableEntityPermissionsScan>
                     <CrestCreatesBuildTasksAssembly>{SecurityElement.Escape(typeof(ScanModulesFromSource).Assembly.Location)}</CrestCreatesBuildTasksAssembly>
                   </PropertyGroup>
-                  <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup>
+                  <ItemGroup>
+                    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+                    <Reference Include="CrestCreates.Modularity"><HintPath>{SecurityElement.Escape(typeof(CrestCreates.Modularity.ModuleBase).Assembly.Location)}</HintPath></Reference>
+                    <Reference Include="CrestCreates.ModuleDiagnostics"><HintPath>{SecurityElement.Escape(typeof(CrestCreates.ModuleDiagnostics.Modules.ModuleInitializationState).Assembly.Location)}</HintPath></Reference>
+                  </ItemGroup>
                   {(reference == null ? "" : $"<ItemGroup><ProjectReference Include=\"{SecurityElement.Escape(reference)}\" Aliases=\"global,contracts\" /></ItemGroup>")}
                   {(targets == null ? "" : $"<Import Project=\"{SecurityElement.Escape(targets)}\" />")}
                   <Import Project="$(R323FailureTargets)" Condition="'$(R323FailureTargets)' != '' and '$(MSBuildProjectName)' == 'Host'" />
@@ -217,41 +254,6 @@ public partial class ModuleManifestTests
         }
         namespace Fixture.CrestCreates.Domain.Shared.Attributes {
           public class CrestModuleAttribute : Attribute {}
-        }
-        namespace CrestCreates.Modularity {
-          public interface IModule {
-            void OnConfigureServices(IServiceCollection services);
-            Task OnPreInitializeAsync(); Task OnInitializeAsync(); Task OnPostInitializeAsync();
-            Task OnApplicationInitializationAsync(IHost host);
-          }
-          public class ModuleBase : IModule {
-            public void OnConfigureServices(IServiceCollection services) {}
-            public Task OnPreInitializeAsync() => Task.CompletedTask;
-            public Task OnInitializeAsync() => Task.CompletedTask;
-            public Task OnPostInitializeAsync() => Task.CompletedTask;
-            public Task OnApplicationInitializationAsync(IHost host) => Task.CompletedTask;
-          }
-          public record ModuleDescriptor(Type ModuleType, int Order, bool AutoRegisterServices);
-        }
-        namespace CrestCreates.ModuleDiagnostics.Timing {
-          public enum ModulePhaseStatus { Success, Failed }
-          public record PhaseResult(string ModuleName, string Phase, ModulePhaseStatus Status, TimeSpan Elapsed, string ErrorMessage);
-          public class ModulePhaseTimer {
-            public static ModulePhaseTimer StartNew(string name, string phase) => new();
-            public PhaseResult Stop(ModulePhaseStatus status) => new("", "", status, TimeSpan.Zero, "");
-            public PhaseResult StopFailed(Exception error) => Stop(ModulePhaseStatus.Failed);
-          }
-        }
-        namespace CrestCreates.ModuleDiagnostics.Stores {
-          public class ModuleDiagnosticsStore {
-            public void Record(CrestCreates.ModuleDiagnostics.Timing.PhaseResult phase) {}
-            public IEnumerable<CrestCreates.ModuleDiagnostics.Timing.PhaseResult> GetAll() => Array.Empty<CrestCreates.ModuleDiagnostics.Timing.PhaseResult>();
-          }
-        }
-        namespace CrestCreates.ModuleDiagnostics.Modules {
-          public static class ModuleDiagnosticsServiceCollectionExtensions {
-            public static CrestCreates.ModuleDiagnostics.Stores.ModuleDiagnosticsStore Store { get; } = new();
-          }
         }
         """;
 }

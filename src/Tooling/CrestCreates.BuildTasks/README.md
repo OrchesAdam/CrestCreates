@@ -52,11 +52,17 @@ builder = ModuleAutoInitializer.RegisterModules(builder);
 
 var host = builder.Build();
 
-// 自动初始化所有模块
-await ModuleAutoInitializer.InitializeAllModulesAsync(host.Services);
+// 执行 PreInit、Init、PostInit 和 AppInit
+await host.InitializeModulesAsync();
 
 host.Run();
 ```
+
+`RegisterAllModules` 对同一 `IServiceCollection` 的同一模块只注册并执行一次 `OnConfigureServices`，另一个 collection 有独立配置状态。配置状态 marker 的 descriptor 在回调开始前和完成（成功/失败）后、以及健康检查注册后发布不可变快照，包含配置历史、失败事实、诊断、健康标记、Store 锚点及完成状态。复制 service descriptors 时只继承复制时已发布的快照，首次使用副本不会回读来源 collection 的实时状态；已经带入的注册不重放，后续变更彼此隔离。复制时仍在执行的快照，即使来源后来完成，也仍然拒绝使用；复制时已经完成的快照，不因来源随后开始新回调而失效。副本可以再次复制，链式副本按复制时已发布的事实逐级重建配置状态。移除 Store 锚点 descriptor 不会使后续配置失效：下一次配置按当前快照重建默认 Store，重复配置已配置模块与重复诊断注册也幂等自愈；若此时存在显式 `IModuleDiagnosticsStore` 注册，仍尊重显式注册。配置快照 descriptor 被移除而框架的类型型初始化状态注册仍在时，后续配置或诊断注册显式拒绝（fail-closed），不重放已执行的回调；以工厂或实例预注册初始化状态不受影响，类型型预注册与框架注册形状相同、无法区分，同样被拒绝（不支持）；框架注册被整体移除则视为全新组合，不在该保护边界内。配置与诊断入口按 collection 串行化，快照发布在同一把锁下原子替换，正常并发配置不会被误判为快照移除。初始化 Task 始终由各 provider 持有，不迁移 Task，也不在配置期执行用户 DI 工厂。配置失败会保留异常，重复调用不会重放已发生的副作用。`InitializeAllModulesAsync` 执行前三个阶段，`InitializeModulesAsync` 再执行 AppInit；各阶段在同一个根 provider 内按模块类型共享执行 Task，包括失败和取消结果。多个生成 initializer 重叠引用同一模块时也共享阶段状态；不同 provider 独立执行，即使来自同一个 collection。
+
+诊断通过 DI 中的 `IModuleDiagnosticsStore` 读取，不再提供进程静态 `Store`。诊断注册描述符捕获当时的固定配置快照，每个 provider 再复制为自己的 Store；已经构建的 provider 即使延迟解析诊断，也不会读到 collection 后续新增的配置事实，再由各自 Store 记录初始化阶段；记录、计数和快照读取在同一把锁下完成。`RegisteredModules` 仅为不可变的生成描述符元数据，不持有 Host 运行状态。Source Generator 只生成注册扩展及应用本地入口，hint 以完整类型身份区分，聚合初始化代码仍由 BuildTasks 唯一生成。普通模块保留 `XExtensions` 公开类名及 `AddX` / `GetX` / `TryGetX` 方法，既有静态调用继续有效；只有当前编译中已有同名非泛型类型/命名空间占用名称，或嵌套 owner 的扩展类名称发生冲突时，冲突扩展类才追加完整 owner 哈希。普通模块与嵌套模块名称冲突时优先保留普通模块公开类名；不同 namespace 的同名模块不视为冲突。嵌套模块的方法名仍包含容器路径及稳定 owner 后缀，避免与普通含下划线的模块名称碰撞。生成的 HostBuilder 静态转发使用 `global::` 全限定目标，避免同名 global alias 重定向注册调用。
+
+构建目前每次消费实际 evaluated Compile、解析后的引用、DefineConstants 和导入配置，不使用可能遗漏依赖的 Inputs/Outputs 跳过缓存。三个模块输出（本地清单、聚合清单、initializer）仅在内容改变时写入；无语义变化的构建保留原时间戳。该策略保证重算输入的正确性，不声明已经实现跳过扫描的构建缓存，也不新增 NativeAOT 验证级别。
 
 ## 配置
 

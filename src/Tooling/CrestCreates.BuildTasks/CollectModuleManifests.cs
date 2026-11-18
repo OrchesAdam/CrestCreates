@@ -46,8 +46,7 @@ public class CollectModuleManifests : Microsoft.Build.Utilities.Task
                     else allModules.Add(module.FullName, module);
                 }
             }
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(OutputPath))!);
-            File.WriteAllText(OutputPath, JsonSerializer.Serialize(allModules.Values, new JsonSerializerOptions { WriteIndented = true }));
+            BuildOutput.WriteIfChanged(OutputPath, JsonSerializer.Serialize(allModules.Values, new JsonSerializerOptions { WriteIndented = true }));
             return true;
         }
         catch (Exception ex)
