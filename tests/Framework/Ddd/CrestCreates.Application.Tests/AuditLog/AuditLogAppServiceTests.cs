@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.AuditLog;
 using CrestCreates.Application.Contracts.DTOs.AuditLog;
+using CrestCreates.Application.Tests.TestHelpers;
 using CrestCreates.Domain.AuditLog;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.DTOs;
@@ -64,7 +65,7 @@ public class AuditLogAppServiceTests
             .ReturnsAsync(new PagedResult<CrestCreates.Domain.AuditLog.AuditLog>(
                 auditLogs, 2, 0, 10));
 
-        var appService = new AuditLogAppService(mockRepository.Object);
+        var appService = new AuditLogAppService(mockRepository.Object, PermissivePermissionChecker.Create());
 
         var request = new AuditLogPagedRequestDto
         {
@@ -113,7 +114,7 @@ public class AuditLogAppServiceTests
                 })
             .ReturnsAsync(() => capturedResult!);
 
-        var appService = new AuditLogAppService(mockRepository.Object);
+        var appService = new AuditLogAppService(mockRepository.Object, PermissivePermissionChecker.Create());
 
         var request = new AuditLogPagedRequestDto
         {
@@ -163,7 +164,7 @@ public class AuditLogAppServiceTests
             .ReturnsAsync(new PagedResult<CrestCreates.Domain.AuditLog.AuditLog>(
                 new List<CrestCreates.Domain.AuditLog.AuditLog>(), 0, 0, 10));
 
-        var appService = new AuditLogAppService(mockRepository.Object);
+        var appService = new AuditLogAppService(mockRepository.Object, PermissivePermissionChecker.Create());
 
         var request = new AuditLogPagedRequestDto { PageIndex = 0, PageSize = 10 };
 

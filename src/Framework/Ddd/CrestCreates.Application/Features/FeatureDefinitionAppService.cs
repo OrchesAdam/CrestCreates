@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Features;
 using CrestCreates.Application.Contracts.Interfaces;
@@ -24,7 +25,7 @@ public class FeatureDefinitionAppService : IFeatureDefinitionAppService
         _permissionChecker = permissionChecker;
     }
 
-    public async Task<List<FeatureDefinitionDto>> GetAllAsync()
+    public async Task<List<FeatureDefinitionDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var definitions = _featureDefinitionManager.GetAll();
@@ -38,7 +39,7 @@ public class FeatureDefinitionAppService : IFeatureDefinitionAppService
         return dtos;
     }
 
-    public async Task<FeatureDefinitionDto?> GetAsync(string name)
+    public async Task<FeatureDefinitionDto?> GetAsync(string name, CancellationToken cancellationToken = default)
     {
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var definition = _featureDefinitionManager.GetOrNull(name);
@@ -50,7 +51,7 @@ public class FeatureDefinitionAppService : IFeatureDefinitionAppService
         return MapToDto(definition);
     }
 
-    public async Task<List<FeatureGroupDto>> GetGroupsAsync()
+    public async Task<List<FeatureGroupDto>> GetGroupsAsync(CancellationToken cancellationToken = default)
     {
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         var groups = _featureDefinitionManager.GetGroups();

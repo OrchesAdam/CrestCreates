@@ -1,4 +1,5 @@
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +11,8 @@ public static class TenantManagementServiceCollectionExtensions
 {
     public static IServiceCollection AddTenantManagement(this IServiceCollection services)
     {
-        services.TryAddScoped<ITenantAppService, TenantAppService>();
+        services.TryAddScoped<CrestCreates.Application.Contracts.Interfaces.ITenantAppService, TenantAppService>();
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IPermissionDefinitionProvider, TenantManagementPermissionDefinitionProvider>());
         services.TryAddScoped<TenantInitializationOrchestrator>();
         services.TryAddScoped<ITenantSettingDefaultsSeeder, TenantSettingDefaultsSeeder>();
         services.TryAddScoped<ITenantFeatureDefaultsSeeder, TenantFeatureDefaultsSeeder>();

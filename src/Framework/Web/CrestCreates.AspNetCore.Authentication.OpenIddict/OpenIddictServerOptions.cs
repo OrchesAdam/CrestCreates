@@ -12,6 +12,7 @@ public class OpenIddictServerOptions
     public string Issuer { get; set; } = string.Empty;
     public bool EnableDevelopmentEphemeralKeys { get; set; }
     public bool EnableDevelopmentPublicPasswordClient { get; set; }
+    public bool EnableDevelopmentHttpTransport { get; set; }
 
     // Keep previous keys during rotation until all tokens protected by them expire.
     // Programmatic key/certificate instances remain owned by the caller.

@@ -1,53 +1,23 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using CrestCreates.Application.AuditLog;
-using CrestCreates.Application.Contracts.Interfaces;
-using CrestCreates.Application.Contracts.DTOs.Tenants;
+using CrestCreates.AspNetCore.Authentication.OpenIddict;
+using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.AuditLogging.Middlewares;
-using CrestCreates.AuditLogging.Services;
-using CrestCreates.DbContextProvider.Abstract;
 using CrestCreates.Security.Abstractions;
-using CrestCreates.Domain.AuditLog;
-using CrestCreates.Domain.DataFilter;
-using CrestCreates.Domain.DomainEvents;
-using CrestCreates.Domain.Permission;
-using CrestCreates.Domain.Repositories;
-using CrestCreates.Domain.Repositories.Permission;
-using CrestCreates.MultiTenancy.Abstract;
-using CrestCreates.Data.Abstractions;
-using CrestCreates.Data.EFCore.DbContexts;
-using CrestCreates.Data.EFCore.Extensions;
-using CrestCreates.AspNetCore.Authentication.OpenIddict;
-using CrestCreates.Data.EFCore.Repositories;
-using CrestCreates.Data.EFCore.Settings;
-using CrestCreates.Data.EFCore.UnitOfWork;
-using CrestCreates.Event.Abstractions;
-using CrestCreates.Event;
-using CrestCreates.EventBus.Abstractions;
-using CrestCreates.EventBus.Local;
-using CrestCreates.Security.Abstractions;
-using CrestCreates.Security.Modules;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using LibraryManagement.EntityFrameworkCore;
-using LibraryManagement.Domain.Repositories;
-using LibraryManagement.EntityFrameworkCore.Repositories;
-using LibraryManagement.Application.Contracts.Interfaces;
-using LibraryManagement.Application.Services;
-using Npgsql;
+using ErpManagement.EntityFrameworkCore;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
-using Microsoft.AspNetCore.TestHost;
+using Npgsql;
 using OpenIddict.Abstractions;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -55,8 +25,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace CrestCreates.IntegrationTests;
 
-public sealed class LibraryManagementWebApplicationFactory
-    : WebApplicationFactory<Program>, IAsyncLifetime
+public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
         .WithDatabase("crestcreates_test")
@@ -65,141 +34,89 @@ public sealed class LibraryManagementWebApplicationFactory
         .Build();
 
     private readonly string _schemaName = $"itest_{Guid.NewGuid():N}";
-    private string _baseConnectionString = null!;
-    private NpgsqlConnection _sharedConnection = null!;
+    private Task _seedTask = Task.CompletedTask;
 
-    internal NpgsqlConnection SharedConnection => _sharedConnection;
-    private readonly SemaphoreSlim _seedLock = new(1, 1);
-    private bool _seedCompleted;
+    internal const string AuditTenantName = "tenant-a";
+    internal Guid AuditTenantId { get; } = Guid.NewGuid();
+    internal Guid HostTenantId { get; private set; }
 
-    public string ConnectionString => $"{_baseConnectionString};Search Path={_schemaName}";
+    public string ConnectionString => new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString())
+    {
+        SearchPath = _schemaName
+    }.ConnectionString;
 
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
-        _baseConnectionString = _postgres.GetConnectionString();
-        EnsureSchemaCreated();
-        _sharedConnection = new NpgsqlConnection(ConnectionString);
-        await _sharedConnection.OpenAsync();
+        await using (var connection = new NpgsqlConnection(_postgres.GetConnectionString()))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"""CREATE SCHEMA "{_schemaName}";""";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        _seedTask = SeedAsync();
+        await _seedTask;
     }
 
-    private void EnsureSchemaCreated()
+    public Task EnsureSeedCompleteAsync() => _seedTask;
+
+    private async Task SeedAsync()
     {
-        using var connection = new NpgsqlConnection(_baseConnectionString);
-        connection.Open();
+        // Services starts ERP's HostMigrationAndSeedRunner before fixture-only data is inserted.
+        await using var scope = Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ErpManagementDbContext>();
+        var hostTenant = await dbContext.Tenants.SingleAsync(tenant => tenant.Name == "host");
+        HostTenantId = hostTenant.Id;
 
-        using var command = connection.CreateCommand();
-        command.CommandText = $"""CREATE SCHEMA IF NOT EXISTS "{_schemaName}";""";
-        command.ExecuteNonQuery();
-    }
+        await EnsureOpenIddictClientAsync(scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>());
 
-    public async Task EnsureSeedCompleteAsync()
-    {
-        if (_seedCompleted)
+        // The audit isolation tests need a second, authenticated tenant.
+        var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+        var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var now = DateTime.UtcNow;
+        dbContext.Tenants.Add(new Tenant(AuditTenantId, AuditTenantName)
         {
-            return;
-        }
-
-        await _seedLock.WaitAsync();
-        try
+            DisplayName = "Audit test tenant",
+            IsActive = true,
+            LifecycleState = TenantLifecycleState.Active,
+            CreationTime = now
+        });
+        dbContext.Users.Add(new User(Guid.NewGuid(), "admin", "audit-admin@example.test", AuditTenantId.ToString())
         {
-            if (_seedCompleted)
-            {
-                return;
-            }
+            PasswordHash = passwordHasher.HashPassword(config["SeedIdentity:Password"]!),
+            IsActive = true,
+            IsSuperAdmin = true,
+            LockoutEnabled = true,
+            CreationTime = now,
+            LastPasswordChangeTime = now
+        });
+        await dbContext.SaveChangesAsync();
 
-            var scopeFactory = Services.GetRequiredService<IServiceScopeFactory>();
-            using var scope = scopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<LibraryDbContext>();
-            var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
-            var applicationManager = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
-
-            // Resolving Services started the host, which ran the formal migrate-and-seed
-            // closure (HostMigrationAndSeedRunner): both LibraryDbContext and
-            // OpenIddictDbContext schemas plus the registered IDataSeeders. The fixture must
-            // not create or recreate schema itself, otherwise a broken host closure could
-            // still be papered over here.
-
-            await EnsureOpenIddictClientAsync(applicationManager);
-
-            // Seed tenant-a user for integration tests
-            var tenantA = dbContext.Tenants.FirstOrDefault(t => t.Name == "tenant-a");
-            if (tenantA == null)
-            {
-                tenantA = new Tenant(Guid.NewGuid(), "tenant-a")
-                {
-                    DisplayName = "Tenant A",
-                    IsActive = true,
-                    LifecycleState = TenantLifecycleState.Active,
-                    CreationTime = DateTime.UtcNow
-                };
-                dbContext.Tenants.Add(tenantA);
-                await dbContext.SaveChangesAsync();
-            }
-
-            var tenantARole = dbContext.Roles.FirstOrDefault(r => r.Name == "Administrators" && r.TenantId == tenantA.Id.ToString());
-            if (tenantARole == null)
-            {
-                tenantARole = new Role(Guid.NewGuid(), "Administrators", tenantA.Id.ToString())
-                {
-                    DisplayName = "Administrators",
-                    IsActive = true,
-                    CreationTime = DateTime.UtcNow
-                };
-                dbContext.Roles.Add(tenantARole);
-                await dbContext.SaveChangesAsync();
-            }
-
-            var tenantAUser = dbContext.Users.FirstOrDefault(u => u.UserName == "admin" && u.TenantId == tenantA.Id.ToString());
-            if (tenantAUser == null)
-            {
-                tenantAUser = new User(Guid.NewGuid(), "admin", "admin@tenant-a.local", tenantA.Id.ToString())
-                {
-                    PasswordHash = passwordHasher.HashPassword("Admin123!"),
-                    IsActive = true,
-                    IsSuperAdmin = true,
-                    LockoutEnabled = true,
-                    CreationTime = DateTime.UtcNow,
-                    LastPasswordChangeTime = DateTime.UtcNow
-                };
-                dbContext.Users.Add(tenantAUser);
-                await dbContext.SaveChangesAsync();
-            }
-
-            await dbContext.SaveChangesAsync();
-
-            if (!await dbContext.AuditLogs.AnyAsync())
-            {
-                // Use raw SQL to insert audit logs directly - bypasses EF Core tracking issues
-                var now = DateTime.UtcNow;
-                using var insertCmd = _sharedConnection.CreateCommand();
-                insertCmd.CommandText = @"
-                    INSERT INTO ""AuditLogs"" (""Id"", ""Duration"", ""UserId"", ""UserName"", ""TenantId"", ""ClientIpAddress"", ""HttpMethod"", ""Url"", ""ServiceName"", ""MethodName"", ""Parameters"", ""ReturnValue"", ""ExceptionMessage"", ""ExceptionStackTrace"", ""Status"", ""ExecutionTime"", ""CreationTime"", ""TraceId"", ""ExtraProperties"")
-                    VALUES
-                    (@id1, 150, 'host-user-1', 'host-alice', 'host', '192.168.1.1', 'POST', 'https://localhost/api/books', 'BookAppService', 'CreateAsync', NULL, NULL, NULL, NULL, 0, @time1, @now, NULL, '{}'),
-                    (@id2, 80, 'host-user-2', 'host-bob', 'host', '192.168.1.2', 'GET', 'https://localhost/api/books', 'BookAppService', 'GetListAsync', NULL, NULL, NULL, NULL, 0, @time2, @now, NULL, '{}'),
-                    (@id3, 200, 'tenant-a-user-1', 'tenant-a-charlie', 'tenant-a', '10.0.0.1', 'POST', 'https://localhost/api/authors', 'AuthorAppService', 'CreateAsync', NULL, NULL, NULL, NULL, 0, @time3, @now, NULL, '{}'),
-                    (@id4, 60, 'tenant-a-user-2', 'tenant-a-david', 'tenant-a', '10.0.0.2', 'GET', 'https://localhost/api/authors', 'AuthorAppService', 'GetListAsync', NULL, NULL, NULL, NULL, 1, @time4, @now, NULL, '{}')";
-
-                insertCmd.Parameters.AddWithValue("@id1", Guid.NewGuid());
-                insertCmd.Parameters.AddWithValue("@id2", Guid.NewGuid());
-                insertCmd.Parameters.AddWithValue("@id3", Guid.NewGuid());
-                insertCmd.Parameters.AddWithValue("@id4", Guid.NewGuid());
-                insertCmd.Parameters.AddWithValue("@time1", now.AddMinutes(-30));
-                insertCmd.Parameters.AddWithValue("@time2", now.AddMinutes(-20));
-                insertCmd.Parameters.AddWithValue("@time3", now.AddMinutes(-25));
-                insertCmd.Parameters.AddWithValue("@time4", now.AddMinutes(-15));
-                insertCmd.Parameters.AddWithValue("@now", now);
-
-                await insertCmd.ExecuteNonQueryAsync();
-            }
-
-            _seedCompleted = true;
-        }
-        finally
-        {
-            _seedLock.Release();
-        }
+        await using var connection = new NpgsqlConnection(ConnectionString);
+        await connection.OpenAsync();
+        await using var insertCmd = connection.CreateCommand();
+        insertCmd.CommandText = """
+            INSERT INTO "AuditLogs" ("Id", "Duration", "UserId", "UserName", "TenantId", "ClientIpAddress", "HttpMethod", "Url", "ServiceName", "MethodName", "Status", "ExecutionTime", "CreationTime", "ExtraProperties")
+            VALUES
+                (@id1, 150, 'host-user-1', 'host-alice', @hostTenant, '192.168.1.1', 'POST', '/api/material', 'MaterialAppService', 'CreateAsync', 0, @time1, @now, '{}'),
+                (@id2, 80, 'host-user-2', 'host-bob', @hostTenant, '192.168.1.2', 'GET', '/api/material/all', 'MaterialAppService', 'GetAllAsync', 0, @time2, @now, '{}'),
+                (@id3, 200, 'tenant-a-user-1', 'tenant-a-charlie', @auditTenant, '10.0.0.1', 'POST', '/api/customer', 'CustomerAppService', 'CreateAsync', 0, @time3, @now, '{}'),
+                (@id4, 60, 'tenant-a-user-2', 'tenant-a-david', @auditTenant, '10.0.0.2', 'GET', '/api/customer/all', 'CustomerAppService', 'GetAllAsync', 1, @time4, @now, '{}');
+            """;
+        insertCmd.Parameters.AddWithValue("hostTenant", HostTenantId.ToString());
+        insertCmd.Parameters.AddWithValue("auditTenant", AuditTenantId.ToString());
+        insertCmd.Parameters.AddWithValue("id1", Guid.NewGuid());
+        insertCmd.Parameters.AddWithValue("id2", Guid.NewGuid());
+        insertCmd.Parameters.AddWithValue("id3", Guid.NewGuid());
+        insertCmd.Parameters.AddWithValue("id4", Guid.NewGuid());
+        insertCmd.Parameters.AddWithValue("time1", now.AddMinutes(-30));
+        insertCmd.Parameters.AddWithValue("time2", now.AddMinutes(-20));
+        insertCmd.Parameters.AddWithValue("time3", now.AddMinutes(-25));
+        insertCmd.Parameters.AddWithValue("time4", now.AddMinutes(-15));
+        insertCmd.Parameters.AddWithValue("now", now);
+        await insertCmd.ExecuteNonQueryAsync();
     }
 
     private static async Task EnsureOpenIddictClientAsync(IOpenIddictApplicationManager applicationManager)
@@ -231,145 +148,63 @@ public sealed class LibraryManagementWebApplicationFactory
         await applicationManager.CreateAsync(descriptor);
     }
 
-    public new HttpClient CreateClient()
+    protected override IHost CreateHost(IHostBuilder builder)
     {
-        EnsureSeedCompleteAsync().GetAwaiter().GetResult();
-        return base.CreateClient();
-    }
-
-    public new HttpClient CreateClient(WebApplicationFactoryClientOptions options)
-    {
-        EnsureSeedCompleteAsync().GetAwaiter().GetResult();
-        return base.CreateClient(options);
+        // The minimal host reads this connection string in Program before ConfigureTestServices.
+        builder.ConfigureHostConfiguration(configuration => configuration.AddInMemoryCollection(
+            new Dictionary<string, string?> { ["ConnectionStrings:Default"] = ConnectionString }));
+        return base.CreateHost(builder);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
-        IConfiguration? hostConfiguration = null;
-        builder.ConfigureAppConfiguration((context, configurationBuilder) =>
-        {
-            configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+        builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+            new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = ConnectionString,
                 ["SeedIdentity:TenantId"] = "host",
                 ["SeedIdentity:RoleName"] = "Administrators",
                 ["SeedIdentity:UserName"] = "admin",
-                ["SeedIdentity:Email"] = "admin@library.local",
+                ["SeedIdentity:Email"] = "admin@example.test",
                 ["SeedIdentity:Password"] = "Admin123!",
                 ["CrestLogging:EnableFile"] = "false",
                 ["AuditLogging:IsEnabledForGetRequests"] = "true"
-            });
-            hostConfiguration = configurationBuilder.Build();
-        });
+            }));
 
         builder.ConfigureTestServices(services =>
         {
-            // RegisterModules wires module OnConfigureServices into builder.ConfigureServices (pre-build).
-            services.AddSingleton<IServiceCollection>(services);
+            UseTestDatabase<ErpManagementDbContext>(services);
+            UseTestDatabase<OpenIddictDbContext>(services);
 
-            // Data filter state — enables tenant-filter on queries (normal startup registers
-            // this via PermissionModule.OnConfigureServices; must replicate inline for test host)
-            services.AddScoped<DataFilterState>();
-
-            services.RemoveAll<DbContextOptions<LibraryDbContext>>();
-            services.RemoveAll<IDbContextOptionsConfiguration<LibraryDbContext>>();
-            services.RemoveAll<LibraryDbContext>();
-            services.RemoveAll<DbContextOptions<CrestCreatesDbContext>>();
-            services.RemoveAll<IDbContextOptionsConfiguration<CrestCreatesDbContext>>();
-            services.RemoveAll<CrestCreatesDbContext>();
-            services.RemoveAll<DbContextOptions<OpenIddictDbContext>>();
-            services.RemoveAll<IDbContextOptionsConfiguration<OpenIddictDbContext>>();
-            services.RemoveAll<OpenIddictDbContext>();
-            services.RemoveAll<DbContext>();
-            services.RemoveAll<AuditLoggingMiddleware>();
-            services.RemoveAll<IAuditLogService>();
-
-            services.AddDbContext<LibraryDbContext>(options =>
-            {
-                options.UseNpgsql(_sharedConnection);
-            });
-
-            services.AddScoped<DbContext>(sp => sp.GetRequiredService<LibraryDbContext>());
-
-            services.RemoveAll<IEntityFrameworkCoreDbContext>();
-            services.RemoveAll<IDataBaseContext>();
-            services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
-                new EfCoreDbContextAdapter(sp.GetRequiredService<LibraryDbContext>()));
-            services.AddScoped<IDataBaseContext>(sp =>
-                sp.GetRequiredService<IEntityFrameworkCoreDbContext>());
-
-            services.RemoveAll<IAuditLogRepository>();
-            services.AddScoped<IAuditLogRepository>(sp =>
-                new AuditLogRepository(
-                    sp.GetRequiredService<IEntityFrameworkCoreDbContext>(),
-                    sp.GetRequiredService<ICurrentTenant>()));
-
-            services.AddScoped<AuditLoggingMiddleware>();
-            services.AddScoped<IAuditLogRedactor, AuditLogRedactor>();
-            services.AddScoped<IAuditLogWriter, AuditLogWriter>();
-            services.AddScoped<IAuditLogService, AuditLogService>();
-            services.AddScoped<IAuditLogAppService, AuditLogAppService>();
-
-            // Configure OpenIddict to use EntityFrameworkCore for testing
-            // Register a dedicated OpenIddict test DbContext
-            services.AddDbContext<OpenIddictDbContext>(options =>
-            {
-                options.UseNpgsql(_sharedConnection);
-            });
-
-            // Repository registrations: EntityFrameworkCoreModule already registers these; the
-            // inline copies resolve against the shared test connection.
-            services.AddScoped(typeof(CrestCreates.Domain.Repositories.IRepository<,>), typeof(DomainRepositoryAdapter<,>));
-            services.AddScoped(typeof(ICrestRepositoryBase<,>), typeof(EfCoreRepository<,>));
-
-            // The unit-of-work assembly comes from EntityFrameworkCoreModule.OnConfigureServices
-            // (RegisterModules runs builder.ConfigureServices, i.e. before the provider is built).
-            // Re-adding it here produced a second 'EfCore' binding, which the binding registry
-            // refuses at first resolution (HTTP 500), exactly as ruled in #129 R01.
-
-            // Sample-specific repositories
-            services.AddScoped<IBookRepository, BookRepository>();
-            services.AddScoped<ICategoryRepository, CategoryRepository>();
-            services.AddScoped<IMemberRepository, MemberRepository>();
-            services.AddScoped<ILoanRepository, LoanRepository>();
-            services.AddScoped<IPermissionGrantRepository, PermissionGrantRepository>();
-            services.AddScoped<IPermissionRepository, PermissionRepository>();
-            services.AddScoped<IRoleRepository, RoleRepository>();
-            services.AddScoped<ITenantRepository, TenantRepository>();
-            services.AddScoped<IUserRepository, UserRepository>();
-            services.AddScoped<IUserRoleRepository, UserRoleRepository>();
-            services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
-            services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
-            services.AddSettingManagementEfCore();
-
-            // Application services — ApplicationModule already registers these; the inline copies
-            // keep the test host's registration set explicit.
-            services.AddScoped<IBookAppService, BookAppService>();
-            services.AddScoped<ICategoryAppService, CategoryAppService>();
-            services.AddScoped<IMemberAppService, MemberAppService>();
-            services.AddScoped<ILoanAppService, LoanAppService>();
-
-            // Tenant infrastructure - use no-op stubs since the SQL Server provisioner
-            // does not work with PostgreSQL test containers.
+            // ERP Program registers SecurityModule and the approval runtime itself.
+            services.RemoveAll<ITenantDatabaseProvisioner>();
+            services.RemoveAll<ITenantSchemaMigrator>();
+            services.RemoveAll<ITenantInitializationStore>();
             services.AddScoped<ITenantDatabaseProvisioner, NoOpTenantDatabaseProvisioner>();
             services.AddScoped<ITenantSchemaMigrator, NoOpTenantSchemaMigrator>();
             services.AddScoped<ITenantInitializationStore, NoOpTenantInitializationStore>();
-
-            // Security & event bus services — normally registered by SecurityModule / AddCrestWeb
-            // but not included in LibraryManagement's generated ModuleAutoInitializer.
-            new SecurityModule(hostConfiguration!).OnConfigureServices(services);
-            services.AddSingleton<IEventValidator, PassThroughEventValidator>();
-            services.AddCrestLocalEventDispatch();
         });
+    }
+
+    private void UseTestDatabase<TContext>(IServiceCollection services) where TContext : DbContext
+    {
+        services.RemoveAll<TContext>();
+        services.RemoveAll<DbContextOptions<TContext>>();
+        services.RemoveAll<IDbContextOptionsConfiguration<TContext>>();
+        services.AddDbContext<TContext>(options => options.UseNpgsql(ConnectionString));
     }
 
     public new async Task DisposeAsync()
     {
-        _sharedConnection?.Dispose();
-        _seedLock.Dispose();
-        await _postgres.DisposeAsync();
-        await base.DisposeAsync();
+        try
+        {
+            await base.DisposeAsync();
+        }
+        finally
+        {
+            await _postgres.DisposeAsync();
+        }
     }
 
     private sealed class NoOpTenantDatabaseProvisioner : ITenantDatabaseProvisioner

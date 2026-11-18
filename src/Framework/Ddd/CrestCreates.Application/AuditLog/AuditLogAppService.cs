@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.AuditLog;
 using CrestCreates.Application.Contracts.DTOs.Common;
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Shared.Attributes;
 
@@ -16,16 +18,19 @@ namespace CrestCreates.Application.AuditLog;
 public class AuditLogAppService : IAuditLogAppService
 {
     private readonly IAuditLogRepository _repository;
+    private readonly IPermissionChecker _permissionChecker;
 
-    public AuditLogAppService(IAuditLogRepository repository)
+    public AuditLogAppService(IAuditLogRepository repository, IPermissionChecker permissionChecker)
     {
         _repository = repository;
+        _permissionChecker = permissionChecker;
     }
 
     public async Task<PagedResultDto<AuditLogListItemDto>> GetListAsync(
         AuditLogPagedRequestDto request,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(AuditLoggingPermissions.Read);
         var result = await _repository.GetPagedListAsync(
             request.StartTime,
             request.EndTime,

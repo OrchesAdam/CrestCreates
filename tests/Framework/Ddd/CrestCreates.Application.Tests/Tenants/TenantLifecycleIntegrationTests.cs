@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Tenants;
+using CrestCreates.Application.Tests.TestHelpers;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Authorization;
@@ -95,7 +96,8 @@ public class TenantLifecycleIntegrationTests
             tenantManager,
             tenantRepositoryMock.Object,
             orchestrator,
-            storeMock.Object);
+            storeMock.Object,
+            PermissivePermissionChecker.Create());
 
         var tenant = new Tenant(Guid.NewGuid(), "TestTenant")
         {
@@ -174,7 +176,8 @@ public class TenantLifecycleIntegrationTests
             tenantManager,
             tenantRepositoryMock.Object,
             orchestrator,
-            storeMock.Object);
+            storeMock.Object,
+            PermissivePermissionChecker.Create());
 
         tenantRepositoryMock
             .Setup(r => r.FindByNameAsync("FAILTENANT", default))

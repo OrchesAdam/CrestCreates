@@ -4,6 +4,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
+using CrestCreates.Authorization;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared;
@@ -17,29 +19,33 @@ using OrchestratorResult = CrestCreates.MultiTenancy.Abstract.TenantInitializati
 namespace CrestCreates.Application.Tenants;
 
 [CrestService]
-public class TenantAppService : ITenantAppService
+public class TenantAppService : CrestCreates.Application.Contracts.Interfaces.ITenantAppService
 {
     private readonly ITenantManager _tenantManager;
     private readonly ITenantRepository _tenantRepository;
     private readonly TenantInitializationOrchestrator _orchestrator;
     private readonly ITenantInitializationStore _store;
+    private readonly IPermissionChecker _permissionChecker;
 
     public TenantAppService(
         ITenantManager tenantManager,
         ITenantRepository tenantRepository,
         TenantInitializationOrchestrator orchestrator,
-        ITenantInitializationStore store)
+        ITenantInitializationStore store,
+        IPermissionChecker permissionChecker)
     {
         _tenantManager = tenantManager;
         _tenantRepository = tenantRepository;
         _orchestrator = orchestrator;
         _store = store;
+        _permissionChecker = permissionChecker;
     }
 
     public async Task<TenantDto> CreateAsync(
         CreateTenantDto input,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.Update);
         var normalizedName = input.Name.Trim().ToUpperInvariant();
         var existing = await _tenantRepository.FindByNameAsync(normalizedName, cancellationToken);
         if (existing is not null)
@@ -82,6 +88,7 @@ public class TenantAppService : ITenantAppService
         string name,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.View);
         var tenant = await _tenantRepository.FindByNameAsync(
             NormalizeRequired(name, nameof(name)),
             cancellationToken);
@@ -93,6 +100,7 @@ public class TenantAppService : ITenantAppService
         bool? isActive = null,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.View);
         var tenants = await _tenantRepository.GetListWithDetailsAsync(cancellationToken);
         return tenants
             .Where(tenant => !isActive.HasValue || tenant.IsActive == isActive.Value)
@@ -106,6 +114,7 @@ public class TenantAppService : ITenantAppService
         UpdateTenantDto input,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.Update);
         var tenant = await _tenantManager.UpdateAsync(
             NormalizeRequired(name, nameof(name)),
             input.DisplayName,
@@ -115,12 +124,13 @@ public class TenantAppService : ITenantAppService
         return MapToDto(tenant);
     }
 
-    public Task SetActiveAsync(
+    public async Task SetActiveAsync(
         string name,
         bool isActive,
         CancellationToken cancellationToken = default)
     {
-        return _tenantManager.SetActiveAsync(
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.Update);
+        await _tenantManager.SetActiveAsync(
             NormalizeRequired(name, nameof(name)),
             isActive,
             cancellationToken);
@@ -130,6 +140,7 @@ public class TenantAppService : ITenantAppService
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.Update);
         var tenant = await _tenantRepository.FindByIdAsync(tenantId, cancellationToken)
             ?? throw new InvalidOperationException($"Tenant '{tenantId}' not found.");
 
@@ -165,6 +176,7 @@ public class TenantAppService : ITenantAppService
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.View);
         var tenant = await _tenantRepository.FindByIdAsync(tenantId, cancellationToken)
             ?? throw new InvalidOperationException($"Tenant '{tenantId}' not found.");
 
@@ -205,6 +217,7 @@ public class TenantAppService : ITenantAppService
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.Update);
         var tenant = await _tenantRepository.FindByIdAsync(tenantId, cancellationToken)
             ?? throw new InvalidOperationException($"Tenant '{tenantId}' not found.");
 
@@ -250,6 +263,7 @@ public class TenantAppService : ITenantAppService
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(TenantManagementPermissions.Update);
         var tenant = await _tenantRepository.FindByIdAsync(tenantId, cancellationToken)
             ?? throw new InvalidOperationException($"Tenant '{tenantId}' not found.");
 

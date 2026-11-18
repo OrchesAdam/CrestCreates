@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="../../../src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Runtime/Audit/CrestCreates.AuditLogging/CrestCreates.AuditLogging.csproj" />
+    <ProjectReference Include="..\..\..\src\Persistence\CrestCreates.Data.EFCore.PostgreSql\CrestCreates.Data.EFCore.PostgreSql.csproj" />
+    <ProjectReference Include="../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../../../src/Framework/Api/CrestCreates.OpenApi/CrestCreates.OpenApi.csproj" />
+    <ProjectReference Include="../ErpManagement.Application/ErpManagement.Application.csproj" />
+    <ProjectReference Include="../ErpManagement.Domain/ErpManagement.Domain.csproj" />
+  </ItemGroup>
+
+  <!-- Npgsql comes transitively from CrestCreates.Data.EFCore.PostgreSql -->
+</Project>

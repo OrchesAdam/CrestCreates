@@ -54,10 +54,7 @@ namespace CrestCreates.Data.EFCore.Interceptors
                     switch (entry.State)
                     {
                         case EntityState.Added:
-                            auditedEntity.CreationTime = now;
-                            auditedEntity.CreatorId = currentUserId;
-                            auditedEntity.LastModificationTime = null;
-                            auditedEntity.LastModifierId = null;
+                            AuditPropertySetter.SetCreationAudit(auditedEntity, now, currentUserId);
                             break;
 
                         case EntityState.Modified:

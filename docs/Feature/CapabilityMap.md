@@ -341,7 +341,7 @@ S3 之后，新增生产 csproj 必须同时在下面的项目索引中登记并
 
 - `tests/**`：单元、集成与 boundary 测试项目；`Directory.Build.targets` 关闭 Trim/AoT（Moq/DynamicProxy 不兼容），因此其绿色不代表原生证据。
 - `tests/**/…AotFixture*`、`…AotHost*`：NativeAOT publish/link/run 门禁宿主，逐项场景与 RID 见 [#123 证据矩阵](../review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md)。
-- `samples/**`：LibraryManagement、SaaSHelpdesk、ProcurementApproval、AssetManagement、DescriptorControlPlane，作为正式链消费与 golden scenario 入口；样例项目集合变化不改变框架支持声明。
+- `samples/**`：SaaSHelpdesk、ProcurementApproval、AssetManagement、DescriptorControlPlane，作为正式链消费与 golden scenario 入口；ErpManagement 是企业级 ERP 示例系统（React + Ant Design Pro 前端 + 容器编排），作为平台能力的业务消费与缺口发现面，设计见 `docs/superpowers/specs/2026-11-18-erp-sample-system-design.md`。平台管理 HTTP 面（User/Role/PermissionGrant/Setting/SettingDefinition/Feature/FeatureDefinition/Tenant/AuditLog，干净 REST ExplicitHost 投影，opt-in `AddCrestPlatformManagementHttp`）为交付能力，JIT 证据见 `docs/Feature/platform-management-http-contract.md` 与 memory.md 2026-11-18 条目。LibraryManagement 已于 2026-11-18 归档至 `99_RecycleBin/`（被 ErpManagement 取代，设计规格 §10）。样例项目集合变化不改变框架支持声明。
 - `src/Tooling/**`：CodeGenerator（netstandard2.0 analyzer）、BuildTasks、JsonContracts 工具链、Metadata.Analyzers，属构建期 Tooling，不是运行时组件。
 
 ## 6. 与既有文档的关系

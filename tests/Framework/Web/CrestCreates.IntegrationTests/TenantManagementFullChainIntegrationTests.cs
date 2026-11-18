@@ -12,7 +12,7 @@ using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
-public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryManagementWebApplicationFactory>
+public class TenantManagementFullChainIntegrationTests : IClassFixture<ErpManagementWebApplicationFactory>
 {
     private const string HostTenantId = "host";
     private const string AdminUserName = "admin";
@@ -23,9 +23,9 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly LibraryManagementWebApplicationFactory _factory;
+    private readonly ErpManagementWebApplicationFactory _factory;
 
-    public TenantManagementFullChainIntegrationTests(LibraryManagementWebApplicationFactory factory)
+    public TenantManagementFullChainIntegrationTests(ErpManagementWebApplicationFactory factory)
     {
         _factory = factory;
         // Trigger host initialization and seed data before any tests run
@@ -41,7 +41,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var defaultAdminUserName = "admin";
         var defaultAdminPassword = "Admin123!";
 
-        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenants", new
         {
             name = tenantName,
             displayName = tenantDisplayName,
@@ -83,7 +83,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var (adminClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
         var tenantName = $"resolution-test-tenant-{Guid.NewGuid():N}";
 
-        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenants", new
         {
             name = tenantName,
             displayName = "租户解析测试",
@@ -120,7 +120,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var tenantName1 = $"cross-tenant1-{Guid.NewGuid():N}";
         var tenantName2 = $"cross-tenant2-{Guid.NewGuid():N}";
 
-        var tenant1Response = await adminClient.PostAsJsonAsync("/api/tenant", new
+        var tenant1Response = await adminClient.PostAsJsonAsync("/api/tenants", new
         {
             name = tenantName1,
             displayName = "跨租户1",
@@ -131,7 +131,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var tenant1 = tenant1Envelope.Data!;
         var tenant1Id = tenant1.Id.ToString();
 
-        var tenant2Response = await adminClient.PostAsJsonAsync("/api/tenant", new
+        var tenant2Response = await adminClient.PostAsJsonAsync("/api/tenants", new
         {
             name = tenantName2,
             displayName = "跨租户2",
@@ -261,7 +261,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var tenantName = $"shared-{Guid.NewGuid():N}";
 
         // Create tenant WITHOUT defaultConnectionString (shared database mode)
-        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenants", new
         {
             name = tenantName,
             displayName = "Shared DB Tenant"
@@ -277,10 +277,10 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
 
         // In shared-database mode, the orchestrator skips DatabaseInitialize and Migration
         // and runs DataSeed, SettingsDefaults, FeatureDefaults phases only.
-        // When those succeed, InitializationStatus should be Initialized (2).
+        // When those succeed, InitializationStatus should be Initialized (serialized as its enum name).
         createdTenant.InitializationStatus.Should().Be(
-            2,
-            $"expected Initialized(2) but got {createdTenant.InitializationStatus}");
+            "Initialized",
+            $"expected Initialized but got {createdTenant.InitializationStatus}");
     }
 
     [Fact]
@@ -290,7 +290,7 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         var tenantName = $"indep-{Guid.NewGuid():N}";
 
         // Create tenant with valid connection string (independent database mode)
-        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenants", new
         {
             name = tenantName,
             displayName = "Independent DB Tenant",
@@ -307,8 +307,8 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
 
         // In independent-database mode all five phases run.
         createdTenant.InitializationStatus.Should().Be(
-            2,
-            $"expected Initialized(2) but got {createdTenant.InitializationStatus}");
+            "Initialized",
+            $"expected Initialized but got {createdTenant.InitializationStatus}");
     }
 
     private sealed class TenantDtoResponse
@@ -316,7 +316,8 @@ public class TenantManagementFullChainIntegrationTests : IClassFixture<LibraryMa
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? DisplayName { get; set; }
-        public int InitializationStatus { get; set; }
+        // Enums are serialized as string names (e.g. "Initialized") by the platform JSON contracts
+        public string InitializationStatus { get; set; } = string.Empty;
         public DateTime? InitializedAt { get; set; }
     }
 }

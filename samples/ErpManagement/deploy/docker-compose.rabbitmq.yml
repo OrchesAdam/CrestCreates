@@ -1,0 +1,18 @@
+# Optional overlay: provisions a RabbitMQ broker for the MES/CRM canonical-event outbound
+# path (P3). The ERP app's RabbitMQ wiring is delivered in P3; this overlay only stands up
+# the broker so the integration contract can be exercised end-to-end once wired.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.rabbitmq.yml up -d
+#   podman-compose -f docker-compose.yml -f docker-compose.rabbitmq.yml up -d
+services:
+  rabbitmq:
+    image: rabbitmq:4.0-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s

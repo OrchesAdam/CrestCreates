@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Identity;
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization;
+using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
@@ -19,21 +21,25 @@ public class RoleAppService : IRoleAppService
     private readonly IRoleRepository _roleRepository;
     private readonly ICurrentTenant _currentTenant;
     private readonly IIdentitySecurityLogWriter _securityLogWriter;
+    private readonly IPermissionChecker _permissionChecker;
 
     public RoleAppService(
         IRoleRepository roleRepository,
         ICurrentTenant currentTenant,
-        IIdentitySecurityLogWriter securityLogWriter)
+        IIdentitySecurityLogWriter securityLogWriter,
+        IPermissionChecker permissionChecker)
     {
         _roleRepository = roleRepository;
         _currentTenant = currentTenant;
         _securityLogWriter = securityLogWriter;
+        _permissionChecker = permissionChecker;
     }
 
     public async Task<IdentityRoleDto> CreateAsync(
         CreateIdentityRoleDto input,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(IdentityManagementPermissions.UsersManage);
         var roleName = NormalizeRequired(input.Name, nameof(input.Name));
         var tenantId = NormalizeRequired(input.TenantId, nameof(input.TenantId));
 
@@ -61,6 +67,7 @@ public class RoleAppService : IRoleAppService
 
     public async Task<IdentityRoleDto?> GetAsync(Guid roleId, CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(IdentityManagementPermissions.UsersRead);
         var role = await _roleRepository.GetAsync(roleId, cancellationToken);
         return role == null ? null : MapToDto(role);
     }
@@ -69,6 +76,7 @@ public class RoleAppService : IRoleAppService
         string? tenantId = null,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(IdentityManagementPermissions.UsersRead);
         var effectiveTenantId = string.IsNullOrWhiteSpace(tenantId) ? _currentTenant.Id : tenantId;
         var roles = string.IsNullOrWhiteSpace(effectiveTenantId)
             ? await _roleRepository.GetListAsync(cancellationToken)
@@ -85,6 +93,7 @@ public class RoleAppService : IRoleAppService
         UpdateIdentityRoleDto input,
         CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(IdentityManagementPermissions.UsersManage);
         var role = await _roleRepository.GetAsync(roleId, cancellationToken)
                    ?? throw new InvalidOperationException($"角色 '{roleId}' 不存在");
 
@@ -99,6 +108,7 @@ public class RoleAppService : IRoleAppService
 
     public async Task SetActiveAsync(Guid roleId, bool isActive, CancellationToken cancellationToken = default)
     {
+        await _permissionChecker.CheckAsync(IdentityManagementPermissions.UsersManage);
         var role = await _roleRepository.GetAsync(roleId, cancellationToken)
                    ?? throw new InvalidOperationException($"角色 '{roleId}' 不存在");
 

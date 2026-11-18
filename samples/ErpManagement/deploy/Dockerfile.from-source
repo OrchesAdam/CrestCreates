@@ -1,0 +1,47 @@
+# Optional: fully self-contained multi-stage build from source.
+#
+# Requires registry access (Docker Hub for node, mcr for sdk/aspnet). In the target
+# environment Docker Hub is only reachable via the system proxy, so build with:
+#
+#   HTTPS_PROXY=http://127.0.0.1:7897 HTTP_PROXY=http://127.0.0.1:7897 \
+#     podman build -f samples/ErpManagement/deploy/Dockerfile.from-source \
+#     -t erp-management:src .
+#
+# Build context is the REPOSITORY ROOT. The primary, verified path remains the
+# host-prebuilt Dockerfile (see deploy/README.md); this alternative removes the host
+# npm/dotnet pre-build dependency at the cost of a larger, slower in-container build.
+#
+# Stage 1: frontend
+FROM docker.io/library/node:22-alpine AS frontend
+WORKDIR /web
+COPY samples/ErpManagement/erp-web/package*.json ./
+RUN npm config set registry https://registry.npmjs.org/ && npm install --no-audit --no-fund
+COPY samples/ErpManagement/erp-web/ ./
+# Vite outputs to ../ErpManagement.Web/wwwroot relative to erp-web; redirect to /web/dist
+RUN npx vite build --outDir /web/dist --emptyOutDir
+
+# Stage 2: backend
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend
+WORKDIR /src
+COPY . .
+COPY --from=frontend /web/dist/ samples/ErpManagement/ErpManagement.Web/wwwroot/
+RUN dotnet publish samples/ErpManagement/ErpManagement.Web/ErpManagement.Web.csproj \
+      -c Release -r linux-x64 --self-contained false \
+      -p:PublishTrimmed=false -p:PublishAot=false \
+      -o /app/publish -m:1 -p:UseSharedCompilation=false
+RUN dotnet dev-certs https -ep /app/erp-dev.pfx -p erp-dev-cert
+
+# Stage 3: runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=backend /app/publish/ ./
+COPY --from=backend /app/erp-dev.pfx /https/erp-dev.pfx
+COPY samples/ErpManagement/deploy/entrypoint.sh /entrypoint.sh
+ENV ASPNETCORE_ENVIRONMENT=Development \
+    ASPNETCORE_URLS=https://+:8443 \
+    Kestrel__Certificates__Default__Path=/https/erp-dev.pfx \
+    Kestrel__Certificates__Default__Password=erp-dev-cert \
+    DB_HOST=db DB_PORT=5432
+EXPOSE 8443
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

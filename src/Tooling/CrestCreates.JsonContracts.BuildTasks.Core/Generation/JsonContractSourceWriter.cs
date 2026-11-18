@@ -99,7 +99,7 @@ public static class JsonContractSourceWriter
             sb.AppendLine($"    [global::System.Text.Json.Serialization.JsonSerializable({JsonContractTypeNameWriter.WriteTypeofExpression(root.RootType)})]");
         }
 
-        sb.AppendLine("    [global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]");
+        sb.AppendLine("    [global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase, UseStringEnumConverter = true)]");
         sb.AppendLine($"    internal sealed partial class {contextName} : global::System.Text.Json.Serialization.JsonSerializerContext");
         sb.AppendLine("    {");
         sb.AppendLine("    }");
@@ -175,7 +175,7 @@ public static class JsonContractSourceWriter
             sb.AppendLine($"    [global::System.Text.Json.Serialization.JsonSerializable({JsonContractTypeNameWriter.WriteTypeofExpression(root.RootType)})]");
         }
 
-        sb.AppendLine("    [global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]");
+        sb.AppendLine("    [global::System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = global::System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase, UseStringEnumConverter = true)]");
         sb.AppendLine($"    internal sealed partial class {JsonContractBuildConstants.CrudJsonContextSimpleName} : global::System.Text.Json.Serialization.JsonSerializerContext");
         sb.AppendLine("    {");
         sb.AppendLine("    }");

@@ -12,8 +12,9 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../../src/Framework/Web/CrestCreates.HealthCheck.Mvc/CrestCreates.HealthCheck.Mvc.csproj" />
-    <ProjectReference Include="../../../../samples/LibraryManagement/LibraryManagement.EntityFrameworkCore/LibraryManagement.EntityFrameworkCore.csproj" />
-    <ProjectReference Include="../../../../samples/LibraryManagement/LibraryManagement.Web/LibraryManagement.Web.csproj" />
+    <ProjectReference Include="../../../../samples/ErpManagement/ErpManagement.Application/ErpManagement.Application.csproj" />
+    <ProjectReference Include="../../../../samples/ErpManagement/ErpManagement.EntityFrameworkCore/ErpManagement.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../../../../samples/ErpManagement/ErpManagement.Web/ErpManagement.Web.csproj" />
     <ProjectReference Include="../../../../src/Framework/Infrastructure/CrestCreates.Security/CrestCreates.Security.csproj" />
     <ProjectReference Include="../../../../src/Persistence/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />

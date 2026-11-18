@@ -95,9 +95,19 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                     }
 
                     GenerateOrmMappings(context, entityClass);
-                    GenerateEntityDto(context, entityClass, ownedCrudArtifacts);
-                    GenerateCreateEntityDto(context, entityClass, ownedCrudArtifacts);
-                    GenerateUpdateEntityDto(context, entityClass, ownedCrudArtifacts);
+                    var dtoNamespace = GetTargetNamespace(entityClass.ContainingNamespace.ToDisplayString(), GeneratedCodeType.Dto);
+                    if (IsDtoOccupiedExternally(compilation, $"{dtoNamespace}.{entityClass.Name}Dto"))
+                        ReportDtoCollision(context, entityClass, $"{dtoNamespace}.{entityClass.Name}Dto");
+                    else
+                        GenerateEntityDto(context, entityClass, ownedCrudArtifacts);
+                    if (IsDtoOccupiedExternally(compilation, $"{dtoNamespace}.Create{entityClass.Name}Dto"))
+                        ReportDtoCollision(context, entityClass, $"{dtoNamespace}.Create{entityClass.Name}Dto");
+                    else
+                        GenerateCreateEntityDto(context, entityClass, ownedCrudArtifacts);
+                    if (IsDtoOccupiedExternally(compilation, $"{dtoNamespace}.Update{entityClass.Name}Dto"))
+                        ReportDtoCollision(context, entityClass, $"{dtoNamespace}.Update{entityClass.Name}Dto");
+                    else
+                        GenerateUpdateEntityDto(context, entityClass, ownedCrudArtifacts);
                     GenerateObjectMappingDeclarations(context, entityClass, ownedCrudArtifacts);
                     GenerateEntityExtensions(context, entityClass);
                     GenerateValidationRules(context, entityClass);
@@ -142,6 +152,27 @@ namespace CrestCreates.CodeGenerator.EntityGenerator
                 GeneratedCodeType.MappingProfile => $"{baseNamespace}.Application",
                 _ => entityNamespace
             };
+        }
+
+        private static bool IsDtoOccupiedExternally(Compilation compilation, string fullMetadataName)
+        {
+            var existing = compilation.GetTypeByMetadataName(fullMetadataName);
+            return existing != null
+                && !SymbolEqualityComparer.Default.Equals(existing.ContainingAssembly, compilation.Assembly);
+        }
+
+        private static void ReportDtoCollision(SourceProductionContext context, INamedTypeSymbol entityClass, string fullMetadataName)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                new DiagnosticDescriptor(
+                    CodeGeneratorDiagnosticCodes.EntityDtoCollisionWarningValue,
+                    "Entity DTO name collision",
+                    "DTO '{0}' already exists in a referenced assembly; skipping generation. Extend the generated partial DTO in the entity assembly or rename the hand-written type to avoid CS0436 and split validator binding.",
+                    "CodeGeneration",
+                    DiagnosticSeverity.Warning,
+                    isEnabledByDefault: true),
+                entityClass.Locations.FirstOrDefault(),
+                fullMetadataName));
         }
 
         private enum GeneratedCodeType

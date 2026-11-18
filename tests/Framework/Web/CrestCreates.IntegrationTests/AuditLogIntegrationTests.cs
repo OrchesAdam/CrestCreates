@@ -17,7 +17,7 @@ using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
-public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplicationFactory>
+public class AuditLogIntegrationTests : IClassFixture<ErpManagementWebApplicationFactory>
 {
     private const string HostTenantId = "host";
     private const string AdminUserName = "admin";
@@ -28,9 +28,9 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly LibraryManagementWebApplicationFactory _factory;
+    private readonly ErpManagementWebApplicationFactory _factory;
 
-    public AuditLogIntegrationTests(LibraryManagementWebApplicationFactory factory)
+    public AuditLogIntegrationTests(ErpManagementWebApplicationFactory factory)
     {
         _factory = factory;
         // Trigger host initialization before any tests run
@@ -46,7 +46,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
         // When
-        var response = await client.GetAsync("/api/audit-log?pageIndex=0&pageSize=10");
+        var response = await client.GetAsync("/api/audit-logs?pageIndex=0&pageSize=10");
 
         // Then
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
@@ -68,7 +68,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
         // When - query with a keyword filter that matches no records
-        var response = await client.GetAsync("/api/audit-log?keyword=__nonexistent_keyword_for_test__&pageIndex=0&pageSize=10");
+        var response = await client.GetAsync("/api/audit-logs?keyword=__nonexistent_keyword_for_test__&pageIndex=0&pageSize=10");
 
         // Then
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -85,7 +85,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
         // When - filter by status=0 (Success)
-        var response = await client.GetAsync("/api/audit-log?status=0&pageIndex=0&pageSize=10");
+        var response = await client.GetAsync("/api/audit-logs?status=0&pageIndex=0&pageSize=10");
 
         // Then
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
@@ -107,7 +107,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
         // When - filter by HttpMethod=GET
-        var response = await client.GetAsync("/api/audit-log?httpMethod=GET&pageIndex=0&pageSize=10");
+        var response = await client.GetAsync("/api/audit-logs?httpMethod=GET&pageIndex=0&pageSize=10");
 
         // Then
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
@@ -128,7 +128,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
         // When
-        var response = await client.GetAsync("/api/audit-log?pageIndex=0&pageSize=1");
+        var response = await client.GetAsync("/api/audit-logs?pageIndex=0&pageSize=1");
 
         // Then
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
@@ -151,19 +151,20 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         await _factory.EnsureSeedCompleteAsync();
 
         // Given - tenant-a context
-        var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, "tenant-a");
+        var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, ErpManagementWebApplicationFactory.AuditTenantName);
 
         // When - query all logs without tenantId filter
-        var response = await client.GetAsync("/api/audit-log?pageIndex=0&pageSize=100");
+        var response = await client.GetAsync("/api/audit-logs?pageIndex=0&pageSize=100");
 
         // Then - should only see tenant-a logs, not host logs
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var envelope = await ReadJsonAsync<DynamicApiResponse<PagedResultResponse<AuditLogResponse>>>(response);
         envelope.Data.Should().NotBeNull();
 
-        foreach (var item in envelope.Data!.Items)
+        envelope.Data!.Items.Should().NotBeEmpty();
+        foreach (var item in envelope.Data.Items)
         {
-            item.TenantId.Should().Be("tenant-a", "tenant context should only see own tenant's logs");
+            item.TenantId.Should().Be(_factory.AuditTenantId.ToString(), "tenant context should only see own tenant's logs");
         }
     }
 
@@ -172,21 +173,18 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
     {
         await _factory.EnsureSeedCompleteAsync();
 
-        // Given - tenant-a context trying to query tenant-b (which doesn't exist in seed data, but host logs exist)
-        var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, "tenant-a");
+        // Given - tenant-a context trying to query seeded host logs
+        var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, ErpManagementWebApplicationFactory.AuditTenantName);
 
         // When - try to query host tenant logs by passing tenantId parameter
-        var response = await client.GetAsync("/api/audit-log?tenantId=host&pageIndex=0&pageSize=100");
+        var response = await client.GetAsync($"/api/audit-logs?tenantId={_factory.HostTenantId}&pageIndex=0&pageSize=100");
 
-        // Then - should still only see tenant-a logs, tenantId filter should be ignored in tenant context
+        // The tenant restriction and the requested filter must exclude every host row.
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var envelope = await ReadJsonAsync<DynamicApiResponse<PagedResultResponse<AuditLogResponse>>>(response);
         envelope.Data.Should().NotBeNull();
 
-        foreach (var item in envelope.Data!.Items)
-        {
-            item.TenantId.Should().Be("tenant-a", "tenant context should ignore tenantId filter and only return own logs");
-        }
+        envelope.Data!.Items.Should().BeEmpty();
     }
 
     [Fact]
@@ -198,7 +196,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
         // When - query tenant-a logs specifically
-        var response = await client.GetAsync("/api/audit-log?tenantId=tenant-a&pageIndex=0&pageSize=100");
+        var response = await client.GetAsync($"/api/audit-logs?tenantId={_factory.AuditTenantId}&pageIndex=0&pageSize=100");
 
         // Then - should see only tenant-a logs (or at least some results when filtering by tenant-a)
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
@@ -206,9 +204,10 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         envelope.Data.Should().NotBeNull();
 
         // All returned items should be for tenant-a
-        foreach (var item in envelope.Data!.Items)
+        envelope.Data!.Items.Should().NotBeEmpty();
+        foreach (var item in envelope.Data.Items)
         {
-            item.TenantId.Should().Be("tenant-a", "host context with tenantId filter should return only that tenant's logs");
+            item.TenantId.Should().Be(_factory.AuditTenantId.ToString(), "host context with tenantId filter should return only that tenant's logs");
         }
     }
 
@@ -221,7 +220,7 @@ public class AuditLogIntegrationTests : IClassFixture<LibraryManagementWebApplic
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
         // When - query all logs with large page size
-        var response = await client.GetAsync("/api/audit-log?pageIndex=0&pageSize=1000");
+        var response = await client.GetAsync("/api/audit-logs?pageIndex=0&pageSize=1000");
         var rawContent = await response.Content.ReadAsStringAsync();
 
         // Then - query should succeed and return properly structured response

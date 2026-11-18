@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="../../../src/Tooling/CrestCreates.BuildTasks/CrestCreates.Modules.props" />
+  <Import Project="../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.props" />
+  <Import Project="../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.targets" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Rougamo.Fody" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Application/CrestCreates.Application.csproj" />
+    <ProjectReference Include="../../../src/Framework/Api/CrestCreates.DynamicApi/CrestCreates.DynamicApi.csproj" />
+    <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.Authorization/CrestCreates.Authorization.csproj" />
+    <ProjectReference Include="../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
+    <ProjectReference Include="../ErpManagement.Domain/ErpManagement.Domain.csproj" />
+    <ProjectReference Include="../ErpManagement.Application.Contracts/ErpManagement.Application.Contracts.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Workflow/CrestCreates.Workflow.Abstractions/CrestCreates.Workflow.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Runtime/HumanTask/CrestCreates.HumanTask.Abstractions/CrestCreates.HumanTask.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Eventing/CrestCreates.Runtime.Delivery.Abstractions/CrestCreates.Runtime.Delivery.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Persistence/CrestCreates.Runtime.Persistence.Abstractions/CrestCreates.Runtime.Persistence.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -17,7 +17,7 @@ using CrestCreates.Domain.Shared.Settings;
 using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
-using LibraryManagement.EntityFrameworkCore;
+using ErpManagement.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,8 +37,7 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
 {
     private const string SettingName = "Sample.Global";
     private const string FeatureName = "Sample.Feature";
-    private const string HostNullMigration = "20261109090000_R3_12_SettingHostNullUnique";
-    private const string InitialMigration = "20260506065811_InitialCreate";
+    private const string InitialMigration = "20261118014835_InitialCreate";
     private const string HostNullIndex = "IX_SettingValues_Name_Scope_ProviderKey";
 
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
@@ -52,21 +51,21 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync() => await _postgres.DisposeAsync();
 
     [Fact]
-    public async Task Library_migration_creates_and_drops_the_host_null_unique_index()
+    public async Task Erp_migration_creates_and_drops_the_host_null_unique_index()
     {
         var schema = await CreateSchemaAsync();
-        using var context = CreateLibraryContext(schema);
+        using var context = CreateErpContext(schema);
 
         await context.Database.MigrateAsync();
 
         (await context.Database.GetAppliedMigrationsAsync()).Should().Contain(
-            HostNullMigration,
+            InitialMigration,
             "the migration must be part of the normal EF upgrade chain");
         (await ReadHostNullIndexDefinitionAsync(schema)).Should().Contain(
             "\"TenantId\" IS NULL",
             "the partial index is what makes host-null natural keys unique on PostgreSQL");
 
-        await context.Database.MigrateAsync(InitialMigration);
+        await context.Database.MigrateAsync("0");
 
         (await ReadHostNullIndexDefinitionAsync(schema)).Should().BeNull(
             "Down must drop the partial unique index");
@@ -78,31 +77,16 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Library_migration_refuses_duplicate_host_null_rows_without_recording_success()
+    public async Task Erp_migration_enforces_unique_host_null_setting_keys()
     {
         var schema = await CreateSchemaAsync();
-        using (var context = CreateLibraryContext(schema))
-        {
-            await context.Database.MigrateAsync(InitialMigration);
-        }
+        await using var context = CreateErpContext(schema);
+        await context.Database.MigrateAsync();
 
-        await InsertDuplicateHostNullSettingsAsync(schema);
-
-        using (var context = CreateLibraryContext(schema))
-        {
-            var act = async () => await context.Database.MigrateAsync();
-
-            var exception = await act.Should().ThrowAsync<Exception>();
-            exception.Which.ToString().Should().Contain(
-                "R3-12",
-                "the duplicate diagnostic must name the reconciliation rule without printing setting values");
-        }
-
-        (await ReadAppliedMigrationsAsync(schema)).Should().NotContain(
-            HostNullMigration,
-            "a failed duplicate check must not be recorded as an applied migration");
-        (await ReadHostNullIndexDefinitionAsync(schema)).Should().BeNull(
-            "the unique index must not be created while duplicates still exist");
+        var act = () => InsertDuplicateHostNullSettingsAsync(schema);
+        var exception = await act.Should().ThrowAsync<PostgresException>();
+        exception.Which.SqlState.Should().Be(PostgresErrorCodes.UniqueViolation);
+        exception.Which.ConstraintName.Should().Be(HostNullIndex);
     }
 
     [Fact]
@@ -661,12 +645,12 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
     private string SchemaConnectionString(string schema)
         => $"{_postgres.GetConnectionString()};Search Path={schema}";
 
-    private LibraryDbContext CreateLibraryContext(string schema)
+    private ErpManagementDbContext CreateErpContext(string schema)
     {
-        var options = new DbContextOptionsBuilder<LibraryDbContext>()
+        var options = new DbContextOptionsBuilder<ErpManagementDbContext>()
             .UseNpgsql(SchemaConnectionString(schema))
             .Options;
-        return new LibraryDbContext(options);
+        return new ErpManagementDbContext(options);
     }
 
     private CrestCreatesDbContext CreateCrestContext(string schema)
@@ -892,22 +876,6 @@ public sealed class SettingFeaturePostgresIntegrationTests : IAsyncLifetime
         command.Parameters.AddWithValue("table", table);
         command.Parameters.AddWithValue("indexName", indexName);
         return await command.ExecuteScalarAsync() as string;
-    }
-
-    private async Task<List<string>> ReadAppliedMigrationsAsync(string schema)
-    {
-        await using var connection = new NpgsqlConnection(SchemaConnectionString(schema));
-        await connection.OpenAsync();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";""";
-        await using var reader = await command.ExecuteReaderAsync();
-        var migrations = new List<string>();
-        while (await reader.ReadAsync())
-        {
-            migrations.Add(reader.GetString(0));
-        }
-
-        return migrations;
     }
 
     private static ISettingRepository CreateStaleThenRealRepository(SettingRepository realRepository)

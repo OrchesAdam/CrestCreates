@@ -1,5 +1,157 @@
 # CrestCreates platform status — 2026-11-06
 
+## 2026-11-18 — ERP 示例 P3：MES/CRM 集成预留 + 缺口汇总
+
+- **入站 API-Key adapter**：`IntegrationApiKeyAuthenticationHandler`（scheme "IntegrationApiKey"，头
+  `X-Integration-Api-Key`，配置 `Integration:Clients:{Mes|Crm}:ApiKey/TenantId`，dev 密钥 mes-dev-key/crm-dev-key
+  仅 Development 生效）+ 最小 API 端点：`POST /api/integration/mes/work-orders/{workOrderId}/report`（Feature
+  `Erp.MesIntegration` 门控，调 WorkOrderAppService.ReportAsync）与 `POST /api/integration/crm/customers`（Feature
+  `Erp.CrmIntegration`，存在更新否则创建，201/200）。授权策略按 `integration_client` claim 区分 Mes/Crm。
+- **出站 canonical 契约**：`MesWorkOrderReleased/MesWorkOrderCompleted/CrmCustomerChanged`（ILocalEvent），
+  WorkOrder 下达/完工与 Customer 创建/变更时经 `ILocalEventBus` 发布（Feature 门控，关闭不发布不阻断）；
+  `IntegrationOutboundLogHandler` 演示消费（宿主日志 3 条出站事件验证）。RabbitMQ 生产传输绑定
+  （[CrestEvent]+codec+AddRabbitMqEventBus+overlay）文档化，本环境无 broker 未执行。
+- **证据**：构建 0 error、单元 6/6、**P3 E2E**（真实宿主）：Feature 关闭 MES→403、开启→MES 报工 200、
+  CRM 创建 201/更新 200、无钥 401、错钥 401；宿主日志 3 条出站事件；**容器**：全新 PG 容器 `erp-p3-db`+
+  `erp-p3-smoke`（可移植 publish）`/health` 200、P0/P1/P2 端点 200、API-Key 无钥 401、Feature 关闭 403。
+- **设计文档**：spec §17 已追加（MES/CRM 端点/契约/Feature 门控/缺口汇总 G-01..G-10 与 P1/P2 发现）。
+- **LibraryManagement 归档**：IntegrationTests 迁移至 ErpManagement 宿主（factory + 实体/权限替换 + Book→Material +
+  Library 专属测试删除），slnx 3 文件移除 Library 6 项目，aot-validation.yml 移除 trim publish，CapabilityMap §5 更新。
+  `samples/LibraryManagement/` 移至 `99_RecycleBin/issue-129-s4-library-archive/LibraryManagement/`。
+  归档后构建：ErpManagement.Web 0 error + IntegrationTests 0 error + ERP unit 6/6 + Platform 4/4。
+
+## 2026-11-18 — ERP 示例 P2：销售 + 生产工单 + 财务-lite + 看板 + Quartz
+
+- 范围=ERP 设计 §4.4-4.7。新增 9 表（SalesOrders/Lines、SalesShipments/Lines、WorkOrders/WorkOrderMaterials/
+  WorkOrderReports、ArApLedgers、SettlementRecords），迁移 `AddSalesProductionFinance`。
+- **销售**：SalesOrder 阈值审批（`Erp.SalesOrderApprovalThreshold`，超阈走 Workflow+HumanTask，sales-manager 候选；
+  `api/sales-approval` 待办/批准/驳回；`ErpSalesOrderDecisionConsumer` 经 Outbox 幂等回写）；SalesShipment 过账经库存内核
+  出库 + 创建应收。**生产**：WorkOrder 下达按 BOM 展开+组件领料（内核 Issue），报工达量完工+成品入库（内核 Receipt）；
+  `api/work-orders` release/report/close。**财务-lite**：发货→应收、收货→应付（同 UoW，Feature `Erp.Finance` 关闭则跳过）；
+  `api/arap-ledger` 只读 + `{id}/settle`。**看板** `api/dashboard/summary`。**Quartz** `AddQuartzScheduling` + `LowStockScanJob`。
+- **证据（真实宿主+手动 PG）**：构建 0 error；迁移应用全新库；**销售链** 60000>阈值→PendingApproval→sales-manager 审批
+  →Approved（决策消费者）→发货→成品 10→0（CountGain/Issue）+ 应收 60000 Open；**生产链** 工单 2→下达（BOM 展开
+  半成品 2/钢 4 issued=required）→报工 2 Completed→成品入库（余额 2，Issue/Receipt）；**结算** 应收 settle 10000
+  →PartiallySettled；**看板** 月销售 60000/应收 60000/低库存 1；**Quartz** 调度器启动（RAMJobStore）。
+- 种子：半成品 SEMI-DRIVE-01 增默认仓库；销售审批员仅在配置 `SeedIdentity:ErpSalesApproverPassword` 时创建。
+- **前端 P2**：销售订单/发货、生产工单、应收应付台账、审批中心（请购+销售双 Tab）、Dashboard 真实六指标；路由接线，
+  `npm run build` 通过。**容器**：可移植 publish 重建镜像，全新独立 PG 容器 `erp-p2-db`（不触碰共享库）启动 `erp-p2-smoke`，
+  `/health` 200，容器内 `/api/sales-orders|sales-shipments|work-orders|arap-ledger|dashboard/summary|users` 全 200；
+  `/api/sales-approval/tasks` 对 admin 403（按 sales-manager 角色守卫，审批员在宿主 E2E 已 200，属预期角色隔离）。
+  说明：浏览器可见面不可用，P2 以宿主 E2E + 端点契约 + 容器端点核验为准，未做逐页点击截图。
+
+## 2026-11-18 — ERP 示例 P1：采购 + 库存 + 审批中心（Workflow/HumanTask/Outbox/LocalEvent）
+
+- 计划 `~/.qoder-cn/plans/frosty-shore-swift.md`（已批准）；维护者决策：阈值驱动审批、PG 同库异 schema
+  （`crest_erp_runtime`）、Outbox+LocalEvent 兼用、范围=采购+库存+审批中心（财务留 P2）。
+- **交付**：采购（PurchaseRequisition/Order/GoodsReceipt + 行）、库存（StockBalance/Transaction/
+  Transfer/Count + 行）、审批中心、IntegrationEventInbox；`StockPostingManager` 共享过账内核（余额仅经它变动）；
+  阈值提交编排（`ErpRequisitionApprovalOrchestrator`）+ 幂等决策消费者（`ErpRequisitionDecisionConsumer`，
+  经 Outbox 回写单据状态）；`StockPostedEventPublisher` + `ErpStockPostedOutboxHandler`（契约级投递）+
+  `ErpStockPostedInboxConsumer`（幂等 inbox）；`StockChanged` LocalEvent handler。运行时装配在
+  `Web/Approval/ErpRuntimeRegistration.AddErpApprovalRuntime`（四件套 + PG runtime + 描述符 + 候选角色解析器）。
+- **证据（真实宿主 + 手动 PG，linux-x64）**：构建 0 error；`AddProcurementInventory` 迁移应用到全新库（8 表）；
+  宿主启动自动创建 `crest_erp_runtime`（workflow/humantask/outbox/continuation 表）；**端到端**：请购 25000（超阈值）
+  →PendingApproval→审批中心待办→approve→**Approved（决策消费者经 Outbox 回写）**→转单→PO Confirmed→收货 Posted
+  →库存余额 5 + 流水 `Receipt` + PO `Received`；负例：PendingApproval 转单被拒 400。**Outbox 可靠消费**：stock-posted
+  消息 status=2 Delivered + 业务 `IntegrationEventInboxes` 落库（consumer `crest.erp.stock-posted-inbox/v1`）。
+  **库存内核**：调拨 A-01 5→3 / A-02 0→2（TransferOut/TransferIn 守恒）、盘点 CountGain（3→4）。单元测试
+  `ErpManagement.Tests` 6/6（实体状态机）。前端 8 页 + 路由，`npm run build` 通过。
+- **实现发现/修复**：(1) `[CrestModule]` 由生成器无参实例化 → 运行时装配不能放模块 ctor，改为从 Program 调静态扩展；
+  (2) 审批守卫 `ICurrentUser.IsInRole` 依赖 `ClaimTypes.Role` 长 URI 判定失效 → 改用 `_currentUser.Roles`
+  （显式识别两种 claim 类型）；(3) 审批 approve/reject 的 HTTP 锚点 `HumanTasks.Complete` 在 HTTP 层被 403 拒绝
+  （权限定义未同步到 Permissions 表）→ 移除该 HTTP 权限、改由服务层 procurement-manager 角色 + 禁自批守卫（双层）；
+  (4) 自定义 Outbox 契约仅 `AddOutboxRequiredConsumer` 不足以投递，需 `AddOutboxDeliveryHandler` 契约级 handler
+  （已补 ErpStockPostedOutboxHandler，实证从 Pending→Delivered+inbox）；(5) kernel 插入的 StockBalance/Transaction
+  未经 AuditInterceptor（业务 DbContext 未挂审计拦截器）→ CreationTime=0001（已知，未修）；(6) resend-stock-event
+  对已 emitted 返回 400（幂等语义待核）。
+- **环境**：Testcontainers 在 rootless podman 下挂起，全量 IntegrationTests 未本地跑通；P1 用真实宿主 + 手动 PG 验证。
+- 后续：P2（销售/生产工单/看板/Quartz/财务-lite）。
+- **容器**：`build.sh` 重建镜像最初失败（`MissingMethodException OpenIddictServerAspNetCoreBuilder ... UseAspNetCore`，
+  RID 特定 `-r linux-x64` publish 的 OpenIddict 程序集不匹配）→ 改为**可移植 publish（去掉 `-r`）**后镜像正常：
+  `erp-p1-smoke` Up、`/health` 200、`/api/purchase-requisitions/all|stock-balances/all|approval-center/tasks|stock-transfers/all`
+  均 200（token 正常）。build.sh 已固化为可移植 publish。podman-compose 的 pipx 解释器本机损坏，本次用
+  `podman run`（复用 compose 的 deploy_default 网络 + deploy_db_1）冒烟，未改用户环境。
+- **系统管理 Web UI（覆盖 P0 遗留的系统管理页）**：`erp-web/src/pages/system/` 新增用户/角色/权限授予/租户/参数设置/功能开关/审计日志 7 个功能页 + 定时任务占位页（Quartz 无 HTTP 面，明示框架缺口）；
+  路由与菜单接线。关键处理：Feature 全局管理为 host-only，新增无租户头客户端 `apiHost`（带租户头会 403）；
+  `AuthContext` 暴露 `tenantId`（JWT）供用户/角色创建使用；菜单系统项权限串对齐真实名
+  （IdentityManagement.Users.Read/PermissionManagement.Read/TenantManagement.View/SettingManagement.Read/
+  FeatureManagement.Read/AuditLogging.Read）。数据契约实测：users/roles/tenants/settings/current/
+  setting-definitions/groups/feature-definitions/audit-logs/features-global(host)/permission-grants-effective 全 200 且字段匹配页面。
+  前端 `npm run build` 通过；容器重建后含新 UI（wwwroot 资产更新），容器内 system 端点全 200。
+  说明：本会话浏览器可见面不可用 + 表单登录在 secret-fill 上不稳定，系统页以端点数据契约 + 构建 + 容器端点核验为准，未做逐页点击截图。
+
+## 2026-11-18 — 框架缺口补齐 G-06/07/08/09/10（平台管理 HTTP 面 + 字符串枚举）
+
+- 维护者决定"先补齐框架缺口 + 完整测试，再推进 ERP P1"。计划
+  `/home/orches/.qoder-cn/plans/ardent-stone-grouse.md`；维护者拍板：**干净 REST**（写用正确动词，
+  既有红测试改写为新契约规格，删 ci 排除）与 **字符串枚举**（破坏性，生成器开 UseStringEnumConverter）。
+- **G-09 平台管理 HTTP 面已交付**（干净 REST，opt-in ExplicitHost）：
+  - Contracts 给 8 个平台接口方法打 `[AppServiceHttpAction]`（`IUser/IRole/IPermissionGrant/ISetting/
+    ISettingDefinition/ITenant/IFeature/IFeatureDefinition`），复数 prefix（api/users、api/roles、
+    api/permission-grants、api/settings、api/setting-definitions、api/features、api/feature-definitions、
+    api/tenants）；写=POST/PUT/PATCH/DELETE、读=GET。AuditLog 查询走 self-contract
+    `AuditLogHttpProjection`（api/audit-logs，扁平 query）。Feature/FeatureDefinition 9 方法补 CT。
+  - 新增 `src/Platform/CrestCreates.Web/PlatformManagement/`：8 空锚点 + AuditLog self-contract +
+    `AddCrestPlatformManagementHttp()`（转调程序集聚合激活 GeneratedAppServiceHttpActivation_CrestCreates_002EWeb，
+    与 AddCrestAuditRetentionHttp 同入口幂等，opt-in 不进 AddCrestWeb 默认）。零新增 csproj。
+  - 权限：新增 `Contracts/Permissions/PlatformHttpPermissions.cs`（wire 常量）；新增 TenantManagement.View/Update
+    与 AuditLogging.Read 常量 + 定义提供器（AddTenantManagement/AddAuditLogging 注册）；Role 复用 Users 域、
+    SettingDefinition 复用 Settings.Read。服务层 admission 补齐到 RoleAppService/SettingDefinitionAppService/
+    TenantAppService/AuditLogAppService（IPermissionChecker.CheckAsync，双层防线）。
+  - `AddCrestWeb` 收编 AddFeatureManagement+AddFeatureManagementEfCore（否则聚合激活连带 Feature 锚点使宿主 CCHTTP007）。
+  - **关键陷阱修复**：`TenantAppService` 原实现的是 ServiceGenerator 在 `CrestCreates.Application.Tenants`
+    生成的同名 `ITenantAppService`（非 Contracts 接口）→ 投影 CCHTTP007 找不到 Contracts 契约。改为显式实现
+    Contracts 接口 + 注册指向 Contracts 类型（生成器不再生成重复接口）。
+  - `IdentityClaimsBuilder` 增 OIDC 短名 claim `name`/`email`（保留长名），修 userinfo/LoginAndRefresh。
+  - 宿主接线：LibraryManagement.Web 加 Platform.Web 引用 + 命名激活（避二义性）+ `AddCrestPlatformManagementHttp`；
+    ErpManagement.Web 同。`LibraryFormalProjectionBaselineTests` 改命名激活。
+- **G-07 字符串枚举**：`JsonContractSourceWriter` 的 HTTP/CRUD `JsonSourceGenerationOptions` 加
+  `UseStringEnumConverter=true`（.NET 10 支持，AOT 友好）；事件 codec 未动。ERP 前端 MaterialList/BomList 枚举改字符串名。
+- **G-08**：`OpenIddictServerOptions.EnableDevelopmentHttpTransport`，Development 下 `DisableTransportSecurityRequirement()`，非 Development 抛异常。
+- **G-10**：新增 `Domain.Shared/Entities/Auditing/AuditPropertySetter.SetCreationAudit`；AuditInterceptor Added 分支
+  与 ErpDataSeeder 复用（单源）。
+- **G-06**：`CodeGeneratorDiagnosticCodes.CCCG005`；`EntitySourceGenerator` 生成 DTO 前检测引用程序集同名占用→跳过+告警（指引 partial 扩展/改名）。
+- 测试与证据（串行）：ci.yml 移除 IntegrationTests 排除改全量；5 个既有集成测试改写干净 REST 契约；
+  新增 `PlatformManagementRouteBaselineTests`（3，路由矩阵/幂等/退役路由）+ `PlatformManagementHostActivationTests`（1，
+  9 契约 IsService + Map 不抛）**4/4 通过**；`Application.Tests` **271/271**；`JsonContracts.BuildTasks.Tests` **162/162**；
+  ERP/Library 生产构建 exit 0；ERP 前端 npm build 通过。
+  **ERP 宿主实测**（fresh DB）：`/api/users|roles|tenants|settings/current|feature-definitions|setting-definitions/groups|audit-logs` 全 200
+  （信封+字符串枚举+分页正确），匿名 `/api/users` 401，`/api/features/global` 403（host-only 语义正确）。
+- **环境限制**：Testcontainers 集成测试在 rootless podman 下挂起（既有环境问题，Plan 调研亦遇），未本地跑通
+  全量 IntegrationTests；改用"真实 ERP 宿主 + 手动 PG + curl"实测平台端点。全量 IntegrationTests 在 CI docker 环境运行。
+  本地 podman-compose pipx 解释器损坏，验证用 `PYTHONPATH=<venv> python3 -m podman_compose`。
+- 后续：ERP 系统管理前端页归入 P1；G-09 平台面支持声明为 JIT（不新增 NativeAOT/trim）。
+
+## 2026-11-18 — ERP 示例系统（ErpManagement）P0 落地 + 框架缺口发现
+
+- 维护者决定新建企业级 ERP 示例 `samples/ErpManagement/`（React + Ant Design Pro 前端 + 容器编排），
+  双重目的：相对完整的业务示例 + 框架能力验证/缺口发现面。设计规格
+  `docs/superpowers/specs/2026-11-18-erp-sample-system-design.md`（含分期 P0–P3 与缺口 G-06…G-10）。
+  旧样例处置：SaaSHelpdesk/Asset/Procurement/DescriptorControlPlane 保留（被主链测试/AOT fixture 消费）；
+  LibraryManagement 归档为独立切片（须先迁 IntegrationTests 与 CI 引用，未做）。
+- P0 已交付并验证（JIT，linux-x64，本地 podman 6.1.3）：五层骨架 + AddCrestWeb + 正式 EF Migrations +
+  种子；MasterData 9 实体正式 ExplicitHost 投影 CRUD（含 BOM 头行/启用停用）；前端登录/权限菜单/
+  基础资料页/BOM；容器编排 `deploy/`（Dockerfile + compose + entrypoint + build.sh）。浏览器实测
+  登录→菜单→物料 CRUD→BOM 全链通过；`podman-compose up -d` 起 db+app，`https://localhost:8443`
+  静态/登录/物料 API 全通过。API 乐观并发正负例通过。compose 标准 v2 语法（docker 兼容由构造保证，
+  本环境 docker 为 podman 包装器）。
+- **关键框架缺口 G-09（ERP 发现，已实证）**：平台管理 HTTP 面（user/role/permission-grant/setting/
+  feature/tenant/audit-log）在正式主链**未被映射**——平台 AppService 仅 `[CrestService]` 无投影锚点，
+  `MapCrestWeb` 只映射 OpenIddict/Health/OpenApi；属 #129 §14.6 推迟的框架级缺口，非样例漏装配。
+  Library 打这些端点的集成测试本就被 CI 排除且既有红（30 败=平台 404）。ERP 系统管理页因此保持占位；
+  补齐须按 AuditRetention 模板在 Platform.Web 手写投影锚点，属独立框架任务，不在 sample 内补。
+- 其它缺口：G-06 `[Entity]` 生成 DTO 与跨程序集手写同名 DTO 冲突（CS0436+CCHTTP008，须用 partial 扩展）；
+  G-07 投影响应信封 `{data,code,message}` + 枚举序列化为数字，前端须显式适配；G-08 OpenIddict token
+  强制 HTTPS 无开发降级开关（容器须自终 TLS）；G-10 seeder 直写绕过审计赋值（CreationTime 落 1901，
+  已在 ERP seeder 补审计时间）。
+- 环境：Docker Hub 直连不可达、经代理 127.0.0.1:7897 可达；mcr 直连可达。本机 podman-compose pipx
+  venv 解释器损坏（python3.14→3.15），验证用模块方式 `PYTHONPATH=<venv> python3 -m podman_compose`，
+  未改用户环境。容器以 Development 运行（开发公共密码客户端 crestcreates-client + 临时签名密钥 +
+  localhost dev 证书 TLS），样例限定。
+- 限界：P0 不产生新 NativeAOT/trim 声明；系统管理与 P1/P2 业务域为占位。Dockerfile.from-source
+  （代理多阶段）已提供但未验证。
+
 ## 2026-11-17 — 99_RecycleBin 工作区清理（维护者决定）
 
 - 按维护者明确决定，`99_RecycleBin/` 整体从工作区删除并取消 git 跟踪（152 个跟踪文件暂存为删除，其余 265 个为 gitignore 副本；历史内容保留在删除前提交 `13a35f90` 及更早，可恢复）。#131/#132 等防回流守卫本身保留，只保留"不得进入 Compile/ProjectReference/pack/方案输入"与退役声明拒绝逻辑。
