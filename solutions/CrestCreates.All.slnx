@@ -10,12 +10,12 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="../samples/CrestCreates.Samples.DescriptorControlPlane/CrestCreates.Samples.DescriptorControlPlane.csproj" />
-    <Project Path="../samples/LibraryManagement/LibraryManagement.Application.Contracts/LibraryManagement.Application.Contracts.csproj" />
-    <Project Path="../samples/LibraryManagement/LibraryManagement.Application/LibraryManagement.Application.csproj" />
-    <Project Path="../samples/LibraryManagement/LibraryManagement.Domain.Shared/LibraryManagement.Domain.Shared.csproj" />
-    <Project Path="../samples/LibraryManagement/LibraryManagement.Domain/LibraryManagement.Domain.csproj" />
-    <Project Path="../samples/LibraryManagement/LibraryManagement.EntityFrameworkCore/LibraryManagement.EntityFrameworkCore.csproj" />
-    <Project Path="../samples/LibraryManagement/LibraryManagement.Web/LibraryManagement.Web.csproj" />
+    <Project Path="../samples/ErpManagement/ErpManagement.Application.Contracts/ErpManagement.Application.Contracts.csproj" />
+    <Project Path="../samples/ErpManagement/ErpManagement.Application/ErpManagement.Application.csproj" />
+    <Project Path="../samples/ErpManagement/ErpManagement.Domain.Shared/ErpManagement.Domain.Shared.csproj" />
+    <Project Path="../samples/ErpManagement/ErpManagement.Domain/ErpManagement.Domain.csproj" />
+    <Project Path="../samples/ErpManagement/ErpManagement.EntityFrameworkCore/ErpManagement.EntityFrameworkCore.csproj" />
+    <Project Path="../samples/ErpManagement/ErpManagement.Web/ErpManagement.Web.csproj" />
     <Project Path="../samples/SaaSHelpdesk/SaaSHelpdesk.Application.Contracts/SaaSHelpdesk.Application.Contracts.csproj" />
     <Project Path="../samples/SaaSHelpdesk/SaaSHelpdesk.Application/SaaSHelpdesk.Application.csproj" />
     <Project Path="../samples/SaaSHelpdesk/SaaSHelpdesk.Domain.Shared/SaaSHelpdesk.Domain.Shared.csproj" />

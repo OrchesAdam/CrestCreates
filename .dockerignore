@@ -1,0 +1,13 @@
+# Build context hygiene for container image builds (e.g. Dockerfile.from-source).
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/.git/
+**/logs/
+**/*.log
+**/*.pfx
+.git/
+99_RecycleBin/
+samples/ErpManagement/deploy/publish/
+samples/ErpManagement/ErpManagement.Web/wwwroot/

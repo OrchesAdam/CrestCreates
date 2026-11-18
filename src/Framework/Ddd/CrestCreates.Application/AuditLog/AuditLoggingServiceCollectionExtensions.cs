@@ -1,4 +1,5 @@
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.Authorization.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -15,6 +16,7 @@ public static class AuditLoggingServiceCollectionExtensions
     public static IServiceCollection AddAuditLogging(this IServiceCollection services)
     {
         services.TryAddScoped<IAuditLogAppService, AuditLogAppService>();
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IPermissionDefinitionProvider, AuditLogQueryPermissionDefinitionProvider>());
         services.AddAuditRetentionApplication();
         return services;
     }

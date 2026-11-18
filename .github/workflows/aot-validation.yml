@@ -70,8 +70,9 @@ jobs:
           dotnet-version: |
             10.0.x
 
-      - name: Publish — LibraryManagement.Web (Trimmed)
-        run: dotnet publish samples/LibraryManagement/LibraryManagement.Web -c Release -r linux-x64 --self-contained true
+      # LibraryManagement.Web archived (ERP sample is the primary sample; ErpManagement.Web
+      # has approval runtime/Quartz/integration adapters and has NOT been trim-verified per
+      # the plan's "不新增 NativeAOT/trim 声明" boundary — do not add trim publish here).
 
       - name: Publish — SaaSHelpdesk.Web (Trimmed)
         run: dotnet publish samples/SaaSHelpdesk/SaaSHelpdesk.Web -c Release -r linux-x64 --self-contained true

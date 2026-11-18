@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="ErpManagement.Domain.Shared/ErpManagement.Domain.Shared.csproj" />
+    <Project Path="ErpManagement.Domain/ErpManagement.Domain.csproj" />
+    <Project Path="ErpManagement.Application.Contracts/ErpManagement.Application.Contracts.csproj" />
+    <Project Path="ErpManagement.Application/ErpManagement.Application.csproj" />
+    <Project Path="ErpManagement.EntityFrameworkCore/ErpManagement.EntityFrameworkCore.csproj" />
+    <Project Path="ErpManagement.Web/ErpManagement.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ErpManagement.Tests/ErpManagement.Tests.csproj" />
+  </Folder>
+</Solution>

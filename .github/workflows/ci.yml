@@ -125,20 +125,15 @@ jobs:
       - name: Test — Persistence / ORM providers (UnitOfWork kernel, chain, capabilities, AOP weave, CAP lease)
         run: dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests --no-build
 
-      # I-18 (OpenIddictScopes missing on a fresh database) is fixed: LibraryManagement's
-      # persistence module now declares OpenIddictDbContext in the same migrate-and-seed
-      # closure that registers HostOpenIddictDataSeeder, so host bootstrap succeeds and the
-      # suite runs. The remaining exclusions are all the framework platform HTTP surface
-      # (Setting / Feature / AuditLog query / Tenant / User) that retired with the legacy
-      # DynamicApi chain and was explicitly deferred to an independent HTTP design task by
-      # #129 rev.2 §14.6 — those routes answer 404 until that surface is re-published
-      # through the formal projection; do not paper over them by editing expectations.
-      # LoginAndRefresh additionally asserts OIDC short-name claim keys (name/email) that
-      # /connect/userinfo has never emitted. Everything else in this project runs here.
+      # The framework platform HTTP surface (User / Role / PermissionGrant / Setting /
+      # SettingDefinition / Feature / FeatureDefinition / Tenant / AuditLog query) is now
+      # re-published through the formal ExplicitHost projection (G-09, clean REST) via
+      # AddCrestPlatformManagementHttp in the Library host. The former #129 rev.2 §14.6
+      # exclusions are removed: these tests are rewritten to the new clean-REST contract
+      # (proper verbs, plural prefixes, string enums) and run in full. OIDC short-name
+      # claims (name/email) are now emitted by IdentityClaimsBuilder, so LoginAndRefresh runs.
       - name: Test — Integration suite (auth / tenant / permission / audit / UoW, Testcontainers)
-        run: |
-          dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build \
-            --filter "FullyQualifiedName!~AuditLogIntegrationTests&FullyQualifiedName!~FeatureManagementIntegrationTests&FullyQualifiedName!~SettingManagementIntegrationTests&FullyQualifiedName!~TenantManagementFullChainIntegrationTests&FullyQualifiedName!~IntegrationTests.LoginAndRefresh_WithSeededAdmin_ReturnsTokensAndCurrentUser&FullyQualifiedName!~IntegrationTests.PermissionGrant_AfterGrantingBookSearch_UserCanAccessDynamicApi&FullyQualifiedName!~IntegrationTests.TenantBoundary_WithMismatchedTenantHeader_ReturnsForbidden"
+        run: dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build
 
       - name: Test — Framework / Modules
         run: |

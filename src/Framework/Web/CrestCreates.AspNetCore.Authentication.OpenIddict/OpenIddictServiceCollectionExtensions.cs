@@ -104,6 +104,11 @@ public static class OpenIddictServiceCollectionExtensions
                     .EnableAuthorizationEndpointPassthrough()
                     .EnableTokenEndpointPassthrough()
                     .EnableUserInfoEndpointPassthrough();
+
+                if (options.EnableDevelopmentHttpTransport)
+                {
+                    serverOptions.UseAspNetCore().DisableTransportSecurityRequirement();
+                }
             })
             .AddValidation(validationOptions =>
             {
@@ -153,7 +158,7 @@ internal sealed class OpenIddictKeyMaterial : IDisposable
 
     public OpenIddictKeyMaterial(OpenIddictServerOptions options, IHostEnvironment environment)
     {
-        if ((options.EnableDevelopmentEphemeralKeys || options.EnableDevelopmentPublicPasswordClient) && !environment.IsDevelopment())
+        if ((options.EnableDevelopmentEphemeralKeys || options.EnableDevelopmentPublicPasswordClient || options.EnableDevelopmentHttpTransport) && !environment.IsDevelopment())
             throw new InvalidOperationException("OpenIddict development opt-ins require the Development host environment.");
         if (options.EnableDevelopmentPublicPasswordClient && !options.EnablePasswordFlow)
             throw new InvalidOperationException("The development password client requires the password flow.");

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Tenants;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Application.Tenants;
+using CrestCreates.Application.Tests.TestHelpers;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Permission;
@@ -35,7 +36,8 @@ public class TenantAppServiceTests
             _tenantManagerMock.Object,
             _tenantRepositoryMock.Object,
             orchestrator,
-            _storeMock.Object);
+            _storeMock.Object,
+            PermissivePermissionChecker.Create());
     }
 
     [Fact]

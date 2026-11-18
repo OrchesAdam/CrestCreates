@@ -1,6 +1,9 @@
+using System;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using ErpManagement.Application.Contracts.DTOs;
+using ErpManagement.Domain.Shared.Enums;
 using FluentAssertions;
-using LibraryManagement.Application.Contracts.DTOs;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
@@ -8,29 +11,29 @@ namespace CrestCreates.IntegrationTests;
 public class DynamicApiSerializationTests
 {
     [Fact]
-    public void Deserialize_CreateCategoryDto_WithCamelCaseJson_BindsExpectedProperties()
+    public void Deserialize_CreateMaterialDto_WithCamelCaseJson_BindsExpectedProperties()
     {
-        var json = """
+        var unitId = Guid.NewGuid();
+        var json = $$"""
         {
-          "name": "integration-category",
-          "description": "Integration category",
-          "parentId": null,
-          "parent": null,
-          "children": [],
-          "books": []
+          "code": "IT-STEEL",
+          "name": "Integration steel",
+          "materialType": "Purchased",
+          "baseUnitId": "{{unitId}}",
+          "categoryId": null
         }
         """;
 
-        var result = JsonSerializer.Deserialize<CreateCategoryDto>(
-            json,
-            new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+        var result = JsonSerializer.Deserialize<CreateMaterialDto>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter<MaterialType>() }
+        });
 
         result.Should().NotBeNull();
-        result!.Name.Should().Be("integration-category");
-        result.Description.Should().Be("Integration category");
-        result.ParentId.Should().BeNull();
+        result!.Code.Should().Be("IT-STEEL");
+        result.Name.Should().Be("Integration steel");
+        result.MaterialType.Should().Be(MaterialType.Purchased);
+        result.BaseUnitId.Should().Be(unitId);
+        result.CategoryId.Should().BeNull();
     }
 }

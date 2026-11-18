@@ -7,26 +7,28 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using ErpManagement.Application.Contracts.DTOs;
+using ErpManagement.Domain.Shared.Enums;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
-public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFactory>
+public class IntegrationTests : IClassFixture<ErpManagementWebApplicationFactory>
 {
     private const string HostTenantId = "host";
     private const string AdminUserName = "admin";
     private const string AdminPassword = "Admin123!";
 
-    private static readonly JsonSerializerOptions JsonSerializerOptions = new()
+    private static readonly JsonSerializerOptions JsonSerializerOptions = new(JsonSerializerDefaults.Web)
     {
-        PropertyNameCaseInsensitive = true
+        Converters = { new JsonStringEnumConverter<MaterialType>() }
     };
 
-    private readonly LibraryManagementWebApplicationFactory _factory;
+    private readonly ErpManagementWebApplicationFactory _factory;
 
-    public IntegrationTests(LibraryManagementWebApplicationFactory factory)
+    public IntegrationTests(ErpManagementWebApplicationFactory factory)
     {
         _factory = factory;
         // Trigger host initialization and seed data before any tests run
@@ -83,26 +85,24 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
     }
 
     [Fact]
-    public async Task DynamicApi_WithAuthorizedAdmin_CanCreateAndGetBook()
+    public async Task DynamicApi_WithAuthorizedAdmin_CanCreateAndGetMaterial()
     {
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        var category = await CreateCategoryAsync(client);
-        var createdBook = await CreateBookAsync(client, category.Id, "Domain Driven Design");
-        createdBook.Data.Should().NotBeNull();
-        createdBook.Data!.Title.Should().Be("Domain Driven Design");
+        var created = await CreateMaterialAsync(client, "Integration steel");
+        created.Name.Should().Be("Integration steel");
 
-        var getBookResponse = await client.GetAsync($"/api/book/{createdBook.Data.Id}");
-        getBookResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var response = await client.GetAsync($"/api/material/{created.Id}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
 
-        var fetchedBook = await ReadJsonAsync<DynamicApiResponse<BookResponse>>(getBookResponse);
-        fetchedBook.Data.Should().NotBeNull();
-        fetchedBook.Data!.Id.Should().Be(createdBook.Data.Id);
-        fetchedBook.Data.Title.Should().Be("Domain Driven Design");
+        var fetched = await ReadJsonAsync<DynamicApiResponse<MaterialDto>>(response);
+        fetched.Data.Should().NotBeNull();
+        fetched.Data!.Id.Should().Be(created.Id);
+        fetched.Data.Name.Should().Be("Integration steel");
     }
 
     [Fact]
-    public async Task PermissionGrant_AfterGrantingBookSearch_UserCanAccessDynamicApi()
+    public async Task PermissionGrant_AfterGrantingMaterialSearch_UserCanAccessDynamicApi()
     {
         await _factory.EnsureSeedCompleteAsync();
 
@@ -116,12 +116,14 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         adminTenantId.Should().NotBeNullOrWhiteSpace("admin userinfo should contain tenantId");
 
         // Ensure user creation is enabled (other tests may have disabled it)
-        await adminClient.GetAsync("/api/feature/set-global?name=Identity.UserCreationEnabled&value=true");
+        using var enableResponse = await adminClient.PutAsync(
+            "/api/features/global/Identity.UserCreationEnabled?value=true", content: null);
+        enableResponse.StatusCode.Should().Be(HttpStatusCode.OK, await enableResponse.Content.ReadAsStringAsync());
 
         var (createdUser, rawCreateResponse) = await CreateUserWithResponseAsync(
             adminClient,
             userName: $"reader-{Guid.NewGuid():N}"[..20],
-            email: $"reader-{Guid.NewGuid():N}@library.local",
+            email: $"reader-{Guid.NewGuid():N}@example.test",
             password: "Reader123!",
             tenantId: adminTenantId, // Use the actual tenant GUID, not the name
             isSuperAdmin: false);
@@ -132,7 +134,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         // Try to login as the new reader user
         var (readerClient, readerToken) = await CreateAuthenticatedClientAsync(createdUser.UserName, "Reader123!", HostTenantId);
 
-        var deniedResponse = await readerClient.GetAsync("/api/book");
+        var deniedResponse = await readerClient.GetAsync("/api/material/all");
         deniedResponse.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
             await deniedResponse.Content.ReadAsStringAsync());
@@ -140,12 +142,13 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         var deniedError = await ReadJsonAsync<ErrorResponse>(deniedResponse);
         deniedError.Message.Should().Be("没有权限执行当前操作。");
 
-        var grantResponse = await adminClient.GetAsync(
-            $"/api/permission-grant/grant-to-user?userId={createdUser.Id}&permissionName=Book.Search&scope=0");
+        var grantResponse = await adminClient.PostAsJsonAsync(
+            $"/api/permission-grants/user/{createdUser.Id}",
+            new { permissionName = "Material.Search", scope = "Global", tenantId = (string?)null });
 
         grantResponse.StatusCode.Should().Be(HttpStatusCode.OK, await grantResponse.Content.ReadAsStringAsync());
 
-        var allowedResponse = await readerClient.GetAsync("/api/book");
+        var allowedResponse = await readerClient.GetAsync("/api/material/all");
         allowedResponse.StatusCode.Should().Be(
             HttpStatusCode.OK,
             await allowedResponse.Content.ReadAsStringAsync());
@@ -156,51 +159,33 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
     {
         var (client, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
 
-        var category = await CreateCategoryAsync(client);
-        var createdBook = await CreateBookAsync(client, category.Id, "Clean Code");
-        createdBook.Data.Should().NotBeNull();
-
-        var updateData = new
+        var created = await CreateMaterialAsync(client, "Integration fastener");
+        const string updatedName = "Updated integration fastener";
+        using var updateResponse = await client.PutAsJsonAsync($"/api/material/{created.Id}", new UpdateMaterialDto
         {
-            Title = "Clean Code Second Edition",
-            Author = "Robert C. Martin",
-            ISBN = createdBook.Data!.ISBN,
-            Description = "Updated edition",
-            PublishDate = DateTime.UtcNow.Date,
-            Publisher = "Prentice Hall",
-            Status = 0,
-            CategoryId = category.Id,
-            TotalCopies = 5,
-            AvailableCopies = 4,
-            Location = "B-02"
-        };
-        var updateJsonContent = new StringContent(
-            System.Text.Json.JsonSerializer.Serialize(updateData),
-            System.Text.Encoding.UTF8,
-            "application/json");
-        var updateResponse = await client.PutAsync($"/api/book/{createdBook.Data!.Id}", updateJsonContent);
+            Code = created.Code,
+            Name = updatedName,
+            BaseUnitId = created.BaseUnitId,
+            MaterialType = created.MaterialType,
+            ConcurrencyStamp = created.ConcurrencyStamp
+        }, JsonSerializerOptions);
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.OK, await updateResponse.Content.ReadAsStringAsync());
+        var updated = await ReadJsonAsync<DynamicApiResponse<MaterialDto>>(updateResponse);
+        updated.Data.Should().NotBeNull();
+        updated.Data!.Name.Should().Be(updatedName);
+        updated.Data.ConcurrencyStamp.Should().NotBeNullOrWhiteSpace();
 
-        updateResponse.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await updateResponse.Content.ReadAsStringAsync());
-        var updatedBook = await ReadJsonAsync<DynamicApiResponse<BookResponse>>(updateResponse);
-        updatedBook.Data.Should().NotBeNull();
-        updatedBook.Data!.Title.Should().Be("Clean Code Second Edition");
+        using var listResponse = await client.GetAsync("/api/material/all");
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK, await listResponse.Content.ReadAsStringAsync());
+        var list = await ReadJsonAsync<DynamicApiResponse<MaterialDto[]>>(listResponse);
+        list.Data.Should().Contain(material => material.Id == created.Id && material.Name == updatedName);
 
-        var listResponse = await client.GetAsync("/api/book?pageIndex=0&pageSize=10");
-        listResponse.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await listResponse.Content.ReadAsStringAsync());
-        var pagedBooks = await ReadJsonAsync<DynamicApiResponse<PagedResultResponse<BookResponse>>>(listResponse);
-        pagedBooks.Data.Should().NotBeNull();
-        pagedBooks.Data!.Items.Should().Contain(book => book.Id == createdBook.Data.Id && book.Title == "Clean Code Second Edition");
+        using var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/material/{created.Id}");
+        deleteRequest.Headers.IfMatch.Add(new EntityTagHeaderValue($"\"{updated.Data.ConcurrencyStamp}\""));
+        using var deleteResponse = await client.SendAsync(deleteRequest);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK, await deleteResponse.Content.ReadAsStringAsync());
 
-        var deleteResponse = await client.DeleteAsync($"/api/book/{createdBook.Data.Id}");
-        deleteResponse.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await deleteResponse.Content.ReadAsStringAsync());
-
-        var getDeletedResponse = await client.GetAsync($"/api/book/{createdBook.Data.Id}");
+        using var getDeletedResponse = await client.GetAsync($"/api/material/{created.Id}");
         getDeletedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
 
         var swaggerResponse = await client.GetAsync("/openapi/v1.json");
@@ -210,12 +195,12 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
         using var swaggerDocument = JsonDocument.Parse(await swaggerResponse.Content.ReadAsStringAsync());
         var paths = swaggerDocument.RootElement.GetProperty("paths");
-        paths.TryGetProperty("/api/book", out var bookCollectionPath).Should().BeTrue();
-        bookCollectionPath.TryGetProperty("get", out _).Should().BeTrue();
-        bookCollectionPath.TryGetProperty("post", out _).Should().BeTrue();
-        paths.TryGetProperty("/api/book/{id}", out var bookItemPath).Should().BeTrue();
-        bookItemPath.TryGetProperty("put", out _).Should().BeTrue();
-        bookItemPath.TryGetProperty("delete", out _).Should().BeTrue();
+        paths.GetProperty("/api/material").TryGetProperty("post", out _).Should().BeTrue();
+        paths.GetProperty("/api/material/all").TryGetProperty("get", out _).Should().BeTrue();
+        var itemPath = paths.GetProperty("/api/material/{id}");
+        itemPath.TryGetProperty("get", out _).Should().BeTrue();
+        itemPath.TryGetProperty("put", out _).Should().BeTrue();
+        itemPath.TryGetProperty("delete", out _).Should().BeTrue();
     }
 
     [Fact]
@@ -233,7 +218,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
 
         // Create a new tenant
         var tenantName = $"tenant-{Guid.NewGuid():N}"[..20];
-        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenant", new
+        var tenantResponse = await adminClient.PostAsJsonAsync("/api/tenants", new
         {
             name = tenantName,
             displayName = "Second Tenant",
@@ -323,7 +308,7 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
             System.Text.Encoding.UTF8,
             "application/json");
 
-        var response = await adminClient.PostAsync("/api/user", content);
+        var response = await adminClient.PostAsync("/api/users", content);
 
         var rawResponse = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(HttpStatusCode.OK, rawResponse);
@@ -356,56 +341,28 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         return result!;
     }
 
-    private static async Task<CategoryResponse> CreateCategoryAsync(HttpClient client)
+    private static async Task<MaterialDto> CreateMaterialAsync(HttpClient client, string name)
     {
-        var categoryData = new
+        using var unitResponse = await client.PostAsJsonAsync("/api/unit-of-measure", new CreateUnitOfMeasureDto
         {
-            Name = $"category-{Guid.NewGuid():N}",
-            Description = "Integration category",
-            ParentId = (Guid?)null
-        };
-        var jsonContent = new StringContent(
-            System.Text.Json.JsonSerializer.Serialize(categoryData),
-            System.Text.Encoding.UTF8,
-            "application/json");
-        var categoryResponse = await client.PostAsync("/api/category", jsonContent);
+            Code = $"IT-{Guid.NewGuid():N}"[..24],
+            Name = "Integration unit"
+        });
+        unitResponse.StatusCode.Should().Be(HttpStatusCode.OK, await unitResponse.Content.ReadAsStringAsync());
+        var unit = await ReadJsonAsync<DynamicApiResponse<UnitOfMeasureDto>>(unitResponse);
+        unit.Data.Should().NotBeNull();
 
-        categoryResponse.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await categoryResponse.Content.ReadAsStringAsync());
-
-        var categoryEnvelope = await ReadJsonAsync<DynamicApiResponse<CategoryResponse>>(categoryResponse);
-        categoryEnvelope.Data.Should().NotBeNull();
-        return categoryEnvelope.Data!;
-    }
-
-    private static async Task<DynamicApiResponse<BookResponse>> CreateBookAsync(HttpClient client, Guid categoryId, string title)
-    {
-        var isbn = $"{Guid.NewGuid().ToString().Replace("-", "")}"[..13];
-        var bookData = new
+        using var response = await client.PostAsJsonAsync("/api/material", new CreateMaterialDto
         {
-            Title = title,
-            Author = "Integration Author",
-            ISBN = isbn,
-            Description = "Integration description",
-            PublishDate = DateTime.UtcNow.Date,
-            Publisher = "Integration Publisher",
-            Status = 0,
-            CategoryId = categoryId,
-            TotalCopies = 3,
-            AvailableCopies = 3,
-            Location = "A-01"
-        };
-        var jsonContent = new StringContent(
-            System.Text.Json.JsonSerializer.Serialize(bookData),
-            System.Text.Encoding.UTF8,
-            "application/json");
-        var createBookResponse = await client.PostAsync("/api/book", jsonContent);
-
-        createBookResponse.StatusCode.Should().Be(
-            HttpStatusCode.OK,
-            await createBookResponse.Content.ReadAsStringAsync());
-        return await ReadJsonAsync<DynamicApiResponse<BookResponse>>(createBookResponse);
+            Code = $"IT-{Guid.NewGuid():N}",
+            Name = name,
+            MaterialType = MaterialType.Purchased,
+            BaseUnitId = unit.Data!.Id
+        }, JsonSerializerOptions);
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var material = await ReadJsonAsync<DynamicApiResponse<MaterialDto>>(response);
+        material.Data.Should().NotBeNull();
+        return material.Data!;
     }
 
     private sealed class TokenResponse
@@ -459,20 +416,6 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         public T? Data { get; set; }
     }
 
-    private sealed class CategoryResponse
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-    }
-
-    private sealed class BookResponse
-    {
-        public Guid Id { get; set; }
-        public string Title { get; set; } = string.Empty;
-        public string ISBN { get; set; } = string.Empty;
-        public string? ConcurrencyStamp { get; set; }
-    }
-
     private sealed class ErrorResponse
     {
         public string Code { get; set; } = string.Empty;
@@ -480,13 +423,5 @@ public class IntegrationTests : IClassFixture<LibraryManagementWebApplicationFac
         public string? Details { get; set; }
         public string? TraceId { get; set; }
         public int StatusCode { get; set; }
-    }
-
-    private sealed class PagedResultResponse<T>
-    {
-        public T[] Items { get; set; } = Array.Empty<T>();
-        public int TotalCount { get; set; }
-        public int PageIndex { get; set; }
-        public int PageSize { get; set; }
     }
 }

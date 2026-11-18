@@ -27,11 +27,11 @@ namespace CrestCreates.IntegrationTests;
 /// instances while sharing only the committed database authority.
 /// </summary>
 public sealed class PermissionCacheConsistencyIntegrationTests
-    : IClassFixture<LibraryManagementWebApplicationFactory>
+    : IClassFixture<ErpManagementWebApplicationFactory>
 {
-    private readonly LibraryManagementWebApplicationFactory _factory;
+    private readonly ErpManagementWebApplicationFactory _factory;
 
-    public PermissionCacheConsistencyIntegrationTests(LibraryManagementWebApplicationFactory factory)
+    public PermissionCacheConsistencyIntegrationTests(ErpManagementWebApplicationFactory factory)
     {
         _factory = factory;
         _ = _factory.CreateClient();

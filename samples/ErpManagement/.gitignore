@@ -1,0 +1,7 @@
+# Generated frontend build output (produced by erp-web npm run build)
+ErpManagement.Web/wwwroot/
+erp-web/dist/
+
+# Local runtime logs
+logs/
+*.log

@@ -40,21 +40,21 @@ public class FeatureAppService : IFeatureAppService
         _permissionChecker = permissionChecker;
     }
 
-    public async Task<List<FeatureValueDto>> GetGlobalValuesAsync()
+    public async Task<List<FeatureValueDto>> GetGlobalValuesAsync(CancellationToken cancellationToken = default)
     {
         EnsureHostContext(FeatureManagementPermissions.Read);
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         return await GetScopedValuesAsync(FeatureScope.Global, string.Empty, null);
     }
 
-    public async Task<List<FeatureValueDto>> GetTenantValuesAsync(string tenantId)
+    public async Task<List<FeatureValueDto>> GetTenantValuesAsync(string tenantId, CancellationToken cancellationToken = default)
     {
         EnsureHostContext(FeatureManagementPermissions.Read);
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         return await GetScopedValuesAsync(FeatureScope.Tenant, tenantId, tenantId);
     }
 
-    public async Task<List<FeatureValueDto>> GetCurrentTenantValuesAsync()
+    public async Task<List<FeatureValueDto>> GetCurrentTenantValuesAsync(CancellationToken cancellationToken = default)
     {
         EnsureTenantContext();
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
@@ -65,21 +65,21 @@ public class FeatureAppService : IFeatureAppService
         return resolved.Select(_mapper.Map).ToList();
     }
 
-    public async Task<FeatureValueDto?> GetGlobalValueAsync(string name)
+    public async Task<FeatureValueDto?> GetGlobalValueAsync(string name, CancellationToken cancellationToken = default)
     {
         EnsureHostContext(FeatureManagementPermissions.Read);
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         return await GetScopedValueAsync(name, FeatureScope.Global, string.Empty, null);
     }
 
-    public async Task<FeatureValueDto?> GetTenantValueAsync(string name, string tenantId)
+    public async Task<FeatureValueDto?> GetTenantValueAsync(string name, string tenantId, CancellationToken cancellationToken = default)
     {
         EnsureHostContext(FeatureManagementPermissions.Read);
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);
         return await GetScopedValueAsync(name, FeatureScope.Tenant, tenantId, tenantId);
     }
 
-    public async Task<FeatureValueDto?> GetCurrentTenantValueAsync(string name)
+    public async Task<FeatureValueDto?> GetCurrentTenantValueAsync(string name, CancellationToken cancellationToken = default)
     {
         EnsureTenantContext();
         await EnsureGrantedAsync(FeatureManagementPermissions.Read);

@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Application.Contracts.DTOs.Identity;
 using CrestCreates.Application.Identity;
+using CrestCreates.Application.Tests.TestHelpers;
 using CrestCreates.Security.Abstractions;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
@@ -26,7 +27,7 @@ public class RoleAppServiceTests
         _currentTenantMock = new Mock<ICurrentTenant>();
         _securityLogWriterMock = new Mock<IIdentitySecurityLogWriter>();
         _currentTenantMock.SetupGet(currentTenant => currentTenant.Id).Returns(string.Empty);
-        _roleAppService = new RoleAppService(_roleRepositoryMock.Object, _currentTenantMock.Object, _securityLogWriterMock.Object);
+        _roleAppService = new RoleAppService(_roleRepositoryMock.Object, _currentTenantMock.Object, _securityLogWriterMock.Object, PermissivePermissionChecker.Create());
     }
 
     [Fact]

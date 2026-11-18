@@ -17,7 +17,9 @@ public class IdentityClaimsBuilder : IIdentityClaimsBuilder
             new(ClaimTypes.NameIdentifier, context.UserId.ToString()),
             new(ClaimTypes.Name, context.UserName),
             new("preferred_username", context.UserName),
+            new("name", context.UserName),
             new(ClaimTypes.Email, context.Email ?? string.Empty),
+            new("email", context.Email ?? string.Empty),
             new("tenantid", context.TenantId ?? string.Empty),
             new("tenant_id", context.TenantId ?? string.Empty),
             new("is_super_admin", context.IsSuperAdmin.ToString().ToLowerInvariant())

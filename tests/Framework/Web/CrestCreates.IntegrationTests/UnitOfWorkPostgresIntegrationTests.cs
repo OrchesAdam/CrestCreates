@@ -20,7 +20,7 @@ namespace CrestCreates.IntegrationTests;
 /// <summary>
 /// 切片 3/4 验收（自包含 PostgreSQL + Testcontainers，CI 运行）：
 /// 外层事务已开始时的嵌套隔离与提交后可见性、隔离级别实测接受。
-/// 不依赖 legacy LibraryManagement fixture 的后启动 seeding（其 bootstrap 问题见 I-18）。
+/// 使用独立的 PostgreSQL fixture，不依赖样例宿主的种子数据。
 /// </summary>
 public sealed class UnitOfWorkPostgresIntegrationTests : IAsyncLifetime
 {

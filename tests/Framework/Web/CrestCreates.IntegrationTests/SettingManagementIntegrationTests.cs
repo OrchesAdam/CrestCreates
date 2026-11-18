@@ -14,7 +14,7 @@ using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
-public class SettingManagementIntegrationTests : IClassFixture<LibraryManagementWebApplicationFactory>
+public class SettingManagementIntegrationTests : IClassFixture<ErpManagementWebApplicationFactory>
 {
     private const string HostTenantId = "host";
     private const string AdminUserName = "admin";
@@ -25,9 +25,9 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly LibraryManagementWebApplicationFactory _factory;
+    private readonly ErpManagementWebApplicationFactory _factory;
 
-    public SettingManagementIntegrationTests(LibraryManagementWebApplicationFactory factory)
+    public SettingManagementIntegrationTests(ErpManagementWebApplicationFactory factory)
     {
         _factory = factory;
         // Trigger host initialization and seed data before any tests run
@@ -41,18 +41,18 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
         var updateResponse = await tenantClient.PutAsJsonAsync(
-            "/api/setting/update-current-tenant?name=App.DisplayName",
+            "/api/settings/current-tenant/App.DisplayName",
             new { value = "Tenant Display" });
 
         updateResponse.StatusCode.Should().Be(HttpStatusCode.OK, await updateResponse.Content.ReadAsStringAsync());
 
-        var currentValuesResponse = await tenantClient.GetAsync("/api/setting/current-values");
+        var currentValuesResponse = await tenantClient.GetAsync("/api/settings/current");
         currentValuesResponse.StatusCode.Should().Be(HttpStatusCode.OK, await currentValuesResponse.Content.ReadAsStringAsync());
 
         var envelope = await ReadJsonAsync<DynamicApiResponse<SettingValueResponse[]>>(currentValuesResponse);
         var displayNameSetting = envelope.Data!.Single(setting => setting.Name == "App.DisplayName");
         displayNameSetting.Value.Should().Be("Tenant Display");
-        displayNameSetting.Scope.Should().Be(2);
+        displayNameSetting.Scope.Should().Be("Tenant");
     }
 
     [Fact]
@@ -62,12 +62,12 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
         var updateResponse = await tenantClient.PutAsJsonAsync(
-            "/api/setting/update-current-tenant?name=Storage.SecretKey",
+            "/api/settings/current-tenant/Storage.SecretKey",
             new { value = "secret-value-123" });
 
         updateResponse.StatusCode.Should().Be(HttpStatusCode.OK, await updateResponse.Content.ReadAsStringAsync());
 
-        var currentValuesResponse = await tenantClient.GetAsync("/api/setting/current-values");
+        var currentValuesResponse = await tenantClient.GetAsync("/api/settings/current");
         currentValuesResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var envelope = await ReadJsonAsync<DynamicApiResponse<SettingValueResponse[]>>(currentValuesResponse);
@@ -82,7 +82,7 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
     {
         var (hostClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, HostTenantId);
         var globalUpdateResponse = await hostClient.PutAsJsonAsync(
-            "/api/setting/update-global?name=App.DisplayName",
+            "/api/settings/global/App.DisplayName",
             new { value = "Global Display" });
 
         globalUpdateResponse.StatusCode.Should().Be(HttpStatusCode.OK, await globalUpdateResponse.Content.ReadAsStringAsync());
@@ -91,7 +91,7 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         var (tenantClient, _) = await CreateAuthenticatedClientAsync(AdminUserName, AdminPassword, tenantId);
 
         var tenantUpdateResponse = await tenantClient.PutAsJsonAsync(
-            "/api/setting/update-current-tenant?name=App.DisplayName",
+            "/api/settings/current-tenant/App.DisplayName",
             new { value = "Tenant Display" });
         tenantUpdateResponse.StatusCode.Should().Be(HttpStatusCode.OK, await tenantUpdateResponse.Content.ReadAsStringAsync());
 
@@ -99,7 +99,7 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         (await GetCurrentSettingAsync(tenantClient, "App.DisplayName")).Value.Should().Be("Tenant Display");
 
         // Delete tenant override and verify fallback to global
-        var deleteTenantResponse = await tenantClient.DeleteAsync("/api/setting/delete-current-tenant?name=App.DisplayName");
+        var deleteTenantResponse = await tenantClient.DeleteAsync("/api/settings/current-tenant/App.DisplayName");
         deleteTenantResponse.StatusCode.Should().Be(HttpStatusCode.OK, await deleteTenantResponse.Content.ReadAsStringAsync());
         (await GetCurrentSettingAsync(tenantClient, "App.DisplayName")).Value.Should().Be("Global Display");
     }
@@ -112,7 +112,7 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
         // Debug: verify we got a token
         loginResult.AccessToken.Should().NotBeNullOrWhiteSpace("login should succeed before creating tenant");
 
-        var response = await adminClient.PostAsJsonAsync("/api/tenant", new
+        var response = await adminClient.PostAsJsonAsync("/api/tenants", new
         {
             name = tenantName,
             displayName = $"Tenant {tenantName}",
@@ -126,7 +126,7 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
 
     private async Task<SettingValueResponse> GetCurrentSettingAsync(HttpClient client, string name)
     {
-        var response = await client.GetAsync("/api/setting/current-values");
+        var response = await client.GetAsync("/api/settings/current");
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
 
         var envelope = await ReadJsonAsync<DynamicApiResponse<SettingValueResponse[]>>(response);
@@ -219,7 +219,8 @@ public class SettingManagementIntegrationTests : IClassFixture<LibraryManagement
     private sealed class SettingValueResponse
     {
         public string Name { get; set; } = string.Empty;
-        public int? Scope { get; set; }
+        // Enums are serialized as string names (e.g. "Tenant") by the platform JSON contracts
+        public string? Scope { get; set; }
         public string? Value { get; set; }
         public string MaskedValue { get; set; } = string.Empty;
     }

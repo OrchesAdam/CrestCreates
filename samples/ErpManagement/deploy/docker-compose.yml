@@ -1,0 +1,43 @@
+# ErpManagement sample stack: PostgreSQL + ERP app (HTTPS).
+#
+# Dual-runtime compatible (docker compose / podman-compose). Readiness is handled by the
+# app entrypoint (TCP wait) rather than depends_on.condition, which podman-compose supports
+# inconsistently. The PostgreSQL image is expected to be present locally (Docker Hub is
+# unreachable in the target environment); build the app image first with deploy/build.sh.
+#
+#   ./build.sh                 # build frontend + backend + dev cert + app image
+#   docker compose up -d       # or: podman-compose up -d
+#   open https://localhost:8443  (admin / ErpDemo#2026)
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: crest
+      POSTGRES_PASSWORD: crest
+      POSTGRES_DB: erpmanagement
+    volumes:
+      - erp-pgdata:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crest -d erpmanagement"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  erp-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: erp-management:latest
+    environment:
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=erpmanagement;Username=crest;Password=crest"
+      DB_HOST: db
+      DB_PORT: "5432"
+    depends_on:
+      - db
+    ports:
+      - "8443:8443"
+
+volumes:
+  erp-pgdata:
