@@ -9,22 +9,25 @@ public interface IErpOutboxAppender
     ValueTask AppendAsync(OutboxMessage message, CancellationToken cancellationToken);
 }
 
-public interface IErpDeliveryStatusReader
+public interface IErpGoodsReceiptDelivery
 {
-    Task<ErpDeliveryStatus?> GetAsync(string messageId, string consumerId, CancellationToken cancellationToken);
+    Task<ErpDeliveryStatus?> GetAsync(Guid tenantId, Guid receiptId, CancellationToken cancellationToken);
+    Task<ErpDeliveryStatus?> RetryAsync(Guid tenantId, Guid receiptId, CancellationToken cancellationToken);
 }
 
 public sealed record ErpDeliveryStatus(string Status, int AttemptCount, bool Consumed, string? FailureCode);
 
 public sealed class StockPostedEventPublisher(IOutboxMessageFactory messageFactory, IErpOutboxAppender appender)
 {
+    public static string GetMessageId(Guid receiptId) => $"erp.stock-posted:{receiptId}";
+
     public async Task PublishAsync(
         GoodsReceipt receipt,
         PurchaseOrder purchaseOrder,
         CancellationToken cancellationToken = default)
     {
         var postedAt = receipt.PostedAt ?? throw new InvalidOperationException("The receipt has not been posted.");
-        var messageId = $"erp.stock-posted:{receipt.Id}";
+        var messageId = GetMessageId(receipt.Id);
         var tenantId = receipt.TenantId == Guid.Empty ? null : receipt.TenantId.ToString();
         var payload = new StockPostedEvent
         {

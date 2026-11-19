@@ -155,8 +155,9 @@ public sealed class TicketNativeHttpGateTests
             evidence.Add("gateExitCode", execution.ExitCode);
             evidence.Add("gateOutput", execution.Output);
             execution.TimedOut.Should().BeFalse();
-            execution.ExitCode.Should().NotBe(0);
-            execution.Output.Should().Contain("invalid-body-zero-business:FAIL");
+            execution.ExitCode.Should().Be(1);
+            execution.Output.Should().Contain(
+                "invalid-body-zero-business:FAIL: invalid input must not enter the real business service");
             execution.Output.Should().NotContain(TicketNativeGate.TotalSentinel);
         }
         catch (Exception exception)

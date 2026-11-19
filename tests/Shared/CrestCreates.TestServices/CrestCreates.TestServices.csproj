@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CrestCreates.MongoDB.Tests" />
     <PackageReference Include="Npgsql" />
   </ItemGroup>
 </Project>

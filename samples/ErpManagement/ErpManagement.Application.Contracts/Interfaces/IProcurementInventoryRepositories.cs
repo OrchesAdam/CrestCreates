@@ -1,5 +1,6 @@
 using CrestCreates.Domain.Repositories;
 using ErpManagement.Domain.Entities;
+using ErpManagement.Domain.Shared.Enums;
 
 namespace ErpManagement.Application.Contracts.Interfaces;
 
@@ -18,6 +19,8 @@ public interface IPurchaseOrderRepository : ICrestRepositoryBase<PurchaseOrder, 
 public interface IGoodsReceiptRepository : ICrestRepositoryBase<GoodsReceipt, Guid>
 {
     Task<GoodsReceipt?> GetWithLinesAsync(Guid id, CancellationToken ct = default);
+    Task<GoodsReceipt?> GetForPostingAsync(Guid tenantId, Guid id, CancellationToken ct = default);
+    Task<GoodsReceiptStatus?> LockAsync(Guid tenantId, Guid id, CancellationToken ct = default);
     Task<List<GoodsReceipt>> GetAllWithLinesAsync(CancellationToken ct = default);
 }
 

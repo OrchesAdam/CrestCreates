@@ -1,4 +1,5 @@
 import { ModalForm, ProFormDigit } from '@ant-design/pro-components';
+import { Button } from 'antd';
 import { useAuth } from '../../auth/AuthContext';
 import CrudPage, { type FieldDef } from '../../components/CrudPage';
 import { useOperationDocAction } from '../../components/docUtils';
@@ -30,16 +31,25 @@ export default function LedgerList() {
       fields={fields}
       readOnly
       rowActions={(record, reload) => {
-        if (!hasPermission('ArApLedger.Settle') || (record.status !== 'Open' && record.status !== 'PartiallySettled')) {
-          return null;
+        if (!hasPermission('ArApLedger.Settle')) return null;
+        const url = `${apiPrefix}/${record.id}/settle`;
+        const pending = submitSettlement.pending(url);
+        if (pending) {
+          return (
+            <Button type="link" loading={submitSettlement.isSubmitting(url)}
+              onClick={() => void submitSettlement.submit(url, '结算成功', reload)}>
+              重试结算（{pending.values.amount}）
+            </Button>
+          );
         }
+        if (record.status !== 'Open' && record.status !== 'PartiallySettled') return null;
         const remaining = Number((Number(record.amount) - Number(record.settledAmount)).toFixed(2));
         return (
           <ModalForm<{ amount: number }>
             title="结算"
             trigger={<a>结算</a>}
             modalProps={{ destroyOnClose: true }}
-            onFinish={(values) => submitSettlement(`${apiPrefix}/${record.id}/settle`, '结算成功', reload, values)}
+            onFinish={(values) => submitSettlement.submit(url, '结算成功', reload, values)}
           >
             <ProFormDigit name="amount" label="结算金额" extra={`未结余额 ${remaining.toFixed(2)}`}
               rules={[{ required: true, type: 'number', min: 0.01, max: remaining }]}

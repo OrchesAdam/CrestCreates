@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Npgsql;
 
 namespace CrestCreates.TestServices;
@@ -36,37 +37,79 @@ public static class ExternalTestServices
             throw new ArgumentException("Database prefix must be identifier-safe.", nameof(prefix));
         var database = $"{prefix}_{Guid.NewGuid():N}";
         var admin = new NpgsqlConnectionStringBuilder(serverConnectionString) { Database = "postgres" };
-        await using (var connection = new NpgsqlConnection(admin.ConnectionString))
+        // A dedicated instance restarted for fault injection may still be settling; PG can reply 57P01
+        // while the postmaster finishes its startup sequence, so retry the create with a bounded budget.
+        for (var attempt = 0; ; attempt++)
         {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"CREATE DATABASE \"{database}\";";
-            await command.ExecuteNonQueryAsync();
-        }
+            try
+            {
+                await using (var connection = new NpgsqlConnection(admin.ConnectionString))
+                {
+                    await connection.OpenAsync();
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = $"CREATE DATABASE \"{database}\";";
+                    await command.ExecuteNonQueryAsync();
+                }
 
-        return new NpgsqlConnectionStringBuilder(serverConnectionString) { Database = database }.ConnectionString;
+                return new NpgsqlConnectionStringBuilder(serverConnectionString) { Database = database }.ConnectionString;
+            }
+            catch (PostgresException ex) when (attempt < 4 && ex.SqlState is "57P01" or "55006")
+            {
+                await Task.Delay(500);
+            }
+        }
     }
 
     public static async Task DropDatabaseAsync(string serverConnectionString, string database)
     {
-        var admin = new NpgsqlConnectionStringBuilder(serverConnectionString) { Database = "postgres" };
+        ArgumentException.ThrowIfNullOrEmpty(database);
+        var admin = new NpgsqlConnectionStringBuilder(serverConnectionString)
+        {
+            Database = "postgres", Pooling = false, Timeout = 5, CommandTimeout = 10
+        };
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         for (var attempt = 0; ; attempt++)
         {
             try
             {
                 await using var connection = new NpgsqlConnection(admin.ConnectionString);
-                await connection.OpenAsync();
+                await connection.OpenAsync(deadline.Token);
                 await using var command = connection.CreateCommand();
-                command.CommandText = $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE);";
-                await command.ExecuteNonQueryAsync();
+                using var quoter = new NpgsqlCommandBuilder();
+                command.CommandText = $"DROP DATABASE IF EXISTS {quoter.QuoteIdentifier(database)} WITH (FORCE);";
+                await command.ExecuteNonQueryAsync(deadline.Token);
                 return;
             }
             catch (PostgresException ex) when (attempt < 4 && ex.SqlState is "57P01" or "55006")
             {
                 // PG16 DROP DATABASE FORCE 与残留池连接竞争时可能以 57P01 中断自身会话，库未删成；重试。
-                await Task.Delay(500);
+                await Task.Delay(500, deadline.Token);
             }
         }
+    }
+
+    public static async Task CleanupAsync(IEnumerable<Func<Task>> cleanup, Exception? originalFailure = null)
+    {
+        var failures = new List<Exception>();
+        if (originalFailure is not null)
+            failures.Add(originalFailure);
+
+        foreach (var action in cleanup)
+        {
+            try
+            {
+                await action();
+            }
+            catch (Exception exception)
+            {
+                failures.Add(exception);
+            }
+        }
+
+        if (failures.Count == 1)
+            ExceptionDispatchInfo.Throw(failures[0]);
+        if (failures.Count > 1)
+            throw new AggregateException(failures);
     }
 
     public static string DatabaseName(string connectionString)

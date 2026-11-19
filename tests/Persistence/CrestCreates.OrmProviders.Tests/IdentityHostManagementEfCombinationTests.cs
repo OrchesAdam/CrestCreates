@@ -46,6 +46,9 @@ public class IdentityHostManagementEfCombinationTests
         featureChecker
             .Setup(checker => checker.IsEnabledAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+        var tenantProvider = new Mock<ITenantProvider>();
+        tenantProvider.Setup(provider => provider.GetTenantAsync(TenantA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TenantInfo(TenantA, "Tenant A"));
         var currentUser = new Mock<ICurrentUser>();
         currentUser.SetupGet(user => user.IsAuthenticated).Returns(true);
         currentUser.SetupGet(user => user.Id).Returns(Guid.NewGuid().ToString());
@@ -64,6 +67,7 @@ public class IdentityHostManagementEfCombinationTests
                 passwordHasher.Object,
                 Mock.Of<IPasswordPolicyValidator>(),
                 hostTenant.Object,
+                tenantProvider.Object,
                 currentUser.Object,
                 featureChecker.Object,
                 Mock.Of<IIdentitySecurityLogWriter>(),
@@ -111,6 +115,7 @@ public class IdentityHostManagementEfCombinationTests
                 passwordHasher.Object,
                 Mock.Of<IPasswordPolicyValidator>(),
                 tenantA.Object,
+                tenantProvider.Object,
                 tenantAdmin.Object,
                 featureChecker.Object,
                 Mock.Of<IIdentitySecurityLogWriter>(),

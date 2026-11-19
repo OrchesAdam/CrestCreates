@@ -490,12 +490,12 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
         }
     }
 
-    [Fact]
-    public void Nullable_scalar_root_answered_first_by_another_contributed_context_must_map()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Nullable_scalar_root_from_another_contribution_requires_equivalent_underlying_metadata(bool changed)
     {
-        // The retention-HTTP shape: the owning contribution requires a nullable query input (int?),
-        // and another activated contribution's context answers it first in the host chain. Nullable
-        // framework scalars are host-shared, so the foreign contributed answer must be accepted.
+        // The retention HTTP shape: another activated contribution answers the nullable query root first.
         var capA = CreateCapability("nullable-a.cap");
         var capB = CreateCapability("nullable-b.cap");
         var epA = CreateEndpoint("nullable-a.endpoint", capA.Id, "/nullable-a");
@@ -505,8 +505,16 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
         services.AddSingleton(CreateCapabilityRegistryMock(capA, capB).Object);
         services.AddSingleton(CreateDispatcherMock().Object);
         services.AddCrestCapabilityEndpoints();
-        services.Configure<JsonOptions>(options => options.SerializerOptions.TypeInfoResolver =
-            JsonTypeInfoResolver.Combine(NullableScalarForeignContext.Default, NullableScalarOwnedContext.Default));
+        services.Configure<JsonOptions>(options =>
+        {
+            if (changed)
+            {
+                options.SerializerOptions.Converters.Add(new NullableUnderlyingIntConverter());
+            }
+
+            options.SerializerOptions.TypeInfoResolver =
+                JsonTypeInfoResolver.Combine(NullableScalarForeignContext.Default, NullableScalarOwnedContext.Default);
+        });
         services.AddCrestCapabilityEndpointContribution(new NullableRootOwnerContribution
         {
             OwnerAssemblyName = "RetentionFeature",
@@ -535,14 +543,26 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
         FirstAnsweringResolver(options, typeof(int?)).Should().BeSameAs(NullableScalarForeignContext.Default,
             "the foreign contributed context must really answer first, otherwise the test proves nothing");
 
-        endpoints.MapCrestCapabilityEndpoints();
+        AssertGeneratedNullableIntWire(NullableScalarForeignContext.Default, options, changed);
 
-        GetEndpoints(endpoints).Should().HaveCount(2);
+        Action map = () => endpoints.MapCrestCapabilityEndpoints();
+        if (changed)
+        {
+            map.Should().Throw<InvalidOperationException>()
+                .WithMessage("*RetentionFeature*GetList*underlying scalar 'System.Int32'*");
+            endpoints.DataSources.Should().BeEmpty();
+        }
+        else
+        {
+            map.Should().NotThrow();
+            GetEndpoints(endpoints).Should().HaveCount(2);
+        }
     }
 
     [Theory]
     [InlineData("canonical-host")]
-    [InlineData("modified")]
+    [InlineData("modified-underlying")]
+    [InlineData("modified-wrapper")]
     [InlineData("reflection")]
     public void Nullable_scalar_root_from_a_non_contributed_context_must_match_the_owned_contract(string mode)
     {
@@ -558,28 +578,32 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
         };
         IJsonTypeInfoResolver first = mode switch
         {
-            "canonical-host" => NullableScalarCanonicalHostContext.Default,
-            "modified" => new NullableScalarModifiedHostContext(),
+            "canonical-host" or "modified-underlying" => NullableScalarCanonicalHostContext.Default,
+            "modified-wrapper" => new NullableScalarModifiedHostContext(),
             _ => new DefaultJsonTypeInfoResolver()
         };
         var (provider, endpoints) = BuildEndpointHost(CreateCapability(), contribution,
-            configureJson: options => options.SerializerOptions.TypeInfoResolver =
-                JsonTypeInfoResolver.Combine(first, NullableScalarOwnedContext.Default));
+            configureJson: options =>
+            {
+                if (mode == "modified-underlying")
+                {
+                    options.SerializerOptions.Converters.Add(new NullableUnderlyingIntConverter());
+                }
+
+                options.SerializerOptions.TypeInfoResolver =
+                    JsonTypeInfoResolver.Combine(first, NullableScalarOwnedContext.Default);
+            });
         using var lifetime = (IDisposable)provider;
         var options = provider.GetRequiredService<IOptions<JsonOptions>>().Value.SerializerOptions;
-        var actual = first.GetTypeInfo(typeof(int?), options);
-        actual.Should().NotBeNull();
-        var expected = ((IJsonTypeInfoResolver)NullableScalarOwnedContext.Default)
-            .GetTypeInfo(typeof(int?), NullableScalarOwnedContext.Default.Options)!;
-        var serialized = JsonSerializer.Serialize((int?)5, actual!);
-        var canonical = JsonSerializer.Serialize((int?)5, expected);
-        if (mode == "modified")
+        FirstAnsweringResolver(options, typeof(int?)).Should().BeSameAs(first);
+        if (mode is "canonical-host" or "modified-underlying")
         {
-            serialized.Should().NotBe(canonical, "the host context changes the nullable scalar wire contract");
+            AssertGeneratedNullableIntWire(first, options, changed: mode == "modified-underlying");
         }
         else
         {
-            serialized.Should().Be(canonical);
+            var metadata = first.GetTypeInfo(typeof(int?), options)!;
+            JsonSerializer.Serialize((int?)5, metadata).Should().Be(mode == "modified-wrapper" ? "\"host:5\"" : "5");
         }
 
         Action map = () => endpoints.MapCrestCapabilityEndpoints();
@@ -590,10 +614,20 @@ public sealed class CapabilityEndpointJsonHostWiringTests : IDisposable
         }
         else
         {
-            map.Should().Throw<InvalidOperationException>(
-                "a non-contributed context must be contract-equivalent, and reflection is never evidence");
+            map.Should().Throw<InvalidOperationException>()
+                .WithMessage("*NullableFeature*GetList*underlying scalar 'System.Int32'*");
             endpoints.DataSources.Should().BeEmpty();
         }
+    }
+
+    private static void AssertGeneratedNullableIntWire(
+        IJsonTypeInfoResolver resolver, JsonSerializerOptions options, bool changed)
+    {
+        var expected = NullableScalarOwnedContext.Default.GetTypeInfo(typeof(int?))!;
+        var actual = resolver.GetTypeInfo(typeof(int?), options)!;
+        actual.Converter.GetType().Should().Be(expected.Converter.GetType());
+        JsonSerializer.Serialize((int?)5, expected).Should().Be("5");
+        JsonSerializer.Serialize((int?)5, actual).Should().Be(changed ? "\"5\"" : "5");
     }
 
     [Fact]

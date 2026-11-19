@@ -1,8 +1,8 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
 using CrestCreates.TestServices;
 using FluentAssertions;
+using Npgsql;
 using Xunit;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests;
@@ -19,19 +19,21 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             ControlPlaneReferenceDataEvidenceLedger.Record(CaseId.C12, "Composition", scenario, EvidenceVectorKey.Default, RequiredRunner.Aot);
 
         var root = FindRepositoryRoot();
-        var output = Path.Combine(Path.GetTempPath(), "crest-runtime-postgresql-aot-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(output);
         var connectionString = ExternalTestServices.RequiredConnectionString(
             "CREST_RUNTIME_PG_CONNECTION", "PostgreSQL 16");
+        var output = Path.Combine(Path.GetTempPath(), "crest-runtime-postgresql-aot-" + Guid.NewGuid().ToString("N"));
+        var schemas = new List<string>();
+        Exception? failure = null;
 
         try
         {
+            Directory.CreateDirectory(output);
             var project = Path.Combine(root,
                 "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj");
-            var publish = await RunAsync(
-                "dotnet",
-                $"publish \"{project}\" -c Release -r linux-x64 --self-contained true -p:CrestCreatesPublishMode=aot --disable-build-servers -o \"{output}\"",
-                TimeSpan.FromMinutes(8));
+            var publish = await TestServiceControl.RunProcessAsync("dotnet",
+                ["publish", project, "-c", "Release", "-r", "linux-x64", "--self-contained", "true",
+                    "-p:CrestCreatesPublishMode=aot", "--disable-build-servers", "-o", output],
+                TimeSpan.FromMinutes(8), new Dictionary<string, string?> { ["MSBUILDDISABLENODEREUSE"] = "1" });
             publish.ExitCode.Should().Be(0, publish.Output);
             publish.Output.Should().NotContain("warning IL2026");
             publish.Output.Should().NotContain("warning IL3050");
@@ -39,11 +41,7 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             var executable = Path.Combine(output, "CrestCreates.Runtime.Persistence.PostgreSql.AotHost");
             File.SetUnixFileMode(executable, File.GetUnixFileMode(executable)
                 | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
-            var schema = "itest_" + Guid.NewGuid().ToString("N");
-            var execution = await RunAsync(
-                executable,
-                $"\"{connectionString}\" {schema}",
-                TimeSpan.FromMinutes(5));
+            var execution = await RunScenarioAsync();
             execution.ExitCode.Should().Be(0, execution.Output);
             execution.Output.Should().Contain("PHASE9B_POSTGRES_SUSPENSION_OK");
             execution.Output.Should().Contain("PHASE9B_POSTGRES_STATE_OK");
@@ -91,10 +89,7 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
             // detected, exit non-zero, and never emit the aggregate retention sentinel.
             foreach (var control in new[] { "wrong-count", "hold-filter", "receipt-fault" })
             {
-                var controlExecution = await RunAsync(
-                    executable,
-                    $"\"{connectionString}\" itest_{Guid.NewGuid():N} retention-negative {control}",
-                    TimeSpan.FromMinutes(5));
+                var controlExecution = await RunScenarioAsync("retention-negative", control);
                 controlExecution.ExitCode.Should().NotBe(
                     0,
                     $"retention negative control '{control}' must fail closed: {controlExecution.Output}");
@@ -105,42 +100,42 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
                     "CRESTCREATES_AUDIT_RETENTION_NATIVE_OK",
                     $"retention negative control '{control}' must not emit the aggregate sentinel");
             }
+
+            Task<(int ExitCode, string Output)> RunScenarioAsync(params string[] arguments)
+            {
+                var schema = $"itest_{Guid.NewGuid():N}";
+                schemas.Add(schema);
+                return TestServiceControl.RunProcessAsync(executable,
+                    [connectionString, schema, .. arguments], TimeSpan.FromMinutes(5));
+            }
         }
-        finally
+        catch (Exception exception)
         {
-            try { Directory.Delete(output, recursive: true); } catch { }
+            failure = exception;
         }
+
+        var cleanup = schemas.Select<string, Func<Task>>(schema => () => DropSchemaAsync(connectionString, schema)).ToList();
+        cleanup.Add(() =>
+        {
+            if (Directory.Exists(output))
+                Directory.Delete(output, recursive: true);
+            return Task.CompletedTask;
+        });
+        await ExternalTestServices.CleanupAsync(cleanup, failure);
     }
 
-    private static async Task<(int ExitCode, string Output)> RunAsync(string fileName, string arguments, TimeSpan timeout)
+    private static async Task DropSchemaAsync(string connectionString, string schema)
     {
-        using var process = new Process
+        var cleanupConnection = new NpgsqlConnectionStringBuilder(connectionString)
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            }
+            Pooling = false, Timeout = 5, CommandTimeout = 10
         };
-        process.StartInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
-        process.Start();
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var cancellation = new CancellationTokenSource(timeout);
-        try
-        {
-            await process.WaitForExitAsync(cancellation.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            process.Kill(entireProcessTree: true);
-            throw new TimeoutException($"Process '{fileName}' exceeded {timeout}.");
-        }
-
-        return (process.ExitCode, await stdout + await stderr);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var connection = new NpgsqlConnection(cleanupConnection.ConnectionString);
+        await connection.OpenAsync(deadline.Token);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DROP SCHEMA IF EXISTS \"{schema}\" CASCADE;";
+        await command.ExecuteNonQueryAsync(deadline.Token);
     }
 
     private static string FindRepositoryRoot()

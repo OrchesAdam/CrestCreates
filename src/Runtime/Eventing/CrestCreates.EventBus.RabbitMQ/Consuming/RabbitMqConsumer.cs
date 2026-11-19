@@ -30,6 +30,7 @@ namespace CrestCreates.EventBus.RabbitMQ.Consuming;
 public sealed class RabbitMqConsumer : BackgroundService
 {
     private static readonly TimeSpan ShutdownDrainTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ShutdownBrokerTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ConsumerChannelProbeInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ConsumerChannelLossGrace = TimeSpan.FromSeconds(5);
 
@@ -44,12 +45,15 @@ public sealed class RabbitMqConsumer : BackgroundService
     private readonly RabbitMqFailureSettlement _failureSettlement;
 
     private readonly SemaphoreSlim _settlementGate = new(1, 1);
+    private readonly object _deliveryGate = new();
+    private readonly TaskCompletionSource _startupCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly List<string> _consumerTags = new();
     private IChannel? _consumerChannel;
     private CancellationTokenSource? _deliveryCts;
     private CancellationToken _deliveryToken;
     private IRabbitMqBindingRegistry? _registry;
     private int _inFlightCount;
+    private bool _acceptDeliveries = true;
     private int _stopStarted;
     private readonly TaskCompletionSource _stopCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource _idle = CreateCompletedSource();
@@ -82,31 +86,23 @@ public sealed class RabbitMqConsumer : BackgroundService
         try
         {
             await _readiness.WaitAsync(stoppingToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
+            _registry = _serviceProvider.GetRequiredService<IRabbitMqBindingRegistry>();
 
-        _registry = _serviceProvider.GetRequiredService<IRabbitMqBindingRegistry>();
+            if (_registry.PublisherOnly)
+            {
+                _logger.LogInformation("RabbitMQ host is publisher-only; the consumer does not start.");
+                return;
+            }
 
-        if (_registry.PublisherOnly)
-        {
-            _logger.LogInformation("RabbitMQ host is publisher-only; the consumer does not start.");
-            return;
-        }
+            if (_registry.QueuePlans.Count == 0)
+            {
+                _logger.LogError("RabbitMQ composition produced zero queue plans; the consumer does not start.");
+                return;
+            }
 
-        if (_registry.QueuePlans.Count == 0)
-        {
-            _logger.LogError("RabbitMQ composition produced zero queue plans; the consumer does not start.");
-            return;
-        }
-
-        _deliveryCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        _deliveryToken = _deliveryCts.Token;
-
-        try
-        {
+            stoppingToken.ThrowIfCancellationRequested();
+            _deliveryCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _deliveryToken = _deliveryCts.Token;
             _consumerChannel = await _connectionPool.CreateDedicatedChannelAsync(stoppingToken).ConfigureAwait(false);
             await _topology.DeclareDeadLetterExchangeAsync(_consumerChannel, stoppingToken).ConfigureAwait(false);
 
@@ -122,6 +118,7 @@ public sealed class RabbitMqConsumer : BackgroundService
                 _registry.QueuePlans.Count,
                 _registry.QueuePlans.Sum(p => p.HandlersByIdentity.Count));
 
+            _startupCompleted.TrySetResult();
             await SuperviseConsumerChannelAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -132,6 +129,14 @@ public sealed class RabbitMqConsumer : BackgroundService
         {
             _logger.LogError(ex, "Fatal error in the RabbitMQ consumer; failing startup is intentional.");
             throw;
+        }
+        finally
+        {
+            _startupCompleted.TrySetResult();
+            if (stoppingToken.IsCancellationRequested)
+            {
+                await CloseConsumerChannelAsync().ConfigureAwait(false);
+            }
         }
     }
 
@@ -150,6 +155,8 @@ public sealed class RabbitMqConsumer : BackgroundService
         while (true)
         {
             await Task.Delay(ConsumerChannelProbeInterval, stoppingToken).ConfigureAwait(false);
+            if (Volatile.Read(ref _stopStarted) != 0)
+                return;
 
             if (_consumerChannel is { IsOpen: true })
             {
@@ -183,8 +190,8 @@ public sealed class RabbitMqConsumer : BackgroundService
             RabbitMqPublisher.CloneProperties(args.BasicProperties),
             args.DeliveryTag);
 
-        BeginDelivery();
-        _ = ProcessDeliveryAsync(delivery, _deliveryToken);
+        if (TryBeginDelivery())
+            _ = ProcessDeliveryAsync(delivery, _deliveryToken);
         return Task.CompletedTask;
     }
 
@@ -225,101 +232,149 @@ public sealed class RabbitMqConsumer : BackgroundService
         }
     }
 
-    private void BeginDelivery()
+    private bool TryBeginDelivery()
     {
-        if (Interlocked.Increment(ref _inFlightCount) == 1)
+        lock (_deliveryGate)
         {
-            _idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_acceptDeliveries)
+                return false;
+
+            if (++_inFlightCount == 1)
+                _idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            return true;
         }
     }
 
     private void EndDelivery()
     {
-        if (Interlocked.Decrement(ref _inFlightCount) == 0)
+        lock (_deliveryGate)
         {
-            _idle.TrySetResult();
+            if (--_inFlightCount == 0)
+                _idle.TrySetResult();
         }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        // Shutdown order: stop intake, bounded wait for in-flight deliveries, then close the dedicated
-        // consumer channel (unfinished messages stay unacknowledged), then let the base class cancel
-        // the execution token. The consumer channel is never returned to the publisher pool.
-        // Test hosts (WebApplicationFactory) can trigger two concurrent host shutdowns; only one
-        // caller may own the channel teardown, and a concurrent caller must not cancel the execution
-        // token before the owner's bounded drain finishes.
-        if (Interlocked.CompareExchange(ref _stopStarted, 1, 0) != 0)
+        if (Interlocked.CompareExchange(ref _stopStarted, 1, 0) == 0)
+            _ = StopOnceAsync();
+
+        try
         {
-            await _stopCompleted.Task.ConfigureAwait(false);
-            await base.StopAsync(cancellationToken).ConfigureAwait(false);
-            return;
+            await _stopCompleted.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task StopOnceAsync()
+    {
+        try
+        {
+            await DrainAndStopAsync().ConfigureAwait(false);
+            _stopCompleted.TrySetResult();
+        }
+        catch (Exception exception)
+        {
+            _stopCompleted.TrySetException(exception);
+        }
+    }
+
+    private async Task DrainAndStopAsync()
+    {
+        Task idle;
+        lock (_deliveryGate)
+        {
+            _acceptDeliveries = false;
+            idle = _idle.Task;
         }
 
         try
         {
-            if (_registry is null || _registry.PublisherOnly || _consumerChannel is null)
+            if (ExecuteTask is null)
+                return;
+
+            try
             {
-                await base.StopAsync(cancellationToken).ConfigureAwait(false);
+                await _startupCompleted.Task.WaitAsync(ShutdownBrokerTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("RabbitMQ consumer startup did not finish before shutdown; cancelling startup.");
                 return;
             }
 
-            _logger.LogInformation("Stopping RabbitMQ consumer: cancelling intake...");
-            await _settlementGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            if (_consumerChannel is not { } channel)
+                return;
+
+            await CancelIntakeAsync(channel).ConfigureAwait(false);
+            try
+            {
+                await idle.WaitAsync(ShutdownDrainTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning(
+                    "In-flight deliveries did not drain within {Timeout}s; unfinished deliveries will be redelivered.",
+                    ShutdownDrainTimeout.TotalSeconds);
+            }
+
+            await CloseConsumerChannelAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            using var timeout = new CancellationTokenSource(ShutdownBrokerTimeout);
+            await base.StopAsync(timeout.Token).ConfigureAwait(false);
+            Interlocked.Exchange(ref _deliveryCts, null)?.Dispose();
+        }
+    }
+
+    private async Task CancelIntakeAsync(IChannel channel)
+    {
+        using var timeout = new CancellationTokenSource(ShutdownBrokerTimeout);
+        try
+        {
+            await _settlementGate.WaitAsync(timeout.Token).ConfigureAwait(false);
             try
             {
                 foreach (var tag in _consumerTags)
-                {
-                    try
-                    {
-                        await _consumerChannel.BasicCancelAsync(tag, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to cancel consumer {ConsumerTag}.", tag);
-                    }
-                }
+                    await channel.BasicCancelAsync(tag, cancellationToken: timeout.Token).WaitAsync(timeout.Token).ConfigureAwait(false);
             }
             finally
             {
                 _settlementGate.Release();
             }
-
-            if (Volatile.Read(ref _inFlightCount) > 0)
-            {
-                var drained = await Task.WhenAny(_idle.Task, Task.Delay(ShutdownDrainTimeout, CancellationToken.None))
-                    .ConfigureAwait(false);
-                if (drained != _idle.Task)
-                {
-                    _logger.LogWarning(
-                        "In-flight deliveries did not drain within {Timeout}s; closing the consumer channel with " +
-                        "{Count} delivery/deliveries unfinished. They remain unacknowledged and will be redelivered.",
-                        ShutdownDrainTimeout.TotalSeconds, Volatile.Read(ref _inFlightCount));
-                }
-            }
-
-            try
-            {
-                await _consumerChannel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error while closing the dedicated consumer channel.");
-            }
-
-            _consumerChannel.Dispose();
-            _consumerChannel = null;
         }
-        finally
+        catch (Exception exception)
         {
-            _stopCompleted.TrySetResult();
+            _logger.LogWarning(exception, "Could not cancel RabbitMQ consumer intake before closing its channel.");
+        }
+    }
+
+    private async Task CloseConsumerChannelAsync()
+    {
+        if (Interlocked.Exchange(ref _consumerChannel, null) is not { } channel)
+            return;
+
+        using var timeout = new CancellationTokenSource(ShutdownBrokerTimeout);
+        try
+        {
+            await channel.CloseAsync(timeout.Token).WaitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Error while closing the dedicated consumer channel.");
         }
 
-        await base.StopAsync(cancellationToken).ConfigureAwait(false);
-
-        // Cancelled through the linked parent token by base.StopAsync; dispose only after that so any
-        // straggler delivery still observes cancellation instead of an ObjectDisposedException.
-        _deliveryCts?.Dispose();
+        try
+        {
+            await channel.DisposeAsync().AsTask().WaitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Error while disposing the dedicated consumer channel.");
+        }
     }
 
     private static TaskCompletionSource CreateCompletedSource()

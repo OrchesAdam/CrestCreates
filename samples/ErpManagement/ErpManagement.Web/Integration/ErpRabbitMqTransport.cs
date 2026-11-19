@@ -7,11 +7,17 @@ using CrestCreates.EventBus.RabbitMQ.Extensions;
 using CrestCreates.EventBus.RabbitMQ.Options;
 using CrestCreates.Generated.ErpManagement_Application_Contracts;
 using CrestCreates.Generated.ErpManagement_Web;
+using CrestCreates.HumanTask.Abstractions;
+using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Runtime.Delivery;
+using CrestCreates.Runtime.Persistence.Abstractions.Keys;
+using CrestCreates.Workflow.Abstractions;
 using CrestCreates.Runtime.Delivery.Abstractions.Registration;
 using ErpManagement.Application.Contracts.Events;
 using ErpManagement.Application.Contracts.Integration;
 using ErpManagement.Application.Events;
+using ErpManagement.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace ErpManagement.Web.Integration;
@@ -47,7 +53,10 @@ internal static class ErpRabbitMqRegistration
         AddDeliveryHandler<MesWorkOrderCompleted>(services, ErpIntegrationWire.MesWorkOrderCompletedId, ErpIntegrationWire.MesWorkOrderCompleted);
         AddDeliveryHandler<CrmCustomerChanged>(services, ErpIntegrationWire.CrmCustomerChangedId, ErpIntegrationWire.CrmCustomerChanged);
 
-        services.AddHealthChecks().AddCheck<ErpRabbitMqHealthCheck>("erp-rabbitmq", timeout: TimeSpan.FromSeconds(3));
+        services.AddHealthChecks()
+            .AddCheck<ErpBusinessDatabaseHealthCheck>("erp-postgresql", timeout: TimeSpan.FromSeconds(3))
+            .AddCheck<ErpApprovalRuntimeHealthCheck>("erp-approval-runtime", timeout: TimeSpan.FromSeconds(3))
+            .AddCheck<ErpRabbitMqHealthCheck>("erp-rabbitmq", timeout: TimeSpan.FromSeconds(3));
         return services;
     }
 
@@ -117,6 +126,30 @@ internal sealed class ErpRabbitMqTopology(RabbitMqCompositionReadiness readiness
 
         _initialSubscriptionSeen = true;
         return true;
+    }
+}
+
+internal sealed class ErpBusinessDatabaseHealthCheck(IServiceProvider services, ICurrentTenant currentTenant) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+    {
+        using var hostFrame = currentTenant.Change(null);
+        await using var scope = services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ErpManagementDbContext>();
+        return await db.Database.CanConnectAsync(cancellationToken).ConfigureAwait(false)
+            ? HealthCheckResult.Healthy()
+            : HealthCheckResult.Unhealthy("The ERP business database is unavailable.");
+    }
+}
+
+internal sealed class ErpApprovalRuntimeHealthCheck(IWorkflowInstanceStore workflows, IHumanTaskInstanceStore tasks) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+    {
+        var probe = new RuntimeInstanceKey(null, "erp-readiness");
+        await workflows.GetAsync(probe, cancellationToken).ConfigureAwait(false);
+        await tasks.GetAsync(probe, cancellationToken).ConfigureAwait(false);
+        return HealthCheckResult.Healthy();
     }
 }
 

@@ -6,12 +6,27 @@
 ## 启动
 
 ```bash
-podman-compose -f infra/docker-compose.test-services.yml up -d
-# 或 docker compose -f infra/docker-compose.test-services.yml up -d
+podman-compose -p crest-test-services -f infra/docker-compose.test-services.yml up -d --wait --wait-timeout 180
+# 或 docker compose -p crest-test-services -f infra/docker-compose.test-services.yml up -d --wait --wait-timeout 180
 ```
 
-全部端口仅绑定宿主 `127.0.0.1`。数据卷持久化；测试隔离靠每用例独立 schema / 一次性数据库，
-不需要每次重建卷。RabbitMQ 卷内账号以首次启动为准，改密码需换卷。
+全部端口仅绑定宿主 `127.0.0.1`。测试隔离靠每用例独立 schema / 一次性数据库，不需要每次重建卷。
+RabbitMQ 卷内账号以首次启动为准，改密码需换卷。
+
+卷名由 Compose 项目名派生，必须始终用 `-p crest-test-services`；换项目名会挂载另一套空卷。
+Redis 自本次起挂载 `crest-test-health-redis` 卷持久化快照历史。早期部署的旧项目卷（例如以目录名 `infra` 为项目名创建）
+需要离线复制到当前项目卷后再重建容器，不能直接挂载空卷覆盖旧账号或数据；旧卷先保留以便回退。
+已有容器缺少 `io.crestcreates.test-services.config=v1` 标签时，故障注入会拒绝操作；按上面的命令重建专属容器即可，
+不要为了换标签删除数据卷。
+
+CAP 的 `cap-pg`、`cap-rabbitmq` 与 Health 的 `health-pg`、`redis` 是故障注入专属服务，不能改名为共享服务。
+夹具检查 Compose 项目名、唯一配置文件名 `docker-compose.test-services.yml`、Docker/Podman 服务标签、
+`io.crestcreates.test-services.config=v1`、运行状态及 `127.0.0.1` 发布端口，全部一致才允许停启，
+随后使用容器 ID 操作。锁文件为 `/tmp/<容器名>.fault-injection.lock`（非 Linux 为系统临时目录），
+跨测试进程持有到恢复完成；不要删除正在使用的锁文件。远程 Docker context/socket 不受支持。
+
+测试启动后仍会检查实际连接的就绪状态；TCP 可连接不代表数据库、broker 或 Redis 已可执行请求。
+停启失败或就绪超时均会报错；夹具释放时会尝试恢复已停止的专属容器，并继续执行其余清理。
 
 ## 环境变量对照表
 

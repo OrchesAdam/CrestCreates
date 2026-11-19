@@ -53,7 +53,7 @@ public sealed class ReviewRetryRecoveryTests
         var flags = BindingFlags.Instance | BindingFlags.NonPublic;
         typeof(RabbitMqConsumer).GetField("_registry", flags)!.SetValue(consumer, registry);
         typeof(RabbitMqConsumer).GetField("_consumerChannel", flags)!.SetValue(consumer, consumerChannel.Object);
-        typeof(RabbitMqConsumer).GetMethod("BeginDelivery", flags)!.Invoke(consumer, null);
+        typeof(RabbitMqConsumer).GetMethod("TryBeginDelivery", flags)!.Invoke(consumer, null);
 
         var envelope = "{\"eventType\":\"orders.order-placed\",\"eventId\":\"" + descriptor.Id +
             "\",\"eventVersion\":1,\"payload\":\"{}\",\"headers\":{}}";

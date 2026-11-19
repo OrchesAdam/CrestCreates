@@ -2,6 +2,13 @@
 # 启动：podman-compose -f infra/docker-compose.test-services.yml up -d
 # 环境变量对照表见 infra/README.md。故障注入套件（CAP/Health）使用专属实例，
 # 测试经 CLI 停启 crest-test-cap-* / crest-test-health-*，不得停启共享实例。
+x-fault-injection-labels: &fault-injection-labels
+  io.crestcreates.test-services.config: v1
+
+# Separate containers keep published ports and container identities consistent between Podman and Docker.
+x-podman:
+  in_pod: false
+
 services:
   pg16:
     image: postgres:16-alpine
@@ -23,6 +30,7 @@ services:
   cap-pg:
     image: postgres:16-alpine
     container_name: crest-test-cap-pg
+    labels: *fault-injection-labels
     environment:
       POSTGRES_USER: test
       POSTGRES_PASSWORD: test
@@ -40,6 +48,7 @@ services:
   health-pg:
     image: postgres:17-alpine
     container_name: crest-test-health-pg
+    labels: *fault-injection-labels
     environment:
       POSTGRES_USER: test
       POSTGRES_PASSWORD: test
@@ -67,7 +76,7 @@ services:
     volumes:
       - crest-test-rabbitmq:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD-SHELL", "su-exec rabbitmq rabbitmq-diagnostics -q check_port_listener 5672"]
+      test: ["CMD-SHELL", "su-exec rabbitmq rabbitmq-diagnostics -q check_port_listener 5672 && su-exec rabbitmq rabbitmq-diagnostics -q check_port_listener 15672"]
       interval: 10s
       timeout: 10s
       retries: 12
@@ -76,6 +85,7 @@ services:
   cap-rabbitmq:
     image: rabbitmq:4.0-management-alpine
     container_name: crest-test-cap-rabbitmq
+    labels: *fault-injection-labels
     hostname: crest-test-cap-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: test
@@ -94,8 +104,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: crest-test-health-redis
+    labels: *fault-injection-labels
     ports:
       - "127.0.0.1:6379:6379"
+    volumes:
+      - crest-test-health-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -121,6 +134,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
     healthcheck:
       test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
       interval: 10s
@@ -136,15 +150,17 @@ services:
     volumes:
       - crest-test-mongo:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok === 1 ? 0 : 1)"]
       interval: 5s
       timeout: 5s
       retries: 20
 
+# 卷名由 Compose 项目名派生（-p crest-test-services）；不要切换项目名，否则会挂载空卷。
 volumes:
   crest-test-pg16:
   crest-test-cap-pg:
   crest-test-health-pg:
   crest-test-rabbitmq:
   crest-test-cap-rabbitmq:
+  crest-test-health-redis:
   crest-test-mongo:

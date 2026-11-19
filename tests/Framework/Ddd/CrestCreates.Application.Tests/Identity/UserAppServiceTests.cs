@@ -53,6 +53,10 @@ public class UserAppServiceTests
             .Setup(checker => checker.IsEnabledAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
+        var tenantProvider = new Mock<ITenantProvider>();
+        tenantProvider.Setup(provider => provider.GetTenantAsync("tenant-a", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TenantInfo("tenant-a", "Tenant A"));
+
         _userAppService = new UserAppService(
             _userRepositoryMock.Object,
             _roleRepositoryMock.Object,
@@ -60,6 +64,7 @@ public class UserAppServiceTests
             _passwordHasherMock.Object,
             _passwordPolicyValidatorMock.Object,
             _currentTenantMock.Object,
+            tenantProvider.Object,
             _currentUserMock.Object,
             _featureCheckerMock.Object,
             _securityLogWriterMock.Object,

@@ -157,6 +157,7 @@ public static class AppServiceHttpProjectionModelBuilder
             CapabilityIdPrefix = explicitCapabilityPrefix
                 ?? AppServiceHttpWireConvention.DefaultCapabilityPrefix + AppServiceHttpWireConvention.CanonicalToken(ownerAssembly),
             RegistrationMode = registrationMode,
+            ActivateSeparately = ReadBool(projection, "ActivateSeparately"),
             Actions = actions,
             ReferencedTypes = referenced
                 .GroupBy(reference => reference.AssemblyName + "|" + reference.FullMetadataName, StringComparer.Ordinal)

@@ -135,7 +135,7 @@ async function stock(page: Page, material: string, location: string, quantity: n
 
 test('真实授权浏览器链：请购审批、收货、库存、生产、销售审批发货与结算', async ({ browser, page, request }) => {
   const ready = await request.get('/health/ready');
-  if (process.env.ERP_E2E_BROKER_RECOVERY) {
+  if (process.env.ERP_E2E_BROKER_RECOVERY === 'true') {
     expect(ready.status()).toBe(503);
     expect((await ready.text()).trim()).toBe('Unhealthy');
   } else {
@@ -198,7 +198,7 @@ test('真实授权浏览器链：请购审批、收货、库存、生产、销�
       }
       const created = await create(page, receiptForm, receipts);
       const posted = await action(page, created, receipts, 'post', '过账', '已过账');
-      if (process.env.ERP_E2E_BROKER_RECOVERY) {
+      if (process.env.ERP_E2E_BROKER_RECOVERY === 'true') {
         test.info().annotations.push({ type: 'receipt-id', description: created.id });
       }
       return posted;

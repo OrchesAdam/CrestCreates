@@ -222,9 +222,8 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
     /// identically (the void/404 envelope and the failure-path error DTO). Their metadata is
     /// framework-owned, so the host's first answerer may be any activated source-generated
     /// contributor of this host; every feature-private root keeps the exact owning-context rule.
-    /// Nullable forms of the framework scalars are shared on the same grounds: STJ emits one
-    /// canonical nullable-scalar metadata shape in every source-generated context, so a nullable
-    /// query/input root (e.g. int? paging filters) cannot be feature-private.
+    /// Nullable forms of the framework scalars are shared when both the wrapper and its effective
+    /// underlying scalar metadata agree with the owning contract.
     /// </summary>
     private static readonly Type[] HostSharedJsonRootTypes =
     [
@@ -256,9 +255,7 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
     ];
 
     private static bool IsHostSharedJsonRoot(Type type)
-        => Array.IndexOf(HostSharedJsonRootTypes, type) >= 0
-            || (Nullable.GetUnderlyingType(type) is { } underlying
-                && Array.IndexOf(HostSharedJsonRootTypes, underlying) >= 0);
+        => Array.IndexOf(HostSharedJsonRootTypes, type) >= 0;
 
     /// <summary>
     /// #128 §7.1/§7.2 map-time verification: for every contribution and every required JSON contract
@@ -330,16 +327,34 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return "The owning contribution declares no source-generated JsonContext.";
         }
 
-        if (!TryGetContributedMetadata(context, required, out var ownerMetadata)
-            || ownerMetadata is null)
+        if (!TryGetResolverMetadata(context, required.ClrType, context.Options, out var ownerMetadata))
         {
             return "The contribution's source-generated JsonContext does not carry metadata for it.";
         }
 
         if (!TryFindFirstAnsweringResolver(
-                options.TypeInfoResolverChain, required.ClrType, options, out var answering))
+                options.TypeInfoResolverChain, required.ClrType, options, out var answering, out var candidateMetadata))
         {
             return "The host's final resolver chain answers no metadata for it at all.";
+        }
+
+        // STJ's generated NullableConverter<T> resolves T using the supplied options. Matching the
+        // wrapper's converter type alone can hide a different converter for T, even for a contributed context.
+        if (Nullable.GetUnderlyingType(required.ClrType) is { } underlying && IsHostSharedJsonRoot(underlying))
+        {
+            if (answering is not DefaultJsonTypeInfoResolver
+                && SharedContractEquivalent(ownerMetadata!, candidateMetadata!)
+                && TryGetResolverMetadata(context, underlying, context.Options, out var ownerUnderlying)
+                && TryFindFirstAnsweringResolver(options.TypeInfoResolverChain, underlying, options,
+                    out var underlyingResolver, out var candidateUnderlying)
+                && underlyingResolver is not DefaultJsonTypeInfoResolver
+                && SharedContractEquivalent(ownerUnderlying!, candidateUnderlying!))
+            {
+                return null;
+            }
+
+            return $"The host's shared nullable metadata is not equivalent to the owning contract "
+                + $"for the wrapper and underlying scalar '{underlying.FullName}'.";
         }
 
         if (ReferenceEquals(answering, context))
@@ -347,25 +362,11 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             return null;
         }
 
-        // Framework-shared root: an activated contributed context is trusted (the platform emitted
-        // it); any other host context may answer it first only when its metadata is contract-equivalent
-        // to the owning contribution's metadata. A context base type is not evidence of source
-        // generation or equivalence: reflection-backed metadata and modified converters/property names
-        // are rejected (#129 S3 review R1).
-        if (IsHostSharedJsonRoot(required.ClrType))
+        if (IsHostSharedJsonRoot(required.ClrType)
+            && ((answering is JsonSerializerContext answeringContext && hostContexts.Contains(answeringContext))
+                || SharedContractEquivalent(ownerMetadata!, candidateMetadata!)))
         {
-            if (answering is JsonSerializerContext answeringContext
-                && hostContexts.Contains(answeringContext))
-            {
-                return null;
-            }
-
-            if (answering is IJsonTypeInfoResolver answeringResolver
-                && TryGetResolverMetadata(answeringResolver, required.ClrType, options, out var candidateMetadata)
-                && SharedContractEquivalent(ownerMetadata, candidateMetadata!))
-            {
-                return null;
-            }
+            return null;
         }
 
         if (answering is JsonSerializerContext foreignContext
@@ -448,27 +449,6 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
             + "|" + (property.CustomConverter?.GetType().FullName ?? string.Empty));
 
     /// <summary>
-    /// Asks the contributed context for the root's metadata through the resolver interface, using the
-    /// context's own options so the answer is a pure fact about the declared contract.
-    /// </summary>
-    private static bool TryGetContributedMetadata(
-        JsonSerializerContext context,
-        CapabilityEndpointJsonRootType required,
-        out JsonTypeInfo? metadata)
-    {
-        try
-        {
-            metadata = ((IJsonTypeInfoResolver)context).GetTypeInfo(required.ClrType, context.Options);
-            return metadata is not null;
-        }
-        catch (NotSupportedException)
-        {
-            metadata = null;
-            return false;
-        }
-    }
-
-    /// <summary>
     /// Reproduces the ordered resolution of the final options — the first resolver in the chain that
     /// answers wins — so the verification can tell which resolver actually served the type. A composed
     /// resolver (the chain type <c>JsonTypeInfoResolver.Combine</c> produces) is walked in its own
@@ -478,14 +458,15 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
         IList<IJsonTypeInfoResolver> chain,
         Type type,
         JsonSerializerOptions options,
-        out IJsonTypeInfoResolver? answering)
+        out IJsonTypeInfoResolver? answering,
+        out JsonTypeInfo? metadata)
     {
         foreach (var resolver in chain)
         {
             if (resolver is not JsonSerializerContext
                 && resolver is IList<IJsonTypeInfoResolver> composed)
             {
-                if (TryFindFirstAnsweringResolver(composed, type, options, out answering))
+                if (TryFindFirstAnsweringResolver(composed, type, options, out answering, out metadata))
                 {
                     return true;
                 }
@@ -493,21 +474,15 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
                 continue;
             }
 
-            try
+            if (TryGetResolverMetadata(resolver, type, options, out metadata))
             {
-                if (resolver.GetTypeInfo(type, options) is not null)
-                {
-                    answering = resolver;
-                    return true;
-                }
-            }
-            catch (NotSupportedException)
-            {
-                // A resolver without metadata for the type reports it this way; the chain continues.
+                answering = resolver;
+                return true;
             }
         }
 
         answering = null;
+        metadata = null;
         return false;
     }
 }

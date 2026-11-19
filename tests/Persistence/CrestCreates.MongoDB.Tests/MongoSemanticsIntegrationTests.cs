@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -13,6 +14,7 @@ using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.OrmProviders.MongoDB.Repositories;
+using CrestCreates.TestServices;
 using FluentAssertions;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
@@ -23,25 +25,29 @@ namespace CrestCreates.MongoDB.Tests;
 
 public sealed class MongoServerFixture : IAsyncLifetime
 {
+    private readonly ConcurrentQueue<string> _databases = new();
+    private MongoClient _client = null!;
     public string ConnectionString { get; private set; } = null!;
 
     public Task InitializeAsync()
     {
-        ConnectionString = CrestCreates.TestServices.ExternalTestServices.RequiredConnectionString(
-            "CREST_MONGO_TEST_CONNECTION", "MongoDB 7");
+        ConnectionString = ExternalTestServices.RequiredConnectionString("CREST_MONGO_TEST_CONNECTION", "MongoDB 7");
+        _client = new MongoClient(ConnectionString);
         return Task.CompletedTask;
     }
 
-    // 长驻实例：测试按 itest_{guid} 建库，夹具结束时统一清理，避免跨轮累积。
-    public async Task DisposeAsync()
+    public IMongoDatabase CreateDatabase()
     {
-        var client = new MongoClient(ConnectionString);
-        using var cursor = await client.ListDatabaseNamesAsync();
-        foreach (var name in cursor.ToEnumerable().Where(n => n.StartsWith("itest_", StringComparison.Ordinal)))
-        {
-            await client.DropDatabaseAsync(name);
-        }
+        var name = $"itest_{Guid.NewGuid():N}";
+        _databases.Enqueue(name);
+        return _client.GetDatabase(name);
     }
+
+    public Task DisposeAsync() => ExternalTestServices.CleanupAsync(_databases.Select<string, Func<Task>>(name => async () =>
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await _client.DropDatabaseAsync(name, deadline.Token);
+    }));
 }
 
 [CollectionDefinition("Mongo server", DisableParallelization = true)]
@@ -52,7 +58,7 @@ public class MongoSemanticsIntegrationTests
 {
     private readonly MongoServerFixture _server;
     public MongoSemanticsIntegrationTests(MongoServerFixture server) => _server = server;
-    private IMongoDatabase Database() => new MongoClient(_server.ConnectionString).GetDatabase("itest_" + Guid.NewGuid().ToString("N"));
+    private IMongoDatabase Database() => _server.CreateDatabase();
     private static ICurrentTenant Tenant(string? id)
     {
         var tenant = new Mock<ICurrentTenant>();
@@ -60,6 +66,191 @@ public class MongoSemanticsIntegrationTests
         return tenant.Object;
     }
     private static MongoRepositoryBase<T, string> Repo<T>(IMongoDatabase db, string? id) where T : class, IEntity<string> => new(db, Tenant(id));
+
+    [Fact]
+    public async Task Cleanup_attempts_every_resource_after_an_earlier_failure()
+    {
+        var attempted = new List<int>();
+        var firstFailure = new InvalidOperationException("first resource cleanup failed");
+        var originalFailure = new InvalidOperationException("fixture initialization failed");
+        var failure = await Assert.ThrowsAsync<AggregateException>(() => ExternalTestServices.CleanupAsync([
+            () => { attempted.Add(1); throw firstFailure; },
+            () => { attempted.Add(2); return Task.CompletedTask; }
+        ], originalFailure));
+
+        Assert.Equal(new[] { 1, 2 }, attempted);
+        Assert.Equal(new[] { originalFailure, firstFailure }, failure.InnerExceptions);
+    }
+
+    [Fact]
+    public async Task Fault_injection_rejects_a_mismatched_endpoint_before_touching_a_container()
+    {
+        using var variables = new EnvironmentVariables(("CREST_CAP_TEST_PG_CONTAINER", "crest-test-cap-pg"));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => TestServiceControl.AcquireAsync(
+            DedicatedTestService.CapPostgres, "127.0.0.1", 5432));
+        Assert.Contains("requires", error.Message);
+        Assert.Contains("127.0.0.1:5433", error.Message);
+    }
+
+    [Fact]
+    public async Task Process_timeout_kills_the_child_and_releases_its_output_pipe()
+    {
+        await Assert.ThrowsAsync<TimeoutException>(() => TestServiceControl.RunProcessAsync("/bin/sh",
+            ["-c", "printf '%0131072d' 0; sleep 30"], TimeSpan.FromMilliseconds(200)));
+    }
+
+    [Fact]
+    public async Task Container_cli_rejects_option_like_names()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => TestServiceControl.ExecAsync("--remote=true", "true"));
+    }
+
+    [Fact]
+    public async Task Fault_injection_rejects_a_shared_endpoint_before_using_the_cli()
+    {
+        using var variables = new EnvironmentVariables(
+            ("CREST_HEALTH_TEST_REDIS_CONTAINER", "crest-test-health-redis"));
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => TestServiceControl.AcquireAsync(
+            DedicatedTestService.HealthRedis, "127.0.0.1", 16379));
+        Assert.Contains("127.0.0.1:6379", failure.Message);
+    }
+
+    [Fact]
+    public async Task Container_cli_quotes_arguments_and_drains_both_output_streams()
+    {
+        var executable = OperatingSystem.IsWindows() ? "powershell.exe" : "/bin/sh";
+        string[] arguments = OperatingSystem.IsWindows()
+            ? ["-NoProfile", "-Command", "[Console]::Out.Write(('x' * 30000)); [Console]::Error.Write(('y' * 30000)); Write-Output $args[0]", "a b"]
+            : ["-c", "printf '%030000d\\n' 0; printf '%030000d\\n' 0 >&2; printf '%s\\n' \"$1\"", "test", "a b"];
+        var (exitCode, output) = await TestServiceControl.RunProcessAsync(executable, arguments, TimeSpan.FromSeconds(20));
+        Assert.Equal(0, exitCode);
+        Assert.Contains(new string(OperatingSystem.IsWindows() ? 'x' : '0', 30000), output);
+        Assert.Contains(new string(OperatingSystem.IsWindows() ? 'y' : '0', 30000), output);
+        Assert.Contains("a b", output);
+    }
+
+    [Fact]
+    public async Task Timed_out_process_is_reaped_with_its_children()
+    {
+        string executable;
+        string[] arguments;
+        if (OperatingSystem.IsWindows())
+        {
+            executable = "powershell.exe";
+            arguments = ["-NoProfile", "-Command", "Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 60'; Start-Sleep -Seconds 60"];
+        }
+        else
+        {
+            executable = "/bin/sh";
+            arguments = ["-c", "sleep 60 & wait"];
+        }
+        await Assert.ThrowsAsync<TimeoutException>(() => TestServiceControl.RunProcessAsync(
+            executable, arguments, TimeSpan.FromMilliseconds(200)));
+    }
+
+    [Fact]
+    public async Task Readiness_timeout_does_not_leave_pending_attempts()
+    {
+        await Assert.ThrowsAsync<TimeoutException>(() => TestServiceControl.WaitUntilAsync(async cancellation =>
+        {
+            await Task.Delay(TimeSpan.FromMinutes(1), cancellation);
+            return true;
+        }, TimeSpan.FromMilliseconds(50), "test readiness"));
+    }
+
+    [Fact]
+    public void Container_inspection_accepts_the_dedicated_compose_service()
+    {
+        Assert.Equal(new string('a', 64), TestServiceControl.ValidateContainer(
+            ContainerInspection("io.crestcreates.test-services.config", "v1"), "cap-pg", "crest-test-cap-pg", 5433, 5432));
+    }
+
+    [Theory]
+    [InlineData("com.docker.compose.project", "another-project")]
+    [InlineData("com.docker.compose.service", "pg16")]
+    [InlineData("io.crestcreates.test-services.config", "unknown")]
+    [InlineData("com.docker.compose.project.config_files", "/repo/infra/docker-compose.production.yml")]
+    public void Container_inspection_rejects_service_or_configuration_mismatch(string label, string value)
+    {
+        Assert.Throws<InvalidOperationException>(() => TestServiceControl.ValidateContainer(
+            ContainerInspection(label, value), "cap-pg", "crest-test-cap-pg", 5433, 5432));
+    }
+
+    [Fact]
+    public void Container_inspection_rejects_another_published_port()
+    {
+        Assert.Throws<InvalidOperationException>(() => TestServiceControl.ValidateContainer(
+            ContainerInspection("HostPort", "15432"), "cap-pg", "crest-test-cap-pg", 5433, 5432));
+    }
+
+    private static string ContainerInspection(string label, string value)
+    {
+        var labels = new Dictionary<string, string>
+        {
+            ["com.docker.compose.project"] = "crest-test-services",
+            ["com.docker.compose.service"] = "cap-pg",
+            ["io.crestcreates.test-services.config"] = "v1",
+            ["com.docker.compose.project.config_files"] = "/repo/infra/docker-compose.test-services.yml",
+            ["com.docker.compose.project.working_dir"] = "/repo/infra"
+        };
+        labels[label] = value;
+        var ports = new[] { new Dictionary<string, string> { ["HostIp"] = "127.0.0.1", ["HostPort"] = "5433" } };
+        if (label == "HostPort")
+            ports[0][label] = value;
+        var container = new[]
+        {
+            new
+            {
+                Id = new string('a', 64),
+                Name = "/crest-test-cap-pg",
+                Config = new { Labels = labels },
+                HostConfig = new { NetworkMode = "bridge", Binds = new[] { "crest-test-cap-pg:/var/lib/postgresql/data" },
+                    PortBindings = new Dictionary<string, object> { ["5432/tcp"] = ports } },
+                State = new { Running = true }
+            }
+        };
+        return System.Text.Json.JsonSerializer.Serialize(container);
+    }
+
+    private sealed class EnvironmentVariables : IDisposable
+    {
+        private readonly (string Name, string? Value)[] variables;
+        public EnvironmentVariables(params (string Name, string? Value)[] variables)
+        {
+            this.variables = variables;
+            foreach (var (name, value) in variables)
+                Environment.SetEnvironmentVariable(name, value);
+        }
+
+        public void Dispose()
+        {
+            foreach (var (name, value) in variables)
+                Environment.SetEnvironmentVariable(name, value);
+        }
+    }
+
+    [Fact]
+    public async Task Disposing_fixture_preserves_another_fixtures_database()
+    {
+        var sibling = new MongoServerFixture();
+        await sibling.InitializeAsync();
+        var otherDatabase = Database();
+        var siblingDatabase = sibling.CreateDatabase();
+        try
+        {
+            await otherDatabase.CreateCollectionAsync("ownership_probe");
+            await siblingDatabase.CreateCollectionAsync("ownership_probe");
+        }
+        finally
+        {
+            await sibling.DisposeAsync();
+        }
+
+        using var collections = await otherDatabase.ListCollectionNamesAsync();
+        Assert.Contains("ownership_probe", await collections.ToListAsync());
+        using var cleanedCollections = await siblingDatabase.ListCollectionNamesAsync();
+        Assert.Empty(await cleanedCollections.ToListAsync());
+    }
 
     [Fact]
     public async Task Deleted_rows_are_hidden()

@@ -1,21 +1,43 @@
 using CrestCreates.Accountability.Abstractions.Contracts;
 using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Domain.AuditLog;
+using CrestCreates.MultiTenancy.Abstract;
+using CrestCreates.Runtime.Persistence.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace ErpManagement.EntityFrameworkCore;
 
-public sealed class ErpHttpAuditSink(IServiceScopeFactory scopes) : IAuditSink
+public sealed class ErpHttpAuditSink(
+    PostgreSqlAuditSink canonical,
+    IServiceScopeFactory scopes,
+    ICurrentTenant currentTenant,
+    ITenantProvider tenants) : IAuditSink
 {
-    public string Id => "erp-http-audit";
+    public string Id => canonical.Id;
 
     public async ValueTask<AuditSinkWriteResult> WriteAsync(AuditEnvelope envelope, CancellationToken cancellationToken = default)
     {
-        var integrity = envelope.Integrity ?? throw new InvalidOperationException("An HTTP audit envelope requires integrity.");
-        if (!Guid.TryParse(envelope.AuditId, out var auditId) || envelope.Runtime.InvocationSource != "http")
-            return Result(envelope.AuditId, integrity, AuditSinkWriteStatus.Accepted);
+        var result = await canonical.WriteAsync(envelope, cancellationToken);
+        if (result.Status == AuditSinkWriteStatus.Conflict || envelope.Action.Kind != "http.request")
+            return result;
+
+        var auditId = Guid.Parse(envelope.AuditId);
+        await ProjectAsync(envelope, auditId, cancellationToken);
+        return result;
+    }
+
+    private async Task ProjectAsync(AuditEnvelope envelope, Guid auditId, CancellationToken cancellationToken)
+    {
+        using var hostFrame = currentTenant.Change(null);
+        ITenantInfo? tenant = null;
+        if (envelope.TenantId is { } tenantId)
+        {
+            tenant = await tenants.GetTenantAsync(tenantId, cancellationToken);
+            if (tenant is null || !string.Equals(tenant.Id, tenantId, StringComparison.Ordinal))
+                throw new InvalidOperationException("The audit tenant no longer resolves to its recorded identity.");
+        }
 
         var log = new AuditLog(auditId)
         {
@@ -33,24 +55,19 @@ public sealed class ErpHttpAuditSink(IServiceScopeFactory scopes) : IAuditSink
             TraceId = envelope.Runtime.TraceId
         };
 
+        using var tenantFrame = currentTenant.Change(tenant);
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ErpManagementDbContext>();
         db.AuditLogs.Add(log);
         try
         {
             await db.SaveChangesAsync(cancellationToken);
-            return Result(envelope.AuditId, integrity, AuditSinkWriteStatus.Accepted);
         }
         catch (DbUpdateException exception) when (exception.InnerException is PostgresException
             { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "PK_AuditLogs" })
         {
-            db.Entry(log).State = EntityState.Detached;
             if (!await db.AuditLogs.AnyAsync(x => x.Id == auditId, cancellationToken))
                 throw;
-            return Result(envelope.AuditId, integrity, AuditSinkWriteStatus.Duplicate);
         }
     }
-
-    private AuditSinkWriteResult Result(string auditId, CrestCreates.Metadata.Abstractions.CanonicalHashing.CanonicalHash integrity, AuditSinkWriteStatus status)
-        => new() { SinkId = Id, AuditId = auditId, Integrity = integrity, Status = status };
 }

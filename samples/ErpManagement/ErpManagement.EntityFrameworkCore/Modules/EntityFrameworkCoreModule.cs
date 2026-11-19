@@ -46,7 +46,7 @@ public class EntityFrameworkCoreModule : ModuleBase
 
         services.AddUnitOfWork(OrmProvider.EfCore);
         services.AddScoped<ErpManagement.Application.Events.IErpOutboxAppender, ErpOutboxAppender>();
-        services.AddScoped<ErpManagement.Application.Events.IErpDeliveryStatusReader, ErpDeliveryStatusReader>();
+        services.AddScoped<ErpManagement.Application.Events.IErpGoodsReceiptDelivery, ErpDeliveryStatusReader>();
         services.AddEfCoreUnitOfWork();
         services.AddScoped<DbContext>(sp => sp.GetRequiredService<ErpManagementDbContext>());
         services.AddScoped<IEntityFrameworkCoreDbContext>(sp =>
@@ -65,7 +65,6 @@ public class EntityFrameworkCoreModule : ModuleBase
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IIdentitySecurityLogRepository, IdentitySecurityLogRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
-        services.AddSingleton<CrestCreates.Accountability.Abstractions.Sinks.IAuditSink, ErpHttpAuditSink>();
 
         services.RemoveAll<Func<string, DbContext>>();
         services.AddSingleton<Func<string, DbContext>>(connectionString =>

@@ -91,6 +91,56 @@
   `GetString`（"Resolved"/"Closed"），语义不变，原生门禁重跑 **6/6 全绿**（重新 publish/link/run + 负控）。
 - **状态**：修复完成，随 PR #190 分支提交；不合并（待用户批准）。
 
+## 2026-11-19 — PR #190 审查修复（用户「修复这些问题」，全部发现在本地修复）
+
+- **范围**：针对上一轮审查的 3×P1 / 12×P2 / 1×P3 全部落地（62 文件）。未提交、未推送、未合并。
+- **ERP 收货与投递**：`PostCoreAsync` 在受管 EF UoW 内按权威 `TenantId`+收货 ID `FOR UPDATE` 行锁后再读，
+  同单并发与顺序重放复用已过账结果；`delivery-status` 入口先校验租户归属，Outbox/Inbox 查询同租户约束
+  （跨租户 404）；新增 `POST /api/goods-receipts/{id}/retry-delivery`（复用 `GoodsReceipt.Post` 权限）——
+  只接受以 `ATTEMPT_BUDGET_EXHAUSTED` / `DELIVERY_ATTEMPT_BUDGET_EXHAUSTED` 终结且无活跃租约的死信，
+  原子重置预算并保留原消息 ID/载荷/完整性/fencing token，库存零写入；非可重投 409
+  `ERP_RECEIPT_DELIVERY_NOT_RETRYABLE`。`ErpDeliveryStatusReader` 改用受管事务连接并要求固定同库。
+- **ERP 审计与就绪**：`ErpHttpAuditSink` 改为装饰 `PostgreSqlAuditSink`（唯一持久 sink）：非 HTTP 事实不再
+  假 Accepted 而是真实落 PG；HTTP 终态按记录中的 `TenantId` 经 `ITenantProvider` 解析权威 Id、显式
+  `currentTenant.Change(tenant)` 打开正确租户库（host 帧解析 + 租户帧投影），PK 冲突按同 ID 判重复。
+  `/health/ready` 增 `erp-postgresql`（业务库 `CanConnectAsync`）与 `erp-approval-runtime`
+  （Workflow/HumanTask store 读探针），与既有 broker 订阅探针并列。
+- **RabbitMQ 并发停机**：`StopAsync` 首个调用者独占清理，其余调用者只等待且**按自身截止时间**
+  返回；取消/排空/关通道/回收统一 `ShutdownBrokerTimeout`（5s）上限，排空 15s；`TryBeginDelivery`
+  在锁内拒绝停机后的新投递；启动未完成时停机有界退出并关闭通道。
+- **ERP 前端**：待确认操作（`operationId`+原参数）改存 `localStorage` 并带心跳租约，跨刷新/跨标签页
+  同单未确认操作只发送一次（`storage` 事件同步）；请求同时校验 JWT 用户与租户；收货页区分六种投递状态、
+  展示失败码并对预算耗尽死信提供「重新投递」；`test:e2e` / `test:e2e:restart` / `test:e2e:retry` 拆分。
+- **JSON 契约**：nullable 共享根不再无条件信任 contributed 应答者或仅比外层 `NullableConverter<T>`；
+  现在 wrapper 与底层标量元数据都必须契约等价（反射与改 wire 均拒绝），正负控各四种模式。
+- **Helpdesk 投影**：`ActivateSeparately` 属性 + emitter 拆分激活后，`AddCrestPlatformManagementHttp` 只发布
+  用户/角色/权限/租户/Feature/Setting/审计查询，`AddCrestAuditRetentionHttp` 在**内核与 store 均已注册**时
+  才发布 retention（否则确定性拒绝），`AddAuditLogging` 不再隐式注册 retention app service。
+- **用户创建**：`UserAppService.CreateAsync` 经 `ITenantProvider` 解析并只持久化权威 Id；未知 Id 或名称
+  零写入拒绝（SuperAdmin 不再能写不可登录账户）。
+- **长驻测试设施**：Mongo 只删本夹具登记的库；CAP/Health 故障注入经 `ServiceLease` 校验 Compose 项目、
+  服务标签、`io.crestcreates.test-services.config=v1`、运行状态与 loopback 发布端口后才按容器 ID 停启，
+  文件锁跨进程互斥、释放时有界恢复；CLI 调用 `ArgumentList` + 双流并行读 + 有界退出/杀进程；PG 原生
+  schema、Kafka topic、ERP vhost/库只回收自有资源（`CleanupAsync` 聚合首败）；RabbitMQ 原生 harness 从
+  文档 env 读取账号/vhost/管理端；CI/Full Validation 配齐共享与专属服务 env 并先 `compose up --wait`。
+- **验证（串行，~/.dotnet 10.0.114 + 长驻服务）**：ERP 集成 **103/103**（含并发过账/租户隔离+死信重投/
+  审计投影/就绪探针）、DynamicApi **159/159**、Application **275/275**、Helpdesk **166/166**、
+  OrmProviders **385/385**、Boundary **297/297**、Mongo **91/91**、RabbitMQ 单元 **58/58** 与集成 **37/37**、
+  Kafka **27/27**、**CAP 集成 38/38**（含专属容器停启故障注入，清理零失败）；浏览器操作重试 **2/2**（含跨标签页）；
+  原生门禁 GeneratedCrud **28/28**、CapabilityEndpoint **13/13**、Ticket **6/6**、PostgreSql **1/1**、
+  RabbitMQ AotHost **2/2**（均真实 publish/link/run）。CodeGenerator **449 通过/0 失败**，
+  `CrudBuild` MSBuild 类超时中断（单类另跑 20 通过/0 失败，含全部 HTTP 投影 emitter 基线），属本机时长限制而非失败。
+- **CAP 瞬态修复**：全量复跑时专属 PG 容器 stop→start 恢复后的启动窗口内，下一个类 fixture 的
+  `CREATE DATABASE` 可能被瞬态 57P01 终止（前两轮 29/38 同形状，单类重跑均绿）。加固
+  `CreateIsolatedDatabaseAsync` 对 57P01/55006 有界重试、`WaitPostgresAsync` 要求连续两次探测成功后，全量 **38/38**。
+- **环境副作用说明**：为让专属容器通过新守卫，已把 cap-pg/health-pg/cap-rabbitmq/health-redis 以
+  `-p crest-test-services` 重建（标签 v1，数据从旧项目卷复制并依镜像 SELinux 类别重标）；共享 pg16/
+  rabbitmq/mongo 保持原容器与卷（仅恢复其 SELinux 类别）；本次复制产生的 `crest-test-*` 卷副本仍在，
+  删除被审批拦截，属未引用副本，可人工清理。Compose 卷恢复为项目作用域（`-p crest-test-services`）。
+- **未覆盖**：旧卷升级路径（用户既定范围：演示库可重建，MIGRATION 未承诺）；Playwright 完整业务链/
+  重启 spec 需真实交付栈，本轮只跑离线操作重试回归。
+- **状态**：修复完成、本地验证全绿；随 PR #190 分支提交推送（不合并，待用户批准）。
+
 ## 2026-11-19 — ERP 主链可靠性与交付验证
 
 - **唯一出站主链**：收货/MES 下达/完工/CRM 变更在业务 EF UoW 内经 `IErpOutboxAppender`（借用受管 Npgsql 事务，

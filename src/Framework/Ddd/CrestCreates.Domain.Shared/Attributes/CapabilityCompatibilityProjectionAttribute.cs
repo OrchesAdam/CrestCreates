@@ -44,5 +44,11 @@ namespace CrestCreates.Domain.Shared.Attributes
         /// How the projection is activated. New declarations use <see cref="HttpProjectionRegistrationMode.ExplicitHost"/>.
         /// </summary>
         public HttpProjectionRegistrationMode RegistrationMode { get; init; } = HttpProjectionRegistrationMode.ExplicitHost;
+
+        /// <summary>
+        /// Generate an assembly-internal activation for this contract outside the assembly-wide activation.
+        /// The owning feature calls it from its host registration entry point.
+        /// </summary>
+        public bool ActivateSeparately { get; init; }
     }
 }

@@ -40,8 +40,10 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
     // 每夹具独立 vhost：共享 broker 上固定队列名不得跨夹具串消息（等价原每夹具独立容器语义）。
     private readonly string _virtualHost = $"erp_it_{Guid.NewGuid():N}";
 
-    private string BaseConnectionString => _isolatedConnectionString;
-    private string _isolatedConnectionString = null!;
+    private string BaseConnectionString => _isolatedConnectionString!;
+    private string? _isolatedConnectionString;
+    private bool _deleteVirtualHost;
+    private bool _disposed;
     private readonly string _schemaName = $"itest_{Guid.NewGuid():N}";
     private Task _seedTask = Task.CompletedTask;
 
@@ -63,23 +65,32 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
         if (!baseConnection.Database!.Contains("test", StringComparison.OrdinalIgnoreCase) &&
             Environment.GetEnvironmentVariable("CREST_ERP_ALLOW_EXTERNAL_TEST_DATABASE") != "true")
             throw new InvalidOperationException("External ERP test databases require explicit acknowledgment.");
-        // 每夹具一次性隔离库：EnsureCreated/迁移语义与原先每夹具独立容器一致，
-        // 共享服务器上其他夹具的表不得使 EnsureCreated 变为 no-op。
-        _isolatedConnectionString = await ExternalTestServices.CreateIsolatedDatabaseAsync(_externalPostgres, "erp");
-        var rabbitUser = Uri.UnescapeDataString(new Uri(_externalRabbit).UserInfo.Split(':', 2)[0]);
-        await TestServiceControl.ExecAsync(_rabbitContainer, "rabbitmqctl", "add_vhost", _virtualHost);
-        await TestServiceControl.ExecAsync(
-            _rabbitContainer, "rabbitmqctl", "set_permissions", "-p", _virtualHost, rabbitUser, ".*", ".*", ".*");
-        await using (var connection = new NpgsqlConnection(BaseConnectionString))
+        try
         {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"""CREATE SCHEMA "{_schemaName}";""";
-            await command.ExecuteNonQueryAsync();
-        }
+            // 每夹具独立数据库，避免其他夹具建表影响 EnsureCreated。
+            _isolatedConnectionString = await ExternalTestServices.CreateIsolatedDatabaseAsync(_externalPostgres, "erp");
+            var rabbitUser = Uri.UnescapeDataString(new Uri(_externalRabbit).UserInfo.Split(':', 2)[0]);
+            // CLI 超时也可能已经创建了本夹具的 vhost。
+            _deleteVirtualHost = true;
+            await TestServiceControl.ExecAsync(_rabbitContainer, "rabbitmqctl", "add_vhost", _virtualHost);
+            await TestServiceControl.ExecAsync(
+                _rabbitContainer, "rabbitmqctl", "set_permissions", "-p", _virtualHost, rabbitUser, ".*", ".*", ".*");
+            await using (var connection = new NpgsqlConnection(BaseConnectionString))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = $"""CREATE SCHEMA "{_schemaName}";""";
+                await command.ExecuteNonQueryAsync();
+            }
 
-        _seedTask = SeedAsync();
-        await _seedTask;
+            _seedTask = SeedAsync();
+            await _seedTask;
+        }
+        catch (Exception failure)
+        {
+            await ExternalTestServices.CleanupAsync([DisposeAsync], failure);
+            throw;
+        }
     }
 
     public Task EnsureSeedCompleteAsync() => _seedTask;
@@ -228,12 +239,22 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
         services.AddDbContext<TContext>(options => options.UseNpgsql(ConnectionString));
     }
 
-    public new async Task DisposeAsync()
+    public new Task DisposeAsync()
     {
-        await base.DisposeAsync();
-        await ExternalTestServices.DropDatabaseAsync(
-            _externalPostgres, ExternalTestServices.DatabaseName(_isolatedConnectionString));
-        await TestServiceControl.ExecAsync(_rabbitContainer, "rabbitmqctl", "delete_vhost", _virtualHost);
+        if (_disposed)
+            return Task.CompletedTask;
+        _disposed = true;
+
+        var cleanup = new List<Func<Task>>
+        {
+            () => base.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30))
+        };
+        if (_isolatedConnectionString is { } connectionString)
+            cleanup.Add(() => ExternalTestServices.DropDatabaseAsync(
+                _externalPostgres, ExternalTestServices.DatabaseName(connectionString)));
+        if (_deleteVirtualHost)
+            cleanup.Add(() => TestServiceControl.ExecAsync(_rabbitContainer, "rabbitmqctl", "delete_vhost", _virtualHost));
+        return ExternalTestServices.CleanupAsync(cleanup);
     }
 
     private sealed class ErpCommitFaultInterceptor(ErpManagementWebApplicationFactory factory) : SaveChangesInterceptor

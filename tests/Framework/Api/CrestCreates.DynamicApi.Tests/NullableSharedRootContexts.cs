@@ -16,12 +16,16 @@ internal partial class NullableScalarForeignContext : JsonSerializerContext;
 [JsonSerializable(typeof(int?))]
 internal partial class NullableScalarCanonicalHostContext : JsonSerializerContext;
 
-/// <summary>
-/// A non-contributed host resolver whose nullable-scalar metadata carries a custom converter.
-/// Source-generated nullable metadata resolves its underlying converter from the querying options,
-/// so a changed nullable wire must be probed through explicit runtime metadata (the same shape as
-/// <see cref="ReviewS3HostContext"/> uses for Guid).
-/// </summary>
+internal sealed class NullableUnderlyingIntConverter : JsonConverter<int>
+{
+    public override int Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        => int.Parse(reader.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+
+    public override void Write(Utf8JsonWriter writer, int value, JsonSerializerOptions options)
+        => writer.WriteStringValue(value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+}
+
+/// <summary>A host resolver that replaces the nullable wrapper converter itself.</summary>
 internal sealed class NullableScalarModifiedHostContext : JsonSerializerContext, IJsonTypeInfoResolver
 {
     public NullableScalarModifiedHostContext() : base(null)

@@ -9,8 +9,8 @@ namespace CrestCreates.Tooling.HttpProjection;
 
 /// <summary>
 /// Issue #129 S2.2: maps the hand-written AppService model onto the neutral HTTP wire model and hands it
-/// to <see cref="HttpWireEmitter"/>, the same backend the CRUD front-end uses. One bundle per contract;
-/// one assembly activation for every contract of an owner.
+/// to <see cref="HttpWireEmitter"/>, the same backend the CRUD front-end uses. Each contract has one
+/// bundle and belongs to either the assembly-wide activation or its own explicit activation.
 /// </summary>
 public static class AppServiceHttpProjectionEmitter
 {
@@ -39,8 +39,8 @@ public static class AppServiceHttpProjectionEmitter
     }
 
     /// <summary>
-    /// One activation per owner assembly: every contract's contribution + a single handler module and a
-    /// single JSON configurator, so two contracts never produce two identical extension methods.
+    /// Emits the assembly-wide activation and any separately activated contracts. Each activation
+    /// has its own handler module and uses the assembly's shared JSON configurator.
     /// </summary>
     public static AppServiceHttpArtifact EmitAssemblyActivation(
         string ownerAssemblyName,
@@ -72,14 +72,65 @@ public static class AppServiceHttpProjectionEmitter
         Line(builder, string.Empty);
         Line(builder, Indent + "/// <summary>");
         Line(builder, Indent + "/// #129 ExplicitHost activation of assembly '" + ownerAssemblyName + "'.");
-        Line(builder, Indent + "/// The host calls " + AppServiceHttpProjectionModel.ActivationMethodName
-            + " for exactly the assemblies it activates; the call is idempotent and never");
-        Line(builder, Indent + "/// writes a process-global registry.");
         Line(builder, Indent + "/// </summary>");
         Line(builder, Indent + "public static class " + options.ActivationTypeName);
         Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection "
-            + AppServiceHttpProjectionModel.ActivationMethodName + "(this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+
+        var aggregate = contracts.Where(contract => !contract.Model.ActivateSeparately).ToArray();
+        if (aggregate.Length > 0)
+        {
+            EmitActivationMethod(builder, "public", AppServiceHttpProjectionModel.ActivationMethodName,
+                "this ", aggregate, options.HandlerModuleTypeName, options.JsonOptionsConfiguratorTypeName);
+        }
+
+        var separate = contracts.Where(contract => contract.Model.ActivateSeparately).ToArray();
+        foreach (var contract in separate)
+        {
+            var token = AppServiceHttpWireConvention.CanonicalToken(contract.Model.ContractFullName);
+            EmitActivationMethod(builder, "internal", "AddGeneratedAppServiceHttpFor_" + token,
+                string.Empty, new[] { contract }, options.HandlerModuleTypeName + "_" + token,
+                options.JsonOptionsConfiguratorTypeName);
+        }
+
+        Line(builder, Indent + "}");
+        if (aggregate.Length > 0)
+        {
+            EmitHandlerModule(builder, ownerAssemblyName, aggregate, options.HandlerModuleTypeName);
+        }
+
+        foreach (var contract in separate)
+        {
+            var token = AppServiceHttpWireConvention.CanonicalToken(contract.Model.ContractFullName);
+            EmitHandlerModule(builder, ownerAssemblyName + ":" + contract.Model.ContractFullName,
+                new[] { contract }, options.HandlerModuleTypeName + "_" + token);
+        }
+
+        Line(builder, string.Empty);
+        Line(builder, Indent + "internal sealed class " + options.JsonOptionsConfiguratorTypeName
+            + " : global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>");
+        Line(builder, Indent + "{");
+        Line(builder, NestedIndent + "public void Configure(global::Microsoft.AspNetCore.Http.Json.JsonOptions options)");
+        Line(builder, NestedIndent + "{");
+        HttpProjectionShared.EmitJsonConfigurator(builder, options.JsonContextFullName, NestedIndent + Indent);
+        Line(builder, NestedIndent + "}");
+        Line(builder, Indent + "}");
+        Line(builder, "}");
+        return new AppServiceHttpArtifact(
+            "GeneratedAppServiceHttpActivation_" + AppServiceHttpWireConvention.CanonicalToken(ownerAssemblyName) + ".g.cs",
+            builder.ToString());
+    }
+
+    private static void EmitActivationMethod(
+        StringBuilder builder,
+        string accessibility,
+        string methodName,
+        string parameterPrefix,
+        IReadOnlyList<(AppServiceHttpProjectionModel Model, AppServiceHttpEmissionOptions Options)> contracts,
+        string handlerModuleTypeName,
+        string jsonOptionsConfiguratorTypeName)
+    {
+        Line(builder, NestedIndent + accessibility + " static global::Microsoft.Extensions.DependencyInjection.IServiceCollection "
+            + methodName + "(" + parameterPrefix + "global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         Line(builder, NestedIndent + "{");
         Line(builder, NestedIndent + Indent + "global::System.ArgumentNullException.ThrowIfNull(services);");
         foreach (var (_, contractOptions) in contracts)
@@ -119,7 +170,7 @@ public static class AppServiceHttpProjectionEmitter
         Line(builder, NestedIndent + Indent + Indent
             + "global::Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Singleton<"
             + "global::CrestCreates.Capability.Abstractions.ICapabilityHandlerModule,");
-        Line(builder, NestedIndent + Indent + Indent + Indent + options.HandlerModuleTypeName + ">());");
+        Line(builder, NestedIndent + Indent + Indent + Indent + handlerModuleTypeName + ">());");
         Line(builder, string.Empty);
         Line(builder, NestedIndent + Indent
             + "global::Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddEnumerable(");
@@ -127,16 +178,23 @@ public static class AppServiceHttpProjectionEmitter
         Line(builder, NestedIndent + Indent + Indent
             + "global::Microsoft.Extensions.DependencyInjection.ServiceDescriptor.Singleton<"
             + "global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>,");
-        Line(builder, NestedIndent + Indent + Indent + Indent + options.JsonOptionsConfiguratorTypeName + ">());");
+        Line(builder, NestedIndent + Indent + Indent + Indent + jsonOptionsConfiguratorTypeName + ">());");
         Line(builder, string.Empty);
         Line(builder, NestedIndent + Indent + "return services;");
         Line(builder, NestedIndent + "}");
-        Line(builder, Indent + "}");
+    }
+
+    private static void EmitHandlerModule(
+        StringBuilder builder,
+        string moduleId,
+        IReadOnlyList<(AppServiceHttpProjectionModel Model, AppServiceHttpEmissionOptions Options)> contracts,
+        string handlerModuleTypeName)
+    {
         Line(builder, string.Empty);
-        Line(builder, Indent + "internal sealed class " + options.HandlerModuleTypeName
+        Line(builder, Indent + "internal sealed class " + handlerModuleTypeName
             + " : global::CrestCreates.Capability.Abstractions.ICapabilityHandlerModule");
         Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public string Id => \"" + Escape(ownerAssemblyName) + "\";");
+        Line(builder, NestedIndent + "public string Id => \"" + Escape(moduleId) + "\";");
         Line(builder, string.Empty);
         Line(builder, NestedIndent + "public void Apply(global::CrestCreates.Capability.Abstractions.CapabilityHandlerResolver resolver)");
         Line(builder, NestedIndent + "{");
@@ -152,19 +210,6 @@ public static class AppServiceHttpProjectionEmitter
 
         Line(builder, NestedIndent + "}");
         Line(builder, Indent + "}");
-        Line(builder, string.Empty);
-        Line(builder, Indent + "internal sealed class " + options.JsonOptionsConfiguratorTypeName
-            + " : global::Microsoft.Extensions.Options.IConfigureOptions<global::Microsoft.AspNetCore.Http.Json.JsonOptions>");
-        Line(builder, Indent + "{");
-        Line(builder, NestedIndent + "public void Configure(global::Microsoft.AspNetCore.Http.Json.JsonOptions options)");
-        Line(builder, NestedIndent + "{");
-        HttpProjectionShared.EmitJsonConfigurator(builder, options.JsonContextFullName, NestedIndent + Indent);
-        Line(builder, NestedIndent + "}");
-        Line(builder, Indent + "}");
-        Line(builder, "}");
-        return new AppServiceHttpArtifact(
-            "GeneratedAppServiceHttpActivation_" + AppServiceHttpWireConvention.CanonicalToken(ownerAssemblyName) + ".g.cs",
-            builder.ToString());
     }
 
     /// <summary>One manifest entry for the contract bundle.</summary>

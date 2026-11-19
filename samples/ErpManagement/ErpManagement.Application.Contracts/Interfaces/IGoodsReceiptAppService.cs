@@ -54,4 +54,8 @@ public interface IGoodsReceiptAppService
     [AppServiceHttpAction(Verb = HttpProjectionVerb.Get, Route = "{id}/delivery-status", Kind = HttpProjectionOperationKind.Query,
         Permissions = new[] { ErpPermissions.GoodsReceipts.Get })]
     Task<GoodsReceiptDeliveryStatusDto> GetDeliveryStatusAsync(Guid id, CancellationToken cancellationToken = default);
+
+    [AppServiceHttpAction(Verb = HttpProjectionVerb.Post, Route = "{id}/retry-delivery", Kind = HttpProjectionOperationKind.Command,
+        Permissions = new[] { ErpPermissions.GoodsReceipts.Post })]
+    Task<GoodsReceiptDeliveryStatusDto> RetryDeliveryAsync(Guid id, CancellationToken cancellationToken = default);
 }

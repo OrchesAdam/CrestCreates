@@ -12,6 +12,21 @@ concurrency:
 jobs:
   full-build-and-test:
     runs-on: ubuntu-latest
+    env:
+      CREST_RUNTIME_PG_CONNECTION: &shared-pg 'Host=127.0.0.1;Port=5432;Database=crest_test;Username=test;Password=test'
+      CREST_GENERATED_CRUD_TEST_PG_CONNECTION: *shared-pg
+      CREST_ERP_TEST_PG_CONNECTION: *shared-pg
+      CREST_ERP_TEST_AMQP_CONNECTION: 'amqp://test:test@127.0.0.1:5672/'
+      CREST_ERP_TEST_RABBIT_CONTAINER: crest-test-rabbitmq
+      CREST_CAP_TEST_PG_CONNECTION: 'Host=127.0.0.1;Port=5433;Database=cap_test;Username=test;Password=test'
+      CREST_CAP_TEST_PG_CONTAINER: crest-test-cap-pg
+      CREST_CAP_TEST_AMQP_CONNECTION: 'amqp://test:test@127.0.0.1:5673/'
+      CREST_CAP_TEST_RABBIT_CONTAINER: crest-test-cap-rabbitmq
+      CREST_HEALTH_TEST_PG_CONNECTION: 'Host=127.0.0.1;Port=5434;Database=health_test;Username=test;Password=test'
+      CREST_HEALTH_TEST_PG_CONTAINER: crest-test-health-pg
+      CREST_HEALTH_TEST_REDIS_ENDPOINT: '127.0.0.1:6379'
+      CREST_HEALTH_TEST_REDIS_CONTAINER: crest-test-health-redis
+      CREST_TEST_CONTAINER_CLI: docker
 
     steps:
       - name: Checkout
@@ -22,6 +37,11 @@ jobs:
         with:
           dotnet-version: |
             10.0.x
+
+      - name: Start external test services
+        run: >-
+          timeout 240s docker compose -p crest-test-services -f infra/docker-compose.test-services.yml
+          up -d --wait --wait-timeout 180 pg16 rabbitmq cap-pg cap-rabbitmq health-pg redis
 
       - name: Restore
         run: dotnet restore CrestCreates.slnx
@@ -75,13 +95,8 @@ jobs:
         run: |
           dotnet test tests/Persistence/CrestCreates.OrmProviders.Tests --no-build
 
-      # See ci.yml: I-18 seeding closure is fixed; the exclusions below are the framework
-      # platform HTTP surface deferred by #129 rev.2 §14.6 (404 until re-published through
-      # the formal projection) plus the userinfo short-name claim assertion.
-      - name: Test — Integration suite (auth / tenant / permission / audit / UoW, Testcontainers)
-        run: |
-          dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build \
-            --filter "FullyQualifiedName!~AuditLogIntegrationTests&FullyQualifiedName!~FeatureManagementIntegrationTests&FullyQualifiedName!~SettingManagementIntegrationTests&FullyQualifiedName!~TenantManagementFullChainIntegrationTests&FullyQualifiedName!~IntegrationTests.LoginAndRefresh_WithSeededAdmin_ReturnsTokensAndCurrentUser&FullyQualifiedName!~IntegrationTests.PermissionGrant_AfterGrantingBookSearch_UserCanAccessDynamicApi&FullyQualifiedName!~IntegrationTests.TenantBoundary_WithMismatchedTenantHeader_ReturnsForbidden"
+      - name: Test — Integration suite (auth / tenant / permission / audit / UoW / health)
+        run: dotnet test tests/Framework/Web/CrestCreates.IntegrationTests --no-build
 
       - name: Test — Framework / Modules
         run: |
@@ -153,7 +168,7 @@ jobs:
 
       # ── Tooling tests ──
 
-      - name: Test — Runtime / CAP atomic publish (PostgreSQL + RabbitMQ Testcontainers)
+      - name: Test — Runtime / CAP atomic publish (dedicated PostgreSQL and RabbitMQ)
         run: |
           dotnet test tests/Runtime/DistributedTransaction/CrestCreates.DistributedTransaction.CAP.IntegrationTests --no-build
         # #125: real PG + RabbitMQ fault matrix (scan-recovery delivery, rollback holds no
@@ -185,17 +200,12 @@ jobs:
     # Bounded job budget: the native publish/link/run gates must fail explicitly
     # instead of hanging indefinitely.
     timeout-minutes: 120
-    services:
-      rabbitmq:
-        image: rabbitmq:4.0-management-alpine
-        ports:
-          - 5672:5672
-          - 15672:15672
-        options: >-
-          --health-cmd "rabbitmq-diagnostics -q check_port_connectivity"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+    env:
+      CREST_RABBITMQ_HOST: '127.0.0.1'
+      CREST_RABBITMQ_PORT: '5672'
+      CREST_RABBITMQ_MGMT_PORT: '15672'
+      CREST_RABBITMQ_USER: test
+      CREST_RABBITMQ_PASSWORD: test
 
     steps:
       - name: Checkout
@@ -206,6 +216,11 @@ jobs:
         with:
           dotnet-version: |
             10.0.x
+
+      - name: Start external RabbitMQ test service
+        run: >-
+          timeout 240s docker compose -p crest-test-services -f infra/docker-compose.test-services.yml
+          up -d --wait --wait-timeout 180 rabbitmq
 
       - name: Bootstrap BuildTasks
         run: dotnet build src/Tooling/CrestCreates.BuildTasks/CrestCreates.BuildTasks.csproj

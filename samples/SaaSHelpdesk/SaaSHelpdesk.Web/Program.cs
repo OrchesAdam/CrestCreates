@@ -23,11 +23,10 @@ builder.AddCrestWeb();
 builder.Services.AddCapabilityRuntime();
 builder.Services.AddSingleton<ISchemaValidator, SchemaValidator>();
 builder.Services.AddCrestCapabilityEndpoints();
-// The platform assembly also carries its own generated activation (audit retention). Name the
-// business activation explicitly so the two formally generated extensions never collide.
+// Qualify the Helpdesk activation because the platform assembly also exposes a generated extension.
 GeneratedAppServiceHttpActivation_SaaSHelpdesk_002EApplication.AddGeneratedAppServiceHttp(builder.Services);
-// Platform management surface (users/roles/permissions/tenants/features/settings/audit) is opt-in;
-// the Helpdesk host serves it through the same formal ExplicitHost projection as the business side.
+// Helpdesk serves platform management, including users and audit log queries. Retention requires
+// its own activation with a retention kernel and store.
 builder.Services.AddCrestPlatformManagementHttp();
 
 builder.Services.AddAuthentication()

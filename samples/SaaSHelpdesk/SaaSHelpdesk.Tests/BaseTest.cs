@@ -286,9 +286,8 @@ public abstract class BaseTest : IClassFixture<Fixtures.HelpdeskWebApplicationFa
 
     /// <summary>
     /// Creates a new user via the formal platform management surface (POST /api/users) and returns
-    /// the parsed user together with the raw JSON response. A tenant name is resolved to the tenant
-    /// entity Id first — UserAppService stores the TenantId verbatim, so the payload must carry the
-    /// authoritative Guid, never the display name.
+    /// the parsed user together with the raw JSON response. Resolve the fixture's tenant name to its
+    /// entity Id before sending the payload because user creation requires the authoritative Id.
     /// </summary>
     protected async Task<(IdentityUserResponse User, string RawResponse)> CreateUserAsync(
         HttpClient adminClient,

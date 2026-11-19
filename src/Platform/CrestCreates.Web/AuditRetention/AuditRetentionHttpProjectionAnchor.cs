@@ -11,6 +11,7 @@ namespace CrestCreates.Web.AuditRetention;
 [CapabilityCompatibilityProjection(
     ContractType = typeof(IAuditRetentionAppService),
     RegistrationMode = HttpProjectionRegistrationMode.ExplicitHost,
+    ActivateSeparately = true,
     RoutePrefix = "api/audit-retention",
     CapabilityIdPrefix = "compat.appservice.audit-retention")]
 public static class AuditRetentionHttpProjectionAnchor;

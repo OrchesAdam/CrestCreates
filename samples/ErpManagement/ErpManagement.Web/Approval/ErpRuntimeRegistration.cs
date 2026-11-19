@@ -1,4 +1,5 @@
 using System.Linq;
+using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.EventBus.Local;
 using CrestCreates.Form;
 using CrestCreates.Form.Abstractions;
@@ -20,6 +21,7 @@ using CrestCreates.Workflow.Abstractions;
 using ErpManagement.Application.Approval;
 using ErpManagement.Application.Contracts.Events;
 using ErpManagement.Domain.Shared.Constants;
+using ErpManagement.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -55,6 +57,10 @@ public static class ErpRuntimeRegistration
             Schema = configuration["Erp:Runtime:Schema"] ?? "crest_erp_runtime",
             ApplyMigrations = true
         });
+        services.Remove(services.Single(descriptor => descriptor.ServiceType == typeof(IAuditSink)
+            && descriptor.ImplementationType == typeof(PostgreSqlAuditSink)));
+        services.AddSingleton<PostgreSqlAuditSink>();
+        services.AddSingleton<IAuditSink, ErpHttpAuditSink>();
         services.AddRuntimeDelivery();
 
         services.AddSingleton<ISchemaRegistry>(schemaRegistry);

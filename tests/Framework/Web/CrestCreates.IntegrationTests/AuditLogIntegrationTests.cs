@@ -10,9 +10,15 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Accountability.Abstractions.Contracts;
+using CrestCreates.Accountability.Abstractions.Preparation;
+using CrestCreates.Accountability.Abstractions.Sinks;
 using CrestCreates.Application.Contracts.Interfaces;
+using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Runtime.Persistence.Abstractions.Transactions;
+using CrestCreates.Runtime.Persistence.PostgreSql;
+using CrestCreates.TestServices;
 using ErpManagement.Application.Contracts.Interfaces;
 using CrestCreates.Data.Abstractions;
 using CrestCreates.Domain.Exceptions;
@@ -30,6 +36,8 @@ using CrestCreates.Domain.Permission;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Moq;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
@@ -53,6 +61,84 @@ public class AuditLogIntegrationTests : IClassFixture<ErpManagementWebApplicatio
         _factory = factory;
         // Trigger host initialization before any tests run
         _ = _factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task Http_audit_projects_to_the_recorded_tenant_database_and_persists_non_http_facts()
+    {
+        var isolatedDatabase = await ExternalTestServices.CreateIsolatedDatabaseAsync(_factory.ConnectionString, "erp_audit");
+        var tenantConnection = new NpgsqlConnectionStringBuilder(isolatedDatabase) { SearchPath = "public" }.ConnectionString;
+        var tenantId = Guid.NewGuid().ToString();
+        try
+        {
+            await using var tenantDb = new ErpManagementDbContext(
+                new DbContextOptionsBuilder<ErpManagementDbContext>().UseNpgsql(tenantConnection).Options);
+            await tenantDb.Database.EnsureCreatedAsync();
+
+            var directory = new Mock<ITenantProvider>();
+            directory.Setup(x => x.GetTenantAsync(tenantId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new TenantInfo(tenantId, "audit-projection", tenantConnection));
+            var services = new ServiceCollection();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?> { ["ConnectionStrings:Default"] = _factory.ConnectionString }).Build());
+            services.AddSingleton<ICurrentTenant, CurrentTenant>();
+            services.AddSingleton(directory.Object);
+            new ErpManagement.EntityFrameworkCore.Modules.EntityFrameworkCoreModule().OnConfigureServices(services);
+            await using var scopeProvider = services.BuildServiceProvider();
+            var tenant = scopeProvider.GetRequiredService<ICurrentTenant>();
+            var canonical = _factory.Services.GetRequiredService<PostgreSqlAuditSink>();
+            var sink = new ErpHttpAuditSink(canonical, scopeProvider.GetRequiredService<IServiceScopeFactory>(), tenant,
+                directory.Object);
+            var preparer = _factory.Services.GetRequiredService<IAuditEnvelopePreparer>();
+            var envelope = new AuditEnvelope
+            {
+                AuditId = Guid.NewGuid().ToString("N"),
+                OccurredAt = DateTimeOffset.UtcNow,
+                TenantId = tenantId,
+                CorrelationId = Guid.NewGuid().ToString("N"),
+                Actor = new AuditActor { Kind = "user", Id = "projection-test" },
+                Action = new AuditAction { Kind = "http.request", Name = "GET /api/material" },
+                Target = new AuditTarget { Kind = "http.endpoint", Id = "GET /api/material" },
+                Outcome = new AuditOutcome { Status = "succeeded" },
+                Runtime = new AuditRuntimeContext { InvocationSource = "http" }
+            };
+            var http = await preparer.PrepareAsync(envelope);
+            http.IsAccepted.Should().BeTrue(string.Join(", ", http.Issues));
+            (await sink.WriteAsync(http.Envelope!)).Status.Should().Be(AuditSinkWriteStatus.Accepted);
+            (await sink.WriteAsync(http.Envelope!)).Status.Should().Be(AuditSinkWriteStatus.Duplicate);
+            tenant.Id.Should().BeNull();
+            var httpId = Guid.Parse(envelope.AuditId);
+            (await tenantDb.AuditLogs.SingleAsync(row => row.Id == httpId)).TenantId.Should().Be(tenantId);
+            await using var hostScope = _factory.Services.CreateAsyncScope();
+            var hostDb = hostScope.ServiceProvider.GetRequiredService<ErpManagementDbContext>();
+            (await hostDb.AuditLogs.AnyAsync(row => row.Id == httpId)).Should().BeFalse();
+
+            var method = await preparer.PrepareAsync(envelope with
+            {
+                AuditId = Guid.NewGuid().ToString("N"),
+                Action = new AuditAction { Kind = "method.invoke", Name = "Probe" },
+                Target = new AuditTarget { Kind = "application.method", Id = "Probe" },
+                Runtime = new AuditRuntimeContext { InvocationSource = "system" }
+            });
+            method.IsAccepted.Should().BeTrue(string.Join(", ", method.Issues));
+            (await sink.WriteAsync(method.Envelope!)).Status.Should().Be(AuditSinkWriteStatus.Accepted);
+            (await sink.WriteAsync(method.Envelope!)).Status.Should().Be(AuditSinkWriteStatus.Duplicate);
+            var methodId = Guid.Parse(method.Envelope!.AuditId);
+            (await tenantDb.AuditLogs.AnyAsync(row => row.Id == methodId)).Should().BeFalse();
+        }
+        finally
+        {
+            await ExternalTestServices.DropDatabaseAsync(_factory.ConnectionString, ExternalTestServices.DatabaseName(isolatedDatabase));
+        }
+    }
+
+    [Fact]
+    public async Task Readiness_uses_business_database_and_approval_store_probes()
+    {
+        var health = _factory.Services.GetRequiredService<HealthCheckService>();
+        var report = await health.CheckHealthAsync(registration => registration.Name is "erp-postgresql" or "erp-approval-runtime");
+        report.Entries.Keys.Should().BeEquivalentTo("erp-postgresql", "erp-approval-runtime");
+        report.Status.Should().Be(HealthStatus.Healthy);
     }
 
     [Fact]
@@ -420,6 +506,237 @@ public class AuditLogIntegrationTests : IClassFixture<ErpManagementWebApplicatio
             """, connection);
         command.Parameters.AddWithValue("id", $"erp.stock-posted:{receipt.Id}");
         ((long)(await command.ExecuteScalarAsync())!).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Concurrent_and_sequential_receipt_posts_apply_business_facts_once()
+    {
+        var (receiptId, orderId) = await SeedReceiptForDeliveryAsync();
+        var (authenticatedClient, _) = await CreateAuthenticatedClientAsync(
+            AdminUserName, AdminPassword, _factory.HostTenantId.ToString());
+        using var client = authenticatedClient;
+        var route = $"/api/goods-receipts/{receiptId}/post";
+
+        await using var connection = new NpgsqlConnection(_factory.ConnectionString);
+        await connection.OpenAsync();
+        await using var blocker = await connection.BeginTransactionAsync();
+        await using (var rowLock = new NpgsqlCommand("""
+            SELECT 1 FROM "GoodsReceipts" WHERE "Id" = @id FOR UPDATE
+            """, connection, blocker))
+        {
+            rowLock.Parameters.AddWithValue("id", receiptId);
+            (await rowLock.ExecuteScalarAsync()).Should().Be(1);
+        }
+
+        await using var observer = new NpgsqlConnection(_factory.ConnectionString);
+        await observer.OpenAsync();
+        var first = client.PostAsync(route, content: null);
+        var second = client.PostAsync(route, content: null);
+        try
+        {
+            await AssertAsync(async () =>
+            {
+                await using var waiters = new NpgsqlCommand("""
+                    SELECT count(*) FROM pg_stat_activity
+                     WHERE datname = current_database() AND wait_event_type = 'Lock'
+                       AND query LIKE 'SELECT "Status" FROM "GoodsReceipts"%FOR UPDATE%'
+                    """, observer);
+                (await waiters.ExecuteScalarAsync()).Should().Be(2L);
+            });
+        }
+        finally
+        {
+            await blocker.CommitAsync();
+        }
+
+        using var firstResponse = await first;
+        using var secondResponse = await second;
+        using var replay = await client.PostAsync(route, content: null);
+        firstResponse.StatusCode.Should().Be(HttpStatusCode.OK, await firstResponse.Content.ReadAsStringAsync());
+        secondResponse.StatusCode.Should().Be(HttpStatusCode.OK, await secondResponse.Content.ReadAsStringAsync());
+        replay.StatusCode.Should().Be(HttpStatusCode.OK, await replay.Content.ReadAsStringAsync());
+        var firstPosted = (await ReadJsonAsync<DynamicApiResponse<GoodsReceiptDto>>(firstResponse)).Data!;
+        firstPosted.Status.Should().Be(GoodsReceiptStatus.Posted);
+        var secondPosted = (await ReadJsonAsync<DynamicApiResponse<GoodsReceiptDto>>(secondResponse)).Data!;
+        var replayed = (await ReadJsonAsync<DynamicApiResponse<GoodsReceiptDto>>(replay)).Data!;
+        secondPosted.Should().BeEquivalentTo(firstPosted, options => options.Excluding(x => x.PostedAt));
+        replayed.Should().BeEquivalentTo(firstPosted, options => options.Excluding(x => x.PostedAt));
+        secondPosted.PostedAt.Should().BeCloseTo(firstPosted.PostedAt!.Value, TimeSpan.FromMicroseconds(1));
+        replayed.PostedAt.Should().BeCloseTo(firstPosted.PostedAt.Value, TimeSpan.FromMicroseconds(1));
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ErpManagementDbContext>();
+        (await db.StockTransactions.CountAsync(x => x.SourceDocId == receiptId)).Should().Be(1);
+        (await db.PurchaseOrders.Include(x => x.Lines).SingleAsync(x => x.Id == orderId))
+            .Lines.Single().ReceivedQuantity.Should().Be(3m);
+        await using var outbox = new NpgsqlCommand($"""
+            SELECT count(*) FROM "{_factory.RuntimeSchema}".runtime_outbox_messages WHERE message_id = @id
+            """, connection);
+        outbox.Parameters.AddWithValue("id", $"erp.stock-posted:{receiptId}");
+        (await outbox.ExecuteScalarAsync()).Should().Be(1L);
+    }
+
+    [Fact]
+    public async Task Receipt_delivery_is_tenant_scoped_and_retries_only_exhausted_dead_letters()
+    {
+        var (receiptId, _) = await SeedReceiptForDeliveryAsync();
+        var (ownerClient, _) = await CreateAuthenticatedClientAsync(
+            AdminUserName, AdminPassword, _factory.HostTenantId.ToString());
+        var (otherTenantClient, _) = await CreateAuthenticatedClientAsync(
+            AdminUserName, AdminPassword, ErpManagementWebApplicationFactory.AuditTenantName);
+        using var owner = ownerClient;
+        using var otherTenant = otherTenantClient;
+        var route = $"/api/goods-receipts/{receiptId}";
+        using var posted = await owner.PostAsync($"{route}/post", content: null);
+        posted.StatusCode.Should().Be(HttpStatusCode.OK, await posted.Content.ReadAsStringAsync());
+
+        async Task<GoodsReceiptDeliveryStatusDto> ReadStatusAsync()
+        {
+            using var response = await owner.GetAsync($"{route}/delivery-status");
+            response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+            return (await ReadJsonAsync<DynamicApiResponse<GoodsReceiptDeliveryStatusDto>>(response)).Data!;
+        }
+
+        await AssertAsync(async () =>
+        {
+            var status = await ReadStatusAsync();
+            status.Status.Should().Be("Delivered");
+            status.Consumed.Should().BeTrue();
+        });
+
+        using var foreignStatus = await otherTenant.GetAsync($"{route}/delivery-status");
+        using var foreignRetry = await otherTenant.PostAsync($"{route}/retry-delivery", content: null);
+        using var foreignPost = await otherTenant.PostAsync($"{route}/post", content: null);
+        foreignStatus.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        foreignRetry.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        foreignPost.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using var deliveredRetry = await owner.PostAsync($"{route}/retry-delivery", content: null);
+        deliveredRetry.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        await using var connection = new NpgsqlConnection(_factory.ConnectionString);
+        await connection.OpenAsync();
+        var outboxTable = $"\"{_factory.RuntimeSchema}\".runtime_outbox_messages";
+        var messageId = $"erp.stock-posted:{receiptId}";
+        async Task MoveDeliveryTenantAsync(Guid tenantId)
+        {
+            await using var command = new NpgsqlCommand($"UPDATE {outboxTable} SET tenant_id = @tenant WHERE message_id = @id",
+                connection);
+            command.Parameters.AddWithValue("id", messageId);
+            command.Parameters.AddWithValue("tenant", tenantId.ToString());
+            (await command.ExecuteNonQueryAsync()).Should().Be(1);
+        }
+
+        async Task MoveInboxTenantAsync(Guid tenantId)
+        {
+            await using var command = new NpgsqlCommand("""
+                UPDATE "IntegrationEventInboxes" SET "TenantId" = @tenant WHERE "MessageId" = @id
+                """, connection);
+            command.Parameters.AddWithValue("id", messageId);
+            command.Parameters.AddWithValue("tenant", tenantId);
+            (await command.ExecuteNonQueryAsync()).Should().Be(1);
+        }
+
+        await MoveInboxTenantAsync(_factory.AuditTenantId);
+        (await ReadStatusAsync()).Consumed.Should().BeFalse();
+        await MoveInboxTenantAsync(_factory.HostTenantId);
+
+        await using var immutableFact = new NpgsqlCommand($"""
+            SELECT payload_utf8, integrity_json::text, fencing_token FROM {outboxTable} WHERE message_id = @id
+            """, connection);
+        immutableFact.Parameters.AddWithValue("id", messageId);
+        async Task<(byte[] Payload, string Integrity, long Fence)> ReadFactAsync()
+        {
+            await using var reader = await immutableFact.ExecuteReaderAsync();
+            (await reader.ReadAsync()).Should().BeTrue();
+            return (reader.GetFieldValue<byte[]>(0), reader.GetString(1), reader.GetInt64(2));
+        }
+
+        var original = await ReadFactAsync();
+        await using (var active = new NpgsqlCommand($"""
+            UPDATE {outboxTable} SET status = 1, delivered_at = NULL, lease_owner_id = 'test-owner',
+                lease_expires_at = clock_timestamp() + interval '1 hour', terminal_lease_owner_id = NULL,
+                terminal_fencing_token = NULL WHERE message_id = @id
+            """, connection))
+        {
+            active.Parameters.AddWithValue("id", messageId);
+            (await active.ExecuteNonQueryAsync()).Should().Be(1);
+        }
+        using var activeRetry = await owner.PostAsync($"{route}/retry-delivery", content: null);
+        activeRetry.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReadStatusAsync()).Status.Should().Be("InFlight");
+
+        async Task SetDeadLetterAsync(string failureCode)
+        {
+            await using var command = new NpgsqlCommand($"""
+                UPDATE {outboxTable} SET status = 3, attempt_count = 100, lease_owner_id = NULL, lease_expires_at = NULL,
+                    dead_lettered_at = clock_timestamp(), terminal_lease_owner_id = 'test-owner',
+                    terminal_fencing_token = fencing_token, terminal_failure_code = @failure, last_failure_code = @failure
+                WHERE message_id = @id
+                """, connection);
+            command.Parameters.AddWithValue("id", messageId);
+            command.Parameters.AddWithValue("failure", failureCode);
+            (await command.ExecuteNonQueryAsync()).Should().Be(1);
+        }
+
+        await SetDeadLetterAsync("INTEGRITY_MISMATCH");
+        using var permanentRetry = await owner.PostAsync($"{route}/retry-delivery", content: null);
+        permanentRetry.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        await SetDeadLetterAsync("ATTEMPT_BUDGET_EXHAUSTED");
+        await MoveDeliveryTenantAsync(_factory.AuditTenantId);
+        (await ReadStatusAsync()).Status.Should().Be("NotAppended");
+        using var mismatchedRetry = await owner.PostAsync($"{route}/retry-delivery", content: null);
+        mismatchedRetry.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        await MoveDeliveryTenantAsync(_factory.HostTenantId);
+        (await ReadStatusAsync()).Status.Should().Be("DeadLettered");
+
+        var attempts = await Task.WhenAll(owner.PostAsync($"{route}/retry-delivery", content: null),
+            owner.PostAsync($"{route}/retry-delivery", content: null));
+        using var accepted = attempts.Single(x => x.StatusCode == HttpStatusCode.OK);
+        using var rejected = attempts.Single(x => x.StatusCode == HttpStatusCode.Conflict);
+        var requeued = (await ReadJsonAsync<DynamicApiResponse<GoodsReceiptDeliveryStatusDto>>(accepted)).Data!;
+        requeued.MessageId.Should().Be(messageId);
+        requeued.Status.Should().Be("Pending");
+        requeued.AttemptCount.Should().Be(0);
+        requeued.FailureCode.Should().BeNull();
+
+        await AssertAsync(async () =>
+        {
+            var status = await ReadStatusAsync();
+            status.Status.Should().Be("Delivered");
+            status.Consumed.Should().BeTrue();
+        });
+        var redelivered = await ReadFactAsync();
+        redelivered.Payload.Should().Equal(original.Payload);
+        redelivered.Integrity.Should().Be(original.Integrity);
+        redelivered.Fence.Should().Be(original.Fence + 1);
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ErpManagementDbContext>();
+        (await db.StockTransactions.CountAsync(x => x.SourceDocId == receiptId)).Should().Be(1);
+        (await db.IntegrationEventInboxes.CountAsync(x => x.MessageId == messageId)).Should().Be(1);
+    }
+
+    private async Task<(Guid ReceiptId, Guid OrderId)> SeedReceiptForDeliveryAsync()
+    {
+        await _factory.EnsureSeedCompleteAsync();
+        var tenantId = _factory.HostTenantId;
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ErpManagementDbContext>();
+        var material = await db.Materials.FirstAsync(x => x.TenantId == tenantId);
+        var warehouse = await db.Warehouses.FirstAsync(x => x.TenantId == tenantId);
+        var location = await db.StorageLocations.FirstAsync(x => x.WarehouseId == warehouse.Id);
+        var supplier = await db.Suppliers.FirstAsync(x => x.TenantId == tenantId);
+        var order = new PurchaseOrder(Guid.NewGuid(), $"AT-{Guid.NewGuid():N}", supplier.Id, tenantId);
+        var line = new PurchaseOrderLine(Guid.NewGuid(), order.Id, material.Id, 3m, 5m, 1,
+            warehouse.Id, location.Id, tenantId);
+        order.ReplaceLines([line]);
+        order.Confirm();
+        db.PurchaseOrders.Add(order);
+        var receipt = new GoodsReceipt(Guid.NewGuid(), $"AT-{Guid.NewGuid():N}", order.Id, supplier.Id, warehouse.Id, tenantId);
+        receipt.ReplaceLines([new GoodsReceiptLine(Guid.NewGuid(), receipt.Id, line.Id, material.Id,
+            location.Id, 3m, 5m, tenantId)]);
+        db.GoodsReceipts.Add(receipt);
+        await db.SaveChangesAsync();
+        return (receipt.Id, order.Id);
     }
 
     [Fact]

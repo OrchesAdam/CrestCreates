@@ -6,6 +6,7 @@ using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Settings;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
+using CrestCreates.Domain.Shared.Exceptions;
 using CrestCreates.EventBus.Abstractions;
 using CrestCreates.MultiTenancy.Abstract;
 using ErpManagement.Application.Contracts.DTOs;
@@ -40,7 +41,7 @@ public class GoodsReceiptAppService
     private readonly IFeatureChecker _features;
     private readonly IArApLedgerRepository _ledgers;
     private readonly ILogger<GoodsReceiptAppService> _logger;
-    private readonly IErpDeliveryStatusReader _deliveryStatus;
+    private readonly IErpGoodsReceiptDelivery _delivery;
 
     public GoodsReceiptAppService(
         IGoodsReceiptRepository receiptRepository,
@@ -57,7 +58,7 @@ public class GoodsReceiptAppService
         IFeatureChecker features,
         IArApLedgerRepository ledgers,
         ILogger<GoodsReceiptAppService> logger,
-        IErpDeliveryStatusReader deliveryStatus)
+        IErpGoodsReceiptDelivery delivery)
         : base(receiptRepository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _receiptRepository = receiptRepository;
@@ -70,10 +71,14 @@ public class GoodsReceiptAppService
         _features = features;
         _ledgers = ledgers;
         _logger = logger;
-        _deliveryStatus = deliveryStatus;
+        _delivery = delivery;
     }
 
-    private Guid CurrentTenantId => Guid.TryParse(_currentTenant.Id, out var tid) ? tid : Guid.Empty;
+    private Guid CurrentTenantId => _currentTenant.Id is not { } id
+        ? Guid.Empty
+        : Guid.TryParse(id, out var tenantId) && tenantId != Guid.Empty
+            ? tenantId
+            : throw new InvalidOperationException("ERP requires a valid tenant ID.");
 
     [UnitOfWorkMo]
     public override async Task<GoodsReceiptDto> CreateAsync(CreateGoodsReceiptDto input, CancellationToken cancellationToken = default)
@@ -148,7 +153,8 @@ public class GoodsReceiptAppService
         Guid id, CancellationToken cancellationToken)
     {
         await CheckPermissionAsync(ErpPermissions.GoodsReceipts.Post, cancellationToken);
-        var receipt = await _receiptRepository.GetWithLinesAsync(id, cancellationToken)
+        var tenantId = CurrentTenantId;
+        var receipt = await _receiptRepository.GetForPostingAsync(tenantId, id, cancellationToken)
                       ?? throw new KeyNotFoundException($"收货单不存在: {id}");
         if (receipt.Status == GoodsReceiptStatus.Posted)
         {
@@ -160,8 +166,9 @@ public class GoodsReceiptAppService
             throw new InvalidOperationException("只有草稿收货单可以过账。");
         }
 
-        var order = await _orderRepository.GetWithLinesAsync(receipt.PurchaseOrderId, cancellationToken)
-                    ?? throw new KeyNotFoundException($"采购单不存在: {receipt.PurchaseOrderId}");
+        var order = await _orderRepository.GetWithLinesAsync(receipt.PurchaseOrderId, cancellationToken);
+        if (order is null || order.TenantId != tenantId)
+            throw new KeyNotFoundException($"采购单不存在: {receipt.PurchaseOrderId}");
         if (order.Status is not (PurchaseOrderStatus.Confirmed or PurchaseOrderStatus.PartiallyReceived))
         {
             throw new InvalidOperationException("采购单当前状态不可收货。");
@@ -179,7 +186,7 @@ public class GoodsReceiptAppService
         var movements = receipt.Lines.Select(l => new StockMovementInput(
             l.MaterialId, receipt.WarehouseId, l.StorageLocationId, l.Quantity, StockMovementType.Receipt)).ToList();
         var results = await _stockPostingManager.PostAsync(
-            CurrentTenantId, movements, allowNegativeStock, "GoodsReceipt", receipt.Id, cancellationToken);
+            tenantId, movements, allowNegativeStock, "GoodsReceipt", receipt.Id, cancellationToken);
 
         order.RecordReceipt(receipt.Lines.ToDictionary(l => l.PurchaseOrderLineId, l => l.Quantity));
         await SetModificationAuditPropertiesAsync(order);
@@ -204,19 +211,37 @@ public class GoodsReceiptAppService
     public async Task<GoodsReceiptDeliveryStatusDto> GetDeliveryStatusAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await CheckPermissionAsync(ReadPermissionName, cancellationToken);
-        if (!await _receiptRepository.AnyAsync(x => x.Id == id, cancellationToken))
+        var tenantId = CurrentTenantId;
+        if (!await _receiptRepository.AnyAsync(x => x.Id == id && x.TenantId == tenantId, cancellationToken))
             throw new KeyNotFoundException($"收货单不存在: {id}");
-        var messageId = $"erp.stock-posted:{id}";
-        var status = await _deliveryStatus.GetAsync(messageId, ErpStockPostedInboxConsumer.ConsumerIdValue, cancellationToken);
-        return new GoodsReceiptDeliveryStatusDto
-        {
-            MessageId = messageId,
-            Status = status?.Status ?? "NotAppended",
-            AttemptCount = status?.AttemptCount ?? 0,
-            Consumed = status?.Consumed ?? false,
-            FailureCode = status?.FailureCode
-        };
+
+        return MapDeliveryStatus(id, await _delivery.GetAsync(tenantId, id, cancellationToken));
     }
+
+    [UnitOfWorkMo]
+    public async Task<GoodsReceiptDeliveryStatusDto> RetryDeliveryAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await CheckPermissionAsync(ErpPermissions.GoodsReceipts.Post, cancellationToken);
+        var tenantId = CurrentTenantId;
+        var receiptStatus = await _receiptRepository.LockAsync(tenantId, id, cancellationToken)
+                            ?? throw new KeyNotFoundException($"收货单不存在: {id}");
+        var delivery = receiptStatus == GoodsReceiptStatus.Posted
+            ? await _delivery.RetryAsync(tenantId, id, cancellationToken)
+            : null;
+        return MapDeliveryStatus(id, delivery ?? throw new DeliveryNotRetryableException());
+    }
+
+    private sealed class DeliveryNotRetryableException() : CrestException(
+        "ERP_RECEIPT_DELIVERY_NOT_RETRYABLE", 409, "只有投递次数耗尽并已进入死信状态的收货事件可以重投。");
+
+    private static GoodsReceiptDeliveryStatusDto MapDeliveryStatus(Guid id, ErpDeliveryStatus? status) => new()
+    {
+        MessageId = StockPostedEventPublisher.GetMessageId(id),
+        Status = status?.Status ?? "NotAppended",
+        AttemptCount = status?.AttemptCount ?? 0,
+        Consumed = status?.Consumed ?? false,
+        FailureCode = status?.FailureCode
+    };
 
     private static List<GoodsReceiptLine> BuildLines(List<ReceiptLineInput> lines, Guid receiptId, Guid tenantId)
     {

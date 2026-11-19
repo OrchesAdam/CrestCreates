@@ -28,6 +28,7 @@ public class UserAppServiceAuthorizationTests
     private readonly Mock<IPasswordHasher> _passwordHasherMock = new();
     private readonly Mock<IPasswordPolicyValidator> _passwordPolicyValidatorMock = new();
     private readonly Mock<ICurrentTenant> _currentTenantMock = new();
+    private readonly Mock<ITenantProvider> _tenantProviderMock = new();
     private readonly Mock<ICurrentUser> _currentUserMock = new();
     private readonly Mock<IFeatureChecker> _featureCheckerMock = new();
     private readonly Mock<IIdentitySecurityLogWriter> _securityLogWriterMock = new();
@@ -57,6 +58,7 @@ public class UserAppServiceAuthorizationTests
             _passwordHasherMock.Object,
             _passwordPolicyValidatorMock.Object,
             _currentTenantMock.Object,
+            _tenantProviderMock.Object,
             _currentUserMock.Object,
             _featureCheckerMock.Object,
             _securityLogWriterMock.Object,
@@ -100,16 +102,59 @@ public class UserAppServiceAuthorizationTests
     public async Task Host_with_the_superadmin_permission_creates_a_super_admin_with_audit()
     {
         SetupAvailableUserNameAndEmail();
+        _tenantProviderMock.Setup(provider => provider.GetTenantAsync("TENANT-A", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TenantInfo(TenantA, "Tenant A"));
         _userRepositoryMock
             .Setup(repository => repository.InsertAsync(It.IsAny<User>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((User user, CancellationToken _) => user);
 
-        var created = await _userAppService.CreateAsync(CreateUser("root", TenantA, isSuperAdmin: true));
+        var created = await _userAppService.CreateAsync(CreateUser("root", "TENANT-A", isSuperAdmin: true));
 
         created.IsSuperAdmin.Should().BeTrue();
+        created.TenantId.Should().Be(TenantA);
+        _userRepositoryMock.Verify(
+            repository => repository.InsertAsync(It.Is<User>(user => user.TenantId == TenantA),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
         _securityLogWriterMock.Verify(
             writer => writer.WriteAsync(
                 created.Id, "root", TenantA, "CreateUser", true, null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData("unknown-tenant", false)]
+    [InlineData("Tenant B", true)]
+    public async Task Super_admin_cannot_create_a_user_with_an_unknown_id_or_tenant_name(
+        string requestedTenantId, bool resolvesByName)
+    {
+        _currentUserMock.SetupGet(user => user.IsSuperAdmin).Returns(true);
+        _currentTenantMock.SetupGet(tenant => tenant.Id).Returns(TenantA);
+        _tenantProviderMock.Setup(provider => provider.GetTenantAsync(requestedTenantId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(resolvesByName ? new TenantInfo(TenantB, "Tenant B") : (ITenantInfo?)null);
+
+        var act = async () => await _userAppService.CreateAsync(CreateUser("alice", requestedTenantId));
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*租户 ID*无效或不可用*");
+        VerifyNoWrites();
+    }
+
+    [Fact]
+    public async Task Tenant_context_can_create_a_user_in_its_resolved_tenant()
+    {
+        _currentTenantMock.SetupGet(tenant => tenant.Id).Returns(TenantA);
+        _tenantProviderMock.Setup(provider => provider.GetTenantAsync(TenantA, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TenantInfo(TenantA, "Tenant A"));
+        SetupAvailableUserNameAndEmail();
+        _userRepositoryMock.Setup(repository => repository.InsertAsync(It.IsAny<User>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((User user, CancellationToken _) => user);
+
+        var created = await _userAppService.CreateAsync(CreateUser("alice", TenantA));
+
+        created.TenantId.Should().Be(TenantA);
+        _userRepositoryMock.Verify(
+            repository => repository.InsertAsync(It.Is<User>(user => user.TenantId == TenantA),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
