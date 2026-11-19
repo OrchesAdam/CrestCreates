@@ -18,9 +18,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using CrestCreates.TestServices;
 using Npgsql;
-using Testcontainers.PostgreSql;
-using Testcontainers.RabbitMq;
 using Xunit;
 
 namespace CrestCreates.DistributedTransaction.CAP.IntegrationTests;
@@ -93,20 +92,22 @@ public sealed class CapIntegrationDbContext : DbContext
 }
 
 /// <summary>
-/// PG + RabbitMQ 集成夹具：容器、真实 Host（CAP 装配 + UoW + EF 集成）与 CAP 存储检查器。
+/// PG + RabbitMQ 集成夹具：长驻测试服务（infra/docker-compose.test-services.yml）、
+/// 每轮一次性隔离数据库、真实 Host（CAP 装配 + UoW + EF 集成）与 CAP 存储检查器。
+/// 故障注入停启的是专属实例（CREST_CAP_TEST_PG_CONTAINER / CREST_CAP_TEST_RABBIT_CONTAINER）。
 /// </summary>
 public sealed class CapIntegrationFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("cap_it")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private readonly string _serverConnectionString =
+        ExternalTestServices.RequiredConnectionString("CREST_CAP_TEST_PG_CONNECTION", "PostgreSQL 16");
 
-    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder("rabbitmq:4.0-management-alpine")
-        .WithUsername("guest")
-        .WithPassword("guest")
-        .Build();
+    private readonly string _pgContainer =
+        ExternalTestServices.RequiredContainerName("CREST_CAP_TEST_PG_CONTAINER", "PostgreSQL 16");
+
+    private readonly string _rabbitContainer =
+        ExternalTestServices.RequiredContainerName("CREST_CAP_TEST_RABBIT_CONTAINER", "RabbitMQ 4");
+
+    private readonly List<string> _createdDatabases = new();
 
     public string PostgresConnectionString { get; private set; } = null!;
 
@@ -118,10 +119,9 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
-        await _rabbit.StartAsync();
-        PostgresConnectionString = _postgres.GetConnectionString();
-        RabbitConnectionString = _rabbit.GetConnectionString();
+        PostgresConnectionString = TrackDatabase(
+            await ExternalTestServices.CreateIsolatedDatabaseAsync(_serverConnectionString, "capit"));
+        RabbitConnectionString = ExternalTestServices.RequiredConnectionString("CREST_CAP_TEST_AMQP_CONNECTION", "RabbitMQ 4");
         Store = new CapStoreInspector(PostgresConnectionString);
 
         Host = await CreateHostAsync(PostgresConnectionString, RabbitConnectionString);
@@ -131,14 +131,16 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
     {
         await Host.StopAsync();
         Host.Dispose();
-        await _postgres.DisposeAsync();
-        await _rabbit.DisposeAsync();
+        foreach (var database in _createdDatabases)
+        {
+            await ExternalTestServices.DropDatabaseAsync(_serverConnectionString, database);
+        }
     }
 
     /// <summary>在同一 PG 服务器上创建独立数据库（隔离扫描恢复类用例），返回连接串。</summary>
     public async Task<string> CreateIsolatedDatabaseAsync(string databaseName)
     {
-        var admin = new NpgsqlConnectionStringBuilder(PostgresConnectionString) { Database = "postgres" };
+        var admin = new NpgsqlConnectionStringBuilder(_serverConnectionString) { Database = "postgres" };
         await using (var connection = new NpgsqlConnection(admin.ConnectionString))
         {
             await connection.OpenAsync();
@@ -147,20 +149,48 @@ public sealed class CapIntegrationFixture : IAsyncLifetime
             await command.ExecuteNonQueryAsync();
         }
 
+        _createdDatabases.Add(databaseName);
         return new NpgsqlConnectionStringBuilder(PostgresConnectionString) { Database = databaseName }.ConnectionString;
+    }
+
+    private string TrackDatabase(string connectionString)
+    {
+        _createdDatabases.Add(ExternalTestServices.DatabaseName(connectionString));
+        return connectionString;
     }
 
     public string RabbitMqConnectionString => RabbitConnectionString;
 
-    /// <summary>暂停/恢复主 PG 容器（Unknown 提交故障注入用例；仅限串行用例，需在 finally 中恢复）。</summary>
-    public Task PauseDatabaseAsync() => _postgres.StopAsync();
+    /// <summary>暂停/恢复主 PG 实例（Unknown 提交故障注入用例；仅限串行用例，需在 finally 中恢复）。</summary>
+    public Task PauseDatabaseAsync() => TestServiceControl.StopAsync(_pgContainer);
 
-    public Task ResumeDatabaseAsync() => _postgres.StartAsync();
+    public async Task ResumeDatabaseAsync()
+    {
+        await TestServiceControl.StartAsync(_pgContainer);
+        await TestServiceControl.WaitUntilAsync(async () =>
+        {
+            try
+            {
+                await using var probe = new NpgsqlConnection(PostgresConnectionString);
+                await probe.OpenAsync();
+                return true;
+            }
+            catch (NpgsqlException)
+            {
+                return false;
+            }
+        }, TimeSpan.FromSeconds(60));
+    }
 
-    /// <summary>暂停/恢复 RabbitMQ 容器（broker 离线恢复用例；仅限串行用例，需在 finally 中恢复）。</summary>
-    public Task PauseBrokerAsync() => _rabbit.StopAsync();
+    /// <summary>暂停/恢复 RabbitMQ 实例（broker 离线恢复用例；仅限串行用例，需在 finally 中恢复）。</summary>
+    public Task PauseBrokerAsync() => TestServiceControl.StopAsync(_rabbitContainer);
 
-    public Task ResumeBrokerAsync() => _rabbit.StartAsync();
+    public async Task ResumeBrokerAsync()
+    {
+        await TestServiceControl.StartAsync(_rabbitContainer);
+        var endpoint = new Uri(RabbitConnectionString);
+        await TestServiceControl.WaitTcpAsync(endpoint.Host, endpoint.Port, TimeSpan.FromSeconds(60));
+    }
 
     /// <summary>预热指定数据库上的 CAP 存储表（真实双库负例准备；用一次性宿主完成初始化）。</summary>
     public async Task InitializeCapStorageAsync(string connectionString)

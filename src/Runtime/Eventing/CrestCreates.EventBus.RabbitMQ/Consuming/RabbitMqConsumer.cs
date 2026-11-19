@@ -50,6 +50,8 @@ public sealed class RabbitMqConsumer : BackgroundService
     private CancellationToken _deliveryToken;
     private IRabbitMqBindingRegistry? _registry;
     private int _inFlightCount;
+    private int _stopStarted;
+    private readonly TaskCompletionSource _stopCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource _idle = CreateCompletedSource();
 
     public RabbitMqConsumer(
@@ -244,57 +246,74 @@ public sealed class RabbitMqConsumer : BackgroundService
         // Shutdown order: stop intake, bounded wait for in-flight deliveries, then close the dedicated
         // consumer channel (unfinished messages stay unacknowledged), then let the base class cancel
         // the execution token. The consumer channel is never returned to the publisher pool.
-        if (_registry is null || _registry.PublisherOnly || _consumerChannel is null)
+        // Test hosts (WebApplicationFactory) can trigger two concurrent host shutdowns; only one
+        // caller may own the channel teardown, and a concurrent caller must not cancel the execution
+        // token before the owner's bounded drain finishes.
+        if (Interlocked.CompareExchange(ref _stopStarted, 1, 0) != 0)
         {
+            await _stopCompleted.Task.ConfigureAwait(false);
             await base.StopAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        _logger.LogInformation("Stopping RabbitMQ consumer: cancelling intake...");
-        await _settlementGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
-            foreach (var tag in _consumerTags)
+            if (_registry is null || _registry.PublisherOnly || _consumerChannel is null)
             {
-                try
+                await base.StopAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            _logger.LogInformation("Stopping RabbitMQ consumer: cancelling intake...");
+            await _settlementGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                foreach (var tag in _consumerTags)
                 {
-                    await _consumerChannel.BasicCancelAsync(tag, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to cancel consumer {ConsumerTag}.", tag);
+                    try
+                    {
+                        await _consumerChannel.BasicCancelAsync(tag, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to cancel consumer {ConsumerTag}.", tag);
+                    }
                 }
             }
+            finally
+            {
+                _settlementGate.Release();
+            }
+
+            if (Volatile.Read(ref _inFlightCount) > 0)
+            {
+                var drained = await Task.WhenAny(_idle.Task, Task.Delay(ShutdownDrainTimeout, CancellationToken.None))
+                    .ConfigureAwait(false);
+                if (drained != _idle.Task)
+                {
+                    _logger.LogWarning(
+                        "In-flight deliveries did not drain within {Timeout}s; closing the consumer channel with " +
+                        "{Count} delivery/deliveries unfinished. They remain unacknowledged and will be redelivered.",
+                        ShutdownDrainTimeout.TotalSeconds, Volatile.Read(ref _inFlightCount));
+                }
+            }
+
+            try
+            {
+                await _consumerChannel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error while closing the dedicated consumer channel.");
+            }
+
+            _consumerChannel.Dispose();
+            _consumerChannel = null;
         }
         finally
         {
-            _settlementGate.Release();
+            _stopCompleted.TrySetResult();
         }
-
-        if (Volatile.Read(ref _inFlightCount) > 0)
-        {
-            var drained = await Task.WhenAny(_idle.Task, Task.Delay(ShutdownDrainTimeout, CancellationToken.None))
-                .ConfigureAwait(false);
-            if (drained != _idle.Task)
-            {
-                _logger.LogWarning(
-                    "In-flight deliveries did not drain within {Timeout}s; closing the consumer channel with " +
-                    "{Count} delivery/deliveries unfinished. They remain unacknowledged and will be redelivered.",
-                    ShutdownDrainTimeout.TotalSeconds, Volatile.Read(ref _inFlightCount));
-            }
-        }
-
-        try
-        {
-            await _consumerChannel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error while closing the dedicated consumer channel.");
-        }
-
-        _consumerChannel.Dispose();
-        _consumerChannel = null;
 
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
 

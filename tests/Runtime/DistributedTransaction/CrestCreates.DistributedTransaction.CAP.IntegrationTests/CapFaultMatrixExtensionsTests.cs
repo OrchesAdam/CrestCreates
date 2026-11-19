@@ -17,6 +17,7 @@ namespace CrestCreates.DistributedTransaction.CAP.IntegrationTests;
 /// #125 故障矩阵补齐：Unknown 提交故障、确认提交后清理失败、放弃、窗口外状态恢复、拒绝矩阵全量、
 /// 最低配置首次投递、broker 离线恢复。真实 PG + RabbitMQ（扫描等待 lookback=30s + interval=2s）。
 /// </summary>
+[Collection("CapLongLivedServices")]
 public class CapFaultMatrixExtensionsTests : IClassFixture<CapIntegrationFixture>
 {
     private static readonly TimeSpan ScanWait = TimeSpan.FromSeconds(150);

@@ -8,11 +8,11 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using CrestCreates.TestServices;
 using Npgsql;
 using SaaSHelpdesk.Domain.Entities;
 using SaaSHelpdesk.Domain.Shared.Enums;
 using SaaSHelpdesk.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 
 namespace SaaSHelpdesk.Tests;
 
@@ -28,13 +28,13 @@ public sealed class DualTenantHttpAcceptanceTests : IAsyncLifetime
     private const string TenantPassword = "Tenant123!";
     private const string TenantUserName = "tenant-admin";
 
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("helpdesk_dual_http")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private readonly string _serverConnection =
+        ExternalTestServices.RequiredConnectionString("CREST_HELPDESK_TEST_PG_CONNECTION", "PostgreSQL 16");
 
     private WebApplicationFactory<global::Program> _factory = null!;
+    private string _baseConnection = null!;
+    private string _hostSchema = null!;
+    private string _tenantSchema = null!;
     private string _hostConnection = null!;
     private string _tenantConnection = null!;
     private Guid _tenantId;
@@ -42,10 +42,12 @@ public sealed class DualTenantHttpAcceptanceTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
-        var baseConnection = _postgres.GetConnectionString();
+        var baseConnection = _serverConnection;
+        _baseConnection = baseConnection;
         var hostSchema = "http_host_" + Guid.NewGuid().ToString("N")[..10];
         var tenantSchema = "http_tenant_" + Guid.NewGuid().ToString("N")[..10];
+        _hostSchema = hostSchema;
+        _tenantSchema = tenantSchema;
         CreateSchema(baseConnection, hostSchema);
         CreateSchema(baseConnection, tenantSchema);
         _hostConnection = baseConnection + ";Search Path=" + hostSchema;
@@ -84,7 +86,14 @@ public sealed class DualTenantHttpAcceptanceTests : IAsyncLifetime
             await _factory.DisposeAsync();
         }
 
-        await _postgres.DisposeAsync();
+        await using var connection = new NpgsqlConnection(_baseConnection);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            DROP SCHEMA IF EXISTS "{_hostSchema}" CASCADE;
+            DROP SCHEMA IF EXISTS "{_tenantSchema}" CASCADE;
+            """;
+        await command.ExecuteNonQueryAsync();
     }
 
     [Fact]

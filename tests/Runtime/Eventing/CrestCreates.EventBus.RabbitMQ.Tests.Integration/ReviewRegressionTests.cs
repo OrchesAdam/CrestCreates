@@ -149,6 +149,8 @@ public sealed class ReviewRegressionTests(ITestOutputHelper output) : RabbitMqIn
         builder.Services.RemoveAll<OrderPlacedHandler>();
         builder.Services.AddRabbitMqEventBus(o =>
         {
+            o.UserName = UserName;
+            o.Password = Password;
             o.VirtualHost = VHost;
             o.DefaultExchange = "itest127.events";
             o.DeadLetterExchange = "itest127.dlx";

@@ -44,10 +44,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using CrestCreates.TestServices;
 using Npgsql;
 using OpenIddict.Abstractions;
 using OpenIddict.EntityFrameworkCore;
-using Testcontainers.PostgreSql;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace SaaSHelpdesk.Tests.Fixtures;
@@ -55,18 +55,16 @@ namespace SaaSHelpdesk.Tests.Fixtures;
 /// <summary>
 /// WebApplicationFactory for SaaSHelpdesk integration tests.
 ///
-/// Starts a PostgreSQL container, creates a schema-isolated test database,
+/// Connects to the long-lived PostgreSQL test instance (CREST_HELPDESK_TEST_PG_CONNECTION),
+/// creates a schema-isolated test database,
 /// seeds admin identity, OpenIddict client, demo categories, customers, and tickets,
 /// and wires all required framework services inline.
 /// </summary>
 public sealed class HelpdeskWebApplicationFactory
     : WebApplicationFactory<global::Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("helpdesk_test")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private readonly string _serverConnectionString =
+        ExternalTestServices.RequiredConnectionString("CREST_HELPDESK_TEST_PG_CONNECTION", "PostgreSQL 16");
 
     private readonly string _schemaName = $"htest_{Guid.NewGuid():N}";
     private string _baseConnectionString = null!;
@@ -100,8 +98,9 @@ public sealed class HelpdeskWebApplicationFactory
 
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
-        _baseConnectionString = _postgres.GetConnectionString();
+        // 每夹具一次性隔离库：EnsureCreated 在空库上才建表，共享服务器上的既有表会使其 no-op。
+        _baseConnectionString = await ExternalTestServices.CreateIsolatedDatabaseAsync(
+            _serverConnectionString, "helpdesk");
         EnsureSchemaCreated();
         _sharedConnection = new NpgsqlConnection(ConnectionString);
         await _sharedConnection.OpenAsync();
@@ -110,9 +109,10 @@ public sealed class HelpdeskWebApplicationFactory
     public new async Task DisposeAsync()
     {
         _sharedConnection?.Dispose();
-        _seedLock.Dispose();
-        await _postgres.DisposeAsync();
         await base.DisposeAsync();
+        await ExternalTestServices.DropDatabaseAsync(
+            _serverConnectionString, ExternalTestServices.DatabaseName(_baseConnectionString));
+        _seedLock.Dispose();
     }
 
     // ── Schema & seed helpers ────────────────────────────────────────

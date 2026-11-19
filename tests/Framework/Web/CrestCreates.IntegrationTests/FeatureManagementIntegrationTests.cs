@@ -257,13 +257,13 @@ public class FeatureManagementIntegrationTests : IClassFixture<ErpManagementWebA
         // Give the audit middleware time to flush the audit log
         await Task.Delay(500);
 
-        // Query audit log for the feature change
-        var auditResponse = await hostClient.GetAsync("/api/audit-logs?keyword=Identity.UserCreationEnabled&pageIndex=0&pageSize=10");
-        auditResponse.StatusCode.Should().Be(HttpStatusCode.OK, await auditResponse.Content.ReadAsStringAsync());
-
-        var body = await auditResponse.Content.ReadAsStringAsync();
-        body.Should().Contain("FeatureChanges");
-        body.Should().Contain("Identity.UserCreationEnabled");
+        // 正式主链 = Accountability HTTP terminal observer → IAuditSink（夹具替换为内存 sink）。
+        // 旧 AuditContext → AuditLogs 表链路已退出 UseCrestWeb，DB 查询看不到实时审计；
+        // 与 AuditLogIntegrationTests 的 sink 断言先例一致。
+        _factory.AuditSink.GetRecords().Should().Contain(record =>
+            record.Action.Name.StartsWith("PUT ") &&
+            record.Action.Name.Contains("features/global") &&
+            record.Outcome.Status == "succeeded");
     }
 
     private async Task<string> CreateTenantAndReturnIdAsync()

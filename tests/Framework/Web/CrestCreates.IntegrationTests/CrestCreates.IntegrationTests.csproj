@@ -19,6 +19,7 @@
     <ProjectReference Include="../../../../src/Persistence/CrestCreates.Data.SqlSugar/CrestCreates.Data.SqlSugar.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.Event/CrestCreates.Event.csproj" />
     <ProjectReference Include="../../../../src/Runtime/Eventing/CrestCreates.EventBus.Local/CrestCreates.EventBus.Local.csproj" />
+    <ProjectReference Include="../../../Shared/CrestCreates.TestServices/CrestCreates.TestServices.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,9 +35,6 @@
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="Testcontainers" />
-    <PackageReference Include="Testcontainers.PostgreSql" />
-    <PackageReference Include="Testcontainers.RabbitMq" />
   </ItemGroup>
 
 </Project>

@@ -34,6 +34,8 @@ public abstract class RabbitMqIntegrationTestBase : IAsyncLifetime
     private static readonly string HostName = Environment.GetEnvironmentVariable("CREST_RABBITMQ_HOST") ?? "localhost";
     private static readonly int AmqpPort = int.TryParse(Environment.GetEnvironmentVariable("CREST_RABBITMQ_PORT"), out var port) ? port : 5672;
     private static readonly int ManagementPort = int.TryParse(Environment.GetEnvironmentVariable("CREST_RABBITMQ_MGMT_PORT"), out var mgmtPort) ? mgmtPort : 15672;
+    protected static readonly string UserName = Environment.GetEnvironmentVariable("CREST_RABBITMQ_USER") ?? "guest";
+    protected static readonly string Password = Environment.GetEnvironmentVariable("CREST_RABBITMQ_PASSWORD") ?? "guest";
     private static readonly HttpClient Management = CreateManagementClient();
 
     private readonly List<IHost> _hosts = new();
@@ -47,8 +49,8 @@ public abstract class RabbitMqIntegrationTestBase : IAsyncLifetime
         {
             HostName = HostName,
             Port = AmqpPort,
-            UserName = "guest",
-            Password = "guest",
+            UserName = UserName,
+            Password = Password,
             VirtualHost = VHost,
             MaxChannels = 5,
             RetryCount = 2,
@@ -297,8 +299,8 @@ public abstract class RabbitMqIntegrationTestBase : IAsyncLifetime
         {
             HostName = HostName,
             Port = AmqpPort,
-            UserName = "guest",
-            Password = "guest",
+            UserName = UserName,
+            Password = Password,
             VirtualHost = vhost,
         };
 
@@ -381,7 +383,7 @@ public abstract class RabbitMqIntegrationTestBase : IAsyncLifetime
         };
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Basic",
-            Convert.ToBase64String(Encoding.ASCII.GetBytes("guest:guest")));
+            Convert.ToBase64String(Encoding.ASCII.GetBytes($"{UserName}:{Password}")));
         return client;
     }
 
@@ -397,7 +399,7 @@ public abstract class RabbitMqIntegrationTestBase : IAsyncLifetime
         {
             Assert.Fail(
                 $"RabbitMQ is not reachable at {HostName}:{AmqpPort} ({ex.Message}). " +
-                "Start it with: DOCKER_HOST=unix:///run/user/1000/podman/podman.sock podman start crestcreates-test-rabbitmq");
+                "Start the long-lived test services: podman-compose -f infra/docker-compose.test-services.yml up -d (see infra/README.md)");
         }
 
         try
@@ -426,9 +428,9 @@ public abstract class RabbitMqIntegrationTestBase : IAsyncLifetime
             Assert.Fail($"Failed to create test vhost '{vhost}': {(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
         }
 
-        // Grant the guest user full permissions on the isolated vhost.
+        // Grant the broker user full permissions on the isolated vhost.
         using var permissions = await Management.SendAsync(new HttpRequestMessage(
-            HttpMethod.Put, $"permissions/{vhost}/guest")
+            HttpMethod.Put, $"permissions/{vhost}/{Uri.EscapeDataString(UserName)}")
         {
             Content = new StringContent("""{"configure":".*","write":".*","read":".*"}""", Encoding.UTF8, "application/json"),
         });

@@ -1,5 +1,62 @@
 # CrestCreates platform status — 2026-11-06
 
+## 2026-11-19 — Testcontainers 全面退出：长驻测试服务改造（全项目）
+
+- **范围与装配**：全项目测试从 Testcontainers per-run 容器改为环境变量注入的长驻服务连接；
+  `Directory.Packages.props` 与各测试 csproj 的 Testcontainers 包引用全部移除（残留仅 3 处刻意文本：
+  TestServiceControl 注释、ExternalTestServices 报错提示、边界守卫断言共享测试项目**不得**引用 Testcontainers）。
+  缺 env 直接报错退出（fail-fast，无静默回退）。预置入口：`infra/docker-compose.test-services.yml` +
+  `infra/README.md`（**新文件，未跟踪未提交**；RabbitMQ 暴露 127.0.0.1:5672/15672，凭据经
+  `CREST_RABBITMQ_USER/PASSWORD` 注入，管理 API 用于 vhost 预置/清理）。
+- **共享工具** `tests/Shared/CrestCreates.TestServices`：`ExternalTestServices`（Required* fail-fast、
+  一次性隔离库 CREATE/DROP DATABASE WITH (FORCE)、identifier-safe 前缀校验）+ `TestServiceControl`
+  （故障注入按用户裁定走**专属实例 + podman/docker CLI 停启**，不再经 Testcontainers exec 通道）。
+  `DropDatabaseAsync` 对 57P01/55006 重试（≤5 次、500ms）：PG16 DROP FORCE 与残留 Npgsql 池连接竞争时
+  会以 57P01 中断自身会话、库未删成（CAP fixture 实测 4 个孤儿库），重试后 38/38 exit 0 零孤儿。
+- **隔离策略**：per-test `itest_{guid}` schema 不变；PG 集成 fixture 改每 fixture 一次性隔离库
+  （`erp_*`/`capit_*` 等前缀）；RabbitMQ 每 fixture 一次性 vhost（`erp_it_{guid:N}` 经 rabbitmqctl，
+  itest vhost 经管理 HTTP API）；fixture 程序集内串行，避免共享长驻服务上的跨类干扰。
+- **生产修复（本次唯一 src 改动）**：`RabbitMqConsumer.StopAsync` 并发停机单 owner 门
+  （Interlocked `_stopStarted` + `_stopCompleted` TCS）：WebApplicationFactory 双重 shutdown 并发调用
+  StopAsync 曾 NRE 于 channel dispose 并跳过清理；现第二调用方等待 owner 完成
+  settlement 门 → BasicCancel → 有界 drain → channel 关闭的既有顺序后再 base.StopAsync。
+- **测试侧修复**：IntegrationTests host 管理帧去掉 `X-Tenant-Id`（host 名称解析进租户实体帧导致
+  Tenant!=null，管理操作要求 host 帧，与 FeatureManagement 先例一致）；Feature 变更审计断言迁移到正式主链
+  （UseCrestWeb 终态 observer → IAuditSink；旧 AuditContext→AuditLogs 路径已死，**FeatureAuditRecorder
+  的 feature 变更明细审计是未处理平台缺口**，本次未修）；AuditLog 结算重放测试改专用种子库存
+  （共享种子被其他用例消耗导致顺序依赖 Insufficient stock）；RabbitMQ.Tests.Integration 凭据 env 化。
+- **HEAD 既有破损修复（与转换无关，但阻断门禁）**：
+  ① GeneratedCrud/Ticket 两个 AotFixture 的内存 UoW 补实现 `IUnitOfWorkAbandonable`
+  （内核 fail-closed 检查 255cd9d7 于 11-11 加入，晚于 10-16 的 fixture 能力声明 → HEAD 上
+  GeneratedCrud.AotFixture 12 红、Ticket 同源潜伏；修复后 28/28 含原生门禁重链接）。
+  ② 边界守卫迁移：OpenIddict 覆盖控制 + 2 个 Accountability 样例守卫从已删除的
+  samples/LibraryManagement 迁到 ErpManagement.Web（断言 `UseCrestWeb()` 委托、禁手拼管线）；
+  Core.AotHost fixture 语义字面量加文档化 `semantic-string-guard: allow` 标记。
+  ③ TI 守卫需全量方案构建产物：`dotnet restore CrestCreates.slnx --force`（TypeForwardLegacyConsumer
+  assets 缺失时普通 restore 误报 up-to-date）+ build 后通过。
+  ④ EvidenceLedger 门禁（581 必需 tuples）要求生产者套件先行：补跑 Organization.Tests 223/223、
+  DescriptorDraft.Tests 132/132（PostgreSql 系列与边界自身 Architecture 类同轮已记账）后 297/297 全绿；
+  ledger 为 gitignored 本地累积，CI 按独立命令顺序运行生产者与门禁。
+- **串行验证矩阵（~/.dotnet 10.0.114，长驻 PG16/RabbitMQ4/Kafka/Mongo，日志 /tmp/crest-verify-*.log）**：
+  IntegrationTests 96/96；RabbitMQ 单元 58/58 + 集成 37/37；PostgreSql.Tests 489/489（7m25s）；
+  PostgreSql.AotFixture 1/1（原生 publish/link/run）；LocalEvent 集成 121/121；Organization 223/223；
+  DescriptorDraft 132/132；DependencyBoundaries 297/297；CAP 集成 38/38（含 CLI 故障注入，清理零失败）；
+  Kafka 集成 27/27；MongoDB 76/76；GeneratedCrud.AotFixture 28/28（原生二进制当日重链接 + 2 负控）；
+  SaaSHelpdesk 145/165。除两个原生 fixture 外均为 JIT/linux-x64 证据，无新增 NativeAOT 声明。
+- **SaaSHelpdesk 20 红全部为 HEAD 既有（归因链）**：工作树唯一 src 改动 RabbitMqConsumer 不被
+  SaaSHelpdesk 任何 csproj 引用；全部失败测试文件零改动；纯 HEAD worktree 对照因 Testcontainers
+  挂起（27min 零输出，已知 podman exec 通道问题）中止，改静态归因。分类：
+  15×TicketApiTests `POST /api/user` 404（#129 §14.6 已记录平台 HTTP surface 缺口）+
+  1×AuthorizationStartupTests 缺 `ITenantProvider`（已记录）——此 16 条对应旧记录；
+  **新增 4 条较新 HEAD 回归**：2×TicketWireBaselineTests 对 `$.data.status` 仍 `GetInt32`
+  （正式 wire 已是 string enum，断言过期）+ 2×AuditRetentionHttpAdmissionTests 宿主启动 fail-closed
+  （必需 JSON root `Nullable<Int32>`、owner `CrestCreates.Web` `GetListAsync` 被 SaaSHelpdesk
+  HttpProjection context 应答，私有 root 归属冲突；10 月 r314 曾 2/2，属 11 月合并后回归）。
+  旧基线「154/165（11 红）」过期，**当前 HEAD 基线 145/165（20 红）**；4 条新回归未修，留待用户裁定。
+- **状态**：转换与验证完成；变更未提交（含 infra/ 两个未跟踪文件）。跟进项：retention HTTP 私有
+  JSON root 闭包修复、TicketWireBaseline string-enum 断言对齐、`POST /api/user` 平台缺口（已记录延期）、
+  FeatureAuditRecorder 明细审计缺口。
+
 ## 2026-11-19 — ERP 主链可靠性与交付验证
 
 - **唯一出站主链**：收货/MES 下达/完工/CRM 变更在业务 EF UoW 内经 `IErpOutboxAppender`（借用受管 Npgsql 事务，
@@ -582,7 +639,7 @@ GitHub workflows stay manually disabled, so this is execution evidence, not a CI
 | CodeGenerator | 461/461 (first run 460/461; the single red was the typed-adapter harness closure missing `CrestCreates.Aop.Abstractions`, CS0234 — its class passes 4/4 after adding the reference) |
 | Integration suite, CI-wired subset | 19/19 |
 | Integration suite, full | 19 pass / 30 fail — all 30 are #129 §14.6 (framework platform HTTP surface 404) or the userinfo short-name mapping; unchanged, documented |
-| SaaSHelpdesk | 154/165 — the 11 red are the documented pre-existing set (10 × `POST /api/user` 404 + 1 × `ITenantProvider`) |
+| SaaSHelpdesk | 154/165 — the 11 red are the documented pre-existing set (10 × `POST /api/user` 404 + 1 × `ITenantProvider`)（历史记录；2026-11-19 长驻服务改造后当前 HEAD 基线为 145/165，见顶部该日条目） |
 | Golden samples / Procurement / Asset unit / Asset E2E | 37/37 · 29/29 + 1/1 (unit + E2E re-run after handler/host changes) · 29/29 · 109/130 (19 need `ASSET_MANAGEMENT_RUNTIME_CONNECTION_STRING`) |
 | Sample builds after `Services.Replace` removal | Procurement Host, AssetManagement Host, SaaSHelpdesk.EntityFrameworkCore all succeed |
 | Dependency boundaries | 237 pass; 3 passed with `DOCKER_HOST` set; 2 evidence-ledger gates need the accumulated `tests/artifacts` producer order (gitignored) |

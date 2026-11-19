@@ -12,34 +12,29 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
-using Testcontainers.PostgreSql;
+using CrestCreates.TestServices;
 using Xunit;
 
 namespace CrestCreates.IntegrationTests;
 
 /// <summary>
-/// 切片 3/4 验收（自包含 PostgreSQL + Testcontainers，CI 运行）：
+/// 切片 3/4 验收（长驻 PostgreSQL 测试实例，见 infra/README.md）：
 /// 外层事务已开始时的嵌套隔离与提交后可见性、隔离级别实测接受。
-/// 使用独立的 PostgreSQL fixture，不依赖样例宿主的种子数据。
+/// 使用独立的 schema 隔离，不依赖样例宿主的种子数据。
 /// </summary>
 public sealed class UnitOfWorkPostgresIntegrationTests : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("crest_uow_test")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private readonly string _postgres = ExternalTestServices.RequiredConnectionString(
+        "CREST_ERP_TEST_PG_CONNECTION", "PostgreSQL 16");
 
     private readonly string _schemaName = $"uow_{Guid.NewGuid():N}";
     private ServiceProvider _provider = null!;
 
-    private string ConnectionString => $"{_postgres.GetConnectionString()};Search Path={_schemaName}";
+    private string ConnectionString => $"{_postgres};Search Path={_schemaName}";
 
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
-
-        await using (var connection = new NpgsqlConnection(_postgres.GetConnectionString()))
+        await using (var connection = new NpgsqlConnection(_postgres))
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
@@ -62,7 +57,11 @@ public sealed class UnitOfWorkPostgresIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _provider.DisposeAsync();
-        await _postgres.DisposeAsync();
+        await using var connection = new NpgsqlConnection(_postgres);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"DROP SCHEMA IF EXISTS \"{_schemaName}\" CASCADE";
+        await command.ExecuteNonQueryAsync();
     }
 
     [Fact]

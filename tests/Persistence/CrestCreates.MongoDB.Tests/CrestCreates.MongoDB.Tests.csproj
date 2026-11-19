@@ -18,7 +18,6 @@
     </PackageReference>
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Moq" />
-    <PackageReference Include="Testcontainers" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,6 +26,7 @@
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Domain.Shared/CrestCreates.Domain.Shared.csproj" />
     <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.MultiTenancy.Abstract/CrestCreates.MultiTenancy.Abstract.csproj" />
     <ProjectReference Include="../../../src/Framework/Infrastructure/CrestCreates.DataFilter/CrestCreates.DataFilter.csproj" />
+    <ProjectReference Include="../../Shared/CrestCreates.TestServices/CrestCreates.TestServices.csproj" />
   </ItemGroup>
 
 </Project>

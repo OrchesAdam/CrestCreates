@@ -13,8 +13,6 @@ using CrestCreates.Domain.Shared.Entities;
 using CrestCreates.Domain.Shared.Entities.Auditing;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.OrmProviders.MongoDB.Repositories;
-using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Containers;
 using FluentAssertions;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
@@ -25,12 +23,25 @@ namespace CrestCreates.MongoDB.Tests;
 
 public sealed class MongoServerFixture : IAsyncLifetime
 {
-    private readonly IContainer _server = new ContainerBuilder()
-        .WithImage("mongo:7").WithPortBinding(27017, true)
-        .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(27017)).Build();
-    public string ConnectionString => $"mongodb://{_server.Hostname}:{_server.GetMappedPublicPort(27017)}";
-    public Task InitializeAsync() => _server.StartAsync();
-    public async Task DisposeAsync() => await _server.DisposeAsync();
+    public string ConnectionString { get; private set; } = null!;
+
+    public Task InitializeAsync()
+    {
+        ConnectionString = CrestCreates.TestServices.ExternalTestServices.RequiredConnectionString(
+            "CREST_MONGO_TEST_CONNECTION", "MongoDB 7");
+        return Task.CompletedTask;
+    }
+
+    // 长驻实例：测试按 itest_{guid} 建库，夹具结束时统一清理，避免跨轮累积。
+    public async Task DisposeAsync()
+    {
+        var client = new MongoClient(ConnectionString);
+        using var cursor = await client.ListDatabaseNamesAsync();
+        foreach (var name in cursor.ToEnumerable().Where(n => n.StartsWith("itest_", StringComparison.Ordinal)))
+        {
+            await client.DropDatabaseAsync(name);
+        }
+    }
 }
 
 [CollectionDefinition("Mongo server", DisableParallelization = true)]

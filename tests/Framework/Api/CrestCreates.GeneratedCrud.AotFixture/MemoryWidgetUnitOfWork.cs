@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Data.Abstractions;
 using CrestCreates.Domain.UnitOfWork;
 using CrestCreates.GeneratedCrud.AotFixture.Domain;
 
@@ -20,7 +21,7 @@ namespace CrestCreates.GeneratedCrud.AotFixture;
 /// #137 Data.Abstractions native fixture uses for its static unit of work; no claim is made about a
 /// real EF provider.
 /// </summary>
-public sealed class MemoryWidgetUnitOfWork : IUnitOfWork
+public sealed class MemoryWidgetUnitOfWork : IUnitOfWork, IUnitOfWorkAbandonable
 {
     private readonly MemoryWidgetRepository _repository;
     private readonly MemoryUnitOfWorkObserver _observer;
@@ -87,11 +88,12 @@ public sealed class MemoryWidgetUnitOfWork : IUnitOfWork
     /// </summary>
     public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
-    public void Dispose()
+    /// <summary>
+    /// 未完成退出的终结：回滚未完成窗口并丢弃其写入。快照式事务没有未 flush 的跟踪写入，
+    /// 恢复快照即丢弃；无未完成工作时为 no-op，容忍重复调用。
+    /// </summary>
+    public void AbandonPendingWork()
     {
-        // Unfinished exit (abandon): discard whatever this window wrote. The kernel's own abandon
-        // protocol rolls back first, so this restore usually finds nothing left to do — it exists so
-        // an interrupted frame can never leak a half-written window into the store.
         List<Widget>? snapshot;
         lock (_sync)
         {
@@ -108,6 +110,8 @@ public sealed class MemoryWidgetUnitOfWork : IUnitOfWork
 
         ReleaseGate();
     }
+
+    public void Dispose() => AbandonPendingWork();
 
     private void ReleaseGate()
     {

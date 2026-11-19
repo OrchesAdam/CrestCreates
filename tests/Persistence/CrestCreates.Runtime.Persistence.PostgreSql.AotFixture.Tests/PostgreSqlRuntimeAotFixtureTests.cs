@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using CrestCreates.ControlPlane.ReferenceData.Persistence.Testing;
+using CrestCreates.TestServices;
 using FluentAssertions;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.AotFixture.Tests;
@@ -21,24 +21,11 @@ public sealed class PostgreSqlRuntimeAotFixtureTests
         var root = FindRepositoryRoot();
         var output = Path.Combine(Path.GetTempPath(), "crest-runtime-postgresql-aot-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(output);
-        var connectionString = Environment.GetEnvironmentVariable("CREST_RUNTIME_PG_CONNECTION");
-        PostgreSqlContainer? postgres = null;
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            postgres = new PostgreSqlBuilder("postgres:16-alpine")
-                .WithDatabase("crest_runtime_aot")
-                .WithUsername("crest")
-                .WithPassword("crest")
-                .Build();
-        }
+        var connectionString = ExternalTestServices.RequiredConnectionString(
+            "CREST_RUNTIME_PG_CONNECTION", "PostgreSQL 16");
 
         try
         {
-            if (postgres is not null)
-            {
-                await postgres.StartAsync();
-                connectionString = postgres.GetConnectionString();
-            }
             var project = Path.Combine(root,
                 "tests/Persistence/CrestCreates.Runtime.Persistence.PostgreSql.AotHost/CrestCreates.Runtime.Persistence.PostgreSql.AotHost.csproj");
             var publish = await RunAsync(

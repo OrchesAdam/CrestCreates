@@ -9,6 +9,7 @@ using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Security.Abstractions;
+using CrestCreates.TestServices;
 using ErpManagement.EntityFrameworkCore;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -22,8 +23,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Npgsql;
 using OpenIddict.Abstractions;
-using Testcontainers.PostgreSql;
-using Testcontainers.RabbitMq;
 using Xunit;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -31,22 +30,18 @@ namespace CrestCreates.IntegrationTests;
 
 public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer? _postgres;
-    private readonly RabbitMqContainer? _rabbit;
-    private readonly string? _externalPostgres = Environment.GetEnvironmentVariable("CREST_ERP_TEST_PG_CONNECTION");
-    private readonly string? _externalRabbit = Environment.GetEnvironmentVariable("CREST_ERP_TEST_AMQP_CONNECTION");
+    private readonly string _externalPostgres = ExternalTestServices.RequiredConnectionString(
+        "CREST_ERP_TEST_PG_CONNECTION", "PostgreSQL 16");
+    private readonly string _externalRabbit = ExternalTestServices.RequiredConnectionString(
+        "CREST_ERP_TEST_AMQP_CONNECTION", "RabbitMQ 4");
+    private readonly string _rabbitContainer = ExternalTestServices.RequiredContainerName(
+        "CREST_ERP_TEST_RABBIT_CONTAINER", "RabbitMQ 4");
 
-    public ErpManagementWebApplicationFactory()
-    {
-        if (_externalPostgres is null)
-            _postgres = new PostgreSqlBuilder("postgres:16-alpine")
-                .WithDatabase("crestcreates_test").WithUsername("test").WithPassword("test").Build();
-        if (_externalRabbit is null)
-            _rabbit = new RabbitMqBuilder("rabbitmq:4.0-management-alpine")
-                .WithUsername("erp-test").WithPassword(Guid.NewGuid().ToString("N")).Build();
-    }
+    // 每夹具独立 vhost：共享 broker 上固定队列名不得跨夹具串消息（等价原每夹具独立容器语义）。
+    private readonly string _virtualHost = $"erp_it_{Guid.NewGuid():N}";
 
-    private string BaseConnectionString => _externalPostgres ?? _postgres!.GetConnectionString();
+    private string BaseConnectionString => _isolatedConnectionString;
+    private string _isolatedConnectionString = null!;
     private readonly string _schemaName = $"itest_{Guid.NewGuid():N}";
     private Task _seedTask = Task.CompletedTask;
 
@@ -64,14 +59,17 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
 
     public async Task InitializeAsync()
     {
-        if (_postgres is not null)
-            await _postgres.StartAsync();
-        if (_rabbit is not null)
-            await _rabbit.StartAsync();
-        var baseConnection = new NpgsqlConnectionStringBuilder(BaseConnectionString);
-        if (_postgres is null && !baseConnection.Database!.Contains("test", StringComparison.OrdinalIgnoreCase) &&
+        var baseConnection = new NpgsqlConnectionStringBuilder(_externalPostgres);
+        if (!baseConnection.Database!.Contains("test", StringComparison.OrdinalIgnoreCase) &&
             Environment.GetEnvironmentVariable("CREST_ERP_ALLOW_EXTERNAL_TEST_DATABASE") != "true")
             throw new InvalidOperationException("External ERP test databases require explicit acknowledgment.");
+        // 每夹具一次性隔离库：EnsureCreated/迁移语义与原先每夹具独立容器一致，
+        // 共享服务器上其他夹具的表不得使 EnsureCreated 变为 no-op。
+        _isolatedConnectionString = await ExternalTestServices.CreateIsolatedDatabaseAsync(_externalPostgres, "erp");
+        var rabbitUser = Uri.UnescapeDataString(new Uri(_externalRabbit).UserInfo.Split(':', 2)[0]);
+        await TestServiceControl.ExecAsync(_rabbitContainer, "rabbitmqctl", "add_vhost", _virtualHost);
+        await TestServiceControl.ExecAsync(
+            _rabbitContainer, "rabbitmqctl", "set_permissions", "-p", _virtualHost, rabbitUser, ".*", ".*", ".*");
         await using (var connection = new NpgsqlConnection(BaseConnectionString))
         {
             await connection.OpenAsync();
@@ -174,9 +172,8 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        var rabbit = new Uri(_externalRabbit ?? _rabbit!.GetConnectionString());
+        var rabbit = new Uri(_externalRabbit);
         var credentials = rabbit.UserInfo.Split(':', 2);
-        var virtualHost = rabbit.AbsolutePath.TrimStart('/');
         builder.ConfigureHostConfiguration(configuration => configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Default"] = ConnectionString,
@@ -185,7 +182,7 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
             ["RabbitMQ:Port"] = rabbit.Port.ToString(),
             ["RabbitMQ:UserName"] = Uri.UnescapeDataString(credentials[0]),
             ["RabbitMQ:Password"] = Uri.UnescapeDataString(credentials[1]),
-            ["RabbitMQ:VirtualHost"] = virtualHost.Length == 0 ? "/" : Uri.UnescapeDataString(virtualHost)
+            ["RabbitMQ:VirtualHost"] = _virtualHost
         }));
         return base.CreateHost(builder);
     }
@@ -233,17 +230,10 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
 
     public new async Task DisposeAsync()
     {
-        try
-        {
-            await base.DisposeAsync();
-        }
-        finally
-        {
-            if (_rabbit is not null)
-                await _rabbit.DisposeAsync();
-            if (_postgres is not null)
-                await _postgres.DisposeAsync();
-        }
+        await base.DisposeAsync();
+        await ExternalTestServices.DropDatabaseAsync(
+            _externalPostgres, ExternalTestServices.DatabaseName(_isolatedConnectionString));
+        await TestServiceControl.ExecAsync(_rabbitContainer, "rabbitmqctl", "delete_vhost", _virtualHost);
     }
 
     private sealed class ErpCommitFaultInterceptor(ErpManagementWebApplicationFactory factory) : SaveChangesInterceptor

@@ -14,6 +14,7 @@ namespace CrestCreates.DistributedTransaction.CAP.IntegrationTests;
 /// 后台补偿经唯一内核建立 UoW 边界后状态跨 scope 持久化；日志链首次写入/连续更新/提交后更新可用。
 /// 专用宿主 CompensationRetryIntervalSeconds=1 驱动真实后台服务路径。
 /// </summary>
+[Collection("CapLongLivedServices")]
 public class CapPersistenceChainIntegrationTests : IClassFixture<CapIntegrationFixture>, IAsyncLifetime
 {
     private static readonly TimeSpan PersistWait = TimeSpan.FromSeconds(60);

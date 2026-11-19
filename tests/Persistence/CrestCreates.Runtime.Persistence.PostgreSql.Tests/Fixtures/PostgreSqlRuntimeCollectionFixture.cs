@@ -1,40 +1,18 @@
+using CrestCreates.TestServices;
 using Npgsql;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace CrestCreates.Runtime.Persistence.PostgreSql.Tests.Fixtures;
 
 public sealed class PostgreSqlRuntimeCollectionFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer? _container;
-
-    public PostgreSqlRuntimeCollectionFixture()
-    {
-        // Allow running the PostgreSQL contract tests against a local server without Docker.
-        var external = Environment.GetEnvironmentVariable("CREST_RUNTIME_PG_CONNECTION");
-        if (string.IsNullOrWhiteSpace(external))
-        {
-            _container = new PostgreSqlBuilder("postgres:16-alpine")
-                .WithDatabase("crest_runtime_tests")
-                .WithUsername("crest")
-                .WithPassword("crest")
-                .Build();
-        }
-    }
-
     public string ConnectionString { get; private set; } = string.Empty;
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
-        if (_container is not null)
-        {
-            await _container.StartAsync();
-            ConnectionString = _container.GetConnectionString();
-        }
-        else
-        {
-            ConnectionString = Environment.GetEnvironmentVariable("CREST_RUNTIME_PG_CONNECTION")!;
-        }
+        ConnectionString = ExternalTestServices.RequiredConnectionString(
+            "CREST_RUNTIME_PG_CONNECTION", "PostgreSQL 16");
+        return Task.CompletedTask;
     }
 
     public async Task<PostgreSqlRuntimeSchemaLease> CreateSchemaLeaseAsync()
@@ -50,11 +28,7 @@ public sealed class PostgreSqlRuntimeCollectionFixture : IAsyncLifetime
         return new PostgreSqlRuntimeSchemaLease(ConnectionString, options);
     }
 
-    public async Task DisposeAsync()
-    {
-        if (_container is not null)
-            await _container.DisposeAsync();
-    }
+    public Task DisposeAsync() => Task.CompletedTask;
 }
 
 public sealed class PostgreSqlRuntimeSchemaLease : IAsyncDisposable

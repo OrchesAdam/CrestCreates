@@ -368,8 +368,11 @@ BuildTasks 编译前链：
 测试基础设施：
 
 - xUnit 2.9.3 + FluentAssertions + Moq + AutoFixture。
-- 集成测试使用 `WebApplicationFactory<Program>` + Testcontainers PostgreSQL。
-- 每测试独立 schema，命名形如 `itest_{guid}`。
+- 集成测试使用 `WebApplicationFactory<Program>` + 长驻外部测试服务（不再使用 Testcontainers）。
+  服务由 `infra/docker-compose.test-services.yml` 预置，连接经环境变量注入（对照表见 `infra/README.md`），
+  缺失即确定性失败；共享 helper 在 `tests/Shared/CrestCreates.TestServices/`。
+  故障注入（CAP/Health 停启服务）只操作专属实例，经 podman/docker CLI 停启，禁止指向共享实例。
+- 每测试独立 schema，命名形如 `itest_{guid}`；需要整库隔离的用例创建一次性数据库并在结束时删除。
 - 测试基类在 `tests/Framework/Testing/CrestCreates.TestBase/`。
 
 测试基类结构是扁平型，不是线性链式：

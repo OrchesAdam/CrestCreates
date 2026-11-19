@@ -260,10 +260,19 @@ public class AuditLogIntegrationTests : IClassFixture<ErpManagementWebApplicatio
             .GetTenantAsync(_factory.HostTenantId.ToString()));
         var db = scope.ServiceProvider.GetRequiredService<ErpManagementDbContext>();
         var tenant = _factory.HostTenantId;
-        var material = await db.Materials.FirstAsync(m => m.DefaultWarehouseId != null);
-        var warehouse = await db.Warehouses.FirstAsync(w => w.Id == material.DefaultWarehouseId);
-        var location = await db.StorageLocations.Where(x => x.WarehouseId == warehouse.Id)
-            .OrderBy(x => x.Code).ThenBy(x => x.Id).FirstAsync();
+        // 专属物料/仓库/库位：共享种子库存会被其他测试的出入库消耗，
+        // 导致本测试的领料在串行顺序变化时出现 Insufficient stock。
+        var suffix = Guid.NewGuid().ToString("N")[..12];
+        var unit = new UnitOfMeasure(Guid.NewGuid(), $"U-{suffix}", "Replay unit", tenant);
+        var warehouse = new Warehouse(Guid.NewGuid(), $"W-{suffix}", "Replay warehouse", tenant);
+        var location = new StorageLocation(Guid.NewGuid(), warehouse.Id, $"L-{suffix}", "Replay location", tenant);
+        var material = new Material(Guid.NewGuid(), $"M-{suffix}", "Replay material", unit.Id, tenant);
+        material.SetDefaultWarehouse(warehouse.Id);
+        db.UnitsOfMeasure.Add(unit);
+        db.Warehouses.Add(warehouse);
+        db.StorageLocations.Add(location);
+        db.Materials.Add(material);
+        await db.SaveChangesAsync();
         await PostStockAsync(tenant, Guid.NewGuid(), new StockMovementInput(material.Id, warehouse.Id, location.Id, 10m, StockMovementType.Receipt));
         var order = new WorkOrder(Guid.NewGuid(), "RP-" + Guid.NewGuid().ToString("N"), tenant);
         order.Plan(material.Id, 2m, null, null);
