@@ -160,7 +160,7 @@ public static class TicketNativeGate
             Check(response.StatusCode == HttpStatusCode.OK, $"resolve status {(int)response.StatusCode}");
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var data = document.RootElement.GetProperty("data");
-            Check(data.GetProperty("status").GetInt32() == 5, "resolve must move the ticket to Resolved");
+            Check(data.GetProperty("status").GetString() == "Resolved", "resolve must move the ticket to Resolved");
             Check(data.GetProperty("resolvedAt").ValueKind != JsonValueKind.Null, "resolve must set resolvedAt");
             stamp = data.GetProperty("concurrencyStamp").GetString()!;
         });
@@ -171,7 +171,7 @@ public static class TicketNativeGate
             Check(response.StatusCode == HttpStatusCode.OK, $"close status {(int)response.StatusCode}");
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var data = document.RootElement.GetProperty("data");
-            Check(data.GetProperty("status").GetInt32() == 6, "close must move the ticket to Closed");
+            Check(data.GetProperty("status").GetString() == "Closed", "close must move the ticket to Closed");
             stamp = data.GetProperty("concurrencyStamp").GetString()!;
         });
 

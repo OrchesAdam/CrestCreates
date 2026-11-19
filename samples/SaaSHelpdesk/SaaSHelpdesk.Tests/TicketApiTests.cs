@@ -97,9 +97,9 @@ public class TicketApiTests : BaseTest
             Id = ticket.Id,
             Title = ticket.Title,
             Description = ticket.Description,
-            Status = (int)ticket.Status,
-            Priority = (int)ticket.Priority,
-            Type = (int)ticket.Type,
+            Status = ticket.Status.ToString(),
+            Priority = ticket.Priority.ToString(),
+            Type = ticket.Type.ToString(),
             CustomerId = ticket.CustomerId,
             ConcurrencyStamp = ticket.ConcurrencyStamp
         }, client);
@@ -129,9 +129,9 @@ public class TicketApiTests : BaseTest
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ReadApiResponseAsync<TicketDto>(response);
-        result.Data.Status.Should().Be((int)TicketStatus.Open);
-        result.Data.Priority.Should().Be((int)TicketPriority.Urgent);
-        result.Data.Type.Should().Be((int)TicketType.Incident);
+        result.Data.Status.Should().Be(nameof(TicketStatus.Open));
+        result.Data.Priority.Should().Be(nameof(TicketPriority.Urgent));
+        result.Data.Type.Should().Be(nameof(TicketType.Incident));
         result.Data.CustomerId.Should().Be(customerId);
         result.Data.Title.Should().Be("Network outage in Building A");
     }
@@ -211,7 +211,7 @@ public class TicketApiTests : BaseTest
         var result = await ReadApiResponseAsync<TicketDto>(response);
         result.Data.Title.Should().Be("Updated: Router replacement needed");
         result.Data.Description.Should().Contain("Updated description");
-        result.Data.Priority.Should().Be(3);
+        result.Data.Priority.Should().Be(nameof(TicketPriority.High));
         result.Data.CategoryId.Should().Be(newCategoryId);
         result.Data.Id.Should().Be(created.Id);
     }
@@ -258,7 +258,7 @@ public class TicketApiTests : BaseTest
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ReadApiResponseAsync<TicketDto>(response);
         result.Data.AssigneeId.Should().Be(assigneeId);
-        result.Data.Status.Should().Be(2); // InProgress
+        result.Data.Status.Should().Be(nameof(TicketStatus.InProgress));
         result.Data.DueDate.Should().NotBeNull("SLA policy should set DueDate");
         result.Data.DueDate!.Value.Should().BeAfter(DateTime.UtcNow.AddMinutes(-1));
     }
@@ -281,7 +281,7 @@ public class TicketApiTests : BaseTest
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ReadApiResponseAsync<TicketDto>(response);
         result.Data.AssigneeId.Should().Be(assigneeId);
-        result.Data.Status.Should().Be(2); // InProgress
+        result.Data.Status.Should().Be(nameof(TicketStatus.InProgress));
         result.Data.DueDate.Should().BeNull("no active SLA policy means no DueDate");
     }
 
@@ -309,7 +309,7 @@ public class TicketApiTests : BaseTest
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ReadApiResponseAsync<TicketDto>(response);
-        result.Data.Status.Should().Be(5); // Resolved
+        result.Data.Status.Should().Be(nameof(TicketStatus.Resolved));
     }
 
     [Fact]
@@ -358,7 +358,7 @@ public class TicketApiTests : BaseTest
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ReadApiResponseAsync<TicketDto>(response);
-        result.Data.Status.Should().Be(6); // Closed
+        result.Data.Status.Should().Be(nameof(TicketStatus.Closed));
     }
 
     [Fact]
@@ -404,7 +404,7 @@ public class TicketApiTests : BaseTest
         // Assert — should succeed since Resolved != Closed
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ReadApiResponseAsync<TicketDto>(response);
-        result.Data.Status.Should().Be(5); // Resolved
+        result.Data.Status.Should().Be(nameof(TicketStatus.Resolved));
     }
 
     // ── 8.6 Close non-resolved (status=InProgress, not Closed) ─────────
@@ -426,7 +426,7 @@ public class TicketApiTests : BaseTest
         // Assert — should succeed since Status is InProgress (not Closed)
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var result = await ReadApiResponseAsync<TicketDto>(response);
-        result.Data.Status.Should().Be(6); // Closed
+        result.Data.Status.Should().Be(nameof(TicketStatus.Closed));
     }
 
     // ── 9. GetByCustomerAsync (GET /api/ticket/customer/{customerId}) ─

@@ -1,4 +1,5 @@
 using CrestCreates.Web;
+using CrestCreates.Web.PlatformManagement;
 using CrestCreates.DynamicApi;
 using CrestCreates.Capability;
 using CrestCreates.Schema;
@@ -25,6 +26,9 @@ builder.Services.AddCrestCapabilityEndpoints();
 // The platform assembly also carries its own generated activation (audit retention). Name the
 // business activation explicitly so the two formally generated extensions never collide.
 GeneratedAppServiceHttpActivation_SaaSHelpdesk_002EApplication.AddGeneratedAppServiceHttp(builder.Services);
+// Platform management surface (users/roles/permissions/tenants/features/settings/audit) is opt-in;
+// the Helpdesk host serves it through the same formal ExplicitHost projection as the business side.
+builder.Services.AddCrestPlatformManagementHttp();
 
 builder.Services.AddAuthentication()
     .AddScheme<SaaSHelpdesk.Web.Auth.CustomerApiKeyOptions, SaaSHelpdesk.Web.Auth.CustomerApiKeyAuthenticationHandler>(

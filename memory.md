@@ -52,10 +52,44 @@
   （正式 wire 已是 string enum，断言过期）+ 2×AuditRetentionHttpAdmissionTests 宿主启动 fail-closed
   （必需 JSON root `Nullable<Int32>`、owner `CrestCreates.Web` `GetListAsync` 被 SaaSHelpdesk
   HttpProjection context 应答，私有 root 归属冲突；10 月 r314 曾 2/2，属 11 月合并后回归）。
-  旧基线「154/165（11 红）」过期，**当前 HEAD 基线 145/165（20 红）**；4 条新回归未修，留待用户裁定。
-- **状态**：转换与验证完成；变更未提交（含 infra/ 两个未跟踪文件）。跟进项：retention HTTP 私有
-  JSON root 闭包修复、TicketWireBaseline string-enum 断言对齐、`POST /api/user` 平台缺口（已记录延期）、
-  FeatureAuditRecorder 明细审计缺口。
+  旧基线「154/165（11 红）」过期，**当前 HEAD 基线 145/165（20 红）**；4 条新回归已于同日修复，见下节。
+- **状态**：转换与验证完成；已随 PR #190 提交。跟进项：FeatureAuditRecorder 明细审计缺口
+  （retention JSON root / string-enum 断言 / 平台用户面三项已于同日修复，见下节）。
+
+## 2026-11-19 — SaaSHelpdesk 20 红修复（PR #190 分支，用户裁定修复）
+
+- **框架修复（唯一 src 改动）**：`CapabilityEndpointRegistryBootstrapper` 的 host-shared JSON root
+  判定补齐 **nullable 框架标量**（`IsHostSharedJsonRoot`：`Nullable.GetUnderlyingType` 落在既有
+  标量表内即共享）。依据与既有标量共享相同：STJ 对 nullable 标量在每个 source-generated context
+  发射同一 canonical 元数据形状，nullable 查询输入（如 retention `GetListAsync` 的 `int?` 分页过滤）
+  不可能是 feature-private。共享路径仍要求应答者是**已激活的 contributed context** 或契约等价
+  resolver；私有 DTO root 的 owning-context 规则不变，反射永不作数 —— 不是放宽校验。
+- **判别性回归（DynamicApi.Tests，5 条新用例 + 探针 contexts）**：
+  ① nullable root 被另一 contributed context 首先应答 → map 通过（retention 缺陷形状，外部
+  contribution 带自己的必需 root 以真正进入 hostContexts）；② 非 contributed canonical context
+  首先应答 → 契约等价通过；③ 自定义转换器改 wire 的 runtime 元数据 → 拒绝；④ 反射 resolver → 拒绝；
+  ⑤ 私有 DTO root 被另一 contributed context 首先应答 → 仍按 feature-private 拒绝。
+  探针事实：STJ source-gen 的 nullable 元数据从**查询方 options** 解析底层转换器，context 自带
+  转换器不会改变外部 options 下的 wire，故改 wire 负例必须走显式 runtime 元数据（同 ReviewS3 Guid 形状）。
+- **样例宿主**：SaaSHelpdesk.Web/Program.cs 开通 `AddCrestPlatformManagementHttp()`（G-09 正式平台
+  管理面，opt-in；与 ERP 宿主同形）。#129 §14.6 记录的「平台 HTTP surface 缺口」就此在 Helpdesk
+  宿主闭合：用户/角色/权限/租户/Feature/Setting/审计面全部经正式 ExplicitHost 投影发布。
+- **测试迁移（不改业务语义）**：BaseTest.CreateUserAsync 走 `POST /api/users`（正式复数路由），
+  去掉 DTO 不存在的 role 字段，租户名先经 `db.Tenants` 解析为实体 Guid 再入 payload
+  （UserAppService 原样存储 TenantId，名称不得直接落库）；Helpers.TicketDto 与 TicketApiTests
+  断言对齐 string-enum wire（`nameof` 名称断言；数字输入 payload 保留，wire 接受整数输入）；
+  TicketWireBaselineTests 两处 `GetInt32` → `GetString`（"Closed"/"InProgress"）；
+  AuthorizationStartupTests 最小宿主补 `Mock.Of<ITenantProvider>()` 叶子（ITenantProvider 归
+  MultiTenancy 装配入口所有，框架不得注册第二真相来源）。
+- **验证**：SaaSHelpdesk **165/165**（20 红清零，46s）；DynamicApi.Tests **157/157**（含 5 条新回归）。
+  bootstrapper 改动波及门禁串行复跑：IntegrationTests(ERP) **96/96**、GeneratedCrud.AotFixture
+  **28/28**（含原生）、CapabilityEndpoint.AotFixture **13/13**（含原生）、PostgreSql.AotFixture
+  **1/1**（含原生）、DependencyBoundaries **297/297**。
+- **复跑中新发现（HEAD 既有潜伏，非本次改动引入）**：TicketHttpProjection 原生门禁 resolve/close
+  场景仍 `GetInt32` 读 string-enum wire（与 TicketWireBaselineTests 同源过期；转换轮验证矩阵未含
+  该 fixture 故未暴露），失败级联使 delete 用旧 stamp → 409。修复 `TicketNativeGate.cs` 两处断言为
+  `GetString`（"Resolved"/"Closed"），语义不变，原生门禁重跑 **6/6 全绿**（重新 publish/link/run + 负控）。
+- **状态**：修复完成，随 PR #190 分支提交；不合并（待用户批准）。
 
 ## 2026-11-19 — ERP 主链可靠性与交付验证
 

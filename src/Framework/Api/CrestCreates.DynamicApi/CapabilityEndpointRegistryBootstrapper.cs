@@ -222,6 +222,9 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
     /// identically (the void/404 envelope and the failure-path error DTO). Their metadata is
     /// framework-owned, so the host's first answerer may be any activated source-generated
     /// contributor of this host; every feature-private root keeps the exact owning-context rule.
+    /// Nullable forms of the framework scalars are shared on the same grounds: STJ emits one
+    /// canonical nullable-scalar metadata shape in every source-generated context, so a nullable
+    /// query/input root (e.g. int? paging filters) cannot be feature-private.
     /// </summary>
     private static readonly Type[] HostSharedJsonRootTypes =
     [
@@ -251,6 +254,11 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
         typeof(DateOnly),
         typeof(TimeOnly),
     ];
+
+    private static bool IsHostSharedJsonRoot(Type type)
+        => Array.IndexOf(HostSharedJsonRootTypes, type) >= 0
+            || (Nullable.GetUnderlyingType(type) is { } underlying
+                && Array.IndexOf(HostSharedJsonRootTypes, underlying) >= 0);
 
     /// <summary>
     /// #128 §7.1/§7.2 map-time verification: for every contribution and every required JSON contract
@@ -344,7 +352,7 @@ internal sealed class CapabilityEndpointRegistryBootstrapper
         // to the owning contribution's metadata. A context base type is not evidence of source
         // generation or equivalence: reflection-backed metadata and modified converters/property names
         // are rejected (#129 S3 review R1).
-        if (Array.IndexOf(HostSharedJsonRootTypes, required.ClrType) >= 0)
+        if (IsHostSharedJsonRoot(required.ClrType))
         {
             if (answering is JsonSerializerContext answeringContext
                 && hostContexts.Contains(answeringContext))
