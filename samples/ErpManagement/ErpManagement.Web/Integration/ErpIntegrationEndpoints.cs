@@ -33,7 +33,10 @@ internal static class ErpIntegrationEndpoints
     {
         // Bind tenant identity to the authenticated client configuration, independent of X-Tenant-Id.
         var integration = app.MapGroup("/api/integration").WithMetadata(new SkipTenantResolutionMetadata());
-        integration.MapPost("/mes/work-orders/{workOrderId:guid}/report", ReportAsync).RequireAuthorization(MesPolicy);
+        integration.MapPost("/mes/work-orders/{workOrderId:guid}/report", ReportAsync)
+            .RequireAuthorization(MesPolicy)
+            .Produces<WorkOrderDto>()
+            .Produces(StatusCodes.Status409Conflict);
         integration.MapPost("/crm/customers", UpsertCustomerAsync).RequireAuthorization(CrmPolicy);
     }
 

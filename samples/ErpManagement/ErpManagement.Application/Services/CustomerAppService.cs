@@ -2,10 +2,11 @@ using CrestCreates.Application.Services;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Repositories;
-using CrestCreates.EventBus.Abstractions;
+using CrestCreates.Aop.Interceptors;
+using ErpManagement.Application.Contracts.Events;
 using ErpManagement.Application.Contracts.Integration;
+using ErpManagement.Application.Events;
 using ErpManagement.Application.Integration;
-using Microsoft.Extensions.Logging;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
 using CrestCreates.MultiTenancy.Abstract;
@@ -25,9 +26,7 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
 {
     private readonly ICurrentTenant _currentTenant;
     private readonly ICurrentPrincipalAccessor _principalAccessor;
-    private readonly IFeatureChecker _features;
-    private readonly ILocalEventBus _localEvents;
-    private readonly ILogger<CustomerAppService> _logger;
+    private readonly ErpIntegrationOutbox _outbox;
 
     public CustomerAppService(
         ICrestRepositoryBase<Customer, Guid> repository,
@@ -37,16 +36,12 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
         IPermissionChecker permissionChecker,
         ICurrentTenant currentTenant,
         ICurrentPrincipalAccessor principalAccessor,
-        IFeatureChecker features,
-        ILocalEventBus localEvents,
-        ILogger<CustomerAppService> logger)
+        ErpIntegrationOutbox outbox)
         : base(repository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _currentTenant = currentTenant;
         _principalAccessor = principalAccessor;
-        _features = features;
-        _localEvents = localEvents;
-        _logger = logger;
+        _outbox = outbox;
     }
 
     protected override Task CheckPermissionAsync(string permissionName, CancellationToken cancellationToken = default)
@@ -83,6 +78,7 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
         }, cancellationToken), false);
     }
 
+    [UnitOfWorkMo]
     public override async Task<CustomerDto> CreateAsync(CreateCustomerDto input, CancellationToken cancellationToken = default)
     {
         var customer = await base.CreateAsync(input, cancellationToken);
@@ -90,6 +86,7 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
         return customer;
     }
 
+    [UnitOfWorkMo]
     public override async Task<CustomerDto> UpdateAsync(Guid id, UpdateCustomerDto input, CancellationToken cancellationToken = default)
     {
         var customer = await base.UpdateAsync(id, input, cancellationToken);
@@ -98,10 +95,8 @@ public class CustomerAppService : CrestAppServiceBase<Customer, Guid, CustomerDt
     }
 
     private Task PublishCustomerChangedAsync(CustomerDto customer, CancellationToken cancellationToken)
-        => _localEvents.PublishIfEnabledAsync(_features, "Erp.CrmIntegration",
-            new CrmCustomerChanged(customer.Id, customer.Code, customer.Name,
-                Guid.TryParse(_currentTenant.Id, out var tenantId) ? tenantId : Guid.Empty),
-            _logger, cancellationToken);
+        => _outbox.AppendAsync(new CrmCustomerChanged(customer.Id, customer.Code, customer.Name, _currentTenant.GetErpTenantId()),
+            Guid.NewGuid(), DateTimeOffset.UtcNow, cancellationToken);
 
     protected override Customer MapToEntity(CreateCustomerDto dto)
     {

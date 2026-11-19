@@ -15,9 +15,11 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Moq" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../ErpManagement.Application/ErpManagement.Application.csproj" />
     <ProjectReference Include="../../ErpManagement.Domain/ErpManagement.Domain.csproj" />
     <ProjectReference Include="../../ErpManagement.Domain.Shared/ErpManagement.Domain.Shared.csproj" />
   </ItemGroup>

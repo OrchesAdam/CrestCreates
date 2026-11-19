@@ -36,6 +36,7 @@
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Testcontainers" />
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
   </ItemGroup>
 
 </Project>

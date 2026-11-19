@@ -34,12 +34,14 @@ public class ArApLedger : AuditedEntity<Guid>
         Status = Amount == 0 ? ArApStatus.Settled : ArApStatus.Open;
     }
 
-    public void Settle(decimal amount)
+    public SettlementRecord Settle(decimal amount, Guid operationId)
     {
         if (amount <= 0 || decimal.Round(amount, 2) != amount || amount > Amount - SettledAmount)
             throw new CrestCreates.Domain.Shared.Exceptions.CrestValidationException("Settlement must be positive, use at most two decimals and not exceed the outstanding balance.");
         SettledAmount += amount;
-        Settlements.Add(new SettlementRecord(Guid.NewGuid(), Id, amount, DateTimeOffset.UtcNow, TenantId));
+        var settlement = new SettlementRecord(Guid.NewGuid(), Id, amount, DateTimeOffset.UtcNow, TenantId, operationId);
+        Settlements.Add(settlement);
         Status = SettledAmount == Amount ? ArApStatus.Settled : ArApStatus.PartiallySettled;
+        return settlement;
     }
 }

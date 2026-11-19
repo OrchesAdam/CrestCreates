@@ -942,9 +942,6 @@ namespace ErpManagement.EntityFrameworkCore.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
-                    b.Property<DateTimeOffset?>("StockEventEmittedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<Guid>("SupplierId")
                         .HasColumnType("uuid");
 
@@ -1056,6 +1053,11 @@ namespace ErpManagement.EntityFrameworkCore.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTimeOffset>("ReceivedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1750,15 +1752,25 @@ namespace ErpManagement.EntityFrameworkCore.Migrations
                     b.Property<Guid>("LedgerId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("OperationId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("SettledAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("_operationResult")
+                        .HasColumnType("text")
+                        .HasColumnName("OperationResult");
+
                     b.HasKey("Id");
 
                     b.HasIndex("LedgerId");
+
+                    b.HasIndex("TenantId", "LedgerId", "OperationId")
+                        .IsUnique();
 
                     b.ToTable("SettlementRecords", (string)null);
                 });
@@ -1956,6 +1968,9 @@ namespace ErpManagement.EntityFrameworkCore.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("SourceOperationId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid>("StorageLocationId")
                         .HasColumnType("uuid");
@@ -2426,6 +2441,9 @@ namespace ErpManagement.EntityFrameworkCore.Migrations
                     b.Property<Guid?>("LastModifierId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("OperationId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("ReportSource")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -2444,9 +2462,16 @@ namespace ErpManagement.EntityFrameworkCore.Migrations
                     b.Property<Guid>("WorkOrderId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("_operationResult")
+                        .HasColumnType("text")
+                        .HasColumnName("OperationResult");
+
                     b.HasKey("Id");
 
                     b.HasIndex("WorkOrderId");
+
+                    b.HasIndex("TenantId", "WorkOrderId", "OperationId")
+                        .IsUnique();
 
                     b.ToTable("WorkOrderReports", (string)null);
                 });

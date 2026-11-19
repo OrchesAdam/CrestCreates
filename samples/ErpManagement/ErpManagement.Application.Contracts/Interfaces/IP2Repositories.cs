@@ -18,11 +18,13 @@ public interface ISalesShipmentRepository : ICrestRepositoryBase<SalesShipment, 
 public interface IWorkOrderRepository : ICrestRepositoryBase<WorkOrder, Guid>
 {
     Task<WorkOrder?> GetWithLinesAsync(Guid tenantId, Guid id, CancellationToken ct = default);
+    Task<WorkOrder?> GetWithLinesForUpdateAsync(Guid tenantId, Guid id, CancellationToken ct = default);
     Task<List<WorkOrder>> GetAllWithLinesAsync(Guid tenantId, CancellationToken ct = default);
 }
 
 public interface IArApLedgerRepository : ICrestRepositoryBase<ArApLedger, Guid>
 {
     Task<ArApLedger?> GetWithLinesAsync(Guid tenantId, Guid id, CancellationToken ct = default);
+    Task<ArApLedger?> GetWithLinesForUpdateAsync(Guid tenantId, Guid id, CancellationToken ct = default);
     Task<List<ArApLedger>> GetAllWithLinesAsync(Guid tenantId, CancellationToken ct = default);
 }

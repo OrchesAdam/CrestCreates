@@ -19,12 +19,12 @@ COPY entrypoint.sh /entrypoint.sh
 ENV ASPNETCORE_ENVIRONMENT=Development \
     ASPNETCORE_URLS=https://+:8443 \
     Kestrel__Certificates__Default__Path=/https/erp-dev.pfx \
-    Kestrel__Certificates__Default__Password=erp-dev-cert \
-    DB_HOST=db \
-    DB_PORT=5432
+    Kestrel__Certificates__Default__Password=erp-dev-cert
 
 EXPOSE 8443
 
-RUN chmod +x /entrypoint.sh
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

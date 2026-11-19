@@ -1,6 +1,10 @@
 # Generated frontend build output (produced by erp-web npm run build)
 ErpManagement.Web/wwwroot/
 erp-web/dist/
+erp-web/playwright-report/
+erp-web/test-results/
+deploy/.env
+deploy/erp-dev.pfx
 
 # Local runtime logs
 logs/

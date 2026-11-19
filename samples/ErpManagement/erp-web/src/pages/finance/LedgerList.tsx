@@ -1,7 +1,7 @@
 import { ModalForm, ProFormDigit } from '@ant-design/pro-components';
 import { useAuth } from '../../auth/AuthContext';
 import CrudPage, { type FieldDef } from '../../components/CrudPage';
-import { postDocAction } from '../../components/docUtils';
+import { useOperationDocAction } from '../../components/docUtils';
 
 const apiPrefix = '/api/arap-ledger';
 const fields: FieldDef[] = [
@@ -22,6 +22,7 @@ const fields: FieldDef[] = [
 
 export default function LedgerList() {
   const { hasPermission } = useAuth();
+  const submitSettlement = useOperationDocAction();
   return (
     <CrudPage
       title="应收应付台账"
@@ -38,7 +39,7 @@ export default function LedgerList() {
             title="结算"
             trigger={<a>结算</a>}
             modalProps={{ destroyOnClose: true }}
-            onFinish={(values) => postDocAction(`${apiPrefix}/${record.id}/settle`, '结算成功', reload, values)}
+            onFinish={(values) => submitSettlement(`${apiPrefix}/${record.id}/settle`, '结算成功', reload, values)}
           >
             <ProFormDigit name="amount" label="结算金额" extra={`未结余额 ${remaining.toFixed(2)}`}
               rules={[{ required: true, type: 'number', min: 0.01, max: remaining }]}

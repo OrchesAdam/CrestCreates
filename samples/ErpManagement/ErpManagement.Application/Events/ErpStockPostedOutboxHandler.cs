@@ -1,37 +1,47 @@
 using System.Text.Json;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
-using CrestCreates.Runtime.Delivery.Abstractions.Registration;
 using ErpManagement.Application.Contracts.Events;
-using ErpManagement.Application.Contracts.Json;
-using ErpManagement.Domain.Shared.Constants;
 
 namespace ErpManagement.Application.Events;
 
-/// <summary>
-/// Contract-level outbox delivery handler for StockPostedEvent. The dispatcher routes by contract id;
-/// AddOutboxRequiredConsumer only registers the consumer/resolver, so a custom contract needs this
-/// handler to decode the source-generated payload and invoke each required consumer.
-/// </summary>
-public sealed class ErpStockPostedOutboxHandler : IOutboxDeliveryHandler
+public interface IErpIntegrationTransport
 {
-    private readonly IOutboxRequiredConsumerResolver<StockPostedEvent> _resolver;
+    Task PublishAsync(IErpIntegrationEvent payload, CancellationToken cancellationToken);
+}
 
-    public ErpStockPostedOutboxHandler(IOutboxRequiredConsumerResolver<StockPostedEvent> resolver)
-        => _resolver = resolver;
+public sealed class ErpStockPostedOutboxHandler(IErpIntegrationTransport transport)
+    : ErpIntegrationOutboxHandler<StockPostedEvent>(transport, ErpIntegrationWire.StockPostedId, ErpIntegrationWire.StockPosted)
+{
+}
 
-    public string ContractId => ErpContractIds.StockPostedContractId;
+public class ErpIntegrationOutboxHandler<TEvent>(IErpIntegrationTransport transport, string contractId, string eventName)
+    : IOutboxDeliveryHandler where TEvent : class, IErpIntegrationEvent
+{
+    public string ContractId => contractId;
 
-    public async ValueTask<OutboxDeliveryOutcome> HandleAsync(OutboxDeliveryContext context, CancellationToken cancellationToken = default)
+    public async ValueTask<OutboxDeliveryOutcome> HandleAsync(OutboxDeliveryContext context,
+        CancellationToken cancellationToken = default)
     {
-        var payload = JsonSerializer.Deserialize(context.Message.Payload, ErpEventJsonContext.Default.StockPostedEvent)
-                      ?? throw new InvalidOperationException("StockPosted payload was empty or invalid.");
-        foreach (var consumerId in context.Message.Metadata.RequiredConsumerIds.Order(StringComparer.Ordinal))
+        var message = context.Message;
+        var metadata = message.Metadata;
+        if (metadata.ContractId != contractId || metadata.PayloadTypeId != eventName || metadata.EventName != eventName ||
+            metadata.EventVersion != ErpIntegrationWire.Version || metadata.RequiredConsumerIds.Count != 0)
+            return OutboxDeliveryOutcome.Conflict;
+
+        TEvent? payload;
+        try
         {
-            var consumer = _resolver.Resolve(context.Services, consumerId);
-            var result = await consumer.ConsumeAsync(payload, context, cancellationToken).ConfigureAwait(false);
-            if (result.Outcome is OutboxDeliveryOutcome.Retry or OutboxDeliveryOutcome.Conflict)
-                return result.Outcome;
+            payload = JsonSerializer.Deserialize(message.Payload, ErpIntegrationWire.GetJsonTypeInfo<TEvent>());
         }
+        catch (JsonException)
+        {
+            return OutboxDeliveryOutcome.Conflict;
+        }
+
+        if (payload is null || payload.TenantKey != metadata.TenantId || payload.MessageId != metadata.MessageId)
+            return OutboxDeliveryOutcome.Conflict;
+
+        await transport.PublishAsync(payload, cancellationToken).ConfigureAwait(false);
         return OutboxDeliveryOutcome.Accepted;
     }
 }

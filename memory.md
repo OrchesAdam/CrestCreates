@@ -1,5 +1,42 @@
 # CrestCreates platform status — 2026-11-06
 
+## 2026-11-19 — ERP 主链可靠性与交付验证
+
+- **唯一出站主链**：收货/MES 下达/完工/CRM 变更在业务 EF UoW 内经 `IErpOutboxAppender`（借用受管 Npgsql 事务，
+  复用 `PostgreSqlTransactionalOutboxWriter` 的 SQL/完整性/冲突校验，固定同库异 schema）追加 Outbox；
+  dispatcher 经正式 `AddRabbitMqEventBus`（generated descriptor + JsonContracts codec + 静态订阅）发布并等待
+  mandatory confirm，订阅提交 Inbox 后才 ACK。新出站消息 `RequiredConsumerIds=[]`；审批仍走本地 durable obligation。
+  退役了收货 `resend-stock-event` 与 `StockEventEmittedAt` 标记（迁移删列），改为 `{id}/delivery-status` 只读投影
+  （Outbox status/attempt/failure + Inbox consumed）。Inbox 按 `(ConsumerId, MessageId)` 唯一键 + payload SHA256 摘要
+  判重/冲突，仅匹配唯一约束的 `DbUpdateException` 才视为 Duplicate，其余进重试。
+- **持久幂等**：报工/结算/MES 用操作 ID + 请求指纹 + 可回放结果（`WorkOrderReport`/`SettlementRecord` 增
+  `OperationId`/`OperationResult`，唯一索引 `(TenantId, 单据, OperationId)`）；同键同参回放、同键异参 409；
+  库存流水增 `SourceOperationId`。UI 同一提交重试复用 operationId。
+- **库存/审计修复**：`StockPostingManager` 批内同键余额复用 + 流水审计时间/操作人；盘点行快照服务端取、过账保留快照后变动；
+  首建竞争仅匹配自然键唯一约束才映射 409（`StockBalanceConflictInterceptor`，索引名固定）。
+  `StockCountRepository.UpdateAsync` 修复 EF 图遍历把客户端 Guid 主键新行标 Modified 的缺陷（按库内存在性识别新行，
+  base.Update 前 Detach、后显式 Added）；盘点更新改定点增删行 + 显式 If-Match 并发守卫。
+  新增 `ErpHttpAuditSink`（单例 + 每写独立 scope，避免被单例 recorder 捕获）把 HTTP 终态审计落 `AuditLogs`。
+  平台补 `GET /api/permission-grants/me`（当前用户有效权限，无需管理权限），前端改用该路由。
+- **交付**：标准 Compose = PG + RabbitMQ + ERP（必需 broker，凭据环境注入，持久卷，readiness `/health/ready` 含订阅健康）；
+  Playwright 真实 Chromium 三角色全链 + 重启数据保留 + broker 停机续投用例。
+- **证据（JIT，linux-x64，真实 PG16 + RabbitMQ4）**：ERP 单元 10/10；权限 22/22；
+  `AuditLogIntegrationTests` 14/14（含收货事务内 Outbox 回滚、报工/结算/MES/CRM 幂等与真实 broker Inbox、
+  盘点快照/流水/HTTP 审计、首建竞争负控；quiet 10 连跑 + normal 13+ 连跑稳定）；PG outbox/迁移聚焦套件通过；
+  浏览器全链在多个全新 Compose 栈通过；broker 停机时业务照常提交、恢复后原 Outbox 记录自动续投且 Inbox 仅一条。
+  支持声明限已执行组合，不外推其他 ORM/RID/NativeAOT。
+- **2026-11-19 复验（用户验收，全部重跑）**：ERP 单元 10/10、权限 22/22、`AuditLogIntegrationTests` 14/14
+  连跑 3 次（长驻实例外接路径约 3–4s/轮）；最终镜像重建后全新栈 `erp-acceptance`（18453）浏览器全链 33.5s 通过、
+  整栈重启后保留 spec 通过；独立空栈 `erp-accept-recovery`（18454）停 broker：readiness 503、recovery 模式全链
+  40.7s 通过，停机读回 `erp.stock-posted` InFlight(1)/attempt=3/HANDLER_RETRY、Inbox=0、StockTransactions=9、
+  SettlementRecords=2（workflow/humantask 本地生命周期事件不经 broker，Delivered 属预期）；恢复后原记录
+  Delivered(2)/attempt=5、Inbox=1、两计数不变，重启保留 spec 再通过。验收栈/卷/网络与临时凭据文件已清理。
+  测试提速：长驻 `erp-accept-pg`（127.0.0.1:54329，test/test/crestcreates_test）+ `erp-accept-rabbit`
+  （127.0.0.1:56729，erp-test）经 `CREST_ERP_TEST_PG_CONNECTION`/`CREST_ERP_TEST_AMQP_CONNECTION` 复用，
+  每用例仍独立 `itest_{guid}` schema；env 值含分号必须加引号。期间一次 Testcontainers 挂起 1h 系宿主重启后
+  podman.service 实例异常（API exec 通道），socket 重新激活后恢复，与代码无关；外部路径首轮一次类清理 NRE
+  告警后两轮未复现。仍为 JIT/linux-x64 证据，无新增原生声明；变更未提交。
+
 ## 2026-11-18 — ERP 示例 P3：MES/CRM 集成预留 + 缺口汇总
 
 - **入站 API-Key adapter**：`IntegrationApiKeyAuthenticationHandler`（scheme "IntegrationApiKey"，头

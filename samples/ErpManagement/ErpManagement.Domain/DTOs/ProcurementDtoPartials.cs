@@ -13,4 +13,13 @@ public class OrderLineInput { public Guid MaterialId { get; set; } public decima
 public partial class GoodsReceiptDto { public List<GoodsReceiptLineDto> Lines { get; set; } = new(); }
 public partial class CreateGoodsReceiptDto { public List<ReceiptLineInput> Lines { get; set; } = new(); }
 public partial class UpdateGoodsReceiptDto { public List<ReceiptLineInput> Lines { get; set; } = new(); }
+public class GoodsReceiptDeliveryStatusDto
+{
+    public string MessageId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public int AttemptCount { get; set; }
+    public bool Consumed { get; set; }
+    public string? FailureCode { get; set; }
+}
+
 public class ReceiptLineInput { public Guid PurchaseOrderLineId { get; set; } public Guid MaterialId { get; set; } public Guid StorageLocationId { get; set; } public decimal Quantity { get; set; } public decimal UnitPrice { get; set; } }

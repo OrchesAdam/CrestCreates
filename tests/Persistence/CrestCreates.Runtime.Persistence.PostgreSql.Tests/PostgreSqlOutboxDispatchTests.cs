@@ -58,6 +58,44 @@ public sealed class PostgreSqlOutboxDispatchTests(PostgreSqlRuntimeCollectionFix
     }
 
     [Fact]
+    public async Task Borrowed_append_commits_and_rolls_back_with_the_caller_transaction()
+    {
+        await using var lease = await fixture.CreateSchemaLeaseAsync();
+        using var provider = new ServiceCollection()
+            .AddCrestCreatesPostgreSqlRuntimePersistence(lease.Options)
+            .BuildServiceProvider();
+        var appender = provider.GetRequiredService<IPostgreSqlOutboxAppender>();
+        var store = provider.GetRequiredService<IOutboxDispatchStore>();
+        var message = new DefaultOutboxMessageFactory().Create(
+            "borrowed-append", "tenant-a", "test.contract/v1", "test.payload/v1", new byte[] { 1 });
+        var claim = new OutboxClaimRequest
+        {
+            OwnerId = "borrowed-append-test",
+            BatchSize = 1,
+            SupportedContractIds = new HashSet<string>(["test.contract/v1"], StringComparer.Ordinal),
+            SupportedRequiredConsumerIds = new HashSet<string>(StringComparer.Ordinal)
+        };
+        await using var connection = new NpgsqlConnection(lease.Options.ConnectionString);
+        await connection.OpenAsync();
+
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            (await appender.AppendAsync(transaction, message)).Should().Be(OutboxAppendResult.Appended);
+            (await store.ClaimAsync(claim)).Should().BeEmpty();
+            await transaction.RollbackAsync();
+        }
+        (await store.ClaimAsync(claim)).Should().BeEmpty();
+
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            (await appender.AppendAsync(transaction, message)).Should().Be(OutboxAppendResult.Appended);
+            (await appender.AppendAsync(transaction, message)).Should().Be(OutboxAppendResult.Duplicate);
+            await transaction.CommitAsync();
+        }
+        (await store.ClaimAsync(claim)).Should().ContainSingle(x => x.Message.Metadata.MessageId == message.Metadata.MessageId);
+    }
+
+    [Fact]
     public async Task SharedOutboxContract_UsesProviderClockAndEmptyClaim()
     {
         await using var lease = await fixture.CreateSchemaLeaseAsync();

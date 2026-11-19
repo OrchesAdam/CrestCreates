@@ -448,7 +448,8 @@ public class ErpManagementDbContext : DbContext
             b.ToTable("StockBalances");
             b.HasKey(e => e.Id);
             b.Property(e => e.Quantity).HasPrecision(18, 4);
-            b.HasIndex(e => new { e.TenantId, e.MaterialId, e.WarehouseId, e.StorageLocationId }).IsUnique();
+            b.HasIndex(e => new { e.TenantId, e.MaterialId, e.WarehouseId, e.StorageLocationId })
+                .HasDatabaseName(Repositories.StockBalanceConflictInterceptor.NaturalKeyIndexName).IsUnique();
         });
         modelBuilder.Entity<StockTransaction>(b =>
         {
@@ -498,6 +499,7 @@ public class ErpManagementDbContext : DbContext
             b.Property(e => e.ConsumerId).HasMaxLength(128).IsRequired();
             b.Property(e => e.MessageId).HasMaxLength(256).IsRequired();
             b.Property(e => e.ContractId).HasMaxLength(128).IsRequired();
+            b.Property(e => e.PayloadHash).HasMaxLength(64).IsRequired();
             b.HasIndex(e => new { e.ConsumerId, e.MessageId }).IsUnique();
         });
 
@@ -585,6 +587,8 @@ public class ErpManagementDbContext : DbContext
             b.Property(e => e.Id).ValueGeneratedNever();
             b.Property(e => e.ReportedQuantity).HasPrecision(18, 4);
             b.Property(e => e.ReportSource).HasMaxLength(64).IsRequired();
+            b.Property<string>("_operationResult").HasColumnName("OperationResult");
+            b.HasIndex(e => new { e.TenantId, e.WorkOrderId, e.OperationId }).IsUnique();
         });
 
         modelBuilder.Entity<ArApLedger>(b =>
@@ -606,6 +610,8 @@ public class ErpManagementDbContext : DbContext
             b.HasKey(e => e.Id);
             b.Property(e => e.Id).ValueGeneratedNever();
             b.Property(e => e.Amount).HasPrecision(18, 2);
+            b.Property<string>("_operationResult").HasColumnName("OperationResult");
+            b.HasIndex(e => new { e.TenantId, e.LedgerId, e.OperationId }).IsUnique();
         });
 
         modelBuilder.ConfigureConcurrencyStamp();

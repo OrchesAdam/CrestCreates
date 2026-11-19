@@ -13,7 +13,6 @@ public class GoodsReceipt : AuditedEntity<Guid>
     public Guid WarehouseId { get; private set; }
     public GoodsReceiptStatus Status { get; private set; } = GoodsReceiptStatus.Draft;
     public DateTimeOffset? PostedAt { get; private set; }
-    public DateTimeOffset? StockEventEmittedAt { get; private set; }
     public string? Notes { get; private set; }
     public Guid TenantId { get; private set; }
 
@@ -54,5 +53,4 @@ public class GoodsReceipt : AuditedEntity<Guid>
         PostedAt = postedAt;
     }
 
-    public void MarkStockEventEmitted(DateTimeOffset at) => StockEventEmittedAt = at;
 }

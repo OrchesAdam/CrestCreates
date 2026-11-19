@@ -16,6 +16,7 @@ using ErpManagement.Domain.Entities;
 using ErpManagement.Domain.Inventory;
 using ErpManagement.Domain.Shared.Enums;
 using ErpManagement.Domain.Shared.Permissions;
+using Microsoft.Extensions.Logging;
 
 namespace ErpManagement.Application.Services;
 
@@ -38,6 +39,8 @@ public class GoodsReceiptAppService
     private readonly ILocalEventBus _localEventBus;
     private readonly IFeatureChecker _features;
     private readonly IArApLedgerRepository _ledgers;
+    private readonly ILogger<GoodsReceiptAppService> _logger;
+    private readonly IErpDeliveryStatusReader _deliveryStatus;
 
     public GoodsReceiptAppService(
         IGoodsReceiptRepository receiptRepository,
@@ -52,7 +55,9 @@ public class GoodsReceiptAppService
         StockPostedEventPublisher stockPostedPublisher,
         ILocalEventBus localEventBus,
         IFeatureChecker features,
-        IArApLedgerRepository ledgers)
+        IArApLedgerRepository ledgers,
+        ILogger<GoodsReceiptAppService> logger,
+        IErpDeliveryStatusReader deliveryStatus)
         : base(receiptRepository, serviceProvider, currentUser, dataPermissionFilter, permissionChecker)
     {
         _receiptRepository = receiptRepository;
@@ -64,6 +69,8 @@ public class GoodsReceiptAppService
         _localEventBus = localEventBus;
         _features = features;
         _ledgers = ledgers;
+        _logger = logger;
+        _deliveryStatus = deliveryStatus;
     }
 
     private Guid CurrentTenantId => Guid.TryParse(_currentTenant.Id, out var tid) ? tid : Guid.Empty;
@@ -110,39 +117,44 @@ public class GoodsReceiptAppService
         return MapToDto(updated);
     }
 
-    /// <summary>
-    /// EF posting commits first (PostCoreAsync owns the UoW); the outbox event and the
-    /// in-process StockChanged notifications are emitted only after that commit. A failed
-    /// emission window leaves StockEventEmittedAt null and is repaired by resend-stock-event.
-    /// </summary>
     public async Task<GoodsReceiptDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var posted = await PostCoreAsync(id, cancellationToken);
-
-        await _stockPostedPublisher.PublishAsync(posted.Receipt, posted.Order, cancellationToken);
         foreach (var movement in posted.Movements)
         {
-            await _localEventBus.PublishAsync(new StockChanged
+            try
             {
-                MaterialId = movement.MaterialId,
-                WarehouseId = movement.WarehouseId,
-                StorageLocationId = movement.StorageLocationId,
-                NewQuantity = movement.NewQuantity,
-                MovementType = movement.MovementType.ToString(),
-                SourceDocId = posted.Receipt.Id
-            }, cancellationToken);
+                await _localEventBus.PublishAsync(new StockChanged
+                {
+                    MaterialId = movement.MaterialId,
+                    WarehouseId = movement.WarehouseId,
+                    StorageLocationId = movement.StorageLocationId,
+                    NewQuantity = movement.NewQuantity,
+                    MovementType = movement.MovementType.ToString(),
+                    SourceDocId = posted.Receipt.Id
+                }, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Local StockChanged notification failed for posted receipt {ReceiptId}.", id);
+            }
         }
 
-        return await MarkStockEventEmittedAsync(posted.Receipt.Id, cancellationToken);
+        return MapToDto(posted.Receipt);
     }
 
     [UnitOfWorkMo]
-    private async Task<(GoodsReceipt Receipt, PurchaseOrder Order, IReadOnlyList<StockMovementResult> Movements)> PostCoreAsync(
+    private async Task<(GoodsReceipt Receipt, IReadOnlyList<StockMovementResult> Movements)> PostCoreAsync(
         Guid id, CancellationToken cancellationToken)
     {
         await CheckPermissionAsync(ErpPermissions.GoodsReceipts.Post, cancellationToken);
         var receipt = await _receiptRepository.GetWithLinesAsync(id, cancellationToken)
                       ?? throw new KeyNotFoundException($"收货单不存在: {id}");
+        if (receipt.Status == GoodsReceiptStatus.Posted)
+        {
+            return (receipt, []);
+        }
+
         if (receipt.Status != GoodsReceiptStatus.Draft)
         {
             throw new InvalidOperationException("只有草稿收货单可以过账。");
@@ -185,40 +197,25 @@ public class GoodsReceiptAppService
             await _ledgers.InsertAsync(ledger, cancellationToken);
         }
 
-        return (receipt, order, results);
-    }
-
-    [UnitOfWorkMo]
-    private async Task<GoodsReceiptDto> MarkStockEventEmittedAsync(Guid id, CancellationToken cancellationToken)
-    {
-        var receipt = await _receiptRepository.GetWithLinesAsync(id, cancellationToken)
-                      ?? throw new KeyNotFoundException($"收货单不存在: {id}");
-        receipt.MarkStockEventEmitted(DateTimeOffset.UtcNow);
-        await SetModificationAuditPropertiesAsync(receipt);
-        var updated = await _receiptRepository.UpdateAsync(receipt, cancellationToken);
-        return MapToDto(updated);
-    }
-
-    [UnitOfWorkMo]
-    public async Task<GoodsReceiptDto> ResendStockEventAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        await CheckPermissionAsync(ErpPermissions.GoodsReceipts.Post, cancellationToken);
-        var receipt = await _receiptRepository.GetWithLinesAsync(id, cancellationToken)
-                      ?? throw new KeyNotFoundException($"收货单不存在: {id}");
-        if (receipt.Status != GoodsReceiptStatus.Posted)
-        {
-            throw new InvalidOperationException("只有已过账的收货单可以补发库存事件。");
-        }
-
-        var order = await _orderRepository.GetWithLinesAsync(receipt.PurchaseOrderId, cancellationToken)
-                    ?? throw new KeyNotFoundException($"采购单不存在: {receipt.PurchaseOrderId}");
-
-        // Same stable MessageId: the outbox/inbox dedup makes the resend idempotent.
         await _stockPostedPublisher.PublishAsync(receipt, order, cancellationToken);
-        receipt.MarkStockEventEmitted(DateTimeOffset.UtcNow);
-        await SetModificationAuditPropertiesAsync(receipt);
-        var updated = await _receiptRepository.UpdateAsync(receipt, cancellationToken);
-        return MapToDto(updated);
+        return (receipt, results);
+    }
+
+    public async Task<GoodsReceiptDeliveryStatusDto> GetDeliveryStatusAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await CheckPermissionAsync(ReadPermissionName, cancellationToken);
+        if (!await _receiptRepository.AnyAsync(x => x.Id == id, cancellationToken))
+            throw new KeyNotFoundException($"收货单不存在: {id}");
+        var messageId = $"erp.stock-posted:{id}";
+        var status = await _deliveryStatus.GetAsync(messageId, ErpStockPostedInboxConsumer.ConsumerIdValue, cancellationToken);
+        return new GoodsReceiptDeliveryStatusDto
+        {
+            MessageId = messageId,
+            Status = status?.Status ?? "NotAppended",
+            AttemptCount = status?.AttemptCount ?? 0,
+            Consumed = status?.Consumed ?? false,
+            FailureCode = status?.FailureCode
+        };
     }
 
     private static List<GoodsReceiptLine> BuildLines(List<ReceiptLineInput> lines, Guid receiptId, Guid tenantId)
@@ -247,7 +244,6 @@ public class GoodsReceiptAppService
             WarehouseId = entity.WarehouseId,
             Status = entity.Status,
             PostedAt = entity.PostedAt,
-            StockEventEmittedAt = entity.StockEventEmittedAt,
             Notes = entity.Notes,
             TenantId = entity.TenantId,
             CreationTime = entity.CreationTime,

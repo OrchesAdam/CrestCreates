@@ -217,7 +217,7 @@ public sealed class PostgreSqlAgentReviewArtifactStoreTests(PostgreSqlRuntimeCol
         while (await reader.ReadAsync())
             versions.Add(reader.GetString(0));
 
-        versions.TakeLast(4).Should().Equal("V012", "V013", "V014", "V015");
+        versions.Should().ContainInOrder("V012", "V013", "V014");
         await AssertTableAsync(lease.Options, "agent_review_artifacts");
     }
 

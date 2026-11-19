@@ -1,8 +1,16 @@
+using CrestCreates.Domain.DomainEvents;
+using CrestCreates.Event.Abstractions;
+
 namespace ErpManagement.Application.Contracts.Events;
 
-public sealed class StockPostedEvent
+[CrestEvent(Id = ErpIntegrationWire.StockPostedId, Name = ErpIntegrationWire.StockPosted,
+    Version = ErpIntegrationWire.Version, Scope = EventScope.Integration, RequiresIdempotency = true)]
+public sealed record StockPostedEvent : IErpIntegrationEvent
 {
+    public string MessageId { get; init; } = string.Empty;
     public string EventId { get; init; } = string.Empty;
+    string? IErpIntegrationEvent.TenantKey => TenantId;
+    DateTime IDomainEvent.OccurredOn => PostedAt.UtcDateTime;
     public Guid ReceiptId { get; init; }
     public Guid PurchaseOrderId { get; init; }
     public Guid? SupplierId { get; init; }

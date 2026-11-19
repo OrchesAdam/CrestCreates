@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { api, unwrap } from '../../api/client';
 import { ProFormDigit, ProFormList, ProFormSelect, ProFormText } from '@ant-design/pro-components';
 import { Space } from 'antd';
 import CrudPage, { type FieldDef } from '../../components/CrudPage';
@@ -11,6 +12,24 @@ const statusOptions = [
   { label: '已过账', value: 'Posted' },
 ];
 
+function DeliveryStatus({ id }: { id: string }) {
+  const [status, setStatus] = useState('查询中');
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const value = unwrap<{ status: string; consumed: boolean }>(
+          (await api.get(`/api/goods-receipts/${id}/delivery-status`)).data);
+        if (active) setStatus(value.consumed ? '已投递并消费' : value.status === 'Delivered' ? '已投递' : '待投递');
+      } catch { if (active) setStatus('状态不可用'); }
+    };
+    void load();
+    const timer = window.setInterval(load, 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [id]);
+  return <span>{status}</span>;
+}
+
 export default function ReceiptList() {
   const options = useMasterOptions();
   const { hasPermission } = useAuth();
@@ -22,13 +41,8 @@ export default function ReceiptList() {
     { name: 'warehouseId', label: '仓库', type: 'select', required: true, options: options.warehouses },
     { name: 'status', label: '状态', type: 'select', options: statusOptions, hideInForm: true, width: 90 },
     { name: 'postedAt', label: '过账时间', hideInForm: true, tableValueType: 'dateTime', width: 170 },
-    {
-      name: 'stockEventEmittedAt',
-      label: '库存事件时间',
-      hideInForm: true,
-      tableValueType: 'dateTime',
-      width: 170,
-    },
+    { name: 'deliveryStatus', label: '投递状态', hideInForm: true, width: 120,
+      render: (record) => record.status === 'Posted' ? <DeliveryStatus id={String(record.id)} /> : '-' },
   ];
 
   return (
@@ -101,15 +115,6 @@ export default function ReceiptList() {
           {record.status === 'Draft' && hasPermission('GoodsReceipt.Post') && (
             <a onClick={() => postDocAction(`/api/goods-receipts/${record.id}/post`, '已过账', reload)}>
               过账
-            </a>
-          )}
-          {record.status === 'Posted' && hasPermission('GoodsReceipt.Post') && (
-            <a
-              onClick={() =>
-                postDocAction(`/api/goods-receipts/${record.id}/resend-stock-event`, '库存事件已补发', reload)
-              }
-            >
-              补发库存事件
             </a>
           )}
         </>

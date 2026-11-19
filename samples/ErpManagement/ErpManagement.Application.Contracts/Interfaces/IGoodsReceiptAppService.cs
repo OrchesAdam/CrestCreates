@@ -51,10 +51,7 @@ public interface IGoodsReceiptAppService
         Permissions = new[] { ErpPermissions.GoodsReceipts.Post })]
     Task<GoodsReceiptDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
 
-    [AppServiceHttpAction(
-        Verb = HttpProjectionVerb.Post,
-        Route = "{id}/resend-stock-event",
-        Kind = HttpProjectionOperationKind.Command,
-        Permissions = new[] { ErpPermissions.GoodsReceipts.Post })]
-    Task<GoodsReceiptDto> ResendStockEventAsync(Guid id, CancellationToken cancellationToken = default);
+    [AppServiceHttpAction(Verb = HttpProjectionVerb.Get, Route = "{id}/delivery-status", Kind = HttpProjectionOperationKind.Query,
+        Permissions = new[] { ErpPermissions.GoodsReceipts.Get })]
+    Task<GoodsReceiptDeliveryStatusDto> GetDeliveryStatusAsync(Guid id, CancellationToken cancellationToken = default);
 }

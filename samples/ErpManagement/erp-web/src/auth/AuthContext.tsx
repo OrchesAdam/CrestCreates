@@ -54,9 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAuthenticated(true);
     if (id) {
       try {
-        const resp = await api.get('/api/permission-grant/user-effective-permissions', {
-          params: { userId: id },
-        });
+        const resp = await api.get('/api/permission-grants/me');
         const payload = unwrap<{ permissions?: string[] }>(resp.data);
         setPermissions(payload?.permissions ?? []);
       } catch {

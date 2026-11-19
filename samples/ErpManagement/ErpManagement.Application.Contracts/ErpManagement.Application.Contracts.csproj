@@ -12,8 +12,14 @@
     <ProjectReference Include="../../../src/Framework/Ddd/CrestCreates.Application.Contracts/CrestCreates.Application.Contracts.csproj" />
     <ProjectReference Include="../../../src/Framework/Modularity/CrestCreates.Modularity/CrestCreates.Modularity.csproj" />
     <ProjectReference Include="../../../src/Runtime/Eventing/CrestCreates.EventBus.Abstractions/CrestCreates.EventBus.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Runtime/Eventing/CrestCreates.Event.Abstractions/CrestCreates.Event.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/CrestCreates.JsonContracts.BuildTasks.csproj"
+                      ReferenceOutputAssembly="false" PrivateAssets="all" ExcludeAssets="runtime" />
     <ProjectReference Include="../ErpManagement.Domain/ErpManagement.Domain.csproj" />
     <ProjectReference Include="../ErpManagement.Domain.Shared/ErpManagement.Domain.Shared.csproj" />
   </ItemGroup>
+
+  <Import Project="../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.props" />
+  <Import Project="../../../src/Tooling/CrestCreates.JsonContracts.BuildTasks/build/CrestCreates.JsonContracts.Build.Repository.targets" />
 
 </Project>

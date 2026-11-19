@@ -23,7 +23,10 @@ public class GoodsReceiptLine : AuditedEntity<Guid>
         PurchaseOrderLineId = purchaseOrderLineId;
         MaterialId = materialId;
         StorageLocationId = storageLocationId;
-        if (quantity <= 0) throw new ArgumentException("Quantity must be positive", nameof(quantity));
+        if (quantity <= 0 || decimal.Round(quantity, 4) != quantity)
+            throw new ArgumentException("Quantity must be positive with at most four decimal places.", nameof(quantity));
+        if (unitPrice < 0 || decimal.Round(unitPrice, 2) != unitPrice)
+            throw new ArgumentException("Unit price must be non-negative with at most two decimal places.", nameof(unitPrice));
         Quantity = quantity;
         UnitPrice = unitPrice;
         TenantId = tenantId;

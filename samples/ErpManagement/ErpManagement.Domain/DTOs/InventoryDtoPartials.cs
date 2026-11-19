@@ -7,5 +7,15 @@ public class TransferLineInput { public Guid MaterialId { get; set; } public Gui
 
 public partial class StockCountDto { public List<StockCountLineDto> Lines { get; set; } = new(); }
 public partial class CreateStockCountDto { public List<CountLineInput> Lines { get; set; } = new(); }
-public partial class UpdateStockCountDto { public List<CountLineInput> Lines { get; set; } = new(); }
-public class CountLineInput { public Guid MaterialId { get; set; } public Guid StorageLocationId { get; set; } public decimal BookQuantity { get; set; } public decimal CountedQuantity { get; set; } }
+public partial class UpdateStockCountDto : CrestCreates.Domain.Shared.Entities.Auditing.IHasConcurrencyStampInput
+{
+    public List<CountLineInput> Lines { get; set; } = new();
+}
+public class CountLineInput
+{
+    public Guid MaterialId { get; set; }
+    public Guid StorageLocationId { get; set; }
+    // Accepted for older clients. The service always supplies its own book quantity snapshot.
+    public decimal BookQuantity { get; set; }
+    public decimal CountedQuantity { get; set; }
+}

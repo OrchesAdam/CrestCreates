@@ -108,7 +108,7 @@ export default function CrudPage({
                   await api.put(`${apiPrefix}/${record.id}`, {
                     ...body,
                     concurrencyStamp: record.concurrencyStamp,
-                  });
+                  }, { headers: { 'If-Match': String(record.concurrencyStamp ?? '') } });
                   message.success('更新成功');
                   reload();
                   return true;

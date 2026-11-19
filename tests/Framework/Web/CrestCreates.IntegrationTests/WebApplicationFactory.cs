@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CrestCreates.Accountability.Abstractions.Sinks;
+using CrestCreates.Accountability.InMemory;
 using CrestCreates.AspNetCore.Authentication.OpenIddict;
 using CrestCreates.Domain.Permission;
 using CrestCreates.MultiTenancy;
@@ -13,6 +15,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -20,6 +23,7 @@ using Microsoft.Extensions.Hosting;
 using Npgsql;
 using OpenIddict.Abstractions;
 using Testcontainers.PostgreSql;
+using Testcontainers.RabbitMq;
 using Xunit;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -27,28 +31,48 @@ namespace CrestCreates.IntegrationTests;
 
 public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("crestcreates_test")
-        .WithUsername("test")
-        .WithPassword("test")
-        .Build();
+    private readonly PostgreSqlContainer? _postgres;
+    private readonly RabbitMqContainer? _rabbit;
+    private readonly string? _externalPostgres = Environment.GetEnvironmentVariable("CREST_ERP_TEST_PG_CONNECTION");
+    private readonly string? _externalRabbit = Environment.GetEnvironmentVariable("CREST_ERP_TEST_AMQP_CONNECTION");
 
+    public ErpManagementWebApplicationFactory()
+    {
+        if (_externalPostgres is null)
+            _postgres = new PostgreSqlBuilder("postgres:16-alpine")
+                .WithDatabase("crestcreates_test").WithUsername("test").WithPassword("test").Build();
+        if (_externalRabbit is null)
+            _rabbit = new RabbitMqBuilder("rabbitmq:4.0-management-alpine")
+                .WithUsername("erp-test").WithPassword(Guid.NewGuid().ToString("N")).Build();
+    }
+
+    private string BaseConnectionString => _externalPostgres ?? _postgres!.GetConnectionString();
     private readonly string _schemaName = $"itest_{Guid.NewGuid():N}";
     private Task _seedTask = Task.CompletedTask;
 
     internal const string AuditTenantName = "tenant-a";
     internal Guid AuditTenantId { get; } = Guid.NewGuid();
     internal Guid HostTenantId { get; private set; }
+    internal InMemoryAuditSink AuditSink { get; } = new();
+    internal Exception? FailNextErpSaveChanges { get; set; }
 
-    public string ConnectionString => new NpgsqlConnectionStringBuilder(_postgres.GetConnectionString())
+    internal string RuntimeSchema => _schemaName + "_runtime";
+    public string ConnectionString => new NpgsqlConnectionStringBuilder(BaseConnectionString)
     {
         SearchPath = _schemaName
     }.ConnectionString;
 
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
-        await using (var connection = new NpgsqlConnection(_postgres.GetConnectionString()))
+        if (_postgres is not null)
+            await _postgres.StartAsync();
+        if (_rabbit is not null)
+            await _rabbit.StartAsync();
+        var baseConnection = new NpgsqlConnectionStringBuilder(BaseConnectionString);
+        if (_postgres is null && !baseConnection.Database!.Contains("test", StringComparison.OrdinalIgnoreCase) &&
+            Environment.GetEnvironmentVariable("CREST_ERP_ALLOW_EXTERNAL_TEST_DATABASE") != "true")
+            throw new InvalidOperationException("External ERP test databases require explicit acknowledgment.");
+        await using (var connection = new NpgsqlConnection(BaseConnectionString))
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
@@ -150,9 +174,19 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
-        // The minimal host reads this connection string in Program before ConfigureTestServices.
-        builder.ConfigureHostConfiguration(configuration => configuration.AddInMemoryCollection(
-            new Dictionary<string, string?> { ["ConnectionStrings:Default"] = ConnectionString }));
+        var rabbit = new Uri(_externalRabbit ?? _rabbit!.GetConnectionString());
+        var credentials = rabbit.UserInfo.Split(':', 2);
+        var virtualHost = rabbit.AbsolutePath.TrimStart('/');
+        builder.ConfigureHostConfiguration(configuration => configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Default"] = ConnectionString,
+            ["Erp:Runtime:Schema"] = _schemaName + "_runtime",
+            ["RabbitMQ:HostName"] = rabbit.Host,
+            ["RabbitMQ:Port"] = rabbit.Port.ToString(),
+            ["RabbitMQ:UserName"] = Uri.UnescapeDataString(credentials[0]),
+            ["RabbitMQ:Password"] = Uri.UnescapeDataString(credentials[1]),
+            ["RabbitMQ:VirtualHost"] = virtualHost.Length == 0 ? "/" : Uri.UnescapeDataString(virtualHost)
+        }));
         return base.CreateHost(builder);
     }
 
@@ -174,7 +208,9 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
 
         builder.ConfigureTestServices(services =>
         {
-            UseTestDatabase<ErpManagementDbContext>(services);
+            services.AddSingleton<IAuditSink>(AuditSink);
+            services.ConfigureDbContext<ErpManagementDbContext>(options => options
+                .UseNpgsql(ConnectionString).AddInterceptors(new ErpCommitFaultInterceptor(this)));
             UseTestDatabase<OpenIddictDbContext>(services);
 
             // ERP Program registers SecurityModule and the approval runtime itself.
@@ -203,7 +239,24 @@ public sealed class ErpManagementWebApplicationFactory : WebApplicationFactory<P
         }
         finally
         {
-            await _postgres.DisposeAsync();
+            if (_rabbit is not null)
+                await _rabbit.DisposeAsync();
+            if (_postgres is not null)
+                await _postgres.DisposeAsync();
+        }
+    }
+
+    private sealed class ErpCommitFaultInterceptor(ErpManagementWebApplicationFactory factory) : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (factory.FailNextErpSaveChanges is { } failure && eventData.Context is ErpManagementDbContext)
+            {
+                factory.FailNextErpSaveChanges = null;
+                throw failure;
+            }
+            return ValueTask.FromResult(result);
         }
     }
 

@@ -1,9 +1,11 @@
+using System.Text.Json;
 using CrestCreates.Aop.Interceptors;
 using CrestCreates.Application.Services;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Domain.Features;
 using CrestCreates.Domain.Shared.Attributes;
 using CrestCreates.Domain.Shared.DataFilter;
+using CrestCreates.Domain.Shared.Exceptions;
 using CrestCreates.MultiTenancy.Abstract;
 using ErpManagement.Application.Contracts.DTOs;
 using ErpManagement.Application.Contracts.Interfaces;
@@ -52,11 +54,27 @@ public class ArApLedgerAppService(
     public async Task<ArApLedgerDto> SettleAsync(Guid id, SettlementInput input, CancellationToken cancellationToken = default)
     {
         await CheckPermissionAsync(ErpPermissions.ArApLedger.Settle, cancellationToken);
-        var ledger = await repository.GetWithLinesAsync(currentTenant.GetErpTenantId(), id, cancellationToken)
+        if (input.OperationId == Guid.Empty)
+            throw new CrestValidationException("结算需要非空的 operationId。");
+
+        var tenantId = currentTenant.GetErpTenantId();
+        var ledger = await repository.GetWithLinesForUpdateAsync(tenantId, id, cancellationToken)
             ?? throw new KeyNotFoundException($"台账 {id} 不存在。");
-        ledger.Settle(input.Amount);
+        var recorded = ledger.Settlements.SingleOrDefault(settlement => settlement.TenantId == tenantId && settlement.OperationId == input.OperationId);
+        var resultType = ErpOperationReplayJsonContext.Default.ArApLedgerDto;
+        if (recorded is not null)
+        {
+            if (recorded.Amount != input.Amount)
+                throw new ErpOperationConflictException();
+            return JsonSerializer.Deserialize(recorded.GetOperationResult(), resultType)
+                ?? throw new InvalidOperationException("The stored settlement result is empty.");
+        }
+
+        var settlement = ledger.Settle(input.Amount, input.OperationId);
         await SetModificationAuditPropertiesAsync(ledger);
-        return MapToDto(await repository.UpdateAsync(ledger, cancellationToken));
+        var result = MapToDto(await repository.UpdateAsync(ledger, cancellationToken));
+        settlement.RecordOperationResult(JsonSerializer.Serialize(result, resultType));
+        return result;
     }
 
     protected override ArApLedger MapToEntity(CreateArApLedgerDto dto) => throw new NotSupportedException();

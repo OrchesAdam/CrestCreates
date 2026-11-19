@@ -22,9 +22,14 @@ public class StockCountLine : AuditedEntity<Guid>
         MaterialId = materialId;
         StorageLocationId = storageLocationId;
         BookQuantity = bookQuantity;
+        SetCountedQuantity(countedQuantity);
+        TenantId = tenantId;
+    }
+
+    public void SetCountedQuantity(decimal countedQuantity)
+    {
         if (countedQuantity < 0) throw new ArgumentException("Counted quantity cannot be negative", nameof(countedQuantity));
         CountedQuantity = countedQuantity;
-        TenantId = tenantId;
     }
 
     public decimal Difference => CountedQuantity - BookQuantity;

@@ -24,6 +24,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddCrestWeb();
 builder.Services.AddErpIntegration();
+builder.Services.AddErpRabbitMqTransport(builder.Configuration);
 
 builder.Services.AddErpApprovalRuntime(builder.Configuration);
 builder.Services.AddQuartzScheduling();
@@ -80,6 +81,7 @@ app.UseStaticFiles();
 app.MapCrestCapabilityEndpoints();
 app.MapCrestWeb();
 app.MapErpIntegration();
+app.MapHealthChecks("/health/ready");
 
 await app.InitializeCrestApplicationAsync();
 
