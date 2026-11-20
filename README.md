@@ -1,54 +1,63 @@
 # CrestCreates
 
-CrestCreates is a .NET framework for modular business applications. It combines domain-driven design with compile-time generation so that an application can expose a business operation over HTTP, offer it as a tool, or invoke it from a workflow while keeping the handler focused on the operation itself.
+CrestCreates is a modular .NET framework for business applications. It brings domain-driven design, compile-time code generation, and a typed execution model to applications that need tenant isolation, permissions, workflows, and an audit trail.
 
-A capability describes an operation and its contract. A host selects which capabilities to publish and configures the services they need. At runtime, the capability pipeline uses the execution context to apply policies such as input validation, authorization, tenant isolation, and auditing.
+The central abstraction is a **capability** — a named operation with a defined input, result, and handler. A host chooses which operations to expose over HTTP or through tools. For example, a procurement application can accept a request over HTTP, let a manager approve it in a workflow, and let a tool read the result. The application service owns the procurement rules across those entry points.
 
-## Run an approval from start to finish
+## From an entity to an HTTP API
 
-With .NET installed, run the sample from the repository root.
+For a conventional resource, the feature author declares the entity and route on a partial class. This is the complete service declaration in the repository's Widget example.
 
-```bash
+```csharp
+[GenerateCrudService(typeof(Widget), RoutePrefix = "/api/widgets")]
+public partial class WidgetAppService
+{
+}
+```
+
+The build produces the service implementation, DTOs, mappings, typed query adapter, HTTP bindings, and JSON serialization metadata. In the host, `builder.Services.AddGeneratedCrud()` registers the generated contributions. At startup, `app.MapCrestCapabilityEndpoints()` checks the capability registrations and required JSON types before mapping routes. [Widget declaration](tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Feature/WidgetAppService.cs) · [Host wiring](tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture/Program.cs)
+
+For an operation with its own business rules, implement a typed handler. The procurement submit handler takes a request DTO and passes the current tenant and user to the application service. Its HTTP declaration binds the request body, selects `POST /api/procurement/requests`, and sets the success response to `201 Created`. [Submit handler](samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Application/Handlers/SubmitProcurementRequestHandler.cs) · [Endpoint declarations](samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/Endpoints/ProcurementEndpoints.cs)
+
+## Run an approval from end to end
+
+With .NET installed, run this command from the repository root. The sample starts a local HTTP server on an ephemeral port, uses in-memory stores, and exits after checking the scenario.
+
+```sh
 dotnet run --project samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host -- --golden-scenario
 ```
 
-The sample starts a loopback HTTP server and uses in-memory storage. It submits a purchase request over HTTP, reads the same request through an MCP tool, and completes the resulting human approval task. It also exercises Agent Tool replay and checks the audit records. A successful run prints `CRESTCREATES_PROCUREMENT_SAMPLE_OK` and `CRESTCREATES_ACCOUNTABILITY_OK`, then shuts down.
+The scenario submits a purchase request over HTTP and reads it through a Model Context Protocol (MCP) tool. A manager then completes the pending approval task. The next HTTP read must return both the approved status and the manager's identity. Finally, the sample submits a second request through an agent tool, replays the invocation, and checks that only one new request was stored.
 
-## Follow the request through the code
+A successful run exits with code zero and prints both lines below. The assertions, including the audit checks, are in the [scenario source](samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/ProcurementGoldenScenario.cs).
 
-1. The [procurement catalog](samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/ProcurementDescriptorCatalog.cs) describes the submit operation, its input and output schemas, and the approval workflow.
-2. The [endpoint declarations](samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/Endpoints/ProcurementEndpoints.cs) supply the route and binding metadata for the HTTP source generator. The [host entry point](samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/Program.cs) maps the generated endpoints.
-3. The [typed submit handler](samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Application/Handlers/SubmitProcurementRequestHandler.cs) calls the application service with the tenant and user from its execution context. The workflow and human-task runtimes manage the approval steps.
+```text
+CRESTCREATES_PROCUREMENT_SAMPLE_OK
+CRESTCREATES_ACCOUNTABILITY_OK
+```
 
-This split also applies to generated AppService and CRUD endpoints. Roslyn generators and MSBuild tasks prepare endpoint bindings, JSON metadata, and module registration at build time. The host composes the resulting contributions. See the [capability exposure guide](docs/Feature/CapabilityExposure/usage-guide.md) and the [metadata model guide](docs/Feature/UnifiedMetadataModel/usage-guide.md).
+## Explore the framework
 
-## Explore other applications
-
-| Application | What to look for |
+| If you are working on… | Start here |
 | --- | --- |
-| [SaaS Helpdesk](samples/SaaSHelpdesk/) | Tenant-aware ticketing, SLA policies, and the platform's identity and administration endpoints. |
-| [Asset Management](samples/AssetManagement/README.md) | Equipment maintenance and approval with SQLite business data and PostgreSQL workflow, human-task, and outbox state. |
-| [ERP Management](samples/ErpManagement/deploy/README.md) | Procurement, inventory, and manufacturing, with a transactional outbox and RabbitMQ delivery. |
-| [Descriptor Control Plane](samples/CrestCreates.Samples.DescriptorControlPlane/README.md) | Agent-assisted drafting and review of metadata. The [Control Plane guide](docs/Feature/AgentControlPlane/usage-guide.md) explains the evidence and activation contracts. |
+| Domain entities, repositories, application contracts, and services | [DDD building blocks](src/Framework/Ddd) and the [helpdesk ticket service](samples/SaaSHelpdesk/SaaSHelpdesk.Application/Services/TicketAppService.cs) |
+| How declarations become executable code | [Source generators](src/Tooling/CrestCreates.CodeGenerator) and [MSBuild tasks for cross-project module registration](src/Tooling/CrestCreates.BuildTasks) |
+| How capabilities, schemas, and human tasks fit together | [Procurement descriptor catalog](samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host/ProcurementDescriptorCatalog.cs) and [runtime implementations](src/Runtime) |
+| Transactional messaging across business processes | [ERP sample](samples/ErpManagement), which pairs a transactional outbox with RabbitMQ delivery and inbox processing |
+| Choosing a module or persistence provider | [Capability map](docs/Feature/CapabilityMap.md) for implementation status and [ORM support matrix](docs/Feature/OrmProviderSupportMatrix.md) for tested provider combinations |
 
-## Build and test
+## Build and verify
 
-```bash
-dotnet build solutions/CrestCreates.All.slnx
-dotnet test tests/Runtime/Capability/CrestCreates.Capability.Tests --no-build
+Build the main solution and run the capability runtime tests from the repository root.
+
+```sh
+dotnet build CrestCreates.slnx
+dotnet test tests/Runtime/Capability/CrestCreates.Capability.Tests
 ```
 
-For database and broker tests, start the services required by the suite and set its connection environment variables. See the [integration test setup](infra/README.md).
+For the full project set, use the [all-project solution](solutions/CrestCreates.All.slnx). Integration suites that exercise PostgreSQL, RabbitMQ, and other external services use the shared test environment. Its [setup guide](infra/README.md) lists the services and connection variables.
 
-The repository defaults to trimmed publishing. For NativeAOT, use `-p:CrestCreatesPublishMode=aot` when publishing a supported fixture. The following test performs the publish, links the native executable, and runs HTTP assertions against it on Linux x64.
-
-```bash
-dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests --filter "Category=NativeAotGate"
-```
-
-Support is recorded per execution path, tested scenario, and runtime identifier. Check the [capability map](docs/Feature/CapabilityMap.md), [ORM provider support matrix](docs/Feature/OrmProviderSupportMatrix.md), and [native execution evidence](docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md) before selecting a host or provider for deployment.
-
-GitHub Actions runs [CI](https://github.com/OrchesAdam/CrestCreates/actions/workflows/ci.yml) for pull requests to `master` and [Full Validation](https://github.com/OrchesAdam/CrestCreates/actions/workflows/full-validation.yml) after pushes to `master`. Both workflows also support manual runs.
+NativeAOT support is documented per execution path and target platform. On Linux x64, the generated CRUD and helpdesk Ticket HTTP fixtures publish and link native executables, then run requests against them. Consult the fixture for the operations it exercises and the ORM matrix for database-specific behavior. [Generated CRUD fixture](tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture) · [Ticket HTTP fixture](tests/Framework/Api/CrestCreates.TicketHttpProjection.AotFixture) · [ORM support matrix](docs/Feature/OrmProviderSupportMatrix.md)
 
 ## License
 
