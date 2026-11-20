@@ -1,4 +1,21 @@
-# CrestCreates platform status — 2026-11-06
+# CrestCreates platform status — 2026-11-20
+
+## 2026-11-20 — PR #190 合并记录（ERP 可靠性 + Testcontainers 退出 + SaaSHelpdesk 20 红修复）
+
+- **合并**：PR #190 于 2026-11-20 以 merge commit `976ec0fa` 合并（master `8f3157df` → `976ec0fa`），
+  四提交：`3a893fa1`（ERP 可靠性基线）→ `13397296`（Testcontainers 全面退出 → 长驻测试服务）→
+  `51e8ccf8`（nullable 标量共享 JSON root + SaaSHelpdesk 20 红清零）→ `7cb4fdb2`（审查发现全量修复：
+  收货投递租户隔离+死信受控重投、审计 canonical sink 租户投影、RabbitMQ 并发停机截止、
+  nullable 底层等价校验、retention 显式装配、用户创建租户权威、测试设施租约/CLI/资源所有权、CAP 瞬态 57P01 加固）。
+- **合并前验证（串行，~/.dotnet 10.0.114 + 长驻 PG16/RabbitMQ4）**：ERP 集成 103/103、SaaSHelpdesk 166/166、
+  DynamicApi 159/159、Application 275/275、OrmProviders 385/385、Boundary 297/297、Mongo 91/91、
+  RabbitMQ 单元 58/58 + 集成 37/37、Kafka 27/27、CAP 38/38（含专属停启故障注入）；原生门禁
+  GeneratedCrud 28/28、CapabilityEndpoint 13/13、Ticket 6/6、PostgreSql 1/1、RabbitMQ AotHost 2/2
+  （均真实 publish/link/run，linux-x64）；浏览器操作重试 2/2。CodeGenerator 449 通过/0 失败
+  （CrudBuild MSBuild 子集受本机时长截断，单类 20/0 含全部 emitter 基线）。
+- **跟进项**：FeatureAuditRecorder 的 feature 变更明细审计缺口（未处理）；AssetManagement/Procurement
+  两个原生门禁仍在升级前工具链证据（见 #123 矩阵 2026-11-20 追加行）；ERP 完整业务链浏览器验收需真实
+  交付栈（本轮离线操作重试回归 2/2）。
 
 ## 2026-11-19 — Testcontainers 全面退出：长驻测试服务改造（全项目）
 

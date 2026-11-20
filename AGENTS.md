@@ -400,6 +400,19 @@ TestBase
 
 以 `memory.md` 为最新状态记录。当前关键共识：
 
+- ERP 示例可靠性与测试基础设施（#190，已合并：PR #190 → master `976ec0fa`，四提交 `3a893fa1`/`13397296`/
+  `51e8ccf8`/`7cb4fdb2`）：ERP 出站唯一主链（业务 EF UoW 内借受管 Npgsql 事务追加 Outbox，正式
+  `AddRabbitMqEventBus` 发布等 confirm，订阅提交 Inbox 后 ACK）+ 报工/结算/MES 持久幂等（操作 ID+指纹+可回放
+  结果，同键异参 409）；收货投递状态租户隔离，死信受控重投（保留原消息身份/fencing token）；审计
+  canonical PG sink 唯一持久层 + 按记录租户投影；全项目测试退出 Testcontainers 改长驻服务
+  （`infra/docker-compose.test-services.yml`，故障注入经校验容器租约）；Helpdesk 开通正式平台管理 HTTP 面，
+  retention 路由需内核+store 显式装配（`ActivateSeparately` 拆分激活）；用户创建经 `ITenantProvider` 解析
+  权威租户 Id；SaaSHelpdesk 20 红（平台用户面/审计 JSON 闭包/string-enum 断言/最小宿主 DI）清零 165/165。
+  证据（串行，~/.dotnet 10.0.114 + 长驻 PG16/RabbitMQ4）：ERP 集成 103/103、SaaSHelpdesk 166/166、
+  DynamicApi 159/159、CAP 38/38（含专属停启故障注入）、原生门禁 GeneratedCrud 28/28、CapabilityEndpoint
+  13/13、Ticket 6/6、PostgreSql 1/1、RabbitMQ AotHost 2/2（均真实 publish/link/run，linux-x64）。
+  支持声明限已执行组合，不外推其他 ORM/RID/NativeAOT。
+
 - Authoring 显式 unsupported / needs-clarification 终态（#159，已合并：PR #160 → master `1bf4a7e7`，Issue completed 关闭）：wire 升为 `8a.v1`，
   `outcome` 判别式 + `UnsupportedIntent` / `NeedsClarification` 两个正式终态（结构化载荷、闭码表、presence
   判定、固定占位 plan/draftset、零草稿）。解析收口为 Stage A 原始信封事实 + Stage B 严格 source-generated
@@ -476,4 +489,4 @@ TestBase
 
 ---
 
-**最后更新**: 2026-11-06
+**最后更新**: 2026-11-20

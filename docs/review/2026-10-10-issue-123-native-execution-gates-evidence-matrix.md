@@ -127,7 +127,7 @@ linux-x64 上 CI 必跑（`Category=NativeAotGate` 过滤）；非 linux-x64 环
 - MCP 宿主/传输层实现（fixture 直达 `IMcpToolInvoker`）。
 - PostgreSQL provider 之外的一切 ORM/驱动（EF Core/FreeSql/SqlSugar 及其 AOT 边界留给 #130）。
 - UnitOfWork 工厂/Provider 装配（#124 轨道；本轮未触碰）。
-- **工具链版本边界（2026-11-05 追加）**：#159 S3 的原生门禁以用户目录官方 SDK **10.0.114**（隐式 ILCompiler/runtime pack **10.0.14**，修复 GHSA-p3jp-9v83-76w9）为验收入口。默认 `/usr/bin/dotnet` 仍为 10.0.113，在该入口下 `dotnet build` 仍命中 `error NU1903`（审计保持开启，未加 NoWarn/未降级）；系统 RPM 升级属环境维护项，本矩阵不宣称全环境已迁移。其余七个原生门禁（CapabilityEndpoint、GeneratedCrud、AssetManagement、Procurement、Ticket、PostgreSql、RabbitMQ AotHost）**仍是升级前的工具链证据**，未在 10.0.114 复验；任何任务/CI 复用 #159 门禁必须显式选择 10.0.114（含 harness 内部 `dotnet publish` 子进程的 `DOTNET_ROOT`/`PATH`），否则裸 `dotnet` 会静默回退旧 host。
+- **工具链版本边界（2026-11-05 追加；2026-11-20 收敛）**：#159 S3 的原生门禁以用户目录官方 SDK **10.0.114**（隐式 ILCompiler/runtime pack **10.0.14**，修复 GHSA-p3jp-9v83-76w9）为验收入口。默认 `/usr/bin/dotnet` 仍为 10.0.113，在该入口下 `dotnet build` 仍命中 `error NU1903`（审计保持开启，未加 NoWarn/未降级）；系统 RPM 升级属环境维护项，本矩阵不宣称全环境已迁移。**2026-11-20 复验收敛（PR #190 合并前验证，`7cb4fdb2`）**：七个门禁中的五个已在 10.0.114 下真实 publish/link/run 复验——GeneratedCrud 28/28（含负控）、CapabilityEndpoint 13/13、Ticket 6/6（含 15 场景 + 五控制与 `TicketNativeGate` string-enum 断言修复）、PostgreSql 1/1、RabbitMQ AotHost 2/2（trim + NativeAOT 双门，凭据/管理 API 改经文档 env，无硬编码 guest）；**AssetManagement、Procurement 两个门禁仍是升级前工具链证据**，未在 10.0.114 复验；任何任务/CI 复用门禁必须显式选择 10.0.114（含 harness 内部 `dotnet publish` 子进程的 `DOTNET_ROOT`/`PATH`），否则裸 `dotnet` 会静默回退旧 host。
 - 三个主 fixture 的发布日志中存在**依赖项目**既有 IL2026/IL3050 警告（`CrestCreates.Application.Contracts`
   QueryExecutor、`CrestCreates.Aop` 配置 provider）；HTTP 门禁将警告断言限定在 fixture 自身编译单元，
   依赖警告与本次 HTTP 执行缺口无关，保留原样并记录，不作为本门禁的阻塞信号。
