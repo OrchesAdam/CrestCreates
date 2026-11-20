@@ -96,8 +96,8 @@ internal sealed class PostgreSqlDescriptorDraftStoreContractDriver : IDescriptor
     public DescriptorDraftModel CreateValidatorOwnedInvalid(DraftValidatorOwnedInvalidVariant variant, EvidenceVectorKey key)
         => variant switch
         {
-            DraftValidatorOwnedInvalidVariant.DescriptorIdBlank => CreateSchema() with { DescriptorId = InvalidText(key) },
-            DraftValidatorOwnedInvalidVariant.AuthorIdBlank => CreateSchema() with { AuthorId = InvalidText(key) },
+            DraftValidatorOwnedInvalidVariant.DescriptorIdBlank => CreateSchema() with { DescriptorId = InvalidText(key)! },
+            DraftValidatorOwnedInvalidVariant.AuthorIdBlank => CreateSchema() with { AuthorId = InvalidText(key)! },
             DraftValidatorOwnedInvalidVariant.DefinedNonPayloadKindMismatch => CreateSchema() with
             {
                 DescriptorKind = key switch

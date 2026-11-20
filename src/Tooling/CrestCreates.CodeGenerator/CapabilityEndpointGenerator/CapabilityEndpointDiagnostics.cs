@@ -29,7 +29,7 @@ internal static class CapabilityEndpointDiagnostics
     public static readonly DiagnosticDescriptor ContainerMustHaveSpecsMarker = new(
         id: CapabilityEndpointDiagnosticCodes.ContainerMustHaveSpecsMarkerValue,
         title: "Container class must have [CapabilityEndpointSpecs] marker",
-        messageFormat: "Container class '{0}' must be marked with [CapabilityEndpointSpecs] when it contains [CapabilityEndpointSpec] nested classes.",
+        messageFormat: "Container class '{0}' must be marked with [CapabilityEndpointSpecs] when it contains [CapabilityEndpointSpec] nested classes",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -88,7 +88,7 @@ internal static class CapabilityEndpointDiagnostics
     public static readonly DiagnosticDescriptor SetMustBeStaticPartial = new(
         id: CapabilityEndpointDiagnosticCodes.SetMustBeStaticPartialValue,
         title: "[CapabilityEndpointSet] must be on a static partial class",
-        messageFormat: "[CapabilityEndpointSet] on class '{0}' requires the class to be 'static partial'.",
+        messageFormat: "[CapabilityEndpointSet] on class '{0}' requires the class to be 'static partial'",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -99,7 +99,7 @@ internal static class CapabilityEndpointDiagnostics
     public static readonly DiagnosticDescriptor HttpMethodAttributeMustBeSealedPartialNested = new(
         id: CapabilityEndpointDiagnosticCodes.HttpMethodAttributeMustBeSealedPartialNestedValue,
         title: "HTTP method attribute must be on a sealed partial nested class",
-        messageFormat: "HTTP method attribute on class '{0}' requires the class to be 'sealed partial' and nested inside a [CapabilityEndpointSet] container.",
+        messageFormat: "HTTP method attribute on class '{0}' requires the class to be 'sealed partial' and nested inside a [CapabilityEndpointSet] container",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -170,7 +170,7 @@ internal static class CapabilityEndpointDiagnostics
     public static readonly DiagnosticDescriptor TargetPropertyMissingOnBody = new(
         id: CapabilityEndpointDiagnosticCodes.TargetPropertyMissingOnBodyValue,
         title: "TargetProperty not found on body type",
-        messageFormat: "TargetProperty '{0}' on endpoint spec '{1}' does not exist as a public settable property on body type '{2}'.",
+        messageFormat: "TargetProperty '{0}' on endpoint spec '{1}' does not exist as a public settable property on body type '{2}'",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -227,7 +227,7 @@ internal static class CapabilityEndpointDiagnostics
     public static readonly DiagnosticDescriptor OptionalBodyCannotBeMaterialized = new(
         id: CapabilityEndpointDiagnosticCodes.OptionalBodyCannotBeMaterializedValue,
         title: "Optional body type cannot be materialized",
-        messageFormat: "Optional body type '{0}' on endpoint spec '{1}' must be a non-abstract class or value type with a public parameterless constructor because route, query, or header values are assigned when the body is absent.",
+        messageFormat: "Optional body type '{0}' on endpoint spec '{1}' must be a non-abstract class or value type with a public parameterless constructor because route, query, or header values are assigned when the body is absent",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);

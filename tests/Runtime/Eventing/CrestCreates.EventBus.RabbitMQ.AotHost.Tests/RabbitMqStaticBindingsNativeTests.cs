@@ -101,12 +101,15 @@ public sealed class RabbitMqStaticBindingsNativeTests
             publish.Output.Should().NotContain("warning IL3050");
 
             var executable = Path.Combine(output, "CrestCreates.EventBus.RabbitMQ.AotHost");
-            File.SetUnixFileMode(
-                executable,
-                File.GetUnixFileMode(executable)
-                | UnixFileMode.UserExecute
-                | UnixFileMode.GroupExecute
-                | UnixFileMode.OtherExecute);
+            if (OperatingSystem.IsLinux())
+            {
+                File.SetUnixFileMode(
+                    executable,
+                    File.GetUnixFileMode(executable)
+                    | UnixFileMode.UserExecute
+                    | UnixFileMode.GroupExecute
+                    | UnixFileMode.OtherExecute);
+            }
 
             var execution = await TestServiceControl.RunProcessAsync(executable, [], runTimeout,
                 new Dictionary<string, string?>

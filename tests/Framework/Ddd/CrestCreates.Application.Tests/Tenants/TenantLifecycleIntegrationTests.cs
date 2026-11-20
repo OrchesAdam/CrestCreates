@@ -16,8 +16,6 @@ using CrestCreates.Domain.Repositories.Permission;
 using CrestCreates.Domain.Shared;
 using CrestCreates.Domain.Shared.Permissions;
 using CrestCreates.EventBus;
-using CrestCreates.MultiTenancy;
-using CrestCreates.MultiTenancy.Abstract;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;

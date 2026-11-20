@@ -19,7 +19,9 @@ public sealed class PromptInputHashTests
     public void SameInput_ProducesSameHash()
     {
         using var provider = CreatePromptingProvider();
+        #pragma warning disable CS0618 // Reproduce hashes created by the compatibility adapter.
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(provider.GetRequiredService<IAgentPromptHashService>());
+        #pragma warning restore CS0618
         var input = TestPromptInput();
 
         var modelRef = new AgentPromptModelProfileRef("test-model");
@@ -35,7 +37,9 @@ public sealed class PromptInputHashTests
     public void ChangedIntent_ProducesDifferentHash()
     {
         using var provider = CreatePromptingProvider();
+        #pragma warning disable CS0618 // Reproduce hashes created by the compatibility adapter.
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(provider.GetRequiredService<IAgentPromptHashService>());
+        #pragma warning restore CS0618
 
         var input1 = TestPromptInput("Add finance review");
         var input2 = TestPromptInput("Add legal review");
@@ -52,7 +56,9 @@ public sealed class PromptInputHashTests
     public void HashUses_CanonicalHashInfrastructure()
     {
         using var provider = CreatePromptingProvider();
+        #pragma warning disable CS0618 // Reproduce hashes created by the compatibility adapter.
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(provider.GetRequiredService<IAgentPromptHashService>());
+        #pragma warning restore CS0618
         var input = TestPromptInput();
 
         var hash = hashService.ComputeHash(
@@ -106,7 +112,9 @@ public sealed class PromptInputHashTests
     public void ComputeHash_IsOrderIndependent_ForDescriptorsAndMemories()
     {
         using var provider = CreatePromptingProvider();
+        #pragma warning disable CS0618 // Reproduce hashes created by the compatibility adapter.
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(provider.GetRequiredService<IAgentPromptHashService>());
+        #pragma warning restore CS0618
 
         var descriptors1 = new List<DescriptorAuthoringDescriptorProjection>
         {

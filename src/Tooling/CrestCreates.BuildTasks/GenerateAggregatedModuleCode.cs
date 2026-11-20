@@ -24,7 +24,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
                 Log.LogError($"Module manifest file not found: {ModuleManifestFile}");
                 return false;
             }
-            var modules = TopologicalSort(CollectModuleManifests.ReadManifest<ModuleManifest>(ModuleManifestFile));
+            var modules = TopologicalSort(CollectModuleManifests.ReadManifest(ModuleManifestFile));
             BuildOutput.WriteIfChanged(OutputPath, GenerateCode(modules));
             Log.LogMessage(MessageImportance.High, $"Generated aggregated module code at {OutputPath} with {modules.Count} modules");
             return true;
@@ -36,15 +36,15 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         }
     }
 
-    private static List<ModuleManifest> TopologicalSort(List<ModuleManifest> modules)
+    private static List<CollectModuleManifests.ModuleManifest> TopologicalSort(List<CollectModuleManifests.ModuleManifest> modules)
     {
-        var identities = new Dictionary<string, ModuleManifest>(StringComparer.Ordinal);
+        var identities = new Dictionary<string, CollectModuleManifests.ModuleManifest>(StringComparer.Ordinal);
         foreach (var module in modules)
             if (!identities.TryAdd(module.FullName, module)) throw new InvalidDataException($"Duplicate module identity: {module.FullName}");
-        var dependencies = new Dictionary<string, List<ModuleManifest>>(StringComparer.Ordinal);
+        var dependencies = new Dictionary<string, List<CollectModuleManifests.ModuleManifest>>(StringComparer.Ordinal);
         foreach (var module in modules)
         {
-            var resolved = new List<ModuleManifest>();
+            var resolved = new List<CollectModuleManifests.ModuleManifest>();
             foreach (var name in module.DependsOn)
             {
                 if (identities.TryGetValue(name, out var exact)) resolved.Add(exact);
@@ -57,7 +57,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
             }
             dependencies.Add(module.FullName, resolved);
         }
-        var sorted = new List<ModuleManifest>();
+        var sorted = new List<CollectModuleManifests.ModuleManifest>();
         var remaining = modules.ToDictionary(module => module.FullName, StringComparer.Ordinal);
         var completed = new HashSet<string>(StringComparer.Ordinal);
         while (remaining.Count != 0)
@@ -72,7 +72,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         return sorted;
     }
 
-    private string GenerateCode(List<ModuleManifest> modules)
+    private string GenerateCode(List<CollectModuleManifests.ModuleManifest> modules)
     {
         if (modules.Count == 0)
             return $$"""
@@ -145,7 +145,7 @@ public class GenerateAggregatedModuleCode : Microsoft.Build.Utilities.Task
         return code.ToString();
     }
 
-    private static void AppendPhase(StringBuilder code, ModuleManifest module, string phase, string gate, string hook, string provider)
+    private static void AppendPhase(StringBuilder code, CollectModuleManifests.ModuleManifest module, string phase, string gate, string hook, string provider)
     {
         code.AppendLine($"        await initialization.{gate}(typeof(global::{module.FullName}), async () =>");
         code.AppendLine("        {");

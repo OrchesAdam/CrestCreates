@@ -19,7 +19,7 @@ public interface IEntityFrameworkCoreDbContext : IDataBaseContext
     OrmProvider Provider { get; }
     
     // 添加ORM特定的扩展方法
-    IQueryableBuilder<TEntity> Queryable<TEntity>() where TEntity : class;
+    new IQueryableBuilder<TEntity> Queryable<TEntity>() where TEntity : class;
     
     // 可以添加更多ORM相关的方法
     Task<int> ExecuteSqlRawAsync(string sql, IEnumerable<object>? parameters = null, CancellationToken cancellationToken = default);

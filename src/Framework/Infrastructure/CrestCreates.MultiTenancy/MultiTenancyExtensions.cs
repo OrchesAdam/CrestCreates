@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -84,7 +85,7 @@ namespace CrestCreates.MultiTenancy
         /// <summary>
         /// 使用自定义租户提供者
         /// </summary>
-        public static IServiceCollection AddTenantProvider<TProvider>(
+        public static IServiceCollection AddTenantProvider<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TProvider>(
             this IServiceCollection services)
             where TProvider : class, ITenantProvider
         {
@@ -99,12 +100,7 @@ namespace CrestCreates.MultiTenancy
             this IServiceCollection services,
             TenantResolutionStrategy strategy)
         {
-            var resolvers = BuildResolverList(strategy);
-
-            foreach (var resolverType in resolvers)
-            {
-                services.TryAddScoped(resolverType);
-            }
+            var resolvers = BuildResolverList(strategy, services);
 
             services.TryAddScoped<ITenantResolver>(sp =>
             {
@@ -171,20 +167,27 @@ namespace CrestCreates.MultiTenancy
             return services;
         }
 
-        private static List<Type> BuildResolverList(TenantResolutionStrategy strategy)
+        private static List<Type> BuildResolverList(TenantResolutionStrategy strategy, IServiceCollection? services = null)
         {
             var resolvers = new List<Type>();
             if (strategy.HasFlag(TenantResolutionStrategy.Header))
-                resolvers.Add(typeof(HeaderTenantResolver));
+                AddResolver<HeaderTenantResolver>();
             if (strategy.HasFlag(TenantResolutionStrategy.Subdomain))
-                resolvers.Add(typeof(SubdomainTenantResolver));
+                AddResolver<SubdomainTenantResolver>();
             if (strategy.HasFlag(TenantResolutionStrategy.QueryString))
-                resolvers.Add(typeof(QueryStringTenantResolver));
+                AddResolver<QueryStringTenantResolver>();
             if (strategy.HasFlag(TenantResolutionStrategy.Cookie))
-                resolvers.Add(typeof(CookieTenantResolver));
+                AddResolver<CookieTenantResolver>();
             if (strategy.HasFlag(TenantResolutionStrategy.Route))
-                resolvers.Add(typeof(RouteTenantResolver));
+                AddResolver<RouteTenantResolver>();
             return resolvers;
+
+            void AddResolver<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TResolver>()
+                where TResolver : class, ITenantResolver
+            {
+                services?.TryAddScoped<TResolver>();
+                resolvers.Add(typeof(TResolver));
+            }
         }
     }
 

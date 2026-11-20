@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using CrestCreates.DistributedTransaction.Abstractions;
 using CrestCreates.DistributedTransaction.Models;
@@ -50,12 +51,8 @@ namespace CrestCreates.DistributedTransaction.CAP.Implementations
                 await _repository.AddAsync(log);
             }
 
-            log.ErrorDetails = JsonSerializer.Serialize(new
-            {
-                exception.Message,
-                exception.StackTrace,
-                Type = exception.GetType().FullName
-            });
+            var details = new TransactionErrorDetails(exception.Message, exception.StackTrace, exception.GetType().FullName);
+            log.ErrorDetails = JsonSerializer.Serialize(details, TransactionErrorJsonContext.Default.TransactionErrorDetails);
             log.UpdatedAt = DateTime.UtcNow;
             await _repository.UpdateAsync(log);
         }
@@ -82,4 +79,9 @@ namespace CrestCreates.DistributedTransaction.CAP.Implementations
             }
         }
     }
+
+    internal sealed record TransactionErrorDetails(string Message, string? StackTrace, string? Type);
+
+    [JsonSerializable(typeof(TransactionErrorDetails))]
+    internal partial class TransactionErrorJsonContext : JsonSerializerContext;
 }

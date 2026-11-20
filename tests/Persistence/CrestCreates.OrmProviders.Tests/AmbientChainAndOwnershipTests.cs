@@ -297,7 +297,7 @@ public class AmbientChainAndOwnershipTests : IDisposable
             throw new NotSupportedException();
         }
 
-        public IDisposable Change(ITenantInfo tenant)
+        public IDisposable Change(ITenantInfo? tenant)
         {
             throw new NotSupportedException();
         }

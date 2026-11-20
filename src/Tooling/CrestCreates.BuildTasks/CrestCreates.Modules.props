@@ -1,8 +1,19 @@
 <Project>
   <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <_CrestCreatesBuildTasksProject Condition="'$(CrestCreatesBuildTasksAssembly)' == '' and Exists('$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.csproj')">$(MSBuildThisFileDirectory)CrestCreates.BuildTasks.csproj</_CrestCreatesBuildTasksProject>
+    <CrestCreatesBuildTasksAssembly Condition="'$(_CrestCreatesBuildTasksProject)' != ''">$(MSBuildThisFileDirectory)bin/$(Configuration)/net10.0/CrestCreates.BuildTasks.dll</CrestCreatesBuildTasksAssembly>
     <CrestCreatesBuildTasksAssembly Condition="'$(CrestCreatesBuildTasksAssembly)' == '' and Exists('$(MSBuildThisFileDirectory)bin/$(Configuration)/net10.0/CrestCreates.BuildTasks.dll')">$(MSBuildThisFileDirectory)bin/$(Configuration)/net10.0/CrestCreates.BuildTasks.dll</CrestCreatesBuildTasksAssembly>
     <CrestCreatesBuildTasksAssembly Condition="'$(CrestCreatesBuildTasksAssembly)' == ''">$(MSBuildThisFileDirectory)bin/Debug/net10.0/CrestCreates.BuildTasks.dll</CrestCreatesBuildTasksAssembly>
   </PropertyGroup>
+  <ItemGroup Condition="'$(_CrestCreatesBuildTasksProject)' != ''">
+    <!-- Build the tool before its importing project, including in a clean solution build. -->
+    <ProjectReference Include="$(_CrestCreatesBuildTasksProject)"
+                      ReferenceOutputAssembly="false"
+                      ExcludeAssets="all"
+                      PrivateAssets="all"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishAot;PublishTrimmed;CrestCreatesPublishMode" />
+  </ItemGroup>
   <UsingTask TaskName="CrestCreates.BuildTasks.ScanModulesFromSource" AssemblyFile="$(CrestCreatesBuildTasksAssembly)" />
   <UsingTask TaskName="CrestCreates.BuildTasks.CollectModuleManifests" AssemblyFile="$(CrestCreatesBuildTasksAssembly)" />
   <UsingTask TaskName="CrestCreates.BuildTasks.GenerateAggregatedModuleCode" AssemblyFile="$(CrestCreatesBuildTasksAssembly)" />

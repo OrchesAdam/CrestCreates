@@ -37,7 +37,7 @@ public class LocalEventCodecWriterTests : JsonContractCompilationTestBase
         ], GetDefaultReferences());
 
         var discovery = new LocalEventJsonSurfaceDiscovery();
-        result.Model!.LocalEventRoots.AddRange(discovery.Discover(result.Compilation));
+        result.Model!.LocalEventRoots.AddRange(discovery.Discover(result.Compilation!));
 
         var output = JsonContractSourceWriter.WriteContextSource(result.Model, "TestAssembly");
 

@@ -8,6 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <GenerateProgramFile>false</GenerateProgramFile>
     <IsTestProject>true</IsTestProject>
     <!-- Enable source generator output for inspection -->
     <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>

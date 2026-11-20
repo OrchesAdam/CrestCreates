@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Caching;
@@ -32,7 +33,7 @@ public static class SettingManagementServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddSettingDefinitionProvider<TProvider>(this IServiceCollection services)
+    public static IServiceCollection AddSettingDefinitionProvider<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TProvider>(this IServiceCollection services)
         where TProvider : class, ISettingDefinitionProvider
     {
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ISettingDefinitionProvider, TProvider>());

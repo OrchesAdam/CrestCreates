@@ -1,3 +1,5 @@
+extern alias mcpMemory;
+
 using System.Security.Claims;
 using System.Text.Json;
 using CrestCreates.Agent.Memory;
@@ -12,7 +14,7 @@ using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Capability;
 using CrestCreates.Capability.Abstractions;
 using CrestCreates.Generated;
-using CrestCreates.Mcp.Memory;
+using mcpMemory::CrestCreates.Mcp.Memory;
 using CrestCreates.Metadata;
 using CrestCreates.Metadata.Abstractions;
 using CrestCreates.Metadata.Abstractions.CanonicalHashing;

@@ -15,7 +15,6 @@ using CrestCreates.Domain.Repositories;
 using CrestCreates.Domain.Exceptions;
 using CrestCreates.Domain.Shared.DTOs;
 using CrestCreates.Domain.Shared.Entities;
-using CrestCreates.Domain.Shared.Entities.Auditing;
 using Microsoft.Extensions.Logging;
 
 namespace CrestCreates.Data.SqlSugar.Repositories

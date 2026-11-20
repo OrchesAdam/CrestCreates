@@ -53,7 +53,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
         client.Aop.OnLogExecuting = (sql, parameters) =>
         {
             if (!sql.TrimStart().StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)) return;
-            var parameter = Assert.Single(parameters.Where(p => p.ParameterName.TrimStart('@', ':') == "liveRow"));
+            var parameter = Assert.Single(parameters, p => p.ParameterName.TrimStart('@', ':') == "liveRow");
             commands.Add((sql, parameter.Value));
         };
 
@@ -96,7 +96,7 @@ public sealed class Issue130DeleteContractBaselineTests : IDisposable
 
         await repository.DeleteAsync((await repository.GetAsync(1))!);
         await repository.DeleteAsync(2);
-        await repository.DeleteRangeAsync(new[] { await repository.GetAsync(3) });
+        await repository.DeleteRangeAsync(new[] { (await repository.GetAsync(3))! });
         await repository.DeleteRangeAsync(e => e.Id == 4);
 
         foreach (var id in new long[] { 1, 2, 3, 4 })

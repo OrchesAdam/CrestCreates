@@ -7,7 +7,6 @@ using CrestCreates.MultiTenancy;
 using CrestCreates.MultiTenancy.Abstract;
 using CrestCreates.Domain.Permission;
 using CrestCreates.Domain.Repositories.Permission;
-using CrestCreates.MultiTenancy;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

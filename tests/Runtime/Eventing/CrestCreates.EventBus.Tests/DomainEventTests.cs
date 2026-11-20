@@ -36,7 +36,7 @@ namespace CrestCreates.EventBus.Tests
 
             // Assert
             Assert.Contains(domainEvent, entity.DomainEvents);
-            Assert.Equal(1, entity.DomainEvents.Count);
+            Assert.Single(entity.DomainEvents);
         }
 
         [Fact]

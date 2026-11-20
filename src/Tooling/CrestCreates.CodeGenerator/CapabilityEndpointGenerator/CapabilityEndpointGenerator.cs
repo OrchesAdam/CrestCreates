@@ -474,7 +474,7 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             }
 
             // Skip body inputs and inputs without TargetProperty
-            if (inputSourceValue == 3 || string.IsNullOrEmpty(targetProperty))
+            if (inputSourceValue == 3 || targetProperty is null or "")
                 continue;
 
             // CEP019: TargetProperty must be a valid C# identifier
@@ -1063,7 +1063,7 @@ public sealed class CapabilityEndpointGenerator : IIncrementalGenerator
             return null;
 
         var capabilityId = GetStringArg(ctorArgs[0]);
-        if (string.IsNullOrEmpty(capabilityId))
+        if (capabilityId is null or "")
             return null;
 
         var httpMethodValue = GetIntArg(ctorArgs[1]);

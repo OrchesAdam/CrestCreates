@@ -7,7 +7,10 @@ public class Money : ValueObject
     public decimal Amount { get; private set; }
     public string Currency { get; private set; }
 
-    private Money() { }
+    private Money()
+    {
+        Currency = string.Empty;
+    }
 
     public Money(decimal amount, string currency)
     {

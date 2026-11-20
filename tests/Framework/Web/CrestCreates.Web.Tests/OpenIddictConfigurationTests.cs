@@ -75,7 +75,7 @@ public class OpenIddictConfigurationTests
         Assert.DoesNotContain(GrantTypes.ClientCredentials, server.GrantTypes);
         Assert.Contains(GrantTypes.AuthorizationCode, server.GrantTypes);
         Assert.Contains(ResponseTypes.Code, server.ResponseTypes);
-        Assert.Single(builder.Services.Where(x => x.ServiceType == typeof(IDataSeeder) && x.ImplementationType == typeof(HostOpenIddictDataSeeder)));
+        Assert.Single(builder.Services, x => x.ServiceType == typeof(IDataSeeder) && x.ImplementationType == typeof(HostOpenIddictDataSeeder));
     }
 
     [Fact]

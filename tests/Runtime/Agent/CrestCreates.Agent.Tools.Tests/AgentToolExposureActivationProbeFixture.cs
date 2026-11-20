@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using System.Collections.Frozen;
 using System.Text.Json;
 using CrestCreates.Agent.Abstractions;
@@ -26,14 +27,14 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
     private readonly List<JsonDocument> _allocatedDocuments = new();
 
     [Fact]
-    public void AuthorizedTools_BelowProviderLimit_Should_Be_Consumable()
+    public async Task AuthorizedTools_BelowProviderLimit_Should_Be_ConsumableAsync()
     {
         const int toolCount = 20;
         var context = CreateContext();
         var (entries, toolNames) = BuildProbeEntries(toolCount);
         var (catalog, snapshot) = BuildCatalog(entries, context);
 
-        var authorizedTools = catalog.ListAsync().AsTask().GetAwaiter().GetResult();
+        var authorizedTools = await catalog.ListAsync();
         var adapter = new ConstrainedProviderAdapter(DefaultProviderBudget);
         var result = adapter.TryConsume(authorizedTools);
 
@@ -46,14 +47,14 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
     }
 
     [Fact]
-    public void AuthorizedTools_AtProviderLimit_Should_Be_Consumable()
+    public async Task AuthorizedTools_AtProviderLimit_Should_Be_ConsumableAsync()
     {
         const int toolCount = 128;
         var context = CreateContext();
         var (entries, toolNames) = BuildProbeEntries(toolCount);
         var (catalog, _) = BuildCatalog(entries, context);
 
-        var authorizedTools = catalog.ListAsync().AsTask().GetAwaiter().GetResult();
+        var authorizedTools = await catalog.ListAsync();
         var adapter = new ConstrainedProviderAdapter(DefaultProviderBudget);
         var result = adapter.TryConsume(authorizedTools);
 
@@ -65,14 +66,14 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
     }
 
     [Fact]
-    public void AuthorizedTools_AboveProviderLimit_Should_Expose_CurrentFailure()
+    public async Task AuthorizedTools_AboveProviderLimit_Should_Expose_CurrentFailureAsync()
     {
         const int toolCount = 129;
         var context = CreateContext();
         var (entries, toolNames) = BuildProbeEntries(toolCount);
         var (catalog, _) = BuildCatalog(entries, context);
 
-        var authorizedTools = catalog.ListAsync().AsTask().GetAwaiter().GetResult();
+        var authorizedTools = await catalog.ListAsync();
         var adapter = new ConstrainedProviderAdapter(DefaultProviderBudget);
         var result = adapter.TryConsume(authorizedTools);
 
@@ -89,7 +90,7 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
     }
 
     [Fact]
-    public void ProviderLimit_Should_Not_Change_AuthorizedToolSet()
+    public async Task ProviderLimit_Should_Not_Change_AuthorizedToolSetAsync()
     {
         const int toolCount = 20;
         var context = CreateContext();
@@ -100,7 +101,7 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
         var adapter64 = new ConstrainedProviderAdapter(64);
         var adapter256 = new ConstrainedProviderAdapter(256);
 
-        var authorizedTools = catalog.ListAsync().AsTask().GetAwaiter().GetResult();
+        var authorizedTools = await catalog.ListAsync();
         var result128 = adapter128.TryConsume(authorizedTools);
         var result64 = adapter64.TryConsume(authorizedTools);
         var result256 = adapter256.TryConsume(authorizedTools);
@@ -122,7 +123,7 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
     }
 
     [Fact]
-    public void ProviderAdapter_Should_Not_Arbitrarily_Truncate_AuthorizedTools()
+    public async Task ProviderAdapter_Should_Not_Arbitrarily_Truncate_AuthorizedToolsAsync()
     {
         const int toolCount = 20;
         const int budget = 15;
@@ -130,7 +131,7 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
         var (entries, _) = BuildProbeEntries(toolCount);
         var (catalog, _) = BuildCatalog(entries, context);
 
-        var authorizedTools = catalog.ListAsync().AsTask().GetAwaiter().GetResult();
+        var authorizedTools = await catalog.ListAsync();
         var adapter = new ConstrainedProviderAdapter(budget);
         var result = adapter.TryConsume(authorizedTools);
 
@@ -143,7 +144,7 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
     }
 
     [Fact]
-    public void RegistrationOrder_Should_Not_Change_ExposureProbeOutcome()
+    public async Task RegistrationOrder_Should_Not_Change_ExposureProbeOutcomeAsync()
     {
         const int toolCount = 30;
         var context = CreateContext();
@@ -154,8 +155,8 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
         var (catalogA, _) = BuildCatalog(entriesA, context);
         var (catalogB, _) = BuildCatalog(entriesB, context);
 
-        var toolsA = catalogA.ListAsync().AsTask().GetAwaiter().GetResult();
-        var toolsB = catalogB.ListAsync().AsTask().GetAwaiter().GetResult();
+        var toolsA = await catalogA.ListAsync();
+        var toolsB = await catalogB.ListAsync();
 
         var adapterA = new ConstrainedProviderAdapter(DefaultProviderBudget);
         var adapterB = new ConstrainedProviderAdapter(DefaultProviderBudget);
@@ -173,7 +174,7 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
     }
 
     [Fact]
-    public void UnauthorizedTool_Should_Never_Become_ModelVisible()
+    public async Task UnauthorizedTool_Should_Never_Become_ModelVisibleAsync()
     {
         var context = CreateContext();
         var authorizedEntries = BuildProbeEntries(5, role: ProbeAgentRole).Entries;
@@ -183,7 +184,7 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
         var allEntries = authorizedEntries.Concat(new[] { unauthorizedEntry }).ToArray();
         var (catalog, _) = BuildCatalog(allEntries, context);
 
-        var tools = catalog.ListAsync().AsTask().GetAwaiter().GetResult();
+        var tools = await catalog.ListAsync();
 
         tools.Count.Should().Be(5,
             "Only role-matching tools should be catalog-visible; unauthorized tool must be excluded");
@@ -199,14 +200,14 @@ public class AgentToolExposureActivationProbeFixture : IDisposable
     /// - GoldenSampleAcceptanceTests.BudgetDenied_DoesNotEnterDispatcher
     /// </summary>
     [Fact]
-    public void CatalogVisibleTool_Should_Carry_GovernanceMetadata_ForExecutionTimeEnforcement()
+    public async Task CatalogVisibleTool_Should_Carry_GovernanceMetadata_ForExecutionTimeEnforcementAsync()
     {
         const int toolCount = 10;
         var context = CreateContext();
         var (entries, _) = BuildProbeEntries(toolCount);
         var (catalog, _) = BuildCatalog(entries, context);
 
-        var tools = catalog.ListAsync().AsTask().GetAwaiter().GetResult();
+        var tools = await catalog.ListAsync();
 
         tools.Should().AllSatisfy(tool =>
         {

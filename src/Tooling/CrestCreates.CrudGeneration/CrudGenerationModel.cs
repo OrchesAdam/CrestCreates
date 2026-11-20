@@ -167,6 +167,8 @@ public sealed record CrudFieldModel
     /// <summary>True for a non-nullable reference-type string, which carries the required attributes.</summary>
     public required bool IsRequiredString { get; init; }
 
+    public bool IsNonNullableReferenceType { get; init; }
+
     /// <summary>
     /// §8: the field's static CLR kind, computed by the builder from the property symbol (special type,
     /// TypeKind, enum identity). The generated query adapter picks its FilterValueReader call and its

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Application.Contracts.Interfaces;
 using CrestCreates.Caching;
 using CrestCreates.Domain.Features;
@@ -32,7 +33,7 @@ public static class FeatureManagementServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddFeatureDefinitionProvider<TProvider>(this IServiceCollection services)
+    public static IServiceCollection AddFeatureDefinitionProvider<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TProvider>(this IServiceCollection services)
         where TProvider : class, IFeatureDefinitionProvider
     {
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IFeatureDefinitionProvider, TProvider>());

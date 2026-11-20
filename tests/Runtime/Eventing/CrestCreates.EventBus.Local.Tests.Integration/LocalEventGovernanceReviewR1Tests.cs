@@ -48,9 +48,7 @@ internal sealed class ThrowingResolutionCheck : ILocalEventExecutionCheck
 
 internal sealed class ThrowingPushAuditAccessor : CrestCreates.Accountability.Abstractions.Context.IAuditOperationContextAccessor
 {
-    private CrestCreates.Accountability.Abstractions.Context.AuditOperationContext? _current;
-
-    public CrestCreates.Accountability.Abstractions.Context.AuditOperationContext? Current => _current;
+    public CrestCreates.Accountability.Abstractions.Context.AuditOperationContext? Current => null;
 
     public IDisposable Push(CrestCreates.Accountability.Abstractions.Context.AuditOperationContext context)
         => throw new InvalidOperationException("probe audit push failure");
@@ -201,11 +199,11 @@ public class LocalEventGovernanceReviewR1Tests
 
         var registry = provider.GetRequiredService<ILocalEventDispatchRegistry>();
         Assert.True(registry.TryGet(typeof(RejectingCheckEvent), out var binding));
-        Assert.Equal(1, binding.ExecutionCheckTypes.Count);
+        Assert.Single(binding.ExecutionCheckTypes);
 
         // Mutating the caller's original collection after freeze must not remove the check.
         checkList.Clear();
-        Assert.Equal(1, binding.ExecutionCheckTypes.Count);
+        Assert.Single(binding.ExecutionCheckTypes);
 
         Interlocked.Exchange(ref RejectingCheckHandler.Calls, 0);
         await using var scope = provider.CreateAsyncScope();

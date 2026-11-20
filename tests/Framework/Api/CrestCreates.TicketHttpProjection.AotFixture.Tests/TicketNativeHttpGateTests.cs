@@ -222,7 +222,7 @@ public sealed class TicketNativeHttpGateTests
             $"-p:CrestCreatesPublishMode=aot --disable-build-servers -o \"{outputDirectory}\"";
         var publish = await RunProcessAsync("dotnet", command, TimeSpan.FromMinutes(25));
         var executable = Path.Combine(outputDirectory, "CrestCreates.TicketHttpProjection.AotFixture");
-        if (publish.ExitCode == 0 && !publish.TimedOut && File.Exists(executable))
+        if (OperatingSystem.IsLinux() && publish.ExitCode == 0 && !publish.TimedOut && File.Exists(executable))
         {
             File.SetUnixFileMode(
                 executable,

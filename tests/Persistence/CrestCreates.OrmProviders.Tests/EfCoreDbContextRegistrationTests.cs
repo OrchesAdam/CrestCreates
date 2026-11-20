@@ -81,7 +81,7 @@ public class EfCoreDbContextRegistrationTests
             return Task.FromResult<IDisposable>(new NoopDisposable());
         }
 
-        public IDisposable Change(ITenantInfo tenant)
+        public IDisposable Change(ITenantInfo? tenant)
         {
             throw new NotImplementedException();
         }
@@ -148,7 +148,7 @@ public class EfCoreDbContextRegistrationTests
             InvokeOnModelCreating(context, modelBuilder);
 
             Assert.Equal(1, applyAllCalls);
-            Assert.NotEmpty(modelBuilder.Model.FindEntityType(typeof(Role))?.GetDeclaredQueryFilters());
+            Assert.NotEmpty(modelBuilder.Model.FindEntityType(typeof(Role))!.GetDeclaredQueryFilters());
         }
         finally
         {
@@ -171,7 +171,7 @@ public class EfCoreDbContextRegistrationTests
 
             Assert.False(TenantFilterRegistryStore.HasRegistrations);
             InvokeOnModelCreating(context, modelBuilder);
-            Assert.Empty(modelBuilder.Model.FindEntityType(typeof(Role))?.GetDeclaredQueryFilters());
+            Assert.Empty(modelBuilder.Model.FindEntityType(typeof(Role))!.GetDeclaredQueryFilters());
         }
         finally
         {

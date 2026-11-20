@@ -175,7 +175,7 @@ public sealed class ControlPlaneJsonContractsAotFixtureTests
         await File.WriteAllTextAsync(Path.Combine(output, "publish.log"), publish.Output);
 
         var executable = Path.Combine(output, "CrestCreates.Agent.ControlPlane.JsonContracts.AotFixture");
-        if (publish.ExitCode == 0 && File.Exists(executable))
+        if (OperatingSystem.IsLinux() && publish.ExitCode == 0 && File.Exists(executable))
         {
             File.SetUnixFileMode(
                 executable,

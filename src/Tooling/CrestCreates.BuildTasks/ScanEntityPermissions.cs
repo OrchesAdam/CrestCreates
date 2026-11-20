@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Task = Microsoft.Build.Utilities.Task;
 
@@ -102,11 +103,7 @@ public class ScanEntityPermissions : Task
                 Directory.CreateDirectory(dir);
             }
 
-            File.WriteAllText(OutputPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            }));
+            File.WriteAllText(OutputPath, JsonSerializer.Serialize(manifest, EntityPermissionsJsonContext.Default.EntityPermissionsManifest));
 
             Log.LogMessage(MessageImportance.High,
                 $"Generated entity permissions manifest at {OutputPath} with {permissions.Count} entities");
@@ -162,3 +159,6 @@ internal class EntityPermissionInfo
     public string Namespace { get; set; } = string.Empty;
     public List<string> Permissions { get; set; } = new();
 }
+[JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(EntityPermissionsManifest))]
+internal partial class EntityPermissionsJsonContext : JsonSerializerContext;

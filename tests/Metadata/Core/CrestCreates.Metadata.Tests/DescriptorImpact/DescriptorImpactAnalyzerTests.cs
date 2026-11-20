@@ -17,7 +17,7 @@ public class DescriptorImpactAnalyzerTests
         BuildTopology(
             (DescriptorRef Ref, DescriptorKind Kind, string Name, DescriptorState State)[] nodeDefs,
             (int Index, DescriptorRef From, DescriptorRef To, RelationshipKind Kind,
-             string? Role, RelationshipStrength Strength, bool IsRuntimeBinding)[] edgeDefs)
+             string Role, RelationshipStrength Strength, bool IsRuntimeBinding)[] edgeDefs)
     {
         var nodes = new Dictionary<DescriptorRef, DescriptorNode>();
         foreach (var def in nodeDefs)
@@ -339,7 +339,7 @@ public class DescriptorImpactAnalyzerTests
 
         var (snapshot, _) = BuildTopology(
             new[] { (form, DescriptorKind.Form, "Checkout", DescriptorState.Active) },
-            Array.Empty<(int, DescriptorRef, DescriptorRef, RelationshipKind, string?, RelationshipStrength, bool)>());
+            Array.Empty<(int, DescriptorRef, DescriptorRef, RelationshipKind, string, RelationshipStrength, bool)>());
 
         var changeSet = new DescriptorChangeSet
         {

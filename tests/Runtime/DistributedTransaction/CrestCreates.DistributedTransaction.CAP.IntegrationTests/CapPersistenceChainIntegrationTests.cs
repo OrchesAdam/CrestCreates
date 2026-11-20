@@ -230,7 +230,7 @@ public class CapPersistenceChainIntegrationTests : IClassFixture<CapIntegrationF
                 return null;
             });
 
-            Assert.Equal(1, executor.Invocations.Count);
+            Assert.Single(executor.Invocations);
         }
 
         var row = await GetRowAsync(transactionId);

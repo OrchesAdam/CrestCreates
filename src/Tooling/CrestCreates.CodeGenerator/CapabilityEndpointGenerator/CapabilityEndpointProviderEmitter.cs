@@ -71,7 +71,7 @@ internal static class CapabilityEndpointProviderEmitter
 
     private static void EmitDescriptor(StringBuilder sb, CapabilityEndpointSpecRecord spec)
     {
-        var endpointId = !string.IsNullOrEmpty(spec.EndpointId) ? spec.EndpointId : $"endpoint:{spec.CapabilityId}";
+        var endpointId = spec.EndpointId is { Length: > 0 } ? spec.EndpointId : $"endpoint:{spec.CapabilityId}";
         var version = spec.EndpointVersion > 0 ? spec.EndpointVersion
             : (spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1);
         var httpMethodName = ResolveHttpMethodName(spec.HttpMethodValue);
@@ -157,18 +157,18 @@ internal static class CapabilityEndpointProviderEmitter
         sb.AppendLine("                {");
 
         var opId = spec.OperationId;
-        if (!string.IsNullOrEmpty(opId))
+        if (opId is { Length: > 0 })
             sb.AppendLine($"                    OperationId = \"{Escape(opId)}\",");
         var grpName = spec.GroupName;
-        if (!string.IsNullOrEmpty(grpName))
+        if (grpName is { Length: > 0 })
             sb.AppendLine($"                    GroupName = \"{Escape(grpName)}\",");
         if (!string.IsNullOrEmpty(tagsStr))
             sb.AppendLine($"                    Tags = {tagsStr},");
         var summary = spec.Summary;
-        if (!string.IsNullOrEmpty(summary))
+        if (summary is { Length: > 0 })
             sb.AppendLine($"                    Summary = \"{Escape(summary)}\",");
         var description = spec.Description;
-        if (!string.IsNullOrEmpty(description))
+        if (description is { Length: > 0 })
             sb.AppendLine($"                    Description = \"{Escape(description)}\",");
         if (spec.Deprecated)
             sb.AppendLine("                    Deprecated = true,");

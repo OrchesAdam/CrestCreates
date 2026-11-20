@@ -38,7 +38,7 @@ public sealed record AgentToolGovernanceAuditContext
 
     public required AgentToolCallOrigin CallOrigin { get; init; }
 
-    public required string AgentRolesHash { get; init; }
+    public required string? AgentRolesHash { get; init; }
 
     public required AgentToolContractIdentity ToolContract { get; init; }
 

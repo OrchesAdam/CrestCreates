@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CrestCreates.Infrastructure.Localization
 {
@@ -28,7 +29,7 @@ namespace CrestCreates.Infrastructure.Localization
             {
                 var cultureName = Path.GetFileNameWithoutExtension(file);
                 var jsonContent = File.ReadAllText(file);
-                var resourceDict = JsonSerializer.Deserialize<Dictionary<string, string>>(jsonContent);
+                var resourceDict = JsonSerializer.Deserialize(jsonContent, LocalizationJsonContext.Default.DictionaryStringString);
                 
                 _resources[cultureName] = resourceDict!;
             }
@@ -89,4 +90,6 @@ namespace CrestCreates.Infrastructure.Localization
             return false;
         }
     }
+    [JsonSerializable(typeof(Dictionary<string, string>))]
+    internal partial class LocalizationJsonContext : JsonSerializerContext;
 }

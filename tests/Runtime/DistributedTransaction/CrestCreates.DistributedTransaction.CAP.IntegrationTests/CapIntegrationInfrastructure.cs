@@ -535,7 +535,7 @@ public sealed class MutableCurrentTenant : CrestCreates.MultiTenancy.Abstract.IC
 
     public Task<IDisposable> ChangeAsync(string tenantId) => throw new NotSupportedException();
 
-    public IDisposable Change(CrestCreates.MultiTenancy.Abstract.ITenantInfo tenant) => throw new NotSupportedException();
+    public IDisposable Change(CrestCreates.MultiTenancy.Abstract.ITenantInfo? tenant) => throw new NotSupportedException();
 
     public void SetTenantId(string tenantId) => Id = tenantId;
 }

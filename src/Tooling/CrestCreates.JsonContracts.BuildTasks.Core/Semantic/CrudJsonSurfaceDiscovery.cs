@@ -106,7 +106,7 @@ public sealed class CrudJsonSurfaceDiscovery
         {
             0 => null,
             1 => candidates[0],
-            _ => candidates.First(candidate => candidate.ContainingAssembly != compilation.Assembly),
+            _ => candidates.First(candidate => !SymbolEqualityComparer.Default.Equals(candidate.ContainingAssembly, compilation.Assembly)),
         };
         if (candidates.Count > 1)
         {

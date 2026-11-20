@@ -25,7 +25,6 @@ public static class AgentMemoryPersistenceContractAssertions
         => True(value is not null, message);
 
     public static void Equal<T>(T expected, T actual, string message)
-        where T : notnull
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
         {

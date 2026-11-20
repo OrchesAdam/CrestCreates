@@ -292,29 +292,26 @@ public sealed class AccountabilityExceptionPipelineTests
             app.UseMultiTenancy();
             app.UseAuthentication();
             app.UseAccountabilityHttpOperationScope();
-            app.UseEndpoints(endpoints =>
+            app.MapGet("/invalid-operation", _ => Task.FromException(new InvalidOperationException("invalid")));
+            app.MapGet("/not-found", _ => Task.FromException(new KeyNotFoundException("missing")));
+            app.MapGet("/forbidden", _ => Task.FromException(new CrestPermissionException("orders.read")));
+            app.MapGet("/unknown", _ => Task.FromException(new Exception("unknown")));
+            app.MapGet("/child-operation", context =>
             {
-                endpoints.MapGet("/invalid-operation", _ => Task.FromException(new InvalidOperationException("invalid")));
-                endpoints.MapGet("/not-found", _ => Task.FromException(new KeyNotFoundException("missing")));
-                endpoints.MapGet("/forbidden", _ => Task.FromException(new CrestPermissionException("orders.read")));
-                endpoints.MapGet("/unknown", _ => Task.FromException(new Exception("unknown")));
-                endpoints.MapGet("/child-operation", context =>
-                {
-                    var ambient = context.RequestServices.GetRequiredService<IAuditOperationContextAccessor>().Current;
-                    child.ChildCorrelationId = ambient?.CorrelationId;
-                    child.ChildActor = ambient?.Actor;
-                    return Task.FromException(new InvalidOperationException("child failed"));
-                });
-                endpoints.MapGet("/success", context =>
-                {
-                    var ambient = context.RequestServices.GetRequiredService<IAuditOperationContextAccessor>().Current;
-                    child.ChildCorrelationId = ambient?.CorrelationId;
-                    child.ChildOperationId = ambient?.OperationId;
-                    child.ChildEnclosingAuditId = ambient?.EnclosingAuditId;
-                    child.ChildActor = ambient?.Actor;
-                    child.ChildTenantId = ambient?.TenantId;
-                    return context.Response.WriteAsync("ok");
-                });
+                var ambient = context.RequestServices.GetRequiredService<IAuditOperationContextAccessor>().Current;
+                child.ChildCorrelationId = ambient?.CorrelationId;
+                child.ChildActor = ambient?.Actor;
+                return Task.FromException(new InvalidOperationException("child failed"));
+            });
+            app.MapGet("/success", context =>
+            {
+                var ambient = context.RequestServices.GetRequiredService<IAuditOperationContextAccessor>().Current;
+                child.ChildCorrelationId = ambient?.CorrelationId;
+                child.ChildOperationId = ambient?.OperationId;
+                child.ChildEnclosingAuditId = ambient?.EnclosingAuditId;
+                child.ChildActor = ambient?.Actor;
+                child.ChildTenantId = ambient?.TenantId;
+                return context.Response.WriteAsync("ok");
             });
             await app.StartAsync();
             return new PipelineHarness(
@@ -473,7 +470,7 @@ public sealed class AccountabilityExceptionPipelineTests
         public ITenantInfo? Tenant => null;
         public string? Id => "tenant-1";
         public Task<IDisposable> ChangeAsync(string tenantId) => Task.FromResult<IDisposable>(new Noop());
-        public IDisposable Change(ITenantInfo tenant) => new Noop();
+        public IDisposable Change(ITenantInfo? tenant) => new Noop();
         public void SetTenantId(string tenantId) { }
 
         private sealed class Noop : IDisposable

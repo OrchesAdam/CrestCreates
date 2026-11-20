@@ -64,7 +64,7 @@ internal static class CapabilityEndpointBindingEmitter
 
         foreach (var spec in group.Specs)
         {
-            var endpointId = !string.IsNullOrEmpty(spec.EndpointId) ? spec.EndpointId : $"endpoint:{spec.CapabilityId}";
+            var endpointId = spec.EndpointId is { Length: > 0 } ? spec.EndpointId : $"endpoint:{spec.CapabilityId}";
             var version = spec.EndpointVersion > 0 ? spec.EndpointVersion
                 : (spec.CapabilityVersion > 0 ? spec.CapabilityVersion : 1);
             var methodName = $"Bind_{SanitizeClassName(spec.SpecClassName)}_Async";

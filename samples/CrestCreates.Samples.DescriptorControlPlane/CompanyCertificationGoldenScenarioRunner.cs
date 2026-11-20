@@ -154,9 +154,9 @@ public sealed class CompanyCertificationGoldenScenarioRunner
 
                     // Track specific HumanTask instances
                     if (initialReviewHtId is null)
-                        initialReviewHtId = wf.WaitingHumanTaskId;
+                        initialReviewHtId = waitingTaskKey.InstanceId;
                     else if (financeReviewHtId is null)
-                        financeReviewHtId = wf.WaitingHumanTaskId;
+                        financeReviewHtId = waitingTaskKey.InstanceId;
 
                     // Complete with Approve
                     await htRuntime.CompleteAsync(new HumanTaskCompletionRequest
@@ -169,7 +169,7 @@ public sealed class CompanyCertificationGoldenScenarioRunner
                             Decision: "Approve")),
                     });
                     completedCount++;
-                    completedHumanTaskInstanceIds.Add(wf.WaitingHumanTaskId);
+                    completedHumanTaskInstanceIds.Add(waitingTaskKey.InstanceId);
                 }
 
                 await Task.Delay(100);

@@ -47,7 +47,7 @@ public class IntegrationEventCodecWriterTests : JsonContractCompilationTestBase
         ], GetDefaultReferences());
 
         var discovery = new IntegrationEventJsonSurfaceDiscovery();
-        result.Model!.IntegrationEventRoots.AddRange(discovery.Discover(result.Compilation));
+        result.Model!.IntegrationEventRoots.AddRange(discovery.Discover(result.Compilation!));
         discovery.Diagnostics.Should().BeEmpty();
 
         var output = JsonContractSourceWriter.WriteContextSource(result.Model!, "TestAssembly");
@@ -83,7 +83,7 @@ public class IntegrationEventCodecWriterTests : JsonContractCompilationTestBase
         ], GetDefaultReferences());
 
         var discovery = new IntegrationEventJsonSurfaceDiscovery();
-        var roots = discovery.Discover(result.Compilation);
+        var roots = discovery.Discover(result.Compilation!);
 
         roots.Should().BeEmpty();
         discovery.Diagnostics.Should().BeEmpty();
@@ -109,7 +109,7 @@ public class IntegrationEventCodecWriterTests : JsonContractCompilationTestBase
         ], GetDefaultReferences());
 
         var discovery = new IntegrationEventJsonSurfaceDiscovery();
-        var roots = discovery.Discover(result.Compilation);
+        var roots = discovery.Discover(result.Compilation!);
 
         roots.Should().BeEmpty();
         discovery.Diagnostics.Should().ContainSingle(d => d.Id == "CJC020");
@@ -132,7 +132,7 @@ public class IntegrationEventCodecWriterTests : JsonContractCompilationTestBase
         ], GetDefaultReferences());
 
         var discovery = new IntegrationEventJsonSurfaceDiscovery();
-        var roots = discovery.Discover(result.Compilation);
+        var roots = discovery.Discover(result.Compilation!);
 
         roots.Should().BeEmpty();
         discovery.Diagnostics.Should().ContainSingle(d => d.Id == "CJC018");
@@ -155,7 +155,7 @@ public class IntegrationEventCodecWriterTests : JsonContractCompilationTestBase
         ], GetDefaultReferences());
 
         var discovery = new IntegrationEventJsonSurfaceDiscovery();
-        result.Model!.IntegrationEventRoots.AddRange(discovery.Discover(result.Compilation));
+        result.Model!.IntegrationEventRoots.AddRange(discovery.Discover(result.Compilation!));
 
         var output = JsonContractSourceWriter.WriteContextSource(result.Model!, "TestAssembly");
         output.Should().Contain("EventJsonSerializerContext");

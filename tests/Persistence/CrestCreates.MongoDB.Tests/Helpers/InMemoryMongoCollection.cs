@@ -272,12 +272,10 @@ public class InMemoryMongoCollection<TDocument> : IMongoCollection<TDocument>
 
     public ReplaceOneResult ReplaceOne(FilterDefinition<TDocument> filter, TDocument replacement, ReplaceOptions options, CancellationToken cancellationToken = default)
     {
-        var replaced = false;
-        for (var i = 0; i < _documents.Count; i++)
+        var replaced = _documents.Count > 0;
+        if (replaced)
         {
-            _documents[i] = replacement;
-            replaced = true;
-            break;
+            _documents[0] = replacement;
         }
 
         return new ReplaceOneResult.Acknowledged(replaced ? 1 : 0, replaced ? 1 : 0, BsonNull.Value);

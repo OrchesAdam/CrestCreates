@@ -37,10 +37,10 @@
     via AssemblyLoadContext to verify true binary compatibility.
     
     NOTE: The frozen fixture DLLs in TypeForward/Fixtures/ take precedence for the
-    LegacyConsumerFixture test. The BuildAndCopyLegacyConsumer target is kept for
-    development convenience (rebuilding fixtures after contract changes).
+    LegacyConsumerFixture test. To rebuild the development copy, restore the legacy
+    consumer project and set RebuildLegacyConsumer=true when building this project.
   -->
-  <Target Name="BuildAndCopyLegacyConsumer" AfterTargets="Build">
+  <Target Name="BuildAndCopyLegacyConsumer" AfterTargets="Build" Condition="'$(RebuildLegacyConsumer)' == 'true'">
     <MSBuild Projects="..\CrestCreates.Agent.Memory.TypeForwardLegacyConsumer\CrestCreates.Agent.Memory.TypeForwardLegacyConsumer.csproj" Targets="Build" />
     <ItemGroup>
       <LegacyConsumerFiles Include="..\CrestCreates.Agent.Memory.TypeForwardLegacyConsumer\bin\$(Configuration)\$(TargetFramework)\TypeForwardLegacyConsumer.dll" />

@@ -113,5 +113,6 @@ public static class ExternalTestServices
     }
 
     public static string DatabaseName(string connectionString)
-        => new NpgsqlConnectionStringBuilder(connectionString).Database;
+        => new NpgsqlConnectionStringBuilder(connectionString).Database
+            ?? throw new ArgumentException("A test database name is required.", nameof(connectionString));
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Runtime.Delivery.Abstractions.Activation;
 using CrestCreates.Runtime.Delivery.Abstractions.Handlers;
 using CrestCreates.Runtime.Delivery.Abstractions.Messages;
@@ -36,7 +37,7 @@ public static class DeliveryServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddOutboxDeliveryHandler<THandler>(this IServiceCollection services, string contractId)
+    public static IServiceCollection AddOutboxDeliveryHandler<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] THandler>(this IServiceCollection services, string contractId)
         where THandler : class, IOutboxDeliveryHandler
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(contractId);
