@@ -34,9 +34,10 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
         with:
-          dotnet-version: |
-            10.0.x
+          dotnet-version: '10.0.114'
 
       - name: Start external test services
         run: >-
@@ -213,9 +214,10 @@ jobs:
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
         with:
-          dotnet-version: |
-            10.0.x
+          dotnet-version: '10.0.114'
 
       - name: Start external RabbitMQ test service
         run: >-

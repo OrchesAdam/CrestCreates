@@ -88,7 +88,7 @@ CrestCreates Core:
     Workflow / HumanTask / Outbox / Memory / AgentTool:
         经 PG AotHost、主 Agent.Tools fixture 与 Golden App fixture 原生 publish/link/run 覆盖
     HTTP (CapabilityEndpoint):
-        CI 门禁已接线（全部 workflow 当前处于手工禁用状态，证据以本地/历史执行计账），
+        CI 与 Full Validation 接入原生门禁，覆盖证据按实际完成的执行计账，
         原生 publish/link/run，含 loopback 请求断言（成功/负例/进程回收），
         仅 linux-x64；认证/权限/租户/bootstrap 全链不在该 fixture 覆盖内
     MCP:
