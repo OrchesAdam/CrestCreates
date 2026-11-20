@@ -513,7 +513,6 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(request.Identity);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
@@ -606,7 +605,6 @@ public sealed class DevelopmentInMemoryAgentToolInvocationGate
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(claim);
-        ArgumentNullException.ThrowIfNull(claim.Identity);
         ArgumentException.ThrowIfNullOrWhiteSpace(claim.ClaimToken);
         ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
         if (kind is not (AgentToolPreDispatchReconciliationCompletionKind.Released

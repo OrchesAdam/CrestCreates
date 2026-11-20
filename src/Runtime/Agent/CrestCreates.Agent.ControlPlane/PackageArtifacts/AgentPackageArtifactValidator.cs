@@ -148,8 +148,8 @@ public sealed class AgentPackageArtifactValidator : IAgentPackageArtifactValidat
         }));
     }
 
-    private static void WriteIdentity(Utf8JsonWriter writer, int version, string tenantId, string artifactId, DateTimeOffset capturedAt,
-        AgentPackageArtifactOwner owner, string scopeFingerprint, string draftVersion)
+    private static void WriteIdentity(Utf8JsonWriter writer, int version, string tenantId, string? artifactId, DateTimeOffset capturedAt,
+        AgentPackageArtifactOwner owner, string scopeFingerprint, string? draftVersion)
     {
         writer.WriteNumber("envelopeVersion", version);
         writer.WriteString("tenantId", tenantId);

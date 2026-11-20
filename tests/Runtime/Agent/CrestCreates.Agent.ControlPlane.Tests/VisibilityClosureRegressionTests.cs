@@ -308,7 +308,7 @@ public class VisibilityClosureRegressionTests : AgentControlPlaneTestBase
 
         result.Status.Should().Be(AgentToolResultStatus.Success);
         // After filtering all denied-kind findings, compatibility must show no incompatibilities
-        result.Value!.CompatibilitySummary.IsCompatible.Should().BeTrue(
+        result.Value!.CompatibilitySummary!.IsCompatible.Should().BeTrue(
             "empty compatibility findings after filtering must default to Compatible");
         result.Value!.CompatibilitySummary.IncompatibilityCount.Should().Be(0,
             "denied-kind compatibility findings must be filtered out");

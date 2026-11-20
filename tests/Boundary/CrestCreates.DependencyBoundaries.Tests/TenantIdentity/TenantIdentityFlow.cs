@@ -632,7 +632,7 @@ internal sealed class TenantIdentityFlow(
     internal static string OriginOf(ISymbol symbol) => symbol switch
     {
         IParameterSymbol parameter =>
-            $"param:{TenantIdentitySymbols.FullName(parameter.ContainingType ?? parameter.ContainingSymbol as INamedTypeSymbol)}:{parameter.Name}",
+            $"param:{TenantIdentitySymbols.FullName(parameter.ContainingType ?? parameter.ContainingSymbol)}:{parameter.Name}",
         IPropertySymbol property => $"{TenantIdentitySymbols.FullName(property.ContainingType)}.{property.Name}",
         IFieldSymbol field => $"{TenantIdentitySymbols.FullName(field.ContainingType)}.{field.Name}",
         IMethodSymbol method => $"method:{TenantIdentitySymbols.FullName(method.ContainingType)}.{method.Name}",

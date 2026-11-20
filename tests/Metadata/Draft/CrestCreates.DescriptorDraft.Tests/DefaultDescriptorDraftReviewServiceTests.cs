@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using CrestCreates.Core.Abstractions.Identity;
 using CrestCreates.DescriptorDraft.Abstractions;
 using CrestCreates.Metadata.Abstractions;
@@ -74,7 +75,7 @@ public class DefaultDescriptorDraftReviewServiceTests
     // ── Test 1: Early stop on validation error ──
 
     [Fact]
-    public void Stops_Early_On_Validation_Error()
+    public async Task Stops_Early_On_Validation_ErrorAsync()
     {
         var draft = new Draft
         {
@@ -102,7 +103,7 @@ public class DefaultDescriptorDraftReviewServiceTests
             .Returns(failedValidation);
 
         var service = CreateService();
-        var result = service.ReviewAsync(draft, EmptyInventory).Result;
+        var result = await service.ReviewAsync(draft, EmptyInventory);
 
         result.IsActivationEligible.Should().BeFalse();
         result.MaterializationResult.Should().BeNull();
@@ -116,7 +117,7 @@ public class DefaultDescriptorDraftReviewServiceTests
     // ── Test 2: Early stop on materialization error ──
 
     [Fact]
-    public void Stops_Early_On_Materialization_Error()
+    public async Task Stops_Early_On_Materialization_ErrorAsync()
     {
         var draft = CreateValidCreateDraft();
         var existingDescriptor = new SchemaDescriptor
@@ -144,7 +145,7 @@ public class DefaultDescriptorDraftReviewServiceTests
                 }));
 
         var service = CreateService();
-        var result = service.ReviewAsync(draft, currentInventory).Result;
+        var result = await service.ReviewAsync(draft, currentInventory);
 
         result.IsActivationEligible.Should().BeFalse();
         result.MaterializationResult.Should().NotBeNull();
@@ -162,7 +163,7 @@ public class DefaultDescriptorDraftReviewServiceTests
     // ── Test 3: Full pipeline for valid draft ──
 
     [Fact]
-    public void Invokes_Control_Plane_For_Valid_Draft()
+    public async Task Invokes_Control_Plane_For_Valid_DraftAsync()
     {
         var draft = CreateValidCreateDraft();
         var materializedInventory = new List<IDescriptor>
@@ -238,7 +239,7 @@ public class DefaultDescriptorDraftReviewServiceTests
             });
 
         var service = CreateService();
-        var result = service.ReviewAsync(draft, EmptyInventory).Result;
+        var result = await service.ReviewAsync(draft, EmptyInventory);
 
         // Validation and materialization should have passed
         result.ValidationResult.IsValid.Should().BeTrue();
@@ -264,7 +265,7 @@ public class DefaultDescriptorDraftReviewServiceTests
     }
 
     [Fact]
-    public void Package_Preview_Does_Not_Fabricate_SnapshotHash()
+    public async Task Package_Preview_Does_Not_Fabricate_SnapshotHashAsync()
     {
         var draft = CreateValidCreateDraft();
         var materializedInventory = new List<IDescriptor>
@@ -310,7 +311,7 @@ public class DefaultDescriptorDraftReviewServiceTests
             });
 
         var service = CreateService();
-        var result = service.ReviewAsync(draft, EmptyInventory).Result;
+        var result = await service.ReviewAsync(draft, EmptyInventory);
 
         result.PackagePreview.Should().NotBeNull();
         result.PackagePreview!.PackageManifestHash.Should().BeNull();

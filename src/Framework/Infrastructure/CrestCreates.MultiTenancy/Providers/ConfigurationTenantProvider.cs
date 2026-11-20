@@ -58,7 +58,7 @@ namespace CrestCreates.MultiTenancy.Providers
                             tenantConfig.ConnectionString);
 
                         _logger.LogDebug("Tenant found in configuration: {TenantId}", tenantId);
-                        return Task.FromResult<ITenantInfo>(tenant);
+                        return Task.FromResult<ITenantInfo?>(tenant);
                     }
                 }
             }
@@ -67,7 +67,7 @@ namespace CrestCreates.MultiTenancy.Providers
             return Task.FromResult<ITenantInfo?>(null);
         }
 
-        private class TenantConfiguration
+        internal sealed class TenantConfiguration
         {
             public string Id { get; set; } = string.Empty;
             public string Name { get; set; } = string.Empty;

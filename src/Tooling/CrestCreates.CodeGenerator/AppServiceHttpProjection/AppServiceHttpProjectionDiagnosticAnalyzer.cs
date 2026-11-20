@@ -37,7 +37,7 @@ public sealed class AppServiceHttpProjectionDiagnosticAnalyzer : DiagnosticAnaly
         title: "AppService HTTP registration mode is retired",
         messageFormat:
             "'{0}' declares RegistrationMode.LegacyStatic, which is retired; use "
-            + "HttpProjectionRegistrationMode.ExplicitHost.",
+            + "HttpProjectionRegistrationMode.ExplicitHost",
         category: "CrestCreates.HttpProjection",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);

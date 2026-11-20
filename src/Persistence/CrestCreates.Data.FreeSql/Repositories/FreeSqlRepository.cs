@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using FreeSql;
@@ -115,26 +116,24 @@ namespace CrestCreates.Data.FreeSql.Repositories
         }
 
         private static Expression<Func<TEntity, bool>> InterfacePropertyEquals(
-            Type interfaceType,
-            string propertyName,
+            PropertyInfo interfaceProperty,
             object value)
         {
             var parameter = Expression.Parameter(typeof(TEntity), "entity");
-            var property = Expression.Property(Expression.Convert(parameter, interfaceType), propertyName);
+            var property = Expression.Property(Expression.Convert(parameter, interfaceProperty.DeclaringType!), interfaceProperty);
             var body = Expression.Equal(property, Expression.Constant(value, property.Type));
             return Expression.Lambda<Func<TEntity, bool>>(body, parameter);
         }
 
         private static Expression<Func<TEntity, bool>> LiveRowPredicate()
         {
-            return InterfacePropertyEquals(typeof(ISoftDelete), nameof(ISoftDelete.IsDeleted), false);
+            return InterfacePropertyEquals(typeof(ISoftDelete).GetProperty(nameof(ISoftDelete.IsDeleted))!, false);
         }
 
         private static Expression<Func<TEntity, bool>> ConcurrencyStampPredicate(string stamp)
         {
             return InterfacePropertyEquals(
-                typeof(IHasConcurrencyStamp),
-                nameof(IHasConcurrencyStamp.ConcurrencyStamp),
+                typeof(IHasConcurrencyStamp).GetProperty(nameof(IHasConcurrencyStamp.ConcurrencyStamp))!,
                 stamp);
         }
 
@@ -144,7 +143,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
             var parameter = Expression.Parameter(typeof(TEntity), "entity");
             var property = Expression.Property(
                 Expression.Convert(parameter, typeof(IMultiTenant)),
-                nameof(IMultiTenant.TenantId));
+                typeof(IMultiTenant).GetProperty(nameof(IMultiTenant.TenantId))!);
             Expression body = Expression.Equal(property, Expression.Constant(null, property.Type));
             if (!string.IsNullOrEmpty(tenantId))
             {
@@ -173,8 +172,7 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 }
 
                 return InterfacePropertyEquals(
-                    typeof(IMustHaveTenant),
-                    nameof(IMustHaveTenant.TenantId),
+                    typeof(IMustHaveTenant).GetProperty(nameof(IMustHaveTenant.TenantId))!,
                     tenantId);
             }
 
@@ -198,15 +196,13 @@ namespace CrestCreates.Data.FreeSql.Repositories
                 }
 
                 return InterfacePropertyEquals(
-                    typeof(IMustHaveTenant),
-                    nameof(IMustHaveTenant.TenantId),
+                    typeof(IMustHaveTenant).GetProperty(nameof(IMustHaveTenant.TenantId))!,
                     tenantId);
             }
 
             // Ordinary tenants own only their own rows; host owns shared null rows.
             return InterfacePropertyEquals(
-                typeof(IMultiTenant),
-                nameof(IMultiTenant.TenantId),
+                typeof(IMultiTenant).GetProperty(nameof(IMultiTenant.TenantId))!,
                 tenantId!);
         }
 

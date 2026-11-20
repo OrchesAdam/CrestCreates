@@ -210,7 +210,7 @@ public static class AgentToolPreDispatchComparerTests
         var left = SampleRecord();
         var right = WithContext(left, c => c with
         {
-            InputSchemaContract = c.InputSchemaContract with { Id = "in-mut" }
+            InputSchemaContract = c.InputSchemaContract! with { Id = "in-mut" }
         });
         AssertNotEquivalent(left, right);
     }
@@ -221,7 +221,7 @@ public static class AgentToolPreDispatchComparerTests
         var left = SampleRecord();
         var right = WithContext(left, c => c with
         {
-            InputSchemaContract = c.InputSchemaContract with
+            InputSchemaContract = c.InputSchemaContract! with
             {
                 Version = c.InputSchemaContract.Version + 1
             }
@@ -235,7 +235,7 @@ public static class AgentToolPreDispatchComparerTests
         var left = SampleRecord();
         var right = WithContext(left, c => c with
         {
-            InputSchemaContract = c.InputSchemaContract with { ContractHash = "inhash-mut" }
+            InputSchemaContract = c.InputSchemaContract! with { ContractHash = "inhash-mut" }
         });
         AssertNotEquivalent(left, right);
     }
@@ -254,7 +254,7 @@ public static class AgentToolPreDispatchComparerTests
         var left = SampleRecord();
         var right = WithContext(left, c => c with
         {
-            OutputSchemaContract = c.OutputSchemaContract with { Id = "out-mut" }
+            OutputSchemaContract = c.OutputSchemaContract! with { Id = "out-mut" }
         });
         AssertNotEquivalent(left, right);
     }
@@ -265,7 +265,7 @@ public static class AgentToolPreDispatchComparerTests
         var left = SampleRecord();
         var right = WithContext(left, c => c with
         {
-            OutputSchemaContract = c.OutputSchemaContract with
+            OutputSchemaContract = c.OutputSchemaContract! with
             {
                 Version = c.OutputSchemaContract.Version + 1
             }
@@ -279,7 +279,7 @@ public static class AgentToolPreDispatchComparerTests
         var left = SampleRecord();
         var right = WithContext(left, c => c with
         {
-            OutputSchemaContract = c.OutputSchemaContract with { ContractHash = "outhash-mut" }
+            OutputSchemaContract = c.OutputSchemaContract! with { ContractHash = "outhash-mut" }
         });
         AssertNotEquivalent(left, right);
     }

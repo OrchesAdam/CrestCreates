@@ -1235,7 +1235,6 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         AgentToolPreDispatchReconciliationClaimRequest req, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(req);
-        ArgumentNullException.ThrowIfNull(req.Identity);
 
         var now = DateTimeOffset.UtcNow;
         var logicalKeyJson = PostgreSqlRuntimeStoreSupport.Serialize(
@@ -1434,7 +1433,6 @@ internal sealed class PostgreSqlAgentToolInvocationGate : IAgentToolInvocationGa
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(claim);
-        ArgumentNullException.ThrowIfNull(claim.Identity);
         ArgumentException.ThrowIfNullOrWhiteSpace(claim.ClaimToken);
         ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
         if (kind is not (AgentToolPreDispatchReconciliationCompletionKind.Released

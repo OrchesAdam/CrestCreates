@@ -12,7 +12,7 @@ namespace CrestCreates.DistributedTransaction.CAP.IntegrationTests;
 public class GuardedCapTransactionTests
 {
     [Fact]
-    public void Commit_variants_are_guarded()
+    public async Task Commit_variants_are_guardedAsync()
     {
         var guarded = new GuardedPostgreSqlCapTransaction(null!);
 
@@ -20,10 +20,10 @@ public class GuardedCapTransactionTests
         Assert.Contains("guards a borrowed", Assert.Throws<InvalidOperationException>(() => guarded.Rollback()).Message);
         Assert.Contains(
             "guards a borrowed",
-            (Assert.ThrowsAsync<InvalidOperationException>(() => guarded.CommitAsync())).GetAwaiter().GetResult().Message);
+            (await Assert.ThrowsAsync<InvalidOperationException>(() => guarded.CommitAsync())).Message);
         Assert.Contains(
             "guards a borrowed",
-            (Assert.ThrowsAsync<InvalidOperationException>(() => guarded.RollbackAsync())).GetAwaiter().GetResult().Message);
+            (await Assert.ThrowsAsync<InvalidOperationException>(() => guarded.RollbackAsync())).Message);
     }
 
     [Fact]

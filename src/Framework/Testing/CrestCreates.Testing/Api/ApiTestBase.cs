@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http;
@@ -9,6 +10,7 @@ using CrestCreates.Testing.Integration;
 
 namespace CrestCreates.Testing.Api;
 
+[RequiresUnreferencedCode("API tests serialize arbitrary test DTOs through reflection-based JSON.")]
 public abstract class ApiTestBase<TProgram> : IntegrationTestBase<TProgram> where TProgram : class
 {
     protected ApiTestBase(WebApplicationFactory<TProgram> factory) : base(factory)

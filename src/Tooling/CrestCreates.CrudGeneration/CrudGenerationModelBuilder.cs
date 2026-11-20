@@ -448,6 +448,8 @@ public static class CrudGenerationModelBuilder
                     TypeDisplay = PropertyTypeDisplay(property),
                     IsRequiredString = property.Type.SpecialType == SpecialType.System_String
                         && property.NullableAnnotation != NullableAnnotation.Annotated,
+                    IsNonNullableReferenceType = property.Type.IsReferenceType
+                        && property.NullableAnnotation != NullableAnnotation.Annotated,
                     Kind = fieldKind.Kind,
                     IsNullable = IsNullableProperty(property),
                     EnumTypeDisplay = fieldKind.EnumTypeDisplay,

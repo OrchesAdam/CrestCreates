@@ -160,8 +160,11 @@ public static class CrudNativeGate
         }
 
         var number = 1.5m;
+        var otherNumber = number;
         var integer = 42;
+        var otherInteger = integer;
         var flag = true;
+        var otherFlag = flag;
         var text = "probe";
         var otherText = "other";
         var id = Guid.Empty;
@@ -169,21 +172,22 @@ public static class CrudNativeGate
         var timestamp = DateTime.UtcNow;
         var otherTimestamp = DateTime.UtcNow.AddSeconds(1);
         var ratio = 1.5;
+        var otherRatio = ratio;
         var kind = ProbeKind.First;
         var otherKind = ProbeKind.Second;
         var nullableText = "x";
         var set = new[] { Guid.Empty };
 
-        Probe("int-eq", () => (Expression<Func<bool>>)(() => integer == integer));
-        Probe("bool-eq", () => (Expression<Func<bool>>)(() => flag == flag));
-        Probe("double-eq", () => (Expression<Func<bool>>)(() => ratio == ratio));
+        Probe("int-eq", () => (Expression<Func<bool>>)(() => integer == otherInteger));
+        Probe("bool-eq", () => (Expression<Func<bool>>)(() => flag == otherFlag));
+        Probe("double-eq", () => (Expression<Func<bool>>)(() => ratio == otherRatio));
         Probe("enum-eq", () => (Expression<Func<bool>>)(() => kind == otherKind));
         Probe("string-eq", () => (Expression<Func<bool>>)(() => text == otherText));
         Probe("string-null-check", () => (Expression<Func<bool>>)(() => nullableText == null));
         Probe("string-notnull-and-contains", () => (Expression<Func<bool>>)(() => nullableText != null && nullableText.Contains(text)));
         Probe("guid-eq", () => (Expression<Func<bool>>)(() => id == otherId));
-        ProbeGap("decimal-eq", () => (Expression<Func<bool>>)(() => number == number));
-        ProbeGap("decimal-gt", () => (Expression<Func<bool>>)(() => number > number));
+        ProbeGap("decimal-eq", () => (Expression<Func<bool>>)(() => number == otherNumber));
+        ProbeGap("decimal-gt", () => (Expression<Func<bool>>)(() => number > otherNumber));
         Probe("datetime-eq", () => (Expression<Func<bool>>)(() => timestamp == otherTimestamp));
         Probe("datetime-gt", () => (Expression<Func<bool>>)(() => timestamp > otherTimestamp));
         Probe("decimal-equals-method", () => (Expression<Func<bool>>)(() => number.Equals(number)));

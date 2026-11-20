@@ -212,7 +212,7 @@ public class AuditLoggingMiddlewareTests
         public ITenantInfo Tenant { get; }
         public string Id { get; }
         public Task<IDisposable> ChangeAsync(string tenantId) => throw new NotSupportedException();
-        public IDisposable Change(ITenantInfo tenant)
+        public IDisposable Change(ITenantInfo? tenant)
         {
             throw new NotImplementedException();
         }

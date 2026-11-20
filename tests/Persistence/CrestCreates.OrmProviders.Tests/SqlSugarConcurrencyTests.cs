@@ -54,7 +54,7 @@ public class SqlSugarConcurrencyTests : IDisposable
         Assert.NotNull(result);
         Assert.NotEqual(oldStamp, result.ConcurrencyStamp);
         Assert.Matches("^[0-9a-f]{32}$", result.ConcurrencyStamp);
-        Assert.Equal(result.ConcurrencyStamp, (await _repository.GetAsync(entity.Id)).ConcurrencyStamp);
+        Assert.Equal(result.ConcurrencyStamp, (await _repository.GetAsync(entity.Id))!.ConcurrencyStamp);
         Assert.Equal("Updated", result.Name);
     }
 

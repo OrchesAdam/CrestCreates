@@ -105,8 +105,19 @@ public static class CrestCreatesWebApplicationExtensions
         {
             services.AddOpenIddictServer(oidcOptions =>
             {
-                oidcOptions.RefreshTokenLifetimeDays = 14;
-                configuration.GetSection(OpenIddictServerOptions.SectionName).Bind(oidcOptions);
+                var section = configuration.GetSection(OpenIddictServerOptions.SectionName);
+                oidcOptions.Issuer = section.GetValue(nameof(oidcOptions.Issuer), oidcOptions.Issuer);
+                oidcOptions.EnableDevelopmentEphemeralKeys = section.GetValue(nameof(oidcOptions.EnableDevelopmentEphemeralKeys), oidcOptions.EnableDevelopmentEphemeralKeys);
+                oidcOptions.EnableDevelopmentPublicPasswordClient = section.GetValue(nameof(oidcOptions.EnableDevelopmentPublicPasswordClient), oidcOptions.EnableDevelopmentPublicPasswordClient);
+                oidcOptions.EnableDevelopmentHttpTransport = section.GetValue(nameof(oidcOptions.EnableDevelopmentHttpTransport), oidcOptions.EnableDevelopmentHttpTransport);
+                section.GetSection(nameof(oidcOptions.SigningCertificateFiles)).Bind(oidcOptions.SigningCertificateFiles);
+                section.GetSection(nameof(oidcOptions.EncryptionCertificateFiles)).Bind(oidcOptions.EncryptionCertificateFiles);
+                oidcOptions.AccessTokenLifetimeMinutes = section.GetValue(nameof(oidcOptions.AccessTokenLifetimeMinutes), oidcOptions.AccessTokenLifetimeMinutes);
+                oidcOptions.RefreshTokenLifetimeDays = section.GetValue(nameof(oidcOptions.RefreshTokenLifetimeDays), 14);
+                oidcOptions.EnableAuthorizationCodeFlow = section.GetValue(nameof(oidcOptions.EnableAuthorizationCodeFlow), oidcOptions.EnableAuthorizationCodeFlow);
+                oidcOptions.EnableClientCredentialsFlow = section.GetValue(nameof(oidcOptions.EnableClientCredentialsFlow), oidcOptions.EnableClientCredentialsFlow);
+                oidcOptions.EnablePasswordFlow = section.GetValue(nameof(oidcOptions.EnablePasswordFlow), oidcOptions.EnablePasswordFlow);
+                oidcOptions.EnableRefreshTokenFlow = section.GetValue(nameof(oidcOptions.EnableRefreshTokenFlow), oidcOptions.EnableRefreshTokenFlow);
             });
             services.AddOpenIddictAuthentication();
         }

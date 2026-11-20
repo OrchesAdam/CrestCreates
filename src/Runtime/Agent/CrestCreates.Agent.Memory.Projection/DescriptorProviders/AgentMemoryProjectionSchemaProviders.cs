@@ -15,7 +15,9 @@ public static class AgentMemoryProjectionSchemaProviders
 {
     private static int _registered;
 
+    #pragma warning disable CA2255 // Registers a descriptor contribution when its assembly loads.
     [ModuleInitializer]
+    #pragma warning restore CA2255
     internal static void Register()
         => EnsureRegistered();
 

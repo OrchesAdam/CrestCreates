@@ -13,7 +13,7 @@ namespace CrestCreates.Agent.ControlPlane.Tests;
 public class ToolContractCoverageTests
 {
     private static readonly Type ContextType = typeof(AgentControlPlaneToolJsonSerializerContext);
-    private static readonly Type ManifestType = ContextType.GetNestedType(
+    private static readonly Type? ManifestType = ContextType.GetNestedType(
         "AgentControlPlaneToolJsonSerializerContextRootManifest",
         BindingFlags.NonPublic | BindingFlags.Public);
 

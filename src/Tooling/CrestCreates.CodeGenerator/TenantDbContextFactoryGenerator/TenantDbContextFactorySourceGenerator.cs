@@ -96,7 +96,7 @@ namespace CrestCreates.CodeGenerator.TenantDbContextFactoryGenerator
             sb.AppendLine();
             sb.AppendLine("namespace CrestCreates.Data.EFCore.MultiTenancy");
             sb.AppendLine("{");
-            sb.AppendLine("    internal sealed class GeneratedTenantDbContextFactory : ITenantDbContextFactory");
+            sb.AppendLine("    file sealed class GeneratedTenantDbContextFactory : ITenantDbContextFactory");
             sb.AppendLine("    {");
 
             foreach (var dbContext in dbContextList)

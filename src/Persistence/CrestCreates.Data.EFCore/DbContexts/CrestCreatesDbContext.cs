@@ -321,7 +321,7 @@ namespace CrestCreates.Data.EFCore.DbContexts
             var missingFilters = modelBuilder.Model.GetEntityTypes()
                 .Where(entityType =>
                     typeof(ISoftDelete).IsAssignableFrom(entityType.ClrType) &&
-                    entityType.GetQueryFilter() is null)
+                    !entityType.GetDeclaredQueryFilters().Any(filter => filter.IsAnonymous && filter.Expression is not null))
                 .Select(entityType => entityType.ClrType.FullName)
                 .ToList();
 
@@ -340,7 +340,7 @@ namespace CrestCreates.Data.EFCore.DbContexts
         // 非隔离期间行为与之前完全一致（返回本实例）。
         public OrmProvider Provider => OrmProvider.EfCore;
 
-        public IDataBaseSet<TEntity> Set<TEntity>() where TEntity : class
+        public new IDataBaseSet<TEntity> Set<TEntity>() where TEntity : class
         {
             var effective = EffectiveDataContext;
             return new EfCoreDataBaseSet<TEntity>(

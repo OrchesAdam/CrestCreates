@@ -174,9 +174,9 @@ public class MultiTenancyMiddlewareTests
             _tenantId = tenantId;
         }
 
-        public Task<ITenantInfo> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ITenantInfo?> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
         {
-            return Task.FromResult<ITenantInfo>(new TenantInfo(_tenantId, _tenantId));
+            return Task.FromResult<ITenantInfo?>(new TenantInfo(_tenantId, _tenantId));
         }
     }
 
@@ -189,7 +189,7 @@ public class MultiTenancyMiddlewareTests
             _tenantId = tenantId;
         }
 
-        public async Task<ITenantInfo> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
+        public async Task<ITenantInfo?> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
         {
             await Task.Yield();
             return new TenantInfo(_tenantId, _tenantId);
@@ -198,9 +198,9 @@ public class MultiTenancyMiddlewareTests
 
     private sealed class NullTenantProvider : ITenantProvider
     {
-        public Task<ITenantInfo> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
+        public Task<ITenantInfo?> GetTenantAsync(string tenantId, System.Threading.CancellationToken cancellationToken = default)
         {
-            return Task.FromResult<ITenantInfo>(null!);
+            return Task.FromResult<ITenantInfo?>(null!);
         }
     }
 
@@ -235,7 +235,7 @@ public class MultiTenancyMiddlewareTests
         public ITenantInfo Tenant { get; }
         public string Id { get; }
         public Task<IDisposable> ChangeAsync(string tenantId) => throw new NotSupportedException();
-        public IDisposable Change(ITenantInfo tenant)
+        public IDisposable Change(ITenantInfo? tenant)
         {
             throw new NotImplementedException();
         }

@@ -27,7 +27,7 @@ namespace CrestCreates.TestBase
             // 子类可以重写此方法来配置服务
         }
 
-        protected T GetRequiredService<T>()
+        protected T GetRequiredService<T>() where T : notnull
         {
             return ServiceProvider.GetRequiredService<T>();
         }

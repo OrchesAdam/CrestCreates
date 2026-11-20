@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.Caching;
 using Microsoft.AspNetCore.Authorization;
@@ -26,7 +27,7 @@ public static class AuthorizationServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddPermissionDefinitionProvider<TProvider>(this IServiceCollection services)
+    public static IServiceCollection AddPermissionDefinitionProvider<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TProvider>(this IServiceCollection services)
         where TProvider : class, IPermissionDefinitionProvider
     {
         services.AddTransient<IPermissionDefinitionProvider, TProvider>();

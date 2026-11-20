@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using CrestCreates.Authorization.Abstractions;
 using CrestCreates.MultiTenancy.Abstract;
@@ -47,12 +48,9 @@ namespace CrestCreates.MultiTenancy.Middleware
                         _logger.LogWarning("Tenant is unavailable: {TenantId}", resolutionResult.TenantId);
                         context.Response.StatusCode = StatusCodes.Status403Forbidden;
                         context.Response.ContentType = "application/json";
-                        await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                        {
-                            Code = StatusCodes.Status403Forbidden,
-                            Message = "租户不存在或已停用",
-                            TraceId = context.TraceIdentifier
-                        }));
+                        await context.Response.WriteAsync(JsonSerializer.Serialize(
+                            new TenantErrorResponse(StatusCodes.Status403Forbidden, "租户不存在或已停用", context.TraceIdentifier),
+                            TenantErrorJsonContext.Default.TenantErrorResponse));
                         return;
                     }
 
@@ -67,14 +65,10 @@ namespace CrestCreates.MultiTenancy.Middleware
                 {
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                    {
-                        Code = StatusCodes.Status403Forbidden,
-                        Message = resolutionResult.Error.Code == "TENANT_INACTIVE"
-                            ? "租户已停用"
-                            : "租户不存在或已停用",
-                        TraceId = context.TraceIdentifier
-                    }));
+                    var message = resolutionResult.Error.Code == "TENANT_INACTIVE" ? "租户已停用" : "租户不存在或已停用";
+                    await context.Response.WriteAsync(JsonSerializer.Serialize(
+                        new TenantErrorResponse(StatusCodes.Status403Forbidden, message, context.TraceIdentifier),
+                        TenantErrorJsonContext.Default.TenantErrorResponse));
                     return;
                 }
 
@@ -178,16 +172,18 @@ namespace CrestCreates.MultiTenancy.Middleware
 
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                {
-                    Code = StatusCodes.Status403Forbidden,
-                    Message = "当前用户无权访问该租户上下文",
-                    TraceId = context.TraceIdentifier
-                }));
+                await context.Response.WriteAsync(JsonSerializer.Serialize(
+                    new TenantErrorResponse(StatusCodes.Status403Forbidden, "当前用户无权访问该租户上下文", context.TraceIdentifier),
+                    TenantErrorJsonContext.Default.TenantErrorResponse));
                 return;
             }
 
             await _next(context);
         }
     }
+
+    internal sealed record TenantErrorResponse(int Code, string Message, string TraceId);
+
+    [JsonSerializable(typeof(TenantErrorResponse))]
+    internal partial class TenantErrorJsonContext : JsonSerializerContext;
 }

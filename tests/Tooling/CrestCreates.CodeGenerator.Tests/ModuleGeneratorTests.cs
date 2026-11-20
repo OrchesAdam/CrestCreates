@@ -16,7 +16,7 @@ namespace CrestCreates.CodeGenerator.Tests
 
             services.AddCoreModule();
             services.AddCoreModule();
-            Assert.Single(services.Where(descriptor => descriptor.ServiceType == typeof(CoreModule)));
+            Assert.Single(services, descriptor => descriptor.ServiceType == typeof(CoreModule));
 
             using var provider = services.BuildServiceProvider();
             var coreModule = provider.GetService<CoreModule>();

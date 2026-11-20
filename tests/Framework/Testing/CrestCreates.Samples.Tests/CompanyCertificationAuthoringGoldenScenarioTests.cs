@@ -562,7 +562,9 @@ public sealed class CompanyCertificationAuthoringGoldenScenarioTests
 
         var factory = new DefaultDescriptorAuthoringPromptInputFactory();
         var rawPromptInput = factory.Create(context);
+        #pragma warning disable CS0618 // Reproduce hashes created by the compatibility adapter.
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
+        #pragma warning restore CS0618
         var hashValue = hashService.ComputeHash(rawPromptInput, new AgentPromptModelProfileRef("default"), new AgentPromptProviderProfileRef("unknown")).Value;
 
         // 4. Build the recorded model client pre-keyed with the real hash

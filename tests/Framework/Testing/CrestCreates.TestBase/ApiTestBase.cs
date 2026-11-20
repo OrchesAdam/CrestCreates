@@ -60,7 +60,7 @@ namespace CrestCreates.TestBase
         protected async Task<T> ReadAsJsonAsync<T>(HttpResponseMessage response)
         {
             var content = await response.Content.ReadAsStringAsync();
-            return JsonConvert.DeserializeObject<T>(content);
+            return JsonConvert.DeserializeObject<T>(content)!;
         }
 
         protected void SetAuthorizationHeader(string token)

@@ -170,7 +170,7 @@ public sealed class SqlSugarPostgresIntegrationTests : IAsyncLifetime
 
     private void AssertUpdate(string? tenant, bool stamped)
     {
-        var update = Assert.Single(_statements.Where(statement => IsUpdate(statement.Sql)));
+        var update = Assert.Single(_statements, statement => IsUpdate(statement.Sql));
         var whereIndex = update.Sql.IndexOf("WHERE", StringComparison.OrdinalIgnoreCase);
         Assert.True(whereIndex >= 0, update.Sql);
         var where = update.Sql[whereIndex..];

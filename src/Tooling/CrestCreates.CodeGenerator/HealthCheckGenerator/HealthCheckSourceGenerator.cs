@@ -42,9 +42,9 @@ public class HealthCheckSourceGenerator : IIncrementalGenerator
             {
                 name = nameValue;
             }
-            else if (namedArg.Key == "Tags" && namedArg.Value.Value is IEnumerable<object> tagValues)
+            else if (namedArg.Key == "Tags" && !namedArg.Value.IsNull && namedArg.Value.Kind == TypedConstantKind.Array)
             {
-                tags.AddRange(tagValues.Select(t => t.ToString()));
+                tags.AddRange(namedArg.Value.Values.Select(t => t.Value).OfType<string>());
             }
             else if (namedArg.Key == "Description" && namedArg.Value.Value is string descValue)
             {
@@ -75,7 +75,7 @@ public class HealthCheckSourceGenerator : IIncrementalGenerator
         sb.AppendLine("#nullable enable");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
         sb.AppendLine();
-        sb.AppendLine("namespace CrestCreates.HealthCheck;");
+        sb.AppendLine("namespace CrestCreates.HealthCheck");
         sb.AppendLine("{");
         sb.AppendLine("    public static class HealthCheckServiceCollectionExtensions");
         sb.AppendLine("    {");

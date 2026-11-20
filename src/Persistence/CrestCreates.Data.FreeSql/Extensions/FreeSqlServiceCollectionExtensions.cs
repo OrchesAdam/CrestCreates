@@ -25,7 +25,7 @@ namespace CrestCreates.Data.FreeSql.Extensions
         public static IServiceCollection AddFreeSqlWithUow(
             this IServiceCollection services,
             Action<FreeSqlBuilder> freeSqlBuilder,
-            Assembly repositoryAssembly)
+            Assembly? repositoryAssembly)
         {
             ArgumentNullException.ThrowIfNull(services);
             ArgumentNullException.ThrowIfNull(freeSqlBuilder);
@@ -41,7 +41,7 @@ namespace CrestCreates.Data.FreeSql.Extensions
         public static IServiceCollection AddFreeSqlWithUow(
             this IServiceCollection services,
             IFreeSql freeSql,
-            Assembly repositoryAssembly)
+            Assembly? repositoryAssembly)
         {
             if (freeSql == null)
                 throw new ArgumentNullException(nameof(freeSql));

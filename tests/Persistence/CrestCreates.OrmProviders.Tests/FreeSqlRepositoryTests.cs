@@ -16,7 +16,7 @@ namespace CrestCreates.OrmProviders.Tests
         where TEntity : class, IEntity<TKey>
         where TKey : IEquatable<TKey>
     {
-        public TestFreeSqlRepository(FreeSqlUnitOfWorkManager uowManager, ILogger<FreeSqlRepository<TEntity, TKey>> logger = null) : base(uowManager, logger)
+        public TestFreeSqlRepository(FreeSqlUnitOfWorkManager uowManager, ILogger<FreeSqlRepository<TEntity, TKey>>? logger = null) : base(uowManager, logger)
         {
         }
 

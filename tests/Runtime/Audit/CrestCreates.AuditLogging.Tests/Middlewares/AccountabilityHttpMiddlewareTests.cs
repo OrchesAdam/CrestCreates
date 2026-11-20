@@ -300,7 +300,7 @@ public sealed class AccountabilityHttpMiddlewareTests
         public ITenantInfo? Tenant => TenantInfo;
         public string? Id => "tenant-1";
         public Task<IDisposable> ChangeAsync(string tenantId) => Task.FromResult<IDisposable>(new Noop());
-        public IDisposable Change(ITenantInfo tenant) => new Noop();
+        public IDisposable Change(ITenantInfo? tenant) => new Noop();
         public void SetTenantId(string tenantId) { }
         private sealed class Noop : IDisposable { public void Dispose() { } }
     }

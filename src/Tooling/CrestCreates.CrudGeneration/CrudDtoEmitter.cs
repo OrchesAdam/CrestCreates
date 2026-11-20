@@ -90,7 +90,9 @@ internal static class CrudDtoEmitter
             Line(builder, NestedIndent + "[StringLength(255)]");
         }
 
-        Line(builder, NestedIndent + "public " + field.TypeDisplay + " " + field.Name + " { get; set; }");
+        // Preserve the unset value until model binding and validation populate the DTO.
+        var initializer = field.IsNonNullableReferenceType ? " = default!;" : string.Empty;
+        Line(builder, NestedIndent + "public " + field.TypeDisplay + " " + field.Name + " { get; set; }" + initializer);
         Line(builder, string.Empty);
     }
 }

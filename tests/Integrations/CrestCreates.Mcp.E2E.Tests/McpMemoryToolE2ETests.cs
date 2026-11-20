@@ -1,3 +1,5 @@
+extern alias mcpMemory;
+
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrestCreates.Agent.Memory.Projection.Abstractions;
@@ -12,8 +14,8 @@ using CrestCreates.Metadata.DescriptorCapability;
 using CrestCreates.Metadata.Mcp;
 using CrestCreates.Metadata.Registry;
 using CrestCreates.Mcp;
-using CrestCreates.Mcp.Memory;
-using CrestCreates.Mcp.Memory.Security;
+using mcpMemory::CrestCreates.Mcp.Memory;
+using mcpMemory::CrestCreates.Mcp.Memory.Security;
 using CrestCreates.Schema;
 using CrestCreates.Schema.Abstractions;
 using FluentAssertions;

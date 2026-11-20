@@ -167,7 +167,7 @@ public class MetadataContextPackBuilderTests
 
         var topology = CreateSnapshot(
             new[] { (cap, DescriptorKind.Capability, "SubmitCap"), (schema, DescriptorKind.Schema, "InputSchema") },
-            new[] { (0, cap, schema, RelationshipKind.Uses, "InputSchema", RelationshipStrength.Strong, false) });
+            new[] { (0, cap, schema, RelationshipKind.Uses, (string?)"InputSchema", RelationshipStrength.Strong, false) });
 
         var descriptors = CreateDescriptors(
             (cap, DescriptorKind.Capability, "SubmitCap", DescriptorState.Active),
@@ -339,7 +339,7 @@ public class MetadataContextPackBuilderTests
             .ToArray();
 
         var allEdges = others.Select((r, i) =>
-            (i, focus, r, RelationshipKind.Triggers, (string?)"Step" + i, RelationshipStrength.Strong, true))
+            (i, focus, r, RelationshipKind.Triggers, (string?)("Step" + i), RelationshipStrength.Strong, true))
             .ToArray();
 
         var topology = CreateSnapshot(allNodes, allEdges);

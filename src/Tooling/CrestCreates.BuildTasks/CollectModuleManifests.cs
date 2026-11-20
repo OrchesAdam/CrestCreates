@@ -31,7 +31,7 @@ public class CollectModuleManifests : Microsoft.Build.Utilities.Task
             var allModules = new SortedDictionary<string, ModuleManifest>(StringComparer.Ordinal);
             foreach (var file in ModuleManifestFiles.Concat(ReferencedModuleManifestFiles).Select(f => Path.GetFullPath(f.ItemSpec)).Distinct(StringComparer.Ordinal))
             {
-                var modules = ReadManifest<ModuleManifest>(file);
+                var modules = ReadManifest(file);
                 var identities = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var module in modules)
                 {
@@ -46,7 +46,7 @@ public class CollectModuleManifests : Microsoft.Build.Utilities.Task
                     else allModules.Add(module.FullName, module);
                 }
             }
-            BuildOutput.WriteIfChanged(OutputPath, JsonSerializer.Serialize(allModules.Values, new JsonSerializerOptions { WriteIndented = true }));
+            BuildOutput.WriteIfChanged(OutputPath, JsonSerializer.Serialize(allModules.Values.ToList(), ModuleManifestJsonContext.Default.ModuleManifests));
             return true;
         }
         catch (Exception ex)
@@ -56,9 +56,9 @@ public class CollectModuleManifests : Microsoft.Build.Utilities.Task
         }
     }
 
-    internal static List<T> ReadManifest<T>(string path) where T : ModuleManifest
+    internal static List<ModuleManifest> ReadManifest(string path)
     {
-        var modules = JsonSerializer.Deserialize<List<T>>(File.ReadAllText(path))
+        var modules = JsonSerializer.Deserialize(File.ReadAllText(path), ModuleManifestJsonContext.Default.ModuleManifests)
             ?? throw new InvalidDataException($"Module manifest must be an array: {path}");
         foreach (var module in modules)
         {

@@ -83,7 +83,7 @@ public class ReviewS22AEmitterR4Probes
     public async Task Synthetic_optional_IfMatch_survives_official_metadata_nullability(bool restoreNullableAnnotation,bool provideHeader)
     {
         var b=Build("[AppServiceHttpAction(Verb=HttpProjectionVerb.Delete,Route=\"{id}\",RequiresConcurrencyToken=true)] Task DeleteAsync(Guid id,CancellationToken ct=default);");
-        var header=Assert.Single(b.Model.Actions.Single().Parameters.Where(p=>p.Source=="Header"));
+        var header=Assert.Single(b.Model.Actions.Single().Parameters, p=>p.Source=="Header");
         Assert.False(header.Required); Assert.False(header.IsContractParameter);
         var envelopeType="global::"+b.Model.Actions.Single().InputEnvelopeFullName;
         var artifacts=b.Artifacts.Select(a=>restoreNullableAnnotation ? a with {Source=a.Source.Replace("global::System.String IfMatch", "global::System.String? IfMatch")} : a).ToArray();

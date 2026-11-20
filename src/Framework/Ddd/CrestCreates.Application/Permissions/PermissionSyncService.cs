@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using CrestCreates.Domain.Permission;
@@ -134,11 +135,7 @@ public class PermissionSyncService : IPermissionSyncService
                 httpClient.DefaultRequestHeaders.Add("X-Api-Key", _options.AuthorizationCenterApiKey);
             }
 
-            var jsonContent = JsonSerializer.Serialize(manifest, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                WriteIndented = true
-            });
+            var jsonContent = JsonSerializer.Serialize(manifest, PermissionSyncJsonContext.Default.EntityPermissionsManifest);
 
             var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
             var response = await httpClient.PostAsync("api/permissions/sync", content, cancellationToken);
@@ -196,11 +193,7 @@ public class PermissionSyncService : IPermissionSyncService
             }
 
             var jsonContent = await File.ReadAllTextAsync(_options.ManifestPath, cancellationToken);
-            _manifest = JsonSerializer.Deserialize<EntityPermissionsManifest>(jsonContent, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                PropertyNameCaseInsensitive = true
-            });
+            _manifest = JsonSerializer.Deserialize(jsonContent, PermissionSyncJsonContext.Default.EntityPermissionsManifest);
 
             return _manifest;
         }
@@ -216,3 +209,10 @@ public class PermissionSyncService : IPermissionSyncService
         }
     }
 }
+
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    PropertyNameCaseInsensitive = true,
+    WriteIndented = true)]
+[JsonSerializable(typeof(EntityPermissionsManifest))]
+internal partial class PermissionSyncJsonContext : JsonSerializerContext;

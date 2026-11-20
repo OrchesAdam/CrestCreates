@@ -44,7 +44,9 @@ public sealed class GoldenScenarioLlmFixtureTests
 
         // 3. Compute prompt input hash to use as fixture key
         var rawPromptInput = factory.Create(context);
+        #pragma warning disable CS0618 // Reproduce hashes created by the compatibility adapter.
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
+        #pragma warning restore CS0618
         var hashValue = hashService.ComputeHash(rawPromptInput, new AgentPromptModelProfileRef("default"), new AgentPromptProviderProfileRef("unknown")).Value;
 
         // 4. Create recorded client with fixture
@@ -85,7 +87,9 @@ public sealed class GoldenScenarioLlmFixtureTests
         var context = CreateCompanyCertificationContext();
 
         var rawPromptInput = factory.Create(context);
+        #pragma warning disable CS0618 // Reproduce hashes created by the compatibility adapter.
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
+        #pragma warning restore CS0618
         var hashValue = hashService.ComputeHash(rawPromptInput, new AgentPromptModelProfileRef("default"), new AgentPromptProviderProfileRef("unknown")).Value;
 
         var fixtureJson = CompanyCertificationLlmFixture.GetRecordedOutput(hashValue);
@@ -154,7 +158,9 @@ public sealed class GoldenScenarioLlmFixtureTests
         var context = CreateCompanyCertificationContext();
 
         var rawPromptInput = factory.Create(context);
+        #pragma warning disable CS0618 // Reproduce hashes created by the compatibility adapter.
         var hashService = new DefaultDescriptorAuthoringPromptInputHashService(promptHashService);
+        #pragma warning restore CS0618
         var hashValue = hashService.ComputeHash(rawPromptInput, new AgentPromptModelProfileRef("default"), new AgentPromptProviderProfileRef("unknown")).Value;
 
         var fixtureJson = CompanyCertificationLlmFixture.GetRecordedOutput(hashValue);

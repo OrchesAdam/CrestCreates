@@ -11,6 +11,7 @@ using Xunit;
 
 namespace CrestCreates.DynamicApi.Tests;
 
+#pragma warning disable CS0618 // These tests exercise the documented compatibility API.
 public class CapabilityEndpointJsonRuntimeTests
 {
     [Fact]
@@ -225,3 +226,5 @@ public sealed class BookDto
 public sealed partial class BookDtoContext : JsonSerializerContext
 {
 }
+
+#pragma warning restore CS0618

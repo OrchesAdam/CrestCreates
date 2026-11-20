@@ -53,8 +53,9 @@ public class CookieTenantResolverTests : IDisposable
         // DefaultHttpContext.Request.Cookies is an IRequestCookieCollection backed by
         // the IRequestCookiesFeature. We set up a feature that returns our desired cookies.
         var cookiesMock = new Mock<IRequestCookieCollection>();
+        string? lookupValue = value;
         cookiesMock
-            .Setup(c => c.TryGetValue(name, out value))
+            .Setup(c => c.TryGetValue(name, out lookupValue))
             .Returns(true);
         cookiesMock
             .Setup(c => c[name])

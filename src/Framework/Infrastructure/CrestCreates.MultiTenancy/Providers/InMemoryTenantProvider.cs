@@ -33,7 +33,7 @@ namespace CrestCreates.MultiTenancy.Providers
             if (_tenants.TryGetValue(tenantId, out var tenant))
             {
                 _logger.LogDebug("Tenant found: {TenantId}", tenantId);
-                return Task.FromResult(tenant);
+                return Task.FromResult<ITenantInfo?>(tenant);
             }
 
             _logger.LogWarning("Tenant not found: {TenantId}", tenantId);

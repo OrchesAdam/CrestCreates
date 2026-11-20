@@ -395,7 +395,7 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
         var replacement = Candidate("tenant-a", "candidate-reciprocal-repl", AgentMemoryKind.Decision);
         await _driver.MemoryStore.CreateCandidateAsync(replacement);
         var supersession = _driver.PrepareSupersessionPlan(
-            await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-reciprocal-old")!,
+            (await _driver.MemoryStore.GetMemoryAsync("tenant-a", "memory-reciprocal-old"))!,
             replacement, "memory-reciprocal-new", Operation("tenant-a", "op-rec-2"));
         await conditional.SupersedeAsync("tenant-a", supersession);
 
@@ -548,7 +548,7 @@ public sealed class PostgreSqlAgentMemoryFailureTaxonomyTests : IAsyncLifetime
             connection);
         command.Parameters.AddWithValue("tenant", tenantId);
         command.Parameters.AddWithValue("id", id);
-        return (string)await command.ExecuteScalarAsync()!;
+        return (string)(await command.ExecuteScalarAsync())!;
     }
 
     private static AgentConversationRecord Conversation(string tenantId, string conversationId, params AgentConversationTurn[] turns)

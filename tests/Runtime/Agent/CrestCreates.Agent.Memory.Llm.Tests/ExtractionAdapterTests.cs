@@ -293,9 +293,9 @@ public class ExtractionAdapterTests
         result.Should().ContainSingle();
         result[0].PromptOutputEvidence.Should().NotBeNull();
         result[0].PromptOutputEvidence!.OutputHash.Should().NotBeNull();
-        result[0].PromptOutputEvidence.OutputHash!.Purpose
+        result[0].PromptOutputEvidence!.OutputHash!.Purpose
             .Should().Be(CanonicalHashPurposeNames.AuditEvidence);
-        result[0].PromptOutputEvidence.OutputHash.ArtifactKind
+        result[0].PromptOutputEvidence!.OutputHash!.ArtifactKind
             .Should().Be(CanonicalHashArtifactNames.AgentPromptOutputEvidence);
     }
 
@@ -340,7 +340,7 @@ public class ExtractionAdapterTests
         result[0].CanonicalOutputHash.Should().NotBeNull();
         result[0].CanonicalOutputHash!.Purpose
             .Should().Be(CanonicalHashPurposeNames.SourceIdentity);
-        result[0].CanonicalOutputHash.ArtifactKind
+        result[0].CanonicalOutputHash!.ArtifactKind
             .Should().Be(CanonicalHashArtifactNames.AgentMemoryCandidateOutput);
     }
 }
