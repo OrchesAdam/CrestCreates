@@ -1,99 +1,68 @@
 # CrestCreates
 
-CrestCreates 是一个面向企业应用和 AI Agent 协作场景的 .NET 10 元数据驱动框架。它以统一的 Descriptor 模型描述业务能力，并通过编译期代码生成和受治理的执行主链，将能力投射为 Dynamic API、Workflow、HumanTask、MCP Tool 和 Agent Tool。
+CrestCreates 是一个基于 .NET 10 的企业应用开发框架。它以 DDD 和模块化组织业务代码，用 Descriptor 描述业务能力、数据契约和流程，再用编译期生成的代码把这些声明接入 HTTP、MCP 和 Agent Tool。
 
-框架关注的不只是如何暴露一个 Handler，而是如何让同一项业务能力拥有可校验、可发现、可授权、可审计和可追踪的契约。这样，传统应用入口与 AI Agent 入口可以共享相同的业务语义和执行边界。
+业务模块可以从实体、DTO、应用服务和 Handler 开始。框架负责生成绑定与注册代码，宿主显式选择发布的入口，运行时通过强类型注册表和执行管线应用权限、租户上下文与审计。审批等长流程由 Workflow 和 HumanTask 管理。
 
-CrestCreates 不是单纯的 CRUD、模块化或运行时反射框架。它优先把发现和绑定工作移到编译期，把运行时收敛为强类型 Registry、不可变快照以及统一的 Capability Dispatcher / Pipeline；具体集成能力仍按各自的 Runtime 和 Host 边界提供。
+## 快速开始
 
-## 核心架构
-
-```text
-Schema / Capability / Event / Workflow / Form / HumanTask
-                          ↓
-     Metadata Registry / Validation / Topology / Snapshot
-                          ↓
-       Capability / Workflow / HumanTask Runtime
-                          ↓
-       Capability Dispatcher + governed Pipeline
-                          ↓
- Dynamic API / MCP Tool / Agent Tool / Application Host
-```
-
-- **Metadata first / 统一 Descriptor 模型**：用统一的元数据契约描述结构、能力、流程、事件和人工交互之间的关系。
-- **Compile-time generation first**：Source Generator 和 BuildTasks 生成端点、绑定、注册和模块聚合代码，减少运行时扫描与反射。
-- **不可变运行时快照**：Registry 在构建和校验后发布只读快照，让执行主链消费稳定、明确的契约。
-- **One mainline / 唯一执行主链**：Dynamic API、MCP、Agent Tool 和 Workflow 都通过 Dispatcher / Pipeline 进入 Capability，而不是直接调用 Handler。
-- **Human + AI governed execution**：授权、租户边界、审计、幂等、预算和人工审批属于执行链约束，而不是各入口自行复制的逻辑。
-- **Trim / NativeAOT 友好方向**：默认发布模式是 Trim；NativeAOT 必须按具体 Runtime 的 publish-and-run fixture 显式验证，不能据此推导全仓库兼容。
-
-## 当前能力
-
-- **Unified Metadata Runtime**：提供 Descriptor、关系分析、校验、快照、兼容性和稳定契约等元数据基础能力。
-- **Capability Runtime**：通过统一 Dispatcher 和 Pipeline 执行带有 Schema、权限、事件和治理边界的业务能力。
-- **Workflow and HumanTask Runtime**：支持由 Capability 驱动的流程状态迁移、人工任务实例和完成结果。
-- **Dynamic API and Compile-time Generation**：从应用服务和能力声明生成 Minimal API、绑定和注册代码。
-- **MCP Tool Projection**：将符合约束的 Capability 投射为带 Schema 和强类型输入输出绑定的 MCP Tool 契约。
-- **Agent Tool Projection**：将 Capability 投射为受角色、选择策略、预算和治理审计约束的 Agent Tool。
-- **Multi-tenancy and Authorization**：提供租户上下文、权限检查、数据边界和身份集成的框架能力。
-- **Infrastructure Integrations**：包含持久化、事件、缓存、调度、日志、审计和外部系统集成的可替换适配层。
-
-CrestCreates 仍处于积极开发阶段，具体能力边界和使用方式以 [`docs/Feature`](docs/Feature/) 中的文档为准。
-
-## Quick Start
-
-要求 .NET SDK `10.0.100`；仓库通过 `global.json` 允许滚动到兼容的最新 minor SDK。
+先安装 .NET SDK **10.0.114**，并确认当前终端选中了该版本。以下命令从仓库根目录执行。
 
 ```bash
-dotnet restore CrestCreates.slnx
-dotnet build CrestCreates.slnx --no-restore
-dotnet test tests/Runtime/Capability/CrestCreates.Capability.Tests/CrestCreates.Capability.Tests.csproj --no-restore --no-build
+dotnet --version
+dotnet build solutions/CrestCreates.All.slnx
+dotnet test tests/Runtime/Capability/CrestCreates.Capability.Tests --no-build
 ```
 
-运行 LibraryManagement Web sample：
+采购审批示例使用内存存储，可以直接运行。它会启动本地 HTTP 宿主，执行采购请求及人工审批场景，然后退出。
 
 ```bash
-dotnet run --project samples/LibraryManagement/LibraryManagement.Web
+dotnet run --project samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host -- --golden-scenario
 ```
 
-该 sample 启动时会执行 PostgreSQL 数据库迁移和种子初始化；默认连接配置位于 `samples/LibraryManagement/LibraryManagement.Web/appsettings.json`，需要本机提供对应的 PostgreSQL 服务。
+带数据库或消息中间件的集成测试使用预先启动的测试服务。Compose 命令、连接环境变量和专用故障注入实例见 [测试基础设施](infra/README.md)。
 
-针对 MCP Runtime 的 NativeAOT publish-and-run fixture：
+## 从声明到执行
+
+| 层次 | 职责 |
+| --- | --- |
+| 业务模块 | 定义实体、DTO、应用服务、Handler 和 Descriptor。 |
+| 编译期工具 | Source Generator 生成项目内的端点、类型绑定和服务注册。BuildTasks 聚合跨项目的模块与契约。 |
+| 执行层 | 宿主通过 ExplicitHost 装配正式 HTTP 投影。Capability Dispatcher 和 Pipeline 执行业务能力，Workflow 与 HumanTask 管理流程和人工步骤。 |
+| Agent 治理 | Authoring 生成候选草稿，确定性评审检查契约，Control Plane 管理证据和激活请求。Agent Tool 通过受治理的运行时入口执行。 |
+
+平台模块提供租户、权限、Setting、Feature 和审计。ORM、持久化及消息中间件的支持范围按 Provider 和宿主组合记录。参见 [能力地图](docs/Feature/CapabilityMap.md) 和 [ORM 支持矩阵](docs/Feature/OrmProviderSupportMatrix.md)。
+
+## 示例应用
+
+| 示例 | 适合查看 |
+| --- | --- |
+| [ProcurementApproval](samples/ProcurementApproval/) | 一次完整的采购申请与审批流程，含生成的 HTTP 端点和 HumanTask。 |
+| [SaaSHelpdesk](samples/SaaSHelpdesk/) | 多租户工单、SLA、身份权限与平台管理 HTTP。 |
+| [AssetManagement](samples/AssetManagement/README.md) | 资产维护审批、PostgreSQL 运行时持久化、MCP 和 Agent Tool。 |
+| [ErpManagement](samples/ErpManagement/deploy/README.md) | 采购、库存、生产和结算，以及 PostgreSQL Outbox 与 RabbitMQ 投递。 |
+
+## 发布与验证
+
+仓库默认使用 Trim 发布模式。NativeAOT 由 `-p:CrestCreatesPublishMode=aot` 显式启用。`NativeAOT-verified` 表示对应 fixture 已完成原生发布、链接，并执行了原生产物。结论限于记录的宿主、用例和 RID。参见 [原生执行证据矩阵](docs/review/2026-10-10-issue-123-native-execution-gates-evidence-matrix.md)。
+
+以下命令在 Linux x64 上运行 Generated CRUD 的原生 HTTP 门禁，需要 .NET SDK 10.0.114 和原生编译工具链。
 
 ```bash
-dotnet test tests/Integrations/CrestCreates.Mcp.AotFixture.Tests/CrestCreates.Mcp.AotFixture.Tests.csproj --no-restore --no-build
+dotnet test tests/Framework/Api/CrestCreates.GeneratedCrud.AotFixture.Tests --filter "Category=NativeAotGate"
 ```
 
-该测试会执行固定的 `linux-x64` NativeAOT 发布、链接和原生产物运行，只代表该 fixture 覆盖的 MCP 主链。
+面向 `master` 的 PR 运行 [CI](https://github.com/OrchesAdam/CrestCreates/actions/workflows/ci.yml)。`master` 更新后运行 [Full Validation](https://github.com/OrchesAdam/CrestCreates/actions/workflows/full-validation.yml)。两条工作流均可手动触发，并包含原生发布、链接和执行门禁。
 
-## Documentation
+## 文档导航
 
-| Topic | Documentation |
-|---|---|
-| Unified Metadata Model | [Usage guide](docs/Feature/UnifiedMetadataModel/usage-guide.md) · [Architecture](docs/Feature/UnifiedMetadataModel/arch-design.md) |
-| Capability Exposure | [Usage guide](docs/Feature/CapabilityExposure/usage-guide.md) · [Architecture](docs/Feature/CapabilityExposure/arch-design.md) |
-| Accountability | [Usage guide](docs/Feature/Accountability/usage-guide.md) · [Architecture](docs/Feature/Accountability/arch-design.md) |
-| Form | [Usage guide](docs/Feature/Form/usage-guide.md) |
-| Organization | [Usage guide](docs/Feature/Organization/usage-guide.md) |
-| MCP | [Usage guide](docs/Feature/MCP/usage-guide.md) |
-| Agent Tools | [Usage guide](docs/Feature/AgentTools/usage-guide.md) |
+- [元数据模型](docs/Feature/UnifiedMetadataModel/usage-guide.md)与 [Capability 暴露](docs/Feature/CapabilityExposure/usage-guide.md)
+- [平台管理 HTTP 契约](docs/Feature/platform-management-http-contract.md)与 [Accountability](docs/Feature/Accountability/usage-guide.md)
+- [MCP](docs/Feature/MCP/usage-guide.md)、[Agent Tools](docs/Feature/AgentTools/usage-guide.md)与 [Agent Control Plane](docs/Feature/AgentControlPlane/usage-guide.md)
+- [工程约定](AGENTS.md)与 [平台状态记录](memory.md)
 
-## Repository Layout
+框架代码位于 `src/`，验收项目位于 `tests/`，示例位于 `samples/`。仓库根目录的 `CrestCreates.slnx` 和 `solutions/` 下的方案均可用于开发。
 
-```text
-CrestCreates/
-├── src/                  # Core、Framework、Metadata、Runtime、Persistence、Platform、Tooling、Integrations
-├── tests/                # 按源码分层组织的测试和 NativeAOT fixtures
-├── samples/              # LibraryManagement、SaaSHelpdesk 等示例
-├── docs/Feature/         # 面向使用者和模块开发者的正式文档
-├── solutions/            # 分层 solution 文件
-├── CrestCreates.slnx     # 根目录全量 solution
-├── Directory.Build.props # 全局 .NET 10 和构建配置
-└── Directory.Build.Aot.props # Trim / NativeAOT 发布配置
-```
+## 许可
 
-## Project Status and License
-
-CrestCreates 处于积极开发状态，主要架构仍在持续收口，公开 API 可能继续演进。请以正式 Feature 文档和实际源码为准，不要将当前仓库状态理解为所有场景都已生产就绪。
-
-MIT License
+MIT
