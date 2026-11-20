@@ -1,15 +1,14 @@
 # CrestCreates
 
-CrestCreates is a .NET 10 framework for modular business applications. It combines domain-driven design with compile-time generation so that an application can expose a business operation over HTTP, offer it as a tool, or invoke it from a workflow while keeping the handler focused on the operation itself.
+CrestCreates is a .NET framework for modular business applications. It combines domain-driven design with compile-time generation so that an application can expose a business operation over HTTP, offer it as a tool, or invoke it from a workflow while keeping the handler focused on the operation itself.
 
 A capability describes an operation and its contract. A host selects which capabilities to publish and configures the services they need. At runtime, the capability pipeline uses the execution context to apply policies such as input validation, authorization, tenant isolation, and auditing.
 
 ## Run an approval from start to finish
 
-From the repository root, use .NET SDK **10.0.114**, the version pinned in CI.
+With .NET installed, run the sample from the repository root.
 
 ```bash
-dotnet --version
 dotnet run --project samples/ProcurementApproval/src/CrestCreates.Sample.Procurement.Host -- --golden-scenario
 ```
 
